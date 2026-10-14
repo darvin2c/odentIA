@@ -12,12 +12,14 @@ import {
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
   formatKnowledgeForPrompt,
+  formatAgentClinicData,
   formatOrgMoney,
   formatLessonExamples,
   formatLessonRules,
   formatPersonMemoryForPrompt,
   formatZoned,
   getAgentCaseState,
+  getAgentClinicData,
   getAgentConfig,
   getAutonomyPolicy,
   getClinicInfoSnapshot,
@@ -177,11 +179,11 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
       : "NO das diagnósticos ni inventas precios, sedes o disponibilidad.",
     on("informar") ? null : whenOff("informar"),
     on("agendar")
-      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si tienes enviar_enlace_cita, ofrece también a quien pide una cita, sea ya paciente o recién se contacte, elegir él mismo el día y la hora en el enlace; es una opción, no una obligación."
+      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si la persona ya sabe qué quiere, ofrécele dos o tres horarios por aquí; si duda entre días, sedes o profesionales, envíale el enlace con enviar_enlace_cita para que vea todo de una vez (sirve a quien ya es paciente y a quien recién se contacta) y ofrece seguir por aquí si lo prefiere."
       : whenOff("agendar"),
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     on("agendar")
-      ? "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); todo se ejecuta solo con confirmación o aprobación según la política."
+      ? "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); reservar, mover o cancelar se ejecuta solo con el sí del interlocutor."
       : null,
     on("seguimiento") ? null : whenOff("seguimiento"),
     "Si el interlocutor pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
@@ -580,7 +582,7 @@ export function compileAgentGraph(
     const asked = draft ?? trailingBurst(items) ?? latestInbound
     const overrides = toolCtx.lessonOverrides
     const hiddenEntries = new Set(overrides?.skipEntryIds ?? [])
-    const { cfg, orgPrompt, policyLine, snapshot, faqs, lessons } = await withOrgContext(
+    const { cfg, orgPrompt, policyLine, snapshot, clinicData, faqs, lessons } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
       async (tx) => {
@@ -589,15 +591,18 @@ export function compileAgentGraph(
         const modes = (Object.entries(policy) as Array<[string, string]>)
           .map(([action, mode]) => `${action}=${mode}`)
           .join(", ")
-        // Con «Informar» apagado el agente no recibe tarifas ni respuestas
-        // oficiales: solo las sedes, que agendar necesita.
+        // Con «Informar» apagado el agente no recibe tarifas, promociones,
+        // profesionales ni respuestas oficiales: solo las sedes y su horario,
+        // que agendar necesita.
         const informs = !cfg.disabledFunctions.includes("informar")
         const snapshot = await getClinicInfoSnapshot(tx, toolCtx.orgId)
+        const clinicData = await getAgentClinicData(tx, toolCtx.orgId, informs)
         return {
           cfg,
           orgPrompt: cfg.systemPrompt,
           policyLine: `Política de autonomía: ${modes}.`,
           snapshot: informs ? snapshot : { ...snapshot, services: [] },
+          clinicData,
           faqs: informs ? (await listPublishedForPrompt(tx, toolCtx.orgId)).filter((entry) => !hiddenEntries.has(entry.id)) : [],
           // Lo aprendido de las correcciones: reglas del agente y ejemplos parecidos a lo que se pregunta.
           lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", toolCtx.runInstruction ? "" : (asked ?? ""), {
@@ -626,7 +631,12 @@ export function compileAgentGraph(
     // mensaje del interlocutor) no elige nada.
     // Un botón tocado no pregunta nada: no hay tema que elegir.
     const selecting = Boolean(toolCtx.decision) && faqs.length > 0 && !toolCtx.runInstruction && !toolCtx.routeHint
-    const knowledgeBlock = formatKnowledgeForPrompt(snapshot, faqs, selecting ? "indice" : undefined)
+    const knowledgeBlock = formatKnowledgeForPrompt(
+      snapshot,
+      faqs,
+      selecting ? "indice" : undefined,
+      formatAgentClinicData(clinicData, zone),
+    )
     const picked = selecting ? await selectKnowledge(asked, faqs) : null
     // De lo más estable a lo más cambiante. Los proveedores sirven desde su
     // caché el prefijo idéntico entre llamadas: lo que es igual para toda la

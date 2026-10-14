@@ -70,11 +70,11 @@ const ALWAYS = ["send_reply", "send_template", "request_human_handoff"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   derivar: ["request_human_handoff"],
-  informacion: [...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios"],
+  informacion: [...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica"],
   saludo: [...ALWAYS],
   clinico: [...ALWAYS],
   cita: [
-    ...ALWAYS, "ver_sedes_y_servicios", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta",
+    ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta",
     "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
   ],
   cambio_cita: [

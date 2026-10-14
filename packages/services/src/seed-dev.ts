@@ -135,7 +135,7 @@ import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
-import { createService } from "./service-catalog.js"
+import { createService, updateService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask } from "./tasks.js"
 
@@ -1286,7 +1286,18 @@ const seedOffers: Array<{
   priceCents: number
   durationMin: number
   billingMode?: "treatment" | "session"
+  /** Cómo dice el precio el agente: la semilla muestra las tres formas (ADR 0021). */
+  priceDisclosure: "exacto" | "desde" | "evaluacion"
 }> = [
+  {
+    code: "EVALUACION",
+    name: "Evaluación odontológica",
+    specialty: "diagnostico",
+    scope: "general",
+    priceCents: 5000,
+    durationMin: 30,
+    priceDisclosure: "exacto",
+  },
   {
     code: "OBTURACION",
     name: "Obturación con resina",
@@ -1294,6 +1305,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 18000,
     durationMin: 45,
+    priceDisclosure: "exacto",
   },
   {
     code: "ENDODONCIA",
@@ -1302,6 +1314,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 45000,
     durationMin: 90,
+    priceDisclosure: "desde",
   },
   {
     code: "CORONA",
@@ -1310,6 +1323,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 90000,
     durationMin: 60,
+    priceDisclosure: "evaluacion",
   },
   {
     code: "BLANQUEAMIENTO",
@@ -1318,6 +1332,7 @@ const seedOffers: Array<{
     scope: "arch",
     priceCents: 60000,
     durationMin: 60,
+    priceDisclosure: "exacto",
   },
   {
     code: "LIMPIEZA",
@@ -1326,6 +1341,7 @@ const seedOffers: Array<{
     scope: "general",
     priceCents: 12000,
     durationMin: 45,
+    priceDisclosure: "exacto",
   },
   {
     code: "ORTODONCIA_CTRL",
@@ -1335,6 +1351,7 @@ const seedOffers: Array<{
     priceCents: 10000,
     durationMin: 30,
     billingMode: "session",
+    priceDisclosure: "exacto",
   },
 ]
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
@@ -1346,6 +1363,10 @@ const serviceIdA = (code: string): string => {
   const found = catalogA.find((s) => s.code === code)
   if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
   return found.id
+}
+// Lo que no se dice con precio exacto ofrece la evaluación de la clínica.
+for (const code of ["ENDODONCIA", "CORONA"]) {
+  await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { evaluationServiceId: serviceIdA("EVALUACION") })
 }
 await db.transaction(async (tx) => {
   await createPromotion(tx, ORG_A, ANA_ID, {

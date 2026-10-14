@@ -1,0 +1,523 @@
+import type { Db } from "@odentia/db"
+import { user } from "@odentia/db/schema/auth"
+import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
+import { type PriceDisclosure, serviceCatalog } from "@odentia/db/schema/clinical"
+import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
+import { branch } from "@odentia/db/schema/org"
+import { and, asc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
+import { normalizeForSearch } from "./knowledge.js"
+import { formatOrgMoney, type OrgLocale } from "./locale.js"
+import { listClinicPromotionSummaries } from "./promotions.js"
+
+/**
+ * Lo que «Informar» le da al agente de la clínica (ADR 0021): horarios de
+ * atención de cada sede, profesionales y especialidades, servicios y
+ * promociones con su precio dicho como la clínica lo eligió. Todo sale de la
+ * base al momento; nada se escribe dos veces ni lo pone un modelo.
+ *
+ * Una clínica chica entra entera en el prompt (sin una llamada de más); una
+ * grande se consulta con `searchClinic`, que devuelve solo lo que coincide.
+ */
+export const SERVICES_IN_PROMPT = 40
+export const PROMOTIONS_IN_PROMPT = 10
+export const PROFESSIONALS_IN_PROMPT = 30
+/** Cuántos días hacia adelante se avisan los cierres de una sede. */
+export const CLOSURE_DAYS = 14
+
+const WEEKDAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"] as const
+
+export interface AgentPrice {
+  disclosure: PriceDisclosure
+  priceCents: number
+  currency: string
+  /** La evaluación que se ofrece cuando el precio no es exacto. */
+  evaluation: { name: string; priceCents: number; currency: string; disclosure: PriceDisclosure } | null
+}
+
+export interface AgentServiceInfo {
+  id: string
+  name: string
+  specialty: string | null
+  durationMin: number | null
+  price: AgentPrice
+}
+
+export interface AgentPromotionInfo {
+  id: string
+  name: string
+  endsAt: string | null
+  conditions: string | null
+  items: Array<{ serviceName: string; disclosure: PriceDisclosure; priceCents: number; currency: string; tariffCents: number }>
+}
+
+export interface AgentBranchHours {
+  id: string
+  name: string
+  /** Por día de la semana (0 = domingo), los tramos en que atiende alguien, en minutos locales. */
+  week: Array<{ weekday: number; ranges: Array<[number, number]> }>
+  /** Cierres de toda la sede en los próximos días. */
+  closures: Array<{ startsAt: string; endsAt: string; reason: string | null }>
+}
+
+export interface AgentProfessionalInfo {
+  /** Usuario del profesional: solo para encontrarlo, nunca se le dice al modelo. */
+  id: string
+  name: string
+  specialties: string[]
+  where: Array<{ branchName: string; weekdays: number[] }>
+}
+
+/** Une tramos que se tocan o se pisan: el horario de la sede es la suma de los de su equipo. */
+function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0])
+  const out: Array<[number, number]> = []
+  for (const [start, end] of sorted) {
+    const last = out[out.length - 1]
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end)
+    else out.push([start, end])
+  }
+  return out
+}
+
+/** Horario de atención de cada sede activa, derivado de los horarios del equipo, y sus próximos cierres. */
+export async function getBranchHours(tx: Db, orgId: string, now = new Date()): Promise<AgentBranchHours[]> {
+  const branches = await tx
+    .select({ id: branch.id, name: branch.name })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .orderBy(asc(branch.name), asc(branch.id))
+  if (!branches.length) return []
+  const ids = branches.map((row) => row.id)
+  const schedules = await tx
+    .select({
+      branchId: professionalSchedule.branchId,
+      weekday: professionalSchedule.weekday,
+      startMin: professionalSchedule.startMin,
+      endMin: professionalSchedule.endMin,
+    })
+    .from(professionalSchedule)
+    .where(
+      and(
+        eq(professionalSchedule.organizationId, orgId),
+        eq(professionalSchedule.isActive, true),
+        inArray(professionalSchedule.branchId, ids),
+      ),
+    )
+  const until = new Date(now.getTime() + CLOSURE_DAYS * 86_400_000)
+  // Un cierre de sede es un bloqueo sin profesional ni sillón: afecta a todos.
+  const closures = await tx
+    .select({
+      branchId: scheduleBlock.branchId,
+      startsAt: scheduleBlock.startsAt,
+      endsAt: scheduleBlock.endsAt,
+      reason: scheduleBlock.reason,
+    })
+    .from(scheduleBlock)
+    .where(
+      and(
+        eq(scheduleBlock.organizationId, orgId),
+        inArray(scheduleBlock.branchId, ids),
+        isNull(scheduleBlock.dentistUserId),
+        isNull(scheduleBlock.chairId),
+        gt(scheduleBlock.endsAt, now),
+        lt(scheduleBlock.startsAt, until),
+      ),
+    )
+    .orderBy(asc(scheduleBlock.startsAt))
+  return branches.map((row) => {
+    const week: AgentBranchHours["week"] = []
+    for (let weekday = 0; weekday < 7; weekday++) {
+      const ranges = mergeRanges(
+        schedules
+          .filter((item) => item.branchId === row.id && item.weekday === weekday)
+          .map((item): [number, number] => [item.startMin, item.endMin]),
+      )
+      if (ranges.length) week.push({ weekday, ranges })
+    }
+    return {
+      id: row.id,
+      name: row.name,
+      week,
+      closures: closures
+        .filter((item) => item.branchId === row.id)
+        .map((item) => ({ startsAt: item.startsAt.toISOString(), endsAt: item.endsAt.toISOString(), reason: item.reason })),
+    }
+  })
+}
+
+/**
+ * Quien atiende: los profesionales con horario activo, con sus especialidades
+ * y en qué sede y qué días. Solo nombre y especialidad; nada más de la persona.
+ */
+export async function listAgentProfessionals(tx: Db, orgId: string): Promise<AgentProfessionalInfo[]> {
+  const rows = await tx
+    .select({
+      userId: professionalSchedule.dentistUserId,
+      name: user.name,
+      branchName: branch.name,
+      weekday: professionalSchedule.weekday,
+    })
+    .from(professionalSchedule)
+    .innerJoin(user, eq(user.id, professionalSchedule.dentistUserId))
+    .innerJoin(branch, eq(branch.id, professionalSchedule.branchId))
+    .where(
+      and(
+        eq(professionalSchedule.organizationId, orgId),
+        eq(professionalSchedule.isActive, true),
+        eq(branch.isActive, true),
+      ),
+    )
+    .orderBy(asc(user.name), asc(branch.name))
+  if (!rows.length) return []
+  const specialties = await tx
+    .select({ userId: professionalSpecialty.userId, name: orgSpecialty.name })
+    .from(professionalSpecialty)
+    .innerJoin(orgSpecialty, eq(orgSpecialty.id, professionalSpecialty.specialtyId))
+    .where(and(eq(professionalSpecialty.organizationId, orgId), eq(orgSpecialty.isActive, true)))
+    .orderBy(asc(orgSpecialty.name))
+  const byUser = new Map<string, AgentProfessionalInfo>()
+  for (const row of rows) {
+    let item = byUser.get(row.userId)
+    if (!item) {
+      item = {
+        id: row.userId,
+        name: row.name,
+        specialties: specialties.filter((s) => s.userId === row.userId).map((s) => s.name),
+        where: [],
+      }
+      byUser.set(row.userId, item)
+    }
+    let place = item.where.find((w) => w.branchName === row.branchName)
+    if (!place) {
+      place = { branchName: row.branchName, weekdays: [] }
+      item.where.push(place)
+    }
+    if (!place.weekdays.includes(row.weekday)) place.weekdays.push(row.weekday)
+  }
+  for (const item of byUser.values()) for (const place of item.where) place.weekdays.sort((a, b) => a - b)
+  return [...byUser.values()]
+}
+
+const evaluationService = alias(serviceCatalog, "evaluation_service")
+
+/** Servicios activos con su precio dicho como la clínica lo eligió; `ids` acota a esos. */
+export async function listAgentServices(
+  tx: Db,
+  orgId: string,
+  options: { ids?: string[]; limit?: number } = {},
+): Promise<AgentServiceInfo[]> {
+  if (options.ids && options.ids.length === 0) return []
+  const conditions = [
+    eq(serviceCatalog.organizationId, orgId),
+    eq(serviceCatalog.isActive, true),
+    ne(serviceCatalog.source, "legacy"),
+  ]
+  if (options.ids) conditions.push(inArray(serviceCatalog.id, options.ids))
+  const query = tx
+    .select({
+      id: serviceCatalog.id,
+      name: serviceCatalog.name,
+      specialty: serviceCatalog.specialty,
+      durationMin: serviceCatalog.durationMin,
+      priceCents: serviceCatalog.priceCents,
+      currency: serviceCatalog.currency,
+      disclosure: serviceCatalog.priceDisclosure,
+      evaluationName: evaluationService.name,
+      evaluationPriceCents: evaluationService.priceCents,
+      evaluationCurrency: evaluationService.currency,
+      evaluationDisclosure: evaluationService.priceDisclosure,
+      evaluationActive: evaluationService.isActive,
+    })
+    .from(serviceCatalog)
+    .leftJoin(
+      evaluationService,
+      and(eq(evaluationService.id, serviceCatalog.evaluationServiceId), eq(evaluationService.organizationId, orgId)),
+    )
+    .where(and(...conditions))
+    .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id))
+  const rows = options.limit ? await query.limit(options.limit) : await query
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    specialty: row.specialty,
+    durationMin: row.durationMin,
+    price: {
+      disclosure: row.disclosure as PriceDisclosure,
+      priceCents: row.priceCents,
+      currency: row.currency,
+      evaluation:
+        row.evaluationName && row.evaluationActive && row.evaluationPriceCents !== null && row.evaluationCurrency
+          ? {
+              name: row.evaluationName,
+              priceCents: row.evaluationPriceCents,
+              currency: row.evaluationCurrency,
+              disclosure: (row.evaluationDisclosure ?? "exacto") as PriceDisclosure,
+            }
+          : null,
+    },
+  }))
+}
+
+/** Promociones vigentes con lo que el agente necesita para decirlas bien. */
+export async function listAgentPromotions(tx: Db, orgId: string, at = new Date()): Promise<AgentPromotionInfo[]> {
+  const live = await listClinicPromotionSummaries(tx, orgId, at)
+  return live.map((promo) => ({
+    id: promo.id,
+    name: promo.name,
+    endsAt: promo.endsAt ? promo.endsAt.toISOString() : null,
+    conditions: promo.conditions,
+    items: promo.items.map((item) => ({
+      serviceName: item.serviceName,
+      disclosure: item.priceDisclosure,
+      priceCents: item.priceCents,
+      currency: item.currency,
+      tariffCents: item.tariffCents,
+    })),
+  }))
+}
+
+/* ---------- Cómo se le dice al modelo ---------- */
+
+type Zone = Pick<OrgLocale, "locale" | "timezone">
+
+function clock(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`
+}
+
+/**
+ * El precio tal como puede decirlo el agente. «desde» lleva la palabra pegada
+ * al número: la comprobación antes de enviar no deja salir ese importe sin
+ * ella. «evaluacion» no lleva ningún número: el agente no puede decirlo.
+ */
+export function formatAgentPrice(price: AgentPrice, zone: Pick<OrgLocale, "locale">): string {
+  const evaluation = price.evaluation
+    ? ` Ofrece la evaluación: ${price.evaluation.name}${
+        price.evaluation.disclosure === "evaluacion"
+          ? ""
+          : price.evaluation.disclosure === "desde"
+            ? `, desde ${formatOrgMoney(price.evaluation.priceCents, price.evaluation.currency, zone)}`
+            : `, ${formatOrgMoney(price.evaluation.priceCents, price.evaluation.currency, zone)}`
+      }.`
+    : " Ofrece agendar una evaluación."
+  if (price.disclosure === "exacto") return formatOrgMoney(price.priceCents, price.currency, zone)
+  if (price.disclosure === "desde") {
+    return `desde ${formatOrgMoney(price.priceCents, price.currency, zone)} (es un mínimo: el precio final se define en la evaluación; dilo siempre con «desde»).${evaluation}`
+  }
+  return `precio solo tras una evaluación: no digas ningún monto de este servicio.${evaluation}`
+}
+
+export function formatAgentService(service: AgentServiceInfo, zone: Pick<OrgLocale, "locale">): string {
+  return `- ${service.name} (id ${service.id})${service.durationMin ? `, ${service.durationMin} min` : ""}: ${formatAgentPrice(service.price, zone)}`
+}
+
+/** Que el precio de una promoción no se confunda con el del servicio. */
+export const PROMOTION_RULE = "Un precio de promoción se dice siempre como de la promoción: con su nombre, sus condiciones y hasta cuándo vale, nunca como el precio del servicio."
+
+export function formatAgentPromotion(promo: AgentPromotionInfo, zone: Zone): string {
+  const until = promo.endsAt
+    ? ` Vigente hasta el ${new Date(promo.endsAt).toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "long" })}.`
+    : ""
+  const items = promo.items
+    .map((item) => {
+      const tariff = formatOrgMoney(item.tariffCents, item.currency, zone)
+      if (item.disclosure === "evaluacion") return `${item.serviceName}: con la promoción; el precio se define en la evaluación (no digas montos)`
+      const amount = formatOrgMoney(item.priceCents, item.currency, zone)
+      return item.disclosure === "desde"
+        ? `${item.serviceName}: desde ${amount} (mínimo; dilo con «desde»)`
+        : `${item.serviceName}: ${amount} en vez de ${tariff}`
+    })
+    .join("; ")
+  return `- Promoción «${promo.name}»: ${items}.${promo.conditions ? ` Condiciones: ${promo.conditions}.` : ""}${until}`
+}
+
+export function formatBranchHours(item: AgentBranchHours, zone: Zone): string {
+  const days = item.week.length
+    ? item.week.map((day) => `${WEEKDAY_NAMES[day.weekday]} ${day.ranges.map(([a, b]) => `${clock(a)}–${clock(b)}`).join(" y ")}`).join("; ")
+    : "sin horario cargado (no afirmes días ni horas)"
+  const closed = item.closures.length
+    ? ` Cerrada: ${item.closures
+        .map((c) => {
+          const from = new Date(c.startsAt).toLocaleString(zone.locale, { timeZone: zone.timezone, weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+          const to = new Date(c.endsAt).toLocaleString(zone.locale, { timeZone: zone.timezone, weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+          return `${from} a ${to}${c.reason ? ` (${c.reason})` : ""}`
+        })
+        .join("; ")}.`
+    : ""
+  return `- ${item.name}: ${days}.${closed}`
+}
+
+export function formatProfessional(item: AgentProfessionalInfo): string {
+  const specialties = item.specialties.length ? ` (${item.specialties.join(", ")})` : ""
+  const where = item.where
+    .map((place) => `${place.branchName}: ${place.weekdays.map((day) => WEEKDAY_NAMES[day]).join(", ")}`)
+    .join("; ")
+  return `- ${item.name}${specialties}. ${where}.`
+}
+
+/* ---------- Buscar en la clínica ---------- */
+
+export interface ClinicSearchResult {
+  services: AgentServiceInfo[]
+  promotions: AgentPromotionInfo[]
+  professionals: AgentProfessionalInfo[]
+}
+
+/** Palabras de la pregunta que cuentan: sin las muy cortas ni las de relleno. */
+const FILLER = new Set(["que", "para", "por", "con", "una", "uno", "los", "las", "del", "tienen", "tiene", "hay", "cuanto", "cuesta", "precio", "quiero", "necesito", "hacen", "como", "esta", "este", "mas"])
+
+function tokensOf(text: string): string[] {
+  return [...new Set(normalizeForSearch(text).split(" "))].filter((word) => word.length >= 3 && !FILLER.has(word))
+}
+
+/** Coincidencia por palabras: cuántas palabras de la pregunta aparecen (también como inicio de palabra). */
+export function textScore(query: string, haystack: string): number {
+  const words = tokensOf(query)
+  if (!words.length) return 0
+  const hay = ` ${normalizeForSearch(haystack)} `
+  let score = 0
+  for (const word of words) {
+    if (hay.includes(` ${word} `)) score += 2
+    else if (hay.includes(` ${word.slice(0, Math.max(4, word.length - 2))}`)) score += 1
+  }
+  return score
+}
+
+/**
+ * Busca en lo que la clínica ofrece: servicios, promociones vigentes y
+ * profesionales. `rank` permite poner delante lo que ya se encontró por
+ * significado (búsqueda con vectores); lo que se devuelve siempre se lee de la
+ * base en este momento.
+ */
+export async function searchClinic(
+  tx: Db,
+  orgId: string,
+  query: string,
+  options: { limit?: number; rankedServiceIds?: string[]; rankedPromotionIds?: string[]; rankedProfessionalIds?: string[] } = {},
+): Promise<ClinicSearchResult> {
+  const limit = Math.min(Math.max(options.limit ?? 6, 1), 10)
+  const services = await listAgentServices(tx, orgId)
+  const promotions = await listAgentPromotions(tx, orgId)
+  const professionals = await listAgentProfessionals(tx, orgId)
+
+  const order = (ranked: string[] | undefined) => new Map((ranked ?? []).map((id, index) => [id, index]))
+  const serviceRank = order(options.rankedServiceIds)
+  const promoRank = order(options.rankedPromotionIds)
+  const pick = <T>(items: T[], idOf: (item: T) => string, textOf: (item: T) => string, ranked: Map<string, number>) =>
+    items
+      .map((item) => {
+        const position = ranked.get(idOf(item))
+        // Lo encontrado por significado va primero, en su orden; después, lo que coincide por palabras.
+        const score = (position === undefined ? 0 : 100 - position) + textScore(query, textOf(item))
+        return { item, score }
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((entry) => entry.item)
+
+  const matchedServices = pick(services, (s) => s.id, (s) => `${s.name} ${s.specialty ?? ""}`, serviceRank)
+  const matchedNames = new Set(matchedServices.map((s) => normalizeForSearch(s.name)))
+  const matchedPromotions = pick(
+    promotions,
+    (p) => p.id,
+    (p) => `${p.name} ${p.conditions ?? ""} ${p.items.map((item) => item.serviceName).join(" ")}`,
+    promoRank,
+  )
+  // Una promoción de un servicio encontrado también viene, aunque su nombre no coincida.
+  for (const promo of promotions) {
+    if (matchedPromotions.length >= limit) break
+    if (matchedPromotions.includes(promo)) continue
+    if (promo.items.some((item) => matchedNames.has(normalizeForSearch(item.serviceName)))) matchedPromotions.push(promo)
+  }
+  const matchedProfessionals = pick(
+    professionals,
+    (p) => p.id,
+    (p) => `${p.name} ${p.specialties.join(" ")}`,
+    order(options.rankedProfessionalIds),
+  )
+  return { services: matchedServices, promotions: matchedPromotions, professionals: matchedProfessionals }
+}
+
+/** Texto del resultado de una búsqueda para el modelo. */
+export function formatClinicSearch(result: ClinicSearchResult, zone: Zone): string {
+  const lines: string[] = []
+  if (result.services.length) {
+    lines.push("Servicios:")
+    for (const service of result.services) lines.push(formatAgentService(service, zone))
+  }
+  if (result.promotions.length) {
+    lines.push(`Promociones vigentes. ${PROMOTION_RULE}`)
+    for (const promo of result.promotions) lines.push(formatAgentPromotion(promo, zone))
+  }
+  if (result.professionals.length) {
+    lines.push("Profesionales:")
+    for (const item of result.professionals) lines.push(formatProfessional(item))
+  }
+  // Lo encontrado por significado es lo más parecido, no lo pedido: medido en
+  // eval:search, algo que la clínica no ofrece (cirugía de nariz) queda a la
+  // misma distancia que una pregunta válida. Lo decide el modelo, con esta regla.
+  return lines.length
+    ? [
+        "Lo más parecido en la clínica a lo que se busca. Si nada de esto es lo que pide la persona, dile que la clínica no lo ofrece; no presentes otro servicio como si fuera lo pedido.",
+        ...lines,
+      ].join("\n")
+    : "No encontré nada que coincida en servicios, promociones ni profesionales de la clínica. No inventes: dilo y ofrece pasar el caso a una persona."
+}
+
+/* ---------- El bloque de la clínica en el prompt ---------- */
+
+export interface AgentClinicData {
+  hours: AgentBranchHours[]
+  professionals: AgentProfessionalInfo[]
+  /** Hasta `SERVICES_IN_PROMPT + 1`: uno más dice que no caben y se buscan. */
+  services: AgentServiceInfo[]
+  promotions: AgentPromotionInfo[]
+}
+
+/** Lo que el bloque estable necesita; con «Informar» apagado, solo horarios. */
+export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean): Promise<AgentClinicData> {
+  const hours = await getBranchHours(tx, orgId)
+  if (!informs) return { hours, professionals: [], services: [], promotions: [] }
+  return {
+    hours,
+    professionals: await listAgentProfessionals(tx, orgId),
+    services: await listAgentServices(tx, orgId, { limit: SERVICES_IN_PROMPT + 1 }),
+    promotions: await listAgentPromotions(tx, orgId),
+  }
+}
+
+/**
+ * Las líneas de la clínica para el prompt. Lo que cabe va entero; lo que no,
+ * se anuncia con su cantidad y se pide a `buscar_en_la_clinica`.
+ */
+export function formatAgentClinicData(data: AgentClinicData, zone: Zone): string[] {
+  const lines: string[] = []
+  if (data.hours.length) {
+    lines.push("Horario de atención de cada sede (sale de los horarios del equipo):")
+    for (const item of data.hours) lines.push(formatBranchHours(item, zone))
+  }
+  if (data.services.length > SERVICES_IN_PROMPT) {
+    lines.push(
+      "Servicios: la clínica tiene muchos y no van aquí. Antes de hablar de un servicio o de su precio, búscalo con buscar_en_la_clinica.",
+    )
+  } else if (data.services.length) {
+    lines.push("Servicios y cómo decir su precio (cada importe con su moneda):")
+    for (const service of data.services) lines.push(formatAgentService(service, zone))
+  } else {
+    lines.push("Sin servicios publicados: no des precios, ofrece derivar.")
+  }
+  if (data.promotions.length > PROMOTIONS_IN_PROMPT) {
+    lines.push(`Hay ${data.promotions.length} promociones vigentes: búscalas con buscar_en_la_clinica antes de mencionar una.`)
+  } else if (data.promotions.length) {
+    lines.push(`Promociones vigentes (solo estas; ninguna otra). ${PROMOTION_RULE}`)
+    for (const promo of data.promotions) lines.push(formatAgentPromotion(promo, zone))
+  }
+  if (data.professionals.length > PROFESSIONALS_IN_PROMPT) {
+    lines.push("Profesionales: búscalos por nombre o especialidad con buscar_en_la_clinica.")
+  } else if (data.professionals.length) {
+    lines.push("Profesionales, sus especialidades y qué días atienden en cada sede:")
+    for (const item of data.professionals) lines.push(formatProfessional(item))
+  }
+  return lines
+}

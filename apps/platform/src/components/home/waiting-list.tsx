@@ -38,7 +38,7 @@ function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }
 }
 
 function iconOf(row: WaitingRow): ReactNode {
-  if (row.kind === "proposal" || row.kind === "batch" || row.kind === "unreached" || (row.kind === "more" && row.of === "proposals")) {
+  if (row.kind === "proposal" || row.kind === "unreached" || (row.kind === "more" && row.of === "proposals")) {
     return <AgentMark className="rounded-full" />
   }
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
@@ -63,8 +63,6 @@ function linkOf(row: WaitingRow, handlers: WaitingHandlers): ReactElement | null
       return row.conversationId ? null : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />
     case "proposal":
       return handlers.canApprove ? null : <Link to="/agent/approvals" search={{ conversationId: row.conversationId ?? undefined, status: undefined }} />
-    case "batch":
-      return <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} />
     case "task":

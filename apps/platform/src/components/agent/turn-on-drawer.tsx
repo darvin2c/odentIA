@@ -1,10 +1,10 @@
-import { Badge, Button, FieldLabel, RadioGroup, RadioGroupItem } from "@odentia/ui"
+import { Button } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useState } from "react"
-import type { AgentLevel, AgentLevelId, AgentOverview } from "../../lib/agent"
+import type { FormEvent, ReactNode } from "react"
+import type { AgentOverview } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { mutationErrorMessage } from "../../lib/query-error"
@@ -39,7 +39,8 @@ const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-prima
 
 /**
  * Encender Recepción por primera vez: cuatro comprobaciones (lo que falta
- * lleva a donde se resuelve) y con qué nivel empieza. Solo la falta de un
+ * lleva a donde se resuelve). Lo que puede hacer lo dicen sus funciones, en la
+ * página; no hay niveles que elegir (ADR 0021). Solo la falta de un
  * canal deja el botón sin efecto: sin canal no le llega ningún mensaje y
  * encender no cambiaría nada. Las otras tres avisan y dejan encender; el
  * servidor no exige ninguna.
@@ -48,34 +49,20 @@ export function TurnOnDrawer({
   open,
   onClose,
   overview,
-  levels,
   onTest,
 }: {
   open: boolean
   onClose: () => void
   overview: AgentOverview
-  levels: AgentLevel[]
   /** Lleva a «Probar» sin perder el encendido a medias. */
   onTest: () => void
 }) {
   const queryClient = useQueryClient()
-  // Quien ya lo usó o ajustó la autonomía acto por acto conserva lo suyo por
-  // defecto; quien lo enciende por primera vez empieza supervisado.
-  const custom = overview.level === "personalizado"
-  const [level, setLevel] = useState<AgentLevelId | "actual">("supervisado")
-  useEffect(() => {
-    if (!open) return
-    setLevel(custom ? "actual" : overview.week.attended > 0 ? (overview.level as AgentLevelId) : "supervisado")
-  }, [open, custom, overview.level, overview.week.attended])
-
   const turnOn = useMutation({
     retry: false,
-    mutationFn: async () => {
-      if (level !== "actual") await apiFetch("/api/agent/level", { method: "PUT", body: JSON.stringify({ level }) })
-      return apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ enabled: true }) })
-    },
+    mutationFn: () => apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ enabled: true }) }),
     onSuccess: () => {
-      for (const key of ["agent-config", "agent-overview", "agent-policy", "agent-panel"]) {
+      for (const key of ["agent-config", "agent-overview", "agent-panel"]) {
         void queryClient.invalidateQueries({ queryKey: [key] })
       }
       onClose()
@@ -167,33 +154,7 @@ export function TurnOnDrawer({
         />
       </ul>
 
-      <fieldset className="flex flex-col gap-2 pt-2">
-        <legend className="mb-1 pt-2 text-sm font-semibold">Cómo empieza</legend>
-        <RadioGroup aria-label="Cómo empieza" value={level} onValueChange={(next) => setLevel(next as AgentLevelId | "actual")}>
-          {custom ? (
-            <FieldLabel className={`flex h-auto min-h-11 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm font-normal ${level === "actual" ? "border-primary bg-primary-soft" : ""}`}>
-              <RadioGroupItem value="actual" className="mt-0.5" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="font-semibold">Como lo tienes ahora</span>
-                <span className="text-muted-foreground">Conserva lo que ajustaste acto por acto. Elegir un nivel de abajo lo reemplaza.</span>
-              </span>
-            </FieldLabel>
-          ) : null}
-          {levels.map((option) => (
-            <FieldLabel key={option.id} className={`flex h-auto min-h-11 w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm font-normal ${level === option.id ? "border-primary bg-primary-soft" : ""}`}>
-              <RadioGroupItem value={option.id} className="mt-0.5" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex flex-wrap items-center gap-2 font-semibold">
-                  {option.label}
-                  {option.id === "supervisado" ? <Badge variant="secondary">Recomendado para empezar</Badge> : null}
-                </span>
-                <span className="text-muted-foreground">{option.summary}</span>
-              </span>
-            </FieldLabel>
-          ))}
-        </RadioGroup>
-      </fieldset>
-      <p className="text-sm text-muted-foreground">Lo apagas cuando quieras. Lo que esté a medias pasa a tu equipo.</p>
+      <p className="text-sm text-muted-foreground">Responde siempre al momento. Antes de reservar, mover o cancelar una cita le pide el «sí» al paciente. Lo apagas cuando quieras; lo que esté a medias pasa a tu equipo.</p>
       </div>
     </FormDrawer>
   )

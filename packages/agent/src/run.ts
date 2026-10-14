@@ -22,6 +22,7 @@ import {
   notifyAgentProviderProblem,
   type RecordRunInput,
   recordAgentRun,
+  type SearchEmbedder,
   reportAgentNoReply,
   toolsDisabledBy,
 } from "@odentia/services"
@@ -60,6 +61,8 @@ export interface AgentRuntime {
   burst?: { quietMs: number; maxWaitMs: number }
   /** Dirección pública de la plataforma, para los enlaces que el agente entrega (reservar una cita). */
   publicUrl?: { webURL: string; cookieDomain: string }
+  /** Quien vectoriza para buscar por significado; sin él, se busca por palabras. */
+  embedder?: SearchEmbedder
   secretsKey: Buffer
   callbacks?: Callbacks
 }
@@ -452,6 +455,7 @@ export async function processAgentRun(
     toolCtx.modelName = spec.modelName
     toolCtx.verifyReplies = cfg.replyCheckEnabled
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
+    if (runtime.embedder) toolCtx.embedder = runtime.embedder
     runUsage = toolCtx.usage
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
@@ -800,7 +804,7 @@ export const EMPTY_SANDBOX_STATE: AgentSandboxState = { pending: [], recent: [],
  */
 export async function simulateAgentSandbox(
   db: Db,
-  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel">,
+  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel" | "embedder">,
   input: {
     orgId: string
     transcript: SandboxTurn[]
@@ -828,6 +832,7 @@ export async function simulateAgentSandbox(
   toolCtx.verifyReplies = cfg.replyCheckEnabled
   toolCtx.modelName = spec.modelName
   toolCtx.draftText = text.slice(0, 4000)
+  if (deps.embedder) toolCtx.embedder = deps.embedder
   const state = structuredClone(input.state ?? EMPTY_SANDBOX_STATE)
   toolCtx.sandbox = { transcript: input.transcript.slice(-40), state }
   if (input.lessonOverrides) toolCtx.lessonOverrides = input.lessonOverrides

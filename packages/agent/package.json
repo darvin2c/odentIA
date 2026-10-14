@@ -13,7 +13,8 @@
     "eval:decisions": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval.ts",
     "eval:knowledge": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-knowledge.ts",
     "eval:admin": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-admin.ts",
-    "eval:month": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts"
+    "eval:month": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts",
+    "eval:search": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts src/busqueda.eval.ts"
   },
   "dependencies": {
     "@langchain/core": "1.2.11",

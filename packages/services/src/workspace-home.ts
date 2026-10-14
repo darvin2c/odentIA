@@ -3,10 +3,9 @@
  * como función pura: cada parte llega ya filtrada por lo que el rol puede ver
  * (lo decide `getWorkspaceHome`), y esta función no consulta nada.
  *
- * El orden es fijo y sin puntajes: casos «Ahora», lo que espera la aprobación
- * del equipo (propuestas y mensajes que encargó el administrador), las
- * personas a las que el agente no pudo escribir, conversaciones sin responder,
- * tareas vencidas, casos «Hoy» y «Sin apuro», la siguiente tarea con el resto
+ * El orden es fijo y sin puntajes: casos «Ahora», las propuestas del agente
+ * que esperan la aprobación del equipo, las personas a las que el agente no
+ * pudo escribir, conversaciones sin responder, tareas vencidas, casos «Hoy» y «Sin apuro», la siguiente tarea con el resto
  * resumido, lo que recomienda el administrador y, solo si él está apagado, los
  * presupuestos que esperan respuesta (encendido, esa lista es una de sus
  * líneas y saldría dos veces).
@@ -57,13 +56,6 @@ export interface WaitingAdvice {
   actor: "agente" | "persona"
 }
 
-/** Mensajes de una línea que esperan aprobación, juntos: llevan el mismo texto. */
-export interface WaitingBatch {
-  key: string
-  name: string
-  total: number
-}
-
 /** Personas a las que el agente no pudo escribir hoy, por motivo. */
 export interface WaitingUnreached {
   total: number
@@ -79,7 +71,6 @@ export interface WaitingBudgets {
 export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
   | ({ kind: "proposal" } & WaitingProposal)
-  | ({ kind: "batch" } & WaitingBatch)
   | ({ kind: "unreached" } & WaitingUnreached)
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   /** `more`: tareas abiertas que no tienen fila propia; solo la lleva la última. */
@@ -105,8 +96,6 @@ export interface WaitingParts {
   openTasks: number
   advice: WaitingAdvice[]
   budgets: WaitingBudgets | null
-  /** Mensajes del administrador que esperan aprobación, por línea. */
-  batches?: WaitingBatch[]
   unreached?: WaitingUnreached | null
 }
 
@@ -120,7 +109,6 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   for (const item of proposals) rows.push({ kind: "proposal", ...item })
   const proposalsLeft = Math.max(parts.proposalsTotal, parts.proposals.length) - proposals.length
   if (proposalsLeft > 0) rows.push({ kind: "more", of: "proposals", count: proposalsLeft })
-  for (const item of parts.batches ?? []) rows.push({ kind: "batch", ...item })
 
   if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })
 

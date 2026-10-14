@@ -10,7 +10,6 @@ const FAKE_REPLY = "Gracias por escribir. Te atiendo enseguida."
 
 interface Overview {
   enabled: boolean
-  level: string
   readiness: { channels: string[]; sandboxTurns: number }
 }
 
@@ -87,7 +86,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(page.getByRole("navigation", { name: "breadcrumb" }).getByRole("link", { name: "Agente" })).toBeVisible()
   const today = page.getByRole("region", { name: "Hoy" })
   const does = page.getByRole("region", { name: "Qué hace" })
-  const reach = page.getByRole("region", { name: "Hasta dónde llega solo" })
+  const reach = page.getByRole("region", { name: "Límites" })
   const knows = page.getByRole("region", { name: "Qué sabe" })
   const behaves = page.getByRole("region", { name: "Cómo se comporta" })
 
@@ -128,21 +127,10 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(booking).toContainText("«Ofrece primero las mañanas.»")
   await expect(booking.getByRole("button", { name: "Editar la indicación de «Agendar, mover y cancelar citas»" })).toBeVisible()
 
-  // Niveles: un control con una sola descripción. Bajar se aplica al momento; subir al máximo se confirma.
-  await expect(reach.getByRole("button", { name: "Equilibrado", exact: true })).toHaveAttribute("aria-pressed", "true")
-  await reach.getByRole("button", { name: "Supervisado", exact: true }).click()
-  await expect(reach.getByRole("button", { name: "Supervisado", exact: true })).toHaveAttribute("aria-pressed", "true")
-  await expect(reach).toContainText("Escribe los borradores y tu equipo los envía.")
-  await expect(reach).not.toContainText("Para reservar o mover una cita pide el sí del paciente.")
-  await expect.poll(async () => (await overview()).level).toBe("supervisado")
-  await reach.getByRole("button", { name: "Autónomo", exact: true }).click()
-  const confirmLevel = page.getByRole("alertdialog", { name: "Pasar a Autónomo" })
-  await expect(confirmLevel).toContainText("Solo para cancelar una cita pide el sí del paciente.")
-  await confirmLevel.getByRole("button", { name: "Cancelar" }).click()
-  await expect(confirmLevel).toBeHidden()
-  expect((await overview()).level).toBe("supervisado")
-  // El nivel se elige entre los tres: ya no hay un enlace para ajustarlo acto por acto.
-  await expect(reach.getByRole("link", { name: "Personalizar por acto" })).toHaveCount(0)
+  // Sin niveles (ADR 0021): cada función dice quién confirma; la cita, siempre el paciente.
+  await expect(reach.getByRole("button", { name: "Supervisado", exact: true })).toHaveCount(0)
+  await expect(booking).toContainText("siempre le pide el «sí» al paciente")
+  await expect(reach).toContainText("Siempre responde al momento.")
 
   // Cuándo pasa a una persona: lo fijo y lo que añade la clínica, con su entrada.
   await expect(reach).toContainText("Piden hablar con alguien")
@@ -258,30 +246,30 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(sandbox.getByRole("button", { name: "Pregunta un precio" })).toHaveAttribute("aria-pressed", "false")
   await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(0)
 
-  // --- Encender: ya hay canal y ya se probó; empieza supervisado ---
+  // --- Encender: ya hay canal y ya se probó; no hay nivel que elegir ---
   await page.getByRole("switch", { name: "Encender Recepción" }).click()
   await expect(turnOn).toContainText("Telegram")
   await expect(turnOn).toContainText("2 mensajes de prueba")
   await expect(turnOn.getByRole("button", { name: "Probar otra" })).toBeVisible()
-  await expect(turnOn.getByRole("radio", { name: /^Supervisado/ })).toBeChecked()
-  await expect(turnOn.getByRole("radio", { name: /^Supervisado/ })).toHaveAccessibleName(/Recomendado para empezar/)
-  await expect(turnOn).toContainText("Lo que esté a medias pasa a tu equipo.")
+  await expect(turnOn.getByRole("radio")).toHaveCount(0)
+  await expect(turnOn).toContainText("Responde siempre al momento.")
+  await expect(turnOn).toContainText("lo que esté a medias pasa a tu equipo.")
   await info.attach("encender", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await turnOn.getByRole("button", { name: "Encender Recepción" }).click()
   await expect(turnOn).toBeHidden()
   await expect(page.getByRole("switch", { name: "Apagar Recepción" })).toBeChecked()
-  expect(await overview()).toMatchObject({ enabled: true, level: "supervisado" })
+  expect(await overview()).toMatchObject({ enabled: true })
 
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   await expect(reception).toContainText("Encendido")
-  await expect(reception).toContainText("Nivel Supervisado · Telegram")
+  await expect(reception).toContainText("Responde por Telegram")
   await info.attach("resumen-encendido", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
   // --- Teléfono: cada agente es una fila tocable que lleva a su página, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const configure = reception.getByRole("link")
-  await expect(configure).toContainText("Encendido · nivel Supervisado")
+  await expect(configure).toContainText("Encendido")
   expect((await configure.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("resumen-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -361,7 +349,6 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Quien solo decide por el agente (recepción) no lo administra: lo decide el servidor.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
-  expect((await api(page, "PUT", "/api/agent/level", org.slug, { level: "autonomo" })).status).toBe(403)
   expect((await api(page, "POST", "/api/agent/sandbox", org.slug, { message: "Hola" })).status).toBe(403)
   expect((await api(page, "PUT", "/api/agent/config", org.slug, { disabledFunctions: [] })).status).toBe(403)
 })

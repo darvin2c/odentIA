@@ -24,8 +24,11 @@ import {
   getClinicInfoSnapshot,
   getOpportunity,
   getOrgLocale,
+  formatAgentClinicData,
+  formatClinicSearch,
   formatOrgMoney,
   formatZoned,
+  getAgentClinicData,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
@@ -39,11 +42,13 @@ import {
   recordKnowledgeGap,
   requireContact,
   resolveAgentPatientContext,
+  rankByMeaning,
+  searchClinic,
   searchPublishedKnowledge,
   ServiceError,
   updateContact,
 } from "@odentia/services"
-import type { OpportunityDetail, OrgLocale, ProposalItem } from "@odentia/services"
+import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
 import type { AgentRoute } from "./decision/route.js"
@@ -57,6 +62,7 @@ export interface AgentEvidence extends Evidence {
 /** Cómo ve el equipo cada herramienta de lectura cuando una respuesta se apoya en ella. */
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },
+  buscar_en_la_clinica: { kind: "servicios", label: "Búsqueda en servicios, promociones y profesionales" },
   consultar_conocimiento: { kind: "conocimiento", label: "Respuestas oficiales de la clínica" },
   buscar_huecos: { kind: "agenda", label: "Agenda: horarios disponibles" },
   ver_contexto_paciente: { kind: "persona", label: "Vínculo con el paciente" },
@@ -92,6 +98,7 @@ export const SANDBOX_PERSON = "Paciente de prueba"
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
   ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
+  buscar_en_la_clinica: "Buscó en los servicios, promociones y profesionales de la clínica.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
   buscar_huecos: "Buscó huecos reales en la agenda.",
   ver_contexto_paciente: "Verificó para quién es la atención.",
@@ -159,6 +166,11 @@ export interface AgentToolCtx {
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
    */
   publicUrl?: { webURL: string; cookieDomain: string }
+  /**
+   * Quien vectoriza para buscar por significado. Sin él, la búsqueda es solo por
+   * palabras. Solo ordena: los datos se leen de la base al responder.
+   */
+  embedder?: SearchEmbedder
   /** Hay una propuesta esperando el sí del interlocutor: el turno recibe todas las herramientas, sea cual sea el camino. */
   casePending?: boolean
   /** El modelo que escribe pidió el resto de herramientas en este turno. */
@@ -656,39 +668,78 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const clinicInfo = tool(
     async () => {
-      const snapshot = await inOrg((tx) => getClinicInfoSnapshot(tx, ctx.orgId))
+      const { snapshot, data, zone } = await inOrg(async (tx) => ({
+        snapshot: await getClinicInfoSnapshot(tx, ctx.orgId),
+        data: await getAgentClinicData(tx, ctx.orgId, true),
+        zone: await getOrgLocale(tx, ctx.orgId),
+      }))
       const lines = [`Clínica: ${snapshot.clinicName}.`]
       for (const b of snapshot.branches) {
         lines.push(
           `- Sede ${b.name} (id ${b.id}): ${[b.address, b.phone, b.mapsUrl].filter(Boolean).join(" · ") || "sin datos"}`,
         )
       }
-      if (!snapshot.services.length) lines.push("Sin servicios publicados: no des precios.")
-      for (const s of snapshot.services.slice(0, 50)) {
-        lines.push(`- Servicio ${s.name} (id ${s.id}): ${formatOrgMoney(s.priceCents, s.currency, snapshot)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
-      }
+      lines.push(...formatAgentClinicData(data, zone))
       if (snapshot.paymentMethods.length) {
         lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
         for (const m of snapshot.paymentMethods) lines.push(`- ${m.name}`)
-      }
-      if (snapshot.promotions.length) {
-        lines.push("Promociones vigentes (el precio «desde» es un mínimo: el final sale del presupuesto):")
-        for (const p of snapshot.promotions) lines.push(`- ${p.name}`)
       }
       return lines.join("\n")
     },
     {
       name: "ver_sedes_y_servicios",
       description:
-        "Sedes (con id), servicios con tarifas oficiales, medios de pago aceptados y promociones vigentes. Úsalo antes de hablar de precios, sedes, medios, promociones o disponibilidad.",
+        "Sedes (con id) y su horario de atención, servicios con cómo decir su precio, promociones vigentes con sus condiciones, profesionales y medios de pago. Úsalo antes de hablar de precios, sedes, horarios, profesionales, medios, promociones o disponibilidad. Si la clínica tiene muchos servicios, búscalos con buscar_en_la_clinica.",
       schema: z.object({}),
+    },
+  )
+
+  /**
+   * Lo más parecido por significado. La frase se vectoriza fuera de la
+   * transacción; si el proveedor falla, se busca solo por palabras.
+   */
+  async function meaningOf(text: string): Promise<MeaningRank | undefined> {
+    const embedder = ctx.embedder
+    if (!embedder) return undefined
+    try {
+      const [embedding] = await embedder.embed([text])
+      if (!embedding?.length) return undefined
+      return await inOrg((tx) => rankByMeaning(tx, ctx.orgId, { model: embedder.model, embedding }))
+    } catch {
+      return undefined
+    }
+  }
+
+  const clinicSearch = tool(
+    async ({ texto }: { texto: string }) => {
+      const ranked = await meaningOf(texto)
+      const result = await inOrg(async (tx) => {
+        return {
+          found: await searchClinic(tx, ctx.orgId, texto, {
+            rankedServiceIds: ranked?.services,
+            rankedPromotionIds: ranked?.promotions,
+            rankedProfessionalIds: ranked?.professionals,
+          }),
+          zone: await getOrgLocale(tx, ctx.orgId),
+        }
+      })
+      return formatClinicSearch(result.found, result.zone)
+    },
+    {
+      name: "buscar_en_la_clinica",
+      description:
+        "Busca en lo que ofrece la clínica: servicios (con cómo decir su precio), promociones vigentes (precio, condiciones y fecha de fin) y profesionales por nombre o especialidad. Escribe lo que pide la persona con sus palabras («dientes amarillos», «frenillos», «ortodoncista»). Devuelve solo lo que coincide, leído en este momento.",
+      schema: z.object({ texto: z.string().trim().min(2).max(200) }),
     },
   )
 
   const knowledgeSearch = tool(
     async ({ pregunta }: { pregunta: string }) => {
       const hidden = new Set(ctx.lessonOverrides?.skipEntryIds ?? [])
-      const found = (await inOrg((tx) => searchPublishedKnowledge(tx, ctx.orgId, pregunta, 5))).filter((hit) => !hidden.has(hit.id))
+      const ranked = await meaningOf(pregunta)
+      const found = (await inOrg((tx) => searchPublishedKnowledge(tx, ctx.orgId, pregunta, 5, ranked?.answers))).filter(
+        (hit) => !hidden.has(hit.id),
+      )
       // En una prueba, la respuesta oficial de una lección aún sin aprobar cuenta como publicada.
       const trial = (ctx.lessonOverrides?.extra ?? [])
         .filter((lesson) => lesson.kind === "respuesta_oficial")
@@ -831,15 +882,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const bookingLink = tool(
     async (input: { patientId?: string; serviceId?: string; branchId?: string }) => {
-      if (ctx.dryRun) return "[SIMULACIÓN] Se crearía un enlace para que la persona elija su cita. Dile que lo recibirá y ofrece también seguir por aquí."
+      // En una prueba no se crea ningún enlace: la marca deja ver dónde iría en el mensaje.
+      if (ctx.dryRun) return "[SIMULACIÓN] Enlace para que la persona elija su cita: [enlace de reserva]. Inclúyelo tal cual en tu respuesta con send_reply y ofrece también seguir por aquí."
       const publicUrl = ctx.publicUrl
-      if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos."
+      if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
       try {
         const { link, slug } = await inOrg(async (tx) => {
           const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, ctx.orgId)).limit(1)
           return { link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }), slug: org?.slug ?? null }
         })
-        if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos."
+        if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
         const url = new URL(publicUrl.webURL)
         url.hostname = `${slug}.${publicUrl.cookieDomain.replace(/^\./, "")}`
         url.pathname = "/reserva"
@@ -856,7 +908,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         if (error instanceof ServiceError && error.code === "BOOKING_PATIENT_AMBIGUOUS") {
           return "La persona tiene varios pacientes vinculados: pregunta para quién es la cita y vuelve a llamar con su patientId (de ver_contexto_paciente)."
         }
-        if (error instanceof ServiceError) return `No se pudo crear el enlace: ${error.message}. Propón horarios por aquí.`
+        if (error instanceof ServiceError) return `No se pudo crear el enlace: ${error.message}. Propón horarios por aquí. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace.`
         throw error
       }
     },
@@ -1108,7 +1160,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "close_opportunity",
       description:
-        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con motivo obligatorio (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con motivo obligatorio. Como perdida, solo si la persona lo dijo claro en esta conversación (ya se atendió en otro lado, ya no le interesa); nunca porque dejó de responder. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
       schema: operationAgentSchema("oportunidad.cerrar"),
     },
   )
@@ -1303,6 +1355,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     updateContactTool,
     createTaskTool,
     clinicInfo,
+    clinicSearch,
     knowledgeSearch,
     patientContext,
     patientSummary,

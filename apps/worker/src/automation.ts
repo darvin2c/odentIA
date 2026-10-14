@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { tickAutomations, type TickDeps } from "@odentia/services"
+import { refreshAgentSearch, type SearchEmbedder, tickAutomations, type TickDeps } from "@odentia/services"
 import { sql } from "drizzle-orm"
 
 export interface AutomationWorkerDeps {
@@ -16,6 +16,8 @@ export interface AutomationWorkerDeps {
   senderMode: "mock" | "live"
   /** Lee lo último que escribió la persona antes de escribirle por un seguimiento. */
   alreadyTold?: TickDeps["alreadyTold"]
+  /** Vectoriza el índice de búsqueda del agente en cada ciclo; sin él, no se toca. */
+  embedder?: SearchEmbedder
 }
 
 const MAX_DRAIN = 50
@@ -30,7 +32,7 @@ const MAX_DRAIN = 50
  * nunca el origen webhook/API) para los enlaces /c/ y /baja/.
  */
 export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boolean> {
-  const { appDb, ownerDb, secretsKey, publicBaseUrl, senderMode, alreadyTold } = deps
+  const { appDb, ownerDb, secretsKey, publicBaseUrl, senderMode, alreadyTold, embedder } = deps
   let pending = 0
   for (let i = 0; i < MAX_DRAIN; i++) {
     const rows = (await appDb.execute(
@@ -60,5 +62,17 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
       `programados=${summary.programados} coordinados=${summary.coordinados} ` +
       `entregados=${summary.entregados} fallidos=${summary.fallidos}`,
   )
+  // El índice del agente se concilia en el mismo despertador. Un fallo aquí no
+  // detiene las automatizaciones: la búsqueda sigue por palabras.
+  if (embedder) {
+    try {
+      const search = await refreshAgentSearch(ownerDb, appDb, embedder)
+      if (search.embedded || search.failed) {
+        console.log(`worker: búsqueda del agente vectorizados=${search.embedded} sin_vector=${search.failed}`)
+      }
+    } catch (error) {
+      console.error("worker: búsqueda del agente", error instanceof Error ? error.message : error)
+    }
+  }
   return true
 }

@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server"
+import { embedderFromEnv } from "@odentia/agent"
 import { createAuth } from "@odentia/auth"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { createMailer } from "@odentia/mail"
@@ -55,6 +56,7 @@ const app = createApp({
     baseUrl: env.LLM_BASE_URL,
     timeoutMs: env.LLM_TIMEOUT_MS,
     maxRetries: env.LLM_MAX_RETRIES,
+    ...(env.LLM_REASONING_EFFORT ? { reasoningEffort: env.LLM_REASONING_EFFORT } : {}),
     allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
   },
   decisions: {
@@ -65,6 +67,7 @@ const app = createApp({
     timeoutMs: env.DECISIONS_TIMEOUT_MS,
   },
   metaSignup: metaSignupFromEnv(env),
+  embedder: embedderFromEnv(env),
   mailbox: {
     gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
     microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },

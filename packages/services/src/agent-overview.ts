@@ -3,16 +3,9 @@ import { member, user } from "@odentia/db/schema/auth"
 import { agentLesson } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
-import {
-  countAgentModelRunsToday,
-  countPendingProposals,
-  getAutonomyPolicy,
-  updateAutonomyPolicy,
-} from "./agent-operations.js"
+import { countAgentModelRunsToday, countPendingProposals } from "./agent-operations.js"
 import { countLearningPending } from "./agent-learning.js"
-import { AGENT_LEVEL_POLICY, AGENT_LEVELS, type AgentLevel, levelOfPolicy } from "./agent-roles.js"
 import { getAgentConfig } from "./agentConfig.js"
-import { validation } from "./errors.js"
 import { countOpenKnowledgeGaps, getClinicInfoSnapshot, getKnowledgeBasics, listActiveKnowledge } from "./knowledge.js"
 import { getOrgLocale } from "./locale.js"
 
@@ -49,7 +42,6 @@ export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
 export interface AgentOverview {
   enabled: boolean
-  level: AgentLevel | "personalizado"
   /** `review` y `lessons`: respuestas por revisar y lecciones por aprobar en Aprender. */
   needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
@@ -183,7 +175,6 @@ async function startOfOrgDay(tx: Db, timezone: string): Promise<Date> {
 export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOverview> {
   const cfg = await getAgentConfig(tx, orgId)
   const zone = await getOrgLocale(tx, orgId)
-  const policy = await getAutonomyPolicy(tx, orgId)
   const pending = await countPendingProposals(tx, orgId)
   const basics = await getKnowledgeBasics(tx, orgId)
   const snapshot = await getClinicInfoSnapshot(tx, orgId)
@@ -208,7 +199,6 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
   const weekAgo = new Date(Date.now() - 7 * 86_400_000)
   return {
     enabled: cfg.enabled,
-    level: levelOfPolicy(policy),
     needsYou: {
       approvals: pending.team,
       gaps: await countOpenKnowledgeGaps(tx, orgId),
@@ -233,12 +223,6 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
     },
     usage: { runsToday: await countAgentModelRunsToday(tx, orgId), dailyRunLimit: cfg.dailyRunLimit },
   }
-}
-
-/** Fija «hasta dónde llega solo»: cada nivel es una política de autonomía completa. */
-export async function setAgentLevel(tx: Db, orgId: string, actorUserId: string, level: string) {
-  if (!(AGENT_LEVELS as readonly string[]).includes(level)) throw validation("Nivel desconocido")
-  return updateAutonomyPolicy(tx, orgId, actorUserId, AGENT_LEVEL_POLICY[level as AgentLevel])
 }
 
 /** Cuenta un mensaje de prueba: solo sirve para saber si la clínica ya probó a su agente. */

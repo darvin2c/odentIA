@@ -40,6 +40,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { BadgePercent, Plus } from "lucide-react"
 import { type FormEvent, useId, useMemo, useRef, useState } from "react"
+import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -59,6 +60,8 @@ import {
   currencySymbol,
   fetchServices,
   formatAmount,
+  PRICE_DISCLOSURE_OPTIONS,
+  type PriceDisclosure,
   type ServiceCatalogItem,
 } from "../../lib/services"
 
@@ -481,7 +484,14 @@ interface PriceRow {
   currency: string
   tariffCents: number
   mode: PromotionMode
+  /** Cómo lo dice el agente. */
+  disclosure: PriceDisclosure
   priceText: string
+}
+
+/** Lo que dice el agente cuando la clínica no eligió otra cosa: sigue al tipo de precio. */
+function disclosureFor(mode: PromotionMode): PriceDisclosure {
+  return mode === "from" ? "desde" : "exacto"
 }
 
 const MODE_OPTIONS: ReadonlyArray<{ value: PromotionMode; label: string }> = [
@@ -528,6 +538,7 @@ function PromotionForm({
         currency: item.currency,
         tariffCents: item.tariffCents,
         mode: item.mode,
+        disclosure: item.priceDisclosure ?? disclosureFor(item.mode),
         priceText: formatMoneyInput(item.priceCents, item.currency, locale),
       })),
     [initial, locale],
@@ -558,6 +569,7 @@ function PromotionForm({
         !before ||
         before.serviceId !== row.serviceId ||
         before.mode !== row.mode ||
+        before.disclosure !== row.disclosure ||
         before.priceText !== row.priceText
       )
     })
@@ -581,6 +593,7 @@ function PromotionForm({
       const items: PromotionItemBody[] = rows.map((row) => ({
         serviceId: row.serviceId,
         mode: row.mode,
+        priceDisclosure: row.disclosure,
         priceCents: parsePrice(row, locale) ?? 0,
       }))
       if (!initial) {
@@ -765,7 +778,13 @@ function PromotionForm({
                     className="w-auto"
                     value={row.mode}
                     options={MODE_OPTIONS}
-                    onChange={(mode) => setRow(row.serviceId, { mode })}
+                    onChange={(mode) =>
+                      // Si la clínica no había elegido otra cosa, lo que dice el agente sigue al tipo de precio.
+                      setRow(row.serviceId, {
+                        mode,
+                        ...(row.disclosure === disclosureFor(row.mode) ? { disclosure: disclosureFor(mode) } : {}),
+                      })
+                    }
                   />
                   <InputGroup className="w-40">
                     <InputGroupAddon align="inline-start">
@@ -784,6 +803,21 @@ function PromotionForm({
                       onChange={(event) => setRow(row.serviceId, { priceText: event.target.value })}
                     />
                   </InputGroup>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span aria-hidden className="text-muted-foreground">El agente lo dice</span>
+                  <ChoiceSelect
+                    className="w-auto min-w-48"
+                    aria-label={`Cómo dice el agente el precio de ${row.serviceName}`}
+                    value={row.disclosure}
+                    onChange={(event) => setRow(row.serviceId, { disclosure: event.target.value as PriceDisclosure })}
+                  >
+                    {PRICE_DISCLOSURE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
                 </div>
                 {issue ? <FieldError>{issue}</FieldError> : null}
                 {above ? (
@@ -814,6 +848,7 @@ function PromotionForm({
                   currency: service.currency,
                   tariffCents: service.priceCents,
                   mode: "fixed",
+                  disclosure: "exacto",
                   priceText: "",
                 },
               ])

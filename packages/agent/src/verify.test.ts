@@ -132,3 +132,18 @@ it("una respuesta sin precios, fechas ni horas no tiene nada que comprobar", () 
   const verdict = check("¡Hola! Con gusto te ayudo. ¿Para qué servicio deseas tu cita?", [])
   expect(verdict).toEqual({ ok: true, checks: [], unsupported: [] })
 })
+
+it("un mínimo («desde») solo sale dicho como mínimo", () => {
+  const desde = {
+    source: "Sedes y servicios",
+    text: "- Ortodoncia (id x): desde S/ 2,500.00 (es un mínimo: el precio final se define en la evaluación).",
+  }
+  expect(check("La ortodoncia es desde S/ 2,500; el final se define en la evaluación.", [desde]).ok).toBe(true)
+  expect(check("La ortodoncia es a partir de S/ 2,500.", [desde]).ok).toBe(true)
+  const asFinal = check("La ortodoncia cuesta S/ 2,500.", [desde])
+  expect(asFinal.ok).toBe(false)
+  expect(describeUnsupported(asFinal)).toContain("es un mínimo")
+  // Si otra fuente lo da como precio exacto, vale sin «desde».
+  const exact = { source: "Presupuesto", text: "Total: S/ 2,500.00" }
+  expect(check("La ortodoncia cuesta S/ 2,500.", [desde, exact]).ok).toBe(true)
+})

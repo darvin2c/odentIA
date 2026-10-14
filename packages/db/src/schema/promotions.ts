@@ -69,6 +69,11 @@ export const promotionServicePrice = pgTable(
       .notNull()
       .references(() => serviceCatalog.id),
     mode: text("mode").notNull().default("fixed"),
+    /**
+     * Cómo lo dice el agente (`PRICE_DISCLOSURES`); por defecto sigue a `mode`
+     * («fijo» → exacto, «desde» → desde). Presupuesto y caja no lo leen.
+     */
+    priceDisclosure: text("price_disclosure").notNull().default("exacto"),
     priceCents: integer("price_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
     /** Nada se borra: retirar un servicio lo desactiva (el histórico no relee). */
@@ -88,6 +93,10 @@ export const promotionServicePrice = pgTable(
       sql`${table.mode} IN ('fixed','from')`,
     ),
     check("promotion_service_price_amount_check", sql`${table.priceCents} >= 0`),
+    check(
+      "promotion_service_price_disclosure_check",
+      sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`,
+    ),
   ],
 )
 

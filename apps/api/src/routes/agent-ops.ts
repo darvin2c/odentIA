@@ -26,6 +26,7 @@ import {
   getCaseBrief,
   listProposals,
   requiredPermissionForAction,
+  type SearchEmbedder,
   ServiceError,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
@@ -37,6 +38,7 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 export interface AgentOpsDeps extends CrmDeps {
   /** Proveedor de la plataforma; la configuración de la organización prevalece. */
   llm: PlatformLlm
+  embedder?: SearchEmbedder
 }
 
 export function createAgentOpsRoute(deps: AgentOpsDeps) {
@@ -373,7 +375,7 @@ const sandboxInput = z.object({
       return await runService(c, 200, async () => {
         const result = await simulateAgentSandbox(
           deps.db,
-          { secretsKey: deps.secretsKey, platform: deps.llm },
+          { secretsKey: deps.secretsKey, platform: deps.llm, embedder: deps.embedder },
           { orgId, ...parsed.data },
         )
         await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))

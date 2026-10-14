@@ -358,20 +358,22 @@ it("tareas y campos van de punta a punta", async () => {
   expect(((await fields.json()) as { data: unknown[] }).data).toHaveLength(1)
 })
 
-it("etapas y campos: los lee quien trabaja con ventas, los define quien configura la clínica", async () => {
+it("etapas y campos: los lee y los define quien trabaja con ventas; quien atiende, no", async () => {
   const json = { "content-type": "application/json" }
   const reception = buildApp("reception")
-  // Recepción los necesita en el tablero y en la ficha del contacto…
+  const dentist = buildApp("dentist")
+  // Recepción los usa en el tablero y en la ficha del contacto, y también los define: es trabajo diario de ventas.
   expect((await reception.request("/pipelines")).status).toBe(200)
   expect((await reception.request("/fields")).status).toBe(200)
-  // …pero definirlos es configurar: la misma regla que abre su apartado en Configuración.
   for (const [path, body] of [
     ["/pipelines", { name: "Otro" }],
     ["/fields", { label: "Origen", type: "text" }],
   ] as const) {
-    const denied = await reception.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
+    const denied = await dentist.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
     expect(denied.status, path).toBe(403)
   }
+  const byReception = await reception.request("/fields", { method: "POST", headers: json, body: JSON.stringify({ label: "Canal preferido", type: "text" }) })
+  expect(byReception.status).toBe(201)
 
   const owner = buildApp("owner")
   // Solo se escribe el nombre: la clave la genera el servidor.
@@ -392,7 +394,7 @@ it("etapas y campos: los lee quien trabaja con ventas, los define quien configur
 
   // Un campo se edita: nombre y opciones; la clave no cambia.
   const edit = { label: "Origen", options: ["Redes", "Recomendación"] }
-  const refused = await reception.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
+  const refused = await dentist.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
   expect(refused.status).toBe(403)
   const edited = await owner.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
   expect(edited.status).toBe(200)
@@ -401,10 +403,10 @@ it("etapas y campos: los lee quien trabaja con ventas, los define quien configur
   const pipelines = ((await (await owner.request("/pipelines")).json()) as { data: { id: string; stages: { id: string }[] }[] }).data
   const stageId = pipelines[0]?.stages[0]?.id ?? ""
   const rename = { method: "PATCH", headers: json, body: JSON.stringify({ name: "Recién llegado" }) }
-  expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
-  expect((await owner.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
+  expect((await dentist.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
+  expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
 
-  expect((await reception.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
+  expect((await dentist.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
   expect((await owner.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(200)
 })
 
@@ -659,7 +661,7 @@ it("conversaciones: identidad manual y directa con restricciones de canal", asyn
   expect(((await waReuse.json()) as { data: { created: boolean } }).data.created).toBe(false)
 })
 
-it("fichas, resumen, nivel y prueba del agente", async () => {
+it("fichas, resumen y prueba del agente", async () => {
   const app = buildApp("owner")
   const member = buildApp("member")
   const json = { "content-type": "application/json" }
@@ -667,29 +669,25 @@ it("fichas, resumen, nivel y prueba del agente", async () => {
   const roles = await app.request("/agent/roles")
   expect(roles.status).toBe(200)
   const fichas = (await roles.json()) as {
-    data: { principles: string[]; roles: { id: string; available: boolean }[]; levels: { id: string }[] }
+    data: { principles: string[]; roles: { id: string; available: boolean }[]; levels?: unknown }
   }
   expect(fichas.data.roles.map((role) => role.id)).toEqual(["recepcion", "asistente_clinico", "administrador", "ayuda"])
-  expect(fichas.data.levels.map((level) => level.id)).toEqual(["supervisado", "equilibrado", "autonomo"])
+  // Sin niveles (ADR 0021): quién confirma cada acción es fijo.
+  expect(fichas.data.levels).toBeUndefined()
   expect(fichas.data.principles.length).toBeGreaterThan(0)
   expect((await member.request("/agent/roles")).status).toBe(403)
 
-  // El nivel es una política completa: fijarlo cambia lo que dice el resumen.
-  const level = await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "supervisado" }) })
-  expect(level.status).toBe(200)
-  const unknown = await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "total" }) })
-  expect(unknown.status).toBe(400)
-  const denied = await member.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "autonomo" }) })
-  expect(denied.status).toBe(403)
+  // Ni nivel ni política se cambian por la API.
+  expect((await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "supervisado" }) })).status).toBe(404)
+  expect((await app.request("/agent/policy", { method: "PUT", headers: json, body: JSON.stringify({ enviar_mensaje: "aprobar_equipo" }) })).status).toBe(404)
 
   // El resumen cuenta «hoy» en la zona de la clínica: necesita su perfil.
   await ownerDb.execute(
     sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
   )
   const before = (await (await app.request("/agent/overview")).json()) as {
-    data: { level: string; readiness: { channels: string[]; sandboxTurns: number } }
+    data: { readiness: { channels: string[]; sandboxTurns: number } }
   }
-  expect(before.data.level).toBe("supervisado")
   expect(before.data.readiness.channels).toContain("whatsapp")
   expect((await member.request("/agent/overview")).status).toBe(403)
 

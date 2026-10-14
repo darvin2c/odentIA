@@ -258,9 +258,13 @@ function OrgLayout() {
     if (!selfVisible) return []
     return [{ ...item, children }]
   })
+  // Recepción no configura la clínica, pero sí define etapas de venta y campos
+  // de contacto: entra a Configuración por el primero de esos apartados.
   const footerItems = canAccess(role, "settings.read")
     ? [{ label: "Configuración", to: "/settings", icon: Settings }]
-    : []
+    : canAccess(role, "crm.write")
+      ? [{ label: "Configuración", to: "/settings/pipelines", icon: Settings }]
+      : []
 
   if (!session) {
     return <LoadingState className="m-8" />

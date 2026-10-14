@@ -527,13 +527,26 @@ export function scoreKnowledgeMatch(
   return score
 }
 
-/** Búsqueda sobre lo vigente (lo único que el agente puede citar). */
-export async function searchPublishedKnowledge(tx: Db, orgId: string, q: string, limit = 5): Promise<KnowledgeEntryItem[]> {
+/**
+ * Búsqueda sobre lo vigente (lo único que el agente puede citar). `rankedIds`
+ * pone delante lo que la búsqueda por significado ya encontró, en su orden.
+ */
+export async function searchPublishedKnowledge(
+  tx: Db,
+  orgId: string,
+  q: string,
+  limit = 5,
+  rankedIds: string[] = [],
+): Promise<KnowledgeEntryItem[]> {
   const query = q.trim()
   if (!query) return []
   const active = await listActiveKnowledge(tx, orgId)
+  const ranked = new Map(rankedIds.map((id, index) => [id, index]))
   return active
-    .map((entry) => ({ entry, score: scoreKnowledgeMatch(query, entry) }))
+    .map((entry) => {
+      const position = ranked.get(entry.id)
+      return { entry, score: scoreKnowledgeMatch(query, entry) + (position === undefined ? 0 : 1000 - position) }
+    })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title) || a.entry.id.localeCompare(b.entry.id))
     .slice(0, Math.min(Math.max(limit, 1), 10))
@@ -691,6 +704,8 @@ export function formatKnowledgeForPrompt(
   snapshot: ClinicInfoSnapshot,
   entries: KnowledgeEntryItem[],
   mode?: KnowledgePromptMode,
+  /** Lo que sabe «Informar» (`formatAgentClinicData`): reemplaza la lista simple de servicios. */
+  clinicLines?: string[],
 ): string {
   const lines = [`Clínica: ${snapshot.clinicName}.`]
   if (snapshot.branches.length) {
@@ -702,7 +717,9 @@ export function formatKnowledgeForPrompt(
       lines.push(parts)
     }
   }
-  if (snapshot.services.length) {
+  if (clinicLines) {
+    lines.push(...clinicLines)
+  } else if (snapshot.services.length) {
     lines.push("Servicios y tarifas vigentes (cada importe con su moneda):")
     for (const s of snapshot.services) {
       const price = formatOrgMoney(s.priceCents, s.currency, snapshot)

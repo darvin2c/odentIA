@@ -11,20 +11,14 @@ import {
 import { withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
-  AGENT_LEVEL_INFO,
-  AGENT_LEVEL_POLICY,
-  AGENT_LEVELS,
   AGENT_ROLE_IDS,
   AGENT_ROLES,
   getAgentConfig,
   getAgentLlmSecrets,
   getAgentOverview,
-  getAutonomyPolicy,
   operationFillsOf,
   previewDictationSuggestions,
   ServiceError,
-  setAgentLevel,
-  updateAutonomyPolicy,
   upsertAgentConfig,
   validateLlmBaseUrl,
 } from "@odentia/services"
@@ -64,19 +58,6 @@ const testInput = z.object({
   llmBaseUrl: z.string().max(300).nullable().optional(),
   /** Ausente: se prueba con la clave guardada, si la hay. */
   llmApiKey: z.string().max(500).nullable().optional(),
-})
-
-const MODES = ["directo", "confirmar_usuario", "aprobar_equipo"] as const
-
-const policyInput = z.object({
-  reservar_cita: z.enum(MODES).optional(),
-  reprogramar_cita: z.enum(MODES).optional(),
-  cancelar_cita: z.enum(MODES).optional(),
-  enviar_mensaje: z.enum(MODES).optional(),
-  mover_oportunidad: z.enum(MODES).optional(),
-  crear_oportunidad: z.enum(MODES).optional(),
-  actualizar_seguimiento: z.enum(MODES).optional(),
-  cerrar_oportunidad: z.enum(MODES).optional(),
 })
 
 export interface AgentRouteDeps extends CrmDeps {
@@ -179,7 +160,6 @@ export function createAgentRoute(deps: AgentRouteDeps) {
           ...AGENT_ROLES[id],
           functions: AGENT_ROLES[id].functions.map((fn) => ({ ...fn, fills: operationFillsOf(fn.tools) })),
         })),
-        levels: AGENT_LEVELS.map((id) => ({ id, ...AGENT_LEVEL_INFO[id], policy: AGENT_LEVEL_POLICY[id] })),
       },
     })
   })
@@ -188,16 +168,6 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAgentOverview(tx, orgId)))
-  })
-
-  app.put("/level", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
-    const parsed = z.object({ level: z.enum(AGENT_LEVELS) }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => setAgentLevel(tx, orgId, userId, parsed.data.level)),
-    )
   })
 
   /**
@@ -225,24 +195,6 @@ export function createAgentRoute(deps: AgentRouteDeps) {
       }
       throw error
     }
-  })
-
-  app.get("/policy", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getAutonomyPolicy(tx, orgId)),
-    )
-  })
-
-  app.put("/policy", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
-    const parsed = policyInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => updateAutonomyPolicy(tx, orgId, userId, parsed.data)),
-    )
   })
 
   return app

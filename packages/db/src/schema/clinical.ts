@@ -867,6 +867,14 @@ export const serviceCatalog = pgTable(
     durationMin: integer("duration_min"),
     // Cómo se cobra: 'treatment' una vez por tratamiento, 'session' en cada visita atendida.
     billingMode: text("billing_mode").notNull().default("treatment"),
+    /**
+     * Cómo dice el precio el agente (`PRICE_DISCLOSURES`). Solo cambia lo que
+     * se le dice a una persona: caja y presupuesto usan siempre la tarifa.
+     * Un servicio nuevo nace «solo con evaluación».
+     */
+    priceDisclosure: text("price_disclosure").notNull().default("evaluacion"),
+    /** La evaluación que ofrece el agente cuando el precio no es exacto. */
+    evaluationServiceId: uuid("evaluation_service_id").references((): AnyPgColumn => serviceCatalog.id),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
@@ -879,8 +887,17 @@ export const serviceCatalog = pgTable(
     index("service_catalog_template_idx").on(table.templateId),
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
     check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),
+    check("service_catalog_price_disclosure_check", sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`),
   ],
 )
+
+/**
+ * Cómo dice un precio el agente: el número tal cual, como mínimo («desde») o
+ * ninguno, ofreciendo la evaluación. Vale para servicios y para cada servicio
+ * de una promoción.
+ */
+export const PRICE_DISCLOSURES = ["exacto", "desde", "evaluacion"] as const
+export type PriceDisclosure = (typeof PRICE_DISCLOSURES)[number]
 /** Procedimiento de una sesión; completar la indicación es una decisión explícita. */
 export const encounterProcedure = pgTable(
   "encounter_procedure",

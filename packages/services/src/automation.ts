@@ -138,8 +138,6 @@ export interface JobPayload {
   detail?: string
   /** Lo pidió una persona con «Solo esta vez»: sale aunque la línea esté apagada. */
   once?: boolean
-  /** Con Recepción en «Supervisado», una persona ya aprobó este mensaje. */
-  approved?: boolean
 }
 
 /** Lee el payload JSONB de un caso campo por campo (sin casts ciegos). */
@@ -151,7 +149,6 @@ export function jobPayloadOf(value: unknown): JobPayload {
   if ("ownerUserId" in value && typeof value.ownerUserId === "string") payload.ownerUserId = value.ownerUserId
   if ("detail" in value && typeof value.detail === "string") payload.detail = value.detail
   if ("once" in value && value.once === true) payload.once = true
-  if ("approved" in value && value.approved === true) payload.approved = true
   return payload
 }
 
@@ -304,7 +301,7 @@ export async function setLine(
         and(
           eq(automationJob.organizationId, orgId),
           eq(automationJob.ruleId, row.id),
-          inArray(automationJob.status, ["pendiente", "por_aprobar"]),
+          eq(automationJob.status, "pendiente"),
           sql`coalesce(${automationJob.payload}->>'once', 'false') <> 'true'`,
         ),
       )
@@ -335,15 +332,13 @@ export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Dat
 
 /**
  * Lo que el Administrador necesita saber antes de hacer algo por su cuenta:
- * si él y Recepción están encendidos, su horario de silencio y si los mensajes
- * que no son recordatorios esperan aprobación (Recepción en «Supervisado»).
+ * si él y Recepción están encendidos y su horario de silencio.
  */
 export interface AdminRuntime {
   adminOn: boolean
   receptionOn: boolean
   quietStart: string
   quietEnd: string
-  supervised: boolean
 }
 
 export const DEFAULT_QUIET_START = "21:00"
@@ -355,13 +350,11 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
-  const policy = await getAutonomyPolicy(tx, orgId)
   return {
     adminOn: row?.advisor?.enabled === true,
     receptionOn: row?.enabled === true,
     quietStart: row?.advisor?.quietStart ?? DEFAULT_QUIET_START,
     quietEnd: row?.advisor?.quietEnd ?? DEFAULT_QUIET_END,
-    supervised: policy.enviar_mensaje === "aprobar_equipo",
   }
 }
 
@@ -1527,7 +1520,7 @@ async function recentlyWritten(tx: Db, orgId: string, contactId: string, now: Da
 
 export interface DeliverResult {
   jobId: string
-  outcome: "enviado" | "tarea" | "por_aprobar" | "pospuesto" | "omitido" | "cancelado" | "fallido"
+  outcome: "enviado" | "tarea" | "pospuesto" | "omitido" | "cancelado" | "fallido"
   detail?: string
 }
 
@@ -1749,8 +1742,7 @@ async function reminderDue(tx: Db, orgId: string, job: JobRow): Promise<Date | u
  *   apagado), queda una tarea para una persona.
  * - Si el agente escribe: comprueba el horario de silencio y el permiso de la
  *   persona, elige la vía (respuesta, mensaje aprobado o correo) y deja el
- *   mensaje en la cola. Con Recepción en «Supervisado», lo que no es un
- *   recordatorio espera antes la aprobación de una persona.
+ *   mensaje en la cola.
  *
  * Nunca termina en blanco: si no puede escribir, el caso se cierra con su
  * motivo, el equipo recibe un aviso por causa con cómo habilitarlo y, si la
@@ -1953,8 +1945,8 @@ export async function deliverJob(
   }
 
   // Recepción no escribe encima de lo que la persona ya dijo. Lo que una persona
-  // aprobó o pidió «solo esta vez» sale igual: ya lo decidió alguien.
-  if (deps.alreadyTold && purpose !== "recordatorio" && !payload.approved && !payload.once) {
+  // pidió «solo esta vez» sale igual: ya lo decidió alguien.
+  if (deps.alreadyTold && purpose !== "recordatorio" && !payload.once) {
     const written = await recentlyWritten(tx, orgId, contactId, now)
     let told = false
     if (written.length > 0) {
@@ -1970,18 +1962,6 @@ export async function deliverJob(
       await audit(tx, orgId, null, "automation_job.already_told", job.id, { kind: job.kind })
       return { jobId: job.id, outcome: "cancelado", detail: "La persona ya había escrito sobre esto" }
     }
-  }
-
-  // Prender un recordatorio ya fue aprobarlo. Lo demás, con Recepción en
-  // «Supervisado», espera a que una persona lo apruebe; «solo esta vez» ya lo
-  // pidió una persona.
-  if (purpose !== "recordatorio" && runtime.supervised && !payload.approved && !payload.once) {
-    await tx
-      .update(automationJob)
-      .set({ status: "por_aprobar", updatedAt: now })
-      .where(inArray(automationJob.id, ids()))
-    await notify(tx, { orgId, kind: "automation.approval.pending", at: now.toISOString() })
-    return { jobId: job.id, outcome: "por_aprobar" }
   }
 
   // El texto y la plantilla son los vigentes de la clínica, iguales para las tres vías.
@@ -2068,91 +2048,6 @@ export async function deliverJob(
     const detail = e instanceof ServiceError ? e.message : "Error al enviar"
     return cannot(detail, causeOfCode(code), { retryable: !isDefinitiveCode(code) })
   }
-}
-
-// ------------------------------------------------- aprobación del equipo ---
-
-export interface PendingApproval {
-  /** Línea que los encargó. */
-  key: string
-  name: string
-  total: number
-  /** A quiénes, para reconocer el encargo (los primeros). */
-  people: string[]
-  since: string
-}
-
-/**
- * Mensajes del Administrador que esperan la aprobación de una persona, uno por
- * línea y no uno por persona: todos los de una línea llevan el mismo texto
- * aprobado, con los datos de cada quien.
- */
-export async function listPendingApprovals(tx: Db, orgId: string): Promise<PendingApproval[]> {
-  const rows = await tx.execute<{ kind: string; total: number; people: string[] | null; since: Date | string }>(sql`
-    select j.kind, count(*)::int as total, min(j.updated_at) as since,
-           (array_agg(c.display_name order by j.updated_at asc, j.id asc))[1:3] as people
-    from automation_job j
-    left join contact c on c.id = j.contact_id and c.organization_id = j.organization_id
-    where j.organization_id = ${orgId} and j.status = 'por_aprobar'
-    group by j.kind
-    order by min(j.updated_at) asc`)
-  return (Array.isArray(rows) ? rows : []).map((row) => ({
-    key: row.kind,
-    name: adminLineOf(row.kind)?.name ?? row.kind,
-    total: Number(row.total),
-    people: (row.people ?? []).filter((name): name is string => typeof name === "string"),
-    since: new Date(row.since).toISOString(),
-  }))
-}
-
-/**
- * Aprueba o rechaza, de una vez, los mensajes de una línea que esperan. Lo
- * aprobado sale en el siguiente ciclo, con las mismas comprobaciones de
- * siempre (motivo vigente, permiso, horario); lo rechazado no se envía.
- */
-export async function decidePendingApprovals(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  key: string,
-  decision: "aprobar" | "rechazar",
-): Promise<{ total: number }> {
-  const kind = assertKind(key)
-  const now = new Date()
-  const rows =
-    decision === "aprobar"
-      ? await tx
-          .update(automationJob)
-          .set({
-            status: "pendiente",
-            payload: sql`${automationJob.payload} || '{"approved": true}'::jsonb`,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(automationJob.organizationId, orgId),
-              eq(automationJob.kind, kind),
-              eq(automationJob.status, "por_aprobar"),
-            ),
-          )
-          .returning({ id: automationJob.id })
-      : await tx
-          .update(automationJob)
-          .set({ status: "cancelado", lastError: "Una persona del equipo no lo aprobó", updatedAt: now })
-          .where(
-            and(
-              eq(automationJob.organizationId, orgId),
-              eq(automationJob.kind, kind),
-              eq(automationJob.status, "por_aprobar"),
-            ),
-          )
-          .returning({ id: automationJob.id })
-  if (rows.length === 0) throw notFound("Mensajes por aprobar")
-  await audit(tx, orgId, actorUserId, `automation_job.${decision === "aprobar" ? "approved" : "rejected"}`, rows[0]!.id, {
-    kind,
-    total: rows.length,
-  })
-  return { total: rows.length }
 }
 
 /**
@@ -2782,7 +2677,7 @@ export async function applyTemplateUpdates(
       // A cuántas personas les toca ya: las que tienen ese mensaje por salir en el próximo día.
       const [soon] = await tx.execute<{ n: number }>(sql`
         select count(distinct j.contact_id)::int as n from automation_job j
-        where j.organization_id = ${orgId} and j.kind = ${owner.id} and j.status in ('pendiente', 'por_aprobar')
+        where j.organization_id = ${orgId} and j.kind = ${owner.id} and j.status = 'pendiente'
           and j.scheduled_for <= now() + interval '24 hours'`)
       const n = Number(soon?.n ?? 0)
       if (n > 0) {

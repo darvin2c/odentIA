@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
+import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
 
@@ -224,7 +225,8 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   expect(await learning()).toMatchObject({ cases: 1 })
 
   // --- Aprobar un mensaje editándolo: sale el texto del equipo y queda una lección por aprobar ---
-  await call(page, "PUT", "/api/agent/level", org.slug, { level: "supervisado" })
+  // Sin niveles (ADR 0021): para que el equipo apruebe el mensaje, la prueba fija la política en la base.
+  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
   const andres = nextEventId()
   await send(andres, "¿Tienen estacionamiento?")
   await expect.poll(async () => (await conversations()).length, { timeout: 30_000 }).toBe(2)
@@ -258,7 +260,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   expect((await learning()).proposed[0]).toMatchObject({ kind: "respuesta_oficial", question: "¿Tienen estacionamiento?" })
 
   // --- Desde la Bandeja: «En qué se basó» ofrece corregir esa respuesta ---
-  await call(page, "PUT", "/api/agent/level", org.slug, { level: "equilibrado" })
+  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "directo" })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
   await page.getByRole("button", { name: "En qué se basó" }).click()
   const trace = page.getByRole("dialog", { name: "En qué se basó" })

@@ -1,5 +1,5 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { type AgentRuntime, consumeAgentRun, createAlreadyTold } from "@odentia/agent"
+import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv } from "@odentia/agent"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
@@ -32,9 +32,11 @@ const transcribe = createTranscriber(env)
 const checkpointer = PostgresSaver.fromConnString(env.DATABASE_URL)
 await checkpointer.setup()
 await setupAgentMemory(ownerDb)
+const embedder = embedderFromEnv(env)
 const agentRuntime: AgentRuntime = {
   checkpointer,
   publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+  ...(embedder ? { embedder } : {}),
   ...(env.AGENT_BURST_WINDOW_SECONDS > 0
     ? {
         burst: {
@@ -49,6 +51,7 @@ const agentRuntime: AgentRuntime = {
     baseUrl: env.LLM_BASE_URL,
     timeoutMs: env.LLM_TIMEOUT_MS,
     maxRetries: env.LLM_MAX_RETRIES,
+    ...(env.LLM_REASONING_EFFORT ? { reasoningEffort: env.LLM_REASONING_EFFORT } : {}),
     allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
   },
   decisions: {
@@ -155,6 +158,7 @@ const queues: QueueDef[] = [
         publicBaseUrl: env.WEB_URL,
         senderMode: env.CHANNEL_SENDER_MODE,
         alreadyTold: createAlreadyTold(db, { secretsKey, platform: agentRuntime.platform, decisions: agentRuntime.decisions }),
+        embedder,
       }),
   },
 ]

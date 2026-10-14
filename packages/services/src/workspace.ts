@@ -3,7 +3,6 @@ import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
-import { listPendingApprovals } from "./automation.js"
 import {
   countPendingProposals,
   getAutonomyPolicy,
@@ -353,8 +352,6 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const advice = admin.recommendations
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
-  // Lo que el administrador encargó y espera aprobación, para quien decide por el agente.
-  const batches = access.agent ? await listPendingApprovals(tx, orgId) : []
   const waiting = composeWaiting({
     cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
     proposals: proposals.items,
@@ -365,7 +362,6 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     openTasks: tasks.open,
     advice: advice.map(({ key, title, detail, actor }) => ({ key, title, detail, actor })),
     unreached: unreached && unreached.total > 0 ? { total: unreached.total, byCause: unreached.byCause.map(({ total, reason }) => ({ total, reason })) } : null,
-    batches: batches.map(({ key, name, total }) => ({ key, name, total })),
     // Con el administrador encendido, los presupuestos sin respuesta son una de sus líneas: no se repiten aquí.
     budgets: (access.finance || access.clinical) && !admin.enabled ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
   })

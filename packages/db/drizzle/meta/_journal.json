@@ -498,6 +498,27 @@
       "when": 1791940463778,
       "tag": "0070_conectar_con_facebook",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1791950763651,
+      "tag": "0071_agente_sin_niveles",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1791951031806,
+      "tag": "0072_precio_que_dice_el_agente",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1791951487554,
+      "tag": "0073_busqueda_por_significado",
+      "breakpoints": true
     }
   ]
 }

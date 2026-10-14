@@ -70,14 +70,16 @@ function errorText(error: unknown, fallback: string): string {
 /**
  * Campos de contacto: lo que la clínica quiere guardar de cada contacto además
  * de lo que ya trae el sistema. La lista se edita en la superficie lateral.
- * Definir campos es de quien administra la clínica (`settings.*`), la misma
- * regla que abre el apartado y que aplica el servidor; llenarlos en la ficha
- * sigue siendo de quien trabaja con contactos.
+ * Definir campos es de quien administra la clínica y también de quien trabaja
+ * con contactos (`crm.write`), la misma regla que abre el apartado y que
+ * aplica el servidor.
  */
 function ContactFieldsPage() {
   const queryClient = useQueryClient()
-  const canRead = usePermission("settings.read")
-  const canWrite = usePermission("settings.write")
+  const canConfigure = usePermission("settings.read")
+  const canSell = usePermission("crm.read")
+  const canRead = canConfigure || canSell
+  const canWrite = usePermission("crm.write")
   // Al lado: un campo nuevo o el que se edita.
   const sideForm = useSideForm<FieldDef>()
   const openForm = sideForm.open

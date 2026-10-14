@@ -368,8 +368,6 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "agent.error": say("Tuvo un error al responder", "agente"),
   "automation_consent.set": say("Cambió un permiso de mensajes de una persona"),
   "automation_consent.unsubscribed": say("Pidió no recibir más un tipo de mensaje", "paciente"),
-  "automation_job.approved": say("Aprobó los mensajes que una línea tenía en espera"),
-  "automation_job.rejected": say("Rechazó los mensajes que una línea tenía en espera"),
   "clinic_message.created": say("Creó un mensaje de WhatsApp de la clínica"),
   "clinic_message.text_changed": say("Cambió el texto de un mensaje de WhatsApp de la clínica"),
   "clinic_message.reverted": say("Volvió al texto anterior de un mensaje de WhatsApp de la clínica"),

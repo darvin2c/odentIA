@@ -163,3 +163,31 @@ it("la conexión de un proveedor propio se fija a direcciones públicas al conec
     await dispatcher.close()
   }
 })
+
+it("el esfuerzo de razonamiento de la plataforma viaja en la petición aunque LangChain no reconozca el modelo", async () => {
+  const bodies: Array<Record<string, unknown>> = []
+  const server = createServer(async (request, response) => {
+    let raw = ""
+    for await (const chunk of request) raw += chunk
+    bodies.push(JSON.parse(raw))
+    response.writeHead(200, { "content-type": "application/json" })
+    response.end(JSON.stringify({ id: "x", object: "chat.completion", created: 1, model: "gpt-6-luna", choices: [{ index: 0, message: { role: "assistant", content: "hola" }, finish_reason: "stop" }] }))
+  })
+  server.listen(0, "127.0.0.1")
+  await once(server, "listening")
+  try {
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("El servidor de prueba no abrió un puerto")
+    const platform = { modelName: "gpt-6-luna", apiKey: "clave-sintetica", baseUrl: `http://127.0.0.1:${address.port}/v1`, allowInsecureBaseUrl: true, reasoningEffort: "none" }
+    const spec = resolveLlmSpec({ model: null }, null, platform)
+    expect(spec.reasoningEffort).toBe("none")
+    await (await createConfiguredChatModel(spec)).invoke([new HumanMessage("hola")])
+    expect(bodies[0]).toMatchObject({ model: "gpt-6-luna", reasoning_effort: "none" })
+    // El proveedor propio de una clínica no lo recibe: es un ajuste de la plataforma.
+    const own = resolveLlmSpec({ model: "otro" }, { baseUrl: "https://example.test/v1", apiKey: "k" }, platform)
+    expect(own.reasoningEffort).toBeUndefined()
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  }
+})

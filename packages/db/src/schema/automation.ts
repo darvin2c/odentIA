@@ -74,8 +74,6 @@ export type AutomationVia = (typeof AUTOMATION_VIAS)[number]
 
 export const AUTOMATION_JOB_STATUSES = [
   "pendiente",
-  /** Espera que una persona del equipo lo apruebe (Recepción en «Supervisado»). */
-  "por_aprobar",
   "enviado",
   /** Quedó como tarea para una persona, sin mensaje. */
   "tarea",

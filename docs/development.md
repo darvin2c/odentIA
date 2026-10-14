@@ -69,6 +69,22 @@ reales aunque el LLM sea real; habilitar `live` y validación externa de conexio
 solo para una prueba autorizada, con destinatarios consentidos. Una respuesta
 del modelo no demuestra entrega del canal ni sustituye la observación humana.
 
+### Búsqueda por significado del agente
+
+Ver `docs/decisions/0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md`.
+Necesita la extensión `vector` (pgvector) en PostgreSQL: la imagen
+`dentalagent-postgres:18.6` la trae desde el 2026-10-14. Con una imagen anterior,
+reconstruirla (`podman build -t dentalagent-postgres:18.6 infra/dev/postgres`) y
+recrear el contenedor de desarrollo antes de migrar; el volumen de datos se conserva.
+La base de producción debe tenerla instalada.
+
+Worker y API leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`
+(cualquier endpoint compatible con OpenAI). `fake` (por defecto) vectoriza por
+trozos de letras, sin red: encuentra palabras mal escritas pero no entiende
+significado y no acredita a ningún proveedor. Vacío: el agente busca solo por
+palabras. El índice se concilia y se vectoriza en el ciclo de automatizaciones
+del worker; cambiar de modelo vuelve a vectorizar todo de a poco. `pnpm --filter @odentia/agent eval:search` mide la búsqueda con el banco `packages/agent/eval/busqueda-clinica.json` (por palabras, con `fake` y con el proveedor real; luego con 3 000 servicios de relleno) en una base efímera. Turbo solo pasa a las apps las variables declaradas en `turbo.json`: una variable nueva de entorno se declara ahí.
+
 ### WhatsApp con «Conectar con Facebook» (opcional)
 
 WhatsApp se conecta de dos maneras. A mano, con los datos de la app de Meta de

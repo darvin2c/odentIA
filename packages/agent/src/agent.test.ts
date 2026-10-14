@@ -1185,8 +1185,10 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(rows).toHaveLength(1)
   expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
 
-  // Cancelar (aprobar_equipo): la confirmación del interlocutor no basta;
-  // reentregar el mismo trigger no duplica la propuesta.
+  // Cancelar con aprobación del equipo (la política fija la pide al paciente,
+  // ADR 0021; la prueba ejercita el otro modo): la confirmación del interlocutor
+  // no basta; reentregar el mismo trigger no duplica la propuesta.
+  await withOrgContext(appDb, "org_a", (tx) => updateAutonomyPolicy(tx, "org_a", actorId, { cancelar_cita: "aprobar_equipo" }))
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
@@ -1217,6 +1219,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     decideProposal(tx, "org_a", actorId, lateId!, { decision: "aprobada" }))
   expect(lateDecided.status).toBe("fallida")
   expect(lateDecided.error ?? "").toMatch(/obsoleta|cancelada/)
+  await withOrgContext(appDb, "org_a", (tx) => updateAutonomyPolicy(tx, "org_a", actorId, { cancelar_cita: "confirmar_usuario" }))
 })
 
 it("proponer_cita en directo fallido no se reporta como aprobación", async () => {
@@ -1903,7 +1906,7 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
     }
     // Lo que otra función encendida necesita, y lo fijo, se queda.
     expect(off.tools).toEqual(expect.arrayContaining(["ver_sedes_y_servicios", "consultar_conocimiento", "request_human_handoff", "anotar_caso", "send_reply"]))
-    expect(off.system).toContain("No reservas, mueves ni cancelas citas: si lo piden, pasa el caso a una persona.")
+    expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat. Si piden una cita, envía el enlace de reserva")
     expect(off.system).toContain("No creas ni cambias oportunidades ni seguimientos comerciales.")
     expect(off.system).not.toContain("reserva con proponer_cita")
     expect(off.system).toContain("Indicación de la clínica para «Informar»: En ortodoncia, pregunta primero si ya tiene evaluación.")
@@ -2287,7 +2290,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(info.ledger).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
-      ["ampliar_herramientas", "consultar_conocimiento", "request_human_handoff", "send_reply", "send_template", "ver_sedes_y_servicios"],
+      ["ampliar_herramientas", "buscar_en_la_clinica", "consultar_conocimiento", "request_human_handoff", "send_reply", "send_template", "ver_sedes_y_servicios"],
     )
 
     // Si el camino no alcanza, pide el resto y lo recibe en el paso siguiente.
