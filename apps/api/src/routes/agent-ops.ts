@@ -1,6 +1,7 @@
 import {
   describeProviderProblem,
   isProviderConfigError,
+  type PlatformDecisions,
   type PlatformLlm,
   simulateAgentSandbox,
   simulateAgentTurn,
@@ -38,6 +39,8 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 export interface AgentOpsDeps extends CrmDeps {
   /** Proveedor de la plataforma; la configuración de la organización prevalece. */
   llm: PlatformLlm
+  /** Credenciales del modelo de decisión: «Probar» elige el camino igual que una conversación real. */
+  decisions?: PlatformDecisions
   embedder?: SearchEmbedder
 }
 
@@ -375,7 +378,7 @@ const sandboxInput = z.object({
       return await runService(c, 200, async () => {
         const result = await simulateAgentSandbox(
           deps.db,
-          { secretsKey: deps.secretsKey, platform: deps.llm, embedder: deps.embedder },
+          { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions, embedder: deps.embedder },
           { orgId, ...parsed.data },
         )
         await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))

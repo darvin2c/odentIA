@@ -58,7 +58,7 @@ Ver `docs/decisions/0007-modelo-de-decision-elige-el-conocimiento.md`. El worker
 sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
 fila con error en Agente › Registro técnico. `pnpm --filter @odentia/agent eval:decisions
 -- --provider=jev` compara un proveedor con los ejemplos propios de
-`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:admin`
+`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:off-topic` mide si reconoce lo que no es de la clínica sin marcar lo que sí lo es. `eval:admin`
 mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens
 por llamada; `eval:month` corre un mes de una clínica inventada y proyecta los tokens
 del mes (necesita el runtime de contenedores, como las pruebas).

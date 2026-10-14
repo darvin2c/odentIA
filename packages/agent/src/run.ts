@@ -27,9 +27,10 @@ import {
   toolsDisabledBy,
 } from "@odentia/services"
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
+import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { handoffFallbackNotice, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { handoffFallbackNotice, offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { compileAgentGraph } from "./graph.js"
 import {
@@ -134,6 +135,17 @@ async function orgToolExclusions(tx: Db, orgId: string, cfg: AgentConfig): Promi
   // Una función apagada en la ficha del agente se lleva sus herramientas: el
   // modelo ni las ve, no depende de que obedezca una instrucción.
   return [...(templates ? [] : ["send_template"]), ...toolsDisabledBy("recepcion", cfg.disabledFunctions)]
+}
+
+/**
+ * El nombre con que la clínica se muestra al público (el de la organización),
+ * no su razón social: así se presenta también el agente.
+ */
+async function publicClinicName(db: Db, orgId: string): Promise<string> {
+  const [row] = await withOrgContext(db, orgId, (tx) =>
+    tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1),
+  )
+  return row?.name ?? "la clínica"
 }
 
 /** Motivos en el libro de una corrida que el sistema no deja empezar por un límite de la clínica. */
@@ -533,6 +545,13 @@ export async function processAgentRun(
             console.error(`agent: el aviso fijo de derivación no salió (${error instanceof Error ? error.message : String(error)})`),
           )
       }
+    } else if (toolCtx.route?.path === "fuera_de_tema") {
+      // Nada que ver con la clínica y el modelo de decisión muy seguro: un
+      // texto fijo, sin llamar al modelo que escribe. Sale por send_reply,
+      // con el mismo formato del canal y la misma comprobación.
+      const clinic = await publicClinicName(db, orgId)
+      const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
+      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
     } else {
       await invokeGraph()
     }
@@ -858,6 +877,24 @@ export async function simulateAgentSandbox(
     } catch {
       // Sin camino la prueba sigue como un turno abierto.
       toolCtx.route = null
+    }
+  }
+  if (toolCtx.route?.path === "fuera_de_tema") {
+    const clinic = await publicClinicName(db, orgId)
+    return {
+      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic),
+      replied: true,
+      toolsUsed: [],
+      handedOff: false,
+      basis: [],
+      checks: [],
+      did: ["Respondió con el texto fijo para lo que no es de la clínica, sin llamar al modelo que escribe."],
+      waiting: [],
+      state,
+      inputTokens: null,
+      outputTokens: null,
+      model: spec.modelName,
+      latencyMs: Date.now() - startedAt,
     }
   }
   if (toolCtx.route?.path === "derivar") {

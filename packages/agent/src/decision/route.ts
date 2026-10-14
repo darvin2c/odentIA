@@ -12,14 +12,21 @@ import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
  * probabilidades no hay certeza y el turno sigue por el camino abierto de
  * siempre. Versionado: cambiar preguntas u opciones invalida lo medido.
  */
-export const ROUTE_VERSION = "route.v2"
+export const ROUTE_VERSION = "route.v3"
 export const ROUTE_QUESTIONS: DecisionQuestion[] = TRIAGE_QUESTIONS
 /** Desde aquí se pasa el caso a una persona sin llamar al modelo que escribe. Punto de partida, por medir. */
 export const ROUTE_HANDOFF = 0.85
 /** Desde aquí se da por buena la intención y se acota el turno. */
 export const ROUTE_INTENT = 0.6
+/**
+ * Lo que no es de la clínica se responde con un texto fijo, sin el modelo que
+ * escribe, solo si el modelo de decisión está muy seguro: medido con
+ * eval:off-topic, con 0.9 ningún mensaje de la clínica cae aquí. Si duda,
+ * va al camino abierto.
+ */
+export const ROUTE_OFF_TOPIC = 0.9
 
-export type RoutePath = "derivar" | "informacion" | "saludo" | "cita" | "cambio_cita" | "clinico" | "abierto"
+export type RoutePath = "derivar" | "informacion" | "saludo" | "cita" | "cambio_cita" | "clinico" | "fuera_de_tema" | "abierto"
 
 export interface AgentRoute {
   path: RoutePath
@@ -49,6 +56,9 @@ export function readRoute(result: DecisionResult): AgentRoute {
   const intent = intentAnswer?.choice ?? null
   const confidence = intentAnswer?.probabilities ? (intentAnswer.probabilities[intentAnswer.choice] ?? null) : null
   if (handoff !== null && handoff >= ROUTE_HANDOFF) return { path: "derivar", intent, handoff, confidence, urgency }
+  if (intent === "off_topic") {
+    return { path: confidence !== null && confidence >= ROUTE_OFF_TOPIC ? "fuera_de_tema" : "abierto", intent, handoff, confidence, urgency }
+  }
   const path = intent !== null && confidence !== null && confidence >= ROUTE_INTENT ? (PATH_BY_INTENT[intent] ?? "abierto") : "abierto"
   return { path, intent, handoff, confidence, urgency }
 }
@@ -123,6 +133,19 @@ export function routeHandoff(route: AgentRoute): { reason: string; priority: "al
 }
 
 /** Aviso que recibe la persona si el modelo que escribe no pudo redactar el suyo: nunca queda sin respuesta. */
+/**
+ * Respuesta fija a lo que no es de la clínica: no se llama al modelo que
+ * escribe (no se usa el agente como chat gratis) y siempre dice lo mismo.
+ */
+export function offTopicReply(treatment: "tu" | "usted" | null, persona: string | null, name: string): string {
+  // Sin punto final propio: «S.A.C.» no deja «S.A.C..».
+  const clinic = name.trim().replace(/\.+$/, "")
+  const who = persona ? `Soy ${persona}, asistente virtual de ${clinic}` : `Soy el asistente virtual de ${clinic}`
+  return treatment === "usted"
+    ? `${who}. Solo puedo ayudarle con temas de la clínica: citas, tratamientos, precios o sedes. ¿En qué le ayudo?`
+    : `${who}. Solo puedo ayudarte con temas de la clínica: citas, tratamientos, precios o sedes. ¿En qué te ayudo?`
+}
+
 export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string {
   return treatment === "usted"
     ? "Recibimos su mensaje. Una persona del equipo le va a responder por aquí."

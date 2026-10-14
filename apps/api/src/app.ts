@@ -617,7 +617,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
   guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm }))
-  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, embedder: deps.embedder }))
+  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, decisions: deps.decisions, embedder: deps.embedder }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(
