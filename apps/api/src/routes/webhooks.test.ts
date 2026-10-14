@@ -221,6 +221,30 @@ it("reto GET de WhatsApp valida verify_token", async () => {
   expect(bad.status).toBe(403)
 })
 
+it("el reto superado deja anotado cuándo Meta verificó la dirección; uno fallido o de otro canal, no", async () => {
+  const app = route()
+  const verifiedAt = async (id: string) => {
+    const rows = (await ownerDb.execute(
+      sql`select "webhook_verified_at" from "channel_connection" where "id" = ${id}::uuid`,
+    )) as unknown as { webhook_verified_at: Date | string | null }[]
+    return rows[0]?.webhook_verified_at ?? null
+  }
+  await ownerDb.execute(sql`update "channel_connection" set "webhook_verified_at" = null`)
+  // La clave correcta por la dirección de otro canal no verifica nada.
+  const crossed = await app.request(
+    `/channels/messenger/${waConn}?hub.mode=subscribe&hub.verify_token=${waSecret}&hub.challenge=CHAL`,
+  )
+  expect(crossed.status).toBe(403)
+  await app.request(`/channels/whatsapp_cloud_api/${waConn}?hub.mode=subscribe&hub.verify_token=mal&hub.challenge=CHAL`)
+  expect(await verifiedAt(waConn)).toBeNull()
+  const ok = await app.request(
+    `/channels/whatsapp_cloud_api/${waConn}?hub.mode=subscribe&hub.verify_token=${waSecret}&hub.challenge=CHAL`,
+  )
+  expect(ok.status).toBe(200)
+  expect(await verifiedAt(waConn)).not.toBeNull()
+  expect(await verifiedAt(msgrConn)).toBeNull()
+})
+
 it("whatsapp válido encola con firma HMAC; firma mala da 401", async () => {
   const app = route()
   const raw = waBody()

@@ -30,7 +30,7 @@ import { createOpportunity, moveOpportunity } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { createTask } from "./tasks.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 const KEY = secretsKeyFromEnv("ee".repeat(32))
@@ -63,6 +63,7 @@ async function makeContact(orgId: string, name: string): Promise<string> {
 
 async function makeConversation(orgId: string, contactId: string): Promise<string> {
   return withOrgContext(appDb, orgId, async (tx) => {
+    await retireWhatsApp(orgId)
     const connection = await createConnection(
       tx,
       orgId,

@@ -102,6 +102,7 @@ export { DatePickerButton, type DatePickerButtonProps } from "./date-picker-butt
 export * from "./schedule/index.js"
 export {
   SectionNav,
+  type SectionNavGroup,
   type SectionNavItem,
   type SectionNavMobilePosition,
   type SectionNavProps,

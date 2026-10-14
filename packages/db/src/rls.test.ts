@@ -704,3 +704,42 @@ it("controles, recetas y cuenta se aíslan por tenant y no admiten borrado", asy
   )
   expect(anulado).toHaveLength(1)
 })
+
+it("los mensajes de WhatsApp de una clínica se aíslan por tenant, no se borran y sus versiones no cruzan de organización", async () => {
+  const mensajeA = "abababab-abab-4bab-8bab-abababababab"
+  const mensajeB = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd"
+  await ownerDb.execute(sql`insert into clinic_message (id, organization_id, key, current_version) values
+    (${mensajeA}::uuid, 'org_a', 'recordatorio_cita', 1),
+    (${mensajeB}::uuid, 'org_b', 'recordatorio_cita', 0)`)
+  await ownerDb.execute(sql`insert into clinic_message_version (organization_id, message_id, number, body, template_name)
+    values ('org_a', ${mensajeA}::uuid, 1, 'Hola, {{persona}}.', 'odentia_recordatorio_cita_tprueba')`)
+  for (const table of ["clinic_message", "clinic_message_version"]) {
+    const query = sql`select 1 from ${sql.identifier(table)}`
+    expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(query)), `${table}: org A`).toHaveLength(1)
+    expect(await appDb.execute(query), `${table}: sin contexto`).toHaveLength(0)
+    await expect(
+      withOrgContext(appDb, "org_a", (tx) => tx.execute(sql`delete from ${sql.identifier(table)}`)),
+      `${table}: DELETE denegado`,
+    ).rejects.toMatchObject({ cause: { code: "42501" } })
+  }
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(sql`select 1 from clinic_message_version`))).toHaveLength(0)
+  // Un texto guardado no se reescribe: otro texto es otra versión.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => tx.execute(sql`update clinic_message_version set body = 'Otro'`)),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  // La versión de B no puede colgarse del mensaje de A: el vínculo incluye la organización.
+  await expect(
+    ownerDb.execute(sql`insert into clinic_message_version (organization_id, message_id, number, body, template_name)
+      values ('org_b', ${mensajeA}::uuid, 2, 'Intruso', 'odentia_intruso')`),
+  ).rejects.toMatchObject({ cause: { code: "23503" } })
+  // Un mensaje es del catálogo o propio, y uno del catálogo no se archiva.
+  await expect(
+    ownerDb.execute(sql`insert into clinic_message (organization_id, key, title) values ('org_a', 'cita_cancelada', 'Doble')`),
+  ).rejects.toMatchObject({ cause: { code: "23514" } })
+  await expect(
+    ownerDb.execute(sql`update clinic_message set archived_at = now() where id = ${mensajeA}::uuid`),
+  ).rejects.toMatchObject({ cause: { code: "23514" } })
+  await expect(
+    ownerDb.execute(sql`insert into clinic_message (organization_id, key) values ('org_a', 'recordatorio_cita')`),
+  ).rejects.toMatchObject({ cause: { code: "23505" } })
+})

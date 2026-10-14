@@ -7,14 +7,8 @@ import { clinicalFollowUp, patient, patientContact, treatmentBudget } from "@ode
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
-import {
-  type AutomationMessage,
-  type AutomationMessageKey,
-  type MessageVariable,
-  renderMessage,
-  replyId,
-} from "./automation-messages.js"
-import { findMessageTemplate, type TemplateItem } from "./channel-templates.js"
+import { type AutomationMessage, type MessageVariable, placePhrase, renderMessage, replyId } from "./automation-messages.js"
+import { findTemplateByName, type TemplateItem } from "./channel-templates.js"
 import { isDirectThread } from "./contacts.js"
 import { reopenConversation, startContactConversation, WA_FREE_TEXT_WINDOW_MS } from "./conversations.js"
 import { ServiceError } from "./errors.js"
@@ -44,7 +38,7 @@ export interface ComposedMessage {
   buttons: ReplyButton[]
 }
 
-function firstName(person: { givenNames: string | null; displayName: string }): string {
+export function firstName(person: { givenNames: string | null; displayName: string }): string {
   const given = person.givenNames?.trim().split(/\s+/)[0]
   return given || person.displayName.trim().split(/\s+/)[0] || person.displayName
 }
@@ -68,13 +62,18 @@ function timePhrase(date: Date, timeZone: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(date)
 }
 
-async function clinicName(tx: Db, orgId: string): Promise<string> {
+/** Nombre con el que la clínica se presenta; nulo si aún no tiene perfil. */
+export async function findClinicName(tx: Db, orgId: string): Promise<string | null> {
   const [profile] = await tx
     .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
-  return profile?.tradeName?.trim() || profile?.legalName || "la clínica"
+  return profile?.tradeName?.trim() || profile?.legalName || null
+}
+
+export async function clinicName(tx: Db, orgId: string): Promise<string> {
+  return (await findClinicName(tx, orgId)) ?? "la clínica"
 }
 
 /** Si la persona que recibe el mensaje es el propio paciente. */
@@ -107,6 +106,7 @@ async function patientName(tx: Db, orgId: string, patientId: string): Promise<st
  * Arma el mensaje de uno o varios trabajos del mismo tipo para una persona
  * (varios recordatorios de cita del mismo día salen juntos). Los datos se leen
  * ahora de la agenda, el presupuesto o el control: no se guarda un texto viejo.
+ * `spec` trae el texto vigente de la clínica (`currentAutomationMessage`).
  * Devuelve null si el trabajo ya no tiene de dónde sacar sus datos.
  */
 export async function composeJobMessage(
@@ -153,7 +153,7 @@ export async function composeJobMessage(
     if (pastVisit) {
       values.cita_pasada = dayPhrase(first.startsAt, now, zone, locale).replace(/^(hoy|mañana), /, "")
     } else {
-      values.lugar = `${clinic}, sede ${first.branchName}`
+      values.lugar = placePhrase(clinic, first.branchName)
       const parts: string[] = []
       for (const row of rows) {
         const rowZone = row.branchZone || orgZone || NEUTRAL_TIMEZONE
@@ -221,14 +221,16 @@ export type MessageRoute =
   | { cause: AutomationCause; detail: string }
 
 /**
- * Decide la vía para escribirle a una persona. No envía nada. `messageKey`
- * nulo es un mensaje sin plantilla declarada: solo puede salir como respuesta.
+ * Decide la vía para escribirle a una persona. No envía nada. `spec` es el
+ * mensaje con el texto vigente de la clínica: su plantilla es la que se busca
+ * en la conexión. Nulo es un mensaje sin plantilla declarada: solo puede salir
+ * como respuesta.
  */
 export async function routeMessage(
   tx: Db,
   orgId: string,
   contactId: string,
-  messageKey: AutomationMessageKey | null,
+  spec: Pick<AutomationMessage, "template"> | null,
 ): Promise<MessageRoute> {
   const [person] = await tx
     .select({ email: contact.email })
@@ -290,7 +292,7 @@ export async function routeMessage(
     ) {
       return { via: "respuesta", channel: "whatsapp", conversationId: thread.id }
     }
-    template = messageKey ? await findMessageTemplate(tx, orgId, whatsapp.id, messageKey) : null
+    template = spec ? await findTemplateByName(tx, orgId, whatsapp.id, spec.template) : null
     if (template?.status === "aprobada") {
       try {
         const started = await startContactConversation(tx, orgId, null, contactId, {
@@ -313,7 +315,7 @@ export async function routeMessage(
   }
 
   const email = person?.email?.trim().toLowerCase()
-  if (messageKey && mailbox && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (spec && mailbox && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     try {
       const thread = await openEmailThread(tx, orgId, null, { contactId, email }, mailbox)
       return { via: "correo", channel: "email", conversationId: thread.id }

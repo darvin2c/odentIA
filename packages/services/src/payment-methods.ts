@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, max } from "drizzle-orm"
 import { notFound, validation } from "./errors.js"
 
 export type PaymentMethodRow = typeof organizationPaymentMethod.$inferSelect
@@ -101,6 +101,21 @@ export interface CreatePaymentMethodInput {
   name: string
   typeCode?: string | null
   sortOrder?: number | null
+  /** Sin puesto indicado, va al final de la lista de la clínica (lo que hace la pantalla). */
+  atEnd?: boolean
+}
+
+/** Separación entre puestos: deja sitio y hace legible el orden guardado. */
+const SORT_STEP = 10
+const SORT_MAX = 9999
+
+/** Puesto siguiente al último medio de la clínica. */
+async function lastSortOrder(tx: Db, orgId: string): Promise<number> {
+  const [row] = await tx
+    .select({ last: max(organizationPaymentMethod.sortOrder) })
+    .from(organizationPaymentMethod)
+    .where(eq(organizationPaymentMethod.organizationId, orgId))
+  return row?.last === null || row?.last === undefined ? 0 : Math.min(row.last + SORT_STEP, SORT_MAX)
 }
 
 export async function createPaymentMethod(
@@ -109,13 +124,17 @@ export async function createPaymentMethod(
   actorUserId: string,
   input: CreatePaymentMethodInput,
 ): Promise<PaymentMethodRow> {
+  const sortOrder =
+    input.atEnd && (input.sortOrder === null || input.sortOrder === undefined)
+      ? await lastSortOrder(tx, orgId)
+      : assertSortOrder(input.sortOrder)
   const [row] = await tx
     .insert(organizationPaymentMethod)
     .values({
       organizationId: orgId,
       name: assertName(input.name),
       typeCode: assertTypeCode(input.typeCode),
-      sortOrder: assertSortOrder(input.sortOrder),
+      sortOrder,
       isActive: true,
     })
     .returning()
@@ -177,6 +196,58 @@ export async function updatePaymentMethod(
     wasActive: current.isActive,
   })
   return updated
+}
+
+export type PaymentMethodMove = "up" | "down"
+
+/**
+ * Sube o baja un medio un puesto en la lista de la clínica: la que caja ofrece
+ * al cobrar y la que responde el agente, en ese orden. Los puestos se
+ * renumeran enteros para que el orden no dependa de empates por nombre. En un
+ * extremo de la lista no cambia nada. Devuelve la lista como queda.
+ */
+export async function movePaymentMethod(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  direction: PaymentMethodMove,
+): Promise<PaymentMethodRow[]> {
+  if (direction !== "up" && direction !== "down") throw validation("direction debe ser up|down")
+  // Se bloquea la lista entera: dos cambios de orden a la vez no se pisan.
+  const rows = await tx
+    .select()
+    .from(organizationPaymentMethod)
+    .where(eq(organizationPaymentMethod.organizationId, orgId))
+    .orderBy(asc(organizationPaymentMethod.sortOrder), asc(organizationPaymentMethod.name))
+    .for("update")
+  const from = rows.findIndex((row) => row.id === id)
+  const moved = rows[from]
+  if (!moved) throw notFound("Medio de pago")
+  const to = direction === "up" ? from - 1 : from + 1
+  const neighbor = rows[to]
+  if (!neighbor) return rows
+  const ordered = [...rows]
+  ordered[from] = neighbor
+  ordered[to] = moved
+  if ((ordered.length - 1) * SORT_STEP > SORT_MAX) {
+    throw validation("Hay demasiados medios de pago para reordenarlos")
+  }
+  for (const [position, row] of ordered.entries()) {
+    const sortOrder = position * SORT_STEP
+    if (row.sortOrder === sortOrder) continue
+    await tx
+      .update(organizationPaymentMethod)
+      .set({ sortOrder, updatedAt: new Date() })
+      .where(
+        and(
+          eq(organizationPaymentMethod.id, row.id),
+          eq(organizationPaymentMethod.organizationId, orgId),
+        ),
+      )
+  }
+  await audit(tx, orgId, actorUserId, "settings.payment_method_moved", id, { direction })
+  return listPaymentMethods(tx, orgId, { activeOnly: false })
 }
 
 async function requirePaymentMethodAll(

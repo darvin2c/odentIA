@@ -18,7 +18,8 @@ import {
   TASK_AREA_LABELS,
 } from "./admin-lines.js"
 import { type AdminDraftView, draftViewOf } from "./admin-drafts.js"
-import { AUTOMATION_MESSAGES, automationMessageOf, MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
+import { MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
+import { currentAutomationMessageOf } from "./clinic-messages.js"
 import {
   activeSince,
   adminRuntime,
@@ -1046,7 +1047,8 @@ export async function getAdminLine(tx: Db, orgId: string, can: (permission: stri
   const month = await weekOf(tx, orgId, SUGGESTION_DAYS)
   const timing = lineTiming(rule)
   const view = await lineView(tx, orgId, can, line, rule, { zone, week, month, receptionOn: runtime.receptionOn })
-  const spec = automationMessageOf(line.key)
+  // Lo que recibe la persona: el texto vigente de la clínica, con datos de ejemplo.
+  const spec = await currentAutomationMessageOf(tx, orgId, line.key)
   const example = spec
     ? renderMessage(spec, Object.fromEntries(spec.variables.map((name) => [name, MESSAGE_VARIABLES[name].example])))
     : null
@@ -1063,7 +1065,7 @@ export async function getAdminLine(tx: Db, orgId: string, can: (permission: stri
     ...view,
     flow: flowOf(line, view, { days: view.days, timing }),
     fullFlow: flowOf(line, view, { days: view.days, timing, all: true }),
-    message: spec && example ? { text: example.text, buttons: AUTOMATION_MESSAGES[spec.key].buttons.map((button) => button.title) } : null,
+    message: spec && example ? { text: example.text, buttons: spec.buttons.map((button) => button.title) } : null,
     noticeExample: line.agent && line.key !== "seguimiento_comercial"
       ? `No pude escribirle a Tomás Rivas: ${words.one}. ${words.fix}`
       : null,
@@ -1342,6 +1344,14 @@ export async function tickAutomations(
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
   const summary: TickSummary = { orgs: 0, programados: 0, coordinados: 0, entregados: 0, fallidos: 0 }
   for (const { orgId } of orgRows) {
+    // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
+    // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
+    if (deps.templates) {
+      const templates = deps.templates
+      await withOrgContext(appDb, orgId, (tx) =>
+        requestNeededTemplates(tx, orgId, deps.secretsKey, now, templates),
+      )
+    }
     const runtime = await withOrgContext(appDb, orgId, (tx) => adminRuntime(tx, orgId))
     if (!runtime.adminOn) continue
     summary.orgs++
@@ -1364,12 +1374,6 @@ export async function tickAutomations(
     })
     summary.programados += synced.total
     summary.coordinados += synced.coordinated
-    if (deps.templates) {
-      const templates = deps.templates
-      await withOrgContext(appDb, orgId, (tx) =>
-        requestNeededTemplates(tx, orgId, deps.secretsKey, now, templates),
-      )
-    }
     const delivered = await withOrgContext(appDb, orgId, async (tx) => {
       await reconcileDeliveries(tx, orgId, now)
       return deliverDueJobs(

@@ -55,3 +55,14 @@ export function setupTestDb(): void {
     await insertOrg(ownerDb, "org_b", "sur")
   }, 180_000)
 }
+
+/**
+ * Una clínica tiene un solo WhatsApp activo. Las pruebas que conectan uno por
+ * caso sobre la misma organización desconectan antes el anterior, como hace la
+ * clínica al cambiar de número.
+ */
+export async function retireWhatsApp(orgId: string): Promise<void> {
+  await ownerDb.execute(
+    sql`update channel_connection set status = 'disabled' where organization_id = ${orgId} and channel = 'whatsapp' and status = 'active'`,
+  )
+}

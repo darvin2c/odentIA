@@ -51,6 +51,7 @@ import { Route as OrgSettingsIndexRouteImport } from './routes/_org/settings.ind
 import { Route as OrgSettingsAgentRouteImport } from './routes/_org/settings.agent'
 import { Route as OrgSettingsAuditRouteImport } from './routes/_org/settings.audit'
 import { Route as OrgSettingsAvailabilityRouteImport } from './routes/_org/settings.availability'
+import { Route as OrgSettingsBranchesRouteImport } from './routes/_org/settings.branches'
 import { Route as OrgSettingsChannelsRouteImport } from './routes/_org/settings.channels'
 import { Route as OrgSettingsFieldsRouteImport } from './routes/_org/settings.fields'
 import { Route as OrgSettingsFormsRouteImport } from './routes/_org/settings.forms'
@@ -60,7 +61,12 @@ import { Route as OrgSettingsPatientRegistrationRouteImport } from './routes/_or
 import { Route as OrgSettingsPaymentMethodsRouteImport } from './routes/_org/settings.payment-methods'
 import { Route as OrgSettingsPipelinesRouteImport } from './routes/_org/settings.pipelines'
 import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settings.specialties'
+import { Route as OrgSettingsTeamRouteImport } from './routes/_org/settings.team'
 import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
+import { Route as OrgSettingsIntegrationsIndexRouteImport } from './routes/_org/settings.integrations.index'
+import { Route as OrgSettingsIntegrationsModelRouteImport } from './routes/_org/settings.integrations.model'
+import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_org/settings.integrations.webchat'
+import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
 import { Route as OrgPatientsPatientIdConsentsConsentIdPrintRouteImport } from './routes/_org/patients.$patientId.consents.$consentId.print'
 import { Route as OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport } from './routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
@@ -276,6 +282,11 @@ const OrgSettingsAvailabilityRoute = OrgSettingsAvailabilityRouteImport.update({
   path: '/availability',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsBranchesRoute = OrgSettingsBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
 const OrgSettingsChannelsRoute = OrgSettingsChannelsRouteImport.update({
   id: '/channels',
   path: '/channels',
@@ -324,11 +335,40 @@ const OrgSettingsSpecialtiesRoute = OrgSettingsSpecialtiesRouteImport.update({
   path: '/specialties',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsTeamRoute = OrgSettingsTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => OrgSettingsRoute,
+} as any)
 const OrgSettingsWebchatRoute = OrgSettingsWebchatRouteImport.update({
   id: '/webchat',
   path: '/webchat',
   getParentRoute: () => OrgSettingsRoute,
 } as any)
+const OrgSettingsIntegrationsIndexRoute =
+  OrgSettingsIntegrationsIndexRouteImport.update({
+    id: '/integrations/',
+    path: '/integrations/',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
+const OrgSettingsIntegrationsModelRoute =
+  OrgSettingsIntegrationsModelRouteImport.update({
+    id: '/integrations/model',
+    path: '/integrations/model',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
+const OrgSettingsIntegrationsWebchatRoute =
+  OrgSettingsIntegrationsWebchatRouteImport.update({
+    id: '/integrations/webchat',
+    path: '/integrations/webchat',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
+const OrgSettingsIntegrationsWhatsappRoute =
+  OrgSettingsIntegrationsWhatsappRouteImport.update({
+    id: '/integrations/whatsapp',
+    path: '/integrations/whatsapp',
+    getParentRoute: () => OrgSettingsRoute,
+  } as any)
 const OrgPatientsPatientIdEncountersEncounterIdRoute =
   OrgPatientsPatientIdEncountersEncounterIdRouteImport.update({
     id: '/encounters/$encounterId',
@@ -385,6 +425,7 @@ export interface FileRoutesByFullPath {
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/audit': typeof OrgSettingsAuditRoute
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
+  '/settings/branches': typeof OrgSettingsBranchesRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
@@ -394,12 +435,17 @@ export interface FileRoutesByFullPath {
   '/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
+  '/settings/team': typeof OrgSettingsTeamRoute
   '/settings/webchat': typeof OrgSettingsWebchatRoute
   '/agent/': typeof OrgAgentIndexRoute
   '/contacts/': typeof OrgContactsIndexRoute
   '/patients/': typeof OrgPatientsIndexRoute
   '/services/': typeof OrgServicesIndexRoute
   '/settings/': typeof OrgSettingsIndexRoute
+  '/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
+  '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
+  '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
+  '/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
@@ -439,6 +485,7 @@ export interface FileRoutesByTo {
   '/settings/agent': typeof OrgSettingsAgentRoute
   '/settings/audit': typeof OrgSettingsAuditRoute
   '/settings/availability': typeof OrgSettingsAvailabilityRoute
+  '/settings/branches': typeof OrgSettingsBranchesRoute
   '/settings/channels': typeof OrgSettingsChannelsRoute
   '/settings/fields': typeof OrgSettingsFieldsRoute
   '/settings/forms': typeof OrgSettingsFormsRoute
@@ -448,12 +495,17 @@ export interface FileRoutesByTo {
   '/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
   '/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/settings/specialties': typeof OrgSettingsSpecialtiesRoute
+  '/settings/team': typeof OrgSettingsTeamRoute
   '/settings/webchat': typeof OrgSettingsWebchatRoute
   '/agent': typeof OrgAgentIndexRoute
   '/contacts': typeof OrgContactsIndexRoute
   '/patients': typeof OrgPatientsIndexRoute
   '/services': typeof OrgServicesIndexRoute
   '/settings': typeof OrgSettingsIndexRoute
+  '/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
+  '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
+  '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
+  '/settings/integrations': typeof OrgSettingsIntegrationsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
@@ -497,6 +549,7 @@ export interface FileRoutesById {
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
   '/_org/settings/audit': typeof OrgSettingsAuditRoute
   '/_org/settings/availability': typeof OrgSettingsAvailabilityRoute
+  '/_org/settings/branches': typeof OrgSettingsBranchesRoute
   '/_org/settings/channels': typeof OrgSettingsChannelsRoute
   '/_org/settings/fields': typeof OrgSettingsFieldsRoute
   '/_org/settings/forms': typeof OrgSettingsFormsRoute
@@ -506,12 +559,17 @@ export interface FileRoutesById {
   '/_org/settings/payment-methods': typeof OrgSettingsPaymentMethodsRoute
   '/_org/settings/pipelines': typeof OrgSettingsPipelinesRoute
   '/_org/settings/specialties': typeof OrgSettingsSpecialtiesRoute
+  '/_org/settings/team': typeof OrgSettingsTeamRoute
   '/_org/settings/webchat': typeof OrgSettingsWebchatRoute
   '/_org/agent/': typeof OrgAgentIndexRoute
   '/_org/contacts/': typeof OrgContactsIndexRoute
   '/_org/patients/': typeof OrgPatientsIndexRoute
   '/_org/services/': typeof OrgServicesIndexRoute
   '/_org/settings/': typeof OrgSettingsIndexRoute
+  '/_org/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
+  '/_org/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
+  '/_org/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
+  '/_org/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/_org/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
   '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
@@ -555,6 +613,7 @@ export interface FileRouteTypes {
     | '/settings/agent'
     | '/settings/audit'
     | '/settings/availability'
+    | '/settings/branches'
     | '/settings/channels'
     | '/settings/fields'
     | '/settings/forms'
@@ -564,12 +623,17 @@ export interface FileRouteTypes {
     | '/settings/payment-methods'
     | '/settings/pipelines'
     | '/settings/specialties'
+    | '/settings/team'
     | '/settings/webchat'
     | '/agent/'
     | '/contacts/'
     | '/patients/'
     | '/services/'
     | '/settings/'
+    | '/settings/integrations/model'
+    | '/settings/integrations/webchat'
+    | '/settings/integrations/whatsapp'
+    | '/settings/integrations/'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/consents/$consentId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
@@ -609,6 +673,7 @@ export interface FileRouteTypes {
     | '/settings/agent'
     | '/settings/audit'
     | '/settings/availability'
+    | '/settings/branches'
     | '/settings/channels'
     | '/settings/fields'
     | '/settings/forms'
@@ -618,12 +683,17 @@ export interface FileRouteTypes {
     | '/settings/payment-methods'
     | '/settings/pipelines'
     | '/settings/specialties'
+    | '/settings/team'
     | '/settings/webchat'
     | '/agent'
     | '/contacts'
     | '/patients'
     | '/services'
     | '/settings'
+    | '/settings/integrations/model'
+    | '/settings/integrations/webchat'
+    | '/settings/integrations/whatsapp'
+    | '/settings/integrations'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/consents/$consentId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
@@ -666,6 +736,7 @@ export interface FileRouteTypes {
     | '/_org/settings/agent'
     | '/_org/settings/audit'
     | '/_org/settings/availability'
+    | '/_org/settings/branches'
     | '/_org/settings/channels'
     | '/_org/settings/fields'
     | '/_org/settings/forms'
@@ -675,12 +746,17 @@ export interface FileRouteTypes {
     | '/_org/settings/payment-methods'
     | '/_org/settings/pipelines'
     | '/_org/settings/specialties'
+    | '/_org/settings/team'
     | '/_org/settings/webchat'
     | '/_org/agent/'
     | '/_org/contacts/'
     | '/_org/patients/'
     | '/_org/services/'
     | '/_org/settings/'
+    | '/_org/settings/integrations/model'
+    | '/_org/settings/integrations/webchat'
+    | '/_org/settings/integrations/whatsapp'
+    | '/_org/settings/integrations/'
     | '/_org/patients/$patientId/encounters/$encounterId'
     | '/_org/patients/$patientId/consents/$consentId/print'
     | '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
@@ -993,6 +1069,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsAvailabilityRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/branches': {
+      id: '/_org/settings/branches'
+      path: '/branches'
+      fullPath: '/settings/branches'
+      preLoaderRoute: typeof OrgSettingsBranchesRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/settings/channels': {
       id: '/_org/settings/channels'
       path: '/channels'
@@ -1056,11 +1139,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsSpecialtiesRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
+    '/_org/settings/team': {
+      id: '/_org/settings/team'
+      path: '/team'
+      fullPath: '/settings/team'
+      preLoaderRoute: typeof OrgSettingsTeamRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
     '/_org/settings/webchat': {
       id: '/_org/settings/webchat'
       path: '/webchat'
       fullPath: '/settings/webchat'
       preLoaderRoute: typeof OrgSettingsWebchatRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/integrations/': {
+      id: '/_org/settings/integrations/'
+      path: '/integrations'
+      fullPath: '/settings/integrations/'
+      preLoaderRoute: typeof OrgSettingsIntegrationsIndexRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/integrations/model': {
+      id: '/_org/settings/integrations/model'
+      path: '/integrations/model'
+      fullPath: '/settings/integrations/model'
+      preLoaderRoute: typeof OrgSettingsIntegrationsModelRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/integrations/webchat': {
+      id: '/_org/settings/integrations/webchat'
+      path: '/integrations/webchat'
+      fullPath: '/settings/integrations/webchat'
+      preLoaderRoute: typeof OrgSettingsIntegrationsWebchatRouteImport
+      parentRoute: typeof OrgSettingsRoute
+    }
+    '/_org/settings/integrations/whatsapp': {
+      id: '/_org/settings/integrations/whatsapp'
+      path: '/integrations/whatsapp'
+      fullPath: '/settings/integrations/whatsapp'
+      preLoaderRoute: typeof OrgSettingsIntegrationsWhatsappRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
     '/_org/patients/$patientId/encounters/$encounterId': {
@@ -1119,6 +1237,7 @@ interface OrgSettingsRouteChildren {
   OrgSettingsAgentRoute: typeof OrgSettingsAgentRoute
   OrgSettingsAuditRoute: typeof OrgSettingsAuditRoute
   OrgSettingsAvailabilityRoute: typeof OrgSettingsAvailabilityRoute
+  OrgSettingsBranchesRoute: typeof OrgSettingsBranchesRoute
   OrgSettingsChannelsRoute: typeof OrgSettingsChannelsRoute
   OrgSettingsFieldsRoute: typeof OrgSettingsFieldsRoute
   OrgSettingsFormsRoute: typeof OrgSettingsFormsRoute
@@ -1128,14 +1247,20 @@ interface OrgSettingsRouteChildren {
   OrgSettingsPaymentMethodsRoute: typeof OrgSettingsPaymentMethodsRoute
   OrgSettingsPipelinesRoute: typeof OrgSettingsPipelinesRoute
   OrgSettingsSpecialtiesRoute: typeof OrgSettingsSpecialtiesRoute
+  OrgSettingsTeamRoute: typeof OrgSettingsTeamRoute
   OrgSettingsWebchatRoute: typeof OrgSettingsWebchatRoute
   OrgSettingsIndexRoute: typeof OrgSettingsIndexRoute
+  OrgSettingsIntegrationsModelRoute: typeof OrgSettingsIntegrationsModelRoute
+  OrgSettingsIntegrationsWebchatRoute: typeof OrgSettingsIntegrationsWebchatRoute
+  OrgSettingsIntegrationsWhatsappRoute: typeof OrgSettingsIntegrationsWhatsappRoute
+  OrgSettingsIntegrationsIndexRoute: typeof OrgSettingsIntegrationsIndexRoute
 }
 
 const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsAgentRoute: OrgSettingsAgentRoute,
   OrgSettingsAuditRoute: OrgSettingsAuditRoute,
   OrgSettingsAvailabilityRoute: OrgSettingsAvailabilityRoute,
+  OrgSettingsBranchesRoute: OrgSettingsBranchesRoute,
   OrgSettingsChannelsRoute: OrgSettingsChannelsRoute,
   OrgSettingsFieldsRoute: OrgSettingsFieldsRoute,
   OrgSettingsFormsRoute: OrgSettingsFormsRoute,
@@ -1145,8 +1270,13 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsPaymentMethodsRoute: OrgSettingsPaymentMethodsRoute,
   OrgSettingsPipelinesRoute: OrgSettingsPipelinesRoute,
   OrgSettingsSpecialtiesRoute: OrgSettingsSpecialtiesRoute,
+  OrgSettingsTeamRoute: OrgSettingsTeamRoute,
   OrgSettingsWebchatRoute: OrgSettingsWebchatRoute,
   OrgSettingsIndexRoute: OrgSettingsIndexRoute,
+  OrgSettingsIntegrationsModelRoute: OrgSettingsIntegrationsModelRoute,
+  OrgSettingsIntegrationsWebchatRoute: OrgSettingsIntegrationsWebchatRoute,
+  OrgSettingsIntegrationsWhatsappRoute: OrgSettingsIntegrationsWhatsappRoute,
+  OrgSettingsIntegrationsIndexRoute: OrgSettingsIntegrationsIndexRoute,
 }
 
 const OrgSettingsRouteWithChildren = OrgSettingsRoute._addFileChildren(

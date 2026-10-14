@@ -167,6 +167,17 @@ function slugify(name: string): string {
   return base.length >= 2 ? base : ""
 }
 
+/**
+ * Clave generada a partir del nombre que escribió la clínica. Nadie la ve: si
+ * del nombre no sale ninguna, el problema se dice del nombre, no de la clave.
+ */
+function keyFromName(name: string): string {
+  // El recorte a 40 puede dejar un guion al final.
+  const key = slugify(name).replace(/-+$/, "")
+  if (key.length < 2) throw validation("El nombre necesita al menos dos letras o números")
+  return assertKey(key, "Clave")
+}
+
 export async function listSpecialties(
   tx: Db,
   orgId: string,
@@ -190,7 +201,7 @@ export async function createSpecialty(
   input: CreateSpecialtyInput,
 ): Promise<SpecialtyRow> {
   const name = assertName(input.name, "Nombre de la especialidad")
-  const key = input.key ? assertKey(input.key, "Clave") : assertKey(slugify(name) || null, "Clave")
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(name)
   const description = assertOptionalText(input.description, "Descripción", 2000)
   try {
     const [row] = await tx
@@ -203,7 +214,7 @@ export async function createSpecialty(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe una especialidad con esa clave")
+    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe una especialidad con ese nombre o uno muy parecido")
     throw e
   }
 }
@@ -834,7 +845,7 @@ export async function createFormTemplate(
   input: CreateFormTemplateInput,
 ): Promise<FormTemplateRow> {
   const title = assertName(input.title, "Título del formulario", 200)
-  const key = input.key ? assertKey(input.key, "Clave") : assertKey(slugify(title) || null, "Clave")
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title)
   const description = assertOptionalText(input.description, "Descripción", 2000)
   const schema = assertFormSchema(input.schema)
   let specialtyId: string | null = null
@@ -1393,7 +1404,7 @@ export async function createConsentTemplate(
 ): Promise<ConsentTemplateRow> {
   const title = assertName(input.title, "Título del consentimiento", 200)
   const { sections, body } = consentContent(input)
-  const key = input.key ? assertKey(input.key, "Clave") : assertKey(slugify(title) || null, "Clave")
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title)
   let specialtyId: string | null = null
   if (input.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, input.specialtyId)

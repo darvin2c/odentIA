@@ -4,7 +4,15 @@ import { AppShell } from "../app-shell.js"
 import { Brand } from "../brand.js"
 import { PageShell } from "../page-shell.js"
 import { SectionNav } from "./index.js"
-import { configuracion, destinos, SectionBody, StoryLink, secciones } from "./story-fixtures.js"
+import {
+  configuracion,
+  configuracionGrupos,
+  configuracionSueltas,
+  destinos,
+  SectionBody,
+  StoryLink,
+  secciones,
+} from "./story-fixtures.js"
 
 /**
  * Navegación de sección. **Web siempre riel** (`side`, ≥1024px) y **tablet y
@@ -113,6 +121,46 @@ export const DieciseisDestinos: Story = {
             title="Auditoría"
             note="Los dieciséis destinos se abren desde un selector y conservan etiquetas legibles."
             placeholder="La lista tiene scroll local, mantiene el destino activo visible y no desborda el documento."
+          />
+        </SectionNav>
+      </PageShell>
+    </AppShell>
+  ),
+}
+
+/**
+ * Lista larga leída por temas: `groups` pone un título a cada grupo y las
+ * entradas sueltas (`items`) quedan al final, tras un separador. En el riel son
+ * rótulos sobre la misma lista; en tablet y móvil, «Cambiar sección» abre una
+ * tarjeta por grupo con una fila por entrada.
+ */
+export const Agrupada: Story = {
+  render: () => (
+    <AppShell
+      items={[
+        { label: "Inicio", to: "/", icon: RiCalendarLine },
+        { label: "Pacientes", to: "/patients", icon: RiUserLine },
+      ]}
+      LinkComponent={StoryLink}
+      pathname="/settings/integrations"
+      user={{ name: "Ada Lovelace", email: "ada@odentia.localhost" }}
+      brand={<Brand />}
+      brandIcon={<Brand compact />}
+      footerItems={[{ label: "Configuración", to: "/settings", icon: RiSettings3Line }]}
+      onSignOut={() => {}}
+    >
+      <PageShell>
+        <SectionNav
+          label="Configuración"
+          groups={configuracionGrupos}
+          items={configuracionSueltas}
+          pathname="/settings/integrations"
+          LinkComponent={StoryLink}
+        >
+          <SectionBody
+            title="Integraciones"
+            note="Cuatro grupos con nombre de trabajo y dos entradas sueltas al final."
+            placeholder="En una ventana baja el riel se desplaza por dentro; en tablet y móvil la lista se abre desde «Cambiar sección»."
           />
         </SectionNav>
       </PageShell>

@@ -59,6 +59,7 @@ import { consentDocument, professionalProfile } from "@odentia/db/schema/clinica
 import {
   agentConfig,
   channelConnection,
+  clinicMessage,
   contact,
   contactIdentity,
   conversation,
@@ -493,6 +494,8 @@ async function wipeSeed(): Promise<void> {
   await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS))
   await db.delete(pipeline).where(inArray(pipeline.organizationId, SEED_ORGS))
   await db.delete(channelConnection).where(inArray(channelConnection.organizationId, SEED_ORGS))
+  // Los mensajes de WhatsApp son de la organización, no de la conexión; sus versiones se van en cascada.
+  await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, SEED_ORGS))
   await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, SEED_ORGS))
   await db.delete(agentConfig).where(inArray(agentConfig.organizationId, SEED_ORGS))
   await db.delete(orgCounter).where(inArray(orgCounter.organizationId, SEED_ORGS))
@@ -761,12 +764,30 @@ const connA = await createConnection(
     displayName: "WhatsApp Dental Smile",
     config: {
       phoneNumberId: "seed",
+      wabaId: "seed-waba",
       displayPhoneNumber: "+51999888777",
       accessToken: "seed-dev",
+      appSecret: "seed-dev",
     },
   },
   { fetch, validateExternal: false },
 )
+// La salud del número, como la entregaría WhatsApp: dato de la semilla, nadie la leyó de Meta.
+await db
+  .update(channelConnection)
+  .set({
+    webhookVerifiedAt: new Date(Date.now() - 7 * 24 * 3_600_000),
+    health: {
+      quality: "alta",
+      dailyLimit: 2000,
+      unlimited: false,
+      number: "+51 999 888 777",
+      name: "Clínica Dental Smile",
+      checkedAt: new Date().toISOString(),
+    },
+  })
+  .where(eq(channelConnection.id, connA.id))
+// Sus mensajes: los seis con los que viene, en estados variados, y uno propio.
 await seedChannelTemplates(db, { orgId: ORG_A, connectionId: connA.id })
 const connB = await createConnection(
   db,
@@ -778,8 +799,10 @@ const connB = await createConnection(
     displayName: "WhatsApp Norte",
     config: {
       phoneNumberId: "seed",
+      wabaId: "seed-waba",
       displayPhoneNumber: "+51999888776",
       accessToken: "seed-dev",
+      appSecret: "seed-dev",
     },
   },
   { fetch, validateExternal: false },

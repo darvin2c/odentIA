@@ -25,8 +25,8 @@ import {
   type SetLineInput,
   TASK_NOTE_CHARS,
 } from "./automation.js"
-import { AUTOMATION_MESSAGES, automationMessageOf, MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
-import { findMessageTemplate } from "./channel-templates.js"
+import { automationMessageOf, MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
+import { currentAutomationMessageOf, findMessageTemplate } from "./clinic-messages.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 
 /* ---------- Pedírselo con palabras: del pedido al borrador ---------- */
@@ -498,7 +498,7 @@ export async function reviewAdminLine(tx: Db, orgId: string, line: AdminLine, ne
     } else if (template) {
       checks.push({ ok: false, text: `WhatsApp tiene el mensaje de esta línea ${template.status}${template.reason ? ` (${template.reason})` : ""}: solo le escribe a quien escribió en las últimas 24 horas, o por correo.` })
     } else {
-      checks.push({ ok: false, text: "WhatsApp todavía no tiene un mensaje aprobado para esto. Se pide solo al prenderla; hasta que lo apruebe, solo le escribe a quien escribió en las últimas 24 horas, o por correo." })
+      checks.push({ ok: false, text: "WhatsApp todavía no tiene el mensaje de esta línea: se pide al conectar WhatsApp y, si faltó, en unos minutos. Hasta que lo apruebe, solo le escribe a quien escribió en las últimas 24 horas, o por correo." })
     }
   }
   if (runtime.supervised && line.agent.purpose !== "recordatorio") {
@@ -600,7 +600,7 @@ export async function draftViewOf(
       : turnsOn
         ? `Al prenderla: ${lower(described)} Solo actúa sobre lo que pase desde ese momento.`
         : "Así quedaría. Mientras no guardes, sigue funcionando como estaba."
-  const spec = automationMessageOf(line.key)
+  const spec = await currentAutomationMessageOf(tx, orgId, line.key)
   const example =
     spec && next.agentPart
       ? renderMessage(spec, Object.fromEntries(spec.variables.map((name) => [name, MESSAGE_VARIABLES[name].example])))
@@ -616,7 +616,7 @@ export async function draftViewOf(
     unsupported: draft.unsupported,
     test: turnsOff || !can(line.permission) ? null : await testAdminLine(tx, orgId, line, next),
     review: turnsOff ? [] : await reviewAdminLine(tx, orgId, line, next),
-    message: spec && example ? { text: example.text, buttons: AUTOMATION_MESSAGES[spec.key].buttons.map((button) => button.title) } : null,
+    message: spec && example ? { text: example.text, buttons: spec.buttons.map((button) => button.title) } : null,
     taskNote:
       !turnsOff && (draft.unsupported.includes(OUT_OF_REACH) || draft.changes.taskNote)
         ? { value: draft.changes.taskNote ?? null, max: TASK_NOTE_CHARS, team }

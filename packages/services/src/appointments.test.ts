@@ -8,12 +8,14 @@ import {
   createAppointment,
   createChair,
   listAppointments,
+  listChairs,
   listScheduleResources,
   moveAppointment,
   searchAgendaPatients,
   setAppointmentStatus,
   setBranchDefaultDuration,
   updateAppointment,
+  updateChair,
 } from "./appointments.js"
 import {
   createScheduleBlock,
@@ -615,4 +617,75 @@ it("al reprogramar, el hueco de la propia cita cuenta como libre y el sillón se
     }),
   )
   expect(again.chairId).toBe(chair2Id)
+})
+
+it("un sillón se renombra, se desactiva y se reactiva; desactivado sale de las reservas y conserva sus citas", async () => {
+  const extra = await run((tx) => createChair(tx, ORG, { branchId, name: "Sillón Tres" }))
+  // Miércoles 2026-12-02, 10:00 de Lima: una cita en pie en ese sillón.
+  const booked = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      branchId,
+      patientId,
+      dentistUserId: DENTIST,
+      chairId: extra.id,
+      startsAt: "2026-12-02T15:00:00Z",
+      endsAt: "2026-12-02T15:30:00Z",
+    }),
+  )
+  const now = new Date("2026-11-20T12:00:00Z")
+
+  const renamed = await run((tx) => updateChair(tx, ORG, ACTOR, extra.id, { name: "  Sala de rayos  " }))
+  expect(renamed).toEqual({ id: extra.id, name: "Sala de rayos", isActive: true })
+  await expect(run((tx) => updateChair(tx, ORG, ACTOR, extra.id, { name: "   " }))).rejects.toMatchObject({ status: 400 })
+  await expect(run((tx) => updateChair(tx, ORG, ACTOR, extra.id, {}))).rejects.toMatchObject({ status: 400 })
+
+  // Quien lo va a desactivar ve antes cuántas citas en pie tiene por delante.
+  const before = await run((tx) => listChairs(tx, ORG, { branchId, now }))
+  expect(before.find((chair) => chair.id === extra.id)).toEqual({
+    id: extra.id,
+    name: "Sala de rayos",
+    isActive: true,
+    upcomingAppointments: 1,
+  })
+
+  await run((tx) => updateChair(tx, ORG, ACTOR, extra.id, { isActive: false }))
+  // La agenda deja de ofrecerlo; Configuración lo sigue listando para reactivarlo.
+  const resources = await run((tx) => listScheduleResources(tx, ORG, { branchId }))
+  expect(resources.chairs.map((chair) => chair.id)).not.toContain(extra.id)
+  const after = await run((tx) => listChairs(tx, ORG, { branchId, now }))
+  expect(after.find((chair) => chair.id === extra.id)).toMatchObject({
+    isActive: false,
+    upcomingAppointments: 1,
+  })
+  // No admite reservas nuevas, pero la cita que tenía sigue en él.
+  await expect(
+    run((tx) =>
+      createAppointment(tx, ORG, ACTOR, {
+        branchId,
+        patientId,
+        dentistUserId: DENTIST_2,
+        chairId: extra.id,
+        startsAt: "2026-12-02T16:00:00Z",
+        endsAt: "2026-12-02T16:30:00Z",
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 404 })
+  const kept = await run((tx) =>
+    listAppointments(tx, ORG, { from: "2026-12-02T05:00:00Z", to: "2026-12-03T05:00:00Z", branchId }),
+  )
+  expect(kept.find((item) => item.id === booked.id)).toMatchObject({
+    chairId: extra.id,
+    chairName: "Sala de rayos",
+    status: "programada",
+  })
+
+  const back = await run((tx) => updateChair(tx, ORG, ACTOR, extra.id, { isActive: true }))
+  expect(back.isActive).toBe(true)
+  const restored = await run((tx) => listScheduleResources(tx, ORG, { branchId }))
+  expect(restored.chairs.map((chair) => chair.id)).toContain(extra.id)
+
+  // Otra organización no lo ve ni lo cambia.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => updateChair(tx, "org_a", ACTOR, extra.id, { name: "Ajeno" })),
+  ).rejects.toMatchObject({ status: 404 })
 })

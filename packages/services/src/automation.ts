@@ -36,18 +36,17 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming } from "./admin-lines.js"
 import { createProposal, getAutonomyPolicy } from "./agent-operations.js"
 import { setAppointmentStatus } from "./appointments.js"
-import {
-  AUTOMATION_MESSAGE_KEYS,
-  type AutomationMessageKey,
-  automationMessageOf,
-  parseReplyId,
-} from "./automation-messages.js"
+import { automationMessageOf, parseReplyId } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { applyTemplateStatuses, type TemplateDeps } from "./channel-templates.js"
 import {
-  applyTemplateStatuses,
-  requestMessageTemplate,
-  type TemplateDeps,
-} from "./channel-templates.js"
+  currentAutomationMessageOf,
+  MESSAGES_HREF,
+  messageOfTemplate,
+  requestMissingTemplates,
+  settleMessageTexts,
+  templateReasonWords,
+} from "./clinic-messages.js"
 import { reconcileProposedCoordinations } from "./commercial-coordination.js"
 import { getConnectionTemplates } from "./connections.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
@@ -1567,8 +1566,8 @@ export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; f
   sin_conexion: {
     one: "la clínica no tiene conectado un canal por el que llegarle",
     many: "la clínica no tiene conectado un canal por el que llegarles",
-    fix: "Conecta WhatsApp o el correo en Configuración › Canales.",
-    fixMany: "Para habilitarlo, conecta WhatsApp o el correo en Configuración › Canales.",
+    fix: "Conecta WhatsApp o el correo en Configuración › Integraciones.",
+    fixMany: "Para habilitarlo, conecta WhatsApp o el correo en Configuración › Integraciones.",
   },
   sin_plantilla: {
     one: "no escribió en las últimas 24 horas y WhatsApp aún no aprueba el mensaje",
@@ -1585,8 +1584,8 @@ export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; f
   proveedor: {
     one: "el envío falló",
     many: "el envío falló",
-    fix: "Revisa la conexión en Configuración › Canales.",
-    fixMany: "Para habilitarlo, revisa la conexión en Configuración › Canales.",
+    fix: "Revisa la conexión en Configuración › Integraciones.",
+    fixMany: "Para habilitarlo, revisa la conexión en Configuración › Integraciones.",
   },
 }
 
@@ -1985,13 +1984,14 @@ export async function deliverJob(
     return { jobId: job.id, outcome: "por_aprobar" }
   }
 
-  const spec = automationMessageOf(job.kind)
+  // El texto y la plantilla son los vigentes de la clínica, iguales para las tres vías.
+  const spec = await currentAutomationMessageOf(tx, orgId, job.kind)
   const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now) : null
   if (!spec || !composed) {
     await close(ids(), "cancelado", "Ya no existe lo que originó el mensaje")
     return { jobId: job.id, outcome: "cancelado", detail: "Sin datos para el mensaje" }
   }
-  const route = await routeMessage(tx, orgId, contactId, spec.key)
+  const route = await routeMessage(tx, orgId, contactId, spec)
   if ("cause" in route) return cannot(route.detail, route.cause)
   try {
     let sent: { id: string }
@@ -2652,28 +2652,12 @@ export async function automationReplyOf(
 
 // ------------------------------------------------- mensajes aprobados ---
 
-/** Mensajes que necesitan las reglas prendidas de una organización. */
-async function neededMessages(tx: Db, orgId: string): Promise<AutomationMessageKey[]> {
-  const rules = await tx
-    .select({ kind: automationRule.kind })
-    .from(automationRule)
-    .where(
-      and(
-        eq(automationRule.organizationId, orgId),
-        eq(automationRule.enabled, true),
-        eq(automationRule.agentPart, true),
-      ),
-    )
-  const kinds = new Set(rules.map((rule) => rule.kind))
-  return AUTOMATION_MESSAGE_KEYS.filter((key) => kinds.has(key))
-}
-
 /**
- * Pide a WhatsApp la aprobación de los mensajes que usan las reglas prendidas
- * y que aún no están en el catálogo. La clínica no hace nada: al prender una
- * regla el mensaje queda «en revisión» y empieza a salir cuando se aprueba.
- * Una solicitud que el proveedor no acepta se avisa una vez al día, con su
- * motivo, y se reintenta al día siguiente.
+ * Pide a WhatsApp, en cada conexión activa, los mensajes de la clínica que aún
+ * no tiene: los seis con los que viene y los que haya creado, sin esperar a que
+ * una línea se prenda. Al conectar ya se pidieron todos; este ciclo cubre lo
+ * que faltó. Una solicitud que el proveedor no acepta se avisa una vez al día,
+ * con su motivo, y se reintenta al día siguiente.
  */
 export async function requestNeededTemplates(
   tx: Db,
@@ -2682,8 +2666,6 @@ export async function requestNeededTemplates(
   now: Date,
   deps: TemplateDeps,
 ): Promise<number> {
-  const needed = await neededMessages(tx, orgId)
-  if (needed.length === 0) return 0
   const connections = await tx
     .select({ id: channelConnection.id })
     .from(channelConnection)
@@ -2697,72 +2679,68 @@ export async function requestNeededTemplates(
     .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
   let requested = 0
   for (const connection of connections) {
-    const existing = await tx.execute<{ name: string }>(sql`
-      select name from channel_template
-      where organization_id = ${orgId} and connection_id = ${connection.id} and message_key is not null`)
-    const known = new Set((Array.isArray(existing) ? existing : []).map((row) => row.name))
-    for (const key of needed) {
-      const spec = automationMessageOf(key)
-      if (!spec || known.has(spec.template)) continue
-      const day = now.toISOString().slice(0, 10)
-      const attempted = await tx.execute<{ one: number }>(sql`
-        select 1 as one from audit_event
-        where organization_id = ${orgId} and action = 'channel_template.request_failed'
-          and entity_id = ${connection.id} and metadata->>'messageKey' = ${key} and metadata->>'day' = ${day}
-        limit 1`)
-      if (Array.isArray(attempted) && attempted.length > 0) continue
-      try {
-        // Punto de retorno: un rechazo del proveedor no debe abortar el tick.
-        await tx.transaction((inner) => requestMessageTemplate(inner, orgId, connection.id, key, secretsKey, deps))
-        requested++
-        await audit(tx, orgId, null, "channel_template.requested", connection.id, { messageKey: key })
-      } catch (error) {
-        if (!(error instanceof ServiceError)) throw error
-        await audit(tx, orgId, null, "channel_template.request_failed", connection.id, {
-          messageKey: key,
-          day,
-          detail: error.message.slice(0, 300),
-        })
-        const recipient = await failureRecipient(tx, orgId, null)
-        if (recipient) {
-          await upsertWorkspaceNotification(tx, orgId, {
-            userId: recipient,
-            dedupeKey: `template-request:${connection.id}:${key}:${day}`,
-            title: "WhatsApp no aceptó la solicitud de un mensaje",
-            body: `Motivo: ${error.message.slice(0, 300)}. Revisa en Configuración › Canales que el token de WhatsApp pueda administrar plantillas. Se vuelve a pedir mañana.`,
-            href: "/settings/channels",
-            permission: "settings.write",
-          })
-        }
-      }
-    }
+    const outcome = await requestMissingTemplates(tx, orgId, connection.id, secretsKey, now, deps)
+    requested += outcome.requested
+    const [first] = outcome.failed
+    if (!first) continue
+    const recipient = await failureRecipient(tx, orgId, null)
+    if (!recipient) continue
+    const many = outcome.failed.length
+    await upsertWorkspaceNotification(tx, orgId, {
+      userId: recipient,
+      dedupeKey: `template-request:${connection.id}:${now.toISOString().slice(0, 10)}`,
+      title:
+        many === 1
+          ? "WhatsApp no aceptó la solicitud de un mensaje"
+          : `WhatsApp no aceptó la solicitud de ${many} mensajes`,
+      body: `${many === 1 ? `«${first.title}». ` : ""}Motivo: ${first.detail}. Revisa en Configuración › Integraciones › WhatsApp que la clave pueda pedir mensajes. Se vuelve a pedir mañana.`,
+      href: MESSAGES_HREF,
+      permission: "settings.write",
+    })
   }
+  // Un cambio de texto que ya puede valer (aprobado, o sin WhatsApp) pasa a ser el vigente.
+  await settleMessageTexts(tx, orgId)
   return requested
 }
 
-const TEMPLATE_NOTICE: Partial<Record<string, { title: string; fix: string }>> = {
+interface NoticeWords {
+  title: string
+  /** Mientras tanto, en un mensaje que envía el agente. */
+  agent: string
+  /** Mientras tanto, en uno que se envía desde la Bandeja. */
+  inbox: string
+}
+
+const TEMPLATE_NOTICE: Partial<Record<string, NoticeWords>> = {
   aprobada: {
     title: "WhatsApp aprobó un mensaje",
-    fix: "Ya puede salir a quien no escribió en las últimas 24 horas.",
+    agent: "Ya puede salir a quien no escribió en las últimas 24 horas.",
+    inbox: "Ya se puede enviar desde la Bandeja cuando pasaron las 24 horas.",
   },
   rechazada: {
     title: "WhatsApp rechazó un mensaje",
-    fix: "Mientras tanto solo sale como respuesta o por correo. odentIA tiene que cambiar el texto y volver a pedirlo.",
+    agent: "Mientras tanto solo sale como respuesta o por correo. Cámbiale el texto para pedirlo de nuevo.",
+    inbox: "Mientras tanto no se ofrece en la Bandeja. Cámbiale el texto para pedirlo de nuevo.",
   },
   pausada: {
     title: "WhatsApp pausó un mensaje",
-    fix: "Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad.",
+    agent: "Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad.",
+    inbox: "Mientras tanto no se ofrece en la Bandeja. WhatsApp lo reactiva solo si mejora su calidad.",
   },
   deshabilitada: {
-    title: "WhatsApp deshabilitó un mensaje",
-    fix: "Mientras tanto solo sale como respuesta o por correo.",
+    title: "WhatsApp retiró un mensaje",
+    agent: "Mientras tanto solo sale como respuesta o por correo. Cámbiale el texto para pedirlo de nuevo.",
+    inbox: "Mientras tanto no se ofrece en la Bandeja. Cámbiale el texto para pedirlo de nuevo.",
   },
 }
 
 /**
  * El proveedor avisó que una plantilla cambió de estado. Se actualiza el
- * catálogo y, si es de un mensaje de odentIA, quien administra recibe un aviso
- * por cambio: cuál, el motivo que da el proveedor y qué pasa mientras tanto.
+ * catálogo, el cambio de texto que aprobó pasa a ser el vigente y quien
+ * administra recibe un aviso por cambio de cualquier mensaje de la clínica (los
+ * que envía el agente, «Retomar la conversación» y los que creó): cuál, el
+ * motivo que da el proveedor y qué pasa mientras tanto. De un texto que ya fue
+ * reemplazado no se avisa.
  */
 export async function applyTemplateUpdates(
   tx: Db,
@@ -2771,6 +2749,11 @@ export async function applyTemplateUpdates(
   statuses: NormalizedTemplateStatus[],
 ): Promise<number> {
   const changes = await applyTemplateStatuses(tx, orgId, connectionId, statuses)
+  if (changes.length === 0) return 0
+  // Antes de dejar vigente lo aprobado: así se sabe si era un cambio en espera.
+  const owners = new Map<string, Awaited<ReturnType<typeof messageOfTemplate>>>()
+  for (const { template } of changes) owners.set(template.id, await messageOfTemplate(tx, orgId, template.name))
+  await settleMessageTexts(tx, orgId)
   for (const { template } of changes) {
     await audit(tx, orgId, null, "channel_template.status", connectionId, {
       name: template.name,
@@ -2778,31 +2761,42 @@ export async function applyTemplateUpdates(
       reason: template.reason,
     })
     const notice = TEMPLATE_NOTICE[template.status]
-    const spec = template.messageKey ? automationMessageOf(template.messageKey) : null
-    if (!notice || !spec) continue
+    const owner = owners.get(template.id)
+    if (!notice || !owner || (!owner.isCurrent && !owner.isPending)) continue
     const recipient = await failureRecipient(tx, orgId, null)
     if (!recipient) continue
-    // A cuántas personas les toca ya: las que tienen ese mensaje por salir en el próximo día.
-    let waiting = ""
-    if (template.status !== "aprobada") {
+    const reason = templateReasonWords(template.reason)
+    const why = reason ? `Motivo: ${reason}. ` : ""
+    let title = `${notice.title}: «${owner.title}»`
+    let body = `${why}${owner.origin === "agente" ? notice.agent : notice.inbox}`
+    if (owner.isPending && !owner.isCurrent) {
+      // Un cambio de texto: el anterior sigue saliendo hasta que aprueben el nuevo.
+      if (template.status === "aprobada") {
+        title = `WhatsApp aprobó tu cambio de texto: «${owner.title}»`
+        body = "Desde ahora sale el texto nuevo."
+      } else {
+        title = `WhatsApp no aceptó tu cambio de texto: «${owner.title}»`
+        body = `${why}Sigue saliendo el texto anterior. Puedes cambiarlo y pedirlo de nuevo.`
+      }
+    } else if (template.status !== "aprobada" && owner.origin === "agente") {
+      // A cuántas personas les toca ya: las que tienen ese mensaje por salir en el próximo día.
       const [soon] = await tx.execute<{ n: number }>(sql`
         select count(distinct j.contact_id)::int as n from automation_job j
-        where j.organization_id = ${orgId} and j.kind = ${spec.key} and j.status in ('pendiente', 'por_aprobar')
+        where j.organization_id = ${orgId} and j.kind = ${owner.id} and j.status in ('pendiente', 'por_aprobar')
           and j.scheduled_for <= now() + interval '24 hours'`)
       const n = Number(soon?.n ?? 0)
       if (n > 0) {
-        waiting = ` ${n === 1 ? "1 persona lo tiene" : `${n} personas lo tienen`} por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Administrador.`
+        body += ` ${n === 1 ? "1 persona lo tiene" : `${n} personas lo tienen`} por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Administrador.`
       }
     }
     await upsertWorkspaceNotification(tx, orgId, {
       userId: recipient,
       dedupeKey: `template-status:${template.id}:${template.status}`,
-      title: `${notice.title}: «${spec.subject}»`,
-      body: `${template.reason ? `Motivo: ${template.reason}. ` : ""}${notice.fix}${waiting}`,
-      href: "/settings/channels",
+      title,
+      body,
+      href: MESSAGES_HREF,
       permission: "settings.write",
     })
   }
   return changes.length
 }
-

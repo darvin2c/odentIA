@@ -41,7 +41,7 @@ const owner: HelpAsker = { userId: USER, roleLabel: "Propietario", canOpen: () =
 const reception: HelpAsker = {
   userId: USER,
   roleLabel: "Recepción",
-  canOpen: (path) => !path.startsWith("/settings") && path !== "/branches" && path !== "/members",
+  canOpen: (path) => !path.startsWith("/settings"),
   can: (permission) => !["settings.write", "appointments.write", "agent.write"].includes(permission),
   whoCan: () => ["Propietario", "Administrador"],
 }
@@ -75,7 +75,10 @@ describe("la guía coincide con el código", () => {
     const first = (question: string) => matchHelpTopics(question)[0]?.topic.id ?? null
     expect(first("¿Dónde configuro los horarios?")).toBe("disponibilidad")
     expect(first("¿Puedo tener más de una sede?")).toBe("sucursales")
-    expect(first("como conecto whatsapp")).toBe("canales")
+    // WhatsApp tiene pantalla propia dentro de Integraciones; los demás canales y el correo se conectan en la lista.
+    expect(first("como conecto whatsapp")).toBe("whatsapp")
+    expect(first("quiero conectar telegram")).toBe("canales")
+    expect(first("¿dónde conecto el correo de la clínica?")).toBe("canales")
     expect(first("donde cambio la lista de precios")).toBe("servicios")
     expect(first("quiero invitar a una recepcionista")).toBe("equipo")
     expect(first("¿dónde veo el stock de insumos?")).toBe("inventario")
@@ -86,6 +89,10 @@ describe("la guía coincide con el código", () => {
     expect(matchHelpTopics("¿Cómo exporto mis pacientes a Excel?")).toEqual([])
     expect(matchHelpTopics("¿Qué tiempo hará mañana?")).toEqual([])
     expect(helpTopicForScreen("/settings/availability")?.id).toBe("disponibilidad")
+    // Lo que se abre desde Integraciones responde con su propio tema, no con el de la lista.
+    expect(helpTopicForScreen("/settings/integrations")?.id).toBe("canales")
+    expect(helpTopicForScreen("/settings/integrations/whatsapp")?.id).toBe("whatsapp")
+    expect(describeHelpScreen("/settings/team")).toMatchObject({ title: "Equipo" })
     expect(helpTopicForScreen("/patients/123/encounters/456")?.id).toBe("pacientes")
     expect(describeHelpScreen("/agenda")).toMatchObject({ title: "Agenda" })
     expect(describeHelpScreen("/agenda").suggestions[0]).toBe("¿Cómo bloqueo un horario?")
@@ -97,9 +104,9 @@ describe("responder", () => {
     const reply = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Dónde configuro los horarios?", screen: "/agenda" }))
     expect(reply).toMatchObject({ kind: "guia", blockers: [] })
     expect(reply.answers).toEqual([
-      { topicId: "disponibilidad", where: "Configuración › Disponibilidad", text: expect.stringContaining("En Configuración › Disponibilidad"), path: "/settings/availability", restriction: null },
+      { topicId: "disponibilidad", where: "Configuración › Horarios y ausencias", text: expect.stringContaining("En Configuración › Horarios y ausencias"), path: "/settings/availability", restriction: null },
     ])
-    expect(reply.basedOn).toBe("El mapa del sistema: Configuración › Disponibilidad.")
+    expect(reply.basedOn).toBe("El mapa del sistema: Configuración › Horarios y ausencias.")
 
     const limited = await run((tx) => askHelp(tx, ORG, reception, { question: "¿Dónde configuro los horarios?", screen: "/agenda" }))
     expect(limited.answers[0]).toMatchObject({ path: null, restriction: expect.stringContaining("Tu rol (Recepción) no tiene acceso") })
@@ -128,11 +135,11 @@ describe("responder", () => {
       "No hay ningún sillón creado. Sin sillón no se puede reservar una cita.",
       "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.",
     ]))
-    expect(empty.blockers[0]).toMatchObject({ where: "Configuración › Disponibilidad", path: "/settings/availability" })
+    expect(empty.blockers[0]).toMatchObject({ where: "Configuración › Horarios y ausencias", path: "/settings/availability" })
     // A quien no puede cambiar la agenda se le dice primero eso, y no se le lleva a donde no entra.
     const limited = await run((tx) => askHelp(tx, ORG, reception, { question: "no me deja mover la cita", screen: "/agenda" }))
     expect(limited.blockers[0]?.text).toContain("Tu rol (Recepción) puede ver Agenda, pero no cambiar nada ahí.")
-    expect(limited.blockers.filter((item) => item.where === "Configuración › Disponibilidad").every((item) => item.path === null)).toBe(true)
+    expect(limited.blockers.filter((item) => item.where === "Configuración › Horarios y ausencias").every((item) => item.path === null)).toBe(true)
 
     // Con sillón, horario y servicio ya no falta nada: responde con la guía.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Sede Ayuda", timezone: "America/Lima" }).returning({ id: branch.id })

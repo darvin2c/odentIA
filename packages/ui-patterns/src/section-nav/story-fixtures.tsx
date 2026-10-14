@@ -13,7 +13,7 @@ import {
   RiUserLine,
 } from "@remixicon/react"
 import type { ReactNode } from "react"
-import type { SectionNavItem } from "./types.js"
+import type { SectionNavGroup, SectionNavItem } from "./types.js"
 
 export const noop = () => {}
 
@@ -62,7 +62,8 @@ export const destinos: SectionNavItem[] = [
   { label: "Ajustes", to: "/ajustes", icon: RiSettings3Line, iconActive: RiSettings3Fill },
 ]
 
-/** Configuración realista: obliga a resolver una navegación secundaria larga. */
+/** Lista larga y sin grupos (la Configuración antes de agruparse): obliga a
+ * resolver una navegación secundaria extensa con el selector. */
 export const configuracion: SectionNavItem[] = [
   ["Organización", "/settings"],
   ["Sucursales", "/branches"],
@@ -85,6 +86,47 @@ export const configuracion: SectionNavItem[] = [
   icon: RiSettings3Line,
   iconActive: RiSettings3Fill,
 }))
+
+/** La misma lista larga, leída por temas: grupos con nombre de trabajo. */
+export const configuracionGrupos: SectionNavGroup[] = [
+  {
+    label: "La clínica",
+    items: [
+      { label: "Datos de la clínica", to: "/settings" },
+      { label: "Sedes", to: "/settings/branches" },
+      { label: "Equipo", to: "/settings/team" },
+      { label: "Horarios y ausencias", to: "/settings/availability" },
+    ],
+  },
+  {
+    label: "Atención",
+    items: [
+      { label: "Especialidades", to: "/settings/specialties" },
+      { label: "Formularios y consentimientos", to: "/settings/forms" },
+    ],
+  },
+  {
+    label: "Pacientes",
+    items: [
+      { label: "Registro de pacientes", to: "/settings/patient-registration" },
+      { label: "Portal del paciente", to: "/settings/patient-access" },
+    ],
+  },
+  {
+    label: "Ventas y cobros",
+    items: [
+      { label: "Medios de pago y ticket", to: "/settings/payment-methods" },
+      { label: "Etapas de venta", to: "/settings/pipelines" },
+      { label: "Campos de contacto", to: "/settings/fields" },
+    ],
+  },
+]
+
+/** Lo que no pertenece a un grupo: va al final, tras el separador. */
+export const configuracionSueltas: SectionNavItem[] = [
+  { label: "Integraciones", to: "/settings/integrations", badge: 1 },
+  { label: "Actividad del equipo", to: "/settings/audit" },
+]
 
 /** Contenido de ejemplo: un bloque alto para ver el pegado al scrollear. */
 export function SectionBody({

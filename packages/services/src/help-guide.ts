@@ -28,6 +28,8 @@ export interface HelpTopic {
 }
 
 const SETTINGS = "Configuración"
+/** Pantallas que se abren desde Integraciones: no están en la lista, pero se llega por ahí. */
+const INTEGRATIONS = `${SETTINGS} › Integraciones`
 
 export const HELP_TOPICS: readonly HelpTopic[] = [
   {
@@ -60,8 +62,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["citas", "calendario", "reservar", "turnos", "horario del día", "mover una cita", "cancelar una cita", "reprogramar"],
     writePermission: "appointments.write",
     faqs: [
-      { q: "¿Cómo bloqueo un horario?", a: "En Configuración › Disponibilidad: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo no se puede reservar; las citas que ya estaban no se mueven solas." },
-      { q: "¿Por qué no aparece un profesional en la agenda?", a: "Un profesional aparece cuando tiene un horario definido en Configuración › Disponibilidad. Sin horario explícito no se le pueden reservar citas." },
+      { q: "¿Cómo bloqueo un horario?", a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo no se puede reservar; las citas que ya estaban no se mueven solas." },
+      { q: "¿Por qué no aparece un profesional en la agenda?", a: "Un profesional aparece cuando tiene un horario definido en Configuración › Horarios y ausencias. Sin horario explícito no se le pueden reservar citas." },
     ],
   },
   {
@@ -109,7 +111,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agente",
     parent: null,
     purpose: "El resumen de tus agentes: cómo van, qué necesita de ti y la entrada para configurar cada uno, aprobar lo que proponen, revisar lo que aprenden y mantener su conocimiento.",
-    terms: ["inteligencia artificial", "ia", "bot", "asistente virtual", "automático", "aprobaciones", "conocimiento", "aprender"],
+    terms: ["inteligencia artificial", "ia", "bot", "asistente virtual", "automático", "aprobaciones", "conocimiento", "aprender", "tope diario", "autonomía"],
     writePermission: "agent.write",
     faqs: [
       { q: "¿Cómo enciendo el agente?", a: "En Agente, en la fila de Recepción, usa el interruptor. Te muestra cuatro comprobaciones (canal, lo básico de tu clínica, si lo probaste y quién recibe los casos) y con qué nivel empieza." },
@@ -177,50 +179,41 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "organizacion",
     path: "/settings",
-    title: "Organización",
+    title: "Datos de la clínica",
     parent: SETTINGS,
-    purpose: "Los datos de tu clínica: razón social, documento fiscal, país, moneda, zona horaria e idioma.",
-    terms: ["datos de la clínica", "nombre de la clínica", "ruc", "moneda", "zona horaria", "empresa"],
+    purpose: "Los datos de tu clínica: razón social, documento fiscal, país, moneda, zona horaria e idioma. Con ellos se leen las fechas, los importes y los documentos.",
+    terms: ["organización", "nombre de la clínica", "ruc", "moneda", "zona horaria", "empresa", "razón social"],
     writePermission: "settings.write",
   },
   {
     id: "sucursales",
-    path: "/branches",
-    title: "Sucursales",
+    path: "/settings/branches",
+    title: "Sedes",
     parent: SETTINGS,
     purpose: "Las sedes de tu clínica, con su dirección, teléfono y zona horaria. Puedes tener más de una.",
-    terms: ["sede", "sedes", "local", "locales", "dirección", "otra sede", "más de una sede"],
+    terms: ["sede", "sucursal", "sucursales", "local", "locales", "dirección", "otra sede", "más de una sede"],
     writePermission: "settings.write",
-    faqs: [{ q: "¿Puedo tener más de una sede?", a: "Sí. Cada sede se agrega en Configuración › Sucursales, con su dirección y su zona horaria." }],
+    faqs: [{ q: "¿Puedo tener más de una sede?", a: "Sí. Cada sede se agrega en Configuración › Sedes, con su dirección y su zona horaria." }],
   },
   {
     id: "equipo",
-    path: "/members",
-    title: "Equipo y permisos",
+    path: "/settings/team",
+    title: "Equipo",
     parent: SETTINGS,
     purpose: "Quién forma parte de tu clínica y qué puede ver o hacer cada persona según su rol. Desde ahí invitas a alguien nuevo.",
-    terms: ["usuarios", "invitar", "roles", "permisos", "recepcionista", "odontólogo", "agregar a alguien", "accesos"],
+    terms: ["usuarios", "invitar", "roles", "permisos", "recepcionista", "odontólogo", "agregar a alguien", "accesos", "miembros"],
     writePermission: "settings.write",
-    faqs: [{ q: "¿Cómo invito a alguien a mi equipo?", a: "En Configuración › Equipo y permisos, pulsa «Invitar miembro», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta." }],
-  },
-  {
-    id: "medios-de-pago",
-    path: "/settings/payment-methods",
-    title: "Medios de pago",
-    parent: SETTINGS,
-    purpose: "Con qué puede pagar un paciente en tu clínica. Los que enciendas son los que ofrece caja al cobrar y los que el agente puede mencionar.",
-    terms: ["efectivo", "tarjeta", "transferencia", "billetera", "formas de pago", "cómo pagar", "métodos de pago"],
-    writePermission: "settings.write",
+    faqs: [{ q: "¿Cómo invito a alguien a mi equipo?", a: "En Configuración › Equipo, pulsa «Invitar al equipo», escribe su correo y elige su rol. Le llega una invitación para crear su cuenta." }],
   },
   {
     id: "disponibilidad",
     path: "/settings/availability",
-    title: "Disponibilidad",
+    title: "Horarios y ausencias",
     parent: SETTINGS,
     purpose: "El horario semanal y las ausencias de cada profesional, y de cada sede sus sillones, sus feriados y cierres y lo que dura una cita regular. Sin un horario aquí no se pueden reservar citas.",
-    terms: ["horarios", "horario de atención", "días de atención", "sillones", "turnos del doctor", "agenda del profesional", "ausencias", "vacaciones", "feriados", "cierres", "duración de la cita"],
+    terms: ["horarios", "disponibilidad", "horario de atención", "días de atención", "sillones", "turnos del doctor", "agenda del profesional", "ausencias", "vacaciones", "feriados", "cierres", "duración de la cita"],
     writePermission: "settings.write",
-    faqs: [{ q: "¿Dónde configuro los horarios?", a: "En Configuración › Disponibilidad. Ahí defines, por profesional y sede, los días y las horas de atención." }],
+    faqs: [{ q: "¿Dónde configuro los horarios?", a: "En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención." }],
   },
   {
     id: "especialidades",
@@ -241,60 +234,6 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "settings.write",
   },
   {
-    id: "canales",
-    path: "/settings/channels",
-    title: "Canales",
-    parent: SETTINGS,
-    purpose: "Por dónde te escriben: aquí conectas WhatsApp, Telegram, Instagram, Messenger y los demás canales a la Bandeja.",
-    terms: ["conectar whatsapp", "whatsapp", "telegram", "instagram", "messenger", "número de whatsapp", "integración"],
-    writePermission: "settings.write",
-  },
-  {
-    id: "chat_web",
-    path: "/settings/webchat",
-    title: "Chat web",
-    parent: SETTINGS,
-    purpose: "El chat que puedes poner en tu página web para que te escriban desde ahí.",
-    terms: ["widget", "chat en mi página", "página web", "sitio web", "burbuja de chat"],
-    writePermission: "settings.write",
-  },
-  {
-    id: "correo",
-    path: "/settings/mail",
-    title: "Correo",
-    parent: SETTINGS,
-    purpose: "Los buzones de correo de la clínica conectados a la Bandeja.",
-    terms: ["email", "gmail", "outlook", "buzón", "conectar correo"],
-    writePermission: "settings.write",
-  },
-  {
-    id: "ajustes_agente",
-    path: "/settings/agent",
-    title: "Agente",
-    parent: SETTINGS,
-    purpose: "Los ajustes técnicos del agente: proveedor del modelo, tope diario y autonomía acto por acto. Lo del día a día está en la pantalla Agente.",
-    terms: ["modelo", "proveedor", "clave de api", "tope diario", "autonomía", "ajustes técnicos"],
-    writePermission: "agent.write",
-  },
-  {
-    id: "pipelines",
-    path: "/settings/pipelines",
-    title: "Pipelines",
-    parent: SETTINGS,
-    purpose: "Las etapas del tablero de oportunidades: cuáles son, en qué orden y cuáles cierran como ganada o perdida.",
-    terms: ["etapas", "embudo", "columnas del tablero", "fases de venta"],
-    writePermission: "crm.write",
-  },
-  {
-    id: "campos",
-    path: "/settings/fields",
-    title: "Campos",
-    parent: SETTINGS,
-    purpose: "Los datos propios que tu clínica quiere guardar de cada contacto, además de los que ya trae el sistema.",
-    terms: ["campos personalizados", "datos adicionales", "campo nuevo", "información extra"],
-    writePermission: "crm.write",
-  },
-  {
     id: "registro_pacientes",
     path: "/settings/patient-registration",
     title: "Registro de pacientes",
@@ -306,19 +245,83 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "acceso_pacientes",
     path: "/settings/patient-access",
-    title: "Acceso de pacientes",
+    title: "Portal del paciente",
     parent: SETTINGS,
     purpose: "El portal donde el paciente ve sus citas y documentos: si está activo y cómo entra.",
-    terms: ["portal del paciente", "portal", "que el paciente vea sus citas", "acceso del paciente", "pin"],
+    terms: ["portal", "acceso de pacientes", "que el paciente vea sus citas", "acceso del paciente", "pin"],
     writePermission: "settings.write",
+  },
+  {
+    id: "medios-de-pago",
+    path: "/settings/payment-methods",
+    title: "Medios de pago y ticket",
+    parent: SETTINGS,
+    purpose: "Con qué puede pagar un paciente en tu clínica y cómo sale el ticket. Los medios que enciendas son los que ofrece caja al cobrar, en el orden que les des, y los que el agente puede mencionar. Ahí también eliges el ancho del ticket, el tamaño de hoja del presupuesto y la frase al pie.",
+    terms: ["efectivo", "tarjeta", "transferencia", "billetera", "formas de pago", "cómo pagar", "métodos de pago", "ancho del ticket", "frase al pie", "pie del ticket", "tamaño de hoja", "impresora térmica"],
+    writePermission: "settings.write",
+  },
+  {
+    id: "pipelines",
+    path: "/settings/pipelines",
+    title: "Etapas de venta",
+    parent: SETTINGS,
+    purpose: "Las etapas del tablero de oportunidades: cuáles son, en qué orden y cuáles cierran como ganada o perdida.",
+    terms: ["etapas", "embudo", "columnas del tablero", "fases de venta", "pipelines"],
+    writePermission: "settings.write",
+  },
+  {
+    id: "campos",
+    path: "/settings/fields",
+    title: "Campos de contacto",
+    parent: SETTINGS,
+    purpose: "Los datos propios que tu clínica quiere guardar de cada contacto, además de los que ya trae el sistema.",
+    terms: ["campos personalizados", "datos adicionales", "campo nuevo", "información extra"],
+    writePermission: "settings.write",
+  },
+  {
+    // Conserva el identificador de «Canales»: sigue siendo donde se conecta por dónde te escriben.
+    id: "canales",
+    path: "/settings/integrations",
+    title: "Integraciones",
+    parent: SETTINGS,
+    purpose: "Lo que tu clínica conecta una vez: WhatsApp, Instagram, Messenger y Telegram, el chat de tu sitio web, el correo de la clínica y el modelo del agente. Cada fila dice para qué sirve, con qué cuenta está y cómo va.",
+    terms: ["canales", "conectar un canal", "telegram", "instagram", "messenger", "integración", "correo", "email", "gmail", "outlook", "buzón", "conectar correo"],
+    writePermission: "settings.write",
+  },
+  {
+    id: "whatsapp",
+    path: "/settings/integrations/whatsapp",
+    title: "WhatsApp",
+    parent: INTEGRATIONS,
+    purpose: "El número de WhatsApp de la clínica y los mensajes que WhatsApp deja enviar: aquí lo conectas y ves cuáles están aprobados.",
+    terms: ["conectar whatsapp", "whatsapp", "número de whatsapp", "mensajes aprobados", "plantillas de whatsapp"],
+    writePermission: "settings.write",
+  },
+  {
+    id: "chat_web",
+    path: "/settings/integrations/webchat",
+    title: "Chat web",
+    parent: INTEGRATIONS,
+    purpose: "El chat que puedes poner en tu página web para que te escriban desde ahí.",
+    terms: ["widget", "chat en mi página", "página web", "sitio web", "burbuja de chat"],
+    writePermission: "settings.write",
+  },
+  {
+    id: "ajustes_agente",
+    path: "/settings/integrations/model",
+    title: "Modelo del agente",
+    parent: INTEGRATIONS,
+    purpose: "Con qué entiende y escribe el agente: el modelo incluido con odentIA o la cuenta propia de la clínica, con su prueba de conexión. Lo del día a día —encenderlo, hasta dónde llega solo, el tope diario y sus indicaciones— está en Agente › Recepción.",
+    terms: ["modelo", "proveedor", "clave de api", "cuenta propia", "probar conexión", "ajustes técnicos"],
+    writePermission: "agent.write",
   },
   {
     id: "auditoria",
     path: "/settings/audit",
-    title: "Auditoría",
+    title: "Actividad del equipo",
     parent: SETTINGS,
-    purpose: "El registro de quién cambió qué y cuándo en la clínica.",
-    terms: ["historial de cambios", "quién cambió", "registro de actividad", "log", "bitácora"],
+    purpose: "Quién hizo qué y cuándo en la clínica, dicho con palabras. Es una consulta: desde ahí no se cambia nada.",
+    terms: ["auditoría", "historial de cambios", "quién cambió", "registro de actividad", "log", "bitácora"],
   },
 ] as const
 
@@ -328,7 +331,7 @@ export function helpTopic(id: string): HelpTopic | undefined {
   return byId.get(id)
 }
 
-/** Cómo se llega a la pantalla, dicho como en el menú: «Configuración › Disponibilidad». */
+/** Cómo se llega a la pantalla, dicho como en el menú: «Configuración › Horarios y ausencias». */
 export function helpTopicLabel(topic: HelpTopic): string {
   return topic.parent && topic.parent !== topic.title ? `${topic.parent} › ${topic.title}` : topic.title
 }

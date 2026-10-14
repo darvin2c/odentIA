@@ -312,12 +312,15 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   }, 201)
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // --- Canales: los mensajes se leen de la cuenta; nadie escribe nombres de plantilla ---
-  await gotoHydrated(page, tenant(org.slug, "/settings/channels"))
-  const approved = page.getByRole("region", { name: "Mensajes aprobados por WhatsApp de WA E2E" })
-  await expect(approved.getByRole("listitem")).toHaveCount(1)
-  await expect(approved.getByRole("listitem")).toContainText("Recordar la cita")
-  await expect(approved).toContainText("WhatsApp revisa cada mensaje, decide su categoría y puede rechazarlo.")
+  // --- WhatsApp (Integraciones): los seis mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
+  const approved = page.getByRole("region", { name: "Mensajes", exact: true })
+  // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
+  await expect(approved.getByRole("listitem")).toHaveCount(6)
+  await expect(approved.getByRole("listitem").filter({ hasText: "Recordar la cita" })).toContainText("Aprobado")
+  await expect(approved).toContainText("1 aprobado · 5 en revisión")
+  await expect(approved).not.toContainText("odentia_recordatorio_cita_v1")
+  await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("canales-mensajes-aprobados", { body: await approved.screenshot(), contentType: "image/png" })
 
@@ -325,11 +328,13 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   const config = () => call<{ askReminders: boolean; askMessages: boolean }>(page, "GET", "/api/patient-registration/config", org.slug)
   expect(await config()).toMatchObject({ askReminders: true, askMessages: true })
   await gotoHydrated(page, tenant(org.slug, "/settings/patient-registration"))
-  await expect(page.getByRole("switch", { name: "Recordatorios de citas y controles" })).toBeChecked()
-  const others = page.getByRole("switch", { name: /Otros mensajes de la clínica/ })
+  // Son casillas del formulario: valen al pulsar «Guardar», que está al final de la página.
+  await expect(page.getByRole("checkbox", { name: "Recordatorios de citas y controles" })).toBeChecked()
+  const others = page.getByRole("checkbox", { name: /Otros mensajes de la clínica/ })
   await expect(others).toBeChecked()
   await others.click()
-  await page.getByRole("button", { name: "Guardar configuración" }).click()
+  await page.getByRole("button", { name: "Guardar", exact: true }).click()
+  await expect(page.getByText("Registro de pacientes guardado", { exact: true })).toBeVisible()
   await expect.poll(config).toMatchObject({ askReminders: true, askMessages: false })
 
   // --- Ficha: lo que la persona aceptó recibir; el interruptor pregunta antes cómo lo dijo ---

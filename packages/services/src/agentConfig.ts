@@ -286,6 +286,10 @@ export async function upsertAgentConfig(
       baseUrl = null
       sealed = null
       if (apiKeyInput?.trim()) throw validation("Para usar una clave propia indica también la URL base del proveedor")
+      // El modelo se eligió para ese proveedor: al volver al incluido con
+      // odentIA no viaja a otro que quizá no lo tiene. Quien quiera conservarlo
+      // lo indica en la misma petición.
+      if (previousUrl !== null && rest.model === undefined) patch.model = null
     } else {
       baseUrl =
         baseUrlInput === undefined

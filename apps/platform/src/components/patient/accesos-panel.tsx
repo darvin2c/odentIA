@@ -70,7 +70,7 @@ export function AccesosPanel({ patientId }: { patientId: string }) {
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
         Las {rows.length} consultas más recientes, agrupadas por persona, parte de la ficha y hora.
-        Los cambios se auditan aparte, en Configuración → Auditoría.
+        Los cambios quedan registrados aparte, en Configuración › Actividad del equipo.
       </p>
       {query.isError ? (
         <div className="mt-4">

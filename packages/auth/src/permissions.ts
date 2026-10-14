@@ -69,13 +69,13 @@ export const ROLE_LABELS: Record<OrgRole, string> = {
 
 /** Qué hace cada rol, en español para la UI de miembros. */
 export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
-  owner: "Acceso total, incluida la gestión de propietarios.",
-  admin: "Acceso total a todos los dominios.",
+  owner: "Puede hacer todo, también nombrar o quitar a otros propietarios.",
+  admin: "Puede hacer todo en la clínica, menos nombrar o quitar propietarios.",
   reception:
-    "Filiación de pacientes, agenda, CRM, conversaciones y tareas; resuelve decisiones del agente de sus dominios. Ve las alergias del paciente, sin el resto de la clínica, caja ni administración del agente.",
-  dentist: "Lectura de pacientes, clínica, presupuestos de sus planes, comisiones propias, agenda, conversaciones y tareas. Sin caja ni CRM.",
-  cashier: "Lectura de pacientes, caja, respuesta a presupuestos y tareas. Sin clínica ni agenda.",
-  member: "Acceso mínimo: solo ver tareas.",
+    "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve las alergias del paciente, pero no su historia clínica, la caja ni la configuración del agente.",
+  dentist: "Pacientes, historia clínica, presupuestos de sus planes, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
+  cashier: "Ve a los pacientes, lleva la caja, registra la respuesta a los presupuestos y ve las tareas. Sin historia clínica ni agenda.",
+  member: "Acceso mínimo: solo ve las tareas.",
 };
 
 const ALL_PERMISSIONS: Permission[] = [
@@ -224,7 +224,13 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // resuelve quien decide (`agent.decide`), no solo quien supervisa.
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },
+  // Regla específica antes de la genérica: el modelo del agente se abre desde
+  // Integraciones, pero lo cambia quien administra el agente.
+  { prefix: "/settings/integrations/model", permissions: ["agent.write"] },
+  // Sedes, Equipo e Integraciones viven bajo Configuración: los cubre esta regla.
   { prefix: "/settings", permissions: ["settings.read"] },
+  // Direcciones antiguas de Equipo y Sedes: solo redirigen a `/settings/team` y
+  // `/settings/branches`, y piden lo mismo que su destino.
   { prefix: "/members", permissions: ["settings.read"] },
   { prefix: "/branches", permissions: ["settings.read"] },
 ];

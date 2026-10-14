@@ -109,6 +109,31 @@ describe("permiso operativo agent.decide", () => {
     expect(platformPathPermission("/settings/fields")).toEqual(["settings.read"])
     expect(platformPathPermission("/audit")).toBeNull()
   })
+
+  it("Sedes, Equipo e Integraciones entran con Configuración; sus direcciones antiguas piden lo mismo", () => {
+    for (const path of [
+      "/settings/branches",
+      "/settings/team",
+      "/settings/integrations",
+      "/settings/integrations/whatsapp",
+      "/settings/integrations/webchat",
+      // Antiguas: redirigen a las de arriba.
+      "/branches",
+      "/members",
+      "/settings/channels",
+      "/settings/mail",
+    ]) {
+      expect(platformPathPermission(path), path).toEqual(["settings.read"])
+    }
+    // Recepción conversa por correo, pero no configura los buzones.
+    expect(canAccessAny("reception", platformPathPermission("/settings/integrations") ?? [])).toBe(false)
+  })
+
+  it("el modelo del agente, bajo Integraciones, lo abre quien administra el agente", () => {
+    expect(platformPathPermission("/settings/integrations/model")).toEqual(["agent.write"])
+    expect(canAccessAny("admin", platformPathPermission("/settings/integrations/model") ?? [])).toBe(true)
+    expect(canAccessAny("reception", platformPathPermission("/settings/integrations/model") ?? [])).toBe(false)
+  })
 })
 
 describe("fronteras económicas por rol", () => {

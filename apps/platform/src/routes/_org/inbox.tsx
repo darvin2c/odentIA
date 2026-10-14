@@ -5,7 +5,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  Input,
   MessageScroller,
   MessageScrollerContent,
   MessageScrollerItem,
@@ -14,11 +13,6 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Spinner,
 } from "@odentia/ui"
 import {
@@ -105,6 +99,7 @@ import { ReceptionOffNotice } from "../../components/agent/reception-off-notice"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
+import { InboxApprovedMessages } from "../../components/integrations/whatsapp/inbox-approved-messages"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
 import { useOrgEvents } from "../../lib/org-events"
@@ -563,8 +558,6 @@ function InboxPage() {
   )
 }
 
-const NO_TEMPLATE = "__ninguna__"
-
 /**
  * Lo que la conversación espera, en una sola etiqueta y con la misma
  * precedencia que el panel de contexto: una decisión del equipo, después una
@@ -854,9 +847,8 @@ function ThreadView({
   const [older, setOlder] = useState<ChatMessage[]>([])
   const [olderCursor, setOlderCursor] = useState<string | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  // WhatsApp cerró la ventana de 24 horas con el hilo ya abierto: el servidor lo dijo al enviar.
   const [windowClosed, setWindowClosed] = useState(false)
-  const [templateName, setTemplateName] = useState("")
-  const [templateParams, setTemplateParams] = useState("")
   const [markedRef, setMarkedRef] = useState<string | null>(null)
   const [registrationLink, setRegistrationLink] = useState<{
     url: string
@@ -928,22 +920,11 @@ function ThreadView({
     }
   }, [detail, id, markedRef, queryClient])
 
-  const templatesQuery = useQuery({
-    queryKey: ["templates", detail?.connection.id],
-    queryFn: () =>
-      apiFetch<{ data: { name: string; language: string }[] }>(
-        `/api/channels/connections/${detail?.connection.id}/templates`,
-      ),
-    enabled: windowClosed && !!detail && canWrite,
-  })
-
-  const templateItems = useMemo(
-    () =>
-      Object.fromEntries(
-        (templatesQuery.data?.data ?? []).map((t) => [t.name, `${t.name} (${t.language})`]),
-      ),
-    [templatesQuery.data],
-  )
+  // Cuando la persona vuelve a escribir, la ventana se abre de nuevo: manda lo que diga el servidor.
+  const lastInboundAt = detail?.whatsappWindow?.lastInboundAt
+  useEffect(() => {
+    setWindowClosed(false)
+  }, [lastInboundAt])
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["conversation", id] })
@@ -994,17 +975,25 @@ function ThreadView({
       setSendError(null)
       invalidate()
     },
-    onError: (error) => {
-      if (error instanceof ApiError && error.shape.code === "WINDOW_CLOSED") {
-        // La URL se conserva en el composer; el operador la usa en la plantilla.
-        setWindowClosed(true)
-        setSendError(null)
-      } else {
-        // Conexión desactivada u otro fallo real: bloquear el envío con el motivo.
-        setSendError(error instanceof ApiError ? error.message : "No se pudo enviar el mensaje")
-      }
-    },
+    onError: sendFailed,
   })
+
+  /**
+   * Un envío que no salió. Si WhatsApp cerró la ventana de 24 horas mientras se
+   * escribía, la zona pasa a ofrecer los mensajes aprobados y lo escrito se
+   * conserva; en lo demás se dice el motivo con las palabras del servidor.
+   */
+  function sendFailed(error: unknown) {
+    const closedNow = error instanceof ApiError && error.shape.code === "WINDOW_CLOSED"
+    if (closedNow && detail?.connection.capabilities?.templates) {
+      setWindowClosed(true)
+      setSendError(null)
+      void queryClient.invalidateQueries({ queryKey: ["conversation", id] })
+      return
+    }
+    // Conexión desactivada u otro fallo real: bloquear el envío con el motivo.
+    setSendError(error instanceof ApiError ? error.message : "No se pudo enviar el mensaje")
+  }
 
   // Envía texto y/o adjuntos del composer. Lanza en error para que PromptInput
   // conserve el texto y los adjuntos (permite reintentar sin perder nada).
@@ -1026,44 +1015,12 @@ function ThreadView({
       setSendError(null)
       invalidate()
     } catch (error) {
-      if (error instanceof ApiError && error.shape.code === "WINDOW_CLOSED") {
-        setWindowClosed(true)
-        setSendError(null)
-      } else {
-        setSendError(error instanceof ApiError ? error.message : "No se pudo enviar el mensaje")
-      }
+      sendFailed(error)
       throw error
     } finally {
       setUploading(false)
     }
   }
-
-  const templateMutation = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/conversations/${id}/messages/template`, {
-        method: "POST",
-        body: JSON.stringify({
-          name: templateName,
-          language:
-            templatesQuery.data?.data.find((t) => t.name === templateName)?.language ?? "es_PE",
-          params: templateParams
-            .split(",")
-            .map((p) => p.trim())
-            .filter(Boolean),
-        }),
-      }),
-    onSuccess: () => {
-      setTemplateName("")
-      setTemplateParams("")
-      setWindowClosed(false)
-      invalidate()
-    },
-    onError: (error) => {
-      setRegistrationError(
-        error instanceof ApiError ? error.message : "No se pudo enviar la plantilla",
-      )
-    },
-  })
 
   const actionMutation = useMutation({
     mutationFn: ({ path, body }: { path: string; body?: unknown }) =>
@@ -1119,6 +1076,8 @@ function ThreadView({
 
   const conv = detail.conversation
   const closed = conv.status === "closed"
+  // La ventana de 24 horas de WhatsApp la dice el servidor con el hilo, antes de que nadie escriba.
+  const windowShut = windowClosed || detail.whatsappWindow?.open === false
   // La atención del propio hilo manda; la de la lista solo adelanta el dato
   // mientras llega el detalle. Sin ninguna, la cabecera calla: no se deduce aquí.
   const threadAttention = detail.attention ?? attention
@@ -1368,63 +1327,21 @@ function ThreadView({
           <p className="text-sm text-muted-foreground">
             Conversación cerrada. Reábrela para responder.
           </p>
-        ) : windowClosed ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium text-warning">
-              Fuera de la ventana de 24h de WhatsApp: responde con una plantilla autorizada.
-            </p>
-            {registrationLink && (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="min-w-0 flex-1 truncate" title={registrationLink.url}>
-                  Enlace listo: {registrationLink.url}
-                </span>
-              </div>
-            )}
-            {(templatesQuery.data?.data ?? []).length === 0 && !templatesQuery.isLoading && (
-              <p className="text-xs text-muted-foreground">
-                No hay plantillas autorizadas disponibles: copia el enlace de arriba y compártelo
-                por otro medio. No se registró ningún envío.
-              </p>
-            )}
-            <div className="flex gap-2">
-              <Select
-                items={{ [NO_TEMPLATE]: "Elegir plantilla…", ...templateItems }}
-                value={templateName || NO_TEMPLATE}
-                onValueChange={(v) => setTemplateName(!v || v === NO_TEMPLATE ? "" : String(v))}
-              >
-                <SelectTrigger aria-label="Plantilla" className="w-56">
-                  <SelectValue placeholder="Elegir plantilla…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_TEMPLATE}>Elegir plantilla…</SelectItem>
-                  {(templatesQuery.data?.data ?? []).map((t) => (
-                    <SelectItem key={`${t.name}:${t.language}`} value={t.name}>
-                      {t.name} ({t.language})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                placeholder="Parámetros separados por coma"
-                value={templateParams}
-                onChange={(e) => setTemplateParams(e.target.value)}
-              />
-              <Button
-                size="sm"
-                disabled={!templateName || templateMutation.isPending || !canWrite}
-                onClick={() => templateMutation.mutate()}
-              >
-                Enviar
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setWindowClosed(false)}>
-                Volver
-              </Button>
-            </div>
-          </div>
         ) : !canWrite ? (
           <p className="text-sm text-muted-foreground">
             Sin permiso de escritura de conversaciones.
           </p>
+        ) : windowShut ? (
+          // Pasaron las 24 horas de WhatsApp: se dice antes de escribir y se ofrecen los mensajes aprobados.
+          <InboxApprovedMessages
+            // Otra conversación es otra elección: no arrastra lo elegido ni el error de la anterior.
+            key={id}
+            conversationId={id}
+            contactName={detail.contact.displayName}
+            lastInboundAt={detail.whatsappWindow?.lastInboundAt}
+            draft={composer}
+            onSent={invalidate}
+          />
         ) : (
           <div className="flex flex-col gap-1.5">
             <PromptInput
@@ -1590,12 +1507,12 @@ function MessageBubble({
         {/* WhatsApp muestra la media arriba y el texto (caption o transcripción) abajo. */}
         <MessageAttachments msg={msg} conversationId={conversationId} orgSlug={orgSlug} />
         {msg.contentType === "template" ? (
-          // Con el texto armado se ve lo que la persona recibió; sin él, solo qué plantilla salió.
+          // Con el texto armado se ve lo que la persona recibió; los anteriores a eso no lo guardaron.
           msg.body ? (
             <p className="whitespace-pre-wrap">{msg.body}</p>
           ) : (
             <span className="italic opacity-80">
-              Plantilla: {msg.templateName} {(msg.templateParams ?? []).join(" · ")}
+              Mensaje aprobado por WhatsApp{(msg.templateParams ?? []).length > 0 ? `: ${(msg.templateParams ?? []).join(" · ")}` : ""}
             </span>
           )
         ) : (

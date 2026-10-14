@@ -8,7 +8,7 @@ import { type ReactNode, useState } from "react"
 import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
-import { type AgentLearned, type AgentOverview, type AgentProviderProblem, type AgentRole, type AgentRoles, LEVEL_LABEL } from "../../lib/agent"
+import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, LEVEL_LABEL, PROVIDER_PROBLEM } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
@@ -45,12 +45,6 @@ const ROLE_PAGE = {
   administrador: "/agent/administrador",
 } as const
 
-/** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
-const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
-  rechazado: "El proveedor del modelo rechazó la conexión.",
-  sin_saldo: "El proveedor del modelo no tiene saldo o cuota.",
-  sin_configurar: "Falta configurar el proveedor del modelo.",
-}
 
 const outlineLink = cn(buttonVariants({ variant: "outline" }), "min-h-11 sm:min-h-9")
 
@@ -182,7 +176,7 @@ function AgentSummaryPage() {
               title="El agente no puede responder ahora"
               action={
                 canWrite ? (
-                  <Link to="/settings/agent" className={outlineLink}>
+                  <Link to="/settings/integrations/model" className={outlineLink}>
                     Revisar el proveedor
                   </Link>
                 ) : null
@@ -199,7 +193,7 @@ function AgentSummaryPage() {
               title={`Llegó al tope de ${overview.usage.dailyRunLimit} respuestas de hoy`}
               action={
                 canWrite ? (
-                  <Link to="/settings/agent" className={outlineLink}>
+                  <Link to="/agent/recepcion" className={outlineLink}>
                     Cambiar el tope
                   </Link>
                 ) : null

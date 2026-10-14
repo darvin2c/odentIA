@@ -498,7 +498,11 @@ function assertWindowAllows(
   if (content.type === "template") return
   const last = row.conversation.lastInboundAt
   if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
-    throw new ServiceError("WINDOW_CLOSED", 409, "Fuera de la ventana de 24h: usa una plantilla")
+    throw new ServiceError(
+      "WINDOW_CLOSED",
+      409,
+      "Pasaron más de 24 horas desde que la persona escribió: WhatsApp solo deja enviarle un mensaje aprobado.",
+    )
   }
 }
 
@@ -1042,6 +1046,12 @@ export interface ConversationDetail {
     displayName: string
     capabilities: unknown
   }
+  /**
+   * La ventana de 24 horas de WhatsApp, para decirlo antes de escribir: abierta
+   * se responde con libertad; cerrada, solo con un mensaje aprobado. Nulo en
+   * los demás canales.
+   */
+  whatsappWindow: { open: boolean; lastInboundAt: string | null } | null
   messages: MessageItem[]
   messagesCursor: string | null
 }
@@ -1084,6 +1094,15 @@ export async function getConversationDetail(
       displayName: row.connection.displayName,
       capabilities: adapter?.capabilities ?? null,
     },
+    whatsappWindow:
+      row.connection.provider === "whatsapp_cloud_api"
+        ? {
+            open:
+              !!row.conversation.lastInboundAt &&
+              Date.now() - row.conversation.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS,
+            lastInboundAt: row.conversation.lastInboundAt?.toISOString() ?? null,
+          }
+        : null,
     messages: items,
     messagesCursor: nextCursor,
   }

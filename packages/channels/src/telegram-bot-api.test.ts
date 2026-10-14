@@ -35,7 +35,7 @@ it("validateConnection resuelve getMe", async () => {
       captured,
     ),
   })
-  expect(got).toEqual({ externalId: "123", displayName: "@mibot" })
+  expect(got).toEqual({ externalId: "123", displayName: "@mibot", account: { name: "Mi", number: "@mibot" } })
   expect(captured[0]?.url).toBe("https://api.telegram.org/botTESTTOKEN/getMe")
 })
 

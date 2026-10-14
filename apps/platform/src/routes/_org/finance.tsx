@@ -437,7 +437,7 @@ function FinanceWorkspace() {
                 : "La caja trabaja por sede: hace falta al menos una. Pídesela a quien administra la clínica."
             }
             actionLabel={canSettings ? "Ir a Sedes" : undefined}
-            onAction={canSettings ? () => void navigate({ to: "/branches" }) : undefined}
+            onAction={canSettings ? () => void navigate({ to: "/settings/branches" }) : undefined}
           />
         )
       ) : (

@@ -241,6 +241,13 @@ export interface AgentLearned {
 /** Clase del problema del proveedor del modelo; nunca su texto. */
 export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
+/** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
+export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
+  rechazado: "El proveedor del modelo rechazó la conexión.",
+  sin_saldo: "El proveedor del modelo no tiene saldo o cuota.",
+  sin_configurar: "Falta configurar el proveedor del modelo.",
+}
+
 export interface AgentOverview {
   enabled: boolean
   level: AgentLevelId | "personalizado"

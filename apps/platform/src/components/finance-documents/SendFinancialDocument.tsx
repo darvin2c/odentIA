@@ -386,7 +386,7 @@ export function SendFinancialDocument({
                       className="self-start"
                       onClick={() => {
                         setOpen(false)
-                        void navigate({ to: "/settings/channels" })
+                        void navigate({ to: "/settings/integrations" })
                       }}
                     >
                       Conectar un canal

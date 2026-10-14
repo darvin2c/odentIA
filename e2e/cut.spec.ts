@@ -66,11 +66,14 @@ test("auth: invitación, permisos y aislamiento", async ({ browser, createOwner 
   const id = randomUUID()
   const member: UiUser = { name: "Beto Pruebas", email: `invitado-${id}@test.dev`, password: "secreto-123" }
 
-  await gotoHydrated(owner.page, tenant(owner.org.slug, "/members"))
-  await owner.page.getByRole("button", { name: "Invitar miembro" }).click()
+  await gotoHydrated(owner.page, tenant(owner.org.slug, "/settings/team"))
+  await owner.page.getByRole("button", { name: "Invitar al equipo" }).click()
   await owner.page.getByLabel("Invitar por correo").fill(member.email)
   await owner.page.getByRole("button", { name: "Invitar", exact: true }).click()
-  await expect(owner.page.getByText(member.email)).toBeVisible()
+  // El aviso también nombra el correo: se mira la lista de invitaciones.
+  await expect(
+    owner.page.getByRole("region", { name: "Invitaciones pendientes" }).getByText(member.email),
+  ).toBeVisible()
 
   const memberContext = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true })
   try {
@@ -86,8 +89,8 @@ test("auth: invitación, permisos y aislamiento", async ({ browser, createOwner 
 
     const forbidden = await api(memberPage, "POST", "/api/branches", owner.org.slug, { name: "Sede Prohibida" })
     expect(forbidden.status).toBe(403)
-    await gotoHydrated(memberPage, tenant(owner.org.slug, "/branches"))
-    await expect(memberPage.getByRole("button", { name: "Nueva sucursal" })).toHaveCount(0)
+    await gotoHydrated(memberPage, tenant(owner.org.slug, "/settings/branches"))
+    await expect(memberPage.getByRole("button", { name: "Nueva sede" })).toHaveCount(0)
   } finally {
     await memberContext.close()
   }
@@ -97,7 +100,7 @@ test("auth: invitación, permisos y aislamiento", async ({ browser, createOwner 
   expect(branches.map((branch) => branch.name)).toEqual(["Sede Central"])
   const extraName = `Sede Extra ${id}`
   await call<{ id: string }>(owner.page, "POST", "/api/branches", owner.org.slug, { name: extraName }, 201)
-  await gotoHydrated(other.page, tenant(other.org.slug, "/branches"))
+  await gotoHydrated(other.page, tenant(other.org.slug, "/settings/branches"))
   await expect(other.page.getByText(extraName)).toHaveCount(0)
   await expect(other.page.getByText("Sede Central")).toBeVisible()
 })
@@ -110,17 +113,17 @@ test("auth: retorno al tenant conserva origen", async ({ browser, createOwner },
   const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true })
   try {
     const page = await context.newPage()
-    await gotoHydrated(page, tenant(owner.org.slug, "/branches"))
+    await gotoHydrated(page, tenant(owner.org.slug, "/settings/branches"))
     await expect(page).toHaveURL(panelPattern("/login?next="))
     const nextRaw = new URL(page.url()).searchParams.get("next")
     expect(nextRaw).toBeTruthy()
     const nextUrl = new URL(nextRaw as string)
     expect(nextUrl.origin).toBe(expectedOrigin)
-    expect(nextUrl.pathname).toBe("/branches")
+    expect(nextUrl.pathname).toBe("/settings/branches")
     await page.getByLabel("Correo").fill(owner.user.email)
     await page.getByLabel("Contraseña").fill(owner.user.password)
     await page.getByRole("button", { name: "Ingresar" }).click()
-    await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/branches"))
+    await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/branches"))
     expect(new URL(page.url()).origin).toBe(expectedOrigin)
     await expect(page.getByText("Sede Central")).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath("retorno-tenant.png"), fullPage: true })
@@ -132,7 +135,7 @@ test("auth: retorno al tenant conserva origen", async ({ browser, createOwner },
 test("auth: un no-miembro no entra en otro tenant", async ({ createOwner }) => {
   const first = await createOwner("tenant-a")
   const second = await createOwner("tenant-b")
-  await gotoHydrated(second.page, tenant(first.org.slug, "/branches"))
+  await gotoHydrated(second.page, tenant(first.org.slug, "/settings/branches"))
   await expect(second.page).toHaveURL(`${PANEL}/`)
   await expect(second.page.getByText(first.org.name)).toHaveCount(0)
 })

@@ -132,7 +132,7 @@ export async function createPipeline(
   input: { name: string },
 ): Promise<PipelineWithStages> {
   const name = input.name.trim()
-  if (!name) throw validation("El nombre del pipeline es obligatorio")
+  if (!name) throw validation("El nombre del embudo de ventas es obligatorio")
   const existing = await tx
     .select({ id: pipeline.id })
     .from(pipeline)
@@ -153,7 +153,7 @@ export async function renamePipeline(
   input: { name: string },
 ): Promise<void> {
   const name = input.name.trim()
-  if (!name) throw validation("El nombre del pipeline es obligatorio")
+  if (!name) throw validation("El nombre del embudo de ventas es obligatorio")
   const updated = await tx
     .update(pipeline)
     .set({ name })
@@ -190,7 +190,7 @@ export async function createStage(
   const name = input.name.trim()
   if (!name) throw validation("El nombre de la etapa es obligatorio")
   const kind = input.kind ?? "open"
-  if (!STAGE_KINDS.includes(kind as StageKind)) throw validation("kind inválido (open|won|lost)")
+  if (!STAGE_KINDS.includes(kind as StageKind)) throw validation("Elige el tipo de la etapa: en curso, ganada o perdida")
   const siblings = await tx
     .select({ position: pipelineStage.position })
     .from(pipelineStage)
@@ -227,7 +227,7 @@ export async function updateStage(
   }
   if (input.kind !== undefined) {
     if (!STAGE_KINDS.includes(input.kind as StageKind))
-      throw validation("kind inválido (open|won|lost)")
+      throw validation("Elige el tipo de la etapa: en curso, ganada o perdida")
     patch.kind = input.kind
   }
   if (Object.keys(patch).length === 0) return stage
@@ -295,7 +295,7 @@ export async function reorderStages(
     .where(and(eq(pipelineStage.pipelineId, pipelineId), eq(pipelineStage.organizationId, orgId)))
   const current = new Set(rows.map((r) => r.id))
   if (stageIds.length !== rows.length || !stageIds.every((id) => current.has(id))) {
-    throw validation("stageIds debe contener exactamente las etapas del pipeline")
+    throw validation("El orden debe incluir todas las etapas, una vez cada una")
   }
   await reassignPositions(tx, stageIds)
   const updated = await tx

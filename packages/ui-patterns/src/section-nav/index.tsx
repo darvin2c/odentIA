@@ -1,24 +1,34 @@
 import { cn } from "@odentia/ui"
+import { ChevronRight } from "lucide-react"
 import * as React from "react"
 import type { ShellLinkComponent } from "../app-shell.js"
 import {
   BADGE_CLASSES,
+  GROUP_LABEL_CLASSES,
+  GROUP_LIST_CLASSES,
   ITEM_ACTIVE_CLASSES,
   ITEM_CLASSES,
   resolveActiveTo,
+  type SectionNavGroup,
   type SectionNavItem,
   type SectionNavMobilePosition,
   type SectionNavSide,
 } from "./types.js"
 
 export type {
+  SectionNavGroup,
   SectionNavItem,
   SectionNavMobilePosition,
   SectionNavSide,
 } from "./types.js"
 
 export interface SectionNavProps {
+  /** Entradas de la sección. Con `groups` son las sueltas: van al final, tras
+   * un separador. */
   items: SectionNavItem[]
+  /** Grupos con título, antes de las entradas sueltas. Para listas largas que
+   * se leen mejor por tema que de corrido. */
+  groups?: SectionNavGroup[]
   LinkComponent: ShellLinkComponent
   pathname: string
   /** Nombre accesible del landmark (`aria-label` del `<nav>`). */
@@ -36,6 +46,9 @@ export interface SectionNavProps {
   className?: string
 }
 
+/** Forma de la entrada según la superficie que la contiene. */
+type EntryShape = "bar" | "picker" | "group"
+
 /**
  * Navegación de una sección dentro del `main` del `AppShell`.
  *
@@ -50,12 +63,18 @@ export interface SectionNavProps {
  * selector que revela opciones verticales desplazables. El riel de escritorio
  * conserva todas las opciones visibles.
  *
+ * Con `groups`, la lista se lee por temas: cada grupo lleva su título y las
+ * entradas sueltas (`items`) quedan al final, tras un separador. En el riel son
+ * rótulos sobre la misma lista; en el selector de tablet y móvil, una tarjeta
+ * por grupo con una fila por entrada.
+ *
  * Se monta dentro del `PageShell`, que aporta fondo de página y padding: el nav
  * no toca ninguno de los dos. Las dos superficies usan la del sidebar
  * (`bg-sidebar`) y el ítem del sidebar (`SidebarMenuButton`).
  */
 export function SectionNav({
   items,
+  groups = [],
   LinkComponent,
   pathname,
   label,
@@ -64,14 +83,96 @@ export function SectionNav({
   mobilePosition = "footer",
   className,
 }: SectionNavProps): React.JSX.Element {
-  const activeTo = resolveActiveTo(items, pathname)
+  const isGrouped = groups.length > 0
+  const allItems = isGrouped ? [...groups.flatMap((group) => group.items), ...items] : items
+  const activeTo = resolveActiveTo(allItems, pathname)
   const isRight = side === "right"
   const isBottom = mobilePosition === "footer"
-  const hasManyItems = items.length > 5
-  const activeItem = activeTo ? items.find((item) => item.to === activeTo) : undefined
+  // Una lista agrupada no cabe en una barra de celdas: siempre usa el selector.
+  const usesPicker = isGrouped || allItems.length > 5
+  const activeItem = activeTo ? allItems.find((item) => item.to === activeTo) : undefined
   const ActiveIcon = activeItem?.iconActive ?? activeItem?.icon
   const [expanded, setExpanded] = React.useState(false)
   const listId = React.useId()
+
+  const renderEntry = (item: SectionNavItem, shape: EntryShape) => {
+    const active = item.to === activeTo
+    const Icon = active && item.iconActive ? item.iconActive : item.icon
+    const { badge } = item
+    return (
+      <li key={item.to} className="relative min-w-0">
+        <LinkComponent
+          to={item.to}
+          title={item.label}
+          aria-current={active ? "page" : undefined}
+          onClick={() => setExpanded(false)}
+          className={cn(
+            ITEM_CLASSES,
+            // Hasta cinco destinos conservan la barra compacta. Una lista larga
+            // usa un selector que abre opciones legibles; agrupada, cada opción
+            // es una fila de su tarjeta.
+            shape === "bar"
+              ? "min-h-11 flex-col justify-center gap-1 px-1 py-2 text-center text-xs leading-tight"
+              : "min-h-11 flex-row justify-start gap-2 px-3 py-2 text-left text-sm leading-tight",
+            shape === "group" && "rounded-none lg:rounded-xl",
+            // Riel: fila del sidebar, con su alto y su padding.
+            "lg:h-9 lg:min-h-0 lg:flex-row lg:justify-normal lg:gap-2 lg:px-3 lg:text-left lg:text-sm",
+            active && ITEM_ACTIVE_CLASSES,
+            badge !== undefined && (shape === "group" ? "pr-16 lg:pr-8" : "pr-8"),
+          )}
+        >
+          {Icon ? <Icon /> : null}
+          <span
+            className={cn(
+              shape === "bar" ? "truncate" : "whitespace-normal",
+              shape === "group" && "min-w-0 flex-1",
+              "lg:truncate",
+            )}
+          >
+            {item.label}
+          </span>
+          {shape === "group" ? (
+            <ChevronRight aria-hidden className="text-muted-foreground lg:hidden" />
+          ) : null}
+        </LinkComponent>
+        {badge === undefined ? null : (
+          <span
+            className={cn(
+              BADGE_CLASSES,
+              shape === "bar"
+                ? "pointer-events-none absolute top-1 left-1/2 translate-x-1"
+                : "pointer-events-none absolute top-1/2 -translate-y-1/2",
+              // En la tarjeta del grupo el contador deja sitio a la flecha.
+              shape === "picker" && "right-2",
+              shape === "group" && "right-9",
+              // Riel: al final de la fila, con el espacio ya reservado
+              // por el `pr-8` del link.
+              "lg:top-1.5 lg:right-1 lg:left-auto lg:translate-x-0 lg:translate-y-0",
+              active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
+            )}
+          >
+            {badge}
+          </span>
+        )}
+      </li>
+    )
+  }
+
+  // Lista del selector: oculta en la barra hasta abrirlo y siempre visible en
+  // el riel. Compartida por la lista larga y por la agrupada, que toma casi
+  // toda la pantalla: con sus títulos se lee como una página, entera cuando cabe.
+  // El padding lateral deshace el sangrado del nav: la raíz recorta lo que
+  // sobresale, así que el contenido se alinea con ella para no quedar cortado.
+  const pickerListClasses = cn(
+    "flex-col overflow-y-auto overscroll-y-contain px-4 py-2 [scrollbar-width:thin] sm:px-6 lg:flex lg:max-h-none lg:overflow-visible lg:p-0",
+    // Todo el alto menos el botón del selector y su aire (y el margen seguro
+    // del teléfono): si el nav midiera más que la pantalla, al estar pegado
+    // abajo sus primeras filas quedarían fuera de alcance.
+    isGrouped
+      ? "max-h-[calc(100svh-4.5rem-env(safe-area-inset-bottom))]"
+      : "max-h-[min(60svh,28rem)]",
+    expanded ? "flex" : "hidden",
+  )
 
   return (
     <div
@@ -107,16 +208,22 @@ export function SectionNav({
           // Riel: panel de su alto, dentro de la rejilla de la página y pegado
           // mientras se scrollea. Deshace el sangrado, el borde pegajoso y la
           // altura de la barra.
-          "lg:top-6 lg:mx-0 lg:mb-0 lg:w-56 lg:shrink-0 lg:rounded-md lg:border-0 lg:p-2",
-          hasManyItems && "flex flex-col",
-          hasManyItems && isBottom && "flex-col-reverse lg:flex-col",
+          "lg:top-6 lg:mx-0 lg:mb-0 lg:shrink-0 lg:rounded-md lg:border-0 lg:p-2",
+          // Agrupado es más ancho (sus nombres son frases) y, si la ventana es
+          // más baja que la lista, se desplaza dentro del riel en vez de
+          // quedar cortado mientras está pegado.
+          isGrouped
+            ? "lg:max-h-[calc(100svh-3rem)] lg:w-64 lg:overflow-y-auto lg:[scrollbar-width:thin]"
+            : "lg:w-56",
+          usesPicker && "flex flex-col",
+          usesPicker && isBottom && "flex-col-reverse lg:flex-col",
           isBottom && "lg:bottom-auto",
         )}
       >
-        {hasManyItems ? (
+        {usesPicker ? (
           <button
             type="button"
-            className="mx-2 flex min-h-11 items-center gap-2 rounded-xl bg-sidebar-accent px-3 text-left font-semibold text-sidebar-accent-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring lg:hidden"
+            className="mx-4 flex min-h-11 items-center gap-2 rounded-xl bg-sidebar-accent px-3 text-left font-semibold text-sidebar-accent-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring sm:mx-6 lg:hidden"
             aria-expanded={expanded}
             aria-controls={listId}
             onClick={() => setExpanded((current) => !current)}
@@ -128,71 +235,55 @@ export function SectionNav({
             </span>
           </button>
         ) : null}
-        <ul
-          id={listId}
-          className={cn(
-            "gap-0.5",
-            hasManyItems
-              ? cn(
-                  "max-h-[min(60svh,28rem)] flex-col overflow-y-auto overscroll-y-contain px-2 py-2 [scrollbar-width:thin] lg:flex lg:max-h-none lg:overflow-visible lg:p-0",
-                  expanded ? "flex" : "hidden",
-                )
-              : "grid grid-flow-col auto-cols-fr",
-            // Riel: lista vertical.
-            "lg:flex lg:flex-col",
-          )}
-        >
-          {items.map((item) => {
-            const active = item.to === activeTo
-            const Icon = active && item.iconActive ? item.iconActive : item.icon
-            const { badge } = item
-            return (
-              <li key={item.to} className="relative min-w-0">
-                <LinkComponent
-                  to={item.to}
-                  title={item.label}
-                  aria-current={active ? "page" : undefined}
-                  onClick={() => setExpanded(false)}
-                  className={cn(
-                    ITEM_CLASSES,
-                    // Hasta cinco destinos conservan la barra compacta. Una
-                    // lista larga usa un selector que abre opciones legibles.
-                    hasManyItems
-                      ? "min-h-11 flex-row justify-start gap-2 px-3 py-2 text-left text-sm leading-tight"
-                      : "min-h-11 flex-col justify-center gap-1 px-1 py-2 text-center text-xs leading-tight",
-                    // Riel: fila del sidebar, con su alto y su padding.
-                    "lg:h-9 lg:min-h-0 lg:flex-row lg:justify-normal lg:gap-2 lg:px-3 lg:text-left lg:text-sm",
-                    active && ITEM_ACTIVE_CLASSES,
-                    badge !== undefined && "pr-8",
-                  )}
+        {isGrouped ? (
+          <div id={listId} className={cn("gap-3 lg:gap-0", pickerListClasses)}>
+            {groups.map((group, index) => {
+              const headingId = `${listId}-grupo-${index}`
+              return (
+                <div
+                  key={group.label}
+                  role="group"
+                  aria-labelledby={headingId}
+                  // `shrink-0`: en una pantalla baja la lista se desplaza; un grupo
+                  // nunca se encoge recortando sus filas.
+                  className={cn("flex shrink-0 flex-col", index === 0 ? "lg:pt-1" : "lg:pt-3")}
                 >
-                  {Icon ? <Icon /> : null}
-                  <span
-                    className={cn(hasManyItems ? "whitespace-normal" : "truncate", "lg:truncate")}
-                  >
-                    {item.label}
-                  </span>
-                </LinkComponent>
-                {badge === undefined ? null : (
-                  <span
-                    className={cn(
-                      BADGE_CLASSES,
-                      hasManyItems
-                        ? "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2"
-                        : "pointer-events-none absolute top-1 left-1/2 translate-x-1",
-                      // Riel: al final de la fila, con el espacio ya reservado
-                      // por el `pr-8` del link.
-                      "lg:top-1.5 lg:right-1 lg:left-auto lg:translate-x-0 lg:translate-y-0",
-                      active ? "text-sidebar-accent-foreground" : "text-sidebar-foreground",
-                    )}
-                  >
-                    {badge}
-                  </span>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+                  <p id={headingId} className={GROUP_LABEL_CLASSES}>
+                    {group.label}
+                  </p>
+                  <ul className={GROUP_LIST_CLASSES}>
+                    {group.items.map((item) => renderEntry(item, "group"))}
+                  </ul>
+                </div>
+              )
+            })}
+            {items.length > 0 ? (
+              <>
+                {/* En el riel, una línea separa lo que no pertenece a un grupo;
+                    en el selector ya lo separa su propia tarjeta. */}
+                <div
+                  role="separator"
+                  className="mx-3 my-2 hidden h-px shrink-0 bg-sidebar-border lg:block"
+                />
+                <ul className={cn(GROUP_LIST_CLASSES, "shrink-0")}>
+                  {items.map((item) => renderEntry(item, "group"))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <ul
+            id={listId}
+            className={cn(
+              "gap-0.5",
+              usesPicker ? pickerListClasses : "grid grid-flow-col auto-cols-fr",
+              // Riel: lista vertical.
+              "lg:flex lg:flex-col",
+            )}
+          >
+            {items.map((item) => renderEntry(item, usesPicker ? "picker" : "bar"))}
+          </ul>
+        )}
       </nav>
       {/* Sin padding ni fondo: los aporta el `PageShell` que envuelve la sección. */}
       <div className="min-w-0 flex-1">{children}</div>

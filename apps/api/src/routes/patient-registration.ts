@@ -13,7 +13,8 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
   const app = new Hono()
   app.get("/patient-registration/config", async c => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "crm.read")) {
+    // La lee quien da de alta pacientes y quien configura el registro.
+    if (!canAccess(memberRole, "crm.read") && !canAccess(memberRole, "settings.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver el registro"), 403)
     }
     try {

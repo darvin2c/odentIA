@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router"
+import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
 import {
   Badge,
   Button,
@@ -10,30 +10,40 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  ConfirmDialog,
   DataRefreshMarker,
   dayMinutesIn,
+  EmptyState,
+  ErrorState,
   formatDateLong,
   formatSpan,
   hourLabel,
-  LoadingState,
   PageHeader,
+  RowActions,
   ScheduleResourceChips,
-  scheduleToneAt,
   SubmitButton,
+  scheduleToneAt,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus } from "lucide-react"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { Building2, Plus } from "lucide-react"
 import * as React from "react"
-import { apiFetch } from "../../lib/api"
-import type { AgendaAppointment, AgendaResources, ScheduleBlock } from "../../lib/agenda"
 import { AbsenceForm, type AbsenceScope } from "../../components/agenda/absence-form"
 import { ChairForm } from "../../components/agenda/chair-form"
 import { useWeeklySchedule, WeeklyScheduleFields } from "../../components/agenda/schedule-editor"
 import { errorMessage, shortName } from "../../components/agenda/shared"
 import { BranchSwitcher } from "../../components/branch-switcher"
+import { SettingsNoAccess } from "../../components/settings/no-access"
 import { useActiveBranch } from "../../lib/active-branch"
-import { usePermission } from "../../lib/crm"
+import type {
+  AgendaAppointment,
+  AgendaResources,
+  ChairSetting,
+  ScheduleBlock,
+} from "../../lib/agenda"
+import { ApiError, apiFetch } from "../../lib/api"
+import { useMyRole, usePermission } from "../../lib/crm"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/availability")({
@@ -51,6 +61,9 @@ const REGULAR_MINUTES = [15, 30, 45, 60, 90, 120]
 const AHEAD_DAYS = 60
 
 const CARD = "grid content-start gap-3 rounded-xl border bg-background p-3 sm:p-4"
+
+/** Sin sede elegida todavía: lo que hacen la página y sus formularios. */
+const SUBTITLE = "El horario y las ausencias de cada profesional, y lo que vale para toda la sede."
 
 function GroupTitle({ title, hint }: { title: string; hint: string }) {
   return (
@@ -70,6 +83,28 @@ function CardHead({ title, action }: { title: string; action?: React.ReactNode }
   )
 }
 
+/** Una lista de la tarjeta que no cargó: lo dice y deja reintentar, sin retirar el resto. */
+function CardError({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <p
+      role="alert"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-destructive"
+    >
+      No pudimos cargar {what}.
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Reintentar
+      </Button>
+    </p>
+  )
+}
+
+/** Lo que se va a quitar, con lo que pasa al quitarlo. */
+interface Removal {
+  block: ScheduleBlock
+  title: string
+  description: string
+}
+
 /**
  * Horarios y ausencias de una sede, en dos grupos: lo de cada profesional (su
  * horario de la semana y los días que no viene) y lo de la sede (sillones,
@@ -77,12 +112,20 @@ function CardHead({ title, action }: { title: string; action?: React.ReactNode }
  */
 function AvailabilityPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const role = useMyRole()
+  const canRead = usePermission("settings.read")
   const canConfigure = usePermission("settings.write")
+  // Un enlace a otra pantalla solo se ofrece a quien puede abrirla.
+  const canOpen = (path: string) => {
+    const permissions = platformPathPermission(path)
+    return permissions === null || canAccessAny(role, permissions)
+  }
   // La misma sede que la Agenda: la del enlace o la última elegida.
   const sede = useActiveBranch()
   const resourcesQuery = useQuery({
     queryKey: ["agenda-resources", sede.branchId ?? null],
-    enabled: sede.ready,
+    enabled: canRead && sede.ready,
     queryFn: () =>
       apiFetch<{ data: AgendaResources }>(
         `/api/agenda/resources${sede.branchId ? `?branchId=${encodeURIComponent(sede.branchId)}` : ""}`,
@@ -102,7 +145,10 @@ function AvailabilityPage() {
   const professional = professionals.find((item) => item.id === dentistId) ?? professionals[0]
   const professionalId = professional?.id ?? ""
 
-  const schedule = useWeeklySchedule({ branchId: resources?.branchId, dentistUserId: professionalId })
+  const schedule = useWeeklySchedule({
+    branchId: resources?.branchId,
+    dentistUserId: professionalId,
+  })
   const draftGuard = usePageDraftGuard(schedule.dirty)
 
   const range = React.useMemo(
@@ -123,6 +169,14 @@ function AvailabilityPage() {
   const blocks = blocksQuery.data?.data ?? []
   const absences = blocks.filter((block) => block.dentistUserId === professionalId)
   const closures = blocks.filter((block) => block.dentistUserId === null)
+  // Los sillones de la sede para administrarlos: también los desactivados.
+  const chairsQuery = useQuery({
+    queryKey: ["agenda-chairs", resources?.branchId],
+    enabled: Boolean(resources?.branchId),
+    queryFn: () =>
+      apiFetch<{ data: ChairSetting[] }>(`/api/agenda/chairs?branchId=${resources?.branchId}`),
+  })
+  const chairs = chairsQuery.data?.data
   // Citas en pie del profesional: las que caen en una ausencia hay que moverlas.
   const standingQuery = useQuery({
     queryKey: ["agenda", "ausencias", resources?.branchId, professionalId, range.from],
@@ -146,10 +200,20 @@ function AvailabilityPage() {
     )
 
   const [absenceForm, setAbsenceForm] = React.useState<AbsenceScope | null>(null)
-  const [chairForm, setChairForm] = React.useState(false)
+  /** `"new"` añade un sillón; un sillón, lo renombra. El formulario es el mismo. */
+  const [chairForm, setChairForm] = React.useState<"new" | ChairSetting | null>(null)
+  const [deactivatingChair, setDeactivatingChair] = React.useState<ChairSetting | null>(null)
+  const [removal, setRemoval] = React.useState<Removal | null>(null)
   const invalidateBlocks = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["schedule-blocks"] }),
+      queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
+    ])
+  }
+  const invalidateChairs = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["agenda-chairs"] }),
+      queryClient.invalidateQueries({ queryKey: ["agenda-resources"] }),
       queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
     ])
   }
@@ -173,6 +237,58 @@ function AvailabilityPage() {
       ? durationMutation.variables
       : (resources?.defaultDurationMin ?? 60)
 
+  const removeMutation = useMutation({
+    mutationFn: (block: ScheduleBlock) =>
+      apiFetch(`/api/agenda/blocks/${block.id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      setRemoval(null)
+      toast.success("Quitado: ese tramo vuelve a ofrecerse")
+      await invalidateBlocks()
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  const chairActiveMutation = useMutation({
+    mutationFn: ({ chair, isActive }: { chair: ChairSetting; isActive: boolean }) =>
+      apiFetch(`/api/agenda/chairs/${chair.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive }),
+      }),
+    onSuccess: async (_result, { chair, isActive }) => {
+      setDeactivatingChair(null)
+      toast.success(
+        isActive ? `${chair.name} vuelve a estar activo` : `${chair.name} quedó desactivado`,
+      )
+      await invalidateChairs()
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+
+  if (!canRead) {
+    return (
+      <div className="grid gap-4">
+        <PageHeader title="Horarios y ausencias" subtitle={SUBTITLE} />
+        <SettingsNoAccess />
+      </div>
+    )
+  }
+
+  // La clínica no tiene ninguna sede activa: no es un fallo, falta un paso.
+  const noBranch =
+    resources === undefined &&
+    resourcesQuery.error instanceof ApiError &&
+    resourcesQuery.error.status === 404
+  const activeChairs = (chairs ?? []).filter((chair) => chair.isActive)
+  /** A qué alcanza un cierre: toda la sede o un sillón, aunque hoy esté desactivado. */
+  const closureScope = (block: ScheduleBlock) =>
+    block.chairId === null
+      ? "toda la sede"
+      : (chairs?.find((chair) => chair.id === block.chairId)?.name ??
+        resources?.chairs.find((chair) => chair.id === block.chairId)?.label ??
+        "un sillón")
+  const reasonOf = (block: ScheduleBlock) =>
+    block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Cierre")
+
   return (
     <div className="grid gap-4">
       {draftGuard.dialog}
@@ -195,13 +311,11 @@ function AvailabilityPage() {
               <span className="truncate">, zona {resources.timeZone}</span>
             </>
           ) : (
-            "El horario y las ausencias de cada profesional, y lo que vale para toda la sede."
+            SUBTITLE
           )
         }
       />
-      {!resources ? (
-        <LoadingState message="Cargando horarios y ausencias…" />
-      ) : (
+      {resources ? (
         <>
           <GroupTitle
             title="De cada profesional"
@@ -264,7 +378,9 @@ function AvailabilityPage() {
                     ) : null
                   }
                 />
-                {blocksQuery.isPending ? (
+                {blocksQuery.isError && blocksQuery.data === undefined ? (
+                  <CardError what="las ausencias" onRetry={() => void blocksQuery.refetch()} />
+                ) : blocksQuery.isPending ? (
                   <Skeleton className="h-9 w-full" />
                 ) : absences.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -275,13 +391,22 @@ function AvailabilityPage() {
                     {absences.map((block) => {
                       const inside = insideOf(block)
                       const first = inside[0]
+                      const when = blockWhen(block, resources.timeZone)
                       return (
                         <BlockRow
                           key={block.id}
-                          block={block}
-                          timeZone={resources.timeZone}
-                          canConfigure={canConfigure}
-                          onDeleted={invalidateBlocks}
+                          reason={reasonOf(block)}
+                          when={when}
+                          onRemove={
+                            canConfigure
+                              ? () =>
+                                  setRemoval({
+                                    block,
+                                    title: `Quitar la ausencia de ${professional.label}`,
+                                    description: `${reasonOf(block)}: ${when}. Al quitarla, ${professional.label} vuelve a ofrecerse para reservar en ese tramo.`,
+                                  })
+                              : undefined
+                          }
                           note={
                             first ? (
                               <Link
@@ -309,7 +434,17 @@ function AvailabilityPage() {
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Esta sede aún no tiene profesionales. Añádelos en Equipo y permisos.
+              Esta sede aún no tiene profesionales.{" "}
+              {canOpen("/settings/team") ? (
+                <Link
+                  to="/settings/team"
+                  className="font-bold text-primary underline-offset-4 hover:underline"
+                >
+                  Invita a alguien en Equipo
+                </Link>
+              ) : (
+                "Pídele a quien administra la clínica que los invite."
+              )}
             </p>
           )}
 
@@ -323,25 +458,73 @@ function AvailabilityPage() {
                 title="Sillones"
                 action={
                   canConfigure ? (
-                    <Button variant="outline" size="sm" onClick={() => setChairForm(true)}>
+                    <Button variant="outline" size="sm" onClick={() => setChairForm("new")}>
                       <Plus aria-hidden />
                       Añadir sillón
                     </Button>
                   ) : null
                 }
               />
-              {resources.chairs.length === 0 ? (
+              {chairsQuery.isError && chairs === undefined ? (
+                <CardError what="los sillones" onRetry={() => void chairsQuery.refetch()} />
+              ) : chairs === undefined ? (
+                <Skeleton className="h-9 w-full" />
+              ) : chairs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Esta sede aún no tiene sillones: sin al menos uno no se puede reservar.
                 </p>
               ) : (
-                <ul className="flex flex-wrap items-start gap-2">
-                  {resources.chairs.map((chair) => (
-                    <li key={chair.id} className="rounded-lg border px-3 py-1.5 text-sm">
-                      {chair.label}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="grid">
+                    {chairs.map((chair) => (
+                      <li
+                        key={chair.id}
+                        className="flex min-h-11 items-center gap-2 border-b text-sm last:border-b-0"
+                      >
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate font-medium",
+                            !chair.isActive && "text-muted-foreground",
+                          )}
+                        >
+                          {chair.name}
+                        </span>
+                        {chair.isActive ? null : <Badge variant="secondary">Desactivado</Badge>}
+                        {canConfigure ? (
+                          <RowActions
+                            label={`Acciones de ${chair.name}`}
+                            items={[
+                              {
+                                key: "rename",
+                                label: "Renombrar",
+                                onSelect: () => setChairForm(chair),
+                              },
+                              chair.isActive
+                                ? {
+                                    key: "deactivate",
+                                    label: "Desactivar",
+                                    tone: "danger" as const,
+                                    onSelect: () => setDeactivatingChair(chair),
+                                  }
+                                : {
+                                    key: "reactivate",
+                                    label: "Reactivar",
+                                    disabled: chairActiveMutation.isPending,
+                                    onSelect: () =>
+                                      chairActiveMutation.mutate({ chair, isActive: true }),
+                                  },
+                            ]}
+                          />
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {activeChairs.length === 0 ? (
+                    <p className="text-sm font-medium text-warning-foreground">
+                      Ningún sillón está activo: sin al menos uno no se puede reservar.
+                    </p>
+                  ) : null}
+                </>
               )}
             </section>
 
@@ -374,7 +557,7 @@ function AvailabilityPage() {
               </RadioGroup>
               <p className="text-sm text-muted-foreground">
                 Lo que dura una cita sin servicio. Con servicio manda su duración, y al reservar se
-                puede cambiar estirando el bloque.
+                puede cambiar estirando el bloque. Se guarda al elegirla.
               </p>
             </section>
           </div>
@@ -395,7 +578,9 @@ function AvailabilityPage() {
                 ) : null
               }
             />
-            {blocksQuery.isPending ? (
+            {blocksQuery.isError && blocksQuery.data === undefined ? (
+              <CardError what="los feriados y cierres" onRetry={() => void blocksQuery.refetch()} />
+            ) : blocksQuery.isPending ? (
               <Skeleton className="h-9 w-full" />
             ) : closures.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -403,33 +588,64 @@ function AvailabilityPage() {
               </p>
             ) : (
               <ul className="grid">
-                {closures.map((block) => (
-                  <BlockRow
-                    key={block.id}
-                    block={block}
-                    timeZone={resources.timeZone}
-                    canConfigure={canConfigure}
-                    onDeleted={invalidateBlocks}
-                    scope={
-                      resources.chairs.find((chair) => chair.id === block.chairId)?.label ??
-                      "toda la sede"
-                    }
-                  />
-                ))}
+                {closures.map((block) => {
+                  const when = blockWhen(block, resources.timeZone)
+                  const scope = closureScope(block)
+                  return (
+                    <BlockRow
+                      key={block.id}
+                      reason={reasonOf(block)}
+                      when={when}
+                      scope={scope}
+                      onRemove={
+                        canConfigure
+                          ? () =>
+                              setRemoval({
+                                block,
+                                title: "Quitar el feriado o cierre",
+                                description: `${reasonOf(block)}: ${when}, ${scope}. Al quitarlo, ese tramo vuelve a ofrecerse para reservar.`,
+                              })
+                          : undefined
+                      }
+                    />
+                  )
+                })}
               </ul>
             )}
           </section>
         </>
+      ) : noBranch ? (
+        <EmptyState
+          icon={Building2}
+          title="No hay ninguna sede activa"
+          description="Los horarios y las ausencias son de una sede. Reactiva una o crea la primera en Sedes."
+          actionLabel={canOpen("/settings/branches") ? "Ir a Sedes" : undefined}
+          onAction={
+            canOpen("/settings/branches")
+              ? () => void navigate({ to: "/settings/branches" })
+              : undefined
+          }
+        />
+      ) : resourcesQuery.isError ? (
+        <ErrorState
+          title="No pudimos cargar los horarios y ausencias"
+          message="Comprueba tu conexión y vuelve a intentarlo."
+          onRetry={() => void resourcesQuery.refetch()}
+        />
+      ) : (
+        <AvailabilitySkeleton />
       )}
       {chairForm && resources ? (
         <ChairForm
+          key={chairForm === "new" ? "new" : chairForm.id}
           branchId={resources.branchId}
           branchName={resources.branchName}
-          suggestedName={`Sillón ${resources.chairs.length + 1}`}
-          onClose={() => setChairForm(false)}
+          suggestedName={`Sillón ${(chairs?.length ?? resources.chairs.length) + 1}`}
+          chair={chairForm === "new" ? undefined : { id: chairForm.id, name: chairForm.name }}
+          onClose={() => setChairForm(null)}
           onSaved={async () => {
-            setChairForm(false)
-            await queryClient.invalidateQueries({ queryKey: ["agenda-resources"] })
+            setChairForm(null)
+            await invalidateChairs()
           }}
         />
       ) : null}
@@ -447,6 +663,90 @@ function AvailabilityPage() {
           }}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={removal !== null}
+        onClose={() => setRemoval(null)}
+        onConfirm={() => removal && removeMutation.mutate(removal.block)}
+        title={removal?.title ?? ""}
+        description={removal?.description ?? ""}
+        confirmLabel="Quitar"
+        variant="destructive"
+        pending={removeMutation.isPending}
+      />
+
+      <ConfirmDialog
+        open={deactivatingChair !== null}
+        onClose={() => setDeactivatingChair(null)}
+        onConfirm={() =>
+          deactivatingChair &&
+          chairActiveMutation.mutate({ chair: deactivatingChair, isActive: false })
+        }
+        title={`Desactivar ${deactivatingChair?.name ?? ""}`}
+        description={
+          deactivatingChair ? chairConsequence(deactivatingChair, activeChairs.length) : ""
+        }
+        confirmLabel="Desactivar"
+        variant="destructive"
+        pending={chairActiveMutation.isPending}
+      />
+    </div>
+  )
+}
+
+/** Lo que pasa al desactivar un sillón, con sus citas por delante y si es el último activo. */
+function chairConsequence(chair: ChairSetting, activeCount: number): string {
+  const parts = ["No se podrán reservar citas nuevas en él. Puedes reactivarlo cuando quieras."]
+  if (chair.upcomingAppointments === 1) {
+    parts.push("Tiene 1 cita por venir: sigue en este sillón y no se mueve sola.")
+  } else if (chair.upcomingAppointments > 1) {
+    parts.push(
+      `Tiene ${chair.upcomingAppointments} citas por venir: siguen en este sillón y no se mueven solas.`,
+    )
+  }
+  if (activeCount <= 1)
+    parts.push("Es el único sillón activo de la sede: sin uno no se puede reservar.")
+  return parts.join(" ")
+}
+
+/** Una fila por día del horario semanal, para reservar su hueco. */
+const WEEK_SLOTS = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
+
+/** El hueco de la pantalla mientras llega la sede: sus dos grupos y sus tarjetas. */
+function AvailabilitySkeleton() {
+  return (
+    <div role="status" aria-busy aria-label="Cargando horarios y ausencias…" className="grid gap-4">
+      <div aria-hidden className="grid gap-4">
+        <div className="mt-2 grid gap-1.5">
+          <Skeleton className="h-6 w-52" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </div>
+        <Skeleton className="h-10 w-64 max-w-full rounded-full" />
+        <div className={CARD}>
+          <Skeleton className="h-5 w-60 max-w-full" />
+          {WEEK_SLOTS.map((day) => (
+            <Skeleton key={day} className="h-10 w-full" />
+          ))}
+        </div>
+        <div className={CARD}>
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+        <div className="mt-2 grid gap-1.5">
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-4 w-64 max-w-full" />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className={CARD}>
+            <Skeleton className="h-5 w-24" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+          <div className={CARD}>
+            <Skeleton className="h-5 w-56 max-w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -470,30 +770,22 @@ function blockWhen(block: ScheduleBlock, timeZone: string): string {
 }
 
 function BlockRow({
-  block,
-  timeZone,
-  canConfigure,
-  onDeleted,
+  reason,
+  when,
+  onRemove,
   scope,
   note,
 }: {
-  block: ScheduleBlock
-  timeZone: string
-  canConfigure: boolean
-  onDeleted: () => Promise<void>
+  /** Por qué no se atiende: «Vacaciones», «Feriado»… */
+  reason: string
+  when: string
+  /** Quitarlo pregunta antes; sin esto, la fila solo se lee. */
+  onRemove?: () => void
   /** A qué alcanza un cierre: toda la sede o un sillón. */
   scope?: string
   /** Aviso de la fila: citas que quedaron dentro. */
   note?: React.ReactNode
 }) {
-  const [error, setError] = React.useState("")
-  const deleteMutation = useMutation({
-    mutationFn: () => apiFetch(`/api/agenda/blocks/${block.id}`, { method: "DELETE" }),
-    onSuccess: async () => onDeleted(),
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-  const reason = block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Cierre")
-  const when = blockWhen(block, timeZone)
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-2 text-sm last:border-b-0">
       <Badge variant="soft">{reason}</Badge>
@@ -502,24 +794,13 @@ function BlockRow({
         {scope ? <span className="text-muted-foreground"> · {scope}</span> : null}
       </span>
       {note}
-      {canConfigure ? (
-        <SubmitButton
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          pending={deleteMutation.isPending}
-          onClick={() => deleteMutation.mutate()}
-        >
+      {onRemove ? (
+        <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onRemove}>
           Quitar
           <span className="sr-only">
             {reason}: {when}
           </span>
-        </SubmitButton>
-      ) : null}
-      {error ? (
-        <span role="alert" className="w-full text-xs text-destructive">
-          {error}
-        </span>
+        </Button>
       ) : null}
     </li>
   )

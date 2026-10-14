@@ -5,7 +5,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { agentPolicy } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
-import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
@@ -38,6 +38,7 @@ import {
   unsubscribeByToken,
 } from "./automation.js"
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
+import { saveMessageText } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
@@ -767,9 +768,33 @@ function fakeMeta(...responses: { status?: number; json: unknown }[]) {
   return { calls, fetch: impl }
 }
 
+/** Deja a la conexión sin la plantilla de un mensaje, como cuando WhatsApp no aceptó pedirla al conectar. */
+async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
+  await ownerDb
+    .delete(channelTemplate)
+    .where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, AUTOMATION_MESSAGES[key].template)))
+}
+
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al haber una regla prendida pide su mensaje una sola vez, y sale cuando WhatsApp lo aprueba", async () => {
+  it("al conectar quedan pedidos los seis, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
+    expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
+      ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
+      ["odentia_recordatorio_cita_v1", "en_revision", "recordatorio_cita"],
+      ["odentia_recordatorio_control_v1", "en_revision", "recordatorio_control"],
+      ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion"],
+      ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia"],
+      ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto"],
+    ])
+    // Ya están pedidos: el ciclo no vuelve a llamar a WhatsApp.
+    const meta = fakeMeta()
+    expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, NOW, { fetch: meta.fetch }))).toBe(0)
+    expect(meta.calls).toHaveLength(0)
+  })
+
+  it("el ciclo pide lo que faltó una sola vez, y sale cuando WhatsApp lo aprueba", async () => {
+    const c = await clinic()
+    await forgetTemplate(c, "recordatorio_cita")
     await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
     const meta = fakeMeta({ json: { id: "950", status: "PENDING", category: "UTILITY" } })
     expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, NOW, { fetch: meta.fetch }))).toBe(1)
@@ -786,10 +811,12 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
         ],
       },
     })
-    expect(await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).toMatchObject([
-      { name: "odentia_recordatorio_cita_v1", status: "en_revision", category: "utility", variables: 3, messageKey: "recordatorio_cita" },
-    ])
-    expect((await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!)))[0]?.externalId).toBe("950")
+    expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).find((item) => item.name === "odentia_recordatorio_cita_v1")).toMatchObject(
+      { status: "en_revision", category: "utility", variables: 3, messageKey: "recordatorio_cita" },
+    )
+    expect(
+      (await ownerDb.select().from(channelTemplate).where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, "odentia_recordatorio_cita_v1"))))[0]?.externalId,
+    ).toBe("950")
     // Ya está pedido: el siguiente tick no vuelve a llamar.
     expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, NOW, { fetch: meta.fetch }))).toBe(0)
     expect(meta.calls).toHaveLength(1)
@@ -806,7 +833,10 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     const update = { externalId: "950", name: "odentia_recordatorio_cita_v1", language: "es", status: "aprobada" as const, reason: null }
     expect(await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [update]))).toBe(1)
     expect(await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [update]))).toBe(0)
-    expect((await noticesOf(c)).map((notice) => notice.title)).toContain("WhatsApp aprobó un mensaje: «Recordatorio de cita»")
+    expect((await noticesOf(c)).map((notice) => [notice.title, notice.href])).toContainEqual([
+      "WhatsApp aprobó un mensaje: «Recordar la cita»",
+      "/settings/integrations/whatsapp",
+    ])
     const next = await person(c, "Jorge Salas", { consent: ["recordatorio"] })
     const later = new Date(NOW.getTime() + 45 * 60_000)
     await appointmentFor(c, next.patientId, new Date(later.getTime() + 24 * HOUR))
@@ -817,7 +847,8 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
 
   it("si WhatsApp no acepta la solicitud, avisa una vez con el motivo y reintenta al día siguiente", async () => {
     const c = await clinic()
-    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
+    // La línea está apagada: el mensaje se pide igual.
+    await forgetTemplate(c, "seguimiento_presupuesto")
     const meta = fakeMeta(
       { status: 400, json: { error: { message: "(#200) Permissions error" } } },
       { json: { id: "951", status: "PENDING", category: "MARKETING" } },
@@ -827,9 +858,9 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     expect(meta.calls).toHaveLength(1)
     const notices = await noticesOf(c)
     expect(notices).toHaveLength(1)
-    expect(notices[0]).toMatchObject({ title: "WhatsApp no aceptó la solicitud de un mensaje", href: "/settings/channels" })
-    expect(notices[0]?.body).toContain("(#200) Permissions error")
-    expect(await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).toEqual([])
+    expect(notices[0]).toMatchObject({ title: "WhatsApp no aceptó la solicitud de un mensaje", href: "/settings/integrations/whatsapp" })
+    expect(notices[0]?.body).toContain("«Retomar un presupuesto». Motivo: WhatsApp no aceptó la solicitud de plantilla: (#200) Permissions error")
+    expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => item.name)).not.toContain("odentia_seguimiento_presupuesto_v1")
     const tomorrow = new Date(NOW.getTime() + DAY)
     expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, tomorrow, { fetch: meta.fetch }))).toBe(1)
   })
@@ -843,7 +874,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ externalId: null, name, language: "es", status: "pausada", reason: "Calidad baja" }]))
     await expect(sendable(3)).rejects.toThrow(`La plantilla «${name}» está pausada (Calidad baja): no se puede enviar`)
     expect((await noticesOf(c)).map((notice) => [notice.title, notice.body])).toEqual([
-      ["WhatsApp pausó un mensaje: «Tu presupuesto sigue pendiente»", "Motivo: Calidad baja. Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad."],
+      ["WhatsApp pausó un mensaje: «Retomar un presupuesto»", "Motivo: Calidad baja. Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad."],
     ])
     await expect(run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "inventada", language: "es", params: 0 }))).rejects.toThrow("Plantilla no autorizada en esta conexión")
   })
@@ -875,10 +906,15 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       },
     })
     const synced = await run(c, (tx) => syncConnectionTemplates(tx, c.orgId, c.whatsappId!, KEY, { fetch: meta.fetch }))
+    // Lo recién pedido puede no aparecer aún en la lectura de la cuenta: sigue en revisión.
     expect(synced.map((item) => [item.name, item.status, item.messageKey, item.variables])).toEqual([
       ["bienvenida", "aprobada", null, 1],
+      ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
       ["odentia_recordatorio_cita_v1", "rechazada", "recordatorio_cita", 3],
       ["odentia_recordatorio_control_v1", "deshabilitada", "recordatorio_control", 0],
+      ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion", 2],
+      ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia", 3],
+      ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto", 3],
     ])
     expect(synced.find((item) => item.status === "rechazada")?.reason).toBe("INVALID_FORMAT")
     // Con el cuerpo conocido, se exige un dato por variable.
@@ -886,7 +922,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0 })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(7)
   })
 })
 
@@ -964,7 +1000,7 @@ describe("pedírselo con palabras", () => {
     expect(line.draft!.test).toMatchObject({ total: 3, title: "3 cancelaciones" })
     expect(line.draft!.test!.rows.map((row) => [row.route, row.total])).toEqual([["respuesta", 1], ["no_pudo", 2]])
     expect(line.draft!.review.map((check) => check.ok)).toContain(false)
-    expect(line.draft!.review.find((check) => !check.ok)!.text).toContain("WhatsApp todavía no tiene un mensaje aprobado para esto")
+    expect(line.draft!.review.find((check) => !check.ok)!.text).toContain("WhatsApp todavía no aprobó el mensaje de esta línea")
     expect(await jobsOf(c)).toHaveLength(0)
     expect(await ownerDb.select().from(conversation).where(eq(conversation.organizationId, c.orgId))).toHaveLength(1)
 
@@ -1239,5 +1275,67 @@ describe("un botón ya dice qué quiere la persona", () => {
     await run(c, (tx) => syncVisitFollowUps(tx, c.orgId, now))
     await deliver(c, now)
     expect(await says(other.conversationId!, "No enviar más")).toBeNull()
+  })
+})
+
+describe("el texto de un mensaje es de cada clínica", () => {
+  it("el cambio sale igual por las tres vías, y solo cuando WhatsApp lo aprueba reemplaza a la plantilla anterior", async () => {
+    const c = await clinic({ approved: ["recordatorio_cita"], email: true })
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const edited = "Estimada {{persona}}: su cita es {{citas}}, en {{lugar}}. Si necesita cambiarla, responda a este mensaje."
+    await run(c, (tx) =>
+      saveMessageText(tx, c.orgId, c.whatsappId!, c.ownerId, "recordatorio_cita", edited, { fetch, validateExternal: false, secretsKey: KEY }),
+    )
+    const [version] = await ownerDb.select().from(clinicMessageVersion).where(eq(clinicMessageVersion.organizationId, c.orgId))
+    const sentTo = async (contactId: string) => {
+      const job = (await jobsOf(c)).find((item) => item.contactId === contactId)!
+      return { job, sent: await messageOf(job.sentMessageId) }
+    }
+
+    // En revisión: sigue saliendo la plantilla y el texto de antes.
+    const first = await person(c, "Lucía Paredes", { consent: ["recordatorio"] })
+    await appointmentFor(c, first.patientId, new Date(NOW.getTime() + 24 * HOUR), "programada", 10)
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    await deliver(c)
+    const before = await sentTo(first.contactId)
+    expect(before.job).toMatchObject({ status: "enviado", via: "plantilla" })
+    expect(before.sent.templateName).toBe("odentia_recordatorio_cita_v1")
+    expect(before.sent.body).toContain("Hola, Lucía. Te recordamos la cita en Clínica Sonríe, sede Centro")
+
+    // WhatsApp lo aprueba: desde ahora el texto de la clínica, por donde salga.
+    await run(c, (tx) =>
+      applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ externalId: null, name: version!.templateName, language: "es", status: "aprobada", reason: null }]),
+    )
+    const later = new Date(NOW.getTime() + 45 * 60_000)
+    const cold = await person(c, "Jorge Salas", { consent: ["recordatorio"] })
+    const warm = await person(c, "Ana Ríos", { consent: ["recordatorio"], openWindow: true })
+    const mail = await person(c, "Rosa Díaz", { whatsapp: false, email: "rosa@example.com", consent: ["recordatorio"] })
+    for (const [index, who] of [cold, warm, mail].entries()) {
+      await appointmentFor(c, who.patientId, new Date(later.getTime() + 24 * HOUR - index * 10 * 60_000), "programada", 10)
+    }
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, later))
+    await deliver(c, later)
+
+    const byTemplate = await sentTo(cold.contactId)
+    expect(byTemplate.job).toMatchObject({ status: "enviado", via: "plantilla" })
+    expect(byTemplate.sent).toMatchObject({ contentType: "template", templateName: version!.templateName, templateLanguage: "es" })
+    // Cada dato va en la posición en que quedó en el texto nuevo.
+    const params = byTemplate.sent.templateParams as string[]
+    expect([params[0], params[2]]).toEqual(["Jorge", "Clínica Sonríe, sede Centro"])
+    expect(byTemplate.sent.body).toBe(`Estimada Jorge: su cita es ${params[1]}, en Clínica Sonríe, sede Centro. Si necesita cambiarla, responda a este mensaje.`)
+    // Los botones y lo que devuelven no cambian con el texto.
+    expect(byTemplate.sent.replyButtons).toEqual([
+      { id: replyId("confirmar", byTemplate.job.id), title: "Confirmar" },
+      { id: replyId("responder", byTemplate.job.id), title: "No podré ir" },
+      { id: replyId("baja", byTemplate.job.id), title: "No enviar más" },
+    ])
+
+    const asReply = await sentTo(warm.contactId)
+    expect(asReply.job).toMatchObject({ status: "enviado", via: "respuesta" })
+    expect(asReply.sent.body).toMatch(/^Estimada Ana: su cita es .+, en Clínica Sonríe, sede Centro\. Si necesita cambiarla, responda a este mensaje\.$/)
+
+    const byMail = await sentTo(mail.contactId)
+    expect(byMail.job).toMatchObject({ status: "enviado", via: "correo" })
+    expect(byMail.sent.body).toContain("Estimada Rosa: su cita es ")
   })
 })

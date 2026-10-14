@@ -6,6 +6,8 @@ import type {
   NormalizedStatus,
   NormalizedTemplateStatus,
   OutboundMessage,
+  ProviderAccount,
+  ProviderHealth,
   ProviderTemplate,
   TemplateCategory,
   TemplateStatus,
@@ -21,7 +23,13 @@ export interface WhatsAppCloudConfig {
   phoneNumberId: string
   wabaId: string
   accessToken: string
-  appSecret: string
+  /**
+   * Clave secreta de la app de Meta de la clínica: firma los avisos que llegan a
+   * la dirección de la conexión. Una conexión hecha con «Conectar con Facebook»
+   * no la tiene: sus avisos llegan a la dirección de la app de odentIA, firmados
+   * con la clave de esa app.
+   */
+  appSecret?: string
   /**
    * Solo para entornos sin proveedor (pruebas y desarrollo): las plantillas se
    * leen de la cuenta con `listTemplates`, no se escriben a mano.
@@ -55,11 +63,13 @@ function getConfig(config: Record<string, unknown>): WhatsAppCloudConfig {
       }
     }
   }
+  const appSecret = config["appSecret"]
   return {
     phoneNumberId: pick("phoneNumberId"),
     wabaId: pick("wabaId"),
     accessToken: pick("accessToken"),
-    appSecret: pick("appSecret"),
+    // Solo hace falta para verificar avisos (`verifyWebhook`); enviar y leer la cuenta no la usan.
+    ...(typeof appSecret === "string" && appSecret.length > 0 ? { appSecret } : {}),
     templates,
   }
 }
@@ -100,6 +110,8 @@ interface WaStatus {
 
 interface WaValue {
   messaging_product?: string
+  /** Número de la empresa al que pertenece el aviso. */
+  metadata?: { display_phone_number?: string; phone_number_id?: string }
   contacts?: { profile?: { name?: string }; wa_id?: string }[]
   messages?: WaMessage[]
   statuses?: WaStatus[]
@@ -296,8 +308,8 @@ export function buildBody(to: string, kind: OutboundMessage["kind"]): Record<str
   }
 }
 
-function connectionInfo(json: unknown): { id?: string; displayName?: string } {
-  if (!json || typeof json !== "object") return {}
+function connectionInfo(json: unknown): { id?: string; displayName?: string; account: ProviderAccount } {
+  if (!json || typeof json !== "object") return { account: { name: null, number: null } }
   const id = "id" in json && typeof json.id === "string" ? json.id : undefined
   const verified =
     "verified_name" in json && typeof json.verified_name === "string"
@@ -310,17 +322,48 @@ function connectionInfo(json: unknown): { id?: string; displayName?: string } {
   return {
     ...(id ? { id } : {}),
     ...((verified ?? phone) ? { displayName: verified ?? phone } : {}),
+    account: { name: verified ?? null, number: phone ?? null },
   }
+}
+
+/** Calidad del número en palabras; lo que Meta no califica (`NA`, `UNKNOWN`) queda sin dato. */
+const META_QUALITY: Record<string, ProviderHealth["quality"]> = {
+  GREEN: "alta",
+  YELLOW: "media",
+  RED: "baja",
+}
+
+/**
+ * Tope diario de conversaciones que inicia la empresa: `TIER_250`, `TIER_2K`,
+ * `TIER_10K`, `TIER_100K` o `TIER_UNLIMITED`. Un valor que no tenga esa forma
+ * (`TIER_NOT_SET`, uno nuevo) queda sin dato: no se supone un número.
+ */
+function messagingLimit(value: unknown): Pick<ProviderHealth, "dailyLimit" | "unlimited"> {
+  const tier = typeof value === "string" ? value.toUpperCase() : ""
+  if (tier === "TIER_UNLIMITED") return { dailyLimit: null, unlimited: true }
+  const match = /^TIER_(\d+)(K?)$/.exec(tier)
+  if (!match) return { dailyLimit: null, unlimited: false }
+  return { dailyLimit: Number(match[1]) * (match[2] ? 1000 : 1), unlimited: false }
 }
 
 const META_TEMPLATE_STATUS: Record<string, TemplateStatus> = {
   APPROVED: "aprobada",
+  // Dejó de estar marcada o deshabilitada: vuelve a servir para enviar.
+  REINSTATED: "aprobada",
   PENDING: "en_revision",
   IN_APPEAL: "en_revision",
   REJECTED: "rechazada",
   PAUSED: "pausada",
   FLAGGED: "pausada",
 }
+
+/**
+ * Avisos que no dicen en qué estado quedó la plantilla (`LOCKED`: no se puede
+ * editar; `UNARCHIVED`: volvió al estado que tenía). No cambian el catálogo; lo
+ * que corresponda llega con la siguiente lectura de la cuenta.
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/message_template_status_update
+ */
+const META_TEMPLATE_EVENTS_WITHOUT_STATUS = new Set(["LOCKED", "UNARCHIVED"])
 
 /** Lo que Meta no declara aprobado, en revisión, rechazado o pausado ya no sirve para enviar. */
 function templateStatus(value: unknown): TemplateStatus {
@@ -382,6 +425,8 @@ function toTemplateStatus(value: unknown): NormalizedTemplateStatus | null {
   const language = "message_template_language" in value ? text(value.message_template_language) : null
   if (!name || !language) return null
   const id = "message_template_id" in value ? value.message_template_id : null
+  const event = "event" in value && typeof value.event === "string" ? value.event.toUpperCase() : ""
+  if (META_TEMPLATE_EVENTS_WITHOUT_STATUS.has(event)) return null
   return {
     externalId: typeof id === "string" || typeof id === "number" ? String(id) : null,
     name,
@@ -397,6 +442,122 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/webp": "webp",
   "application/pdf": "pdf",
   "audio/ogg": "ogg",
+}
+
+/** Un cambio de un aviso de WhatsApp, ya normalizado, con a quién pertenece. */
+interface WaChange {
+  /** Cuenta de WhatsApp Business (`entry[].id`). */
+  accountId: string | null
+  /** Número de la empresa (`value.metadata.phone_number_id`); los cambios de plantilla no lo traen. */
+  phoneNumberId: string | null
+  messages: NormalizedInbound[]
+  statuses: NormalizedStatus[]
+  templateStatus: NormalizedTemplateStatus | null
+}
+
+/** Recorre `entry[].changes[]` de un aviso y normaliza cada cambio por separado. */
+function readChanges(rawBody: string): WaChange[] {
+  let body: unknown
+  try {
+    body = JSON.parse(rawBody) as unknown
+  } catch {
+    return []
+  }
+  if (!body || typeof body !== "object" || !("entry" in body) || !Array.isArray(body.entry)) return []
+  const found: WaChange[] = []
+  for (const entry of body.entry) {
+    if (!entry || typeof entry !== "object" || !("changes" in entry) || !Array.isArray(entry.changes))
+      continue
+    const accountId = "id" in entry ? text(entry.id) : null
+    for (const change of entry.changes) {
+      if (!change || typeof change !== "object" || !("value" in change)) continue
+      if ("field" in change && change.field === "message_template_status_update") {
+        const update = toTemplateStatus(change.value)
+        if (update) {
+          found.push({ accountId, phoneNumberId: null, messages: [], statuses: [], templateStatus: update })
+        }
+        continue
+      }
+      const value = change.value as WaValue
+      if (!value || typeof value !== "object") continue
+      const messages: NormalizedInbound[] = []
+      const statuses: NormalizedStatus[] = []
+      for (const m of value.messages ?? []) {
+        const n = messageToNormalized(m, displayNameOf(value, m.from))
+        if (n) messages.push(n)
+      }
+      for (const s of value.statuses ?? []) {
+        const n = statusToNormalized(s)
+        if (n) statuses.push(n)
+      }
+      found.push({
+        accountId,
+        phoneNumberId: text(value.metadata?.phone_number_id),
+        messages,
+        statuses,
+        templateStatus: null,
+      })
+    }
+  }
+  return found
+}
+
+/** Lo que un aviso trae para un número: sus mensajes y los estados de lo que envió. */
+export interface WhatsAppNumberDelivery {
+  kind: "number"
+  phoneNumberId: string
+  accountId: string | null
+  messages: NormalizedInbound[]
+  statuses: NormalizedStatus[]
+}
+
+/** Lo que un aviso trae para una cuenta: los cambios de estado de sus plantillas. */
+export interface WhatsAppAccountDelivery {
+  kind: "account"
+  accountId: string
+  templateStatuses: NormalizedTemplateStatus[]
+}
+
+export type WhatsAppDelivery = WhatsAppNumberDelivery | WhatsAppAccountDelivery
+
+/**
+ * Reparte un aviso que llega a la dirección de una app (una sola para todas las
+ * cuentas suscritas, y puede traer cambios de varias en el mismo envío): los
+ * mensajes y estados van al número que los recibió
+ * (`value.metadata.phone_number_id`) y los cambios de plantilla, que no traen
+ * número, a su cuenta (`entry[].id`). Lo que no dice de quién es se omite.
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/messages
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/message_template_status_update
+ */
+export function splitWhatsAppWebhook(rawBody: string): WhatsAppDelivery[] {
+  const numbers = new Map<string, WhatsAppNumberDelivery>()
+  const accounts = new Map<string, WhatsAppAccountDelivery>()
+  for (const change of readChanges(rawBody)) {
+    if (change.templateStatus) {
+      if (!change.accountId) continue
+      const account = accounts.get(change.accountId) ?? {
+        kind: "account",
+        accountId: change.accountId,
+        templateStatuses: [],
+      }
+      account.templateStatuses.push(change.templateStatus)
+      accounts.set(change.accountId, account)
+      continue
+    }
+    if (!change.phoneNumberId || (change.messages.length === 0 && change.statuses.length === 0)) continue
+    const number = numbers.get(change.phoneNumberId) ?? {
+      kind: "number",
+      phoneNumberId: change.phoneNumberId,
+      accountId: change.accountId,
+      messages: [],
+      statuses: [],
+    }
+    number.messages.push(...change.messages)
+    number.statuses.push(...change.statuses)
+    numbers.set(change.phoneNumberId, number)
+  }
+  return [...numbers.values(), ...accounts.values()]
 }
 
 export const whatsappCloudApiAdapter: ChannelAdapter = {
@@ -420,44 +581,13 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
   },
 
   parseWebhook({ rawBody }): WebhookParseResult {
-    const empty: WebhookParseResult = { messages: [], statuses: [] }
-    let body: unknown
-    try {
-      body = JSON.parse(rawBody) as unknown
-    } catch {
-      return empty
-    }
-    if (!body || typeof body !== "object" || !("entry" in body) || !Array.isArray(body.entry))
-      return empty
     const messages: NormalizedInbound[] = []
     const statuses: NormalizedStatus[] = []
     const templateStatuses: NormalizedTemplateStatus[] = []
-    for (const entry of body.entry) {
-      if (
-        !entry ||
-        typeof entry !== "object" ||
-        !("changes" in entry) ||
-        !Array.isArray(entry.changes)
-      )
-        continue
-      for (const change of entry.changes) {
-        if (!change || typeof change !== "object" || !("value" in change)) continue
-        if ("field" in change && change.field === "message_template_status_update") {
-          const update = toTemplateStatus(change.value)
-          if (update) templateStatuses.push(update)
-          continue
-        }
-        const value = change.value as WaValue
-        if (!value || typeof value !== "object") continue
-        for (const m of value.messages ?? []) {
-          const n = messageToNormalized(m, displayNameOf(value, m.from))
-          if (n) messages.push(n)
-        }
-        for (const s of value.statuses ?? []) {
-          const n = statusToNormalized(s)
-          if (n) statuses.push(n)
-        }
-      }
+    for (const change of readChanges(rawBody)) {
+      messages.push(...change.messages)
+      statuses.push(...change.statuses)
+      if (change.templateStatus) templateStatuses.push(change.templateStatus)
     }
     return { messages, statuses, ...(templateStatuses.length > 0 ? { templateStatuses } : {}) }
   },
@@ -558,6 +688,25 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     }
   },
 
+  /**
+   * Meta elimina por nombre todas las plantillas que lo llevan, en cualquier
+   * idioma, y no deja eliminar una deshabilitada ni reutilizar durante 30 días
+   * el nombre de una aprobada.
+   * https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/template-management
+   */
+  async deleteTemplate(config, template, deps) {
+    const cfg = getConfig(config)
+    const { status, json } = await graphFetch(
+      cfg,
+      `${cfg.wabaId}/message_templates?name=${encodeURIComponent(template.name)}`,
+      { method: "DELETE" },
+      deps,
+    )
+    if (status >= 400) {
+      throw new Error(`WhatsApp no eliminó la plantilla: ${graphError(status, json)}`)
+    }
+  },
+
   async validateConnection(config, deps) {
     const cfg = getConfig(config)
     const { status, json } = await graphFetch(
@@ -573,6 +722,34 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     return {
       externalId: info.id ?? cfg.phoneNumberId,
       displayName: info.displayName ?? cfg.phoneNumberId,
+      account: info.account,
+    }
+  },
+
+  /**
+   * Calidad del número y tope diario. El tope se lee de
+   * `whatsapp_business_manager_messaging_limit`: `messaging_limit_tier` está en
+   * desuso. Es del portafolio de la empresa, aunque Meta lo informe por número.
+   * https://developers.facebook.com/documentation/business-messaging/whatsapp/messaging-limits
+   * https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/phone-numbers
+   */
+  async readHealth(config, deps) {
+    const cfg = getConfig(config)
+    const { status, json } = await graphFetch(
+      cfg,
+      `${cfg.phoneNumberId}?fields=quality_rating,whatsapp_business_manager_messaging_limit`,
+      {},
+      deps,
+    )
+    if (status >= 400 || !json || typeof json !== "object") {
+      throw new Error(`WhatsApp no entregó la salud del número: ${graphError(status, json)}`)
+    }
+    const rating = "quality_rating" in json && typeof json.quality_rating === "string" ? json.quality_rating : ""
+    return {
+      quality: META_QUALITY[rating.toUpperCase()] ?? null,
+      ...messagingLimit(
+        "whatsapp_business_manager_messaging_limit" in json ? json.whatsapp_business_manager_messaging_limit : null,
+      ),
     }
   },
 }

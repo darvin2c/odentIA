@@ -5,6 +5,7 @@ import {
   CONVERSATION_VIEWS,
   closeConversation,
   getInboxConversationDetail,
+  listApprovedMessages,
   listInboxConversations,
   listMessages,
   markRead,
@@ -12,8 +13,8 @@ import {
   OUTBOUND_MEDIA_MIME_EXT,
   reopenConversation,
   resolveConversationIdentity,
+  sendApprovedMessage,
   sendOutbound,
-  sendTemplateOutbound,
   setAgentStatus,
   summarizeInbox,
 } from "@odentia/services"
@@ -38,10 +39,10 @@ const listQuery = filtersQuery.extend({
 
 const textInput = z.object({ text: z.string().min(1).max(4000) })
 
-const templateInput = z.object({
-  name: z.string().min(1),
-  language: z.string().min(1),
-  params: z.array(z.string()).default([]),
+const approvedInput = z.object({
+  messageId: z.string().min(1).max(80),
+  // Solo en plantillas de la cuenta que piden datos: los escribe quien envía.
+  values: z.array(z.string().max(1000)).max(20).optional(),
 })
 
 const assignInput = z.object({ userId: z.string().nullable() })
@@ -133,15 +134,30 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
-  app.post("/:id/messages/template", async (c) => {
+  /**
+   * Los mensajes aprobados que se pueden enviar a mano en esta conversación,
+   * con los datos de la persona ya puestos, o por qué no hay ninguno.
+   */
+  app.get("/:id/approved-messages", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    try {
+      const result = await withOrgContext(deps.db, orgId, (tx) =>
+        listApprovedMessages(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+      )
+      return c.json({ data: result.data, none: result.none })
+    } catch (e) {
+      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+    }
+  })
+
+  app.post("/:id/messages/approved", async (c) => {
     const { orgId, userId } = orgContextOf(c)
-    const parsed = templateInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = approvedInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        sendTemplateOutbound(tx, orgId, deps.secretsKey, {
+        sendApprovedMessage(tx, orgId, deps.secretsKey, {
           conversationId: c.req.param("id"),
-          senderKind: "user",
           senderUserId: userId,
           ...parsed.data,
         }),

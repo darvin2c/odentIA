@@ -117,7 +117,7 @@ export function TurnOnDrawer({
           }
           action={
             hasChannel ? undefined : (
-              <Link to="/settings/channels" className={LINK}>
+              <Link to="/settings/integrations" className={LINK}>
                 Conectar un canal
               </Link>
             )
@@ -159,7 +159,7 @@ export function TurnOnDrawer({
           }
           action={
             readiness.receivers.length > 0 ? undefined : (
-              <Link to="/members" className={LINK}>
+              <Link to="/settings/team" className={LINK}>
                 Invitar a alguien
               </Link>
             )

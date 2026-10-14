@@ -5,6 +5,7 @@ import { createMailer } from "@odentia/mail"
 import { createStorage, secretsKeyFromEnv } from "@odentia/services"
 import { createApp } from "./app.js"
 import { env } from "./env.js"
+import { metaSignupFromEnv } from "./routes/whatsapp-signup.js"
 
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -63,6 +64,7 @@ const app = createApp({
       : {}),
     timeoutMs: env.DECISIONS_TIMEOUT_MS,
   },
+  metaSignup: metaSignupFromEnv(env),
   mailbox: {
     gmail: { clientId: env.GMAIL_CLIENT_ID, clientSecret: env.GMAIL_CLIENT_SECRET, redirectUri: env.GMAIL_REDIRECT_URI },
     microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },

@@ -69,6 +69,83 @@ reales aunque el LLM sea real; habilitar `live` y validación externa de conexio
 solo para una prueba autorizada, con destinatarios consentidos. Una respuesta
 del modelo no demuestra entrega del canal ni sustituye la observación humana.
 
+### WhatsApp con «Conectar con Facebook» (opcional)
+
+WhatsApp se conecta de dos maneras. A mano, con los datos de la app de Meta de
+cada clínica: funciona desde el primer día y no necesita nada de esta sección.
+Con el botón «Conectar con Facebook» (Embedded Signup de Meta, versión 4): la
+clínica entra con su Facebook y vuelve conectada. El botón necesita que odentIA
+tenga su propia app aprobada por Meta; motivos en
+`docs/decisions/0020-conectar-whatsapp-con-facebook.md`.
+
+**Este camino no se ha probado contra Meta**: la app de odentIA todavía no
+existe. El código sigue la documentación de Meta leída el 2026-10-13 y sus
+pruebas usan respuestas con la forma que esa documentación publica. Antes de
+ofrecerlo a una clínica hay que recorrerlo entero con una cuenta real.
+
+Variables, solo en la API (`infra/dev/.env` o los secretos del despliegue):
+
+| Variable | Qué es | Dónde se obtiene |
+| --- | --- | --- |
+| `META_APP_ID` | Identificador de la app de odentIA | Arriba en el panel de la app |
+| `META_APP_SECRET` | Clave secreta de la app: canjea el código y firma los avisos | Configuración de la app › Básica |
+| `META_LOGIN_CONFIG_ID` | Configuración de «Facebook Login for Business» | Facebook Login for Business › Configuraciones |
+| `META_WEBHOOK_VERIFY_TOKEN` | Texto que elige odentIA para que Meta verifique la dirección de avisos | Se inventa (`openssl rand -hex 24`) y se pega igual en Meta |
+| `META_GRAPH_VERSION` | Versión del Graph API (`v25.0` si falta) | La vigente al crear la app |
+
+Sin las cuatro primeras el botón no existe y nada más cambia; con solo algunas,
+la API lo dice al arrancar y sigue sin botón. Tampoco existe con
+`CHANNEL_VALIDATE_EXTERNAL=false`, porque ahí no se llama a Meta. La clave
+secreta no sale del servidor: la pantalla recibe el identificador de la app, el
+de la configuración y la versión.
+
+Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clínica):
+
+1. Verificar la empresa de odentIA en Meta (Business Verification).
+2. Crear la app con el caso de uso de WhatsApp y unirla a ese portafolio; en
+   «Tech Provider onboarding» seguir los pasos que muestra el panel.
+3. Pedir en App Review el acceso avanzado a `whatsapp_business_management` y
+   `whatsapp_business_messaging`. Meta pide dos videos: un mensaje enviado desde
+   la app y recibido en WhatsApp, y la creación de una plantilla. Hasta que
+   apruebe, el botón solo sirve a quien tiene un rol en la app (administrador o
+   desarrollador): alcanza para probar.
+4. En Facebook Login for Business › Configuración, activar el inicio de sesión
+   con el SDK de JavaScript y los demás interruptores que lista la guía de
+   implementación, y agregar a «Dominios permitidos» y a «URI de redirección de
+   OAuth válidos» el dominio donde se abre la plataforma. Solo HTTPS con
+   certificado válido. Cada clínica entra por su subdominio: confirmar con Meta
+   si admite comodín o hay que servir el botón desde un único dominio.
+5. Crear la configuración de «Facebook Login for Business» con la variante
+   «WhatsApp Embedded Signup» y elegir los productos: eso fija la versión 4. Su
+   identificador es `META_LOGIN_CONFIG_ID`.
+6. En el producto Webhooks de la app (objeto «WhatsApp Business Account»), poner
+   como dirección `https://<API>/api/webhooks/meta/whatsapp` y como clave de
+   verificación el valor de `META_WEBHOOK_VERIFY_TOKEN`; suscribir los campos
+   `messages` y `message_template_status_update`, que son los que odentIA usa, y
+   `account_update`, que la guía de Meta exige (odentIA lo recibe y no hace nada
+   con él). Es una sola dirección para todas las clínicas. La API debe estar
+   arriba con las variables puestas para responder la verificación.
+7. Con la API reiniciada, conectar una cuenta de prueba y comprobar: el canje
+   del código, la suscripción, el registro del número, un mensaje que entra, uno
+   que sale y el aviso de una plantilla aprobada.
+
+Límites que pone Meta: al principio se pueden conectar hasta 10 clínicas nuevas
+cada 7 días (200 al completar la verificación de la empresa, App Review y la
+verificación de acceso). El código que devuelve la ventana vive 30 segundos. Un
+número debe registrarse dentro de los 14 días siguientes a la ventana, con un
+máximo de 10 intentos cada 72 horas. La forma de pago la agrega cada clínica en
+su cuenta de WhatsApp: no hay llamada que lo haga por ella.
+
+Hoy la plataforma no envía una política de seguridad de contenido. Si llega a
+tenerla, el botón necesita al menos `script-src https://connect.facebook.net`
+(el SDK); lo demás que el SDK pida a `https://www.facebook.com`,
+`https://web.facebook.com` o `https://graph.facebook.com` (`connect-src`,
+`frame-src`, `img-src`) se confirma con la consola del navegador en la primera
+prueba real: Meta no lo publica en la guía del botón. La ventana de Meta es
+emergente y avisa a la página que la abrió: una cabecera
+`Cross-Origin-Opener-Policy: same-origin` cortaría ese aviso; tendría que ser
+`same-origin-allow-popups`.
+
 ## Verificación
 
 - `pnpm build|test|typecheck`: monorepo mediante Turbo; `pnpm --filter @odentia/services test|typecheck`: paquete.

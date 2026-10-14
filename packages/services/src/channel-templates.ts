@@ -3,26 +3,21 @@ import {
   channelAdapters,
   type NormalizedTemplateStatus,
   type ProviderTemplate,
+  type TemplateCategory,
   type TemplateStatus,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
-import { channelConnection, channelTemplate } from "@odentia/db/schema/crm"
-import { and, asc, eq, inArray } from "drizzle-orm"
-import {
-  AUTOMATION_MESSAGE_KEYS,
-  AUTOMATION_MESSAGE_LANGUAGE,
-  AUTOMATION_MESSAGES,
-  type AutomationMessageKey,
-  messageExamples,
-} from "./automation-messages.js"
+import { channelConnection, channelTemplate, clinicMessage, clinicMessageVersion } from "@odentia/db/schema/crm"
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm"
+import { AUTOMATION_MESSAGE_LANGUAGE, CATALOG_MESSAGE_KEYS, catalogMessageOf } from "./automation-messages.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { decryptConfig } from "./secrets.js"
 
 /**
  * Catálogo de plantillas por conexión. Lo que hay en la cuenta del proveedor
  * manda: se lee de ahí, se actualiza cuando el proveedor avisa y solo una
- * plantilla `aprobada` se puede enviar. odentIA pide las que necesitan sus
- * propios mensajes (`AUTOMATION_MESSAGES`); la clínica no escribe nombres.
+ * plantilla `aprobada` se puede enviar. odentIA pide las de los mensajes de la
+ * clínica (`clinic-messages.ts`); nadie escribe nombres de plantilla.
  *
  * Sin proveedor (pruebas, desarrollo) nada de esto acredita que el proveedor
  * acepte una plantilla: una solicitud queda `en_revision` y no cambia sola.
@@ -40,9 +35,11 @@ export interface TemplateItem {
   body: string
   variables: number
   buttons: string[]
-  /** Mensaje de odentIA al que sirve; nulo si es una plantilla propia de la clínica. */
+  /** Mensaje del catálogo de odentIA al que sirve; nulo si es propio de la clínica o ya estaba en la cuenta. */
   messageKey: string | null
   requestedAt: string | null
+  /** Desde cuándo está en ese estado; nulo si ya estaba así en la cuenta. */
+  statusSince: string | null
   syncedAt: string | null
 }
 
@@ -65,16 +62,37 @@ function toItem(row: ChannelTemplateRow): TemplateItem {
     buttons: Array.isArray(row.buttons) ? row.buttons : [],
     messageKey: row.messageKey,
     requestedAt: row.requestedAt?.toISOString() ?? null,
+    statusSince: row.statusSince?.toISOString() ?? null,
     syncedAt: row.syncedAt?.toISOString() ?? null,
   }
 }
 
-/** Mensaje de odentIA al que corresponde un nombre de plantilla, si es una de las suyas. */
-function messageKeyOfTemplate(name: string): AutomationMessageKey | null {
-  return AUTOMATION_MESSAGE_KEYS.find((key) => AUTOMATION_MESSAGES[key].template === name) ?? null
+/** Mensaje del catálogo al que corresponde el nombre de la plantilla con la que viene escrito. */
+function catalogKeyOfTemplate(name: string): string | null {
+  return CATALOG_MESSAGE_KEYS.find((key) => catalogMessageOf(key)?.template === name) ?? null
 }
 
-async function connectionWithAdapter(tx: Db, orgId: string, connectionId: string, secretsKey: Buffer) {
+/**
+ * A qué mensaje del catálogo sirve cada nombre de plantilla de la organización:
+ * los textos con los que viene y los que la clínica guardó para ellos.
+ */
+async function catalogKeysByTemplate(tx: Db, orgId: string): Promise<(name: string) => string | null> {
+  const edited = await tx
+    .select({ name: clinicMessageVersion.templateName, key: clinicMessage.key })
+    .from(clinicMessageVersion)
+    .innerJoin(
+      clinicMessage,
+      and(
+        eq(clinicMessage.id, clinicMessageVersion.messageId),
+        eq(clinicMessage.organizationId, clinicMessageVersion.organizationId),
+      ),
+    )
+    .where(and(eq(clinicMessageVersion.organizationId, orgId), isNotNull(clinicMessage.key)))
+  const byName = new Map(edited.map((row) => [row.name, row.key]))
+  return (name) => byName.get(name) ?? catalogKeyOfTemplate(name)
+}
+
+export async function connectionWithAdapter(tx: Db, orgId: string, connectionId: string, secretsKey: Buffer) {
   const [row] = await tx
     .select()
     .from(channelConnection)
@@ -151,6 +169,7 @@ async function upsertFromProvider(
   connectionId: string,
   template: ProviderTemplate,
   now: Date,
+  keyOf: (name: string) => string | null,
 ): Promise<void> {
   const values = {
     category: template.category,
@@ -170,12 +189,17 @@ async function upsertFromProvider(
       connectionId,
       name: template.name,
       language: template.language,
-      messageKey: messageKeyOfTemplate(template.name),
+      messageKey: keyOf(template.name),
       ...values,
     })
     .onConflictDoUpdate({
       target: [channelTemplate.connectionId, channelTemplate.name, channelTemplate.language],
-      set: values,
+      set: {
+        ...values,
+        // Solo cambia la fecha cuando cambia el estado.
+        statusSince: sql`case when ${channelTemplate.status} is distinct from ${template.status}
+          then ${now.toISOString()}::timestamptz else ${channelTemplate.statusSince} end`,
+      },
     })
 }
 
@@ -209,7 +233,8 @@ export async function syncConnectionTemplates(
     )
   }
   const now = new Date()
-  for (const template of fetched) await upsertFromProvider(tx, orgId, connectionId, template, now)
+  const keyOf = await catalogKeysByTemplate(tx, orgId)
+  for (const template of fetched) await upsertFromProvider(tx, orgId, connectionId, template, now, keyOf)
   const known = new Set(fetched.map((template) => `${template.name}\n${template.language}`))
   const current = await tx
     .select()
@@ -224,7 +249,7 @@ export async function syncConnectionTemplates(
   if (gone.length > 0) {
     await tx
       .update(channelTemplate)
-      .set({ status: "deshabilitada", reason: "Ya no está en la cuenta", syncedAt: now, updatedAt: now })
+      .set({ status: "deshabilitada", reason: "Ya no está en la cuenta", statusSince: now, syncedAt: now, updatedAt: now })
       .where(
         inArray(
           channelTemplate.id,
@@ -266,7 +291,7 @@ export async function declareConfigTemplates(
         name: template.name,
         language: template.language,
         status: "aprobada",
-        messageKey: messageKeyOfTemplate(template.name),
+        messageKey: catalogKeyOfTemplate(template.name),
       })
       .onConflictDoNothing({
         target: [channelTemplate.connectionId, channelTemplate.name, channelTemplate.language],
@@ -274,47 +299,78 @@ export async function declareConfigTemplates(
   }
 }
 
-/**
- * Pide al proveedor la plantilla de un mensaje de odentIA, una sola vez por
- * conexión: si ya está en el catálogo (en cualquier estado) no se vuelve a
- * pedir. El proveedor decide el estado y la categoría.
- */
-export async function requestMessageTemplate(
+/** Lo que se pide aprobar para un mensaje de la clínica. */
+export interface TemplateOrder {
+  name: string
+  category: TemplateCategory
+  /** Cuerpo con variables por posición. */
+  body: string
+  /** Un ejemplo por variable, en orden. */
+  examples: string[]
+  /** Títulos de los botones de respuesta. */
+  buttons: string[]
+  /** Mensaje del catálogo al que sirve; nulo si es un mensaje propio de la clínica. */
+  messageKey: string | null
+}
+
+/** Plantilla de la conexión por su nombre, en el estado que tenga. */
+export async function findTemplateByName(
   tx: Db,
   orgId: string,
   connectionId: string,
-  messageKey: AutomationMessageKey,
-  secretsKey: Buffer,
-  deps: TemplateDeps,
-): Promise<TemplateItem> {
-  const spec = AUTOMATION_MESSAGES[messageKey]
-  const language = AUTOMATION_MESSAGE_LANGUAGE
-  const [existing] = await tx
+  name: string,
+  language: string = AUTOMATION_MESSAGE_LANGUAGE,
+): Promise<TemplateItem | null> {
+  const [row] = await tx
     .select()
     .from(channelTemplate)
     .where(
       and(
         eq(channelTemplate.organizationId, orgId),
         eq(channelTemplate.connectionId, connectionId),
-        eq(channelTemplate.name, spec.template),
+        eq(channelTemplate.name, name),
         eq(channelTemplate.language, language),
       ),
     )
     .limit(1)
-  if (existing) return toItem(existing)
+  return row ? toItem(row) : null
+}
+
+/**
+ * Pide al proveedor la aprobación de una plantilla, una sola vez por conexión:
+ * si ya está en el catálogo (en cualquier estado) no se vuelve a pedir. El
+ * proveedor decide el estado y la categoría.
+ */
+export async function requestConnectionTemplate(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  order: TemplateOrder,
+  secretsKey: Buffer,
+  deps: TemplateDeps,
+): Promise<TemplateItem> {
+  const language = AUTOMATION_MESSAGE_LANGUAGE
+  const existing = await findTemplateByName(tx, orgId, connectionId, order.name, language)
+  if (existing) return existing
   const { adapter, config } = await connectionWithAdapter(tx, orgId, connectionId, secretsKey)
-  const buttons = spec.buttons.map((button) => button.title)
   let answer: { externalId: string | null; status: TemplateStatus; category: string } = {
     externalId: null,
     status: "en_revision",
-    category: spec.category,
+    category: order.category,
   }
   if (deps.validateExternal !== false) {
     if (!adapter?.requestTemplate) throw validation("Este canal no usa plantillas")
     try {
       answer = await adapter.requestTemplate(
         config,
-        { name: spec.template, language, category: spec.category, body: spec.body, examples: messageExamples(spec), buttons },
+        {
+          name: order.name,
+          language,
+          category: order.category,
+          body: order.body,
+          examples: order.examples,
+          buttons: order.buttons,
+        },
         { fetch: deps.fetch },
       )
     } catch (error) {
@@ -331,35 +387,26 @@ export async function requestMessageTemplate(
     .values({
       organizationId: orgId,
       connectionId,
-      name: spec.template,
+      name: order.name,
       language,
       category: answer.category,
       status: answer.status,
-      body: spec.body,
-      variables: spec.variables.length,
-      buttons,
+      body: order.body,
+      variables: order.examples.length,
+      buttons: order.buttons,
       externalId: answer.externalId,
-      messageKey,
+      messageKey: order.messageKey,
       requestedAt: now,
+      statusSince: now,
     })
     .onConflictDoNothing({
       target: [channelTemplate.connectionId, channelTemplate.name, channelTemplate.language],
     })
     .returning()
   if (created) return toItem(created)
-  const [row] = await tx
-    .select()
-    .from(channelTemplate)
-    .where(
-      and(
-        eq(channelTemplate.connectionId, connectionId),
-        eq(channelTemplate.name, spec.template),
-        eq(channelTemplate.language, language),
-      ),
-    )
-    .limit(1)
+  const row = await findTemplateByName(tx, orgId, connectionId, order.name, language)
   if (!row) throw new Error("No se pudo registrar la plantilla solicitada")
-  return toItem(row)
+  return row
 }
 
 export interface TemplateStatusChange {
@@ -398,6 +445,7 @@ export async function applyTemplateStatuses(
         status: update.status,
         reason: update.reason,
         ...(update.externalId ? { externalId: update.externalId } : {}),
+        ...(current.status === update.status ? {} : { statusSince: now }),
         syncedAt: now,
         updatedAt: now,
       })
@@ -408,24 +456,21 @@ export async function applyTemplateStatuses(
   return changes
 }
 
-/** Plantilla de un mensaje de odentIA en una conexión, en el estado que tenga. */
-export async function findMessageTemplate(
-  tx: Db,
-  orgId: string,
-  connectionId: string,
-  messageKey: AutomationMessageKey,
-): Promise<TemplateItem | null> {
-  const [row] = await tx
-    .select()
-    .from(channelTemplate)
+/**
+ * Deja de servir una plantilla que la clínica eliminó. La fila se conserva: los
+ * mensajes que la usaron siguen diciendo cuál fue.
+ */
+export async function retireTemplates(tx: Db, orgId: string, names: string[], reason: string): Promise<void> {
+  if (names.length === 0) return
+  const now = new Date()
+  await tx
+    .update(channelTemplate)
+    .set({ status: "deshabilitada", reason, statusSince: now, syncedAt: now, updatedAt: now })
     .where(
       and(
         eq(channelTemplate.organizationId, orgId),
-        eq(channelTemplate.connectionId, connectionId),
-        eq(channelTemplate.name, AUTOMATION_MESSAGES[messageKey].template),
-        eq(channelTemplate.language, AUTOMATION_MESSAGE_LANGUAGE),
+        inArray(channelTemplate.name, names),
+        ne(channelTemplate.status, "deshabilitada"),
       ),
     )
-    .limit(1)
-  return row ? toItem(row) : null
 }

@@ -31,12 +31,12 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   // --- Dónde está: responde con el nombre del sistema y lleva hasta ahí ---
   await ask("¿Dónde configuro los horarios?")
   const first = help.getByRole("listitem").filter({ hasText: "¿Dónde configuro los horarios?" })
-  await expect(first).toContainText("En Configuración › Disponibilidad. Ahí defines, por profesional y sede, los días y las horas de atención.")
+  await expect(first).toContainText("En Configuración › Horarios y ausencias. Ahí defines, por profesional y sede, los días y las horas de atención.")
   // El destino va resaltado en el texto y el botón solo dice «Llévame».
-  await expect(first.locator("strong")).toHaveText("Configuración › Disponibilidad")
-  await expect(first.getByRole("link", { name: "Llévame a Configuración › Disponibilidad" })).toHaveText("Llévame")
+  await expect(first.locator("strong")).toHaveText("Configuración › Horarios y ausencias")
+  await expect(first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" })).toHaveText("Llévame")
   await expect(first).toContainText("En qué se basó")
-  await expect(first).toContainText("El mapa del sistema: Configuración › Disponibilidad.")
+  await expect(first).toContainText("El mapa del sistema: Configuración › Horarios y ausencias.")
   await first.getByRole("button", { name: "Sí" }).click()
   await expect(first).toContainText("Gracias. Lo anotamos.")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -73,7 +73,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   ])
 
   // «Llévame» abre la pantalla.
-  await first.getByRole("link", { name: "Llévame a Configuración › Disponibilidad" }).click()
+  await first.getByRole("link", { name: "Llévame a Configuración › Horarios y ausencias" }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/availability"))
 
   // --- odentIA responde el caso: el aviso llega al mismo botón ---

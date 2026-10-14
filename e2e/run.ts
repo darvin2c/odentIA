@@ -751,7 +751,7 @@ async function probeAll(targets: ReadinessTargets, dispatcher: Agent): Promise<v
     })(),
     (async () => {
       // Wildcard + SSR: el tenant técnico llega al login con `next` del mismo origen.
-      let current = `${targets.tenantOrigin}/branches`
+      let current = `${targets.tenantOrigin}/settings/branches`
       const chain: string[] = []
       for (let hop = 0; hop < 5; hop++) {
         const res = await fetchVia(current, dispatcher, `tenant ${current}`)
@@ -762,7 +762,7 @@ async function probeAll(targets: ReadinessTargets, dispatcher: Agent): Promise<v
         }
         if (res.status === 200 && new URL(current).origin === targets.panelOrigin && new URL(current).pathname === "/login") {
           const next = new URL(current).searchParams.get("next")
-          if (next && new URL(next).origin === targets.tenantOrigin && new URL(next).pathname === "/branches") return
+          if (next && new URL(next).origin === targets.tenantOrigin && new URL(next).pathname === "/settings/branches") return
           throw new Error(
             `el tenant llegó al panel sin conservar el origen (next=${next ?? "ausente"}; cadena: ${chain.join(" | ") || "sin redirecciones"})`,
           )

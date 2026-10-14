@@ -26,6 +26,11 @@ export interface RegionDefaults {
   currency: string | null
   /** BCP 47: idioma principal del país (o el indicado) con su región. */
   locale: string
+  /**
+   * BCP 47 que se ofrecen para ese país, el propuesto primero. Quien los
+   * muestra escribe su nombre («Español (Perú)»); nadie teclea el código.
+   */
+  locales: string[]
   /** IANA; `null` cuando el país tiene varias zonas o no está en la tabla. */
   timezone: string | null
   sheetSize: SheetSize
@@ -64,6 +69,12 @@ const COUNTRY_LANGUAGE: Record<string, string> = {
   AT: "de", DE: "de", FR: "fr", HT: "fr", IT: "it", NL: "nl",
 }
 
+/**
+ * Idiomas en los que se ofrece escribir fechas y números, combinados con el
+ * país de la clínica. No traducen la interfaz; son los de `COUNTRY_LANGUAGE`.
+ */
+const FORMAT_LANGUAGES = ["es", "en", "pt", "fr", "de", "it", "nl"] as const
+
 /** Países donde la hoja habitual es Carta (CLDR `paperSize` US-Letter); el resto usa A4 (ISO 216). */
 const LETTER_COUNTRIES = new Set([
   "BZ", "CA", "CL", "CO", "CR", "GT", "MX", "NI", "PA", "PH", "PR", "SV", "US", "VE",
@@ -85,9 +96,11 @@ const COUNTRY_TIMEZONE: Record<string, string> = {
  */
 export function regionPresetForCountry(countryCode: string, language = "es"): RegionDefaults {
   const code = countryCode.trim().toUpperCase()
+  const locale = `${COUNTRY_LANGUAGE[code] ?? language}-${code}`
   return {
     currency: COUNTRY_CURRENCY[code] ?? null,
-    locale: `${COUNTRY_LANGUAGE[code] ?? language}-${code}`,
+    locale,
+    locales: [...new Set([locale, ...FORMAT_LANGUAGES.map((item) => `${item}-${code}`)])],
     timezone: COUNTRY_TIMEZONE[code] ?? null,
     sheetSize: LETTER_COUNTRIES.has(code) ? "Letter" : "A4",
   }

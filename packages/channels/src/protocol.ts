@@ -119,6 +119,22 @@ export interface ChannelAdapterDeps {
   fetch: typeof fetch
 }
 
+/** La cuenta que el proveedor reconoce con unas credenciales. */
+export interface ProviderAccount {
+  /** Nombre verificado de la cuenta. */
+  name: string | null
+  /** Número o dirección tal como la muestra el proveedor. */
+  number: string | null
+}
+
+/** Calidad de la cuenta y tope diario de conversaciones que inicia la empresa. */
+export interface ProviderHealth {
+  quality: "alta" | "media" | "baja" | null
+  dailyLimit: number | null
+  /** El proveedor no pone tope diario. */
+  unlimited: boolean
+}
+
 export interface ChannelAdapter {
   provider: ChannelProvider
   capabilities: ChannelCapabilities
@@ -143,10 +159,19 @@ export interface ChannelAdapter {
     mediaExternalId: string,
     deps: ChannelAdapterDeps,
   ): Promise<{ bytes: Uint8Array; mimeType: string; filename: string }>
+  /**
+   * Comprueba las credenciales contra el proveedor. `account` dice qué cuenta
+   * encontró (nombre verificado y número), cuando el proveedor lo entrega.
+   */
   validateConnection(
     config: Record<string, unknown>,
     deps: ChannelAdapterDeps,
-  ): Promise<{ externalId: string; displayName: string }>
+  ): Promise<{ externalId: string; displayName: string; account?: ProviderAccount }>
+  /**
+   * Salud de la cuenta según el proveedor (solo quien la publica). Cada dato
+   * que el proveedor no entrega queda nulo: no se supone ninguno.
+   */
+  readHealth?(config: Record<string, unknown>, deps: ChannelAdapterDeps): Promise<ProviderHealth>
   /** Plantillas de la cuenta con su estado (solo canales con plantillas). */
   listTemplates?(config: Record<string, unknown>, deps: ChannelAdapterDeps): Promise<ProviderTemplate[]>
   /**
@@ -158,6 +183,15 @@ export interface ChannelAdapter {
     request: TemplateRequest,
     deps: ChannelAdapterDeps,
   ): Promise<{ externalId: string | null; status: TemplateStatus; category: TemplateCategory }>
+  /**
+   * Elimina del proveedor una plantilla por su nombre (en todos sus idiomas).
+   * Lanza si el proveedor no la elimina; quien llama comprueba antes que exista.
+   */
+  deleteTemplate?(
+    config: Record<string, unknown>,
+    template: { name: string },
+    deps: ChannelAdapterDeps,
+  ): Promise<void>
 }
 
 /**

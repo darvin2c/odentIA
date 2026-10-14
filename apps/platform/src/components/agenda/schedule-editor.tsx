@@ -59,6 +59,9 @@ export interface WeeklySchedule {
   turns: TurnDraft[]
   /** Falso mientras llega el horario de quien se eligió. */
   ready: boolean
+  /** El horario no llegó: se dice y se ofrece reintentar, no se espera para siempre. */
+  failed: boolean
+  retry: () => void
   dirty: boolean
   saving: boolean
   error: string
@@ -137,6 +140,8 @@ export function useWeeklySchedule(input: {
   return {
     turns: ready ? turns : [],
     ready,
+    failed: !ready && query.isError,
+    retry: () => void query.refetch(),
     dirty: ready && !sameTurns(turns, baseline),
     saving: save.isPending,
     error,
@@ -172,6 +177,16 @@ export function WeeklyScheduleFields({
   canEdit: boolean
   stacked?: boolean
 }) {
+  if (schedule.failed) {
+    return (
+      <p role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm text-destructive">
+        No pudimos cargar el horario.
+        <Button variant="outline" size="sm" onClick={schedule.retry}>
+          Reintentar
+        </Button>
+      </p>
+    )
+  }
   if (!schedule.ready) {
     return (
       <div role="status" aria-label="Cargando el horario…" className="grid gap-2 py-2">

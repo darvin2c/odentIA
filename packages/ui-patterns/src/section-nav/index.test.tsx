@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it } from "vitest"
 import { SectionNav, type SectionNavProps } from "./index.js"
-import type { SectionNavItem } from "./types.js"
+import type { SectionNavGroup, SectionNavItem } from "./types.js"
 
 afterEach(cleanup)
 
@@ -154,6 +155,102 @@ describe("SectionNav", () => {
     expect(link.className).toContain("pr-8")
     expect(screen.getAllByText("3")).toHaveLength(1)
     expect(link.contains(screen.getByText("3"))).toBe(false)
+  })
+
+  describe("con grupos", () => {
+    const groups: SectionNavGroup[] = [
+      {
+        label: "La clínica",
+        items: [
+          { label: "Datos de la clínica", to: "/settings" },
+          { label: "Sedes", to: "/settings/branches" },
+        ],
+      },
+      {
+        label: "Pacientes",
+        items: [{ label: "Portal del paciente", to: "/settings/patient-access" }],
+      },
+    ]
+    const loose: SectionNavItem[] = [
+      { label: "Integraciones", to: "/settings/integrations" },
+      { label: "Actividad del equipo", to: "/settings/audit" },
+    ]
+    const renderGrouped = (pathname = "/settings/branches") =>
+      renderNav({ label: "Configuración", groups, items: loose, pathname })
+
+    it("cada grupo es una lista con su título como nombre", () => {
+      renderGrouped()
+      const clinic = screen.getByRole("group", { name: "La clínica" })
+      expect(within(clinic).getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Datos de la clínica",
+        "Sedes",
+      ])
+      const patients = screen.getByRole("group", { name: "Pacientes" })
+      expect(within(patients).getAllByRole("link")).toHaveLength(1)
+    })
+
+    it("las entradas sueltas van al final, tras un separador y fuera de todo grupo", () => {
+      const { container } = renderGrouped()
+      const separator = screen.getByRole("separator")
+      const looseLink = screen.getByRole("link", { name: "Integraciones" })
+      expect(looseLink.closest("[role=group]")).toBeNull()
+      // Orden del documento: último grupo → separador → entradas sueltas.
+      const lastGrouped = screen.getByRole("link", { name: "Portal del paciente" })
+      expect(lastGrouped.compareDocumentPosition(separator) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(separator.compareDocumentPosition(looseLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      // Sigue siendo un solo árbol: un landmark y un link por entrada.
+      expect(container.querySelectorAll("nav")).toHaveLength(1)
+      expect(screen.getAllByRole("link")).toHaveLength(5)
+    })
+
+    it("sin entradas sueltas no dibuja el separador", () => {
+      renderNav({ groups, items: [], pathname: "/settings" })
+      expect(screen.queryByRole("separator")).toBeNull()
+    })
+
+    it("resuelve el activo entre grupos y sueltas: gana la ruta más específica", () => {
+      renderGrouped("/settings/integrations/whatsapp")
+      expect(screen.getByRole("link", { name: "Integraciones" }).getAttribute("aria-current")).toBe(
+        "page",
+      )
+      expect(
+        screen.getByRole("link", { name: "Datos de la clínica" }).getAttribute("aria-current"),
+      ).toBeNull()
+    })
+
+    it("en la barra usa el selector aunque sean pocas entradas, y muestra los mismos grupos", async () => {
+      const user = userEvent.setup()
+      renderNav({
+        groups: [{ label: "La clínica", items: [{ label: "Sedes", to: "/settings/branches" }] }],
+        items: [],
+        pathname: "/settings/branches",
+      })
+      const picker = screen.getByRole("button", { name: /Sedes.*Cambiar sección/ })
+      expect(picker.getAttribute("aria-expanded")).toBe("false")
+      const list = document.getElementById(picker.getAttribute("aria-controls") ?? "")
+      expect(list?.contains(screen.getByRole("group", { name: "La clínica" }))).toBe(true)
+      expect(list?.className.split(" ")).toContain("hidden")
+
+      await user.click(picker)
+      expect(picker.getAttribute("aria-expanded")).toBe("true")
+      expect(picker.textContent).toContain("Ocultar secciones")
+      expect(list?.className.split(" ")).not.toContain("hidden")
+      expect(list?.className.split(" ")).toContain("flex")
+
+      // Elegir una entrada cierra el selector: la barra vuelve a su alto.
+      // (jsdom no navega: se cancela el salto del enlace de prueba.)
+      document.addEventListener("click", (event) => event.preventDefault(), { once: true })
+      await user.click(screen.getByRole("link", { name: "Sedes" }))
+      expect(picker.getAttribute("aria-expanded")).toBe("false")
+    })
+
+    it("el riel agrupado es más ancho y se desplaza por dentro en una ventana baja", () => {
+      const { container } = renderGrouped()
+      const nav = navOf(container)
+      expect(nav.className).toContain("lg:w-64")
+      expect(nav.className).not.toContain("lg:w-56")
+      expect(nav.className).toContain("lg:overflow-y-auto")
+    })
   })
 
   it("dibuja el icono relleno en el activo y el de contorno en el resto", () => {

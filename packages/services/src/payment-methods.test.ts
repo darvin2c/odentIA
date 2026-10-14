@@ -2,8 +2,15 @@ import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { expect, it } from "vitest"
-import { updateOrgRegion } from "./organization-profile.js"
-import { ensureDefaultPaymentMethods, listPaymentMethods, requirePaymentMethod, updatePaymentMethod } from "./payment-methods.js"
+import { regionPresetForCountry, updateOrgRegion } from "./organization-profile.js"
+import {
+  createPaymentMethod,
+  ensureDefaultPaymentMethods,
+  listPaymentMethods,
+  movePaymentMethod,
+  requirePaymentMethod,
+  updatePaymentMethod,
+} from "./payment-methods.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -100,4 +107,102 @@ it("el alta sirve para cualquier país: propone lo que se deduce y pide solo lo 
     }),
   )
   expect(explicit).toMatchObject({ countryCode: "KZ", currency: "KZT", timezone: "Asia/Almaty" })
+})
+
+it("el orden se cambia subiendo y bajando, y un medio nuevo va al final", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, orgId)
+  await withOrgContext(appDb, orgId, (tx) => ensureDefaultPaymentMethods(tx, orgId, "config-test", "PE"))
+  const names = async (activeOnly = false) =>
+    (await withOrgContext(appDb, orgId, (tx) => listPaymentMethods(tx, orgId, { activeOnly }))).map((method) => method.name)
+  const move = (id: string, direction: "up" | "down") =>
+    withOrgContext(appDb, orgId, (tx) => movePaymentMethod(tx, orgId, "config-test", id, direction))
+  expect(await names()).toEqual(["Efectivo", "Yape", "Plin", "Tarjeta", "Transferencia"])
+
+  // Desde la pantalla no se indica puesto: el nuevo queda último, no primero.
+  const cheque = await withOrgContext(appDb, orgId, (tx) =>
+    createPaymentMethod(tx, orgId, "config-test", { name: "Cheque", typeCode: "20", atEnd: true }),
+  )
+  expect(cheque.sortOrder).toBe(50)
+  expect(await names()).toEqual(["Efectivo", "Yape", "Plin", "Tarjeta", "Transferencia", "Cheque"])
+
+  const all = await withOrgContext(appDb, orgId, (tx) => listPaymentMethods(tx, orgId, { activeOnly: false }))
+  const card = all.find((method) => method.name === "Tarjeta")!
+  const moved = await move(card.id, "up")
+  expect(moved.map((method) => method.name)).toEqual(["Efectivo", "Yape", "Tarjeta", "Plin", "Transferencia", "Cheque"])
+  // Los puestos quedan enteros y sin empates: el orden no depende del nombre.
+  expect(moved.map((method) => method.sortOrder)).toEqual([0, 10, 20, 30, 40, 50])
+  await move(card.id, "down")
+  expect(await names()).toEqual(["Efectivo", "Yape", "Plin", "Tarjeta", "Transferencia", "Cheque"])
+
+  // En un extremo no cambia nada.
+  await move(all.find((method) => method.name === "Efectivo")!.id, "up")
+  await move(cheque.id, "down")
+  expect(await names()).toEqual(["Efectivo", "Yape", "Plin", "Tarjeta", "Transferencia", "Cheque"])
+
+  // El orden es el que ve caja, también con un medio apagado en medio de la lista.
+  const plin = all.find((method) => method.name === "Plin")!
+  await withOrgContext(appDb, orgId, (tx) => updatePaymentMethod(tx, orgId, "config-test", plin.id, { isActive: false }))
+  await move(cheque.id, "up")
+  expect(await names(true)).toEqual(["Efectivo", "Yape", "Tarjeta", "Cheque", "Transferencia"])
+
+  // Otra organización no reordena esta lista.
+  const other = randomUUID()
+  await insertOrg(ownerDb, other, other)
+  await expect(
+    withOrgContext(appDb, other, (tx) => movePaymentMethod(tx, other, "config-test", card.id, "up")),
+  ).rejects.toMatchObject({ status: 404 })
+})
+
+it("los medios creados sin puesto también se ordenan", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, orgId)
+  // Tres medios con el mismo puesto: hasta moverlos los desempata el nombre.
+  for (const name of ["Tarjeta", "Efectivo", "Billetera"]) {
+    await withOrgContext(appDb, orgId, (tx) => createPaymentMethod(tx, orgId, "config-test", { name }))
+  }
+  const list = await withOrgContext(appDb, orgId, (tx) => listPaymentMethods(tx, orgId, { activeOnly: false }))
+  expect(list.map((method) => method.name)).toEqual(["Billetera", "Efectivo", "Tarjeta"])
+  const moved = await withOrgContext(appDb, orgId, (tx) =>
+    movePaymentMethod(tx, orgId, "config-test", list[2]!.id, "up"),
+  )
+  expect(moved.map((method) => [method.name, method.sortOrder])).toEqual([
+    ["Billetera", 0],
+    ["Tarjeta", 10],
+    ["Efectivo", 20],
+  ])
+})
+
+it("la impresión se guarda sin tocar la región, y cada país ofrece sus formatos con el propuesto primero", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, orgId)
+  const saved = await withOrgContext(appDb, orgId, (tx) =>
+    updateOrgRegion(tx, orgId, "config-test", {
+      receiptWidth: "58",
+      sheetSize: "Letter",
+      ticketFooter: "  Gracias por su visita.  ",
+    }),
+  )
+  expect(saved).toMatchObject({
+    receiptWidth: "58",
+    sheetSize: "Letter",
+    ticketFooter: "Gracias por su visita.",
+    countryCode: "PE",
+    currency: "PEN",
+    timezone: "America/Lima",
+    locale: "es-PE",
+  })
+  await expect(
+    withOrgContext(appDb, orgId, (tx) => updateOrgRegion(tx, orgId, "config-test", { ticketFooter: "   " })),
+  ).rejects.toMatchObject({ status: 400 })
+
+  expect(regionPresetForCountry("pe")).toMatchObject({
+    locale: "es-PE",
+    locales: ["es-PE", "en-PE", "pt-PE", "fr-PE", "de-PE", "it-PE", "nl-PE"],
+  })
+  // El propuesto va primero y no se repite.
+  expect(regionPresetForCountry("BR").locales.slice(0, 3)).toEqual(["pt-BR", "es-BR", "en-BR"])
+  // Sin idioma conocido para el país vale el indicado, aunque no sea de la lista.
+  expect(regionPresetForCountry("KZ", "ru").locales[0]).toBe("ru-KZ")
+  for (const tag of regionPresetForCountry("US").locales) expect(Intl.getCanonicalLocales(tag)).toEqual([tag])
 })

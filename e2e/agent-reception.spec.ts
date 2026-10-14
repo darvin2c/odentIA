@@ -141,7 +141,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await confirmLevel.getByRole("button", { name: "Cancelar" }).click()
   await expect(confirmLevel).toBeHidden()
   expect((await overview()).level).toBe("supervisado")
-  await expect(reach.getByRole("link", { name: "Personalizar por acto" })).toBeVisible()
+  // El nivel se elige entre los tres: ya no hay un enlace para ajustarlo acto por acto.
+  await expect(reach.getByRole("link", { name: "Personalizar por acto" })).toHaveCount(0)
 
   // Cuándo pasa a una persona: lo fijo y lo que añade la clínica, con su entrada.
   await expect(reach).toContainText("Piden hablar con alguien")
@@ -180,7 +181,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const [name, href] of [
     ["Respuestas oficiales", "/agent/knowledge"],
     ["Servicios y precios", "/services"],
-    ["Sedes y horarios", "/branches"],
+    ["Sedes y horarios", "/settings/branches"],
     ["Lo que aprendió de tus correcciones", "/agent/learn"],
   ] as const) {
     await expect(knows.getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute("href", new RegExp(`${href}$`))
@@ -224,7 +225,9 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(behaves).toContainText("Se presenta como Sofi · trata de usted · tono cercano")
   await expect(behaves).toContainText(`«¡Hola! Soy Sofi, asistente virtual de ${org.name}. ¿En qué le ayudo?»`)
   expect((await config()).personaName).toBe("Sofi")
-  await expect(page.getByRole("link", { name: /^Ajustes técnicos/ })).toBeVisible()
+  // Lo único técnico que decide la clínica, con el nombre de su pantalla.
+  await expect(page.getByRole("link", { name: /^Modelo del agente/ })).toHaveAttribute("href", "/settings/integrations/model")
+  await expect(page.getByRole("link", { name: /^Ajustes técnicos/ })).toHaveCount(0)
 
   // --- Probar: dos turnos, nada se envía; los ejemplos siguen a la vista con el usado marcado ---
   const sandbox = page.getByRole("region", { name: "Probar" })

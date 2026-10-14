@@ -11,6 +11,7 @@ import {
   listProposals,
   pendingProposalDecider,
 } from "./agent-operations.js"
+import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -393,17 +394,46 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     setup: setup ?? null, activity: { recorded: activity?.recorded ?? false } }
 }
 
-export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?: string; before?: string; beforeId?: string }) {
+/** Una fila de «Actividad del equipo»: el registro y, además, cómo se dice con palabras. */
+export interface WorkspaceAuditItem {
+  id: string
+  action: string
+  entity: string
+  entityId: string | null
+  actorName: string | null
+  createdAt: string
+  /** Qué pasó, como predicado: «Reservó una cita». */
+  what: string
+  /** Quién lo hizo: la persona del equipo o, sin ella, lo que el registro permite afirmar. */
+  who: string
+  area: AuditArea | "otros"
+  areaLabel: string
+}
+
+/**
+ * Actividad del equipo, de lo más reciente a lo más antiguo. `area` acota por
+ * tema (`AUDIT_AREAS`); `action` sigue admitiendo el código exacto para quien
+ * integra o prueba. La pantalla solo muestra las palabras.
+ */
+export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?: string; area?: AuditArea; before?: string; beforeId?: string }) {
   if ((input.before && !Number.isFinite(Date.parse(input.before))) || (!!input.before !== !!input.beforeId)) throw validation("Cursor de auditoría inválido")
-  const rows = await tx.execute<{ id: string; action: string; entity: string; entityId: string | null; actorName: string | null; createdAt: string }>(sql`
+  if (input.area !== undefined && !(AUDIT_AREAS as readonly string[]).includes(input.area)) throw validation("Elige un área de la lista")
+  const subjects = input.area ? auditSubjectsOf(input.area) : null
+  const rows = await tx.execute<{ id: string; action: string; entity: string; entityId: string | null; actorName: string | null; createdAt: string; origin: string | null }>(sql`
     select a.id, a.action, a.entity, a.entity_id as "entityId", u.name as "actorName",
-      to_char(a.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt"
+      to_char(a.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt",
+      a.metadata->>'origin' as origin
     from audit_event a left join "user" u on u.id=a.actor_user_id
     where a.organization_id=${orgId}
     ${input.action ? sql`and a.action = ${input.action}` : sql``}
+    ${subjects ? sql`and split_part(a.action, '.', 1) in (${sql.join(subjects.map((subject) => sql`${subject}`), sql`, `)})` : sql``}
     ${input.before && input.beforeId ? sql`and (a.created_at,a.id) < (${input.before}::timestamptz,${input.beforeId}::uuid)` : sql``}
     order by a.created_at desc, a.id desc limit 51`)
-  const items = rows.slice(0, 50)
+  const items: WorkspaceAuditItem[] = rows.slice(0, 50).map(({ origin, ...row }) => {
+    const words = describeAuditEvent(row.action, origin)
+    return { ...row, what: words.what, who: row.actorName ?? words.author, area: words.area, areaLabel: words.areaLabel }
+  })
   const last = items.at(-1)
-  return { items, next: rows.length > 50 && last ? { before: last.createdAt, beforeId: last.id } : null }
+  // Las áreas viajan con su nombre: la pantalla arma el filtro sin textos propios.
+  return { items, next: rows.length > 50 && last ? { before: last.createdAt, beforeId: last.id } : null, areas: AUDIT_AREAS.map((id) => ({ id, label: AUDIT_AREA_LABELS[id] })) }
 }

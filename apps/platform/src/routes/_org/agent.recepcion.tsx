@@ -126,7 +126,7 @@ function Card({
 }
 
 /** Fila con su entrada: lo que hay y, si se puede cambiar, a dónde lleva. */
-function EntryRow({ label, value, onClick, to }: { label: string; value: string | null; onClick?: () => void; to?: "/agent/knowledge" | "/services" | "/branches" | "/agent/learn" }) {
+function EntryRow({ label, value, onClick, to }: { label: string; value: string | null; onClick?: () => void; to?: "/agent/knowledge" | "/services" | "/settings/branches" | "/agent/learn" }) {
   const content = (
     <>
       <span className="min-w-0 flex-[1_1_9rem] font-semibold">{label}</span>
@@ -369,7 +369,7 @@ function ReceptionPage() {
   const instructions = splitInstructions(config.systemPrompt)
   const levelSummary =
     activeLevel === "personalizado"
-      ? `${LEVEL_LABEL.personalizado}: lo ajustaste acto por acto en Ajustes técnicos. Elegir un nivel lo reemplaza.`
+      ? `${LEVEL_LABEL.personalizado}: cada acto tiene su propio ajuste. Elegir un nivel lo reemplaza.`
       : (roles.levels.find((level) => level.id === activeLevel)?.summary ?? "")
   const lessons = learningQuery.data?.data.learned.filter((lesson) => lesson.agent === "recepcion").length
   const { today, knows } = overview
@@ -531,14 +531,7 @@ function ReceptionPage() {
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
-            <div className="flex flex-wrap items-start gap-x-4 text-sm">
-              <p className="min-w-0 flex-1 basis-64 text-muted-foreground">{levelSummary}</p>
-              {canWrite ? (
-                <Link to="/settings/agent" className={`${LINK} max-sm:hidden`}>
-                  Personalizar por acto
-                </Link>
-              ) : null}
-            </div>
+            <p className="text-sm text-muted-foreground">{levelSummary}</p>
             {changeLevel.isError && !levelToConfirm ? (
               <p role="alert" className="text-sm text-destructive">
                 {mutationErrorMessage(changeLevel.error)}
@@ -586,7 +579,7 @@ function ReceptionPage() {
                   </li>
                 </ul>
                 {overview.readiness.channels.length === 0 && canWrite ? (
-                  <Link to="/settings/channels" className={`w-fit ${LINK}`}>
+                  <Link to="/settings/integrations" className={`w-fit ${LINK}`}>
                     Conectar un canal
                   </Link>
                 ) : null}
@@ -629,7 +622,7 @@ function ReceptionPage() {
                 <EntryRow
                   label="Sedes y horarios"
                   value={knows.branches === 0 ? "Ninguna sede activa" : count(knows.branches, "sede", "sedes")}
-                  to="/branches"
+                  to="/settings/branches"
                 />
               </li>
               <li>
@@ -713,13 +706,13 @@ function ReceptionPage() {
 
           {canWrite ? (
             <Link
-              to="/settings/agent"
+              to="/settings/integrations/model"
               className="elevated lift flex min-h-13 items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-6"
             >
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="font-semibold">Ajustes técnicos</span>
+                <span className="font-semibold">Modelo del agente</span>
                 <span className="text-muted-foreground">
-                  Proveedor del modelo, modelo de decisión y autonomía acto por acto. Para quien administra.
+                  Con qué cuenta trabaja: la incluida con odentIA o la propia de la clínica.
                 </span>
               </span>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -778,7 +771,7 @@ function ReceptionPage() {
         title={levelToConfirm ? `Pasar a ${LEVEL_LABEL[levelToConfirm]}` : "Cambiar el nivel"}
         description={
           overview.level === "personalizado"
-            ? "Reemplaza lo que ajustaste acto por acto. Puedes volver a ajustarlo en Ajustes técnicos."
+            ? "Reemplaza el ajuste acto por acto que tiene hoy. Después se elige entre los niveles."
             : (roles.levels.find((level) => level.id === levelToConfirm)?.summary ?? "")
         }
         confirmLabel="Cambiar el nivel"

@@ -3,7 +3,22 @@ export * from "./protocol.js"
 export { setTelegramWebhook, telegramBotApiAdapter } from "./telegram-bot-api.js"
 export * from "./gmail.js"
 export * from "./microsoft365.js"
-export { whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"
+export {
+  splitWhatsAppWebhook,
+  type WhatsAppAccountDelivery,
+  type WhatsAppDelivery,
+  type WhatsAppNumberDelivery,
+  whatsappCloudApiAdapter,
+} from "./whatsapp-cloud-api.js"
+export {
+  exchangeSignupCode,
+  type MetaPlatformApp,
+  MetaSignupError,
+  type MetaSignupStep,
+  newRegistrationPin,
+  registerPhoneNumber,
+  subscribeAppToAccount,
+} from "./whatsapp-embedded-signup.js"
 export {
   assertValidWebchatConfig,
   buildWebchatInbound,

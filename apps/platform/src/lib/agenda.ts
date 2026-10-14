@@ -56,6 +56,15 @@ export interface AgendaResources {
   defaultDurationMin: number
 }
 
+/** Un sillón en Configuración (`GET /api/agenda/chairs`): también los desactivados. */
+export interface ChairSetting {
+  id: string
+  name: string
+  isActive: boolean
+  /** Citas en pie que aún no terminan en ese sillón: no se mueven solas al desactivarlo. */
+  upcomingAppointments: number
+}
+
 export interface AgendaServiceOption {
   id: string
   name: string
