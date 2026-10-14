@@ -154,7 +154,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await expect(agents.getByRole("link", { name: "Configurar" })).toHaveCount(0)
   const receptionRow = reception.getByRole("link")
   await expect(receptionRow).toHaveCount(1)
-  await expect(receptionRow).toContainText("Encendido · nivel")
+  await expect(receptionRow).toContainText("Encendido")
   expect((await box(receptionRow)).height).toBeGreaterThanOrEqual(44)
   const advisorRow = rows.filter({ hasText: "Administrador" }).getByRole("link")
   await expect(advisorRow).toContainText("Apagado · ver y encender")

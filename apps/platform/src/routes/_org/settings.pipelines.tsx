@@ -62,13 +62,16 @@ function errorText(error: unknown, fallback: string): string {
 /**
  * Etapas de venta: las columnas del tablero de oportunidades, en su orden. La
  * lista se edita en la superficie lateral; subir y bajar guardan al momento.
- * Configurar las etapas es de quien administra la clínica (`settings.*`), la
- * misma regla que abre el apartado y que aplica el servidor.
+ * Las configura quien administra la clínica y también quien trabaja con
+ * oportunidades (`crm.write`), la misma regla que abre el apartado y que
+ * aplica el servidor.
  */
 function SalesStagesPage() {
   const queryClient = useQueryClient()
-  const canRead = usePermission("settings.read")
-  const canWrite = usePermission("settings.write")
+  const canConfigure = usePermission("settings.read")
+  const canSell = usePermission("crm.read")
+  const canRead = canConfigure || canSell
+  const canWrite = usePermission("crm.write")
   const [funnelId, setFunnelId] = useState<string | null>(null)
   // Al lado: una etapa nueva o la que se edita.
   const sideForm = useSideForm<Stage>()

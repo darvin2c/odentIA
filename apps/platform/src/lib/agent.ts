@@ -207,18 +207,9 @@ export interface AgentRole {
   learnsLater?: string
 }
 
-export type AgentLevelId = "supervisado" | "equilibrado" | "autonomo"
-
-export interface AgentLevel {
-  id: AgentLevelId
-  label: string
-  summary: string
-}
-
 export interface AgentRoles {
   principles: string[]
   roles: AgentRole[]
-  levels: AgentLevel[]
 }
 
 export interface AgentOutcomes {
@@ -250,7 +241,6 @@ export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
 
 export interface AgentOverview {
   enabled: boolean
-  level: AgentLevelId | "personalizado"
   needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
@@ -260,13 +250,6 @@ export interface AgentOverview {
   knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
   readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
   usage: { runsToday: number; dailyRunLimit: number }
-}
-
-export const LEVEL_LABEL: Record<AgentOverview["level"], string> = {
-  supervisado: "Supervisado",
-  equilibrado: "Equilibrado",
-  autonomo: "Autónomo",
-  personalizado: "Personalizado",
 }
 
 /** Estado de una conversación de prueba; el servidor lo devuelve y vuelve tal cual en el turno siguiente. */

@@ -52,6 +52,8 @@ const envSchema = z.object({
   LLM_BASE_URL: z.string().url().optional(),
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
   LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
+  /** Esfuerzo de razonamiento del modelo de la plataforma (`none`, `low`…). Vacío: no se envía. */
+  LLM_REASONING_EFFORT: z.string().optional(),
   /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
   LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
   /** Modelos de decisión de la plataforma: entienden lo que se le pide al Administrador con palabras. */
@@ -62,6 +64,15 @@ const envSchema = z.object({
   OPENAI_DECISIONS_BASE_URL: z.string().url().optional(),
   OPENAI_DECISIONS_MODEL: z.string().optional().default("gpt-6-luna"),
   DECISIONS_TIMEOUT_MS: z.coerce.number().int().min(500).max(20_000).default(5_000),
+  /**
+   * Búsqueda por significado del agente (ADR 0021): proveedor de vectores de la
+   * plataforma, compatible con OpenAI. `fake`: vectores por letras, sin red.
+   * Vacío: el agente busca solo por palabras.
+   */
+  EMBEDDINGS_MODEL: z.string().optional(),
+  EMBEDDINGS_BASE_URL: z.string().url().optional(),
+  EMBEDDINGS_API_KEY: z.string().optional().default(""),
+  EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),
   PORT: z.coerce.number().int().default(3001),
 })
 

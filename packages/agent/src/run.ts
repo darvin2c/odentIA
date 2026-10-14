@@ -22,13 +22,15 @@ import {
   notifyAgentProviderProblem,
   type RecordRunInput,
   recordAgentRun,
+  type SearchEmbedder,
   reportAgentNoReply,
   toolsDisabledBy,
 } from "@odentia/services"
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
+import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { handoffFallbackNotice, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { handoffFallbackNotice, offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { compileAgentGraph } from "./graph.js"
 import {
@@ -60,6 +62,8 @@ export interface AgentRuntime {
   burst?: { quietMs: number; maxWaitMs: number }
   /** Dirección pública de la plataforma, para los enlaces que el agente entrega (reservar una cita). */
   publicUrl?: { webURL: string; cookieDomain: string }
+  /** Quien vectoriza para buscar por significado; sin él, se busca por palabras. */
+  embedder?: SearchEmbedder
   secretsKey: Buffer
   callbacks?: Callbacks
 }
@@ -131,6 +135,17 @@ async function orgToolExclusions(tx: Db, orgId: string, cfg: AgentConfig): Promi
   // Una función apagada en la ficha del agente se lleva sus herramientas: el
   // modelo ni las ve, no depende de que obedezca una instrucción.
   return [...(templates ? [] : ["send_template"]), ...toolsDisabledBy("recepcion", cfg.disabledFunctions)]
+}
+
+/**
+ * El nombre con que la clínica se muestra al público (el de la organización),
+ * no su razón social: así se presenta también el agente.
+ */
+async function publicClinicName(db: Db, orgId: string): Promise<string> {
+  const [row] = await withOrgContext(db, orgId, (tx) =>
+    tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1),
+  )
+  return row?.name ?? "la clínica"
 }
 
 /** Motivos en el libro de una corrida que el sistema no deja empezar por un límite de la clínica. */
@@ -452,6 +467,7 @@ export async function processAgentRun(
     toolCtx.modelName = spec.modelName
     toolCtx.verifyReplies = cfg.replyCheckEnabled
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
+    if (runtime.embedder) toolCtx.embedder = runtime.embedder
     runUsage = toolCtx.usage
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
@@ -529,6 +545,13 @@ export async function processAgentRun(
             console.error(`agent: el aviso fijo de derivación no salió (${error instanceof Error ? error.message : String(error)})`),
           )
       }
+    } else if (toolCtx.route?.path === "fuera_de_tema") {
+      // Nada que ver con la clínica y el modelo de decisión muy seguro: un
+      // texto fijo, sin llamar al modelo que escribe. Sale por send_reply,
+      // con el mismo formato del canal y la misma comprobación.
+      const clinic = await publicClinicName(db, orgId)
+      const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
+      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
     } else {
       await invokeGraph()
     }
@@ -800,7 +823,7 @@ export const EMPTY_SANDBOX_STATE: AgentSandboxState = { pending: [], recent: [],
  */
 export async function simulateAgentSandbox(
   db: Db,
-  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel">,
+  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel" | "embedder">,
   input: {
     orgId: string
     transcript: SandboxTurn[]
@@ -828,6 +851,7 @@ export async function simulateAgentSandbox(
   toolCtx.verifyReplies = cfg.replyCheckEnabled
   toolCtx.modelName = spec.modelName
   toolCtx.draftText = text.slice(0, 4000)
+  if (deps.embedder) toolCtx.embedder = deps.embedder
   const state = structuredClone(input.state ?? EMPTY_SANDBOX_STATE)
   toolCtx.sandbox = { transcript: input.transcript.slice(-40), state }
   if (input.lessonOverrides) toolCtx.lessonOverrides = input.lessonOverrides
@@ -853,6 +877,24 @@ export async function simulateAgentSandbox(
     } catch {
       // Sin camino la prueba sigue como un turno abierto.
       toolCtx.route = null
+    }
+  }
+  if (toolCtx.route?.path === "fuera_de_tema") {
+    const clinic = await publicClinicName(db, orgId)
+    return {
+      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic),
+      replied: true,
+      toolsUsed: [],
+      handedOff: false,
+      basis: [],
+      checks: [],
+      did: ["Respondió con el texto fijo para lo que no es de la clínica, sin llamar al modelo que escribe."],
+      waiting: [],
+      state,
+      inputTokens: null,
+      outputTokens: null,
+      model: spec.modelName,
+      latencyMs: Date.now() - startedAt,
     }
   }
   if (toolCtx.route?.path === "derivar") {

@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { type AutomationDraft, automationJob, automationRule } from "@odentia/db/schema/automation"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq, inArray, type SQL, sql } from "drizzle-orm"
+import { and, eq, type SQL, sql } from "drizzle-orm"
 import {
   type AdminLine,
   type AdminLineKey,
@@ -296,7 +296,7 @@ export async function deleteAdminLine(tx: Db, orgId: string, actorUserId: string
       and(
         eq(automationJob.organizationId, orgId),
         eq(automationJob.ruleId, rule.id),
-        inArray(automationJob.status, ["pendiente", "por_aprobar"]),
+        eq(automationJob.status, "pendiente"),
       ),
     )
     .returning({ id: automationJob.id })
@@ -500,9 +500,6 @@ export async function reviewAdminLine(tx: Db, orgId: string, line: AdminLine, ne
     } else {
       checks.push({ ok: false, text: "WhatsApp todavía no tiene el mensaje de esta línea: se pide al conectar WhatsApp y, si faltó, en unos minutos. Hasta que lo apruebe, solo le escribe a quien escribió en las últimas 24 horas, o por correo." })
     }
-  }
-  if (runtime.supervised && line.agent.purpose !== "recordatorio") {
-    checks.push({ ok: true, text: "Recepción está en «Supervisado»: los mensajes de esta línea esperan tu aprobación antes de salir." })
   }
   checks.push({ ok: true, text: "Como mucho un mensaje al día por persona: si ese día ya recibió otro, este espera al siguiente." })
   return checks

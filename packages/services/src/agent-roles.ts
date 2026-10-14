@@ -1,5 +1,4 @@
 import { ADMIN_LINES, say } from "./admin-lines.js"
-import { AUTONOMY_ACTIONS, type AutonomyAction, type AutonomyMode, DEFAULT_AUTONOMY_MODES } from "@odentia/db/schema/agent"
 
 /**
  * Ficha de cada agente: su manual de funciones. Es la fuente única de lo que
@@ -83,32 +82,37 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       {
         id: "informar",
         label: "Informar",
-        description: "Sedes, servicios, precios y las respuestas oficiales de la clínica.",
+        description:
+          "Servicios y precios, promociones vigentes, sedes y horarios de atención, profesionales y especialidades, medios de pago y lo que tu clínica le enseñó.",
         fixed: false,
-        tools: ["ver_sedes_y_servicios", "consultar_conocimiento"],
+        tools: ["ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento"],
         whenOff: "No respondes preguntas de información general (precios, servicios, horarios): pasa el caso a una persona.",
-        offNote: "Apagada: si preguntan por precios, servicios u horarios, pasa el caso a una persona.",
+        offNote: "Apagado: responde el saludo y lo que es del propio paciente (sus citas), pero precios, servicios y horarios los pasa a una persona.",
       },
       {
         id: "agendar",
         label: "Agendar, mover y cancelar citas",
-        description: "Busca horarios reales, reserva con el sí del paciente, reprograma y cancela.",
+        description:
+          "Busca horarios reales y reserva, mueve o cancela por el chat. Antes de hacerlo, siempre le pide el «sí» al paciente. También puede mandar el enlace de reserva cuando a la persona le sirve ver todos los horarios, sedes y profesionales a la vez.",
         fixed: false,
-        tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "reprogramar_cita", "cancelar_cita"],
+        tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reprogramar_cita", "cancelar_cita"],
         steps: [
           "Confirma la sede y el servicio.",
-          "Busca huecos reales en la agenda.",
+          "Busca huecos reales en la agenda, o manda el enlace si a la persona le sirve ver todo.",
           "Propone la cita.",
-          "Pide el sí del paciente o la aprobación del equipo, según el nivel.",
+          "Pide el sí del paciente.",
           "Reserva y avisa.",
         ],
-        whenOff: "No reservas, mueves ni cancelas citas: si lo piden, pasa el caso a una persona.",
-        offNote: "Apagada: si piden una cita, moverla o cancelarla, pasa el caso a una persona.",
+        whenOff:
+          "No reservas, mueves ni cancelas citas por el chat. Si piden una cita, envía el enlace de reserva con enviar_enlace_cita para que la persona la elija; si piden moverla o cancelarla, pasa el caso a una persona.",
+        offNote:
+          "Apagado: no toca la agenda. Si piden una cita, manda el enlace de reserva para que la persona la elija. Si piden moverla o cancelarla, pasa el caso a una persona.",
       },
       {
         id: "seguimiento",
         label: "Seguimiento comercial",
-        description: "Registra al interesado, mueve su oportunidad y retoma el contacto.",
+        description:
+          "Registra al interesado, mueve su oportunidad de etapa y anota el próximo seguimiento. La cierra como perdida solo si la persona lo dice claro, con el motivo. Lo ves y lo deshaces en la oportunidad.",
         fixed: false,
         tools: ["create_opportunity", "update_followup", "close_opportunity", "move_to_stage", "listar_oportunidades"],
         whenOff: "No creas ni cambias oportunidades ni seguimientos comerciales.",
@@ -132,6 +136,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     always: [
       "send_reply",
       "send_template",
+      // El enlace de reserva no depende de Agendar: con Agendar apagado es la vía para sacar una cita.
+      "enviar_enlace_cita",
       "confirmar_propuesta",
       "ver_contexto_paciente",
       "ver_resumen_paciente",
@@ -141,7 +147,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     sees: "La conversación y lo acordado. Agenda, servicios, precios y los medios de pago que acepta la clínica. El conocimiento de la clínica. Las citas y los datos de contacto de la persona; su saldo solo si la clínica lo autoriza.",
     notSees: "Historia clínica ni caja.",
     never: "Diagnosticar o recetar. Inventar precios, horarios o disponibilidad. Ver o mencionar la historia clínica.",
-    confirms: "Según el nivel: el paciente con su sí o el equipo en Aprobaciones.",
+    confirms:
+      "El paciente, con su sí, antes de reservar, mover o cancelar una cita. Lo demás lo hace solo y se deshace en la ficha o en la oportunidad.",
     learnsFrom: "Las correcciones del equipo, como lecciones que alguien aprueba.",
   },
   asistente_clinico: {
@@ -203,7 +210,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     sees: "Agenda, pendientes y cifras, según los permisos de quien lee. Los números salen de la base de datos, no de un modelo. El modelo recibe dos cosas: el texto de lo que le pides con palabras y, antes de un mensaje de seguimiento, los últimos mensajes que escribió esa persona.",
     notSees: "Historia clínica, caja ni el resto de las conversaciones. Al entender un pedido el modelo no recibe nombres ni datos de la clínica. Quien escribe a las personas es Recepción.",
     never: "Prender, cambiar ni apagar nada por su cuenta. Escribirle a quien no lo aceptó. Dar un número que no pueda mostrar. Más de tres recomendaciones a la vez. Armar una línea que el sistema no sepa hacer ni cambiar el texto de un mensaje.",
-    confirms: "Una persona prende cada línea, una por una; prender un recordatorio ya es aprobarlo. Con Recepción en «Supervisado», los demás mensajes esperan tu aprobación.",
+    confirms: "Una persona prende cada línea, una por una; prender una línea ya es aprobar sus mensajes.",
     learnsFrom: "De lo que descartas: «No recomendarla más» deja la línea en la lista sin volver a recomendarla. El plazo de cada línea lo cambias tú. No aprende de las conversaciones.",
     behaves: "Usa la base de tu clínica. El modelo solo elige entre opciones cerradas: de qué línea hablas, qué quieres hacer con ella y si una persona ya avisó algo. No redacta: cada cifra y cada mensaje salen de reglas fijas y de consultas a tus datos. Si el modelo no responde, lo dice; lo prendido y los interruptores siguen funcionando.",
     testedWith: "Con lo que haría hoy con tus datos antes de prender cada línea y, al pedirle algo con palabras, con lo que pasó en tus últimos 30 días. La prueba no envía nada.",
@@ -254,58 +261,4 @@ export function toolsDisabledBy(role: AgentRoleId, disabledFunctions: readonly s
     for (const tool of fn.tools) if (!kept.has(tool)) removed.add(tool)
   }
   return [...removed]
-}
-
-/* ---------- Hasta dónde llega solo: niveles sobre la política de autonomía ---------- */
-
-export const AGENT_LEVELS = ["supervisado", "equilibrado", "autonomo"] as const
-export type AgentLevel = (typeof AGENT_LEVELS)[number]
-
-const ALL_TEAM = Object.fromEntries(AUTONOMY_ACTIONS.map((action) => [action, "aprobar_equipo"])) as Record<
-  AutonomyAction,
-  AutonomyMode
->
-
-/**
- * Cada nivel es una política completa. `equilibrado` es la política por
- * defecto del producto: una clínica que nunca tocó la autonomía ya está ahí.
- */
-export const AGENT_LEVEL_POLICY: Record<AgentLevel, Record<AutonomyAction, AutonomyMode>> = {
-  supervisado: ALL_TEAM,
-  equilibrado: { ...DEFAULT_AUTONOMY_MODES },
-  autonomo: {
-    reservar_cita: "directo",
-    reprogramar_cita: "directo",
-    cancelar_cita: "confirmar_usuario",
-    enviar_mensaje: "directo",
-    mover_oportunidad: "directo",
-    crear_oportunidad: "directo",
-    actualizar_seguimiento: "directo",
-    cerrar_oportunidad: "directo",
-  },
-}
-
-export const AGENT_LEVEL_INFO: Record<AgentLevel, { label: string; summary: string }> = {
-  supervisado: {
-    label: "Supervisado",
-    summary: "Escribe los borradores y tu equipo los envía. Nada sale ni cambia sin que alguien lo apruebe.",
-  },
-  equilibrado: {
-    label: "Equilibrado",
-    summary:
-      "Responde solo. Para reservar o mover una cita pide el sí del paciente. Cancelar una cita, crear o cerrar una oportunidad y programar un seguimiento los aprueba tu equipo.",
-  },
-  autonomo: {
-    label: "Autónomo",
-    summary: "Responde, agenda y lleva el seguimiento solo. Solo para cancelar una cita pide el sí del paciente.",
-  },
-}
-
-/** Nivel que corresponde a una política; `personalizado` si no coincide con ninguno. */
-export function levelOfPolicy(policy: Record<AutonomyAction, AutonomyMode>): AgentLevel | "personalizado" {
-  for (const level of AGENT_LEVELS) {
-    const preset = AGENT_LEVEL_POLICY[level]
-    if (AUTONOMY_ACTIONS.every((action) => preset[action] === policy[action])) return level
-  }
-  return "personalizado"
 }

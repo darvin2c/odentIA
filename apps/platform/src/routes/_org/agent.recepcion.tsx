@@ -12,7 +12,6 @@ import {
   CollapsibleTrigger,
 } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { ConfirmDialog, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
@@ -30,10 +29,8 @@ import { TurnOnDrawer } from "../../components/agent/turn-on-drawer"
 import { useAgentPanel } from "../../components/agent-panel"
 import {
   type AgentFunction,
-  type AgentLevelId,
   type AgentOverview,
   type AgentRoles,
-  LEVEL_LABEL,
   type LearningOverview,
   minutesToClock,
   splitInstructions,
@@ -253,7 +250,6 @@ function ReceptionPage() {
   const [baseOpen, setBaseOpen] = useState(false)
   const [turnOnOpen, setTurnOnOpen] = useState(false)
   const [turnOffOpen, setTurnOffOpen] = useState(false)
-  const [levelToConfirm, setLevelToConfirm] = useState<AgentLevelId | null>(null)
   const [behaviorOpen, setBehaviorOpen] = useState(false)
   // Teléfono: «Probar» abierto como pantalla propia.
   const [testing, setTesting] = useState(false)
@@ -297,7 +293,7 @@ function ReceptionPage() {
   })
 
   function refresh() {
-    for (const key of ["agent-config", "agent-overview", "agent-policy", "agent-panel"]) {
+    for (const key of ["agent-config", "agent-overview", "agent-panel"]) {
       void queryClient.invalidateQueries({ queryKey: [key] })
     }
   }
@@ -307,12 +303,6 @@ function ReceptionPage() {
     retry: false,
     mutationFn: (disabledFunctions: string[]) =>
       apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ disabledFunctions }) }),
-    onSettled: refresh,
-  })
-  const changeLevel = useMutation({
-    retry: false,
-    mutationFn: (level: AgentLevelId) => apiFetch("/api/agent/level", { method: "PUT", body: JSON.stringify({ level }) }),
-    onSuccess: () => setLevelToConfirm(null),
     onSettled: refresh,
   })
   const turnOff = useMutation({
@@ -353,7 +343,6 @@ function ReceptionPage() {
   }
 
   const disabled = toggleFunction.isPending && toggleFunction.variables ? toggleFunction.variables : config.disabledFunctions
-  const activeLevel = changeLevel.isPending && changeLevel.variables ? changeLevel.variables : overview.level
   const hours =
     config.activeFromMin !== null && config.activeUntilMin !== null
       ? `De ${minutesToClock(config.activeFromMin)} a ${minutesToClock(config.activeUntilMin)}`
@@ -367,23 +356,12 @@ function ReceptionPage() {
     `tono ${TONE_LABEL[config.tone]}`,
   ].join(" · ")
   const instructions = splitInstructions(config.systemPrompt)
-  const levelSummary =
-    activeLevel === "personalizado"
-      ? `${LEVEL_LABEL.personalizado}: cada acto tiene su propio ajuste. Elegir un nivel lo reemplaza.`
-      : (roles.levels.find((level) => level.id === activeLevel)?.summary ?? "")
   const lessons = learningQuery.data?.data.learned.filter((lesson) => lesson.agent === "recepcion").length
   const { today, knows } = overview
   const gaps = overview.needsYou.gaps
   const status = overview.enabled ? "Encendido" : "Apagado"
   // En la pantalla de «Probar» del teléfono lo demás no se muestra.
   const besideTest = testing ? "max-sm:hidden" : ""
-
-  function pickLevel(level: AgentLevelId) {
-    if (!canWrite || changeLevel.isPending || level === overview?.level) return
-    // Subir al máximo o pisar un ajuste acto por acto se confirma; lo demás se aplica y se deshace igual de fácil.
-    if (level === "autonomo" || overview?.level === "personalizado") setLevelToConfirm(level)
-    else changeLevel.mutate(level)
-  }
 
   /** «Probar» desde otra superficie: en teléfono abre su pantalla; al lado de la página, la acerca. */
   function openTest() {
@@ -504,40 +482,11 @@ function ReceptionPage() {
               </p>
             ) : null}
             <p className="text-sm text-muted-foreground max-sm:hidden">
-              Los pasos son los mismos que usa tu equipo. Tú eliges qué funciones tiene y quién confirma.
+              Los pasos son los mismos que usa tu equipo. Tú eliges qué funciones tiene; antes de una cita siempre confirma el paciente.
             </p>
           </Card>
 
-          <Card title="Hasta dónde llega solo" hint="Empieza supervisado y súbelo cuando confíes.">
-            <ToggleGroup
-              aria-label="Nivel de autonomía"
-              variant="outline"
-              spacing={0}
-              className="w-full"
-              value={activeLevel === "personalizado" ? [] : [activeLevel]}
-              disabled={!canWrite || changeLevel.isPending}
-              onValueChange={(next) => {
-                const level = next[0] as AgentLevelId | undefined
-                if (level) pickLevel(level)
-              }}
-            >
-              {roles.levels.map((level) => (
-                <ToggleGroupItem
-                  key={level.id}
-                  value={level.id}
-                  className="min-h-11 flex-1 disabled:opacity-100 aria-pressed:bg-primary-soft aria-pressed:font-semibold aria-pressed:text-primary-soft-foreground sm:min-h-9"
-                >
-                  {level.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            <p className="text-sm text-muted-foreground">{levelSummary}</p>
-            {changeLevel.isError && !levelToConfirm ? (
-              <p role="alert" className="text-sm text-destructive">
-                {mutationErrorMessage(changeLevel.error)}
-              </p>
-            ) : null}
-
+          <Card title="Límites" hint="Siempre responde al momento. Aquí decides cuándo pasa el caso a una persona y cuánto puede hacer al día.">
             {/* Teléfono: una fila lleva a todos los límites; quien solo lee los ve desplegados. */}
             {canWrite ? (
               <div className="overflow-hidden rounded-xl border sm:hidden">
@@ -760,39 +709,11 @@ function ReceptionPage() {
         open={turnOnOpen}
         onClose={() => setTurnOnOpen(false)}
         overview={overview}
-        levels={roles.levels}
         onTest={() => {
           setTurnOnOpen(false)
           openTest()
         }}
       />
-      <ConfirmDialog
-        open={levelToConfirm !== null}
-        title={levelToConfirm ? `Pasar a ${LEVEL_LABEL[levelToConfirm]}` : "Cambiar el nivel"}
-        description={
-          overview.level === "personalizado"
-            ? "Reemplaza el ajuste acto por acto que tiene hoy. Después se elige entre los niveles."
-            : (roles.levels.find((level) => level.id === levelToConfirm)?.summary ?? "")
-        }
-        confirmLabel="Cambiar el nivel"
-        variant="default"
-        pending={changeLevel.isPending}
-        onClose={() => {
-          if (!changeLevel.isPending) {
-            changeLevel.reset()
-            setLevelToConfirm(null)
-          }
-        }}
-        onConfirm={() => {
-          if (levelToConfirm) changeLevel.mutate(levelToConfirm)
-        }}
-      >
-        {changeLevel.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {mutationErrorMessage(changeLevel.error)}
-          </p>
-        ) : null}
-      </ConfirmDialog>
       <ConfirmDialog
         open={turnOffOpen}
         title="Apagar Recepción"

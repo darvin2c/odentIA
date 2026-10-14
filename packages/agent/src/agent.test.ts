@@ -52,7 +52,7 @@ import {
   updateAutonomyPolicy,
   upsertAgentConfig,
 } from "@odentia/services"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
@@ -684,7 +684,7 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
     )
     // Con LLM_MODEL=fake la línea base es el modelo de decisión falso.
     expect(rows).toEqual([
-      expect.objectContaining({ point: "triage.v2", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
+      expect.objectContaining({ point: "triage.v3", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
     ])
     expect(rows[0]!.stateChars).toBeGreaterThan(0)
     // Las filas no guardan el texto: solo la huella.
@@ -1050,21 +1050,33 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
     to: new Date(Date.parse(from) + 86_400_000).toISOString(),
     durationMin: 45,
   }))
-  const firstLine = out.split("\n")[0] ?? ""
+  // La hora va en la de la sede, para decirla tal cual; el instante exacto queda entre corchetes para reservar.
+  expect(out.split("\n")[0]).toContain("hora local de la sede")
+  const firstLine = out.split("\n")[1] ?? ""
   const optionBranch = firstLine.match(/sede ([0-9a-f-]{36})/i)?.[1]
   const optionChair = firstLine.match(/sillón ([0-9a-f-]{36})/i)?.[1]
-  const optionDentist = firstLine.match(/profesional (\S+)/)?.[1]
-  const optionZone = firstLine.match(/zona ([^)]+)\)/)?.[1]
-  const [optionStart, optionEnd] = firstLine.match(/(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/g) ?? []
+  const optionDentist = firstLine.match(/profesional ([^\]\s]+)/)?.[1]
+  const optionStart = firstLine.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1]
+  const [, startClock, endClock] = firstLine.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/) ?? []
   expect(optionBranch).toBe(branchId)
   expect(optionChair).toBe(chairId)
   expect(optionDentist).toBe(dentistId)
-  expect(optionZone).toBe("America/Lima")
-  if (!optionStart || !optionEnd || !optionDentist || !optionChair || !optionBranch) {
+  if (!optionStart || !startClock || !endClock || !optionDentist || !optionChair || !optionBranch) {
     throw new Error("El hueco no contiene los datos necesarios para reservar")
   }
-  const durationMin = Math.round((Date.parse(optionEnd) - Date.parse(optionStart)) / 60000)
+  // La hora local que lee la persona es la del instante en Lima.
+  expect(new Date(optionStart).toLocaleTimeString("es-PE", { timeZone: "America/Lima", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).toBe(startClock)
+  const minutesOf = (clock: string) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3))
+  const durationMin = minutesOf(endClock) - minutesOf(startClock)
   expect(durationMin).toBe(45)
+  // Un rango en hora local, sin zona, es el mismo día en Lima.
+  const localDay = String(await gaps!.invoke({
+    branchId,
+    from: `${monday.toISOString().slice(0, 10)}T00:00`,
+    to: `${monday.toISOString().slice(0, 10)}T23:59`,
+    durationMin: 45,
+  }))
+  expect(localDay.split("\n")[1]).toBe(firstLine)
   const booking = tools.find((t) => t.name === "proponer_cita")
   expect(booking).toBeDefined()
   await booking!.invoke({
@@ -1092,7 +1104,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.dentistUserId).toBe(dentistId)
   expect(booked.durationMin).toBe(45)
   expect(booked.startsAt.toISOString()).toBe(optionStart)
-  expect(booked.endsAt.toISOString()).toBe(optionEnd)
+  expect(booked.endsAt.toISOString()).toBe(new Date(Date.parse(optionStart) + durationMin * 60_000).toISOString())
   expect(booked.status).toBe("programada")
 })
 
@@ -1185,8 +1197,10 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(rows).toHaveLength(1)
   expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
 
-  // Cancelar (aprobar_equipo): la confirmación del interlocutor no basta;
-  // reentregar el mismo trigger no duplica la propuesta.
+  // Cancelar con aprobación del equipo (la política fija la pide al paciente,
+  // ADR 0021; la prueba ejercita el otro modo): la confirmación del interlocutor
+  // no basta; reentregar el mismo trigger no duplica la propuesta.
+  await withOrgContext(appDb, "org_a", (tx) => updateAutonomyPolicy(tx, "org_a", actorId, { cancelar_cita: "aprobar_equipo" }))
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
@@ -1217,6 +1231,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     decideProposal(tx, "org_a", actorId, lateId!, { decision: "aprobada" }))
   expect(lateDecided.status).toBe("fallida")
   expect(lateDecided.error ?? "").toMatch(/obsoleta|cancelada/)
+  await withOrgContext(appDb, "org_a", (tx) => updateAutonomyPolicy(tx, "org_a", actorId, { cancelar_cita: "confirmar_usuario" }))
 })
 
 it("proponer_cita en directo fallido no se reporta como aprobación", async () => {
@@ -1533,12 +1548,12 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
         )
       }
       if (call === 2) {
-        const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[0] ?? ""
+        const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[1] ?? ""
         return toolCall(
           "proponer_cita",
           {
             patientId: fx.patientId,
-            dentistUserId: line.match(/profesional (\S+)/)?.[1],
+            dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
             chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
             startsAt: line.match(ISO_INSTANT)?.[0],
             branchId: fx.branchId,
@@ -1903,7 +1918,7 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
     }
     // Lo que otra función encendida necesita, y lo fijo, se queda.
     expect(off.tools).toEqual(expect.arrayContaining(["ver_sedes_y_servicios", "consultar_conocimiento", "request_human_handoff", "anotar_caso", "send_reply"]))
-    expect(off.system).toContain("No reservas, mueves ni cancelas citas: si lo piden, pasa el caso a una persona.")
+    expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat. Si piden una cita, envía el enlace de reserva")
     expect(off.system).toContain("No creas ni cambias oportunidades ni seguimientos comerciales.")
     expect(off.system).not.toContain("reserva con proponer_cita")
     expect(off.system).toContain("Indicación de la clínica para «Informar»: En ortodoncia, pregunta primero si ya tiene evaluación.")
@@ -2021,12 +2036,12 @@ it("probar: una conversación de prueba reserva en dos turnos sin tocar la base"
       )
     }
     if (call === 2) {
-      const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[0] ?? ""
+      const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[1] ?? ""
       return toolCall(
         "proponer_cita",
         {
           patientId: "00000000-0000-4000-8000-0000000000aa",
-          dentistUserId: line.match(/profesional (\S+)/)?.[1],
+          dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
           chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
@@ -2282,12 +2297,12 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(info.system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: pide información.")
     expect(info.system).toContain("Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas.")
     expect(info.decisions).toEqual([
-      expect.objectContaining({ point: "route.v2", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
+      expect.objectContaining({ point: "route.v3", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
     ])
     expect(info.ledger).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
-      ["ampliar_herramientas", "consultar_conocimiento", "request_human_handoff", "send_reply", "send_template", "ver_sedes_y_servicios"],
+      ["ampliar_herramientas", "buscar_en_la_clinica", "consultar_conocimiento", "request_human_handoff", "send_reply", "send_template", "ver_sedes_y_servicios"],
     )
 
     // Si el camino no alcanza, pide el resto y lo recibe en el paso siguiente.
@@ -2387,7 +2402,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     const shadow = await turn("tg:camino-apagado", "evt-camino-apagado", "Tengo una queja y quiero hablar con una persona")
     expect(shadow.calls).toBe(1)
     expect(shadow.system).not.toContain("Camino de este turno")
-    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v2", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
+    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v3", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
   }
@@ -2535,5 +2550,49 @@ it("un botón de un mensaje automático fija el camino sin preguntarle al modelo
     expect(asked).toBeGreaterThan(0)
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
+  }
+})
+
+it("varios mensajes seguidos nunca van por el camino «saludo», aunque el modelo de decisión lo diga", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  // Como Jev medido: con un «gracias» al final de una ráfaga, elige saludo con confianza suficiente.
+  const sayGreeting: DecisionModel = {
+    provider: "fake",
+    reportsProbabilities: true,
+    decide: async () => ({
+      answers: [
+        { id: "handoff", kind: "yesno", probability: 0.05 },
+        { id: "intent", kind: "choice", choice: "greeting_or_thanks", probabilities: { greeting_or_thanks: 0.7, reschedule_or_cancel: 0.3 }, confidence: 0.7 },
+      ],
+      model: "prueba",
+      usage: null,
+      latencyMs: 1,
+    }),
+  }
+  const run = async (conversationId: string, messageId: string) => {
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Listo." }, `r-${messageId}`))
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => sayGreeting }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+    })).toBe("done")
+    const [logged] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ outcome: agentDecisionLog.outcome }).from(agentDecisionLog)
+        .where(and(eq(agentDecisionLog.conversationId, conversationId), eq(agentDecisionLog.mode, "route")))
+        .orderBy(desc(agentDecisionLog.createdAt)).limit(1))
+    return { path: (logged?.outcome as { path?: string } | undefined)?.path, offered: model.offered[0] ?? [] }
+  }
+  try {
+    // «Quiero cancelar… / Gracias»: el camino queda abierto y el que escribe tiene con qué cancelar.
+    await ingestText("tg:rafaga-saludo", "evt-rafaga-1", "Quiero cancelar mi cita del viernes")
+    const last = await ingestText("tg:rafaga-saludo", "evt-rafaga-2", "Gracias")
+    const burst = await run(last.conversationId, last.messageId)
+    expect(burst.path).toBe("abierto")
+    expect(burst.offered).toContain("cancelar_cita")
+    // Un «gracias» solo sigue siendo saludo: respuesta breve y barata.
+    const alone = await ingestText("tg:rafaga-solo", "evt-rafaga-solo", "Gracias")
+    const single = await run(alone.conversationId, alone.messageId)
+    expect(single.path).toBe("saludo")
+    expect(single.offered).not.toContain("cancelar_cita")
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
 })

@@ -48,6 +48,7 @@ const promotionItemInput = z
   .object({
     serviceId: z.uuid(),
     mode: z.enum(["fixed", "from"]),
+    priceDisclosure: z.enum(["exacto", "desde", "evaluacion"]).nullish(),
     priceCents: z.number().int().min(0).max(2147483647),
   })
   .strict()

@@ -23,8 +23,9 @@ const patchInput = z.object({
 
 /**
  * Campos de contacto. Leerlos es de quien trabaja con contactos (los llena en
- * la ficha) y de quien configura; definirlos —crear, editar, eliminar— es
- * configurar la clínica, la misma regla que abre su apartado en Configuración.
+ * la ficha) y de quien configura; definirlos —crear, editar, eliminar— también
+ * es de quien trabaja con contactos (`crm.write`): es parte del trabajo diario
+ * de ventas, la misma regla que abre su apartado en Configuración.
  */
 export function createFieldsRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -41,8 +42,8 @@ export function createFieldsRoute(deps: CrmDeps) {
 
   app.post("/", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Los campos los configura quien administra la clínica"), 403)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar los campos de contacto"), 403)
     }
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -53,8 +54,8 @@ export function createFieldsRoute(deps: CrmDeps) {
 
   app.patch("/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Los campos los configura quien administra la clínica"), 403)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar los campos de contacto"), 403)
     }
     const parsed = patchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -67,8 +68,8 @@ export function createFieldsRoute(deps: CrmDeps) {
 
   app.delete("/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Los campos los configura quien administra la clínica"), 403)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar los campos de contacto"), 403)
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => deleteFieldDef(tx, orgId, c.req.param("id"))).then(

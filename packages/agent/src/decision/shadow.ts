@@ -4,7 +4,7 @@ import { recordAgentDecision } from "@odentia/services"
 import { and, desc, eq, lt } from "drizzle-orm"
 import { BURST_HORIZON_MS, BURST_MESSAGES, TRIAGE_QUESTIONS, TRIAGE_VERSION, triageOutcome, triageState } from "./points.js"
 import { DecisionError, type DecisionModel, type DecisionResult } from "./port.js"
-import { type AgentRoute, readRoute, ROUTE_QUESTIONS, ROUTE_VERSION, routeOutcome } from "./route.js"
+import { type AgentRoute, guardBurst, readRoute, ROUTE_QUESTIONS, ROUTE_VERSION, routeOutcome } from "./route.js"
 
 /**
  * Estado mínimo que ve el modelo de decisión: el mensaje disparador, los que
@@ -16,7 +16,7 @@ async function decisionState(
   db: Db,
   orgId: string,
   input: { conversationId: string; triggerMessageId: string },
-): Promise<string | null> {
+): Promise<{ text: string; messages: number } | null> {
   return withOrgContext(db, orgId, async (tx) => {
     const [trigger] = await tx
       .select({ body: message.body, createdAt: message.createdAt })
@@ -56,11 +56,15 @@ async function decisionState(
     ).reverse()
     const burst = earlier.filter((m) => m.createdAt.getTime() > since).slice(-(BURST_MESSAGES - 1))
     const previous = earlier.filter((m) => m.createdAt.getTime() <= since).slice(-2)
-    return triageState(
-      previous.map((m) => ({ direction: "in" as const, body: m.body })),
-      trigger.body ?? "[attachment]",
-      burst.map((m) => m.body),
-    )
+    return {
+      text: triageState(
+        previous.map((m) => ({ direction: "in" as const, body: m.body })),
+        trigger.body ?? "[attachment]",
+        burst.map((m) => m.body),
+      ),
+      // Cuántos mensajes seguidos sin respuesta leyó el modelo, contando el último.
+      messages: burst.length + 1,
+    }
   })
 }
 
@@ -81,8 +85,9 @@ export async function decideRoute(
       () => undefined,
     )
   try {
-    const state = await decisionState(db, orgId, input)
-    if (state === null) return null
+    const read = await decisionState(db, orgId, input)
+    if (read === null) return null
+    const state = read.text
     const base = { ...input, point: ROUTE_VERSION, mode: "route" as const, provider: decision.provider, state }
     let result: DecisionResult
     try {
@@ -92,7 +97,8 @@ export async function decideRoute(
       await record({ ...base, answers: [], error: detail })
       return null
     }
-    const route = readRoute(result)
+    // En el libro queda el camino que de verdad se aplicó.
+    const route = guardBurst(readRoute(result), read.messages)
     await record({
       ...base,
       model: result.model,
@@ -119,8 +125,9 @@ export async function runShadowTriage(
   decision: DecisionModel,
   input: { conversationId: string; triggerMessageId: string },
 ): Promise<void> {
-  const state = await decisionState(db, orgId, input)
-  if (state === null) return
+  const read = await decisionState(db, orgId, input)
+  if (read === null) return
+  const state = read.text
   const base = { conversationId: input.conversationId, triggerMessageId: input.triggerMessageId, point: TRIAGE_VERSION, provider: decision.provider, state }
   let result: DecisionResult
   try {

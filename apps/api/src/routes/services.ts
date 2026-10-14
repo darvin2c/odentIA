@@ -1,4 +1,5 @@
 import { withOrgContext } from "@odentia/db"
+import { PRICE_DISCLOSURES } from "@odentia/db/schema/clinical"
 import {
   createService,
   getTemplate,
@@ -50,6 +51,8 @@ const createInput = z
       .nullish(),
     durationMin: z.number().int().min(1).max(1440).nullish(),
     billingMode: z.enum(["treatment", "session"]).nullish(),
+    priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
+    evaluationServiceId: z.string().uuid().nullish(),
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -68,6 +71,8 @@ const patchInput = z
       .optional(),
     durationMin: z.number().int().min(1).max(1440).nullish(),
     billingMode: z.enum(["treatment", "session"]).optional(),
+    priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
+    evaluationServiceId: z.string().uuid().nullish(),
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -228,6 +233,8 @@ export function createServicesRoute(deps: CrmDeps) {
           currency: parsed.data.currency,
           durationMin: parsed.data.durationMin,
           billingMode: parsed.data.billingMode,
+          priceDisclosure: parsed.data.priceDisclosure,
+          evaluationServiceId: parsed.data.evaluationServiceId,
           isActive: parsed.data.isActive,
         }),
       ),
@@ -253,6 +260,8 @@ export function createServicesRoute(deps: CrmDeps) {
           currency: parsed.data.currency,
           durationMin: parsed.data.durationMin,
           billingMode: parsed.data.billingMode,
+          priceDisclosure: parsed.data.priceDisclosure,
+          evaluationServiceId: parsed.data.evaluationServiceId,
           isActive: parsed.data.isActive,
         }),
       ),

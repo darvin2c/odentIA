@@ -16,6 +16,12 @@ export interface PlatformLlm {
   maxRetries?: number
   /** dev/e2e: admite http y destinos privados (servidores locales de prueba). */
   allowInsecureBaseUrl?: boolean
+  /**
+   * Esfuerzo de razonamiento que se pide al modelo de la plataforma
+   * (`reasoning_effort`). Sin indicar no se envía. Algunos modelos (gpt-6-luna
+   * en chat/completions) rechazan herramientas si no va `none`.
+   */
+  reasoningEffort?: string
 }
 
 /** Proveedor propio de una organización, ya descifrado. */
@@ -33,6 +39,8 @@ export interface LlmSpec {
   timeoutMs: number
   maxRetries: number
   allowInsecureBaseUrl: boolean
+  /** Solo para el modelo de la plataforma; el propio de una clínica no lo recibe. */
+  reasoningEffort?: string
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -104,7 +112,14 @@ export function resolveLlmSpec(
   if (!platform.apiKey) {
     throw new LlmConfigError("API_KEY_REQUIRED", "La plataforma no tiene clave de proveedor configurada (LLM_API_KEY)")
   }
-  return { modelName, source: "platform", apiKey: platform.apiKey, baseUrl: platform.baseUrl, ...common }
+  return {
+    modelName,
+    source: "platform",
+    apiKey: platform.apiKey,
+    baseUrl: platform.baseUrl,
+    ...common,
+    ...(platform.reasoningEffort ? { reasoningEffort: platform.reasoningEffort } : {}),
+  }
 }
 
 /**
@@ -138,6 +153,9 @@ export async function createConfiguredChatModel(spec: LlmSpec) {
     apiKey: spec.apiKey,
     timeout: spec.timeoutMs,
     maxRetries: spec.maxRetries,
+    // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
+    // nombre (o1…, gpt-5…) y gpt-6-luna no está en esa lista.
+    ...(spec.reasoningEffort ? { modelKwargs: { reasoning_effort: spec.reasoningEffort } } : {}),
     configuration: {
       ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
       organization: null,

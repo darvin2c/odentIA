@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { agentPolicy } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
@@ -20,11 +19,9 @@ import {
   automationReplyOf,
   cancelAppointmentByToken,
   confirmAppointmentByToken,
-  decidePendingApprovals,
   deliverDueJobs,
   getMessagePermissions,
   handleAutomationReply,
-  listPendingApprovals,
   reconcileDeliveries,
   requestNeededTemplates,
   setConsent,
@@ -702,33 +699,6 @@ describe("quién lo hace: el agente, una persona o los dos", () => {
     expect(await deliver(c)).toMatchObject([{ outcome: "cancelado", detail: "Recepción apagada" }])
     expect(await tasksOf(c)).toHaveLength(0)
     expect(await noticesOf(c)).toHaveLength(0)
-  })
-
-  it("con Recepción en «Supervisado», lo que no es un recordatorio espera una sola aprobación por línea", async () => {
-    const c = await clinic()
-    await ownerDb.insert(agentPolicy).values({ organizationId: c.orgId, modes: { enviar_mensaje: "aprobar_equipo" } })
-    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
-    const one = await person(c, "Uno", { consent: ["seguimiento"], openWindow: true })
-    const two = await person(c, "Dos", { consent: ["seguimiento"], openWindow: true })
-    const reminded = await person(c, "Con cita", { consent: ["recordatorio"], openWindow: true })
-    await dueBudget(c, one.patientId)
-    await dueBudget(c, two.patientId)
-    await appointmentFor(c, reminded.patientId, new Date(NOW.getTime() + 24 * HOUR))
-    await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
-    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
-    // El recordatorio sale: prenderlo ya fue aprobarlo. Los otros dos esperan.
-    expect((await deliver(c)).map((result) => result.outcome).sort()).toEqual(["enviado", "por_aprobar", "por_aprobar"])
-    const [waiting, ...rest] = await run(c, (tx) => listPendingApprovals(tx, c.orgId))
-    expect(rest).toEqual([])
-    expect(waiting).toMatchObject({ key: "seguimiento_presupuesto", name: "Retomar un presupuesto", total: 2 })
-    expect([...waiting!.people].sort()).toEqual(["Dos", "Uno"])
-    // Mientras esperan, el ciclo no los vuelve a tocar.
-    expect(await deliver(c)).toEqual([])
-    expect(await run(c, (tx) => decidePendingApprovals(tx, c.orgId, c.ownerId, "seguimiento_presupuesto", "aprobar"))).toEqual({ total: 2 })
-    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado", "enviado"])
-    expect(await run(c, (tx) => listPendingApprovals(tx, c.orgId))).toEqual([])
-    await expect(run(c, (tx) => decidePendingApprovals(tx, c.orgId, c.ownerId, "seguimiento_presupuesto", "rechazar"))).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 })
 

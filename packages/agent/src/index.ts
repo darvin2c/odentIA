@@ -20,6 +20,7 @@ export {
 } from "./llm.js"
 export { assertSafeBaseUrl, createPinnedDispatcher, isPrivateAddress, parseLlmBaseUrl, parseSafeBaseUrl } from "./llm-endpoint.js"
 export * from "./decision/index.js"
+export { embedderFromEnv, type EmbeddingsEnv, FAKE_EMBEDDINGS_MODEL, fakeEmbedder, openAiEmbedder } from "./embeddings.js"
 export { type AdminModelDeps, ALREADY_TOLD_MIN, asAdminDecider, createAdminDecisionModel, createAlreadyTold } from "./admin.js"
 export { runShadowTriage } from "./decision/shadow.js"
 export {

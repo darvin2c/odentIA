@@ -1,18 +1,15 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { AUTONOMY_ACTIONS, agentAnswerTrace, agentHandoff, agentLesson, agentReviewItem, agentRunLedger } from "@odentia/db/schema/agent"
+import { AUTONOMY_ACTIONS, DEFAULT_AUTONOMY_MODES, agentAnswerTrace, agentHandoff, agentLesson, agentReviewItem, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { beforeAll, describe, expect, it } from "vitest"
 import { randomUUID } from "node:crypto"
 import { recordAgentDecision } from "./agent-decisions.js"
-import { getAgentRunStats, getAutonomyPolicy, updateAutonomyPolicy } from "./agent-operations.js"
-import { getAgentOverview, noteSandboxTurn, setAgentLevel } from "./agent-overview.js"
+import { getAgentRunStats, getAutonomyPolicy } from "./agent-operations.js"
+import { getAgentOverview, noteSandboxTurn } from "./agent-overview.js"
 import {
-  AGENT_LEVEL_POLICY,
-  AGENT_LEVELS,
   AGENT_ROLE_IDS,
   AGENT_ROLES,
-  levelOfPolicy,
   switchableFunctions,
   toolsDisabledBy,
 } from "./agent-roles.js"
@@ -92,9 +89,9 @@ describe("fichas de los agentes", () => {
   })
 
   it("una herramienta compartida sigue mientras alguna función encendida la traiga", () => {
-    expect(toolsDisabledBy("recepcion", ["informar"])).toEqual(["consultar_conocimiento"])
+    expect(toolsDisabledBy("recepcion", ["informar"]).sort()).toEqual(["buscar_en_la_clinica", "consultar_conocimiento"])
     expect(toolsDisabledBy("recepcion", ["agendar"]).sort()).toEqual(
-      ["buscar_huecos", "cancelar_cita", "enviar_enlace_cita", "proponer_cita", "reprogramar_cita"].sort(),
+      ["buscar_huecos", "cancelar_cita", "proponer_cita", "reprogramar_cita"].sort(),
     )
     expect(toolsDisabledBy("recepcion", ["informar", "agendar"])).toContain("ver_sedes_y_servicios")
   })
@@ -109,28 +106,19 @@ describe("fichas de los agentes", () => {
   })
 })
 
-describe("niveles: hasta dónde llega solo", () => {
-  it("cada nivel es una política completa y se reconoce a sí mismo", () => {
-    for (const level of AGENT_LEVELS) {
-      expect(Object.keys(AGENT_LEVEL_POLICY[level]).sort()).toEqual([...AUTONOMY_ACTIONS].sort())
-      expect(levelOfPolicy(AGENT_LEVEL_POLICY[level])).toBe(level)
-    }
-  })
-
-  it("supervisado no deja nada sin aprobación del equipo y autónomo nunca cancela sin el sí del paciente", () => {
-    expect(new Set(Object.values(AGENT_LEVEL_POLICY.supervisado))).toEqual(new Set(["aprobar_equipo"]))
-    expect(AGENT_LEVEL_POLICY.autonomo.cancelar_cita).toBe("confirmar_usuario")
-  })
-
-  it("una política retocada acto por acto es «personalizado»", () => {
-    expect(levelOfPolicy({ ...AGENT_LEVEL_POLICY.equilibrado, enviar_mensaje: "aprobar_equipo" })).toBe("personalizado")
-  })
-
-  it("fijar un nivel escribe su política; uno desconocido se rechaza", async () => {
-    await run((tx) => setAgentLevel(tx, ORG, OWNER, "supervisado"))
-    expect(await run((tx) => getAutonomyPolicy(tx, ORG))).toEqual(AGENT_LEVEL_POLICY.supervisado)
-    await expect(run((tx) => setAgentLevel(tx, ORG, OWNER, "total"))).rejects.toThrow(/Nivel desconocido/)
-    await run((tx) => setAgentLevel(tx, ORG, OWNER, "equilibrado"))
+describe("quién dice que sí: fijo para todas las clínicas", () => {
+  it("el agente responde solo, la cita la confirma el paciente y lo comercial va directo", async () => {
+    expect(Object.keys(DEFAULT_AUTONOMY_MODES).sort()).toEqual([...AUTONOMY_ACTIONS].sort())
+    expect(await run((tx) => getAutonomyPolicy(tx, ORG))).toEqual({
+      reservar_cita: "confirmar_usuario",
+      reprogramar_cita: "confirmar_usuario",
+      cancelar_cita: "confirmar_usuario",
+      enviar_mensaje: "directo",
+      mover_oportunidad: "directo",
+      crear_oportunidad: "directo",
+      actualizar_seguimiento: "directo",
+      cerrar_oportunidad: "directo",
+    })
   })
 })
 
@@ -182,11 +170,10 @@ describe("voz, funciones y límites de la clínica", () => {
 describe("resumen del agente", () => {
   let connectionId: string
 
-  it("una clínica que no tocó nada: apagado, equilibrado y con lo básico por responder", async () => {
+  it("una clínica que no tocó nada: apagado y con lo básico por responder", async () => {
     const overview = await run((tx) => getAgentOverview(tx, OTHER), OTHER)
     expect(overview).toMatchObject({
       enabled: false,
-      level: "equilibrado",
       needsYou: { approvals: 0, gaps: 0 },
       week: { attended: 0, corrected: 0, passed: 0, alone: 0, booked: 0 },
       learned: { officialAnswers: 0, rules: 0, examples: 0, latest: null },
@@ -197,24 +184,20 @@ describe("resumen del agente", () => {
     expect(overview.needsYou.basicsMissing).toBe(overview.knows.basicsTotal - overview.knows.basicsCovered)
   })
 
-  it("dice el nivel, quién recibe los casos, los canales conectados y si ya se probó", async () => {
+  it("dice quién recibe los casos, los canales conectados y si ya se probó", async () => {
     connectionId = await run((tx) =>
       createConnection(tx, ORG, KEY,
         { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } },
         { fetch, validateExternal: false }).then((connection) => connection.id),
     )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "aprobar_equipo" }))
     await run((tx) => noteSandboxTurn(tx, ORG))
     await run((tx) => noteSandboxTurn(tx, ORG))
     const overview = await run((tx) => getAgentOverview(tx, ORG))
-    expect(overview.level).toBe("personalizado")
     expect(overview.readiness.channels).toEqual(["telegram"])
     // Quien atiende un caso derivado: administración y recepción, no el clínico.
     expect(overview.readiness.receivers).toContain("Dueña Resumen")
     expect(overview.readiness.receivers).not.toContain("Odontólogo")
     expect(overview.readiness.sandboxTurns).toBe(2)
-    await run((tx) => setAgentLevel(tx, ORG, OWNER, "equilibrado"))
-    expect((await run((tx) => getAgentOverview(tx, ORG))).level).toBe("equilibrado")
   })
 
   it("cuenta conversaciones, no mensajes, y separa las que pasó a una persona", async () => {

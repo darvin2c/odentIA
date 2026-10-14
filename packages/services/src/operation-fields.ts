@@ -370,6 +370,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
 /** Herramientas que solo leen: sus parámetros son filtros de una consulta, no campos de una operación. */
 export const READ_TOOLS: readonly string[] = [
   "ver_sedes_y_servicios",
+  "buscar_en_la_clinica",
   "consultar_conocimiento",
   "ver_contexto_paciente",
   "ver_resumen_paciente",

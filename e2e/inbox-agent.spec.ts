@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant } from "./env"
 import { api, call, expect, type OwnerFixture, test } from "./fixtures"
+import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 
 interface Conversation {
@@ -45,7 +46,7 @@ async function seedThreads(owner: OwnerFixture, fixtureDb: Db, nextEventId: () =
   }
   const waiting = await conversationWith(page, org.slug, WAITING_TEXT)
   const derived = await conversationWith(page, org.slug, DERIVED_TEXT)
-  await call(page, "PUT", "/api/agent/policy", org.slug, { enviar_mensaje: "aprobar_equipo" })
+  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
   const propose = async (conversation: Conversation, text: string) => {
     const [row] = await fixtureDb.insert(agentProposal).values({
       organizationId: org.id, contactId: conversation.contact.id, conversationId: conversation.id, action: "enviar_mensaje",

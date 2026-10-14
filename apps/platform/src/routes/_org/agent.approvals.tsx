@@ -3,7 +3,6 @@ import { ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell, SubmitB
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { AdminApprovals } from "../../components/agent/admin-approvals"
 import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { HandoffNotice } from "../../components/agent/handoff-badges"
@@ -125,7 +124,6 @@ function AgentApprovalsPage() {
     <PageHeader title="Agente" subtitle="Revisa a quién afecta, el cambio previsto y el resultado antes de volver al caso." />
     <AgentTabs />
     {!canRead ? <EmptyState title="Sin acceso" description="No tienes acceso a las decisiones del agente." /> : <>
-      <AdminApprovals />
       <div className="flex flex-wrap items-end gap-3">
         <Field className="w-56"><FieldLabel htmlFor="filtro-estado">Estado</FieldLabel>
           <Select value={status || "todos"} onValueChange={value => void navigate({ search: { ...search, status: value === "todos" ? "" : value ?? "propuesta" }, replace: true })}>

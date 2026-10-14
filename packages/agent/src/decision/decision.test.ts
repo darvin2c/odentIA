@@ -93,7 +93,7 @@ it("el adaptador de OpenAI Decisions envía predicate/choice/score y respeta ref
     const sent = provider.seen[0]?.body as { model: string; input: string; questions: Array<{ type: string; name: string; choices?: unknown[]; levels?: unknown[] }> }
     expect(sent.model).toBe("gpt-6-luna")
     expect(sent.questions.map((q) => q.type)).toEqual(["predicate", "predicate", "score", "choice", "predicate"])
-    expect(sent.questions[3]?.choices).toHaveLength(8)
+    expect(sent.questions[3]?.choices).toHaveLength(9)
     expect(sent.questions[2]?.levels).toHaveLength(3)
     expect(answerOf(result, "requires_reply", "yesno")?.probability).toBe(0.97)
     expect(result.answers.find((a) => a.id === "handoff")?.kind).toBe("declined")
@@ -245,4 +245,41 @@ it("el modelo falso es determinista y el estado del triaje no lleva datos del co
       expect(answerOf(result, "handoff", "yesno")?.probability).toBeGreaterThan(0.7)
       expect(triageOutcome(result)).toMatchObject({ wouldHandoff: true, wouldSkipReply: false })
     })
+})
+
+it("lo que no es de la clínica va al texto fijo solo si el modelo de decisión está muy seguro", async () => {
+  const { offTopicReply, readRoute, ROUTE_OFF_TOPIC } = await import("./route.js")
+  const route = (p: number, handoff = 0.05) =>
+    readRoute({
+      answers: [
+        { id: "handoff", kind: "yesno", probability: handoff },
+        { id: "intent", kind: "choice", choice: "off_topic", probabilities: { off_topic: p, other: 1 - p }, confidence: p },
+      ],
+      model: "prueba",
+      usage: null,
+      latencyMs: 1,
+    }).path
+  expect(route(ROUTE_OFF_TOPIC)).toBe("fuera_de_tema")
+  // Con duda (medido: «se me cayó una calza mientras comía» salió con 0.64) va al camino abierto.
+  expect(route(0.64)).toBe("abierto")
+  // Pedir una persona manda sobre todo lo demás.
+  expect(route(0.99, 0.95)).toBe("derivar")
+  expect(TRIAGE_QUESTIONS.find((q) => q.id === "intent")).toMatchObject({ options: expect.arrayContaining([expect.objectContaining({ value: "off_topic" })]) })
+  expect(offTopicReply("usted", "Sofi", "Dental Smile")).toBe(
+    "Soy Sofi, asistente virtual de Dental Smile. Solo puedo ayudarle con temas de la clínica: citas, tratamientos, precios o sedes. ¿En qué le ayudo?",
+  )
+  expect(offTopicReply(null, null, "Dental Smile")).toContain("Soy el asistente virtual de Dental Smile. Solo puedo ayudarte")
+})
+
+it("la respuesta fija no duplica el punto de una razón social", async () => {
+  const { offTopicReply } = await import("./route.js")
+  expect(offTopicReply("tu", null, "Dental Smile S.A.C.")).toMatch(/^Soy el asistente virtual de Dental Smile S\.A\.C\. Solo puedo/)
+})
+
+it("la regla de la ráfaga solo cambia el camino «saludo» y solo con más de un mensaje", async () => {
+  const { guardBurst } = await import("./route.js")
+  const route = (path: "saludo" | "cita") => ({ path, intent: null, handoff: null, confidence: null, urgency: null })
+  expect(guardBurst(route("saludo"), 1).path).toBe("saludo")
+  expect(guardBurst(route("saludo"), 2).path).toBe("abierto")
+  expect(guardBurst(route("cita"), 4).path).toBe("cita")
 })

@@ -885,7 +885,7 @@ async function listContext(tx: Db, orgId: string): Promise<ListContext> {
   // Personas con cada mensaje por salir en el próximo día.
   const soon = await tx.execute<{ kind: string; n: number }>(sql`
     select j.kind, count(distinct j.contact_id)::int as n from automation_job j
-    where j.organization_id = ${orgId} and j.status in ('pendiente', 'por_aprobar')
+    where j.organization_id = ${orgId} and j.status = 'pendiente'
       and j.scheduled_for <= now() + interval '24 hours'
     group by j.kind`)
   return {

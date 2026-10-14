@@ -8,7 +8,7 @@ import { type ReactNode, useState } from "react"
 import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
-import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, LEVEL_LABEL, PROVIDER_PROBLEM } from "../../lib/agent"
+import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, PROVIDER_PROBLEM } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
@@ -293,7 +293,7 @@ function AgentSummaryPage() {
                           <span className="font-semibold">{role.name}</span>
                           <span className={cn("text-sm", on ? "font-bold text-success" : "text-muted-foreground")}>
                             {on
-                              ? `Encendido${isReception ? ` · nivel ${LEVEL_LABEL[overview.level]}` : ""}`
+                              ? "Encendido"
                               : canWrite
                                 ? "Apagado · ver y encender"
                                 : "Apagado · ver"}
@@ -318,8 +318,8 @@ function AgentSummaryPage() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {isReception && on
-                            ? `Nivel ${LEVEL_LABEL[overview.level]} · ${
-                                channels.length ? channels.map((channel) => channelLabel(channel)).join(", ") : "sin canal conectado"
+                            ? `Responde por ${
+                                channels.length ? channels.map((channel) => channelLabel(channel)).join(", ") : "ningún canal: falta conectar uno"
                               }`
                             : role.id === "administrador" && on && admin
                               ? adminSummary(admin)

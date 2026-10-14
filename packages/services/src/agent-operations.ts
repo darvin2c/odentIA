@@ -33,7 +33,7 @@ import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/sch
 import { appointment } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
-import { listAvailableSlots } from "./availability.js"
+import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import {
   createAppointment,
   getAppointment,
@@ -434,7 +434,20 @@ export interface FreeGap {
   startsAt: string
   endsAt: string
   dentistUserId: string
+  /** Nombre del profesional, para decirlo a la persona. */
+  dentistName: string | null
   chairId: string | null
+}
+
+/**
+ * Un límite del rango: «2026-10-16» o «2026-10-16T08:00» sin zona es hora
+ * local de la sede (así piensa quien pide «el viernes en la mañana»); con
+ * zona (`Z`, `-05:00`) es un instante.
+ */
+function rangeBound(value: string, timeZone: string): Date {
+  const local = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?)?$/.exec(value.trim())
+  if (local) return zonedTimeToUtc(local[1]!, Number(local[2] ?? 0) * 60 + Number(local[3] ?? 0), timeZone)
+  return new Date(value)
 }
 
 export interface FreeGapResult {
@@ -450,8 +463,15 @@ export interface FreeGapResult {
  * rango o pagina por días.
  */
 export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): Promise<FreeGapResult> {
-  const from = new Date(input.from)
-  const to = new Date(input.to)
+  if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
+  const [place] = await tx
+    .select({ timezone: branch.timezone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId)))
+    .limit(1)
+  const zone = place?.timezone || (await getOrgLocale(tx, orgId)).timezone
+  const from = rangeBound(input.from, zone)
+  const to = rangeBound(input.to, zone)
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
     throw validation("Rango de búsqueda inválido")
   }
@@ -462,7 +482,6 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
   if (durationMin !== undefined && (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480)) {
     throw validation("durationMin debe ser entero entre 10 y 480")
   }
-  if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
   const { slots, truncated, timeZone } = await listAvailableSlots(tx, orgId, {
     branchId: input.branchId,
     dentistUserId: input.dentistUserId,
@@ -474,11 +493,19 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
   })
+  const shown = slots.slice(0, 20)
+  const ids = [...new Set(shown.map((s) => s.dentistUserId))]
+  const names = ids.length
+    ? new Map(
+        (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids))).map((row) => [row.id, row.name]),
+      )
+    : new Map<string, string>()
   return {
-    gaps: slots.slice(0, 20).map((s) => ({
+    gaps: shown.map((s) => ({
       startsAt: s.startsAt,
       endsAt: s.endsAt,
       dentistUserId: s.dentistUserId,
+      dentistName: names.get(s.dentistUserId) ?? null,
       chairId: s.chairId,
     })),
     truncated: truncated || slots.length > 20,

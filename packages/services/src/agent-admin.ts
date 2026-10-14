@@ -570,7 +570,6 @@ async function enqueueCase(
 /** Resultado de un caso, en una palabra que la pantalla sabe decir. */
 export type CaseOutcome =
   | "programado"
-  | "por_aprobar"
   | "enviando"
   | "entregado"
   | "confirmo"
@@ -666,7 +665,6 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
       ? { outcome: "tarea_resuelta", text: "Una persona ya lo resolvió.", fix: null, cause: null }
       : { outcome: "tarea", text: `Quedó una tarea para ${taskTeam}.`, fix: null, cause: null }
   }
-  if (row.status === "por_aprobar") return { outcome: "por_aprobar", text: "El mensaje espera la aprobación de una persona.", fix: null, cause: null }
   if (row.status === "cancelado") return { outcome: "no_hizo_falta", text: `No se hizo nada: ${(row.last_error ?? "ya no hacía falta").replace(/\.$/, "").toLowerCase()}.`, fix: null, cause: null }
   return { outcome: "programado", text: `Programado para el ${dayOf(row.scheduled_for, zone)}.`, fix: null, cause: null }
 }
@@ -710,11 +708,10 @@ export interface LineWeek {
   tasks: number
   tasksDone: number
   unreached: number
-  waiting: number
 }
 
 async function weekOf(tx: Db, orgId: string, days = 7): Promise<Map<string, LineWeek>> {
-  const rows = await tx.execute<{ kind: string; cases: number; messages: number; answered: number; tasks: number; tasks_done: number; unreached: number; waiting: number }>(sql`
+  const rows = await tx.execute<{ kind: string; cases: number; messages: number; answered: number; tasks: number; tasks_done: number; unreached: number }>(sql`
     select j.kind,
       count(*) filter (where j.status in ('enviado', 'tarea', 'fallido', 'omitido'))::int as cases,
       count(*) filter (where j.status = 'enviado')::int as messages,
@@ -727,8 +724,7 @@ async function weekOf(tx: Db, orgId: string, days = 7): Promise<Map<string, Line
                 and n.status in ('programada', 'confirmada', 'atendida')))))::int as answered,
       count(*) filter (where j.task_id is not null)::int as tasks,
       count(*) filter (where t.status = 'done')::int as tasks_done,
-      count(*) filter (where j.cause is not null)::int as unreached,
-      count(*) filter (where j.status = 'por_aprobar')::int as waiting
+      count(*) filter (where j.cause is not null)::int as unreached
     from automation_job j
     left join message m on m.id = j.sent_message_id and m.organization_id = j.organization_id
     left join appointment a on a.id = j.appointment_id and a.organization_id = j.organization_id
@@ -737,7 +733,7 @@ async function weekOf(tx: Db, orgId: string, days = 7): Promise<Map<string, Line
     group by j.kind`)
   return new Map(rows.map((row) => [row.kind, {
     cases: Number(row.cases), messages: Number(row.messages), answered: Number(row.answered), tasks: Number(row.tasks),
-    tasksDone: Number(row.tasks_done), unreached: Number(row.unreached), waiting: Number(row.waiting),
+    tasksDone: Number(row.tasks_done), unreached: Number(row.unreached),
   }]))
 }
 
@@ -774,7 +770,7 @@ function suggestionOf(line: AdminLine, writes: boolean, month: LineWeek | undefi
 
 /** La semana de una línea prendida, en una frase. Sin actividad, lo dice. */
 function weekLine(line: AdminLine, week: LineWeek | undefined): string {
-  if (!week || week.cases + week.waiting === 0) return "Esta semana: todavía nada"
+  if (!week || week.cases === 0) return "Esta semana: todavía nada"
   const parts: string[] = []
   if (week.messages > 0) {
     parts.push(`${week.messages} ${plural(week.messages, "mensaje del agente", "mensajes del agente")}`)
@@ -783,7 +779,6 @@ function weekLine(line: AdminLine, week: LineWeek | undefined): string {
   }
   if (week.tasks > 0) parts.push(`${week.tasks} ${plural(week.tasks, "tarea", "tareas")}, ${week.tasksDone} ${plural(week.tasksDone, "resuelta", "resueltas")}`)
   if (week.unreached > 0) parts.push(`${week.unreached} ${plural(week.unreached, "aviso", "avisos")} de «no pude»`)
-  if (week.waiting > 0) parts.push(`${week.waiting} ${plural(week.waiting, "espera", "esperan")} aprobación`)
   return `Esta semana: ${parts.join(", ")}`
 }
 

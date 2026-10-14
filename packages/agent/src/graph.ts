@@ -12,12 +12,14 @@ import {
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
   formatKnowledgeForPrompt,
+  formatAgentClinicData,
   formatOrgMoney,
   formatLessonExamples,
   formatLessonRules,
   formatPersonMemoryForPrompt,
   formatZoned,
   getAgentCaseState,
+  getAgentClinicData,
   getAgentConfig,
   getAutonomyPolicy,
   getClinicInfoSnapshot,
@@ -50,11 +52,13 @@ import {
 import { DecisionError, type DecisionResult } from "./decision/port.js"
 import { z } from "zod"
 import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
+import { channelFormatRule } from "./channel-format.js"
 import { ROUTE_TOOLS, routeInstruction, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
   type AgentSandbox,
   type AgentToolCtx,
+  conversationChannel,
   makeAgentTools,
   performHandoff,
   SANDBOX_PATIENT_ID,
@@ -150,6 +154,15 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
  * qué hacer cuando alguien la pide. Con la configuración por defecto dice lo
  * mismo que antes de existir las funciones, más los principios fijos.
  */
+/**
+ * Vender bien sin decir nada falso: la promoción que aplica se ofrece aunque
+ * no la pidan, dicha como promoción, con el ahorro y la fecha de fin que trae
+ * el dato, y siempre con un paso siguiente. Nada de urgencia, cupos ni
+ * condiciones que no estén en los datos.
+ */
+const SELLS =
+  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
+
 function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
   const ficha = AGENT_ROLES.recepcion
   const off = new Set(cfg.disabledFunctions)
@@ -171,21 +184,23 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
     `La zona horaria de la clínica es ${zone.timezone}. Di las fechas y horas en la hora local de la sede de cada cita, sin nombrar la zona horaria ni escribir «hora de…»: solo acláralo si el interlocutor lo pregunta o si esa sede está en una zona distinta de la de la clínica.`,
+    "Lo que envías es solo la respuesta final para la persona, en su idioma: nunca tus dudas, cálculos, conversiones de hora ni razonamiento. Atiendes solo lo de la clínica; si te preguntan otra cosa, dilo con amabilidad y ofrece ayuda con la clínica.",
     "Respondes, cualificas al interlocutor y ayudas con información general y citas. Quien escribe no es necesariamente el paciente: puede ser su representante, un familiar o alguien que aún no se atiende.",
     lookups.length
       ? `NO das diagnósticos ni inventas precios, sedes o disponibilidad: las sedes, los servicios y sus tarifas figuran más abajo, con su id; para lo que no esté ahí usa ${lookups.join(", ").replace(/, ([^,]*)$/, " y $1")}.`
       : "NO das diagnósticos ni inventas precios, sedes o disponibilidad.",
-    on("informar") ? null : whenOff("informar"),
+    on("informar") ? SELLS : whenOff("informar"),
     on("agendar")
-      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si tienes enviar_enlace_cita, ofrece también a quien pide una cita, sea ya paciente o recién se contacte, elegir él mismo el día y la hora en el enlace; es una opción, no una obligación."
+      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si la persona ya sabe qué quiere, ofrécele dos o tres horarios por aquí; si duda entre días, sedes o profesionales, envíale el enlace con enviar_enlace_cita para que vea todo de una vez (sirve a quien ya es paciente y a quien recién se contacta) y ofrece seguir por aquí si lo prefiere."
       : whenOff("agendar"),
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     on("agendar")
-      ? "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); todo se ejecuta solo con confirmación o aprobación según la política."
+      ? "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); reservar, mover o cancelar se ejecuta solo con el sí del interlocutor."
       : null,
     on("seguimiento") ? null : whenOff("seguimiento"),
     "Si el interlocutor pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
     ...notes,
+    "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
@@ -425,9 +440,9 @@ export function compileAgentGraph(
           const followup = o.nextActionAt
             ? `; próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}`
             : ""
-          const amount =
-            o.amountCents !== null ? `; valor ${formatOrgMoney(o.amountCents, o.currency, zone)}` : ""
-          parts.push(`${o.title} (etapa ${o.stageName}${followup}${amount})`)
+          // El valor de la oportunidad es una cifra interna de ventas, no un precio: no llega al
+          // agente, que podría decirlo a la persona y la comprobación lo daría por bueno (ADR 0021).
+          parts.push(`${o.title} (etapa ${o.stageName}${followup})`)
         }
         if (nextCursor) parts.push("hay más oportunidades: usa listar_oportunidades para verlas todas")
       }
@@ -580,7 +595,7 @@ export function compileAgentGraph(
     const asked = draft ?? trailingBurst(items) ?? latestInbound
     const overrides = toolCtx.lessonOverrides
     const hiddenEntries = new Set(overrides?.skipEntryIds ?? [])
-    const { cfg, orgPrompt, policyLine, snapshot, faqs, lessons } = await withOrgContext(
+    const { cfg, orgPrompt, policyLine, snapshot, clinicData, faqs, lessons } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
       async (tx) => {
@@ -589,15 +604,18 @@ export function compileAgentGraph(
         const modes = (Object.entries(policy) as Array<[string, string]>)
           .map(([action, mode]) => `${action}=${mode}`)
           .join(", ")
-        // Con «Informar» apagado el agente no recibe tarifas ni respuestas
-        // oficiales: solo las sedes, que agendar necesita.
+        // Con «Informar» apagado el agente no recibe tarifas, promociones,
+        // profesionales ni respuestas oficiales: solo las sedes y su horario,
+        // que agendar necesita.
         const informs = !cfg.disabledFunctions.includes("informar")
         const snapshot = await getClinicInfoSnapshot(tx, toolCtx.orgId)
+        const clinicData = await getAgentClinicData(tx, toolCtx.orgId, informs)
         return {
           cfg,
           orgPrompt: cfg.systemPrompt,
           policyLine: `Política de autonomía: ${modes}.`,
           snapshot: informs ? snapshot : { ...snapshot, services: [] },
+          clinicData,
           faqs: informs ? (await listPublishedForPrompt(tx, toolCtx.orgId)).filter((entry) => !hiddenEntries.has(entry.id)) : [],
           // Lo aprendido de las correcciones: reglas del agente y ejemplos parecidos a lo que se pregunta.
           lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", toolCtx.runInstruction ? "" : (asked ?? ""), {
@@ -626,7 +644,12 @@ export function compileAgentGraph(
     // mensaje del interlocutor) no elige nada.
     // Un botón tocado no pregunta nada: no hay tema que elegir.
     const selecting = Boolean(toolCtx.decision) && faqs.length > 0 && !toolCtx.runInstruction && !toolCtx.routeHint
-    const knowledgeBlock = formatKnowledgeForPrompt(snapshot, faqs, selecting ? "indice" : undefined)
+    const knowledgeBlock = formatKnowledgeForPrompt(
+      snapshot,
+      faqs,
+      selecting ? "indice" : undefined,
+      formatAgentClinicData(clinicData, zone),
+    )
     const picked = selecting ? await selectKnowledge(asked, faqs) : null
     // De lo más estable a lo más cambiante. Los proveedores sirven desde su
     // caché el prefijo idéntico entre llamadas: lo que es igual para toda la
@@ -643,7 +666,9 @@ export function compileAgentGraph(
     const routeBlock = route ? [routeInstruction(route.path, prefetched?.text), toolCtx.routeHint].filter(Boolean).join("\n") || null : null
     const nowLine = `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
-    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, policyLine, knowledgeBlock, contactBlock, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
+    // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
+    const formatLine = channelFormatRule(await conversationChannel(toolCtx))
+    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, policyLine, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const said = (who: "contact" | "agent" | "team") =>

@@ -58,7 +58,7 @@ Ver `docs/decisions/0007-modelo-de-decision-elige-el-conocimiento.md`. El worker
 sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
 fila con error en Agente › Registro técnico. `pnpm --filter @odentia/agent eval:decisions
 -- --provider=jev` compara un proveedor con los ejemplos propios de
-`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:admin`
+`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:off-topic` mide si reconoce lo que no es de la clínica sin marcar lo que sí lo es. `eval:admin`
 mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens
 por llamada; `eval:month` corre un mes de una clínica inventada y proyecta los tokens
 del mes (necesita el runtime de contenedores, como las pruebas).
@@ -68,6 +68,22 @@ worker o en `infra/prod/.env`. `CHANNEL_SENDER_MODE=mock` sigue impidiendo enví
 reales aunque el LLM sea real; habilitar `live` y validación externa de conexiones
 solo para una prueba autorizada, con destinatarios consentidos. Una respuesta
 del modelo no demuestra entrega del canal ni sustituye la observación humana.
+
+### Búsqueda por significado del agente
+
+Ver `docs/decisions/0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md`.
+Necesita la extensión `vector` (pgvector) en PostgreSQL: la imagen
+`dentalagent-postgres:18.6` la trae desde el 2026-10-14. Con una imagen anterior,
+reconstruirla (`podman build -t dentalagent-postgres:18.6 infra/dev/postgres`) y
+recrear el contenedor de desarrollo antes de migrar; el volumen de datos se conserva.
+La base de producción debe tenerla instalada.
+
+Worker y API leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`
+(cualquier endpoint compatible con OpenAI). `fake` (el de `.env.example`) vectoriza por
+trozos de letras, sin red: encuentra palabras mal escritas pero no entiende
+significado y no acredita a ningún proveedor. Vacío: el agente busca solo por
+palabras. El índice se concilia y se vectoriza en el ciclo de automatizaciones
+del worker; cambiar de modelo vuelve a vectorizar todo de a poco. `pnpm --filter @odentia/agent eval:search` mide la búsqueda con el banco `packages/agent/eval/busqueda-clinica.json` (por palabras, con `fake` y con el proveedor real; luego con 3 000 servicios de relleno) en una base efímera. Turbo solo pasa a las apps las variables declaradas en `turbo.json`: una variable nueva de entorno se declara ahí.
 
 ### WhatsApp con «Conectar con Facebook» (opcional)
 

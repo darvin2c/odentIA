@@ -99,7 +99,8 @@ function ContactDetailPage() {
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const canWrite = usePermission("crm.write")
-  const canConfigure = usePermission("settings.read")
+  // Definir campos lo hace quien configura y también quien trabaja con contactos.
+  const canConfigure = usePermission("settings.read") || canWrite
   const { contactId } = Route.useParams()
   const [editOpen, setEditOpen] = useState(false)
   const [draftName, setDraftName] = useState("")
@@ -753,7 +754,7 @@ function ContactDetailPage() {
           {fieldDefs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Sin campos definidos.{" "}
-              {/* El enlace solo para quien puede abrir Configuración: a los demás los devolvería a Inicio. */}
+              {/* El enlace solo para quien puede abrir Campos de contacto: a los demás los devolvería a Inicio. */}
               {canConfigure ? (
                 <Link to="/settings/fields" className="font-semibold text-primary hover:underline">
                   Definir campos

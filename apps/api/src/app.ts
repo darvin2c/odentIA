@@ -3,7 +3,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { initialOrgRegion, type MailboxEnv, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
+import { initialOrgRegion, type MailboxEnv, type SearchEmbedder, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -81,6 +81,8 @@ export interface AppDeps {
   llm?: PlatformLlm
   /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
   decisions?: PlatformDecisions
+  /** Quien vectoriza para la búsqueda por significado (EMBEDDINGS_*); sin él, por palabras. */
+  embedder?: SearchEmbedder
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
@@ -615,7 +617,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
   guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm }))
-  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm }))
+  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, decisions: deps.decisions, embedder: deps.embedder }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(

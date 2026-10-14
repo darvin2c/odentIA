@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   check,
+  customType,
   date,
   foreignKey,
   index,
@@ -702,13 +703,70 @@ export interface AgentPatientContext {
   authorization: "self" | "representante_legal" | "autorizado_informacion"
 }
 
+/**
+ * Quién dice que sí a cada acción del agente. Es fija para todas las clínicas
+ * (ADR 0021): el agente siempre responde, la cita la confirma el paciente y lo
+ * comercial es interno y se deshace. La clínica elige qué funciones enciende,
+ * no niveles. `agent_policy` queda solo para que las pruebas ejerciten los
+ * otros modos de la máquina de propuestas.
+ */
 export const DEFAULT_AUTONOMY_MODES: Record<AutonomyAction, AutonomyMode> = {
   reservar_cita: "confirmar_usuario",
   reprogramar_cita: "confirmar_usuario",
-  cancelar_cita: "aprobar_equipo",
+  cancelar_cita: "confirmar_usuario",
   enviar_mensaje: "directo",
   mover_oportunidad: "directo",
-  crear_oportunidad: "aprobar_equipo",
-  actualizar_seguimiento: "aprobar_equipo",
-  cerrar_oportunidad: "aprobar_equipo",
+  crear_oportunidad: "directo",
+  actualizar_seguimiento: "directo",
+  cerrar_oportunidad: "directo",
 }
+
+/* ---------- Búsqueda por significado (ADR 0021) ---------- */
+
+/**
+ * Vector de pgvector sin dimensión fija: cada fila guarda el modelo que la
+ * vectorizó y solo se compara con vectores del mismo modelo. Sin dimensión no
+ * hay índice; la búsqueda recorre las filas de una clínica, que son pocas.
+ */
+export const pgVector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return "vector"
+  },
+  toDriver(value) {
+    return `[${value.join(",")}]`
+  },
+  fromDriver(value) {
+    return JSON.parse(value) as number[]
+  },
+})
+
+/** Qué se puede encontrar por significado. */
+export const SEARCH_ITEM_KINDS = ["servicio", "promocion", "profesional", "respuesta"] as const
+export type SearchItemKind = (typeof SEARCH_ITEM_KINDS)[number]
+
+/**
+ * Lo que el agente encuentra por significado: un texto descriptivo por cosa
+ * de la clínica (nunca precios, fechas ni datos de personas) y su vector. Sirve
+ * solo para encontrar: lo que se dice se lee de su tabla en ese momento. La
+ * fila se concilia con el catálogo; con el texto cambiado, el vector se borra
+ * y el trabajador lo vuelve a calcular.
+ */
+export const agentSearchItem = pgTable(
+  "agent_search_item",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    kind: text("kind").notNull(),
+    refId: text("ref_id").notNull(),
+    text: text("text").notNull(),
+    /** Modelo que calculó `embedding`; nulo mientras falta calcularlo. */
+    model: text("model"),
+    embedding: pgVector("embedding"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("agent_search_item_ref_uidx").on(table.organizationId, table.kind, table.refId),
+    index("agent_search_item_pending_idx").on(table.organizationId).where(sql`${table.embedding} is null`),
+    check("agent_search_item_kind_check", sql`${table.kind} in ('servicio','promocion','profesional','respuesta')`),
+  ],
+)

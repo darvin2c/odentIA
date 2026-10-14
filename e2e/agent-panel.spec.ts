@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
+import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 
 interface Conversation {
@@ -74,7 +75,7 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   // que la genere, y la vía HTTP la marcaría como propuesta por una persona.
   // Ese es el límite de esta evidencia; la lógica de propuesta se cubre en
   // services y en crm.spec.ts con el modelo falso.
-  await call(page, "PUT", "/api/agent/policy", org.slug, { enviar_mensaje: "aprobar_equipo" })
+  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
   await fixtureDb.insert(agentProposal).values({
     organizationId: org.id,
     contactId: conversation.contact.id,
@@ -190,7 +191,7 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   // Trabajo proactivo: propuesta sin hilo (seguimiento vencido) anclada al
   // contacto y a su oportunidad; el caso que se abre es la oportunidad. Con la
   // política por defecto de mensajes (directo) sigue siendo decisión del equipo.
-  await call(page, "PUT", "/api/agent/policy", org.slug, { enviar_mensaje: "directo" })
+  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "directo" })
   const opportunity = await call<{ id: string }>(
     page,
     "POST",
