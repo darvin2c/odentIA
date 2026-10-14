@@ -161,7 +161,7 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
  * condiciones que no estén en los datos.
  */
 const SELLS =
-  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
+  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
 
 function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
   const ficha = AGENT_ROLES.recepcion

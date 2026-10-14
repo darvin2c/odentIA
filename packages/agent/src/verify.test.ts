@@ -140,6 +140,9 @@ it("un mínimo («desde») solo sale dicho como mínimo", () => {
   }
   expect(check("La ortodoncia es desde S/ 2,500; el final se define en la evaluación.", [desde]).ok).toBe(true)
   expect(check("La ortodoncia es a partir de S/ 2,500.", [desde]).ok).toBe(true)
+  // En WhatsApp va en negrita junto al precio: la marca no esconde el «desde».
+  expect(check("La ortodoncia es *desde S/ 2,500*; el final se define en la evaluación.", [desde]).ok).toBe(true)
+  expect(check("La ortodoncia en promoción: *S/ 2,500*.", [desde]).ok).toBe(false)
   const asFinal = check("La ortodoncia cuesta S/ 2,500.", [desde])
   expect(asFinal.ok).toBe(false)
   expect(describeUnsupported(asFinal)).toContain("es un mínimo")
