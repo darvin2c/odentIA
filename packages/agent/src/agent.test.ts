@@ -52,7 +52,7 @@ import {
   updateAutonomyPolicy,
   upsertAgentConfig,
 } from "@odentia/services"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
@@ -2550,5 +2550,49 @@ it("un botón de un mensaje automático fija el camino sin preguntarle al modelo
     expect(asked).toBeGreaterThan(0)
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
+  }
+})
+
+it("varios mensajes seguidos nunca van por el camino «saludo», aunque el modelo de decisión lo diga", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  // Como Jev medido: con un «gracias» al final de una ráfaga, elige saludo con confianza suficiente.
+  const sayGreeting: DecisionModel = {
+    provider: "fake",
+    reportsProbabilities: true,
+    decide: async () => ({
+      answers: [
+        { id: "handoff", kind: "yesno", probability: 0.05 },
+        { id: "intent", kind: "choice", choice: "greeting_or_thanks", probabilities: { greeting_or_thanks: 0.7, reschedule_or_cancel: 0.3 }, confidence: 0.7 },
+      ],
+      model: "prueba",
+      usage: null,
+      latencyMs: 1,
+    }),
+  }
+  const run = async (conversationId: string, messageId: string) => {
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Listo." }, `r-${messageId}`))
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => model, createDecisionModel: () => sayGreeting }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+    })).toBe("done")
+    const [logged] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ outcome: agentDecisionLog.outcome }).from(agentDecisionLog)
+        .where(and(eq(agentDecisionLog.conversationId, conversationId), eq(agentDecisionLog.mode, "route")))
+        .orderBy(desc(agentDecisionLog.createdAt)).limit(1))
+    return { path: (logged?.outcome as { path?: string } | undefined)?.path, offered: model.offered[0] ?? [] }
+  }
+  try {
+    // «Quiero cancelar… / Gracias»: el camino queda abierto y el que escribe tiene con qué cancelar.
+    await ingestText("tg:rafaga-saludo", "evt-rafaga-1", "Quiero cancelar mi cita del viernes")
+    const last = await ingestText("tg:rafaga-saludo", "evt-rafaga-2", "Gracias")
+    const burst = await run(last.conversationId, last.messageId)
+    expect(burst.path).toBe("abierto")
+    expect(burst.offered).toContain("cancelar_cita")
+    // Un «gracias» solo sigue siendo saludo: respuesta breve y barata.
+    const alone = await ingestText("tg:rafaga-solo", "evt-rafaga-solo", "Gracias")
+    const single = await run(alone.conversationId, alone.messageId)
+    expect(single.path).toBe("saludo")
+    expect(single.offered).not.toContain("cancelar_cita")
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
 })

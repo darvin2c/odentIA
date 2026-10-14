@@ -275,3 +275,11 @@ it("la respuesta fija no duplica el punto de una razón social", async () => {
   const { offTopicReply } = await import("./route.js")
   expect(offTopicReply("tu", null, "Dental Smile S.A.C.")).toMatch(/^Soy el asistente virtual de Dental Smile S\.A\.C\. Solo puedo/)
 })
+
+it("la regla de la ráfaga solo cambia el camino «saludo» y solo con más de un mensaje", async () => {
+  const { guardBurst } = await import("./route.js")
+  const route = (path: "saludo" | "cita") => ({ path, intent: null, handoff: null, confidence: null, urgency: null })
+  expect(guardBurst(route("saludo"), 1).path).toBe("saludo")
+  expect(guardBurst(route("saludo"), 2).path).toBe("abierto")
+  expect(guardBurst(route("cita"), 4).path).toBe("cita")
+})

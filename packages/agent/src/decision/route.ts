@@ -134,6 +134,18 @@ export function routeHandoff(route: AgentRoute): { reason: string; priority: "al
 
 /** Aviso que recibe la persona si el modelo que escribe no pudo redactar el suyo: nunca queda sin respuesta. */
 /**
+ * Varios mensajes seguidos nunca van por el camino «saludo». Medido: con «Quiero
+ * cancelar mi cita… / Gracias» o «¿cuánto cuesta…? / gracias», el modelo de
+ * decisión pesa demasiado el agradecimiento final y elige saludo, y en ese
+ * camino el modelo que escribe recibe «responde breve, sin consultar nada»:
+ * la cancelación o el precio quedarían sin atender. Es una regla del código,
+ * no depende de que un modelo acierte.
+ */
+export function guardBurst(route: AgentRoute, messages: number): AgentRoute {
+  return route.path === "saludo" && messages > 1 ? { ...route, path: "abierto" } : route
+}
+
+/**
  * Respuesta fija a lo que no es de la clínica: no se llama al modelo que
  * escribe (no se usa el agente como chat gratis) y siempre dice lo mismo.
  */
