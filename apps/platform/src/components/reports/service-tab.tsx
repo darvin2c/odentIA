@@ -47,7 +47,7 @@ export function ServiceTab({ query }: { query: ReportQuery }) {
         title={`Nadie escribió en ${period}`}
         description="Con un canal conectado, aquí se ve cuánto se tarda en responder y quién responde primero."
         actionLabel={canChannels ? "Conectar un canal" : undefined}
-        onAction={() => void navigate({ to: "/settings/channels" })}
+        onAction={() => void navigate({ to: "/settings/integrations" })}
       />
     )
   }

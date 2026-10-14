@@ -197,6 +197,38 @@ it("la auditoría pagina sin saltar eventos del mismo milisegundo", async () => 
   expect(second.next).toBeNull()
 })
 
+it("la actividad del equipo se dice con palabras, dice quién fue y se acota por área", async () => {
+  await ownerDb.execute(sql`insert into audit_event (organization_id, actor_user_id, action, entity, metadata, created_at) values
+    ('org_a', ${recipient}, 'appointment.created', 'appointment', null, '2026-09-29 10:00:00+00'),
+    ('org_a', null, 'appointment.status_confirmada', 'appointment', null, '2026-09-29 10:00:30+00'),
+    ('org_a', null, 'portal.appointment_confirmed', 'appointment', null, '2026-09-29 10:01:00+00'),
+    ('org_a', null, 'contact.updated', 'contact', '{"origin":"agent"}'::jsonb, '2026-09-29 10:02:00+00'),
+    ('org_a', null, 'tema_nuevo.sin_frase', 'x', null, '2026-09-29 10:03:00+00')`)
+  const list = (input: Parameters<typeof listWorkspaceAudit>[2]) =>
+    withOrgContext(appDb, "org_a", tx => listWorkspaceAudit(tx, "org_a", input))
+
+  const agenda = await list({ area: "agenda" })
+  expect(agenda.items.every(item => item.area === "agenda")).toBe(true)
+  // Con una persona del equipo, su nombre; sin ella no se supone a nadie.
+  expect(agenda.items.find(item => item.action === "appointment.created")).toMatchObject({
+    what: "Reservó una cita", who: "Persona de prueba", areaLabel: "Agenda",
+  })
+  expect(agenda.items.find(item => item.action === "appointment.status_confirmada")).toMatchObject({
+    what: "Confirmó una cita", who: "Automático",
+  })
+  // Lo que hace el paciente es suyo por naturaleza; lo del agente, solo si el registro lo dice.
+  expect((await list({ area: "portal" })).items.find(item => item.action === "portal.appointment_confirmed")).toMatchObject({
+    what: "Confirmó su cita desde el portal", who: "El paciente o su contacto",
+  })
+  expect((await list({ area: "ventas" })).items.find(item => item.action === "contact.updated")).toMatchObject({
+    what: "Cambió los datos de un contacto", who: "El agente",
+  })
+  // Un registro sin frase propia se dice de forma general: el código nunca es el texto.
+  const [unknown] = (await list({ action: "tema_nuevo.sin_frase" })).items
+  expect(unknown).toMatchObject({ what: "Hizo un cambio", who: "Automático", area: "otros", areaLabel: "Otros" })
+  await expect(list({ area: "inexistente" as never })).rejects.toMatchObject({ status: 400 })
+})
+
 it("«Te espera» ordena los casos «Ahora», lo que espera aprobación y los casos sin apuro", async () => {
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, full))
   const agentRows = home.waiting.filter(row => row.kind === "case" || row.kind === "proposal")

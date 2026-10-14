@@ -77,7 +77,11 @@ it("validateConnection usa verified_name", async () => {
       { status: 200 },
     )) as unknown as typeof fetch
   const got = await whatsappCloudApiAdapter.validateConnection(fx.config, { fetch: stub })
-  expect(got).toEqual({ externalId: "PNID", displayName: "Clínica" })
+  expect(got).toEqual({
+    externalId: "PNID",
+    displayName: "Clínica",
+    account: { name: "Clínica", number: "511999888777" },
+  })
 })
 
 // ------------------------------------------------ plantillas y botones ---
@@ -256,4 +260,51 @@ it("un aviso de cambio de estado de plantilla no se confunde con un mensaje", ()
   expect(result.templateStatuses).toEqual([
     { externalId: "950", name: "odentia_seguimiento_presupuesto_v1", language: "es", status: "rechazada", reason: "ABUSIVE_CONTENT" },
   ])
+})
+
+it("un aviso que no dice el estado de la plantilla no cambia nada, y «reinstated» la vuelve a dejar aprobada", () => {
+  const update = (event: string) =>
+    parse(
+      { event, message_template_id: 951, message_template_name: "odentia_recordatorio_cita_v1", message_template_language: "es", reason: "NONE" },
+      "message_template_status_update",
+    ).templateStatuses
+  expect(update("LOCKED")).toBeUndefined()
+  expect(update("UNARCHIVED")).toBeUndefined()
+  expect(update("REINSTATED")).toEqual([
+    { externalId: "951", name: "odentia_recordatorio_cita_v1", language: "es", status: "aprobada", reason: null },
+  ])
+  expect(update("DISABLED")?.[0]?.status).toBe("deshabilitada")
+})
+
+// ------------------------------------------------------ salud y borrado ---
+
+it("lee la calidad y el tope diario con el campo vigente, y deja sin dato lo que Meta no entrega", async () => {
+  const meta = fakeFetch(
+    { json: { quality_rating: "GREEN", whatsapp_business_manager_messaging_limit: "TIER_2K", id: "PNID" } },
+    { json: { quality_rating: "YELLOW", whatsapp_business_manager_messaging_limit: "TIER_UNLIMITED" } },
+    { json: { quality_rating: "UNKNOWN", whatsapp_business_manager_messaging_limit: "TIER_NOT_SET" } },
+    { json: { id: "PNID" } },
+    { status: 400, json: { error: { message: "(#100) Tried accessing nonexisting field" } } },
+  )
+  const read = () => whatsappCloudApiAdapter.readHealth!(fx.config, { fetch: meta.fetch })
+  expect(await read()).toEqual({ quality: "alta", dailyLimit: 2000, unlimited: false })
+  expect(meta.calls[0]?.url).toBe(
+    "https://graph.facebook.com/v21.0/PNID?fields=quality_rating,whatsapp_business_manager_messaging_limit",
+  )
+  expect(await read()).toEqual({ quality: "media", dailyLimit: null, unlimited: true })
+  expect(await read()).toEqual({ quality: null, dailyLimit: null, unlimited: false })
+  expect(await read()).toEqual({ quality: null, dailyLimit: null, unlimited: false })
+  await expect(read()).rejects.toThrow("(#100) Tried accessing nonexisting field")
+})
+
+it("elimina una plantilla por su nombre y dice el motivo si Meta no la elimina", async () => {
+  const meta = fakeFetch({ json: { success: true } }, { status: 400, json: { error: { message: "(#200) Permissions error" } } })
+  await whatsappCloudApiAdapter.deleteTemplate!(fx.config, { name: "clinica_tu_trabajo_ab12cd34" }, { fetch: meta.fetch })
+  expect(meta.calls[0]).toMatchObject({
+    method: "DELETE",
+    url: "https://graph.facebook.com/v21.0/WABA1/message_templates?name=clinica_tu_trabajo_ab12cd34",
+  })
+  await expect(
+    whatsappCloudApiAdapter.deleteTemplate!(fx.config, { name: "x" }, { fetch: meta.fetch }),
+  ).rejects.toThrow("(#200) Permissions error")
 })

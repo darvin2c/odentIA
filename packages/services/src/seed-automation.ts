@@ -4,18 +4,25 @@ import {
   automationJob,
   automationRule,
 } from "@odentia/db/schema/automation"
-import { channelTemplate } from "@odentia/db/schema/crm"
-import { and, eq } from "drizzle-orm"
+import { channelTemplate, clinicMessage, clinicMessageVersion } from "@odentia/db/schema/crm"
+import { and, eq, isNull } from "drizzle-orm"
 import {
   AUTOMATION_MESSAGE_LANGUAGE,
-  AUTOMATION_MESSAGES,
-  type AutomationMessageKey,
+  CATALOG_MESSAGE_KEYS,
+  type CatalogMessageKey,
+  catalogMessageOf,
+  positionalBody,
 } from "./automation-messages.js"
 
+type TemplateSeed = Omit<typeof channelTemplate.$inferInsert, "organizationId" | "connectionId" | "language">
+
 /**
- * Catálogo de mensajes de una conexión de WhatsApp de demostración, uno en cada
- * estado que puede dar el proveedor, para ver Configuración › Canales y cada
- * vía de envío. Son datos de la semilla: ninguno pasó por WhatsApp.
+ * Los mensajes de WhatsApp de la clínica de demostración, en los estados que
+ * puede dar el proveedor, para ver Configuración › Integraciones › WhatsApp, la
+ * Bandeja pasadas las 24 horas y cada vía de envío: los seis con los que viene
+ * (uno con un cambio de texto en revisión), uno creado por la clínica y dos
+ * plantillas que ya estaban en la cuenta. Son datos de la semilla: ninguno pasó
+ * por WhatsApp.
  */
 export async function seedChannelTemplates(
   tx: Db,
@@ -23,61 +30,132 @@ export async function seedChannelTemplates(
 ): Promise<void> {
   const { orgId, connectionId } = input
   const yesterday = new Date(Date.now() - 24 * 3_600_000)
-  const own: { key: AutomationMessageKey; status: string; reason?: string }[] = [
-    { key: "recordatorio_cita", status: "aprobada" },
-    { key: "recordatorio_control", status: "aprobada" },
-    { key: "seguimiento_presupuesto", status: "en_revision" },
-    { key: "seguimiento_no_asistencia", status: "rechazada", reason: "INVALID_FORMAT" },
-  ]
-  const rows = [
-    ...own.map(({ key, status, reason }) => {
-      const spec = AUTOMATION_MESSAGES[key]
-      return {
-        name: spec.template,
-        language: AUTOMATION_MESSAGE_LANGUAGE,
-        category: spec.category,
-        status,
-        reason: reason ?? null,
-        body: spec.body,
-        variables: spec.variables.length,
-        buttons: spec.buttons.map((button) => button.title),
-        messageKey: key as string | null,
-        requestedAt: yesterday as Date | null,
-      }
-    }),
-    {
-      name: "bienvenida",
-      language: AUTOMATION_MESSAGE_LANGUAGE,
+  const lastWeek = new Date(Date.now() - 7 * 24 * 3_600_000)
+  const upsert = async (row: TemplateSeed) => {
+    const values = { ...row, statusSince: row.statusSince ?? yesterday, syncedAt: yesterday }
+    await tx
+      .insert(channelTemplate)
+      .values({ organizationId: orgId, connectionId, language: AUTOMATION_MESSAGE_LANGUAGE, ...values })
+      .onConflictDoUpdate({
+        target: [channelTemplate.connectionId, channelTemplate.name, channelTemplate.language],
+        set: values,
+      })
+  }
+
+  // Los seis con los que viene la clínica, cada uno en un estado distinto.
+  const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date }> = {
+    recordatorio_cita: { status: "aprobada", since: lastWeek },
+    recordatorio_control: { status: "aprobada", since: lastWeek },
+    seguimiento_presupuesto: { status: "en_revision" },
+    seguimiento_no_asistencia: { status: "rechazada", reason: "INVALID_FORMAT" },
+    cita_cancelada: { status: "aprobada", since: lastWeek },
+    retomar_conversacion: { status: "aprobada", since: lastWeek },
+  }
+  for (const key of CATALOG_MESSAGE_KEYS) {
+    const spec = catalogMessageOf(key)
+    if (!spec) continue
+    await upsert({
+      name: spec.template,
+      category: spec.category,
+      status: states[key].status,
+      reason: states[key].reason ?? null,
+      statusSince: states[key].since ?? yesterday,
+      body: spec.body,
+      variables: spec.variables.length,
+      buttons: spec.buttons.map((button) => button.title),
+      messageKey: key,
+      requestedAt: lastWeek,
+    })
+  }
+
+  // «Avisar un control» con un cambio de texto en revisión: sigue saliendo el anterior.
+  await tx.insert(clinicMessage).values({ organizationId: orgId, key: "recordatorio_control" }).onConflictDoNothing()
+  const [control] = await tx
+    .select({ id: clinicMessage.id })
+    .from(clinicMessage)
+    .where(and(eq(clinicMessage.organizationId, orgId), eq(clinicMessage.key, "recordatorio_control")))
+    .limit(1)
+  if (control) {
+    const body = "Estimada {{persona}}: en {{clinica}} tiene pendiente este control: {{control}}. Responda a este mensaje y le buscamos un horario."
+    const templateName = "odentia_recordatorio_control_tsemilla01"
+    await tx
+      .insert(clinicMessageVersion)
+      .values({ organizationId: orgId, messageId: control.id, number: 1, body, templateName })
+      .onConflictDoNothing()
+    await tx.update(clinicMessage).set({ currentVersion: 0, pendingVersion: 1 }).where(eq(clinicMessage.id, control.id))
+    const positional = positionalBody(body)
+    await upsert({
+      name: templateName,
+      category: "utility",
+      status: "en_revision",
+      reason: null,
+      body: positional.body,
+      variables: positional.variables.length,
+      buttons: catalogMessageOf("recordatorio_control")?.buttons.map((button) => button.title) ?? [],
+      messageKey: "recordatorio_control",
+      requestedAt: yesterday,
+    })
+  }
+
+  // Un mensaje creado por la clínica para la Bandeja, ya aprobado.
+  const ownTitle = "Tu trabajo ya está listo"
+  let [own] = await tx
+    .select({ id: clinicMessage.id })
+    .from(clinicMessage)
+    .where(and(eq(clinicMessage.organizationId, orgId), eq(clinicMessage.title, ownTitle), isNull(clinicMessage.archivedAt)))
+    .limit(1)
+  if (!own) {
+    ;[own] = await tx
+      .insert(clinicMessage)
+      .values({ organizationId: orgId, title: ownTitle, buttonTitle: "Quiero mi cita", currentVersion: 1 })
+      .returning({ id: clinicMessage.id })
+  }
+  if (own) {
+    const body = "Hola, {{persona}}. Tu trabajo ya llegó a {{clinica}}. Escríbenos y coordinamos tu cita."
+    const templateName = "clinica_mensaje_semilla01"
+    await tx
+      .insert(clinicMessageVersion)
+      .values({ organizationId: orgId, messageId: own.id, number: 1, body, templateName })
+      .onConflictDoNothing()
+    const positional = positionalBody(body)
+    await upsert({
+      name: templateName,
       category: "utility",
       status: "aprobada",
       reason: null,
-      body: "Hola, {{1}}. Gracias por escribirnos. En breve te atendemos.",
-      variables: 1,
-      buttons: [],
+      statusSince: lastWeek,
+      body: positional.body,
+      variables: positional.variables.length,
+      buttons: ["Quiero mi cita"],
       messageKey: null,
-      requestedAt: null,
-    },
-    {
-      name: "promo_blanqueamiento",
-      language: AUTOMATION_MESSAGE_LANGUAGE,
-      category: "marketing",
-      status: "pausada",
-      reason: "Calidad baja",
-      body: "Este mes, blanqueamiento con evaluación incluida. ¿Te reservamos un horario?",
-      variables: 0,
-      buttons: [],
-      messageKey: null,
-      requestedAt: null,
-    },
-  ]
-  for (const row of rows) {
-    await tx
-      .insert(channelTemplate)
-      .values({ organizationId: orgId, connectionId, syncedAt: yesterday, ...row })
-      .onConflictDoNothing({
-        target: [channelTemplate.connectionId, channelTemplate.name, channelTemplate.language],
-      })
+      requestedAt: lastWeek,
+    })
   }
+
+  // Plantillas que ya estaban en la cuenta: se ven, pero se cambian en la página de Meta.
+  await upsert({
+    name: "bienvenida",
+    category: "utility",
+    status: "aprobada",
+    reason: null,
+    statusSince: null,
+    body: "Hola, {{1}}. Gracias por escribirnos. En breve te atendemos.",
+    variables: 1,
+    buttons: [],
+    messageKey: null,
+    requestedAt: null,
+  })
+  await upsert({
+    name: "promo_blanqueamiento",
+    category: "marketing",
+    status: "pausada",
+    reason: "Calidad baja",
+    body: "Este mes, blanqueamiento con evaluación incluida. ¿Te reservamos un horario?",
+    variables: 0,
+    buttons: [],
+    messageKey: null,
+    requestedAt: null,
+  })
 }
 
 /**

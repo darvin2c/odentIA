@@ -24,10 +24,10 @@ export function KnowledgeSources({ sources }: { sources: Sources | null }) {
       action: "Se editan en Servicios",
     },
     {
-      to: "/branches",
+      to: "/settings/branches",
       title: "Sedes y horarios",
       detail: sources ? (sources.branches === 0 ? "Ninguna sede activa" : plural(sources.branches, "sede", "sedes")) : null,
-      action: "Se editan en Sucursales",
+      action: "Se editan en Sedes",
     },
   ] as const
   return (

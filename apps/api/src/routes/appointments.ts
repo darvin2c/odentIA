@@ -9,6 +9,7 @@ import {
   getAppointment,
   getProfessionalSchedule,
   listAppointments,
+  listChairs,
   listScheduleBlocks,
   listScheduleResources,
   moveAppointment,
@@ -17,6 +18,7 @@ import {
   setBranchDefaultDuration,
   setProfessionalSchedule,
   updateAppointment,
+  updateChair,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -72,6 +74,13 @@ const chairInput = z.object({
   branchId: z.uuid(),
   name: z.string().min(1).max(120),
 })
+
+const chairPatch = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
 
 const scheduleRuleInput = z.object({
   weekday: z.number().int().min(0).max(6),
@@ -150,6 +159,38 @@ export function createAgendaRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => createChair(tx, orgId, parsed.data)),
+    )
+  })
+
+  // Los sillones de la sede para administrarlos: también los desactivados.
+  app.get("/chairs", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la configuración de sillones"), 403)
+    }
+    const branchId = c.req.query("branchId")
+    if (!branchId || !z.uuid().safeParse(branchId).success) {
+      return c.json(errorBody(c, "VALIDATION", "branchId es obligatorio"), 400)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listChairs(tx, orgId, { branchId })),
+    )
+  })
+
+  // Renombrar un sillón, desactivarlo o reactivarlo.
+  app.patch("/chairs/:id", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar sillones"), 403)
+    }
+    const id = c.req.param("id")
+    if (!z.uuid().safeParse(id).success) {
+      return c.json(errorBody(c, "NOT_FOUND", "Sillón no encontrado"), 404)
+    }
+    const parsed = chairPatch.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => updateChair(tx, orgId, userId, id, parsed.data)),
     )
   })
 

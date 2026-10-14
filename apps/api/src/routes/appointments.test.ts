@@ -275,3 +275,40 @@ it("valida el query y el body con 400", async () => {
   })
   expect(badBody.status).toBe(400)
 })
+
+it("sillones: administrarlos exige configuración; desactivado sale de la agenda y sigue en la lista", async () => {
+  const owner = buildApp("owner")
+  const reception = buildApp("reception")
+  const patch = (app: Hono, id: string, body: unknown) =>
+    app.request(`/agenda/chairs/${id}`, { method: "PATCH", headers: json, body: JSON.stringify(body) })
+
+  // Recepción reserva, pero no ve la lista de administración ni cambia un sillón.
+  expect((await reception.request(`/agenda/chairs?branchId=${branchId}`)).status).toBe(403)
+  expect((await patch(reception, chairId, { name: "Otro nombre" })).status).toBe(403)
+  expect((await patch(reception, chairId, { isActive: false })).status).toBe(403)
+
+  expect((await owner.request("/agenda/chairs")).status).toBe(400)
+  expect((await patch(owner, chairId, {})).status).toBe(400)
+  expect((await patch(owner, chairId, { name: "  " })).status).toBe(400)
+  expect((await patch(owner, chairId, { color: "rojo" })).status).toBe(400)
+  expect((await patch(owner, "no-es-un-id", { name: "Sillón" })).status).toBe(404)
+  expect((await patch(owner, crypto.randomUUID(), { name: "Sillón" })).status).toBe(404)
+
+  const renamed = await patch(owner, chairId, { name: "Sillón Uno" })
+  expect(renamed.status).toBe(200)
+  expect(await renamed.json()).toEqual({ data: { id: chairId, name: "Sillón Uno", isActive: true } })
+
+  expect((await patch(owner, chairId, { isActive: false })).status).toBe(200)
+  const resources = await reception.request(`/agenda/resources?branchId=${branchId}`)
+  expect(((await resources.json()) as { data: { chairs: unknown[] } }).data.chairs).toEqual([])
+  const listed = await owner.request(`/agenda/chairs?branchId=${branchId}`)
+  expect(listed.status).toBe(200)
+  const chairs = ((await listed.json()) as { data: Array<{ id: string; name: string; isActive: boolean }> }).data
+  expect(chairs).toMatchObject([{ id: chairId, name: "Sillón Uno", isActive: false }])
+
+  expect((await patch(owner, chairId, { isActive: true })).status).toBe(200)
+  const again = await reception.request(`/agenda/resources?branchId=${branchId}`)
+  expect(((await again.json()) as { data: { chairs: Array<{ label: string }> } }).data.chairs).toEqual([
+    { id: chairId, label: "Sillón Uno" },
+  ])
+})

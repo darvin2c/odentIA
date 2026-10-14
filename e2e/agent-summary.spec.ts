@@ -182,7 +182,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await page.setViewportSize({ width: 1440, height: 900 })
   await info.attach("resumen-problema", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await problem.getByRole("link", { name: "Revisar el proveedor" }).click()
-  await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/agent"))
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/model"))
 })
 
 test("bandeja: con Recepción apagada lo dice, y solo quien administra puede ir a encenderla", async ({ owner, fixtureDb }, info) => {

@@ -474,6 +474,10 @@ it.each(["https://app.odentia.localhost", "https://app.odentia.localhost:4463"])
   const person = await withOrgContext(appDb, ORG_A, (tx) =>
     createContact(tx, ORG_A, { displayName: "Titular Conversación" }, { userId: "u-reg-owner" }),
   )
+  // Una clínica tiene un solo WhatsApp activo y este caso corre dos veces sobre la misma.
+  await ownerDb.execute(
+    sql`update channel_connection set status = 'disabled' where organization_id = ${ORG_A} and channel = 'whatsapp' and status = 'active'`,
+  )
   const conn = await withOrgContext(appDb, ORG_A, (tx) =>
     createConnection(
       tx,

@@ -358,6 +358,56 @@ it("tareas y campos van de punta a punta", async () => {
   expect(((await fields.json()) as { data: unknown[] }).data).toHaveLength(1)
 })
 
+it("etapas y campos: los lee quien trabaja con ventas, los define quien configura la clínica", async () => {
+  const json = { "content-type": "application/json" }
+  const reception = buildApp("reception")
+  // Recepción los necesita en el tablero y en la ficha del contacto…
+  expect((await reception.request("/pipelines")).status).toBe(200)
+  expect((await reception.request("/fields")).status).toBe(200)
+  // …pero definirlos es configurar: la misma regla que abre su apartado en Configuración.
+  for (const [path, body] of [
+    ["/pipelines", { name: "Otro" }],
+    ["/fields", { label: "Origen", type: "text" }],
+  ] as const) {
+    const denied = await reception.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
+    expect(denied.status, path).toBe(403)
+  }
+
+  const owner = buildApp("owner")
+  // Solo se escribe el nombre: la clave la genera el servidor.
+  const created = await owner.request("/fields", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ label: "Cómo nos conoció", type: "select", options: ["Redes"] }),
+  })
+  expect(created.status).toBe(201)
+  const field = ((await created.json()) as { data: { id: string; key: string } }).data
+  expect(field.key).toBe("como_nos_conocio")
+  const repeated = await owner.request("/fields", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ label: "cómo nos conoció", type: "text" }),
+  })
+  expect(repeated.status).toBe(409)
+
+  // Un campo se edita: nombre y opciones; la clave no cambia.
+  const edit = { label: "Origen", options: ["Redes", "Recomendación"] }
+  const refused = await reception.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
+  expect(refused.status).toBe(403)
+  const edited = await owner.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
+  expect(edited.status).toBe(200)
+  expect(((await edited.json()) as { data: unknown }).data).toMatchObject({ key: "como_nos_conocio", ...edit })
+
+  const pipelines = ((await (await owner.request("/pipelines")).json()) as { data: { id: string; stages: { id: string }[] }[] }).data
+  const stageId = pipelines[0]?.stages[0]?.id ?? ""
+  const rename = { method: "PATCH", headers: json, body: JSON.stringify({ name: "Recién llegado" }) }
+  expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
+  expect((await owner.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
+
+  expect((await reception.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
+  expect((await owner.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(200)
+})
+
 it("contactos: filtro isActive, alta sin isActive y PATCH con gating", async () => {
   const owner = buildApp("owner")
   const sneaky = await owner.request("/contacts", {
@@ -700,4 +750,168 @@ it("aprender: lectura, corrección y aprobación piden permisos distintos y vali
   // Editar el texto solo vale al aprobar un mensaje.
   const rejected = await post(app, `/agent/proposals/${randomUUID()}/decision`, { decision: "aprobada", editedText: "" })
   expect(rejected.status).toBe(400)
+})
+
+it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y la prueba piden administrar", async () => {
+  const app = buildApp("owner")
+  const reception = buildApp("reception")
+  const json = { "content-type": "application/json" }
+  const list = (await (await app.request("/channels/connections")).json()) as { data: Record<string, unknown>[] }
+  const wa = list.data.find((item) => item["id"] === waConnId)
+  expect(wa).toMatchObject({
+    webhookVerifiedAt: null,
+    health: null,
+    messages: { aprobados: 0, enRevision: 6, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 0 },
+  })
+  expect(typeof wa?.["lastInboundAt"]).toBe("string")
+  expect((await reception.request("/channels/connections")).status).toBe(403)
+
+  const setup = await app.request(`/channels/connections/${waConnId}/setup`)
+  expect(setup.status).toBe(200)
+  expect(((await setup.json()) as { data: Record<string, unknown> }).data).toMatchObject({
+    webhookUrl: `https://api.example.com/api/webhooks/channels/whatsapp_cloud_api/${waConnId}`,
+    verifyToken: expect.any(String),
+    webhookVerifiedAt: null,
+    lastInboundAt: expect.any(String),
+  })
+  expect((await reception.request(`/channels/connections/${waConnId}/setup`)).status).toBe(403)
+
+  const post = (target: Hono, path: string, body?: unknown) =>
+    target.request(path, { method: "POST", headers: json, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  const changed = await post(app, `/channels/connections/${waConnId}/credentials`, { config: { accessToken: "otra" } })
+  expect(changed.status).toBe(200)
+  expect(((await changed.json()) as { data: Record<string, unknown> }).data).toMatchObject({ id: waConnId, status: "active", account: null })
+  expect(JSON.stringify(await (await app.request("/channels/connections")).json())).not.toContain("otra")
+  expect((await post(app, `/channels/connections/${waConnId}/credentials`, { config: {} })).status).toBe(400)
+  expect((await post(reception, `/channels/connections/${waConnId}/credentials`, { config: { accessToken: "x" } })).status).toBe(403)
+
+  // Sin proveedor no se afirma que la conexión funcione.
+  const tested = await post(app, `/channels/connections/${waConnId}/test`)
+  expect(tested.status).toBe(200)
+  expect(((await tested.json()) as { data: Record<string, unknown> }).data).toMatchObject({ ok: false, account: null, checkedAt: expect.any(String) })
+
+  // El nombre es opcional: sin él queda el del canal (o el que dé el proveedor).
+  const unnamed = await post(app, "/channels/connections", { channel: "telegram", provider: "telegram_bot_api", config: { botToken: "sin-nombre" } })
+  expect(unnamed.status).toBe(201)
+  expect(((await unnamed.json()) as { data: Record<string, unknown> }).data).toMatchObject({ displayName: "Telegram", account: null, templates: null })
+  expect((await post(app, "/channels/connections", { channel: "telegram", provider: "telegram_bot_api", config: {} })).status).toBe(400)
+})
+
+it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambiar, crear y eliminar, de quien la administra", async () => {
+  await ownerDb.execute(
+    sql`insert into "user" ("id", "name", "email", "email_verified", "created_at", "updated_at")
+        values ('u-1', 'Dueña', 'u1@example.com', true, now(), now()) on conflict do nothing`,
+  )
+  const app = buildApp("owner")
+  const reception = buildApp("reception")
+  const json = { "content-type": "application/json" }
+  const base = `/channels/connections/${waConnId}/messages`
+  const send = (target: Hono, method: string, path: string, body?: unknown) =>
+    target.request(path, { method, headers: json, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+
+  const listed = await app.request(base)
+  expect(listed.status).toBe(200)
+  const items = ((await listed.json()) as { data: { id: string; origin: string }[] }).data
+  expect(items.map((item) => [item.id, item.origin])).toEqual([
+    ["recordatorio_cita", "agente"],
+    ["recordatorio_control", "agente"],
+    ["seguimiento_presupuesto", "agente"],
+    ["seguimiento_no_asistencia", "agente"],
+    ["cita_cancelada", "agente"],
+    ["retomar_conversacion", "bandeja"],
+  ])
+  expect((await reception.request(base)).status).toBe(403)
+
+  const formal = "Estimada {{persona}}: le recordamos su cita en {{lugar}}: {{citas}}. Si necesita cambiarla, responda a este mensaje."
+  const checked = await send(app, "POST", `${base}/check`, { messageId: "recordatorio_cita", body: "Hola, {{persona}}." })
+  expect(checked.status).toBe(200)
+  const check = ((await checked.json()) as { data: { ok: boolean; checks: { ok: boolean; text: string }[]; previewParts: unknown[] } }).data
+  expect(check.ok).toBe(false)
+  expect(check.checks.filter((item) => !item.ok).map((item) => item.text)).toContain("Falta el dato «Clínica y sede».")
+  expect(check.previewParts.length).toBeGreaterThan(0)
+  expect((await send(reception, "POST", `${base}/check`, { body: "Hola" })).status).toBe(403)
+
+  const invalid = await send(app, "PUT", `${base}/recordatorio_cita/text`, { body: "Hola, {{persona}}." })
+  expect(invalid.status).toBe(400)
+  expect(await invalid.json()).toMatchObject({ error: { code: "VALIDATION", message: "Falta el dato «Clínica y sede»." } })
+  const saved = await send(app, "PUT", `${base}/recordatorio_cita/text`, { body: formal })
+  expect(saved.status).toBe(200)
+  expect(((await saved.json()) as { data: Record<string, unknown> }).data).toMatchObject({
+    id: "recordatorio_cita",
+    current: { body: formal, status: "en_revision", isDefault: false },
+    pending: null,
+    canRevert: true,
+  })
+  expect((await send(reception, "PUT", `${base}/recordatorio_cita/text`, { body: formal })).status).toBe(403)
+  const reverted = await send(app, "POST", `${base}/recordatorio_cita/revert`)
+  expect(reverted.status).toBe(200)
+  expect(((await reverted.json()) as { data: Record<string, unknown> }).data).toMatchObject({ current: { isDefault: true }, canRevert: false })
+  expect((await send(app, "PUT", `${base}/no_existe/text`, { body: formal })).status).toBe(404)
+
+  const created = await send(app, "POST", base, { title: "Tu trabajo ya está listo", body: "Hola, {{persona}}. Tu trabajo ya llegó a {{clinica}}.", buttonTitle: "Quiero mi cita" })
+  expect(created.status).toBe(201)
+  const own = ((await created.json()) as { data: { id: string; origin: string; deletable: boolean } }).data
+  expect(own).toMatchObject({ origin: "clinica", deletable: true })
+  expect((await send(reception, "POST", base, { title: "Otro", body: "Hola." })).status).toBe(403)
+  expect((await send(reception, "DELETE", `${base}/${own.id}`)).status).toBe(403)
+  expect((await send(app, "DELETE", `${base}/retomar_conversacion`)).status).toBe(400)
+  const removed = await send(app, "DELETE", `${base}/${own.id}`)
+  expect(removed.status).toBe(200)
+  expect(await removed.json()).toEqual({ data: { ok: true } })
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(6)
+})
+
+it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {
+  await ownerDb.execute(
+    sql`update "conversation" set "last_inbound_at" = now() - interval '25 hours' where "id" = ${conversationId}::uuid`,
+  )
+  const app = buildApp("owner")
+  const reception = buildApp("reception")
+  const json = { "content-type": "application/json" }
+  const detail = (await (await app.request(`/conversations/${conversationId}`)).json()) as {
+    data: { whatsappWindow: { open: boolean; lastInboundAt: string | null } | null }
+  }
+  expect(detail.data.whatsappWindow).toMatchObject({ open: false, lastInboundAt: expect.any(String) })
+
+  type Offered = { data: { id: string; title: string }[]; none: { text: string; fixHref: string | null } | null }
+  const waiting = (await (await app.request(`/conversations/${conversationId}/approved-messages`)).json()) as Offered
+  expect(waiting.data).toEqual([])
+  expect(waiting.none).toMatchObject({
+    text: expect.stringContaining("«Retomar la conversación» está en revisión"),
+    fixHref: "/settings/integrations/whatsapp",
+  })
+  // Recepción no abre Configuración: se le dice a quién avisar.
+  const forReception = (await (await reception.request(`/conversations/${conversationId}/approved-messages`)).json()) as Offered
+  expect(forReception.none).toMatchObject({ text: expect.stringContaining("Avísale a quien administra la clínica."), fixHref: null })
+  expect((await buildApp("member").request(`/conversations/${conversationId}/approved-messages`)).status).toBe(403)
+
+  const send = (target: Hono, body: unknown) =>
+    target.request(`/conversations/${conversationId}/messages/approved`, { method: "POST", headers: json, body: JSON.stringify(body) })
+  const early = await send(reception, { messageId: "retomar_conversacion" })
+  expect(early.status).toBe(409)
+  expect(await early.json()).toMatchObject({ error: { code: "APPROVED_MESSAGE_UNAVAILABLE" } })
+  expect((await send(reception, {})).status).toBe(400)
+
+  await ownerDb.execute(
+    sql`update "channel_template" set "status" = 'aprobada' where "connection_id" = ${waConnId}::uuid and "name" = 'odentia_retomar_conversacion_v1'`,
+  )
+  const offered = (await (await reception.request(`/conversations/${conversationId}/approved-messages`)).json()) as Offered
+  expect(offered.none).toBeNull()
+  expect(offered.data.map((item) => [item.id, item.title])).toEqual([["retomar_conversacion", "Retomar la conversación"]])
+  const sent = await send(reception, { messageId: "retomar_conversacion" })
+  expect(sent.status).toBe(201)
+  expect(((await sent.json()) as { data: Record<string, unknown> }).data).toMatchObject({
+    contentType: "template",
+    templateName: "odentia_retomar_conversacion_v1",
+    body: "Hola, Luis. Te escribimos de Clínica para continuar con tu consulta. ¿Seguimos por aquí?",
+  })
+  // Un segundo mensaje aprobado espera a que la persona responda o a que pase un día.
+  const again = await send(reception, { messageId: "retomar_conversacion" })
+  expect(again.status).toBe(409)
+  expect(await again.json()).toMatchObject({
+    error: { code: "APPROVED_MESSAGE_UNAVAILABLE", message: expect.stringContaining("Ya se le envió un mensaje aprobado") },
+  })
+  await ownerDb.execute(
+    sql`update "conversation" set "last_inbound_at" = now() where "id" = ${conversationId}::uuid`,
+  )
 })

@@ -3,7 +3,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { initialOrgRegion, type MailboxEnv, regionPresetForCountry, type Storage, updateOrgRegion } from "@odentia/services"
+import { initialOrgRegion, type MailboxEnv, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -52,6 +52,7 @@ import { createTasksRoute } from "./routes/tasks.js"
 import { createUbigeoRoute } from "./routes/ubigeo.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
+import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
 import { createReportsRoute } from "./routes/reports.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
 
@@ -81,6 +82,8 @@ export interface AppDeps {
   /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
   decisions?: PlatformDecisions
   mailbox?: MailboxEnv
+  /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
+  metaSignup?: MetaSignupConfig | undefined
 }
 const branchInput = z.object({
   name: z.string().min(1).max(120),
@@ -101,11 +104,12 @@ const branchPatch = branchInput.partial()
 
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
-  tradeName: z.string().max(200).optional(),
+  // `null` vacía el dato; una clave ausente lo deja como estaba.
+  tradeName: z.string().max(200).nullish(),
   fiscalDocType: z.string().max(20).nullish(),
-  fiscalDocNumber: z.string().max(20).optional(),
+  fiscalDocNumber: z.string().max(20).nullish(),
   billingEmail: z.string().email().optional(),
-  fiscalAddress: z.string().max(300).optional(),
+  fiscalAddress: z.string().max(300).nullish(),
   countryCode: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
@@ -114,6 +118,13 @@ const orgProfileInput = z.object({
   sheetSize: z.enum(["A4", "Letter"]).optional(),
   ticketFooter: z.string().trim().min(1).max(280).optional(),
   applyCountryPreset: z.boolean().optional(),
+})
+
+/** Lo que se imprime: se edita en «Medios de pago y ticket», aparte de los datos de la clínica. */
+const orgPrintingInput = z.object({
+  receiptWidth: z.enum(["58", "80"]),
+  sheetSize: z.enum(["A4", "Letter"]),
+  ticketFooter: z.string().trim().min(1, "Escribe la frase al pie del ticket").max(280),
 })
 
 interface NotifyPayload {
@@ -304,7 +315,14 @@ export function createApp(deps: AppDeps) {
   // userScoped/guarded también casa /api/webhooks/* y respondería 401.
   app.route(
     "/api/webhooks",
-    createWebhooksRoute({ ownerDb: deps.ownerDb, db: deps.db, secretsKey: deps.secretsKey }),
+    createWebhooksRoute({
+      ownerDb: deps.ownerDb,
+      db: deps.db,
+      secretsKey: deps.secretsKey,
+      metaApp: deps.metaSignup
+        ? { appSecret: deps.metaSignup.appSecret, verifyToken: deps.metaSignup.webhookVerifyToken }
+        : undefined,
+    }),
   )
 
   app.route("/api", userScoped)
@@ -388,6 +406,19 @@ export function createApp(deps: AppDeps) {
     }))
   })
 
+  // Ancho del ticket, tamaño de hoja y frase al pie: no tocan la región ni la identidad.
+  guarded.put("/org-profile/printing", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el ticket"), 403)
+    }
+    const parsed = orgPrintingInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => updateOrgRegion(tx, orgId, userId, parsed.data)),
+    )
+  })
+
   guarded.get("/branches", async (c) => {
     const { orgId } = orgContextOf(c)
     const rows = await withOrgContext(db, orgId, (tx) =>
@@ -399,7 +430,7 @@ export function createApp(deps: AppDeps) {
   guarded.post("/branches", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para crear sucursales"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para crear sedes"), 403)
     }
     const parsed = branchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -425,7 +456,7 @@ export function createApp(deps: AppDeps) {
   guarded.patch("/branches/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar sucursales"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar sedes"), 403)
     }
     const id = c.req.param("id")
     const parsed = branchPatch.safeParse(await c.req.json().catch(() => null))
@@ -449,35 +480,29 @@ export function createApp(deps: AppDeps) {
       }
       return updated ?? null
     })
-    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sucursal no encontrada"), 404)
+    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sede no encontrada"), 404)
     return c.json({ data: row })
   })
 
   guarded.delete("/branches/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para desactivar sucursales"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para desactivar sedes"), 403)
     }
-    const id = c.req.param("id")
-    const row = await withOrgContext(db, orgId, async (tx) => {
-      const [updated] = await tx
-        .update(branch)
-        .set({ isActive: false, updatedAt: new Date() })
-        .where(and(eq(branch.id, id), eq(branch.organizationId, orgId)))
-        .returning({ id: branch.id })
-      if (updated) {
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: userId,
-          action: "branch.deactivate",
-          entity: "branch",
-          entityId: id,
-        })
-      }
-      return updated ?? null
-    })
-    if (!row) return c.json(errorBody(c, "NOT_FOUND", "Sucursal no encontrada"), 404)
-    return c.json({ data: row })
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), false)),
+    )
+  })
+
+  // Una sede desactivada vuelve con sus citas, horarios y sillones.
+  guarded.post("/branches/:id/reactivate", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reactivar sedes"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), true)),
+    )
   })
 
   guarded.get("/notifications/stream", async (c) => {
@@ -576,6 +601,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
+  guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))
   guarded.route("/agent", createAgentRoute({ ...crmDeps, llm }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
   guarded.route("/agenda", createAgendaRoute(crmDeps))

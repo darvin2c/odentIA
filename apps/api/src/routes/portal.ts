@@ -47,9 +47,18 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; 
     await next()
   })
 
+  /** Por qué no puede, dicho con palabras: el código del permiso no llega a la pantalla. */
+  const DENIED: Record<string, string> = {
+    "settings.read": "El portal del paciente lo configura quien administra la clínica",
+    "settings.write": "El portal del paciente lo configura quien administra la clínica",
+    "patients.write": "El acceso de un paciente al portal lo gestiona quien puede editar su ficha",
+    "clinical.read": "Solo quien ve la ficha clínica puede dar acceso a sus documentos",
+    "finance.read": "Solo quien ve los cobros puede dar acceso a presupuestos o a la cuenta",
+  }
+
   function deny(c: Context, permission: string) {
     return c.json(
-      errorBody(c, "FORBIDDEN", `Necesitas el permiso ${permission} para el portal`),
+      errorBody(c, "FORBIDDEN", DENIED[permission] ?? "No tienes permiso para hacer esto en el portal"),
       403,
     )
   }

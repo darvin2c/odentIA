@@ -97,7 +97,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
 
   app.put("/config", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = putInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     // La URL se resuelve por DNS antes de guardarla: una organización no puede
@@ -127,7 +127,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
    */
   app.post("/config/llm/test", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = testInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const body = parsed.data
@@ -192,7 +192,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
 
   app.put("/level", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = z.object({ level: z.enum(AGENT_LEVELS) }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -207,7 +207,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
    */
   app.post("/clinical/practice", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = z.object({ transcript: z.string().trim().min(3).max(12_000) }).safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
@@ -237,7 +237,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
 
   app.put("/policy", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = policyInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>

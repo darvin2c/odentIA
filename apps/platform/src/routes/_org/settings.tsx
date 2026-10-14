@@ -1,45 +1,82 @@
-import { PageShell, SectionNav, type SectionNavItem } from "@odentia/ui-patterns"
+import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
+import { PageShell, SectionNav, type SectionNavGroup, type SectionNavItem } from "@odentia/ui-patterns"
 import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
-import { Bot, Building2, CalendarDays, ClipboardList, Kanban, MessageCircle, ShieldCheck, Stethoscope, Tag, Users, Wallet } from "lucide-react"
+import { useMyRole } from "../../lib/crm"
 import { RouterLink } from "../../lib/router-link"
 
 export const Route = createFileRoute("/_org/settings")({
   component: SettingsLayout,
 })
 
-const secciones: SectionNavItem[] = [
-  { label: "Organización", to: "/settings", icon: Building2 },
-  { label: "Sucursales", to: "/branches", icon: Building2 },
-  { label: "Equipo y permisos", to: "/members", icon: Users },
-  { label: "Medios de pago", to: "/settings/payment-methods", icon: Wallet },
-  { label: "Disponibilidad", to: "/settings/availability", icon: CalendarDays },
-  { label: "Especialidades", to: "/settings/specialties", icon: Stethoscope },
-  { label: "Formularios y consentimientos", to: "/settings/forms", icon: ClipboardList },
-  { label: "Canales", to: "/settings/channels", icon: MessageCircle },
-  { label: "Chat web", to: "/settings/webchat", icon: MessageCircle },
-  { label: "Correo", to: "/settings/mail", icon: MessageCircle },
-  { label: "Agente", to: "/settings/agent", icon: Bot },
-  { label: "Pipelines", to: "/settings/pipelines", icon: Kanban },
-  { label: "Campos", to: "/settings/fields", icon: Tag },
-  { label: "Registro de pacientes", to: "/settings/patient-registration", icon: ClipboardList },
-  { label: "Acceso de pacientes", to: "/settings/patient-access", icon: Users },
-  { label: "Auditoría", to: "/settings/audit", icon: ShieldCheck },
+/**
+ * Los apartados, por grupos con nombre de trabajo. El nombre de la lista es el
+ * título de su página y el de su tema en la guía de ayuda: `help.test.ts`
+ * compara los tres, así que se cambian juntos.
+ */
+const grupos: SectionNavGroup[] = [
+  {
+    label: "La clínica",
+    items: [
+      { label: "Datos de la clínica", to: "/settings" },
+      { label: "Sedes", to: "/settings/branches" },
+      { label: "Equipo", to: "/settings/team" },
+      { label: "Horarios y ausencias", to: "/settings/availability" },
+    ],
+  },
+  {
+    label: "Atención",
+    items: [
+      { label: "Especialidades", to: "/settings/specialties" },
+      { label: "Formularios y consentimientos", to: "/settings/forms" },
+    ],
+  },
+  {
+    label: "Pacientes",
+    items: [
+      { label: "Registro de pacientes", to: "/settings/patient-registration" },
+      { label: "Portal del paciente", to: "/settings/patient-access" },
+    ],
+  },
+  {
+    label: "Ventas y cobros",
+    items: [
+      { label: "Medios de pago y ticket", to: "/settings/payment-methods" },
+      { label: "Etapas de venta", to: "/settings/pipelines" },
+      { label: "Campos de contacto", to: "/settings/fields" },
+    ],
+  },
+]
+
+/** Lo que no pertenece a un grupo: al final, tras un separador. */
+const sueltas: SectionNavItem[] = [
+  { label: "Integraciones", to: "/settings/integrations" },
+  { label: "Actividad del equipo", to: "/settings/audit" },
 ]
 
 /**
  * Configuración de la organización: los apartados viven en el nav de sección
- * (riel en web, barra en tablet y móvil) y cada página aporta su `PageHeader` y
- * su contenido. El `PageShell` es de este layout, para no anidar fondos ni
- * paddings.
+ * (riel en web, selector en tablet y móvil) y cada página aporta su
+ * `PageHeader` y su contenido. El `PageShell` es de este layout, para no anidar
+ * fondos ni paddings.
  */
 function SettingsLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const role = useMyRole()
+  // Un apartado solo se ofrece a quien puede abrirlo, con la misma regla que el guard.
+  const canOpen = (item: SectionNavItem) => {
+    const permissions = platformPathPermission(item.to)
+    return permissions === null || canAccessAny(role, permissions)
+  }
+  const visibleGroups = grupos
+    .map((group) => ({ ...group, items: group.items.filter(canOpen) }))
+    .filter((group) => group.items.length > 0)
 
   return (
     <PageShell>
       <SectionNav
         label="Configuración"
-        items={secciones}
+        groups={visibleGroups}
+        items={sueltas.filter(canOpen)}
         pathname={pathname}
         LinkComponent={RouterLink}
       >

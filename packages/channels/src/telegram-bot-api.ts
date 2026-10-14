@@ -250,13 +250,15 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     return {
       externalId: String(info.id),
       displayName: info.username ? `@${info.username}` : (info.first_name ?? String(info.id)),
+      account: { name: info.first_name ?? null, number: info.username ? `@${info.username}` : null },
     }
   },
 }
 
 /**
- * Registra el webhook del bot ante Telegram. Todavía no lo llama nadie: sin este
- * registro una conexión real no recibe mensajes, así que se conserva para completar la integración.
+ * Registra ante Telegram la dirección a la que avisa cada mensaje del bot. Sin
+ * este registro una conexión real no recibe nada: se llama al conectar, al
+ * cambiar la clave y al reactivar.
  */
 export async function setTelegramWebhook(
   config: Record<string, unknown>,

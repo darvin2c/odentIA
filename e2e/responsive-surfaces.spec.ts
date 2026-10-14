@@ -4,24 +4,15 @@ import { expect, fillPatientNames, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
-const SETTINGS_SECTIONS = [
-  "Organización",
-  "Sucursales",
-  "Equipo y permisos",
-  "Medios de pago",
-  "Disponibilidad",
-  "Especialidades",
-  "Formularios y consentimientos",
-  "Canales",
-  "Chat web",
-  "Correo",
-  "Agente",
-  "Pipelines",
-  "Campos",
-  "Registro de pacientes",
-  "Acceso de pacientes",
-  "Auditoría",
+/** La lista de Configuración: cuatro grupos con nombre y dos entradas sueltas al final. */
+const SETTINGS_GROUPS: Array<[string, string[]]> = [
+  ["La clínica", ["Datos de la clínica", "Sedes", "Equipo", "Horarios y ausencias"]],
+  ["Atención", ["Especialidades", "Formularios y consentimientos"]],
+  ["Pacientes", ["Registro de pacientes", "Portal del paciente"]],
+  ["Ventas y cobros", ["Medios de pago y ticket", "Etapas de venta", "Campos de contacto"]],
 ]
+const SETTINGS_LOOSE = ["Integraciones", "Actividad del equipo"]
+const SETTINGS_SECTIONS = [...SETTINGS_GROUPS.flatMap(([, items]) => items), ...SETTINGS_LOOSE]
 
 async function withTouchPage(
   browser: Browser,
@@ -73,7 +64,7 @@ test("móvil: el alta de paciente mantiene las acciones operables", async ({ own
   })
 })
 
-test("móvil: Configuración mantiene dieciséis destinos legibles y navegables", async ({
+test("móvil: Configuración muestra sus apartados por grupos, legibles y navegables", async ({
   owner,
   browser,
 }) => {
@@ -81,17 +72,29 @@ test("móvil: Configuración mantiene dieciséis destinos legibles y navegables"
     await gotoHydrated(page, tenant(owner.org.slug, "/settings/audit"))
 
     const nav = page.getByRole("navigation", { name: "Configuración" })
-    const picker = nav.getByRole("button", { name: /^Auditoría/ })
+    const picker = nav.getByRole("button", { name: /^Actividad del equipo/ })
     await expect(picker).toBeVisible()
     await picker.tap()
 
     const links = nav.getByRole("link")
-    await expect(links).toHaveCount(SETTINGS_SECTIONS.length)
     await expect(links).toHaveText(SETTINGS_SECTIONS)
-    const active = nav.getByRole("link", { name: "Auditoría", exact: true })
-    const sectionList = nav.getByRole("list")
-    for (const width of [360, 390, 768]) {
-      await page.setViewportSize({ width, height: 844 })
+    for (const [group, items] of SETTINGS_GROUPS) {
+      await expect(nav.getByRole("group", { name: group, exact: true }).getByRole("link")).toHaveText(items)
+    }
+    // Las entradas sueltas no pertenecen a ningún grupo.
+    for (const loose of SETTINGS_LOOSE) {
+      await expect(nav.getByRole("group").getByRole("link", { name: loose, exact: true })).toHaveCount(0)
+    }
+    const active = nav.getByRole("link", { name: "Actividad del equipo", exact: true })
+    const sectionList = page.locator(`[id="${await picker.getAttribute("aria-controls")}"]`)
+    for (const size of [
+      { width: 360, height: 844 },
+      { width: 390, height: 844 },
+      { width: 768, height: 844 },
+      // Pantalla baja: la lista no cabe entera.
+      { width: 390, height: 560 },
+    ]) {
+      await page.setViewportSize(size)
       const targets = await links.evaluateAll((elements) =>
         elements.map((element) => {
           const rect = element.getBoundingClientRect()
@@ -106,7 +109,8 @@ test("móvil: Configuración mantiene dieciséis destinos legibles y navegables"
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
       }))
-      expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight)
+      // Si no cabe, se desplaza por dentro: nunca a lo ancho ni moviendo el documento.
+      if (size.height < 700) expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight)
       expect(scroll.scrollWidth).toBeLessThanOrEqual(scroll.clientWidth)
       expect(
         await page.evaluate(
@@ -114,19 +118,25 @@ test("móvil: Configuración mantiene dieciséis destinos legibles y navegables"
         ),
       ).toBeLessThanOrEqual(0)
       await expect(picker).toBeInViewport()
+      // La última entrada siempre se alcanza.
+      await active.scrollIntoViewIfNeeded()
+      await expect(active).toBeInViewport()
     }
 
     await expect(active).toHaveAttribute("aria-current", "page")
 
-    const agent = nav.getByRole("link", { name: "Agente", exact: true })
-    await agent.focus()
-    await agent.press("Enter")
-    await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/agent"))
-    await expect(nav.getByRole("button", { name: /^Agente/ })).toBeInViewport()
+    await page.setViewportSize({ width: 390, height: 844 })
+    const integrations = nav.getByRole("link", { name: "Integraciones", exact: true })
+    await integrations.focus()
+    await integrations.press("Enter")
+    await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/integrations"))
+    await expect(nav.getByRole("button", { name: /^Integraciones/ })).toBeInViewport()
 
     await page.setViewportSize({ width: 1024, height: 844 })
     await expect(nav).toBeVisible()
-    await expect(agent).toHaveAttribute("aria-current", "page")
+    await expect(integrations).toHaveAttribute("aria-current", "page")
+    // En el riel, una línea separa las entradas sueltas de los grupos.
+    await expect(nav.getByRole("separator")).toBeVisible()
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

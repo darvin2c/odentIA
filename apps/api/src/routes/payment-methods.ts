@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import {
   createPaymentMethod,
   listPaymentMethods,
+  movePaymentMethod,
   updatePaymentMethod,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -33,6 +34,8 @@ const patchInput = z
     isActive: z.boolean().optional(),
   })
   .strict()
+
+const moveInput = z.object({ direction: z.enum(["up", "down"]) }).strict()
 
 export function createPaymentMethodsRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -74,7 +77,27 @@ export function createPaymentMethodsRoute(deps: CrmDeps) {
           name: parsed.data.name,
           typeCode: parsed.data.typeCode,
           sortOrder: parsed.data.sortOrder,
+          // Sin puesto indicado, el medio nuevo va al final de la lista.
+          atEnd: true,
         }),
+      ),
+    )
+  })
+
+  // Subir o bajar un medio un puesto: responde con la lista como queda.
+  app.post("/:id/move", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(
+        errorBody(c, "FORBIDDEN", "No tienes permiso para configurar medios de pago"),
+        403,
+      )
+    }
+    const parsed = moveInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        movePaymentMethod(tx, orgId, userId, c.req.param("id"), parsed.data.direction),
       ),
     )
   })

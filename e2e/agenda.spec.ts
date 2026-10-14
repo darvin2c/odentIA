@@ -517,7 +517,14 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
   await expect(closures.getByText("Feriado", { exact: true })).toBeVisible()
   await expect(closures.getByText(/toda la sede/)).toBeVisible()
   await shot("configuracion-dos-grupos")
+  // Quitarlo pregunta antes y dice qué pasa; cancelar lo deja como estaba.
   await closures.getByRole("button", { name: /^Quitar Feriado/ }).click()
+  const removal = page.getByRole("alertdialog", { name: "Quitar el feriado o cierre" })
+  await expect(removal).toContainText("ese tramo vuelve a ofrecerse para reservar")
+  await removal.getByRole("button", { name: "Cancelar", exact: true }).click()
+  await expect(closures.getByText("Feriado", { exact: true })).toBeVisible()
+  await closures.getByRole("button", { name: /^Quitar Feriado/ }).click()
+  await removal.getByRole("button", { name: "Quitar", exact: true }).click()
   await expect(closures.getByText("Sin feriados ni cierres", { exact: false })).toBeVisible()
 
   // Durante la ausencia no queda ningún tramo reservable (lo mismo que pinta la agenda).

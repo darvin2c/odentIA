@@ -27,6 +27,40 @@ export function orgFk(target: Parameters<typeof text>[0]) {
     .references(() => organization.id)
 }
 
+/**
+ * Salud de una cuenta según su proveedor (hoy, WhatsApp): calidad del número y
+ * a cuántas personas puede escribirles primero en un día. Cada dato es nulo si
+ * el proveedor no lo entregó: nunca se rellena con un valor supuesto.
+ */
+export interface ConnectionHealth {
+  quality: "alta" | "media" | "baja" | null
+  dailyLimit: number | null
+  /** El proveedor no pone tope diario. */
+  unlimited: boolean
+  /** Número tal como lo muestra el proveedor. */
+  number: string | null
+  /** Nombre verificado de la cuenta. */
+  name: string | null
+  checkedAt: string
+}
+
+/**
+ * «Conectar con Facebook» (hoy, WhatsApp): después de la ventana del proveedor,
+ * odentIA suscribe su app a los avisos de la cuenta y registra el número. Cada
+ * paso guarda cuándo quedó hecho; mientras falte uno, la conexión necesita
+ * atención y dice qué respondió el proveedor en el último intento.
+ */
+export interface ConnectionSignup {
+  /** Cuándo se entró con Facebook por última vez. */
+  grantedAt: string
+  /** Cuándo quedó suscrita la app de odentIA a los avisos de la cuenta. Nulo: falta. */
+  subscribedAt: string | null
+  /** Cuándo quedó registrado el número para enviar y recibir. Nulo: falta. */
+  registeredAt: string | null
+  /** Qué pasó en el último intento de cada paso que sigue pendiente, en palabras. */
+  problems: { suscribir?: string; registrar?: string }
+}
+
 export const channelConnection = pgTable(
   "channel_connection",
   {
@@ -40,12 +74,31 @@ export const channelConnection = pgTable(
     webhookSecret: text("webhook_secret").notNull(),
     status: text("status").notNull().default("active"),
     pollingOffset: text("polling_offset"),
+    /**
+     * Cuándo el proveedor verificó la dirección de avisos (el reto de Meta al
+     * darla de alta a mano). Nulo: aún no la verificó o el canal no lo necesita.
+     */
+    webhookVerifiedAt: timestamp("webhook_verified_at", { withTimezone: true }),
+    /** Lo último que el proveedor dijo de la cuenta. Nulo: no lo entrega o aún no se leyó. */
+    health: jsonb("health").$type<ConnectionHealth>(),
+    /**
+     * Cuenta del proveedor dueña del número (en WhatsApp, la cuenta de WhatsApp
+     * Business) cuando la conexión se hizo con «Conectar con Facebook». Por ella
+     * se reparten los avisos que llegan a la app de odentIA sin número (cambios
+     * de plantilla). Nulo: la conexión se hizo a mano y avisa a su propia dirección.
+     */
+    accountExternalId: text("account_external_id"),
+    /** Los pasos de «Conectar con Facebook» y cómo quedaron. Nulo: conexión hecha a mano. */
+    signup: jsonb("signup").$type<ConnectionSignup>(),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("channel_connection_provider_external_uidx")
       .on(table.provider, table.externalId)
       .where(sql`"external_id" is not null`),
+    index("channel_connection_account_idx")
+      .on(table.provider, table.accountExternalId)
+      .where(sql`"account_external_id" is not null`),
   ],
 )
 
@@ -53,7 +106,9 @@ export const channelConnection = pgTable(
  * Plantillas de la conexión tal como las tiene el proveedor (hoy, WhatsApp):
  * nadie escribe nombres a mano. Se leen de la cuenta y se actualizan cuando el
  * proveedor avisa un cambio de estado. Solo una `aprobada` se puede enviar.
- * `messageKey` enlaza la plantilla con el mensaje de odentIA que la pidió.
+ * `messageKey` enlaza la plantilla con el mensaje del catálogo al que sirve; las
+ * de un mensaje creado por la clínica se reconocen por su nombre en
+ * `clinic_message_version`.
  */
 export const channelTemplate = pgTable(
   "channel_template",
@@ -71,13 +126,18 @@ export const channelTemplate = pgTable(
     status: text("status").notNull().default("en_revision"),
     /** Motivo del proveedor cuando la rechaza o la pausa. */
     reason: text("reason"),
+    /**
+     * Desde cuándo está en ese estado, según lo supo el sistema (al pedirla o
+     * al llegar el cambio). Nulo si ya estaba así en la cuenta: no se supone una fecha.
+     */
+    statusSince: timestamp("status_since", { withTimezone: true }),
     /** Cuerpo con variables por posición (`{{1}}`). */
     body: text("body").notNull().default(""),
     variables: integer("variables").notNull().default(0),
     /** Títulos de los botones de respuesta rápida, en orden. */
     buttons: jsonb("buttons").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     externalId: text("external_id"),
-    /** Mensaje de odentIA al que sirve (clave de `AUTOMATION_MESSAGES`); nulo si es de la clínica. */
+    /** Mensaje del catálogo de odentIA al que sirve; nulo si es propio de la clínica o ya estaba en la cuenta. */
     messageKey: text("message_key"),
     /** Cuándo la pidió odentIA; nulo si ya existía en la cuenta. */
     requestedAt: timestamp("requested_at", { withTimezone: true }),
@@ -91,6 +151,75 @@ export const channelTemplate = pgTable(
       table.language,
     ),
     index("channel_template_org_message_idx").on(table.organizationId, table.messageKey),
+  ],
+)
+
+/**
+ * Un mensaje de WhatsApp de la organización. Los del catálogo (`key`: los que
+ * envía el agente y «Retomar la conversación») vienen escritos por odentIA y
+ * solo tienen fila cuando la clínica les cambia el texto; los que la clínica
+ * crea para la Bandeja llevan `title` y, si quiere, un botón de respuesta.
+ *
+ * `currentVersion` es el texto vigente para todas las vías (0 es el de
+ * odentIA) y `pendingVersion` el cambio que espera a WhatsApp: mientras está
+ * en revisión, o si lo rechaza, sigue saliendo el vigente. El estado de cada
+ * versión en cada conexión vive en `channel_template`, por su nombre.
+ */
+export const clinicMessage = pgTable(
+  "clinic_message",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    /** Clave del catálogo; nulo en un mensaje creado por la clínica. */
+    key: text("key"),
+    /** «Para qué sirve»: solo en los creados por la clínica. */
+    title: text("title"),
+    /** Botón de respuesta de un mensaje creado por la clínica; nulo si no lleva. */
+    buttonTitle: text("button_title"),
+    currentVersion: integer("current_version").notNull().default(0),
+    pendingVersion: integer("pending_version"),
+    /** Un mensaje creado por la clínica se elimina archivándolo; uno del catálogo, nunca. */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("clinic_message_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("clinic_message_org_key_uidx").on(table.organizationId, table.key).where(sql`"key" is not null`),
+    // Del catálogo o propio, nunca las dos cosas ni ninguna.
+    check("clinic_message_kind_check", sql`(${table.key} is null) <> (${table.title} is null)`),
+    check("clinic_message_catalog_check", sql`${table.key} is null or (${table.buttonTitle} is null and ${table.archivedAt} is null)`),
+    check("clinic_message_version_check", sql`${table.currentVersion} >= 0 and (${table.pendingVersion} is null or ${table.pendingVersion} >= 0)`),
+  ],
+)
+
+/**
+ * Un texto que la clínica guardó para un mensaje. Los datos van por nombre
+ * (`{{persona}}`); cada versión se pide a WhatsApp con su propio nombre de
+ * plantilla, así la anterior sigue sirviendo mientras revisan la nueva. No se
+ * edita ni se borra: un texto nuevo es otra versión.
+ */
+export const clinicMessageVersion = pgTable(
+  "clinic_message_version",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    messageId: uuid("message_id").notNull(),
+    /** Desde 1: el 0 es el texto de odentIA y no tiene fila. */
+    number: integer("number").notNull(),
+    body: text("body").notNull(),
+    templateName: text("template_name").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.messageId],
+      foreignColumns: [clinicMessage.organizationId, clinicMessage.id],
+    }).onDelete("cascade"),
+    uniqueIndex("clinic_message_version_message_number_uidx").on(table.messageId, table.number),
+    uniqueIndex("clinic_message_version_org_template_uidx").on(table.organizationId, table.templateName),
+    check("clinic_message_version_number_check", sql`${table.number} >= 1`),
   ],
 )
 

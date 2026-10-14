@@ -854,3 +854,89 @@ export async function createChair(
   if (!created) throw new Error("No se pudo crear el sillón")
   return created
 }
+
+/** Un sillón tal como lo administra Configuración: también los desactivados. */
+export interface ChairItem {
+  id: string
+  name: string
+  isActive: boolean
+  /** Citas en pie que aún no terminan en ese sillón: no se mueven solas al desactivarlo. */
+  upcomingAppointments: number
+}
+
+/**
+ * Sillones de la sede para administrarlos: activos y desactivados, con las
+ * citas en pie que cada uno tiene por delante. La agenda sigue leyendo solo
+ * los activos (`listScheduleResources`).
+ */
+export async function listChairs(
+  tx: Db,
+  orgId: string,
+  input: { branchId: string; now?: Date },
+): Promise<ChairItem[]> {
+  const resolved = await resolveBranch(tx, orgId, input.branchId)
+  const now = input.now ?? new Date()
+  const [chairs, standing] = await Promise.all([
+    tx
+      .select({ id: scheduleChair.id, name: scheduleChair.name, isActive: scheduleChair.isActive })
+      .from(scheduleChair)
+      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.branchId, resolved.id)))
+      .orderBy(asc(scheduleChair.name)),
+    tx
+      .select({ chairId: appointment.chairId, total: sql<number>`count(*)::int` })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.branchId, resolved.id),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          gt(appointment.endsAt, now),
+        ),
+      )
+      .groupBy(appointment.chairId),
+  ])
+  const upcoming = new Map(standing.map((row) => [row.chairId, row.total]))
+  return chairs.map((chair) => ({ ...chair, upcomingAppointments: upcoming.get(chair.id) ?? 0 }))
+}
+
+/**
+ * Cambia el nombre de un sillón o lo desactiva y reactiva. Desactivarlo lo saca
+ * de las reservas nuevas; sus citas en pie se conservan en él y no se mueven
+ * solas (quien lo desactiva ve cuántas son antes de confirmar).
+ */
+export async function updateChair(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  patch: { name?: string; isActive?: boolean },
+): Promise<{ id: string; name: string; isActive: boolean }> {
+  const set: Partial<typeof scheduleChair.$inferInsert> = {}
+  const fields: string[] = []
+  if (patch.name !== undefined) {
+    const name = patch.name.trim()
+    if (!name || name.length > 120) throw validation("El nombre del sillón debe tener entre 1 y 120 caracteres")
+    set.name = name
+    fields.push("name")
+  }
+  if (patch.isActive !== undefined) {
+    set.isActive = patch.isActive
+    fields.push("isActive")
+  }
+  if (fields.length === 0) throw validation("Indica qué cambia del sillón")
+  const [updated] = await tx
+    .update(scheduleChair)
+    .set({ ...set, updatedAt: new Date() })
+    .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.id, id)))
+    .returning({ id: scheduleChair.id, name: scheduleChair.name, isActive: scheduleChair.isActive })
+  if (!updated) throw notFound("Sillón")
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "schedule_chair.updated",
+    entity: "schedule_chair",
+    entityId: id,
+    metadata: { fields, ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}) },
+  })
+  return updated
+}

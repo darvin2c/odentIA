@@ -8,8 +8,10 @@ import type { ConsentPurpose } from "@odentia/db/schema/automation"
  * horas y el correo de respaldo: los tres dicen lo mismo.
  *
  * Los datos los pone el sistema (agenda, presupuestos, controles) al entregar;
- * ningún texto de aquí sale de un modelo. Un texto nuevo es una plantilla
- * nueva: se cambia la versión del nombre, nunca el cuerpo de una ya pedida.
+ * ningún texto de aquí sale de un modelo. Estos son los textos con los que
+ * viene cada clínica: cada una puede cambiarlos (`clinic-messages.ts`), y un
+ * texto nuevo, de odentIA o de la clínica, es siempre otra plantilla con otro
+ * nombre, nunca el cuerpo cambiado de una ya pedida.
  */
 
 /** Qué hace un botón cuando la persona lo toca. */
@@ -31,9 +33,9 @@ export interface MessageButton {
   asks?: "reservar" | "cambiar"
 }
 
-export interface AutomationMessage {
-  key: AutomationMessageKey
-  purpose: ConsentPurpose
+/** Un mensaje ya escrito: lo que se pide a WhatsApp y lo que se envía. */
+export interface MessageSpec {
+  key: string
   /** La que se pide; el proveedor puede asignar otra. */
   category: TemplateCategory
   template: string
@@ -41,6 +43,11 @@ export interface AutomationMessage {
   body: string
   variables: readonly MessageVariable[]
   buttons: readonly MessageButton[]
+}
+
+export interface AutomationMessage extends MessageSpec {
+  key: AutomationMessageKey
+  purpose: ConsentPurpose
   /** Asunto cuando sale por correo. */
   subject: string
 }
@@ -51,7 +58,7 @@ export const MESSAGE_VARIABLES = {
   lugar: { label: "Clínica y sede", example: "Clínica Sonríe, sede Centro" },
   clinica: { label: "Nombre de la clínica", example: "Clínica Sonríe" },
   citas: {
-    label: "De quién es la cita, fecha y hora en la zona de la sede, y profesional",
+    label: "Fecha, hora y profesional de la cita",
     example: "mañana, martes 13 de octubre, a las 10:00, con Dra. Ana Torres",
   },
   cita_pasada: { label: "Fecha de la cita que no se dio", example: "lunes 12 de octubre" },
@@ -137,6 +144,30 @@ export function automationMessageOf(kind: string): AutomationMessage | null {
     : null
 }
 
+/**
+ * El mensaje que no sale solo: lo envía una persona desde la Bandeja cuando
+ * pasaron 24 horas y WhatsApp ya no deja escribir con libertad. Continúa una
+ * consulta que la persona inició, así que no responde a ningún permiso de
+ * mensajes y solo se ofrece en una conversación donde ella ya escribió.
+ */
+export const RESUME_MESSAGE_KEY = "retomar_conversacion"
+export const RESUME_MESSAGE: MessageSpec = {
+  key: RESUME_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_retomar_conversacion_v1",
+  body: "Hola, {{1}}. Te escribimos de {{2}} para continuar con tu consulta. ¿Seguimos por aquí?",
+  variables: ["persona", "clinica"],
+  buttons: [{ action: "responder", title: "Sí, continuemos" }],
+}
+
+/** Los mensajes con los que viene cada clínica: los que envía el agente y el de la Bandeja. */
+export const CATALOG_MESSAGE_KEYS = [...AUTOMATION_MESSAGE_KEYS, RESUME_MESSAGE_KEY] as const
+export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
+
+export function catalogMessageOf(key: string): MessageSpec | null {
+  return key === RESUME_MESSAGE_KEY ? RESUME_MESSAGE : automationMessageOf(key)
+}
+
 /** Idioma de las plantillas: el de los textos del producto, sin variante de país. */
 export const AUTOMATION_MESSAGE_LANGUAGE = "es"
 
@@ -144,12 +175,28 @@ export const AUTOMATION_MESSAGE_LANGUAGE = "es"
  * WhatsApp rechaza una variable con saltos de línea, tabulaciones o más de
  * cuatro espacios seguidos, y una vacía. Se limpia aquí para todas las vías.
  */
+/**
+ * «Clínica, sede X» para el dato `lugar`. Si la sede ya se llama «Sede …», no se
+ * repite la palabra («Dental Smile, Sede Miraflores», no «sede Sede Miraflores»).
+ */
+export function placePhrase(clinic: string, branchName: string): string {
+  const name = branchName.trim()
+  return /^sede\b/i.test(name) ? `${clinic}, ${name}` : `${clinic}, sede ${name}`
+}
+
+/**
+ * Un dato va siempre dentro de una frase que pone su propio punto: el punto
+ * final del dato («Dental Smile S.A.C.») se quita para no escribir «S.A.C..».
+ */
 export function cleanVariable(value: string): string {
-  return value.replace(/\s+/g, " ").trim()
+  return value.replace(/\s+/g, " ").trim().replace(/\.+$/, "")
 }
 
 /** Pone cada dato en su posición. Lanza si falta alguno: no se envía un mensaje a medias. */
-export function renderMessage(spec: AutomationMessage, values: Partial<Record<MessageVariable, string>>) {
+export function renderMessage(
+  spec: Pick<MessageSpec, "key" | "body" | "variables">,
+  values: Partial<Record<MessageVariable, string>>,
+) {
   const params = spec.variables.map((name) => {
     const value = cleanVariable(values[name] ?? "")
     if (!value) throw new Error(`Al mensaje «${spec.key}» le falta el dato «${name}»`)
@@ -160,8 +207,62 @@ export function renderMessage(spec: AutomationMessage, values: Partial<Record<Me
 }
 
 /** Valores de ejemplo, en el orden de las variables, para pedir la plantilla. */
-export function messageExamples(spec: AutomationMessage): string[] {
+export function messageExamples(spec: Pick<MessageSpec, "variables">): string[] {
   return spec.variables.map((name) => MESSAGE_VARIABLES[name].example)
+}
+
+// ------------------------------------------------- datos por nombre ---
+
+/**
+ * Quien edita un texto escribe sus datos por nombre (`{{persona}}`); WhatsApp
+ * los recibe por posición (`{{1}}`). Las dos formas dicen lo mismo y se
+ * convierten aquí, en un solo sitio.
+ */
+const NAMED_DATA = /\{\{\s*([^{}\s]+)\s*\}\}/g
+
+export function isMessageVariable(name: string): name is MessageVariable {
+  return Object.hasOwn(MESSAGE_VARIABLES, name)
+}
+
+/** El cuerpo por posición, con cada dato por su nombre. */
+export function namedBody(spec: Pick<MessageSpec, "body" | "variables">): string {
+  return spec.body.replace(/\{\{(\d+)\}\}/g, (whole, position: string) => {
+    const name = spec.variables[Number(position) - 1]
+    return name ? `{{${name}}}` : whole
+  })
+}
+
+/** Datos que nombra un texto, en el orden en que aparecen y con sus repeticiones. */
+export function dataNamesOf(body: string): string[] {
+  return [...body.matchAll(NAMED_DATA)].map((match) => match[1] ?? "")
+}
+
+/**
+ * El texto con datos por nombre, llevado a posiciones: el primero que aparece
+ * es `{{1}}`. Solo vale para un texto ya validado (datos conocidos, una vez cada uno).
+ */
+export function positionalBody(body: string): { body: string; variables: MessageVariable[] } {
+  const variables: MessageVariable[] = []
+  const text = body.replace(NAMED_DATA, (whole, name: string) => {
+    if (!isMessageVariable(name)) return whole
+    if (!variables.includes(name)) variables.push(name)
+    return `{{${variables.indexOf(name) + 1}}}`
+  })
+  return { body: text, variables }
+}
+
+/** El texto partido en lo fijo y lo que pone el sistema, para mostrarlo con lo segundo resaltado. */
+export function splitNamedBody(body: string): { text: string; name: string | null }[] {
+  const parts: { text: string; name: string | null }[] = []
+  let last = 0
+  for (const match of body.matchAll(NAMED_DATA)) {
+    const at = match.index ?? 0
+    if (at > last) parts.push({ text: body.slice(last, at), name: null })
+    parts.push({ text: match[0], name: match[1] ?? "" })
+    last = at + match[0].length
+  }
+  if (last < body.length) parts.push({ text: body.slice(last), name: null })
+  return parts
 }
 
 // ------------------------------------------------ botones de respuesta ---

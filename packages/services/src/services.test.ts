@@ -122,6 +122,56 @@ it("custom fields: valida tipos, descarta desconocidas", async () => {
   })
 })
 
+it("campos de contacto: la clave sale del nombre y dos campos no se llaman igual", async () => {
+  await withOrgContext(appDb, "org_b", async (tx) => {
+    const first = await createFieldDef(tx, "org_b", { label: "Sede preferida", type: "text" })
+    expect(first.key).toBe("sede_preferida")
+    // Otro nombre que da la misma clave recibe la siguiente libre; nadie la escribe.
+    const second = await createFieldDef(tx, "org_b", { label: "Sede (preferida)", type: "text" })
+    expect(second.key).toBe("sede_preferida_2")
+    // Sin letras ni números también hay clave.
+    expect((await createFieldDef(tx, "org_b", { label: "¿?", type: "number" })).key).toBe("campo")
+    // El mismo nombre, con otras mayúsculas o tildes, es el mismo nombre.
+    await expect(createFieldDef(tx, "org_b", { label: "  sede PREFERÍDA ", type: "date" })).rejects.toMatchObject({
+      code: "FIELD_NAME_TAKEN",
+      status: 409,
+    })
+    await expect(createFieldDef(tx, "org_b", { label: "   ", type: "text" })).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+it("campos de contacto: editar cambia el nombre y las opciones, nunca la clave ni el tipo", async () => {
+  await withOrgContext(appDb, "org_b", async (tx) => {
+    const origin = await createFieldDef(tx, "org_b", {
+      label: "Cómo nos conoció",
+      type: "select",
+      options: [" Redes ", "Recomendación", "Redes", ""],
+    })
+    // Las opciones se guardan sin vacías ni repetidas.
+    expect(origin.options).toEqual(["Redes", "Recomendación"])
+    const edited = await updateFieldDef(tx, "org_b", origin.id, {
+      label: "Origen",
+      options: ["Recomendación", "Pasó por la clínica"],
+    })
+    expect(edited).toMatchObject({
+      key: "como_nos_conocio",
+      type: "select",
+      label: "Origen",
+      options: ["Recomendación", "Pasó por la clínica"],
+    })
+    // Lo ya guardado con esa clave sigue valiendo tras el cambio de nombre.
+    expect(await sanitizeCustomFields(tx, "org_b", { como_nos_conocio: "Recomendación" })).toEqual({
+      como_nos_conocio: "Recomendación",
+    })
+    await expect(updateFieldDef(tx, "org_b", origin.id, { options: [] })).rejects.toMatchObject({ status: 400 })
+    // No toma el nombre de otro campo; conservar el propio no es un choque.
+    await expect(updateFieldDef(tx, "org_b", origin.id, { label: "sede preferida" })).rejects.toMatchObject({
+      code: "FIELD_NAME_TAKEN",
+    })
+    expect((await updateFieldDef(tx, "org_b", origin.id, { label: "ORIGEN" })).label).toBe("ORIGEN")
+  })
+})
+
 it("tasks: crear, listar por estado, completar", async () => {
   const created = await withOrgContext(appDb, "org_a", (tx) =>
     createTask(tx, "org_a", { title: "Llamar al paciente", createdBy: "agent" }),
@@ -147,4 +197,28 @@ it("agent config: defaults y upsert", async () => {
   await expect(
     withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { maxTurns: 0 })),
   ).rejects.toMatchObject({ status: 400 })
+})
+
+it("agent config: volver al modelo incluido retira también el modelo de la cuenta propia", async () => {
+  const key = Buffer.alloc(32, 7)
+  const own = await withOrgContext(appDb, "org_b", (tx) =>
+    upsertAgentConfig(
+      tx,
+      "org_b",
+      { llmBaseUrl: "https://proveedor.example/v1", llmApiKey: "sk-prueba", model: "modelo-propio", maxTurns: 7 },
+      { secretsKey: key },
+    ),
+  )
+  expect(own).toMatchObject({ llmBaseUrl: "https://proveedor.example/v1", hasLlmApiKey: true, model: "modelo-propio" })
+  // Ese modelo se eligió para ese proveedor: no viaja al de odentIA. Lo demás queda como estaba.
+  const included = await withOrgContext(appDb, "org_b", (tx) =>
+    upsertAgentConfig(tx, "org_b", { llmBaseUrl: null, llmApiKey: null }, { secretsKey: key }),
+  )
+  expect(included).toMatchObject({ llmBaseUrl: null, hasLlmApiKey: false, model: null, maxTurns: 7 })
+  // Sin cuenta propia, un modelo ya guardado no se toca al guardar otra cosa.
+  await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { model: "otro-modelo" }))
+  const kept = await withOrgContext(appDb, "org_b", (tx) =>
+    upsertAgentConfig(tx, "org_b", { llmBaseUrl: null, llmApiKey: null }, { secretsKey: key }),
+  )
+  expect(kept.model).toBe("otro-modelo")
 })

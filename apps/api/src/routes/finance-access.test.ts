@@ -324,6 +324,16 @@ it("métodos: activeOnly filtra y configurar exige settings.write", async () => 
   const createdId = IdData.parse(await created.json()).data.id
   const patched = await patchJson(admin, `/org/payment-methods/${createdId}`, { isActive: false })
   expect(patched.status).toBe(200)
+
+  // El orden de la lista también es configuración: caja lo ve, no lo cambia.
+  const move = `/org/payment-methods/${createdId}/move`
+  expect((await postJson(buildApp("cashier", CASH), move, { direction: "up" })).status).toBe(403)
+  expect((await postJson(admin, move, { direction: "arriba" })).status).toBe(400)
+  const moved = await postJson(admin, move, { direction: "up" })
+  expect(moved.status).toBe(200)
+  // El medio nuevo se creó al final: tras subir un puesto ya no es el último.
+  const order = IdList.parse(await moved.json()).data.map((m) => m.id)
+  expect(order.indexOf(createdId)).toBe(order.length - 2)
 })
 
 it("caja: reception/dentist sin finance.read; cashier lee y cierra", async () => {

@@ -41,7 +41,7 @@ async function reloadClean(page: Page) {
   }
 }
 
-test("Organización protege navegación, historial y recarga; guardar y revertir limpian el borrador", async ({ createOwner }) => {
+test("Datos de la clínica protege navegación, historial y recarga; guardar y revertir limpian el borrador", async ({ createOwner }) => {
   const { page, org } = await createOwner("page-org")
   await call(page, "PUT", "/api/org-profile", org.slug, {
     legalName: org.name,
@@ -51,13 +51,13 @@ test("Organización protege navegación, historial y recarga; guardar y revertir
     timezone: "America/Lima",
     locale: "es-PE",
   })
-  await gotoHydrated(page, tenant(org.slug, "/settings/channels"))
-  await page.getByRole("link", { name: "Organización", exact: true }).click()
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations"))
+  await page.getByRole("link", { name: "Datos de la clínica", exact: true }).click()
   const name = page.getByLabel("Nombre comercial", { exact: true })
   await expect(name).toHaveValue("Nombre guardado")
   await name.fill("Borrador de organización")
 
-  await page.getByRole("link", { name: "Canales", exact: true }).click()
+  await page.getByRole("link", { name: "Integraciones", exact: true }).click()
   const confirmation = page.getByRole("alertdialog")
   await expect(confirmation).toBeVisible()
   await confirmation.getByRole("button", { name: "Continuar editando" }).click()
@@ -69,7 +69,7 @@ test("Organización protege navegación, historial y recarga; guardar y revertir
   await expect(name).toHaveValue("Borrador de organización")
   // Cambiar la URL fuera del router también pasa por beforeunload.
   const nativeDialog = page.waitForEvent("dialog")
-  const externalNavigation = page.evaluate((url) => window.location.assign(url), tenant(org.slug, "/branches"))
+  const externalNavigation = page.evaluate((url) => window.location.assign(url), tenant(org.slug, "/settings/branches"))
   const leave = await nativeDialog
   expect(leave.type()).toBe("beforeunload")
   await leave.dismiss()
@@ -83,15 +83,15 @@ test("Organización protege navegación, historial y recarga; guardar y revertir
   await expect(name).toBeFocused()
   await page.evaluate(() => window.history.back())
   await confirmation.getByRole("button", { name: "Descartar y salir" }).click()
-  await expect(page).toHaveURL(/\/settings\/channels$/)
+  await expect(page).toHaveURL(/\/settings\/integrations\/?$/)
   // La URL cambia antes de desmontar la página: navegar el historial solo al ver el destino.
-  await expect(page.getByRole("heading", { level: 1, name: "Canales" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Integraciones" })).toBeVisible()
   await page.evaluate(() => window.history.forward())
   await expect(name).toHaveValue("Nombre guardado")
 
   // Adelante debe conservar el destino pendiente igual que atrás.
-  await page.getByRole("link", { name: "Canales", exact: true }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Canales" })).toBeVisible()
+  await page.getByRole("link", { name: "Integraciones", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Integraciones" })).toBeVisible()
   await page.evaluate(() => window.history.back())
   await expect(name).toHaveValue("Nombre guardado")
   await name.fill("Borrador para adelante")
@@ -117,10 +117,10 @@ test("Organización protege navegación, historial y recarga; guardar y revertir
   await expect(page.getByRole("button", { name: "Guardar", exact: true })).toBeEnabled()
   await reloadClean(page)
   await expect(name).toHaveValue("Borrador para adelante")
-  await page.getByRole("link", { name: "Canales", exact: true }).click()
-  await expect(page).toHaveURL(/\/settings\/channels$/)
+  await page.getByRole("link", { name: "Integraciones", exact: true }).click()
+  await expect(page).toHaveURL(/\/settings\/integrations\/?$/)
   await expect(confirmation).toBeHidden()
-  await page.getByRole("link", { name: "Organización", exact: true }).click()
+  await page.getByRole("link", { name: "Datos de la clínica", exact: true }).click()
   await expect(name).toHaveValue("Borrador para adelante")
   await name.fill("Cambio temporal")
   await name.fill("Borrador para adelante")
@@ -130,7 +130,7 @@ test("Organización protege navegación, historial y recarga; guardar y revertir
   await expect(confirmation).toBeHidden()
 })
 
-test("Acceso de pacientes conserva campos con auxiliares tardíos, fallo de guardado y navegación cancelada", async ({ createOwner }) => {
+test("Portal del paciente conserva campos con auxiliares tardíos, fallo de guardado y navegación cancelada", async ({ createOwner }) => {
   const { page, org } = await createOwner("page-portal")
   const connectionsReady = Promise.withResolvers<void>()
   await page.route("**/api/channels/connections", async (route) => {
@@ -139,18 +139,30 @@ test("Acceso de pacientes conserva campos con auxiliares tardíos, fallo de guar
   })
   try {
     await gotoHydrated(page, tenant(org.slug, "/settings"))
-    await page.getByRole("link", { name: "Acceso de pacientes", exact: true }).click()
-    const ttl = page.getByLabel("Enlace de activación (minutos, 1–43200)", { exact: true })
-    await expect(ttl).toBeVisible()
+    await page.getByRole("link", { name: "Portal del paciente", exact: true }).click()
+    const ttl = page.getByLabel("El enlace de activación vale (minutos)", { exact: true })
+    const advanced = page.getByRole("button", { name: /^Opciones avanzadas/ })
+    /** Lo que no es el encendido ni lo que ve el paciente está en «Opciones avanzadas», cerradas al entrar. */
+    const openAdvanced = async () => {
+      await expect(advanced).toBeVisible()
+      if ((await advanced.getAttribute("aria-expanded")) !== "true") await advanced.click()
+      await expect(ttl).toBeVisible()
+    }
+    // A la vista quedan el encendido y lo que el paciente puede ver.
+    await expect(page.getByRole("checkbox", { name: "Portal del paciente encendido" })).toBeVisible()
+    await expect(page.getByRole("checkbox", { name: "Citas", exact: true })).toBeVisible()
+    await expect(ttl).toHaveCount(0)
+    await openAdvanced()
     const savedTtl = await ttl.inputValue()
     const nextTtl = savedTtl === "75" ? "76" : "75"
-    await expect(page.getByText("Cargando conexiones…", { exact: true })).toBeVisible()
+    const loadingChannels = page.getByRole("status").filter({ hasText: "Cargando los canales conectados…" })
+    await expect(loadingChannels).toHaveCount(1)
     await ttl.fill(nextTtl)
     connectionsReady.resolve()
-    await expect(page.getByText("Cargando conexiones…", { exact: true })).toBeHidden()
+    await expect(loadingChannels).toHaveCount(0)
     await expect(ttl).toHaveValue(nextTtl)
 
-    await page.getByRole("link", { name: "Organización", exact: true }).click()
+    await page.getByRole("link", { name: "Datos de la clínica", exact: true }).click()
     const confirmation = page.getByRole("alertdialog")
     await expect(confirmation).toBeVisible()
     await confirmation.getByRole("button", { name: "Continuar editando" }).click()
@@ -160,8 +172,8 @@ test("Acceso de pacientes conserva campos con auxiliares tardíos, fallo de guar
     await expect(ttl).toHaveValue(nextTtl)
 
     await page.route("**/api/portal/policy", (route) => failSave(page, route))
-    await page.getByRole("button", { name: "Guardar políticas", exact: true }).click()
-    await expect(page.getByText("No se pudo guardar", { exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Guardar", exact: true }).click()
+    await expect(page.getByText("No pudimos guardar el portal del paciente", { exact: true })).toBeVisible()
     await expect(ttl).toHaveValue(nextTtl)
     await page.evaluate(() => window.history.back())
     await expect(confirmation).toBeVisible()
@@ -169,14 +181,16 @@ test("Acceso de pacientes conserva campos con auxiliares tardíos, fallo de guar
     await expect(ttl).toHaveValue(nextTtl)
 
     await page.unroute("**/api/portal/policy")
-    await page.getByRole("button", { name: "Guardar políticas", exact: true }).click()
-    await expect(page.getByText("Políticas guardadas.", { exact: true })).toBeVisible()
-    await page.getByRole("link", { name: "Organización", exact: true }).click()
+    await page.getByRole("button", { name: "Guardar", exact: true }).click()
+    await expect(page.getByText("Portal del paciente guardado", { exact: true })).toBeVisible()
+    await page.getByRole("link", { name: "Datos de la clínica", exact: true }).click()
     await expect(page).toHaveURL(/\/settings\/?$/)
     await expect(confirmation).toBeHidden()
-    await page.getByRole("link", { name: "Acceso de pacientes", exact: true }).click()
+    await page.getByRole("link", { name: "Portal del paciente", exact: true }).click()
+    await openAdvanced()
     await expect(ttl).toHaveValue(nextTtl)
     await reloadClean(page)
+    await openAdvanced()
     await expect(ttl).toHaveValue(nextTtl)
     await ttl.fill("90")
     await page.getByRole("link", { name: "Contactos", exact: true }).click()
@@ -184,6 +198,7 @@ test("Acceso de pacientes conserva campos con auxiliares tardíos, fallo de guar
     await expect(page).toHaveURL(/\/contacts\/?$/)
     await expect(page.getByRole("heading", { level: 1, name: "Contactos" })).toBeVisible()
     await page.evaluate(() => window.history.back())
+    await openAdvanced()
     await expect(ttl).toHaveValue(nextTtl)
   } finally {
     connectionsReady.resolve()

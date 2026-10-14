@@ -90,6 +90,11 @@ export interface ConversationDetail {
       edit: boolean
     } | null
   }
+  /**
+   * La ventana de 24 horas de WhatsApp: cerrada, solo se le envía un mensaje
+   * aprobado. Nulo en los demás canales; ausente en respuestas antiguas en caché.
+   */
+  whatsappWindow?: { open: boolean; lastInboundAt: string | null } | null
   messages: ChatMessage[]
   messagesCursor: string | null
 }
@@ -317,6 +322,43 @@ export interface ConnectionItem {
   webhookUrl: string
   createdAt: string
   updatedAt: string
+  /**
+   * Lo que sigue lo añade el servidor por conexión. Mientras una versión no lo
+   * entregue llega ausente, y la pantalla omite ese dato en vez de suponerlo.
+   */
+  /** Cuándo entró el último mensaje por esta conexión; `null` si aún ninguno. */
+  lastInboundAt?: string | null
+  /** Cuándo el proveedor verificó la dirección de avisos; `null` si aún no. */
+  webhookVerifiedAt?: string | null
+  /** Lo último que el proveedor dijo de la cuenta; cada dato que no entrega queda nulo. */
+  health?: {
+    quality?: "alta" | "media" | "baja" | null
+    dailyLimit?: number | null
+    /** El proveedor no pone tope diario. */
+    unlimited?: boolean
+    number?: string | null
+    name?: string | null
+    checkedAt?: string
+  } | null
+  /** Mensajes de la cuenta por el estado que les da el proveedor (hoy, solo WhatsApp). */
+  messages?: {
+    aprobados?: number
+    enRevision?: number
+    rechazados?: number
+    pausados?: number
+    retirados?: number
+    sinPedir?: number
+  } | null
+  /**
+   * Solo en una conexión hecha con «Conectar con Facebook»: lo que falta para
+   * terminarla, con las palabras del servidor. Nulo en las hechas a mano.
+   */
+  signup?: {
+    grantedAt: string
+    subscribedAt: string | null
+    registeredAt: string | null
+    pending: { step: string; title: string; problem: string | null }[]
+  } | null
 }
 
 export interface AgentConfig {

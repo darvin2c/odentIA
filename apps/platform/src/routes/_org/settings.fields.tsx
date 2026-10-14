@@ -1,14 +1,18 @@
 import {
   Button,
   Field,
+  FieldDescription,
   FieldError,
   FieldLabel,
+  FieldTitle,
   Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Textarea,
+  toast,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -17,114 +21,93 @@ import {
   EmptyState,
   FilterBar,
   FormDrawer,
-  FormPanel,
-  fieldErrorMessages,
-  MasterDetail,
   PageHeader,
   RowActions,
-  useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Plus } from "lucide-react"
-import { type FormEvent, useMemo, useState } from "react"
-import { z } from "zod"
-import { apiFetch } from "../../lib/api"
+import { type FormEvent, useId, useMemo, useState } from "react"
+import { SettingsLoadError } from "../../components/settings/load-error"
+import { SettingsNoAccess } from "../../components/settings/no-access"
+import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
+import { ApiError, apiFetch } from "../../lib/api"
 import { type FieldDef, usePermission } from "../../lib/crm"
-import { PageDraftGuard } from "../../lib/page-draft-guard"
 
 export const Route = createFileRoute("/_org/settings/fields")({
-  component: FieldsPage,
+  component: ContactFieldsPage,
 })
 
-const fieldSchema = z.object({
-  key: z.string().regex(/^[a-z0-9_]{1,40}$/, "minúsculas, números y _ (máx 40)"),
-  label: z.string().min(1, "Ingresa el label"),
-  type: z.enum(["text", "number", "date", "select"]),
-  options: z.string(),
-})
+const TITLE = "Campos de contacto"
+const SUBTITLE = "Los datos propios que tu clínica guarda de cada contacto."
 
-type FieldFormValues = z.infer<typeof fieldSchema>
+type FieldType = "text" | "number" | "date" | "select"
 
-/** Tipos de campo personalizado: etiqueta única para el select y el filtro. */
-const FIELD_TYPES = [
-  { value: "text", label: "Texto" },
-  { value: "number", label: "Número" },
-  { value: "date", label: "Fecha" },
-  { value: "select", label: "Opciones" },
-] as const
+/** El tipo de campo, dicho con palabras: la misma frase en la lista, el filtro y el formulario. */
+const FIELD_TYPES: Array<{ value: FieldType; label: string; hint: string }> = [
+  { value: "text", label: "Texto", hint: "Una respuesta escrita, corta." },
+  { value: "number", label: "Número", hint: "Solo cifras." },
+  { value: "date", label: "Fecha", hint: "Un día del calendario." },
+  { value: "select", label: "Lista de opciones", hint: "Se elige una de las opciones que definas." },
+]
+const TYPE_ITEMS: Record<string, string> = Object.fromEntries(FIELD_TYPES.map((type) => [type.value, type.label]))
 
-function FieldsPage() {
+function typeLabel(type: string): string {
+  return TYPE_ITEMS[type] ?? "Otro"
+}
+
+/** Una opción por línea, sin vacías ni repetidas. */
+function toOptions(text: string): string[] {
+  return [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))]
+}
+
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
+}
+
+/**
+ * Campos de contacto: lo que la clínica quiere guardar de cada contacto además
+ * de lo que ya trae el sistema. La lista se edita en la superficie lateral.
+ * Definir campos es de quien administra la clínica (`settings.*`), la misma
+ * regla que abre el apartado y que aplica el servidor; llenarlos en la ficha
+ * sigue siendo de quien trabaja con contactos.
+ */
+function ContactFieldsPage() {
   const queryClient = useQueryClient()
-  const canWrite = usePermission("crm.write")
-  const canRead = usePermission("crm.read")
-  const mode = useDetailMode()
-  const [formOpen, setFormOpen] = useState(false)
+  const canRead = usePermission("settings.read")
+  const canWrite = usePermission("settings.write")
+  // Al lado: un campo nuevo o el que se edita.
+  const sideForm = useSideForm<FieldDef>()
+  const openForm = sideForm.open
   const [deleting, setDeleting] = useState<FieldDef | null>(null)
 
   const listQuery = useQuery({
     queryKey: ["fields"],
     queryFn: () => apiFetch<{ data: FieldDef[] }>("/api/fields"),
     enabled: canRead,
+    retry: 1,
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["fields"] })
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: FieldFormValues) => {
-      await apiFetch("/api/fields", {
-        method: "POST",
-        body: JSON.stringify({
-          key: values.key,
-          label: values.label,
-          type: values.type,
-          options:
-            values.type === "select"
-              ? values.options
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean)
-              : undefined,
-        }),
-      })
-    },
-    onSuccess: () => {
-      closeFieldForm()
-      void invalidate()
-    },
-  })
-
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/fields/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
+    mutationFn: (field: FieldDef) => apiFetch(`/api/fields/${field.id}`, { method: "DELETE" }),
+    onSuccess: (_result, field) => {
       setDeleting(null)
+      toast.success(`Campo «${field.label}» eliminado`)
       void invalidate()
     },
+    onError: (error) => {
+      setDeleting(null)
+      toast.error(errorText(error, "No pudimos eliminar el campo. Vuelve a intentarlo."))
+    },
   })
-
-  const form = useForm({
-    defaultValues: { key: "", label: "", type: "text" as FieldFormValues["type"], options: "" },
-    validators: { onSubmit: fieldSchema },
-    onSubmit: ({ value }) => saveMutation.mutate(value),
-  })
-
-  // Suscripción explícita: el render de la página no se entera de los cambios de
-  // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
-  const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
-
-  /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
-   *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
-  function closeFieldForm() {
-    setFormOpen(false)
-    form.reset()
-  }
 
   const listSearch = useListSearch()
   const search = listSearch.get("q") ?? ""
-  const tipoFilter = listSearch.get("tipo")
+  const typeFilter = listSearch.get("tipo")
   const sort = listSearch.get("sort")
 
   const rows = listQuery.data?.data ?? []
@@ -132,27 +115,30 @@ function FieldsPage() {
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase()
     const matches = rows.filter((field) => {
-      if (tipoFilter && field.type !== tipoFilter) return false
-      if (needle && !`${field.key} ${field.label}`.toLowerCase().includes(needle)) return false
+      if (typeFilter && field.type !== typeFilter) return false
+      if (needle && !field.label.toLowerCase().includes(needle)) return false
       return true
     })
     const sortField = (sort ?? "").replace(/^-/, "")
     const desc = (sort ?? "").startsWith("-")
-    const compare = (a: FieldDef, b: FieldDef) => {
-      if (sortField === "label") return a.label.localeCompare(b.label)
-      if (sortField === "tipo") return a.type.localeCompare(b.type)
-      return a.key.localeCompare(b.key)
-    }
+    const compare = (a: FieldDef, b: FieldDef) =>
+      sortField === "tipo"
+        ? typeLabel(a.type).localeCompare(typeLabel(b.type)) || a.label.localeCompare(b.label)
+        : a.label.localeCompare(b.label)
     return [...matches].sort((a, b) => (desc ? -compare(a, b) : compare(a, b)))
-  }, [rows, search, tipoFilter, sort])
+  }, [rows, search, typeFilter, sort])
 
-  const hasCriteria = search.trim() !== "" || Boolean(tipoFilter)
+  const hasCriteria = search.trim() !== "" || Boolean(typeFilter)
 
   const columns = useMemo<ColumnDef<FieldDef>[]>(
     () => [
-      { accessorKey: "key", header: "Clave", meta: { view: { primary: true } } },
-      { accessorKey: "label", header: "Label", meta: { view: { role: "title" } } },
-      { accessorKey: "type", header: "Tipo", meta: { view: { primary: true } } },
+      { accessorKey: "label", header: "Nombre", meta: { view: { role: "title" } } },
+      {
+        accessorKey: "type",
+        header: "Tipo",
+        meta: { view: { primary: true } },
+        cell: ({ row }) => typeLabel(row.original.type),
+      },
       {
         id: "options",
         header: "Opciones",
@@ -166,18 +152,14 @@ function FieldsPage() {
             <RowActions
               label={`Acciones de ${row.original.label}`}
               items={[
-                {
-                  key: "delete",
-                  label: "Eliminar",
-                  tone: "danger",
-                  onSelect: () => setDeleting(row.original),
-                },
+                { key: "edit", label: "Editar", onSelect: () => openForm(row.original) },
+                { key: "delete", label: "Eliminar", tone: "danger", onSelect: () => setDeleting(row.original) },
               ]}
             />
           ) : null,
       },
     ],
-    [canWrite],
+    [canWrite, openForm],
   )
 
   const table = useReactTable({
@@ -188,162 +170,241 @@ function FieldsPage() {
 
   if (!canRead) {
     return (
-      <div>
-        <EmptyState title="Sin acceso" description="Sin permiso de lectura del CRM." />
+      <div className="flex flex-col gap-6">
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SettingsNoAccess />
       </div>
     )
   }
 
-  const formFields = (
-    <div className="flex flex-col gap-4">
-      <form.Field name="key">
-        {(field) => (
+  const neverLoaded = listQuery.isError && listQuery.data === undefined
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          canWrite ? (
+            <Button type="button" className="min-h-11" onClick={() => openForm(null)}>
+              <Plus aria-hidden />
+              Nuevo campo
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {listQuery.isPending ? (
+        <DataTableSkeleton columnCount={4} rowCount={4} label="Cargando los campos de contacto…" />
+      ) : neverLoaded ? (
+        <SettingsLoadError what="los campos de contacto" onRetry={() => void listQuery.refetch()} />
+      ) : (
+        <>
+          {listQuery.isError ? (
+            <SettingsLoadError stale what="los campos de contacto" onRetry={() => void listQuery.refetch()} />
+          ) : null}
+          {rows.length === 0 ? (
+            <EmptyState
+              title="Aún no hay campos"
+              description="Sirven para guardar en cada contacto lo que tu clínica quiere saber: cómo nos conoció, su sede preferida."
+              {...(canWrite ? { actionLabel: "Agrega el primer campo", onAction: () => openForm(null) } : {})}
+            />
+          ) : (
+            <>
+              <FilterBar
+                filters={[
+                  {
+                    key: "tipo",
+                    label: "Tipo",
+                    type: "select",
+                    options: FIELD_TYPES.map(({ value, label }) => ({ value, label })),
+                  },
+                ]}
+                sortOptions={[
+                  { value: "nombre", label: "Nombre" },
+                  { value: "tipo", label: "Tipo" },
+                ]}
+                searchPlaceholder="Buscar por nombre"
+              />
+              {filtered.length === 0 ? (
+                <EmptyState
+                  title="Sin resultados"
+                  description={
+                    hasCriteria
+                      ? "Ningún campo coincide con la búsqueda. Cambia el texto o quita el filtro."
+                      : "No hay campos para mostrar."
+                  }
+                />
+              ) : (
+                <DataTable
+                  table={table}
+                  {...(canWrite ? { onRowClick: (field: FieldDef) => openForm(field) } : {})}
+                  isRowActive={(row) => sideForm.form?.target?.id === row.id}
+                  isFetching={listQuery.isFetching}
+                  refreshMessage="Actualizando los campos…"
+                />
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {canWrite && sideForm.form ? (
+        <FieldForm
+          key={sideForm.form.opening}
+          field={sideForm.form.target}
+          onDirtyChange={sideForm.setDirty}
+          onClose={sideForm.close}
+          onSaved={() => {
+            sideForm.close()
+            void invalidate()
+          }}
+        />
+      ) : null}
+      <DiscardDraftDialog form={sideForm} what="otro campo" />
+
+      {canWrite ? (
+        <ConfirmDialog
+          open={deleting !== null}
+          onClose={() => setDeleting(null)}
+          title={`Eliminar el campo «${deleting?.label ?? ""}»`}
+          description="Deja de verse en la ficha de cada contacto. Lo que ya estaba guardado en él se descarta la próxima vez que se editen los campos de ese contacto."
+          confirmLabel="Eliminar"
+          pending={deleteMutation.isPending}
+          onConfirm={() => deleting && deleteMutation.mutate(deleting)}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Un campo nuevo o el que se edita. Solo se escribe el nombre: la clave con que
+ * se guarda la genera el servidor. Al editar, el tipo ya no cambia.
+ */
+function FieldForm({
+  field,
+  onDirtyChange,
+  onClose,
+  onSaved,
+}: {
+  field: FieldDef | null
+  onDirtyChange: (dirty: boolean) => void
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const ids = useId()
+  const initialOptions = (field?.options ?? []).join("\n")
+  const [label, setLabel] = useState(field?.label ?? "")
+  const [type, setType] = useState<FieldType>((field?.type as FieldType | undefined) ?? "text")
+  const [options, setOptions] = useState(initialOptions)
+  const [errors, setErrors] = useState<{ label?: string; options?: string }>({})
+
+  const save = useMutation({
+    mutationFn: (values: { label: string; type: FieldType; options: string[] }) => {
+      const withOptions = values.type === "select" ? { options: values.options } : {}
+      return field
+        ? apiFetch(`/api/fields/${field.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ label: values.label, ...withOptions }),
+          })
+        : apiFetch("/api/fields", {
+            method: "POST",
+            body: JSON.stringify({ label: values.label, type: values.type, ...withOptions }),
+          })
+    },
+    onSuccess: (_result, values) => {
+      toast.success(`Campo «${values.label}» guardado`)
+      onSaved()
+    },
+  })
+
+  const isDirty = label !== (field?.label ?? "") || options !== initialOptions || (!field && type !== "text")
+  useReportDirty(isDirty, onDirtyChange)
+
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={field ? "Editar campo" : "Nuevo campo"}
+      isDirty={isDirty}
+      isSubmitting={save.isPending}
+      error={save.isError ? errorText(save.error, "No pudimos guardar el campo. Vuelve a intentarlo.") : null}
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault()
+        const name = label.trim()
+        const list = toOptions(options)
+        const next: { label?: string; options?: string } = {}
+        if (!name) next.label = "Escribe el nombre del campo"
+        if (type === "select" && list.length === 0) next.options = "Escribe al menos una opción"
+        setErrors(next)
+        if (next.label || next.options) return
+        save.mutate({ label: name, type, options: list })
+      }}
+    >
+      <div className="flex flex-col gap-4">
+        <Field>
+          <FieldLabel htmlFor={`${ids}-nombre`}>Nombre</FieldLabel>
+          <Input
+            id={`${ids}-nombre`}
+            value={label}
+            maxLength={120}
+            placeholder="Cómo nos conoció"
+            aria-invalid={errors.label ? true : undefined}
+            onChange={(event) => setLabel(event.target.value)}
+          />
+          <FieldDescription>Así se lee en la ficha de cada contacto.</FieldDescription>
+          {errors.label ? <FieldError>{errors.label}</FieldError> : null}
+        </Field>
+        {field ? (
           <Field>
-            <FieldLabel>Clave (a-z, 0-9, _)</FieldLabel>
-            <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+            <FieldTitle>Tipo</FieldTitle>
+            <p className="text-sm">{typeLabel(field.type)}</p>
+            <FieldDescription>
+              No se cambia después de crear el campo: lo que ya está guardado depende de él.
+            </FieldDescription>
           </Field>
-        )}
-      </form.Field>
-      <form.Field name="label">
-        {(field) => (
+        ) : (
           <Field>
-            <FieldLabel>Label</FieldLabel>
-            <Input value={field.state.value} onChange={(e) => field.handleChange(e.target.value)} />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
-          </Field>
-        )}
-      </form.Field>
-      <form.Field name="type">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor="campo-tipo">Tipo</FieldLabel>
-            <Select
-              value={field.state.value}
-              items={Object.fromEntries(FIELD_TYPES.map((t) => [t.value, t.label]))}
-              onValueChange={(value) => field.handleChange(value as FieldFormValues["type"])}
-            >
-              <SelectTrigger id="campo-tipo">
+            <FieldLabel htmlFor={`${ids}-tipo`}>Tipo</FieldLabel>
+            <Select value={type} items={TYPE_ITEMS} onValueChange={(value) => setType((value as FieldType | null) ?? "text")}>
+              <SelectTrigger id={`${ids}-tipo`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {FIELD_TYPES.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
-                    {t.label}
+                {FIELD_TYPES.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+            <FieldDescription>
+              {FIELD_TYPES.find((item) => item.value === type)?.hint} Después no se puede cambiar.
+            </FieldDescription>
           </Field>
         )}
-      </form.Field>
-      <form.Field name="options">
-        {(field) => (
+        {type === "select" ? (
           <Field>
-            <FieldLabel>Opciones separadas por coma (solo select)</FieldLabel>
-            <Input
-              value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
-              placeholder="norte, sur"
+            <FieldLabel htmlFor={`${ids}-opciones`}>Opciones</FieldLabel>
+            <Textarea
+              id={`${ids}-opciones`}
+              value={options}
+              rows={5}
+              placeholder={"Redes sociales\nRecomendación\nPasó por la clínica"}
+              aria-invalid={errors.options ? true : undefined}
+              onChange={(event) => setOptions(event.target.value)}
             />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)}</FieldError>
+            <FieldDescription>
+              Una por línea.
+              {field
+                ? " Si quitas una, los contactos que la tenían la conservan; al editar sus campos habrá que elegir otra."
+                : ""}
+            </FieldDescription>
+            {errors.options ? <FieldError>{errors.options}</FieldError> : null}
           </Field>
-        )}
-      </form.Field>
-    </div>
-  )
-
-  // Idénticos para los dos contenedores: solo cambia dónde se monta el shell.
-  const formProps = {
-    onClose: closeFieldForm,
-    title: "Nuevo campo",
-    isDirty,
-    isSubmitting: saveMutation.isPending,
-    submitLabel: "Crear",
-    cancelLabel: "Cancelar",
-    onSubmit: (event: FormEvent) => {
-      event.preventDefault()
-      void form.handleSubmit()
-    },
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      <PageDraftGuard dirty={formOpen && isDirty} />
-      <MasterDetail
-        panel={
-          canWrite && mode === "panel" && formOpen ? (
-            <FormPanel {...formProps}>{formFields}</FormPanel>
-          ) : null
-        }
-      >
-        <PageHeader
-          title="Campos personalizados"
-          subtitle="Datos extra de contactos (validados por tipo)"
-          actions={
-            canWrite ? (
-              <Button type="button" className="min-h-11" onClick={() => setFormOpen(true)}>
-                <Plus aria-hidden />
-                Nuevo campo
-              </Button>
-            ) : undefined
-          }
-        />
-        <FilterBar
-          filters={[
-            {
-              key: "tipo",
-              label: "Tipo",
-              type: "select",
-              options: [...FIELD_TYPES],
-            },
-          ]}
-          sortOptions={[
-            { value: "clave", label: "Clave" },
-            { value: "label", label: "Label" },
-            { value: "tipo", label: "Tipo" },
-          ]}
-          searchPlaceholder="Buscar por clave o label"
-        />
-        {listQuery.isPending ? (
-          <DataTableSkeleton columnCount={5} rowCount={4} label="Cargando campos…" />
-        ) : rows.length === 0 ? (
-          <EmptyState
-            title="Sin campos"
-            description="Define el primero, p.ej. alergias o sede preferida."
-          />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            title="Sin resultados"
-            description={
-              hasCriteria
-                ? "Ningún campo coincide con los criterios de búsqueda."
-                : "Todavía no hay campos para mostrar."
-            }
-          />
-        ) : (
-          <DataTable table={table} isFetching={listQuery.isFetching} refreshMessage="Actualizando campos…" />
-        )}
-      </MasterDetail>
-    
-      {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
-          duplicaría los id/htmlFor de los campos. */}
-      {canWrite && mode === "drawer" ? (
-        <FormDrawer open={formOpen} {...formProps}>
-          {formFields}
-        </FormDrawer>
-      ) : null}
-      {canWrite && (
-        <ConfirmDialog
-          open={deleting !== null}
-          onClose={() => setDeleting(null)}
-          title={`Eliminar ${deleting?.label ?? ""}`}
-          description="Los valores ya guardados quedan intactos pero se ocultan."
-          confirmLabel="Eliminar"
-          onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
-        />
-      )}
-    </div>
+        ) : null}
+      </div>
+    </FormDrawer>
   )
 }

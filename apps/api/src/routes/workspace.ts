@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { getWorkspaceHome, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "@odentia/services"
+import { AUDIT_AREAS, getWorkspaceHome, listWorkspaceAudit, listWorkspaceNotifications, readWorkspaceNotification, type WorkspaceAccess } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf, type Permission } from "../lib/context.js"
@@ -24,7 +24,7 @@ function accessFor(role: string): WorkspaceAccess {
 }
 const domains = ["patients", "clinical", "appointments", "crm", "conversations", "tasks", "finance", "inventory", "reports", "settings", "audit", "agent"]
 const homeInput = z.object({ branch: z.string().uuid().optional() })
-const auditInput = z.object({ action: z.string().max(120).optional(), before: z.string().datetime({ offset: true }).optional(), beforeId: z.string().uuid().optional() })
+const auditInput = z.object({ action: z.string().max(120).optional(), area: z.enum(AUDIT_AREAS).optional(), before: z.string().datetime({ offset: true }).optional(), beforeId: z.string().uuid().optional() })
 
 export function createWorkspaceRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -58,7 +58,7 @@ export function createWorkspaceRoute(deps: CrmDeps) {
   })
   app.get("/audit", async c => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "audit.read")) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para consultar la auditoría"), 403)
+    if (!canAccess(memberRole, "audit.read")) return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para consultar la actividad del equipo"), 403)
     const parsed = auditInput.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listWorkspaceAudit(tx, orgId, parsed.data)))

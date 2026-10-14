@@ -16,6 +16,12 @@ export type SectionNavItem = {
   badge?: string | number
 }
 
+/** Grupo con título: reúne entradas de una lista larga bajo un nombre de trabajo. */
+export type SectionNavGroup = {
+  label: string
+  items: SectionNavItem[]
+}
+
 /** Lado del riel respecto al contenido. */
 export type SectionNavSide = "left" | "right"
 
@@ -51,6 +57,17 @@ export const ITEM_CLASSES =
 /** `data-active` del shell: acento de sidebar y mayor peso. En reposo el ítem
  * hereda `text-sidebar-foreground` de la superficie, como en el sidebar. */
 export const ITEM_ACTIVE_CLASSES = "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
+
+/** Título de un grupo: rótulo corto en mayúsculas, sin competir con las entradas. */
+export const GROUP_LABEL_CLASSES =
+  "px-1 pb-1 text-[0.6875rem] font-bold tracking-[0.08em] text-muted-foreground uppercase lg:px-3"
+
+/**
+ * Lista de un grupo. En la barra (tablet y móvil) es una tarjeta con sus filas
+ * separadas; en el riel, la misma lista vertical que sin grupos.
+ */
+export const GROUP_LIST_CLASSES =
+  "flex flex-col divide-y divide-sidebar-border overflow-hidden rounded-xl border border-sidebar-border bg-card lg:gap-0.5 lg:divide-y-0 lg:overflow-visible lg:rounded-none lg:border-0 lg:bg-transparent"
 
 /** Contador: la pastilla de texto del `SidebarMenuBadge` (`h-5 min-w-5`). */
 export const BADGE_CLASSES =

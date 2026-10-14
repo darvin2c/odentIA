@@ -1,7 +1,7 @@
+import { canAccessAny, platformPathPermission, ROLE_LABELS } from "@odentia/auth/permissions"
 import {
   Badge,
   Button,
-  Checkbox,
   Field,
   FieldError,
   FieldLabel,
@@ -11,19 +11,19 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
   Textarea,
   toast,
 } from "@odentia/ui"
-import {
-  ConfirmDialog,
-  EmptyState,
-  ErrorState,
-  FormDrawer,
-  PageHeader,
-} from "@odentia/ui-patterns"
+import { Switch } from "@odentia/ui/components/switch"
+import { ConfirmDialog, EmptyState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { createFileRoute, Link } from "@tanstack/react-router"
+import { Plus } from "lucide-react"
+import { type FormEvent, useId, useState } from "react"
+import { SettingsLoadError } from "../../components/settings/load-error"
+import { SettingsNoAccess } from "../../components/settings/no-access"
+import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
 import { ApiError } from "../../lib/api"
 import {
   archiveSpecialty,
@@ -32,239 +32,280 @@ import {
   fetchServiceSpecialties,
   fetchSpecialties,
   fetchSpecialtyProfessionals,
+  type Specialty,
   saveProfessionalSpecialties,
   saveServiceSpecialties,
   updateSpecialty,
-  type Specialty,
 } from "../../lib/clinical-forms"
+import { useMyRole, useOrgMembers, usePermission } from "../../lib/crm"
 import { fetchServices } from "../../lib/services"
-import { useOrgMembers, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/specialties")({
   component: SpecialtiesPage,
 })
 
+const TITLE = "Especialidades"
+const SUBTITLE = "Las especialidades que atiende tu clínica, con sus profesionales."
+/** La tarjeta de página, la misma en toda la plataforma. */
+const CARD = "elevated flex flex-col gap-3 rounded-xl border bg-card p-5"
+const LINK = "font-semibold text-primary underline-offset-4 hover:underline"
+
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
+}
+
+/** ¿Puede este rol abrir esa pantalla? Un enlace solo se ofrece a quien puede. */
+function useCanOpen(path: string): boolean {
+  const role = useMyRole()
+  const permissions = platformPathPermission(path)
+  return permissions === null || canAccessAny(role, permissions)
+}
+
 /**
- * Especialidades de la organización: CRUD propio (sin catálogo fijo) y
- * asignación de profesionales y prestaciones del tarifario. Crear una
- * especialidad aquí la deja disponible en formularios, consentimientos,
- * órdenes y captura clínica sin despliegue ni ficha paralela.
+ * Especialidades de la clínica: la lista, y de cada una sus datos, quiénes la
+ * atienden y los servicios que tiene vinculados. Crear una aquí la deja
+ * disponible para las plantillas de formularios y consentimientos.
  */
 function SpecialtiesPage() {
   const queryClient = useQueryClient()
+  const canRead = usePermission("settings.read")
   const canAdmin = usePermission("settings.write")
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [editing, setEditing] = useState<Specialty | null>(null)
+  // Al lado: una especialidad nueva o la que se edita.
+  const sideForm = useSideForm<Specialty>()
+  const openForm = sideForm.open
   const [archiving, setArchiving] = useState<Specialty | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const submitRef = useRef<() => void>(() => {})
 
   const listQuery = useQuery({
     queryKey: ["specialties"],
     queryFn: () => fetchSpecialties(),
+    enabled: canRead,
+    retry: 1,
   })
   const specialties = listQuery.data?.data ?? []
-  const selected = specialties.find((s) => s.id === selectedId) ?? specialties[0] ?? null
+  const selected = specialties.find((item) => item.id === selectedId) ?? specialties[0] ?? null
 
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["specialties"] })
-  }
-  const fail = (e: unknown) =>
-    setError(e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación")
-
-  const saveMutation = useMutation({
-    mutationFn: (values: { key?: string; name: string; description?: string | null; isActive?: boolean }) =>
-      editing
-        ? updateSpecialty(editing.id, values).then((r) => r.data)
-        : createSpecialty(values).then((r) => r.data),
-    onSuccess: (row) => {
-      setDrawerOpen(false)
-      setEditing(null)
-      setError(null)
-      setSelectedId(row.id)
-      invalidate()
-      toast.success(editing ? "Especialidad actualizada" : "Especialidad creada")
-    },
-    onError: fail,
-  })
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["specialties"] })
 
   const archiveMutation = useMutation({
-    mutationFn: (id: string) => archiveSpecialty(id),
-    onSuccess: () => {
+    mutationFn: (specialty: Specialty) => archiveSpecialty(specialty.id),
+    onSuccess: (_result, specialty) => {
       setArchiving(null)
-      invalidate()
-      toast.success("Especialidad archivada")
+      toast.success(`Especialidad «${specialty.name}» archivada`)
+      void invalidate()
     },
-    onError: fail,
   })
+
+  if (!canRead) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SettingsNoAccess />
+      </div>
+    )
+  }
+
+  const neverLoaded = listQuery.isError && listQuery.data === undefined
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Especialidades"
-        subtitle="Cada organización define las suyas: formularios, consentimientos, órdenes y profesionales cuelgan de aquí."
+        title={TITLE}
+        subtitle={SUBTITLE}
         actions={
           canAdmin ? (
-            <Button
-              type="button"
-              onClick={() => {
-                setEditing(null)
-                setDrawerOpen(true)
-              }}
-            >
+            <Button type="button" className="min-h-11" onClick={() => openForm(null)}>
+              <Plus aria-hidden />
               Nueva especialidad
             </Button>
           ) : undefined
         }
       />
-      {error ? <ErrorState message={error} onRetry={() => setError(null)} /> : null}
-      {listQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Cargando…</p>
-      ) : listQuery.isError ? (
-        <ErrorState
-          message="No se pudieron cargar las especialidades"
-          onRetry={() => void listQuery.refetch()}
-        />
-      ) : specialties.length === 0 ? (
-        <EmptyState
-          title="Sin especialidades"
-          description="Crea la primera (p. ej. Endodoncia) para habilitar formularios y órdenes por especialidad."
-        />
+
+      {listQuery.isPending ? (
+        <SpecialtiesSkeleton />
+      ) : neverLoaded ? (
+        <SettingsLoadError what="las especialidades" onRetry={() => void listQuery.refetch()} />
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
-          <ul className="flex flex-col gap-2">
-            {specialties.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm ${
-                    selected?.id === item.id ? "border-primary bg-accent" : ""
-                  }`}
-                >
-                  <span className="font-medium">{item.name}</span>
-                  <Badge variant={item.isActive ? "default" : "secondary"}>
-                    {item.isActive ? "Activa" : "Inactiva"}
-                  </Badge>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {selected ? (
-            <SpecialtyDetail
-              specialty={selected}
-              canAdmin={canAdmin}
-              onEdit={() => {
-                setEditing(selected)
-                setDrawerOpen(true)
-              }}
-              onArchive={() => setArchiving(selected)}
-            />
+        <>
+          {listQuery.isError ? (
+            <SettingsLoadError stale what="las especialidades" onRetry={() => void listQuery.refetch()} />
           ) : null}
-        </div>
+          {specialties.length === 0 ? (
+            <EmptyState
+              title="Aún no hay especialidades"
+              description="Con ellas dices quién atiende qué y ordenas las plantillas de formularios y consentimientos."
+              {...(canAdmin
+                ? { actionLabel: "Agrega la primera especialidad", onAction: () => openForm(null) }
+                : {})}
+            />
+          ) : (
+            <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+              <ul aria-label="Especialidades de la clínica" className="flex flex-col gap-1">
+                {specialties.map((item) => (
+                  <li key={item.id}>
+                    <Button
+                      type="button"
+                      variant={selected?.id === item.id ? "secondary" : "ghost"}
+                      aria-current={selected?.id === item.id ? "true" : undefined}
+                      className="h-auto min-h-11 w-full justify-between gap-2 rounded-xl px-3 py-2 text-left whitespace-normal"
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <span className="min-w-0 font-medium">{item.name}</span>
+                      {item.isActive ? null : <Badge variant="secondary">Archivada</Badge>}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              {selected ? (
+                <SpecialtyDetail
+                  key={selected.id}
+                  specialty={selected}
+                  canAdmin={canAdmin}
+                  onEdit={() => openForm(selected)}
+                  onArchive={() => {
+                    archiveMutation.reset()
+                    setArchiving(selected)
+                  }}
+                />
+              ) : null}
+            </div>
+          )}
+        </>
       )}
-      <FormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title={editing ? "Editar especialidad" : "Nueva especialidad"}
-        onSubmit={() => submitRef.current()}
-        isSubmitting={saveMutation.isPending}
-        submitLabel={editing ? "Guardar cambios" : "Crear especialidad"}
-      >
+
+      {canAdmin && sideForm.form ? (
         <SpecialtyForm
-          key={editing?.id ?? "nueva"}
-          initial={editing}
-          registerSubmit={(fn) => {
-            submitRef.current = fn
+          key={sideForm.form.opening}
+          specialty={sideForm.form.target}
+          onDirtyChange={sideForm.setDirty}
+          onClose={sideForm.close}
+          onSaved={(saved) => {
+            sideForm.close()
+            setSelectedId(saved.id)
+            void invalidate()
           }}
-          onSubmit={(values) => saveMutation.mutate(values)}
         />
-      </FormDrawer>
+      ) : null}
+      <DiscardDraftDialog form={sideForm} what="otra especialidad" />
+
       <ConfirmDialog
         open={archiving !== null}
         onClose={() => setArchiving(null)}
-        title="Archivar especialidad"
-        description={`«${archiving?.name}» dejará de estar disponible para plantillas nuevas. El historial se conserva.`}
+        title={`Archivar «${archiving?.name ?? ""}»`}
+        description="Deja de ofrecerse al crear plantillas de formularios y consentimientos. Lo que ya se hizo con ella se conserva, y puedes reactivarla después."
         confirmLabel="Archivar"
         variant="default"
         pending={archiveMutation.isPending}
-        onConfirm={() => {
-          if (archiving) archiveMutation.mutate(archiving.id)
-        }}
-      />
+        onConfirm={() => archiving && archiveMutation.mutate(archiving)}
+      >
+        {archiveMutation.isError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {errorText(archiveMutation.error, "No pudimos archivar la especialidad. Vuelve a intentarlo.")}
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </div>
   )
 }
 
-function SpecialtyForm({
-  initial,
-  registerSubmit,
-  onSubmit,
-}: {
-  initial: Specialty | null
-  registerSubmit: (fn: () => void) => void
-  onSubmit: (values: { key?: string; name: string; description?: string | null }) => void
-}) {
-  const [name, setName] = useState(initial?.name ?? "")
-  const [key, setKey] = useState(initial?.key ?? "")
-  const [description, setDescription] = useState(initial?.description ?? "")
-  const [errors, setErrors] = useState<{ name?: string; key?: string }>({})
+/** El hueco de la pantalla mientras carga: la lista a la izquierda y el detalle al lado. */
+function SpecialtiesSkeleton() {
+  return (
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+      <p role="status" className="sr-only">
+        Cargando las especialidades…
+      </p>
+      <div className="flex flex-col gap-2" aria-hidden>
+        {["w-40", "w-32", "w-44", "w-36"].map((width) => (
+          <div key={width} className="flex min-h-11 items-center px-3">
+            <Skeleton className={`h-4 ${width}`} />
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col gap-4" aria-hidden>
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="h-4 w-72 max-w-full" />
+        <Skeleton className="h-32 w-full rounded-xl" />
+        <Skeleton className="h-24 w-full rounded-xl" />
+      </div>
+    </div>
+  )
+}
 
-  useEffect(() => {
-    registerSubmit(() => {
-      const next: { name?: string; key?: string } = {}
-      if (!name.trim()) next.name = "Ingresa el nombre"
-      if (key.trim() && !/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(key.trim().toLowerCase())) {
-        next.key = "Clave de 2–40 caracteres (letras, números y guiones)"
-      }
-      setErrors(next)
-      if (next.name || next.key) return
-      onSubmit({
-        name: name.trim(),
-        ...(key.trim() ? { key: key.trim().toLowerCase() } : {}),
-        description: description.trim() ? description.trim() : null,
-      })
-    })
+/** Nombre y descripción, con su «Guardar». La clave interna la genera el servidor. */
+function SpecialtyForm({
+  specialty,
+  onDirtyChange,
+  onClose,
+  onSaved,
+}: {
+  specialty: Specialty | null
+  onDirtyChange: (dirty: boolean) => void
+  onClose: () => void
+  onSaved: (saved: Specialty) => void
+}) {
+  const ids = useId()
+  const [name, setName] = useState(specialty?.name ?? "")
+  const [description, setDescription] = useState(specialty?.description ?? "")
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  const save = useMutation({
+    mutationFn: (values: { name: string; description: string | null }) =>
+      (specialty ? updateSpecialty(specialty.id, values) : createSpecialty(values)).then((result) => result.data),
+    onSuccess: (saved) => {
+      toast.success(`Especialidad «${saved.name}» guardada`)
+      onSaved(saved)
+    },
   })
 
+  const isDirty = name !== (specialty?.name ?? "") || description !== (specialty?.description ?? "")
+  useReportDirty(isDirty, onDirtyChange)
+
   return (
-    <div className="flex flex-col gap-4">
-      <Field>
-        <FieldLabel htmlFor="specialty-name">Nombre</FieldLabel>
-        <Input
-          id="specialty-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Endodoncia"
-          maxLength={120}
-        />
-        {errors.name ? <FieldError>{errors.name}</FieldError> : null}
-      </Field>
-      {!initial ? (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={specialty ? "Editar especialidad" : "Nueva especialidad"}
+      isDirty={isDirty}
+      isSubmitting={save.isPending}
+      error={save.isError ? errorText(save.error, "No pudimos guardar la especialidad. Vuelve a intentarlo.") : null}
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault()
+        const trimmed = name.trim()
+        if (trimmed.length < 2) {
+          setNameError("Escribe el nombre de la especialidad")
+          return
+        }
+        setNameError(null)
+        save.mutate({ name: trimmed, description: description.trim() ? description.trim() : null })
+      }}
+    >
+      <div className="flex flex-col gap-4">
         <Field>
-          <FieldLabel htmlFor="specialty-key">Clave (opcional, se genera del nombre)</FieldLabel>
+          <FieldLabel htmlFor={`${ids}-nombre`}>Nombre</FieldLabel>
           <Input
-            id="specialty-key"
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-            placeholder="endodoncia"
-            maxLength={40}
+            id={`${ids}-nombre`}
+            value={name}
+            placeholder="Endodoncia"
+            maxLength={120}
+            aria-invalid={nameError ? true : undefined}
+            onChange={(event) => setName(event.target.value)}
           />
-          {errors.key ? <FieldError>{errors.key}</FieldError> : null}
+          {nameError ? <FieldError>{nameError}</FieldError> : null}
         </Field>
-      ) : null}
-      <Field>
-        <FieldLabel htmlFor="specialty-description">Descripción</FieldLabel>
-        <Textarea
-          id="specialty-description"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          rows={3}
-          maxLength={2000}
-        />
-      </Field>
-    </div>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-descripcion`}>Descripción (opcional)</FieldLabel>
+          <Textarea
+            id={`${ids}-descripcion`}
+            value={description}
+            rows={3}
+            maxLength={2000}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+        </Field>
+      </div>
+    </FormDrawer>
   )
 }
 
@@ -281,20 +322,23 @@ function SpecialtyDetail({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold">{specialty.name}</h2>
-          <p className="text-sm text-muted-foreground">
-            Clave «{specialty.key}» · {specialty.description || "Sin descripción"}
-          </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold">{specialty.name}</h2>
+            <Badge variant={specialty.isActive ? "success" : "secondary"}>
+              {specialty.isActive ? "Activa" : "Archivada"}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">{specialty.description || "Sin descripción."}</p>
         </div>
         {canAdmin ? (
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={onEdit}>
               Editar
             </Button>
             {specialty.isActive ? (
-              <Button type="button" variant="outline" size="sm" onClick={onArchive}>
+              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={onArchive}>
                 Archivar
               </Button>
             ) : (
@@ -315,14 +359,16 @@ function ReactivateButton({ specialty }: { specialty: Specialty }) {
     mutationFn: () => updateSpecialty(specialty.id, { isActive: true }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["specialties"] })
-      toast.success("Especialidad reactivada")
+      toast.success(`Especialidad «${specialty.name}» reactivada`)
     },
+    onError: (error) => toast.error(errorText(error, "No pudimos reactivar la especialidad. Vuelve a intentarlo.")),
   })
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
+      className="min-h-11 sm:min-h-8"
       disabled={mutation.isPending}
       onClick={() => mutation.mutate()}
     >
@@ -331,123 +377,204 @@ function ReactivateButton({ specialty }: { specialty: Specialty }) {
   )
 }
 
+/** Quiénes atienden la especialidad. Cada interruptor guarda al momento y lo dice. */
 function ProfessionalAssignment({ specialty, canAdmin }: { specialty: Specialty; canAdmin: boolean }) {
   const members = useOrgMembers()
+  const canOpenTeam = useCanOpen("/settings/team")
   const queryClient = useQueryClient()
   const assignedQuery = useQuery({
     queryKey: ["specialty-professionals", specialty.id],
     queryFn: () => fetchSpecialtyProfessionals(specialty.id),
+    retry: 1,
   })
-  const assigned = new Set((assignedQuery.data?.data ?? []).map((r) => r.userId))
+  const assigned = new Set((assignedQuery.data?.data ?? []).map((row) => row.userId))
   const mutation = useMutation({
-    mutationFn: (userId: string) =>
-      fetchProfessionalSpecialties(userId).then(async (current) => {
-        const ids = new Set(current.data.map((s) => s.id))
-        if (assigned.has(userId)) {
-          // Este profesional ya figura: se quita esta especialidad de las suyas.
-          ids.delete(specialty.id)
-        } else {
-          ids.add(specialty.id)
-        }
-        return saveProfessionalSpecialties(userId, [...ids])
-      }),
-    onSuccess: () => {
+    mutationFn: async ({ userId, attends }: { userId: string; name: string; attends: boolean }) => {
+      // Se guarda la lista completa de esa persona: se parte de la que tiene hoy.
+      const current = await fetchProfessionalSpecialties(userId)
+      const ids = new Set(current.data.map((item) => item.id))
+      if (attends) ids.add(specialty.id)
+      else ids.delete(specialty.id)
+      return saveProfessionalSpecialties(userId, [...ids])
+    },
+    onSuccess: (_result, { name, attends }) => {
+      toast.success(attends ? `${name} ahora atiende ${specialty.name}` : `${name} ya no atiende ${specialty.name}`)
       void queryClient.invalidateQueries({ queryKey: ["specialty-professionals", specialty.id] })
     },
+    onError: (error) => toast.error(errorText(error, "No pudimos guardar el cambio. Vuelve a intentarlo.")),
   })
+  const neverLoaded = assignedQuery.isError && assignedQuery.data === undefined
 
   return (
-    <section className="rounded-md border p-4">
-      <h3 className="text-sm font-semibold">Profesionales</h3>
-      <p className="text-sm text-muted-foreground">
-        Quiénes atienden esta especialidad (miembros de la organización).
-      </p>
-      <ul className="mt-3 flex flex-col gap-2">
-        {members.map((member) => (
-          <li key={member.userId} className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={assigned.has(member.userId)}
-              disabled={!canAdmin || mutation.isPending}
-              onCheckedChange={() => mutation.mutate(member.userId)}
-              aria-label={`Asignar a ${member.user.name}`}
-            />
-            <span>
-              {member.user.name} <span className="text-muted-foreground">· {member.role}</span>
-            </span>
-          </li>
-        ))}
-        {members.length === 0 ? (
-          <li className="text-sm text-muted-foreground">Sin miembros para asignar.</li>
-        ) : null}
-      </ul>
+    <section className={CARD} aria-labelledby={`profesionales-${specialty.id}`}>
+      <div className="flex flex-col gap-1">
+        <h3 id={`profesionales-${specialty.id}`} className="text-sm font-semibold">
+          Profesionales
+        </h3>
+        <p className="text-sm text-muted-foreground">Quiénes de tu equipo atienden esta especialidad.</p>
+      </div>
+      {members.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Aún no hay nadie en el equipo.{" "}
+          {canOpenTeam ? (
+            <Link to="/settings/team" className={LINK}>
+              Invitar a alguien en Equipo
+            </Link>
+          ) : null}
+        </p>
+      ) : assignedQuery.isPending ? (
+        <div className="flex flex-col gap-3">
+          <p role="status" className="sr-only">
+            Cargando quiénes atienden esta especialidad…
+          </p>
+          <Skeleton className="h-5 w-56" aria-hidden />
+          <Skeleton className="h-5 w-48" aria-hidden />
+        </div>
+      ) : neverLoaded ? (
+        <SettingsLoadError what="quiénes atienden esta especialidad" onRetry={() => void assignedQuery.refetch()} />
+      ) : (
+        <ul className="flex flex-col divide-y">
+          {members.map((member) => {
+            const id = `atiende-${specialty.id}-${member.userId}`
+            const role = ROLE_LABELS[member.role as keyof typeof ROLE_LABELS]
+            return (
+              <li key={member.userId} className="flex min-h-11 items-center gap-3 py-2">
+                <label htmlFor={id} className="min-w-0 flex-1 text-sm">
+                  <span className="font-medium">{member.user.name}</span>
+                  {role ? <span className="text-muted-foreground"> · {role}</span> : null}
+                </label>
+                <Switch
+                  id={id}
+                  checked={assigned.has(member.userId)}
+                  disabled={!canAdmin || mutation.isPending}
+                  onCheckedChange={(checked) =>
+                    mutation.mutate({ userId: member.userId, name: member.user.name, attends: checked })
+                  }
+                />
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </section>
   )
 }
 
+/**
+ * Servicios vinculados a la especialidad. El vínculo se cambia servicio por
+ * servicio, con su botón; nada más se toca del servicio.
+ */
 function ServiceAssignment({ specialty, canAdmin }: { specialty: Specialty; canAdmin: boolean }) {
   const [serviceId, setServiceId] = useState<string>("")
+  const canOpenServices = useCanOpen("/services")
   const queryClient = useQueryClient()
   const servicesQuery = useQuery({
     queryKey: ["services-all"],
     queryFn: () => fetchServices({ limit: 100 }),
+    retry: 1,
   })
   const services = servicesQuery.data?.data ?? []
   const linkedQuery = useQuery({
     queryKey: ["service-specialties", serviceId],
     queryFn: () => fetchServiceSpecialties(serviceId),
     enabled: serviceId !== "",
+    retry: 1,
   })
-  const linked = new Set((linkedQuery.data?.data ?? []).map((s) => s.id))
+  const linked = new Set((linkedQuery.data?.data ?? []).map((item) => item.id))
+  const isLinked = linked.has(specialty.id)
+  const serviceName = services.find((service) => service.id === serviceId)?.name ?? "El servicio"
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (link: boolean) => {
       const ids = new Set(linked)
-      if (ids.has(specialty.id)) ids.delete(specialty.id)
-      else ids.add(specialty.id)
+      if (link) ids.add(specialty.id)
+      else ids.delete(specialty.id)
       return saveServiceSpecialties(serviceId, [...ids])
     },
-    onSuccess: () => {
+    onSuccess: (_result, link) => {
+      toast.success(
+        link
+          ? `${serviceName} quedó vinculado a ${specialty.name}`
+          : `${serviceName} ya no está vinculado a ${specialty.name}`,
+      )
       void queryClient.invalidateQueries({ queryKey: ["service-specialties", serviceId] })
-      toast.success("Prestación actualizada")
     },
-    onError: (e: unknown) => {
-      toast.error(e instanceof ApiError ? (e.shape.message ?? "Falló la operación") : "Falló la operación")
-    },
+    onError: (error) => toast.error(errorText(error, "No pudimos guardar el cambio. Vuelve a intentarlo.")),
   })
+  const servicesNeverLoaded = servicesQuery.isError && servicesQuery.data === undefined
 
   return (
-    <section className="rounded-md border p-4">
-      <h3 className="text-sm font-semibold">Servicios de la clínica</h3>
-      <p className="text-sm text-muted-foreground">
-        Vincula prestaciones a esta especialidad (la especialidad de biblioteca sigue intacta).
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Select value={serviceId} onValueChange={(v: string | null) => setServiceId(v ?? "")}>
-          <SelectTrigger className="w-64" aria-label="Prestación">
-            <SelectValue placeholder="Elige una prestación" />
-          </SelectTrigger>
-          <SelectContent>
-            {services.map((service) => (
-              <SelectItem key={service.id} value={service.id}>
-                {service.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!canAdmin || !serviceId || mutation.isPending}
-          onClick={() => mutation.mutate()}
-        >
-          {linked.has(specialty.id) ? "Desvincular" : "Vincular"}
-        </Button>
-      </div>
-      {serviceId && linkedQuery.data ? (
-        <p className="mt-2 text-sm text-muted-foreground">
-          {linked.has(specialty.id) ? "Vinculada a esta especialidad." : "No vinculada a esta especialidad."}
+    <section className={CARD} aria-labelledby={`servicios-${specialty.id}`}>
+      <div className="flex flex-col gap-1">
+        <h3 id={`servicios-${specialty.id}`} className="text-sm font-semibold">
+          Servicios de la clínica
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          Elige un servicio para vincularlo con esta especialidad o quitarle el vínculo.
         </p>
-      ) : null}
+      </div>
+      {servicesQuery.isPending ? (
+        <div>
+          <p role="status" className="sr-only">
+            Cargando los servicios…
+          </p>
+          <Skeleton className="h-9 w-64 max-w-full" aria-hidden />
+        </div>
+      ) : servicesNeverLoaded ? (
+        <SettingsLoadError what="los servicios" onRetry={() => void servicesQuery.refetch()} />
+      ) : services.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Aún no hay servicios.{" "}
+          {canOpenServices ? (
+            <Link to="/services" className={LINK}>
+              Agregar el primero en Servicios
+            </Link>
+          ) : null}
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={serviceId}
+              items={Object.fromEntries(services.map((service) => [service.id, service.name]))}
+              onValueChange={(value: string | null) => setServiceId(value ?? "")}
+            >
+              <SelectTrigger className="w-64 max-w-full" aria-label="Servicio">
+                <SelectValue placeholder="Elige un servicio" />
+              </SelectTrigger>
+              <SelectContent>
+                {services.map((service) => (
+                  <SelectItem key={service.id} value={service.id}>
+                    {service.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {canAdmin ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-11 sm:min-h-8"
+                disabled={!serviceId || !linkedQuery.data || mutation.isPending}
+                onClick={() => mutation.mutate(!isLinked)}
+              >
+                {isLinked ? "Quitar el vínculo" : "Vincular"}
+              </Button>
+            ) : null}
+          </div>
+          {serviceId && linkedQuery.isError ? (
+            <SettingsLoadError
+              stale={linkedQuery.data !== undefined}
+              what="el vínculo de ese servicio"
+              onRetry={() => void linkedQuery.refetch()}
+            />
+          ) : serviceId && linkedQuery.data ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              {isLinked ? "Está vinculado a esta especialidad." : "No está vinculado a esta especialidad."}
+            </p>
+          ) : null}
+        </>
+      )}
     </section>
   )
 }

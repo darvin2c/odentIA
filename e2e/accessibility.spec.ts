@@ -173,6 +173,21 @@ for (const viewport of [
       await expect(page.getByRole("listbox")).not.toBeVisible()
       await expect(zones).toBeFocused()
 
+      // Integraciones: la lista por filas y el panel de un canal, con teclado.
+      await gotoHydrated(page, tenant(owner.org.slug, "/settings/integrations"))
+      await theme(page, dark)
+      await expect(page.getByRole("region", { name: "Mensajería" }).getByRole("listitem")).toHaveCount(4)
+      await expect(page.getByRole("region", { name: "Inteligencia artificial" }).getByRole("listitem")).toHaveCount(1)
+      await audit(page, info, "integraciones")
+      const connectTelegram = page.getByRole("button", { name: "Conectar Telegram", exact: true })
+      await connectTelegram.focus()
+      await page.keyboard.press("Enter")
+      const telegram = surface(page, { name: "Conectar Telegram", exact: true })
+      await expect(telegram.getByLabel("Clave del bot", { exact: true })).toBeVisible()
+      await audit(page, info, "integraciones-telegram")
+      await telegram.getByRole("button", { name: "Cancelar", exact: true }).click()
+      await expect(telegram).toBeHidden()
+
       await gotoHydrated(page, tenant(owner.org.slug, "/patients"))
       await theme(page, dark)
       const create = page.getByRole("button", { name: "Nuevo paciente", exact: true })

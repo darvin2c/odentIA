@@ -48,9 +48,14 @@ export function usePaymentMethods(activeOnly = true) {
   })
 }
 
+/** Tipos de medio que admite la clínica, en el orden en que se ofrecen al elegir. */
+export const PAYMENT_TYPE_CODES = ["10", "48", "30", "68", "20", "1"] as const
+export type PaymentTypeCode = (typeof PAYMENT_TYPE_CODES)[number]
+
+/** Sin `sortOrder`, el medio nuevo va al final de la lista. */
 export interface CreatePaymentMethodBody {
   name: string
-  typeCode?: "10" | "48" | "30" | "68" | "20" | "1" | null
+  typeCode?: PaymentTypeCode | null
   sortOrder?: number | null
 }
 
@@ -65,7 +70,7 @@ export function createPaymentMethodApi(
 
 export interface UpdatePaymentMethodBody {
   name?: string
-  typeCode?: "10" | "48" | "30" | "68" | "20" | "1"
+  typeCode?: PaymentTypeCode
   sortOrder?: number | null
   isActive?: boolean
 }
@@ -77,5 +82,16 @@ export function updatePaymentMethodApi(
   return apiFetch<{ data: PaymentMethod }>(`/api/org/payment-methods/${id}`, {
     method: "PATCH",
     body: JSON.stringify(patch),
+  })
+}
+
+/** Sube o baja un medio un puesto; responde con la lista entera como queda. */
+export function movePaymentMethodApi(
+  id: string,
+  direction: "up" | "down",
+): Promise<{ data: PaymentMethod[] }> {
+  return apiFetch<{ data: PaymentMethod[] }>(`/api/org/payment-methods/${id}/move`, {
+    method: "POST",
+    body: JSON.stringify({ direction }),
   })
 }

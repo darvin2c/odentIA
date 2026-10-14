@@ -20,7 +20,7 @@ import {
 } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -173,6 +173,7 @@ it("sendOutbound humano apaga el agente, marca leído y encola", async () => {
 
 it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
   const connId = await withOrgContext(appDb, "org_a", async (tx) => {
+    await retireWhatsApp("org_a")
     const created = await createConnection(
       tx,
       "org_a",
@@ -269,6 +270,7 @@ it("sendOutbound con media persiste adjunto, contentType derivado y caption", as
 
 it("media saliente de WhatsApp fuera de ventana lanza WINDOW_CLOSED", async () => {
   const connId = await withOrgContext(appDb, "org_a", async (tx) => {
+    await retireWhatsApp("org_a")
     const created = await createConnection(
       tx,
       "org_a",
@@ -597,6 +599,7 @@ it("cursores manipulados de bandeja y mensajes se rechazan antes de consultar Po
 it("listContactChannelHistory: procedencia, acotación, paginación, identidad y transferencia", async () => {
   const tgConn = await makeTelegramConnection("org_a")
   const waConn = await withOrgContext(appDb, "org_a", async (tx) => {
+    await retireWhatsApp("org_a")
     const created = await createConnection(
       tx,
       "org_a",
@@ -612,6 +615,7 @@ it("listContactChannelHistory: procedencia, acotación, paginación, identidad y
     return created.id
   })
   const waConn2 = await withOrgContext(appDb, "org_a", async (tx) => {
+    await retireWhatsApp("org_a")
     const created = await createConnection(
       tx,
       "org_a",
