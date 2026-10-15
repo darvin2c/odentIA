@@ -26,8 +26,7 @@ import {
 } from "./contacts.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { handoffOpenSql } from "./handoff-state.js"
-import { proposalPendingSql } from "./proposal-state.js"
+import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
 import { createOpportunity } from "./opportunities.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
@@ -237,6 +236,11 @@ export async function ingestInbound(
   if (existing) {
     conversationId = existing.id
     threadContactId = existing.contactId
+    // Todo mensaje de la persona reabre la conversación cerrada antes que nada
+    // (ADR 0024): ningún entrante queda escondido en una cerrada.
+    if (existing.status === "closed") {
+      await reopenIfClosed(tx, orgId, existing.id, { userId: null, via: "entrante" })
+    }
     // Hilo compartido (p. ej. grupo de Telegram con otro remitente):
     // conservar interlocutor e identidad, nunca reasignar automáticamente.
     // Solo se vincula la identidad en hilos directos del mismo contacto.
@@ -391,6 +395,8 @@ export async function ingestInbound(
       lastInboundAt: now,
       lastMessageAt: now,
       unreadCount: sql`"unread_count" + 1`,
+      // La persona respondió: si vuelve a callar, el agente puede insistir otra vez.
+      nudgedAt: null,
       updatedAt: now,
     })
     .where(eq(conversation.id, conversationId))
@@ -480,18 +486,78 @@ export const OUTBOUND_MEDIA_MIME_EXT: Record<string, string> = {
 }
 export const OUTBOUND_MEDIA_MAX_BYTES = 16 * 1024 * 1024
 
-async function requireOpenConversation(tx: Db, orgId: string, conversationId: string) {
-  const [row] = await tx
-    .select({ conversation, connection: channelConnection })
-    .from(conversation)
-    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
-    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1)
+/** Acciones de auditoría que cambian el estado de una conversación: el replay de SSE las entrega como `conversation.updated`. */
+export const CONVERSATION_STATE_ACTIONS = [
+  "conversation.updated",
+  "conversation.closed",
+  "conversation.resolved",
+  "conversation.closed_resuelta",
+  "conversation.closed_sin_respuesta",
+  "conversation.reopened",
+  "conversation.reopened_by_message",
+  "conversation.taken",
+  "conversation.released",
+] as const
+
+/**
+ * Reabre una conversación cerrada (ADR 0024): vuelve a estar abierta, sin
+ * cierre, con una atención nueva, sin recordatorio y con el agente encendido.
+ * `via` dice por qué: un entrante de la persona, un envío de la clínica o el
+ * botón «Reabrir». Devuelve si estaba cerrada; una abierta no se toca.
+ */
+export async function reopenIfClosed(
+  tx: Db,
+  orgId: string,
+  id: string,
+  by: { userId: string | null; via: "entrante" | "envio" | "equipo" },
+): Promise<boolean> {
+  const now = new Date()
+  const [reopened] = await tx
+    .update(conversation)
+    .set({
+      status: "open",
+      closedAt: null,
+      closedByUserId: null,
+      closeReason: null,
+      attentionStartedAt: now,
+      nudgedAt: null,
+      agentStatus: "on",
+      updatedAt: now,
+    })
+    .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId), eq(conversation.status, "closed")))
+    .returning({ id: conversation.id })
+  if (!reopened) return false
+  await audit(tx, orgId, {
+    actorUserId: by.userId,
+    action: by.via === "entrante" ? "conversation.reopened_by_message" : "conversation.reopened",
+    entity: "conversation",
+    entityId: id,
+    metadata: { via: by.via },
+  })
+  await notify(tx, { orgId, kind: "conversation.updated", conversationId: id, at: now.toISOString() })
+  return true
+}
+
+/**
+ * La conversación con su conexión, para escribir en ella. Escribir a una
+ * cerrada la reabre con quién lo hizo (ADR 0024): ya no se rechaza con
+ * `CONVERSATION_CLOSED`.
+ */
+async function requireWritableConversation(tx: Db, orgId: string, conversationId: string, by: { userId: string | null }) {
+  const read = () =>
+    tx
+      .select({ conversation, connection: channelConnection })
+      .from(conversation)
+      .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+      .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+  const [row] = await read()
   if (!row) throw notFound("Conversación")
-  if (row.conversation.status !== "open") {
-    throw new ServiceError("CONVERSATION_CLOSED", 409, "La conversación está cerrada")
-  }
-  return row
+  if (row.conversation.status !== "closed") return row
+  await reopenIfClosed(tx, orgId, conversationId, { userId: by.userId, via: "envio" })
+  const [reopened] = await read()
+  if (!reopened) throw notFound("Conversación")
+  return reopened
 }
 
 function assertWindowAllows(
@@ -539,7 +605,7 @@ export async function sendOutbound(
     content: OutboundContent
   },
 ): Promise<MessageItem> {
-  const row = await requireOpenConversation(tx, orgId, input.conversationId)
+  const row = await requireWritableConversation(tx, orgId, input.conversationId, { userId: input.senderUserId ?? null })
   if (row.connection.provider === "whatsapp_cloud_api") {
     assertWindowAllows(row, input.content)
   } else if (META_OUTBOUND_PROVIDERS.includes(row.connection.provider)) {
@@ -630,7 +696,14 @@ export async function sendTemplateOutbound(
     preview?: string
   },
 ): Promise<MessageItem> {
-  const row = await requireOpenConversation(tx, orgId, input.conversationId)
+  // Abierta o cerrada: el envío (sendOutbound) la reabre si hace falta.
+  const [row] = await tx
+    .select({ connection: channelConnection })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Conversación")
   const template = await assertTemplateSendable(tx, orgId, row.connection.id, {
     name: input.name,
     language: input.language,
@@ -668,8 +741,8 @@ export interface ConversationListItem {
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
 }
-export const CONVERSATION_VIEWS = ["unanswered", "human", "approval", "agent", "handoff"] as const
-export type ConversationView = (typeof CONVERSATION_VIEWS)[number]
+/** Estados de una conversación: abierta o cerrada (con su motivo, ADR 0024). */
+export const CONVERSATION_STATUSES = ["open", "closed"] as const
 
 export interface ConversationFilters {
   status?: string
@@ -681,7 +754,12 @@ export interface ConversationFilters {
 /** Filtros de la bandeja sobre `conversation` + `contact` + `channel_connection`. */
 function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
   const conditions: SQL[] = [eq(conversation.organizationId, orgId)]
-  if (input.status) conditions.push(eq(conversation.status, input.status))
+  if (input.status) {
+    if (!(CONVERSATION_STATUSES as readonly string[]).includes(input.status)) {
+      throw validation(`Estado inválido (${CONVERSATION_STATUSES.join("|")})`)
+    }
+    conditions.push(eq(conversation.status, input.status))
+  }
   if (input.channel) conditions.push(eq(channelConnection.channel, input.channel))
   if (input.assigned === "none") {
     conditions.push(sql`"conversation"."assigned_user_id" is null`)
@@ -693,64 +771,14 @@ function conversationFilterConditions(orgId: string, input: ConversationFilters)
 }
 
 /**
- * Condiciones de cada vista de la bandeja; lista y contadores comparten esta
- * única definición.
- * - `unanswered`: hay un entrante posterior al último saliente aceptado.
- * - `human`: una persona tomó el hilo (agente apagado en una abierta).
- * - `approval`: tiene una propuesta del agente pendiente.
- * - `agent`: la atiende el agente (abierta, encendido en el hilo y en la organización).
- * - `handoff`: tiene una derivación sin resolver.
+ * Condiciones de cada vista de la bandeja: lista y contadores comparten la
+ * única definición de `conversation-state.ts`.
  */
-function conversationViewConditions(orgId: string, view: ConversationView): SQL[] {
+function conversationViewConditions(view: ConversationView): SQL[] {
   if (!(CONVERSATION_VIEWS as readonly string[]).includes(view)) {
     throw validation(`Vista inválida (${CONVERSATION_VIEWS.join("|")})`)
   }
-  if (view === "human") {
-    return [eq(conversation.agentStatus, "off"), eq(conversation.status, "open")]
-  }
-  if (view === "agent") {
-    return [
-      eq(conversation.agentStatus, "on"),
-      eq(conversation.status, "open"),
-      sql`exists (select 1 from "agent_config" where "agent_config"."organization_id" = ${orgId} and "agent_config"."enabled")`,
-    ]
-  }
-  if (view === "handoff") {
-    return [
-      sql`exists (select 1 from "agent_handoff" as "h_open" where "h_open"."conversation_id" = "conversation"."id" and "h_open"."organization_id" = ${orgId} and ${handoffOpenSql(sql.raw('"h_open"'))})`,
-    ]
-  }
-  if (view === "approval") {
-    return [
-      sql`exists (select 1 from "agent_proposal" where "agent_proposal"."conversation_id" = "conversation"."id" and "agent_proposal"."organization_id" = ${orgId} and ${proposalPendingSql(sql.raw('"agent_proposal"'))})`,
-    ]
-  }
-  return [
-    sql`exists (select 1 from "message" as "m_in" where "m_in"."conversation_id" = "conversation"."id" and "m_in"."organization_id" = ${orgId} and "m_in"."direction" = 'in')`,
-    sql`(
-      not exists (
-        select 1 from "message" as "m_out"
-        where "m_out"."conversation_id" = "conversation"."id"
-          and "m_out"."organization_id" = ${orgId}
-          and "m_out"."direction" = 'out'
-          and "m_out"."status" in ('sent', 'delivered', 'read')
-          and coalesce("m_out"."external_id", '') not like 'mock-%'
-      )
-      or (
-        (select max("m_in2"."created_at") from "message" as "m_in2"
-          where "m_in2"."conversation_id" = "conversation"."id"
-            and "m_in2"."organization_id" = ${orgId}
-            and "m_in2"."direction" = 'in')
-        >
-        (select max("m_out2"."created_at") from "message" as "m_out2"
-          where "m_out2"."conversation_id" = "conversation"."id"
-            and "m_out2"."organization_id" = ${orgId}
-            and "m_out2"."direction" = 'out'
-            and "m_out2"."status" in ('sent', 'delivered', 'read')
-            and coalesce("m_out2"."external_id", '') not like 'mock-%')
-      )
-    )`,
-  ]
+  return [conversationViewSql(sql.raw('"conversation"'), view)]
 }
 
 /**
@@ -766,7 +794,7 @@ export async function countConversationViews<V extends ConversationView>(
 ): Promise<{ all: number } & Record<V, number>> {
   const selection: Record<string, SQL<number>> = { all: sql<number>`count(*)::int` }
   for (const view of views) {
-    selection[view] = sql<number>`(count(*) filter (where ${and(...conversationViewConditions(orgId, view))}))::int`
+    selection[view] = sql<number>`(count(*) filter (where ${and(...conversationViewConditions(view))}))::int`
   }
   const [row] = await tx
     .select(selection)
@@ -790,7 +818,7 @@ export async function listConversations(
 ): Promise<{ items: ConversationListItem[]; nextCursor: string | null }> {
   const limit = Math.min(Math.max(input.limit ?? 30, 1), 100)
   const conditions = conversationFilterConditions(orgId, input)
-  if (input.view !== undefined) conditions.push(...conversationViewConditions(orgId, input.view))
+  if (input.view !== undefined) conditions.push(...conversationViewConditions(input.view))
   const activityAt = sql`coalesce(${conversation.lastMessageAt}, ${conversation.createdAt})`
   if (input.cursor) {
     const decoded = conversationCursor(input.cursor)
@@ -1151,22 +1179,20 @@ export async function assignConversation(
   await mutateConversation(tx, orgId, id, { assignedUserId: userId }, { actorUserId, op: "assign" })
 }
 
-export async function closeConversation(
-  tx: Db,
-  orgId: string,
-  id: string,
-  actorUserId?: string,
-): Promise<void> {
-  await mutateConversation(tx, orgId, id, { status: "closed" }, { actorUserId, op: "close" })
-}
-
+/** «Reabrir»: reabre a mano una conversación cerrada, sin mensaje. Una abierta queda igual. */
 export async function reopenConversation(
   tx: Db,
   orgId: string,
   id: string,
   actorUserId?: string,
 ): Promise<void> {
-  await mutateConversation(tx, orgId, id, { status: "open" }, { actorUserId, op: "reopen" })
+  const [row] = await tx
+    .select({ id: conversation.id })
+    .from(conversation)
+    .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Conversación")
+  await reopenIfClosed(tx, orgId, id, { userId: actorUserId ?? null, via: "equipo" })
 }
 
 export async function setAgentStatus(

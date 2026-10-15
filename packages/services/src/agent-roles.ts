@@ -135,6 +135,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     ],
     always: [
       "send_reply",
+      // Ninguna conversación queda abierta: al terminar se despide y la cierra (ADR 0024).
+      "despedirse_y_cerrar",
       "send_template",
       // El enlace de reserva no depende de Agendar: con Agendar apagado es la vía para sacar una cita.
       "enviar_enlace_cita",

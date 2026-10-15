@@ -357,6 +357,7 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
  */
 export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   send_reply: "Enviar un mensaje no es un formulario: el texto es el único campo.",
+  despedirse_y_cerrar: "La despedida es un mensaje (el texto es su único campo) y cerrar no tiene campos: el motivo es siempre «resuelta».",
   send_template: "La plantilla y sus parámetros los define el proveedor del canal.",
   confirmar_propuesta: "Solo lleva el id de la propuesta que el interlocutor confirma.",
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",

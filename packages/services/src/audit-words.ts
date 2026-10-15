@@ -325,6 +325,15 @@ const ACTION_WORDS: Record<string, Phrase> = {
   // Conversaciones
   "conversation.started": say("Empezó una conversación"),
   "conversation.updated": say("Cambió una conversación"),
+  "conversation.closed": say("Cerró una conversación"),
+  "conversation.resolved": say("Resolvió una conversación"),
+  // El agente cierra por su cuenta: la frase dice por qué (ADR 0024).
+  "conversation.closed_resuelta": say("Cerró una conversación: terminó la atención", "agente"),
+  "conversation.closed_sin_respuesta": say("Cerró una conversación: el paciente dejó de responder", "agente"),
+  "conversation.reopened": say("Reabrió una conversación"),
+  "conversation.reopened_by_message": say("Reabrió una conversación al escribir", "paciente"),
+  "conversation.taken": say("Tomó una conversación"),
+  "conversation.released": say("Devolvió una conversación al agente"),
   "conversation.identity_resolved": say("Identificó a quién pertenece una conversación"),
   "message.created": say("Registró un mensaje en una conversación"),
   "message.updated": say("Actualizó el estado de un mensaje"),

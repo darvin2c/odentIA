@@ -173,7 +173,7 @@ export function ResumenTab({
       detail: proposal.context.afterSummary || proposal.reason || "Espera la confirmación del paciente.",
       action: (
         <Link
-          to="/agent/approvals"
+          to="/agent/pendientes"
           search={{
             status: undefined,
             conversationId: proposal.conversationId,

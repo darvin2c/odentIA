@@ -1,7 +1,7 @@
 import { Badge, Button } from "@odentia/ui"
 import { Clock, Minus, TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
-import type { AgentHandoff } from "../../lib/agent"
+import { type AgentHandoff, URGENCY_WORDS, urgencyWord } from "../../lib/agent"
 import { channelLabel } from "../../lib/channels"
 import { timeAgo } from "../../lib/crm"
 
@@ -11,15 +11,13 @@ import { timeAgo } from "../../lib/crm"
  * icono y un color, para que no dependa solo del color.
  */
 const URGENCY = {
-  alta: { label: "Ahora", variant: "destructive", Icon: TriangleAlert },
-  media: { label: "Hoy", variant: "warning", Icon: Clock },
-  baja: { label: "Sin apuro", variant: "outline", Icon: Minus },
+  alta: { label: URGENCY_WORDS.alta, variant: "destructive", Icon: TriangleAlert },
+  media: { label: URGENCY_WORDS.media, variant: "warning", Icon: Clock },
+  baja: { label: URGENCY_WORDS.baja, variant: "outline", Icon: Minus },
 } as const
 
 /** La palabra del nivel, para donde no cabe la insignia (una fila de la Bandeja). */
-export function urgencyLabel(priority: string): string {
-  return (URGENCY[priority as keyof typeof URGENCY] ?? URGENCY.media).label
-}
+export const urgencyLabel = urgencyWord
 
 export function HandoffUrgency({ priority }: { priority: string }) {
   const urgency = URGENCY[priority as keyof typeof URGENCY] ?? URGENCY.media

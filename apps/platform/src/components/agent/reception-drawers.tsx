@@ -5,6 +5,7 @@ import { type FormEvent, useEffect, useState } from "react"
 import { type AgentFunction, clockToMinutes, minutesToClock, withInstruction } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
+import { CLOSE_AFTER_HOURS_MAX, CLOSE_AFTER_HOURS_MIN, closeAfterHoursIssue } from "../../lib/conversation-state"
 import type { AgentConfig } from "../../lib/crm"
 import { sameDraft } from "../../lib/page-draft-guard"
 import { mutationErrorMessage } from "../../lib/query-error"
@@ -93,10 +94,11 @@ interface LimitsDraft {
   from: string
   until: string
   dailyRunLimit: string
+  closeAfterHours: string
 }
 
 /** Qué parte de los límites se abre: cada fila de la página lleva a la suya; en teléfono, a todas. */
-export type LimitsSection = "todo" | "pasa" | "horario" | "canales" | "tope"
+export type LimitsSection = "todo" | "pasa" | "horario" | "canales" | "tope" | "cierre"
 
 const LIMITS_TITLE: Record<LimitsSection, string> = {
   todo: "Límites de Recepción",
@@ -104,6 +106,7 @@ const LIMITS_TITLE: Record<LimitsSection, string> = {
   horario: "Horario de Recepción",
   canales: "Canales de Recepción",
   tope: "Tope diario de Recepción",
+  cierre: "Cerrar si el paciente no responde",
 }
 
 function toLimits(config: AgentConfig): LimitsDraft {
@@ -116,6 +119,7 @@ function toLimits(config: AgentConfig): LimitsDraft {
     from: hasHours ? minutesToClock(config.activeFromMin ?? 0) : "08:00",
     until: hasHours ? minutesToClock(config.activeUntilMin ?? 0) : "20:00",
     dailyRunLimit: String(config.dailyRunLimit),
+    closeAfterHours: String(config.closeAfterHours),
   }
 }
 
@@ -166,7 +170,9 @@ export function LimitsDrawer({
       ? "Indica una hora de inicio y una de fin distintas."
       : has("tope") && !(limit >= 1 && limit <= 100_000)
         ? "El tope diario va de 1 a 100 000 respuestas."
-        : null
+        : has("cierre")
+          ? closeAfterHoursIssue(draft.closeAfterHours)
+          : null
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -183,6 +189,7 @@ export function LimitsDrawer({
       ...(has("canales") ? { channels: draft.allChannels ? null : draft.channels } : {}),
       ...(has("horario") ? { activeFromMin: draft.allDay ? null : from, activeUntilMin: draft.allDay ? null : until } : {}),
       ...(has("tope") ? { dailyRunLimit: limit } : {}),
+      ...(has("cierre") ? { closeAfterHours: Number(draft.closeAfterHours.trim()) } : {}),
     })
   }
 
@@ -197,7 +204,9 @@ export function LimitsDrawer({
       description={
         shown === "pasa"
           ? "Además de cuando duda, no tiene el dato o le piden hablar con alguien."
-          : "Fuera de estos límites no responde: la conversación queda para tu equipo."
+          : shown === "cierre"
+            ? "Si el paciente deja de responder, el agente se despide y cierra la conversación. Si vuelve a escribir, se abre otra vez."
+            : "Fuera de estos límites no responde: la conversación queda para tu equipo."
       }
       onSubmit={submit}
       isSubmitting={save.isPending}
@@ -310,6 +319,29 @@ export function LimitsDrawer({
         />
         <FieldDescription>
           Cada mensaje que atiende con el modelo cuenta una. Al llegar al tope deja de responder ese día y pasa los casos a tu equipo.
+        </FieldDescription>
+      </Field>
+      ) : null}
+      {has("cierre") ? (
+      <Field>
+        <FieldLabel htmlFor="limites-cierre">Cerrar la conversación si el paciente no responde</FieldLabel>
+        <div className="flex items-center gap-2">
+          <Input
+            id="limites-cierre"
+            type="number"
+            inputMode="numeric"
+            min={CLOSE_AFTER_HOURS_MIN}
+            max={CLOSE_AFTER_HOURS_MAX}
+            step={1}
+            className="w-24"
+            aria-describedby="limites-cierre-ayuda"
+            value={draft.closeAfterHours}
+            onChange={(event) => setDraft({ ...draft, closeAfterHours: event.target.value })}
+          />
+          <span className="text-sm text-muted-foreground">horas</span>
+        </div>
+        <FieldDescription id="limites-cierre-ayuda">
+          Entre 6 y 23 horas. Antes de cerrar, el agente se despide en horario de atención. Más de 23 no se puede: WhatsApp ya no deja escribirle.
         </FieldDescription>
       </Field>
       ) : null}

@@ -3,7 +3,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { initialOrgRegion, type MailboxEnv, type SearchEmbedder, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
+import { CONVERSATION_STATE_ACTIONS, initialOrgRegion, type MailboxEnv, type SearchEmbedder, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -163,7 +163,8 @@ async function toReplayPayload(
     if (!conversationId) return null
     return { orgId, kind: event.action, conversationId, messageId: event.entityId, at }
   }
-  if (event.action === "conversation.updated") {
+  // Cerrar, reabrir, tomar o devolver también cambian la conversación: se avisan igual.
+  if ((CONVERSATION_STATE_ACTIONS as readonly string[]).includes(event.action)) {
     if (!event.entityId) return null
     return { orgId, kind: "conversation.updated", conversationId: event.entityId, at }
   }
@@ -521,11 +522,7 @@ export function createApp(deps: AppDeps) {
             .where(
               and(
                 eq(auditEvent.organizationId, orgId),
-                inArray(auditEvent.action, [
-                  "message.created",
-                  "message.updated",
-                  "conversation.updated",
-                ]),
+                inArray(auditEvent.action, ["message.created", "message.updated", ...CONVERSATION_STATE_ACTIONS]),
                 gt(auditEvent.createdAt, new Date(lastEventId)),
               ),
             )

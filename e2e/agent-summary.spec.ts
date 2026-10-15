@@ -96,7 +96,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   const needs = page.getByRole("region", { name: "Necesita de ti" })
   const tiles = needs.getByRole("link")
   await expect(tiles).toHaveCount(4)
-  for (const [index, name] of ["Aprobaciones", "Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
+  for (const [index, name] of ["Pendientes", "Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
   const agents = page.getByRole("region", { name: "Tus agentes" })
@@ -132,7 +132,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await learned.getByRole("link", { name: "Ver todo lo aprendido" }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/learn"))
 
-  // --- Teléfono: fichas en 2×2, cada agente en una fila que navega y «Aprobaciones» al final de las pestañas ---
+  // --- Teléfono: fichas en 2×2, cada agente en una fila que navega y «Pendientes» al final de las pestañas ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   await expect(tiles).toHaveCount(4)
@@ -147,7 +147,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const tile of tileBoxes) expect(tile.height).toBeGreaterThanOrEqual(44)
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
   const tabX = async (name: string) => (await box(tabs.getByRole("link", { name: new RegExp(`^${name}`) }))).x
-  const order = [await tabX("Resumen"), await tabX("Aprender"), await tabX("Conocimiento"), await tabX("Aprobaciones")]
+  const order = [await tabX("Resumen"), await tabX("Aprender"), await tabX("Conocimiento"), await tabX("Pendientes")]
   expect(order).toEqual([...order].sort((a, b) => a - b))
   // Una fila por agente, sin botones sueltos ni interruptor: todo eso vive en su página.
   await expect(agents.getByRole("switch")).toHaveCount(0)
@@ -210,7 +210,7 @@ test("bandeja: con Recepción apagada lo dice, y solo quien administra puede ir 
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   await panelLoaded
   await expect(page.getByRole("heading", { level: 1, name: "Bandeja" })).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Todas/ })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Abiertas/ })).toBeVisible()
   await expect(notice).toHaveCount(0)
   await call(page, "PUT", "/api/agent/config", org.slug, { enabled: false })
 

@@ -52,6 +52,7 @@ import {
   syncVisitFollowUps,
 } from "./automation.js"
 import type { TemplateDeps } from "./channel-templates.js"
+import { type ConversationCareDeps, tickConversationCare } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -1303,6 +1304,8 @@ export interface TickDeps {
   templates?: TemplateDeps
   /** Lee lo último que escribió la persona antes de escribirle (`DeliverDeps.alreadyTold`). */
   alreadyTold?: DeliverDeps["alreadyTold"]
+  /** Formato del canal para lo que el agente escribe por su cuenta al insistir y al despedirse. */
+  format?: ConversationCareDeps["format"]
 }
 
 export interface TickSummary {
@@ -1310,6 +1313,10 @@ export interface TickSummary {
   programados: number
   entregados: number
   fallidos: number
+  /** Conversaciones en que el agente insistió, que cerró por silencio y avisos a quien tiene una a cargo. */
+  insistidas: number
+  cerradas: number
+  avisadas: number
 }
 
 /** Las líneas que escriben a la persona, cada una con quien anota sus casos. */
@@ -1340,8 +1347,16 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0 }
+  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, avisadas: 0 }
   for (const { orgId } of orgRows) {
+    // Ninguna conversación queda abierta (ADR 0024): es de Recepción, no del
+    // Administrador, así que corre aunque este esté apagado.
+    const care = await withOrgContext(appDb, orgId, (tx) =>
+      tickConversationCare(tx, orgId, now, deps.format ? { format: deps.format } : {}),
+    )
+    summary.insistidas += care.nudged
+    summary.cerradas += care.closed
+    summary.avisadas += care.noticed
     // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
     if (deps.templates) {

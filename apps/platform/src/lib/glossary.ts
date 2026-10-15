@@ -22,12 +22,18 @@ import {
  * (estados, tipos, categorías) a la terminología que ve el usuario. Reúne las
  * etiquetas de cada dominio; ningún código crudo debe llegar a la pantalla.
  */
+/** Una conversación solo está abierta o cerrada (`conversation.status`). */
 const CONVERSATION_STATUS_LABELS: Record<string, string> = {
   open: "Abierta",
-  pending: "Pendiente",
-  snoozed: "Pospuesta",
   closed: "Cerrada",
-  resolved: "Resuelta",
+}
+
+/** Motivo de cierre (`conversation.close_reason`), en las palabras de la interfaz. */
+const CONVERSATION_CLOSE_REASON_LABELS: Record<string, string> = {
+  resuelta: "Resuelta",
+  sin_respuesta: "Sin respuesta del paciente",
+  equipo: "Resuelta por el equipo",
+  manual: "Cerrada sin resolver",
 }
 
 const DOMAINS = {
@@ -39,6 +45,7 @@ const DOMAINS = {
   conversacion: CONVERSATION_STATUS_LABELS,
   diagnostico: DIAGNOSIS_STATUS_LABELS,
   campo: FIELD_TYPE_LABELS as Record<string, string>,
+  cierre: CONVERSATION_CLOSE_REASON_LABELS,
   formulario: FORM_RESPONSE_STATUS_LABELS as Record<string, string>,
   imagen: IMAGE_TYPE_LABELS as Record<string, string>,
   informe: REPORT_STATUS_LABELS as Record<string, string>,
@@ -76,4 +83,21 @@ export function label(domain: GlossaryDomain, code: string | null | undefined): 
       return map[code] ?? humanize(code)
     }
   }
+}
+
+/**
+ * El estado de una conversación en la ficha: «Abierta», o «Cerrada · motivo»
+ * con quién la cerró si fue una persona. Sin el motivo del servidor, solo «Cerrada».
+ */
+export function conversationStatusLabel(
+  status: string,
+  closure?: { reason: string; byName: string | null } | null,
+): string {
+  const base = label("conversacion", status)
+  if (status !== "closed" || !closure) return base
+  if (closure.reason === "equipo" && closure.byName) return `${base} · resuelta por ${closure.byName}`
+  if (closure.reason === "manual" && closure.byName) return `${base} · por ${closure.byName}`
+  if (closure.reason === "resuelta") return `${base} · resuelta por el agente`
+  const reason = label("cierre", closure.reason)
+  return `${base} · ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`
 }

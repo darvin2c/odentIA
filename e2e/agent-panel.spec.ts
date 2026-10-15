@@ -119,16 +119,16 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await expect(page.locator("h1", { hasText: "Inicio" })).toHaveCount(1)
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toHaveCount(0)
 
-  // Abre en Derivadas: tomar el caso lo deja con responsable sin sacarlo de la lista.
+  // Abre en Derivadas: «Tomar» (la conversación del caso) lo deja con responsable sin sacarlo de la lista.
   const item = panel.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
   await expect(item).toContainText("En cola por recoger")
   await info.attach("panel-derivadas", {
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   })
-  await item.getByRole("button", { name: "Tomar caso" }).click()
+  await item.getByRole("button", { name: "Tomar", exact: true }).click()
   await expect(item).toContainText("Responsable asignado")
-  await expect(item.getByRole("button", { name: "Tomar caso" })).toHaveCount(0)
+  await expect(item.getByRole("button", { name: "Tomar", exact: true })).toHaveCount(0)
   const persisted = await call<Array<{ id: string; status: string }>>(
     page,
     "GET",
@@ -186,8 +186,8 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await expect(agentButton(page)).toBeVisible()
 
-  // Aprobaciones: primero los casos; la cita aparte, con solo registrar la confirmación del paciente.
-  await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
+  // Pendientes: primero los casos; la cita aparte, con solo registrar la confirmación del paciente.
+  await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
   await expect(page.getByRole("heading", { name: "Casos que pasó a tu equipo" })).toBeVisible()
   const approvalCard = page.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
   await expect(approvalCard).toContainText("Espera al paciente")

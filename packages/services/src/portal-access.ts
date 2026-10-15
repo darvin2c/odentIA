@@ -640,7 +640,7 @@ export async function approvePortalRequest(
     .limit(1)
   if (!conv) throw notFound("Conversación")
   if (conv.contactId !== input.contactId) throw validation("La conversación no pertenece a este contacto")
-  if (conv.status !== "open") throw new ServiceError("CONVERSATION_CLOSED", 409, "La conversación está cerrada")
+  // Una conversación cerrada no impide entregar el acceso: escribir en ella la reabre (ADR 0024).
   await ensurePatientLink(tx, orgId, actorUserId, input.patientId, input.contactId, input.relationship ?? "other")
   const scope = await assertScope(tx, orgId, input.patientId, input.scope)
   const ensured = await ensurePortalGrant(tx, orgId, actorUserId, {

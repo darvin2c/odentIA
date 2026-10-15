@@ -30,7 +30,7 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
-import { sendOutbound, startContactConversation } from "./conversations.js"
+import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { deliverBudget, requireOwnPlan } from "./budgets.js"
 import {
@@ -633,8 +633,8 @@ async function ensureEmailIdentity(
 }
 
 /**
- * Hilo de correo con una persona: el último abierto por esa conexión o uno
- * nuevo a la dirección de su ficha. El correo es el único canal, junto con
+ * Hilo de correo con una persona: el último por esa conexión (si está cerrado
+ * se reabre: escribir reabre, ADR 0024) o uno nuevo a la dirección de su ficha. El correo es el único canal, junto con
  * WhatsApp y su plantilla, por el que la clínica puede escribir primero. La
  * usan el envío de documentos y los mensajes automáticos (sin actor).
  */
@@ -657,12 +657,14 @@ export async function openEmailThread(
           eq(conversation.organizationId, orgId),
           eq(conversation.contactId, recipient.contactId),
           eq(conversation.channelConnectionId, conn.id),
-          eq(conversation.status, "open"),
         ),
       )
-      .orderBy(desc(conversation.lastMessageAt))
+      .orderBy(sql`${conversation.status} = 'open' desc`, sql`${conversation.lastMessageAt} desc nulls last`)
       .limit(1)
-    if (thread) return { id: thread.id }
+    if (thread) {
+      await reopenIfClosed(tx, orgId, thread.id, { userId: actorUserId, via: "envio" })
+      return { id: thread.id }
+    }
     await lockChannelIdentity(tx, orgId, "email", identity.externalUserId)
     const [created] = await tx
       .insert(conversation)
@@ -699,13 +701,14 @@ export async function openEmailThread(
         ),
       )
       .limit(1)
-    if (!retry || retry.contactId !== recipient.contactId || retry.status !== "open") {
+    if (!retry || retry.contactId !== recipient.contactId) {
       throw new ServiceError(
         "AMBIGUOUS_CHANNEL_HISTORY",
         409,
-        "El hilo ya existe con otro estado: resuélvelo manualmente",
+        "Ese correo ya tiene un hilo con otra persona: resuélvelo manualmente",
       )
     }
+    await reopenIfClosed(tx, orgId, retry.id, { userId: actorUserId, via: "envio" })
     return { id: retry.id }
   }
 }
@@ -736,9 +739,7 @@ async function resolveConversation(
       identityId: identity.id,
       connectionId: conn.id,
     })
-    if (started.status !== "open") {
-      throw new ServiceError("CONVERSATION_CLOSED", 409, "La conversación está cerrada: reábela antes de enviar")
-    }
+    // Cerrada o abierta: el envío la reabre (ADR 0024).
     return { id: started.id }
   }
   const [thread] = await tx
@@ -749,10 +750,9 @@ async function resolveConversation(
         eq(conversation.organizationId, orgId),
         eq(conversation.contactId, recipient.contactId),
         eq(conversation.channelConnectionId, conn.id),
-        eq(conversation.status, "open"),
       ),
     )
-    .orderBy(desc(conversation.lastMessageAt))
+    .orderBy(sql`${conversation.status} = 'open' desc`, sql`${conversation.lastMessageAt} desc nulls last`)
     .limit(1)
   if (!thread) {
     throw new ServiceError(

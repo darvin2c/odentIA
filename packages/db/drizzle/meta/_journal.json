@@ -561,6 +561,13 @@
       "when": 1792038142191,
       "tag": "0079_retomar_oportunidad_como_las_demas",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1792043503093,
+      "tag": "0080_conversaciones_abrir_y_cerrar",
+      "breakpoints": true
     }
   ]
 }

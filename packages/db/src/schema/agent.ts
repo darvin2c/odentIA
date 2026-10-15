@@ -351,6 +351,11 @@ export const agentDecisionLog = pgTable(
 export interface AgentCaseNote {
   text: string
   at: string
+  /**
+   * `atencion_anterior`: la deja el sistema al cerrar la conversación, con
+   * cómo terminó; las notas del agente de esa atención no pasan a la siguiente.
+   */
+  kind?: "atencion_anterior"
 }
 
 /** Última consulta de una herramienta de lectura en el hilo, tal como la vio el modelo. */

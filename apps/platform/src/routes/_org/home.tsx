@@ -53,7 +53,7 @@ function hasWork(access: WorkspaceHome["access"]): boolean {
 
 function HomePage() {
   const queryClient = useQueryClient()
-  const canClaim = usePermission("tasks.write")
+  const canTake = usePermission("conversations.write")
   const sede = useActiveBranch()
   const query = useQuery({
     queryKey: ["workspace-home", sede.branchId ?? null],
@@ -117,7 +117,7 @@ function HomePage() {
       </div>
     )}
 
-    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canClaim={canClaim} onClose={() => setBriefFor(null)} onClaimed={refresh} />
+    <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
     <DetailDrawer

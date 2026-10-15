@@ -17,6 +17,7 @@ import {
   ServiceError,
   DEFAULT_AGENT_LLM,
   getOrgLocale,
+  nextAgentOpening,
   notifyAgentProviderProblem,
   type RecordRunInput,
   recordAgentRun,
@@ -28,7 +29,7 @@ import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { handoffFallbackNotice, offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { compileAgentGraph } from "./graph.js"
 import {
@@ -41,7 +42,16 @@ import {
   type PlatformLlm,
   resolveLlmSpec,
 } from "./llm.js"
-import { type AgentSandboxState, type AgentToolCtx, type LessonOverrides, makeAgentTools, performHandoff, SANDBOX_NIL_ID, TOOL_ACTION_LABEL } from "./tools.js"
+import {
+  type AgentSandboxState,
+  type AgentToolCtx,
+  type LessonOverrides,
+  makeAgentTools,
+  noticeAfterHandoff,
+  performHandoff,
+  SANDBOX_NIL_ID,
+  TOOL_ACTION_LABEL,
+} from "./tools.js"
 export interface AgentRuntime {
   checkpointer: PostgresSaver
   /** Cuentas de odentIA en los proveedores; la organización solo elige el modelo. */
@@ -64,6 +74,8 @@ export interface AgentRuntime {
   embedder?: SearchEmbedder
   secretsKey: Buffer
   callbacks?: Callbacks
+  /** Reloj de la corrida (pruebas); sin él, la hora real. */
+  now?: () => Date
 }
 
 /** Problema del proveedor que no se arregla reintentando. */
@@ -133,7 +145,7 @@ const OUT_OF_HOURS = "fuera-de-horario"
  * una franja puede cruzar la medianoche). Fuera de ellos el hilo queda para
  * el equipo, como cuando el agente está apagado.
  */
-async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId: string): Promise<string | null> {
+async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId: string, at: Date): Promise<string | null> {
   if (cfg.channels) {
     const [connection] = await tx
       .select({ channel: channelConnection.channel })
@@ -149,7 +161,7 @@ async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId:
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
-    }).formatToParts(new Date())
+    }).formatToParts(at)
     const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
     const now = pick("hour") * 60 + pick("minute")
     const from = cfg.activeFromMin
@@ -214,6 +226,7 @@ export async function processAgentRun(
   msg: QueueMessage<AgentRunJob>,
 ): Promise<"done" | "retry"> {
   const { orgId, conversationId } = msg.message
+  const clock = runtime.now ?? (() => new Date())
   // Mensaje que la corrida atiende; con una ráfaga pasa a ser el último leído,
   // y el resto de la ráfaga se anota al terminar para que sus corridas no repitan.
   let inboundMessageId: string | null = msg.message.messageId
@@ -229,7 +242,7 @@ export async function processAgentRun(
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
-      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig }
+      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig; attention: number }
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
     const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
@@ -249,13 +262,26 @@ export async function processAgentRun(
         .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
         .limit(1)
       if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
+      // El agente nunca responde en una conversación cerrada (ADR 0024): un entrante la reabre antes.
+      if (conv.status !== "open") return { skip: { reason: "conversation-closed", model: effectiveModel } }
       if (conv.agentStatus !== "on") {
         return { skip: { reason: "agent-off", model: effectiveModel } }
       }
       const cfg = await getAgentConfig(tx, orgId)
       effectiveModel = llmModelName(cfg.llm, runtime.platform)
       if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
-      const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId)
+      const now = clock()
+      const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId, now)
+      if (limit === OUT_OF_HOURS && cfg.activeFromMin !== null && cfg.activeUntilMin !== null) {
+        // Fuera del horario del agente lo que escribió no se pierde: la misma
+        // corrida vuelve a la cola para cuando abra y entonces atiende todo lo
+        // que quedó sin responder (ADR 0024).
+        const zone = await getOrgLocale(tx, orgId)
+        const opensAt = nextAgentOpening(now, zone.timezone, { fromMin: cfg.activeFromMin, untilMin: cfg.activeUntilMin })
+        const delaySeconds = Math.max(1, Math.ceil((opensAt.getTime() - now.getTime()) / 1000))
+        await sendAgentRun(tx, { ...inboundJob, deferred: true }, { delaySeconds })
+        return { skip: { reason: OUT_OF_HOURS, model: effectiveModel, silent: true } }
+      }
       if (limit) return { skip: { reason: limit, model: effectiveModel } }
       const [trigger] = await tx
         .select()
@@ -302,7 +328,9 @@ export async function processAgentRun(
         .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
         .orderBy(desc(message.createdAt), desc(message.id))
         .limit(20)
-      const horizon = Date.now() - BURST_HORIZON_MS
+      // Una corrida pospuesta hasta la apertura del horario atiende todo lo que
+      // quedó sin responder, aunque pase de la ventana de ráfaga.
+      const horizon = inboundJob.deferred ? Number.NEGATIVE_INFINITY : now.getTime() - BURST_HORIZON_MS
       const pendingTail: { id: string; body: string | null; createdAt: Date }[] = []
       for (const item of recent) {
         if (item.direction !== "in" || item.createdAt.getTime() < horizon) break
@@ -316,8 +344,8 @@ export async function processAgentRun(
       const newest = pendingTail[0]
       const oldest = pendingTail[pendingTail.length - 1]
       if (runtime.burst && newest && oldest) {
-        const sinceLast = Date.now() - newest.createdAt.getTime()
-        const waited = Date.now() - oldest.createdAt.getTime()
+        const sinceLast = now.getTime() - newest.createdAt.getTime()
+        const waited = now.getTime() - oldest.createdAt.getTime()
         const remaining = Math.min(runtime.burst.quietMs - sinceLast, runtime.burst.maxWaitMs - waited)
         if (remaining > 0) {
           await sendAgentRun(tx, msg.message, { delaySeconds: Math.max(1, Math.ceil(remaining / 1000)) })
@@ -337,6 +365,9 @@ export async function processAgentRun(
           triggerId: latestId,
         })
         await performHandoff(toolCtx, `palabra clave en: ${(keyword.body ?? "").slice(0, 120)}`)
+        // Derivar siempre avisa: la persona recibe el aviso fijo, sin modelo.
+        toolCtx.treatment = cfg.treatment
+        await noticeAfterHandoff(toolCtx)
         return { skip: { reason: "handoff", model: effectiveModel } }
       }
       const spec = resolveLlm(cfg)
@@ -348,6 +379,7 @@ export async function processAgentRun(
         }),
         spec,
         cfg,
+        attention: conv.attentionStartedAt.getTime(),
       }
     })
     if ("skip" in prepared && configProblem) {
@@ -372,8 +404,9 @@ export async function processAgentRun(
       })
       return "done"
     }
-    const { toolCtx, spec, cfg } = prepared
+    const { toolCtx, spec, cfg, attention } = prepared
     effectiveModel = spec.modelName
+    toolCtx.treatment = cfg.treatment
     toolCtx.modelName = spec.modelName
     toolCtx.verifyReplies = cfg.replyCheckEnabled
     toolCtx.emojis = cfg.emojis
@@ -430,7 +463,8 @@ export async function processAgentRun(
       await graph.invoke(
         { messages: [], turnCount: 0 },
         {
-          configurable: { thread_id: `${orgId}:${conversationId}` },
+          // Cada atención (desde que se abrió o reabrió) es un hilo propio del grafo.
+          configurable: { thread_id: `${orgId}:${conversationId}:${attention}` },
           ...(runtime.callbacks ? { callbacks: runtime.callbacks } : {}),
         },
       )
@@ -448,14 +482,7 @@ export async function processAgentRun(
       } catch (error) {
         console.error(`agent: el aviso de derivación no se pudo redactar (${error instanceof Error ? error.message : String(error)})`)
       }
-      if (!toolCtx.replySettled) {
-        const notify = makeAgentTools(toolCtx).find((item) => item.name === "request_human_handoff")
-        await notify
-          ?.invoke({ reason, summary: reason, message: handoffFallbackNotice(cfg.treatment) })
-          .catch((error: unknown) =>
-            console.error(`agent: el aviso fijo de derivación no salió (${error instanceof Error ? error.message : String(error)})`),
-          )
-      }
+      if (!toolCtx.replySettled) await noticeAfterHandoff(toolCtx)
     } else if (toolCtx.route?.path === "fuera_de_tema") {
       // Nada que ver con la clínica y el modelo de decisión muy seguro: un
       // texto fijo, sin llamar al modelo que escribe. Sale por send_reply,
@@ -541,6 +568,7 @@ export async function processAgentRun(
         triggerId: inboundMessageId,
       })
       await performHandoff(toolCtx, "error del agente").catch(() => {})
+      await noticeAfterHandoff(toolCtx).catch(() => {})
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId: inboundMessageId,
@@ -571,6 +599,8 @@ export async function processAgentRun(
       triggerId: inboundMessageId,
     })
     await performHandoff(toolCtx, handoffReasonFor(problem)).catch(() => {})
+    // Sin modelo la persona igual sabe que sigue una persona: el aviso es fijo.
+    await noticeAfterHandoff(toolCtx).catch(() => {})
     await ledger(db, orgId, {
       conversationId,
       triggerMessageId: inboundMessageId,

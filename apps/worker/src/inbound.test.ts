@@ -1,7 +1,8 @@
 import type { NormalizedInbound } from "@odentia/channels"
 import { type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { message } from "@odentia/db/schema/crm"
-import { sql } from "drizzle-orm"
+import { conversation, message } from "@odentia/db/schema/crm"
+import { closeConversationWith } from "@odentia/services"
+import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { consumeInbound, processInbound } from "./inbound.js"
 import {
@@ -99,4 +100,22 @@ it("veneno tras 5 entregas hace ack", async () => {
   poison.message.connectionId = "00000000-0000-0000-0000-000000000000"
   poison.read_ct = 5
   expect(await processInbound(appDb, deps, poison)).toBe("done")
+})
+
+it("un entrante a una conversación cerrada la reabre y el agente la atiende (ADR 0024)", async () => {
+  await ownerDb.execute(sql`insert into "agent_config" ("organization_id", "enabled") values ('org_a', true)`)
+  try {
+    await ownerDb.execute(sql`select pgmq.purge_queue('agent_runs')`)
+    await consumeInbound(appDb, deps, job("evt-cerrada-1", "tg:558"))
+    const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.externalThreadId, "tg:558"))
+    await withOrgContext(appDb, "org_a", (tx) => closeConversationWith(tx, "org_a", thread!.id, { reason: "sin_respuesta", byUserId: null }))
+    await ownerDb.execute(sql`select pgmq.purge_queue('agent_runs')`)
+    await consumeInbound(appDb, deps, job("evt-cerrada-2", "tg:558"))
+    const [reopened] = await ownerDb.select().from(conversation).where(eq(conversation.id, thread!.id))
+    expect(reopened).toMatchObject({ status: "open", closeReason: null, closedAt: null, agentStatus: "on", nudgedAt: null })
+    expect(reopened!.attentionStartedAt.getTime()).toBeGreaterThan(thread!.attentionStartedAt.getTime())
+    expect(await queueDepth("agent_runs")).toBe(1)
+  } finally {
+    await ownerDb.execute(sql`delete from "agent_config" where "organization_id" = 'org_a'`)
+  }
 })

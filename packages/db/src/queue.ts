@@ -39,6 +39,12 @@ export interface AgentRunJob {
   orgId: string
   conversationId: string
   messageId: string
+  /**
+   * La corrida llegó fuera del horario del agente y se pospuso hasta que
+   * abriera: atiende todo lo que la persona escribió desde la última
+   * respuesta, aunque tenga más de la ventana de ráfaga.
+   */
+  deferred?: boolean
 }
 
 async function sendTo(db: Db, queue: string, payload: unknown, delaySeconds = 0): Promise<string> {

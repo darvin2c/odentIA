@@ -270,12 +270,12 @@ export function ContactWorkspace({
     onRefreshRef.current?.()
   }, [queryClient, contactId])
 
+  // «Tomar» y «Devolver al agente»: las mismas acciones que la cabecera del hilo.
+  // Devolver con un caso derivado abierto responde 409 con su motivo, que se muestra.
   const agentMutation = useMutation({
-    mutationFn: (enabled: boolean) =>
-      apiFetch(`/api/conversations/${conversationId}/agent`, {
-        method: "POST",
-        body: JSON.stringify({ enabled }),
-      }),
+    retry: false,
+    mutationFn: (action: "take" | "release") =>
+      apiFetch(`/api/conversations/${conversationId}/${action}`, { method: "POST" }),
     onSuccess: () => {
       invalidateWorkspace()
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
@@ -494,17 +494,19 @@ export function ContactWorkspace({
                   <Button
                     variant="outline"
                     size="sm"
+                    className="min-h-11 sm:min-h-8"
                     disabled={agentMutation.isPending}
-                    onClick={() => agentMutation.mutate(false)}
+                    onClick={() => agentMutation.mutate("take")}
                   >
-                    {agentMutation.isPending ? "Guardando…" : "Tomar atención"}
+                    {agentMutation.isPending ? "Guardando…" : "Tomar"}
                   </Button>
                 ) : (
                   <Button
                     variant="outline"
                     size="sm"
+                    className="min-h-11 sm:min-h-8"
                     disabled={agentMutation.isPending}
-                    onClick={() => agentMutation.mutate(true)}
+                    onClick={() => agentMutation.mutate("release")}
                   >
                     {agentMutation.isPending ? "Guardando…" : "Devolver al agente"}
                   </Button>

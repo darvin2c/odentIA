@@ -58,13 +58,13 @@ function badgeOf(row: WaitingRow): ReactNode {
 function linkOf(row: WaitingRow, props: { className: string; children: ReactNode }): ReactElement | null {
   switch (row.kind) {
     case "case":
-      return row.conversationId ? null : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} {...props} />
+      return row.conversationId ? null : <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
     case "task":
       return row.more > 0 ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to={row.href} {...props} />
     case "more":
-      return row.of === "tasks" ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} {...props} />
+      return row.of === "tasks" ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
     default:
       return null
   }

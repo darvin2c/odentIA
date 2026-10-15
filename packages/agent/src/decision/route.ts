@@ -81,7 +81,8 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   derivar: ["request_human_handoff"],
   informacion: [...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica"],
-  saludo: [...ALWAYS],
+  // Un agradecimiento o una despedida pueden cerrar la conversación (ADR 0024).
+  saludo: [...ALWAYS, "despedirse_y_cerrar"],
   clinico: [...ALWAYS],
   cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta",
@@ -176,7 +177,7 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null): s
     return `${head} pide información. Arriba ya tienes las sedes, los servicios con sus tarifas, los medios de pago que acepta la clínica y las respuestas oficiales que aplican. Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas. Solo si el dato no está arriba, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona.`
   }
   if (path === "saludo") {
-    return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso con send_reply, breve, sin consultar nada.`
+    return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso, breve, sin consultar nada: si agradece o se despide y no queda nada pendiente, despídete con despedirse_y_cerrar; si no, con send_reply.`
   }
   if (path === "derivar") {
     return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso. El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual).`

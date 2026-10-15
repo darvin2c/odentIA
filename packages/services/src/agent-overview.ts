@@ -44,7 +44,7 @@ export interface AgentOverview {
   enabled: boolean
   /**
    * `approvals`: casos que el agente pasó a una persona y siguen sin resolver
-   * (lo que espera al equipo en Aprobaciones; ninguna propuesta lo espera).
+   * (lo que espera al equipo en Pendientes; ninguna propuesta lo espera).
    * `review` y `lessons`: respuestas por revisar y lecciones por aprobar en Aprender.
    */
   needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }

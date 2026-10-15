@@ -5,6 +5,7 @@ import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { listHandoffs } from "./agent-operations.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
+import { unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -248,19 +249,14 @@ async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean)
 }
 
 /**
- * Conversaciones abiertas con un entrante posterior al último saliente
- * aceptado (la vista «Sin responder» de la Bandeja) y desde cuándo espera la
- * que más lleva.
+ * Conversaciones que esperan respuesta (la vista «Esperan respuesta» de la
+ * Bandeja, con su misma definición: también las cerradas que un mensaje
+ * reabrió) y desde cuándo espera la que más lleva.
  */
 async function waitingConversations(tx: Db, orgId: string) {
   const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
     with pending as (
-      select (select min(i.created_at) from message i
-        where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
-          and i.created_at > coalesce((select max(o.created_at) from message o
-            where o.organization_id=${orgId} and o.conversation_id=c.id and o.direction='out'
-              and o.status in ('sent','delivered','read') and coalesce(o.external_id,'') not like 'mock-%'), '-infinity'::timestamptz)
-      ) as since from conversation c where c.organization_id=${orgId} and c.status='open'
+      select ${unansweredSinceSql(sql.raw("c"))} as since from conversation c where c.organization_id=${orgId} and c.status='open'
     ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
   return row ?? { waiting: 0, oldestAt: null }
 }

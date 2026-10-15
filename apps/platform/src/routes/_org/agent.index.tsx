@@ -140,7 +140,7 @@ function AgentSummaryPage() {
 
   if (!canRead) {
     // No es un error: la sección existe y esta persona no la administra. Quien
-    // decide por el agente conserva sus aprobaciones, y aquí tiene cómo llegar.
+    // decide por el agente conserva sus pendientes, y aquí tiene cómo llegar.
     return (
       <PageShell className="flex flex-col gap-6">
         <PageHeader title="Agente" />
@@ -148,8 +148,8 @@ function AgentSummaryPage() {
         <EmptyState
           icon={Lock}
           title="No tienes acceso a esta sección"
-          description={`Pídelo a quien administra la clínica.${canDecide ? " Tus aprobaciones siguen en su pestaña." : ""}`}
-          {...(canDecide ? { actionLabel: "Ir a Aprobaciones", onAction: () => void navigate({ to: "/agent/approvals" }) } : {})}
+          description={`Pídelo a quien administra la clínica.${canDecide ? " Tus pendientes siguen en su pestaña." : ""}`}
+          {...(canDecide ? { actionLabel: "Ir a Pendientes", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
         />
       </PageShell>
     )
@@ -216,10 +216,10 @@ function AgentSummaryPage() {
             <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
               <NeedTile
                 count={overview.needsYou.approvals}
-                title="Aprobaciones"
+                title="Pendientes"
                 pending="Casos que el agente pasó a tu equipo."
                 done="Ningún caso espera a una persona."
-                to="/agent/approvals"
+                to="/agent/pendientes"
               />
               <NeedTile
                 count={overview.needsYou.review}

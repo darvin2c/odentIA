@@ -36,6 +36,7 @@ import { Route as OrgAgentApprovalsRouteImport } from './routes/_org/agent.appro
 import { Route as OrgAgentAsistenteClinicoRouteImport } from './routes/_org/agent.asistente-clinico'
 import { Route as OrgAgentKnowledgeRouteImport } from './routes/_org/agent.knowledge'
 import { Route as OrgAgentLearnRouteImport } from './routes/_org/agent.learn'
+import { Route as OrgAgentPendientesRouteImport } from './routes/_org/agent.pendientes'
 import { Route as OrgAgentRecepcionRouteImport } from './routes/_org/agent.recepcion'
 import { Route as OrgAgentRegistroRouteImport } from './routes/_org/agent.registro'
 import { Route as OrgContactsIndexRouteImport } from './routes/_org/contacts.index'
@@ -204,6 +205,11 @@ const OrgAgentKnowledgeRoute = OrgAgentKnowledgeRouteImport.update({
 const OrgAgentLearnRoute = OrgAgentLearnRouteImport.update({
   id: '/agent/learn',
   path: '/agent/learn',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgAgentPendientesRoute = OrgAgentPendientesRouteImport.update({
+  id: '/agent/pendientes',
+  path: '/agent/pendientes',
   getParentRoute: () => OrgRoute,
 } as any)
 const OrgAgentRecepcionRoute = OrgAgentRecepcionRouteImport.update({
@@ -414,6 +420,7 @@ export interface FileRoutesByFullPath {
   '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/agent/learn': typeof OrgAgentLearnRoute
+  '/agent/pendientes': typeof OrgAgentPendientesRoute
   '/agent/recepcion': typeof OrgAgentRecepcionRoute
   '/agent/registro': typeof OrgAgentRegistroRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
@@ -474,6 +481,7 @@ export interface FileRoutesByTo {
   '/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/agent/learn': typeof OrgAgentLearnRoute
+  '/agent/pendientes': typeof OrgAgentPendientesRoute
   '/agent/recepcion': typeof OrgAgentRecepcionRoute
   '/agent/registro': typeof OrgAgentRegistroRoute
   '/contacts/$contactId': typeof OrgContactsContactIdRoute
@@ -538,6 +546,7 @@ export interface FileRoutesById {
   '/_org/agent/asistente-clinico': typeof OrgAgentAsistenteClinicoRoute
   '/_org/agent/knowledge': typeof OrgAgentKnowledgeRoute
   '/_org/agent/learn': typeof OrgAgentLearnRoute
+  '/_org/agent/pendientes': typeof OrgAgentPendientesRoute
   '/_org/agent/recepcion': typeof OrgAgentRecepcionRoute
   '/_org/agent/registro': typeof OrgAgentRegistroRoute
   '/_org/contacts/$contactId': typeof OrgContactsContactIdRoute
@@ -602,6 +611,7 @@ export interface FileRouteTypes {
     | '/agent/asistente-clinico'
     | '/agent/knowledge'
     | '/agent/learn'
+    | '/agent/pendientes'
     | '/agent/recepcion'
     | '/agent/registro'
     | '/contacts/$contactId'
@@ -662,6 +672,7 @@ export interface FileRouteTypes {
     | '/agent/asistente-clinico'
     | '/agent/knowledge'
     | '/agent/learn'
+    | '/agent/pendientes'
     | '/agent/recepcion'
     | '/agent/registro'
     | '/contacts/$contactId'
@@ -725,6 +736,7 @@ export interface FileRouteTypes {
     | '/_org/agent/asistente-clinico'
     | '/_org/agent/knowledge'
     | '/_org/agent/learn'
+    | '/_org/agent/pendientes'
     | '/_org/agent/recepcion'
     | '/_org/agent/registro'
     | '/_org/contacts/$contactId'
@@ -962,6 +974,13 @@ declare module '@tanstack/react-router' {
       path: '/agent/learn'
       fullPath: '/agent/learn'
       preLoaderRoute: typeof OrgAgentLearnRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/agent/pendientes': {
+      id: '/_org/agent/pendientes'
+      path: '/agent/pendientes'
+      fullPath: '/agent/pendientes'
+      preLoaderRoute: typeof OrgAgentPendientesRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/agent/recepcion': {
@@ -1320,6 +1339,7 @@ interface OrgRouteChildren {
   OrgAgentAsistenteClinicoRoute: typeof OrgAgentAsistenteClinicoRoute
   OrgAgentKnowledgeRoute: typeof OrgAgentKnowledgeRoute
   OrgAgentLearnRoute: typeof OrgAgentLearnRoute
+  OrgAgentPendientesRoute: typeof OrgAgentPendientesRoute
   OrgAgentRecepcionRoute: typeof OrgAgentRecepcionRoute
   OrgAgentRegistroRoute: typeof OrgAgentRegistroRoute
   OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
@@ -1349,6 +1369,7 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgAgentAsistenteClinicoRoute: OrgAgentAsistenteClinicoRoute,
   OrgAgentKnowledgeRoute: OrgAgentKnowledgeRoute,
   OrgAgentLearnRoute: OrgAgentLearnRoute,
+  OrgAgentPendientesRoute: OrgAgentPendientesRoute,
   OrgAgentRecepcionRoute: OrgAgentRecepcionRoute,
   OrgAgentRegistroRoute: OrgAgentRegistroRoute,
   OrgContactsContactIdRoute: OrgContactsContactIdRoute,

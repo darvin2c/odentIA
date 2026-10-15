@@ -351,6 +351,7 @@ function ReceptionPage() {
   const channels = config.channels ?? overview.readiness.channels
   const channelsText = channels.length > 0 ? channels.map((channel) => channelLabel(channel)).join(", ") : "Sin canal conectado"
   const dailyLimit = count(config.dailyRunLimit, "respuesta", "respuestas")
+  const closeAfter = `A las ${count(config.closeAfterHours, "hora", "horas")} sin respuesta`
   const voice = [
     config.personaName ? `Se presenta como ${config.personaName}` : "Sin nombre propio",
     `trata ${TREATMENT_LABEL[config.treatment ?? "tu"]}`,
@@ -527,6 +528,9 @@ function ReceptionPage() {
                   </li>
                   <li>
                     <EntryRow label="Tope diario" value={dailyLimit} onClick={canWrite ? () => setLimits("tope") : undefined} />
+                  </li>
+                  <li>
+                    <EntryRow label="Cerrar la conversación" value={closeAfter} onClick={canWrite ? () => setLimits("cierre") : undefined} />
                   </li>
                 </ul>
                 {overview.readiness.channels.length === 0 && canWrite ? (

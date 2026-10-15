@@ -1,3 +1,13 @@
+/**
+ * La urgencia de un caso que pasó al equipo, en una palabra. La insignia
+ * (`HandoffUrgency`) le suma icono y color; donde no cabe, va la palabra sola.
+ */
+export const URGENCY_WORDS = { alta: "Ahora", media: "Hoy", baja: "Sin apuro" } as const
+
+export function urgencyWord(priority: string): string {
+  return URGENCY_WORDS[priority as keyof typeof URGENCY_WORDS] ?? URGENCY_WORDS.media
+}
+
 /** Etiquetas en español para las acciones del agente autónomo. */
 export const ACTION_LABEL: Record<string, string> = {
   reservar_cita: "Reservar cita",

@@ -11,7 +11,7 @@ import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { type AutomationMessage, type MessageVariable, placePhrase, renderMessage, replyId } from "./automation-messages.js"
 import { findTemplateByName, type TemplateItem } from "./channel-templates.js"
 import { isDirectThread } from "./contacts.js"
-import { reopenConversation, startContactConversation, WA_FREE_TEXT_WINDOW_MS } from "./conversations.js"
+import { startContactConversation, WA_FREE_TEXT_WINDOW_MS } from "./conversations.js"
 import { ServiceError } from "./errors.js"
 import { openEmailThread } from "./financial-documents.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -296,11 +296,10 @@ export async function routeMessage(
         ),
       )
     const thread = threads.find((row) => isDirectThread("whatsapp", row.externalThreadId, identity.externalUserId))
-    // Una conversación cerrada no se reabre con una respuesta: su ventana ya no
-    // cuenta. Con plantilla sí se le puede volver a escribir.
+    // Escribir reabre una conversación cerrada (ADR 0024): lo que cuenta es la
+    // ventana de 24 horas desde que la persona escribió, no si está abierta.
     if (
-      thread?.status === "open" &&
-      thread.lastInboundAt &&
+      thread?.lastInboundAt &&
       Date.now() - thread.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS
     ) {
       return { via: "respuesta", channel: "whatsapp", conversationId: thread.id }
@@ -312,7 +311,6 @@ export async function routeMessage(
           identityId: identity.id,
           connectionId: whatsapp.id,
         })
-        if (started.status !== "open") await reopenConversation(tx, orgId, started.id)
         return {
           via: "plantilla",
           channel: "whatsapp",
@@ -328,15 +326,18 @@ export async function routeMessage(
   }
 
   const email = person?.email?.trim().toLowerCase()
+  // Por qué no se pudo abrir el hilo de correo, si la clínica sí tiene buzón:
+  // no es «sin conexión», y decirlo así manda a conectar lo que ya está.
+  let mailboxProblem: string | null = null
   if (spec && mailbox && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     try {
       const thread = await openEmailThread(tx, orgId, null, { contactId, email }, mailbox)
       return { via: "correo", channel: "email", conversationId: thread.id }
     } catch (error) {
       if (!(error instanceof ServiceError)) throw error
+      mailboxProblem = error.message
     }
   }
-
   if (!identity && !email) {
     return { cause: "sin_destino", detail: "La persona no tiene WhatsApp ni correo registrados" }
   }
@@ -348,6 +349,9 @@ export async function routeMessage(
           ? `WhatsApp tiene el mensaje ${template.status}${template.reason ? ` (${template.reason})` : ""}`
           : "Aún no hay un mensaje aprobado por WhatsApp"
     return { cause: "sin_plantilla", detail: `${state} y la persona no escribió en las últimas 24 horas` }
+  }
+  if (mailboxProblem) {
+    return { cause: "correo_ajeno", detail: `No se pudo usar su correo: ${mailboxProblem}` }
   }
   return {
     cause: "sin_conexion",
