@@ -572,15 +572,43 @@
     {
       "idx": 81,
       "version": "7",
-      "when": 1792078045714,
-      "tag": "0081_un_pendiente_un_lugar",
+      "when": 1792071843222,
+      "tag": "0081_personal_admin_seguridad",
       "breakpoints": true
     },
     {
       "idx": 82,
       "version": "7",
+      "when": 1792071843223,
+      "tag": "0082_saas_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1792071843224,
+      "tag": "0083_casos_de_soporte",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1792071843225,
+      "tag": "0084_organizaciones_y_cuentas",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1792078045714,
+      "tag": "0085_un_pendiente_un_lugar",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
       "when": 1792084231417,
-      "tag": "0082_ventas_que_se_mueven_solas",
+      "tag": "0086_ventas_que_se_mueven_solas",
       "breakpoints": true
     }
   ]

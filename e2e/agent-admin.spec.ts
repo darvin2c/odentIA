@@ -209,8 +209,8 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(unknown).toContainText("Se envía lo que escribiste, con el nombre de tu clínica, tu rol, esta pantalla y la versión de odentIA.")
   await unknown.getByRole("button", { name: "Enviarlo a odentIA como pedido" }).click()
   await expect(unknown).toContainText("Enviado a odentIA. La respuesta te llega en Ayuda.")
-  expect(await call<Array<{ question: string; status: string }>>(page, "GET", "/api/help/requests", org.slug)).toMatchObject([
-    { question: "Felicita a quien cumple años", status: "abierta" },
+  expect(await call<Array<{ question: string; status: string }>>(page, "GET", "/api/help/cases", org.slug)).toMatchObject([
+    { question: "Felicita a quien cumple años", status: "abierto" },
   ])
 
   // --- Si el modelo no responde: lo dice, el campo se desactiva y se puede reintentar ---

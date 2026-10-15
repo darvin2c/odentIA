@@ -26,8 +26,8 @@ export interface RuntimeProcessMeta {
 export interface RuntimeMeta {
   runId: string
   stateDir: string
-  outDirs: { panel: string; platform: string }
-  ports: { proxy: number; api: number; panel: number; platform: number }
+  outDirs: { panel: string; platform: string; admin: string }
+  ports: { proxy: number; api: number; panel: number; platform: number; admin: number }
   containers: RuntimeContainerMeta[]
   processes: RuntimeProcessMeta[]
 }
@@ -49,8 +49,8 @@ function emptyMeta(runId: string): RuntimeMeta {
   return {
     runId,
     stateDir: "",
-    outDirs: { panel: "", platform: "" },
-    ports: { proxy: 0, api: 0, panel: 0, platform: 0 },
+    outDirs: { panel: "", platform: "", admin: "" },
+    ports: { proxy: 0, api: 0, panel: 0, platform: 0, admin: 0 },
     containers: [],
     processes: [],
   }

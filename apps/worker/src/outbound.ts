@@ -3,10 +3,9 @@ import { channelAdapters, type OutboundMessage } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { decryptConfig, type Storage } from "@odentia/services"
+import { decryptConfig, isSaasSendBlocked, type Storage } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
-
 export interface SendDeps {
   storage: Storage
   fetch: typeof fetch
@@ -103,8 +102,23 @@ export async function processOutbound(
   db: Db,
   deps: SendDeps,
   msg: QueueMessage<OutboundMessageJob>,
-): Promise<"done" | "retry"> {
+): Promise<"done" | "retry" | "deferred"> {
   const { orgId, messageId } = msg.message
+  // Restricción/pausa comercial: no se envía, no se pierde, no cuenta como
+  // fallo (sale por "deferred" con VT largo; el reintento envenenado tampoco
+  // declara fallo mientras siga bloqueada). La ingesta entrante no pasa aquí.
+  if (await isSaasSendBlocked(db, orgId)) {
+    await withOrgContext(db, orgId, async (tx) => {
+      await tx.insert(auditEvent).values({
+        organizationId: orgId,
+        action: "message.updated",
+        entity: "message",
+        entityId: messageId,
+        metadata: { op: "send-deferred", reason: "saas-restricted" },
+      })
+    })
+    return "deferred"
+  }
   let providerAttempted = false
   try {
     await withOrgContext(db, orgId, async (tx) => {
@@ -174,6 +188,8 @@ export async function processOutbound(
       return "done"
     }
     if (msg.read_ct >= MAX_DELIVERIES) {
+      // Bloqueada: el conteo de lecturas no declara fallo (sigue diferida).
+      if (await isSaasSendBlocked(db, orgId).catch(() => false)) return "deferred"
       const detail = error instanceof Error ? error.message : String(error)
       await withOrgContext(db, orgId, async (tx) => {
         await tx
@@ -203,5 +219,9 @@ export async function consumeOutbound(
   const verdict = await processOutbound(db, deps, msg)
   if (verdict === "done") {
     await db.execute(sql`select pgmq.delete('outbound_messages', ${Number(msg.msg_id)}::bigint)`)
+  } else if (verdict === "deferred") {
+    // Sin ack y sin contar fallo: reaparece en 6 h para reevaluar (o antes si
+    // alguien reanuda y reencola). El mensaje queda `queued` hasta entonces.
+    await db.execute(sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, 21600)`)
   }
 }

@@ -187,6 +187,20 @@ services:
         condition: service_healthy
     mem_limit: 512m
 
+  admin:
+    build: *app-build
+    command: [pnpm, --filter, "@odentia/admin", start]
+    env_file: *runtime-env-file
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1::3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 512m
+
   platform:
     build: *app-build
     command: [pnpm, --filter, "@odentia/platform", start]

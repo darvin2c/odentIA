@@ -17,6 +17,7 @@
     "@odentia/agent": "workspace:*",
     "@odentia/channels": "workspace:*",
     "@odentia/db": "workspace:*",
+    "@odentia/mail": "workspace:*",
     "@odentia/services": "workspace:*",
     "drizzle-orm": "0.45.2",
     "postgres": "3.4.9",

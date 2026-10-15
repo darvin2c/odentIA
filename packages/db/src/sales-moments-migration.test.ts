@@ -7,7 +7,7 @@ import { expect, it } from "vitest"
 import { createOwnerDb } from "./client.js"
 
 /**
- * 0082 (ADR 0028): las oportunidades automáticas se borran con un criterio
+ * 0086 (ADR 0028): las oportunidades automáticas se borran con un criterio
  * seguro, la próxima acción pasa a ser una tarea (una sola), las etapas quedan
  * en los cuatro pasos fijos sin perder oportunidades, los cierres anteriores
  * conservan su texto como nota y la línea «Seguimiento sin responsable» se va.
@@ -34,7 +34,7 @@ it("lleva las ventas a los cuatro pasos fijos sin perder lo que es de una person
         if (statement.trim()) await db.execute(sql.raw(statement))
       }
     }
-    for (const file of files.filter((f) => Number(f.slice(0, 4)) < 82)) await apply(file)
+    for (const file of files.filter((f) => Number(f.slice(0, 4)) < 86)) await apply(file)
     const q = (text: string) => db.execute(sql.raw(text))
     await q(`insert into organization (id, name, slug, created_at) values ('legacy', 'Legado', 'legacy', now())`)
     await q(`insert into "user" (id, name, email, email_verified) values ('u1', 'Ana', 'ana@legacy.test', true)`)
@@ -87,7 +87,7 @@ it("lleva las ventas a los cuatro pasos fijos sin perder lo que es de una person
     await q(`insert into automation_job (organization_id, rule_id, kind, dedupe_key, scheduled_for, status, task_id)
       values ('legacy', '61111111-1111-4111-8111-111111111111', 'seguimientos_sin_responsable', 'seguimientos_sin_responsable:x', now(), 'tarea', '53333333-3333-4333-8333-333333333333')`)
 
-    await apply("0082_ventas_que_se_mueven_solas.sql")
+    await apply("0086_ventas_que_se_mueven_solas.sql")
 
     const rows = async (text: string) => [...(await q(text))] as Array<Record<string, unknown>>
     // La automática se borró; su nota sigue en la persona.

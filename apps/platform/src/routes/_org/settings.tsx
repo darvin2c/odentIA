@@ -1,8 +1,9 @@
 import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
 import { PageShell, SectionNav, type SectionNavGroup, type SectionNavItem } from "@odentia/ui-patterns"
-import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Outlet, useRouterState } from "@tanstack/react-router"
 import { useMyRole } from "../../lib/crm"
 import { RouterLink } from "../../lib/router-link"
+import { panelUrl } from "../../lib/host"
 
 export const Route = createFileRoute("/_org/settings")({
   component: SettingsLayout,
@@ -62,6 +63,7 @@ const sueltas: SectionNavItem[] = [
 function SettingsLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = useMyRole()
+  const { org } = getRouteApi("/_org").useRouteContext()
   // Un apartado solo se ofrece a quien puede abrirlo, con la misma regla que el guard.
   const canOpen = (item: SectionNavItem) => {
     const permissions = platformPathPermission(item.to)
@@ -80,6 +82,11 @@ function SettingsLayout() {
         pathname={pathname}
         LinkComponent={RouterLink}
       >
+        {(role === "owner" || role === "admin") && (
+          <a href={panelUrl(`/billing/${org.id}`)} className="mb-4 inline-flex text-sm font-medium underline underline-offset-4">
+            Plan y pagos de odentIA ↗
+          </a>
+        )}
         <Outlet />
       </SectionNav>
     </PageShell>

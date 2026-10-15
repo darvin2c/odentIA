@@ -130,6 +130,8 @@ beforeAll(async () => {
     trustedOrigins: [],
     cookieDomain: "odentia.localhost",
     webURL: "https://app.odentia.localhost",
+    adminURL: "https://admin.odentia.localhost",
+    mailer: { send: async () => { throw new Error("Correo no esperado en este recorrido") } },
     listenUrl: "postgres://localhost:5432/dentalagent",
   })
 }, 180_000)

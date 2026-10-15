@@ -20,7 +20,7 @@ export type HarnessRuntime = {
   stateDir: string
   baseDomain: string
   proxyPort: number
-  appPorts: { api: number; panel: number; platform: number }
+  appPorts: { api: number; panel: number; platform: number; admin: number }
   postgres?: { host: string; port: number }
   minio?: { host: string; port: number }
   mailpit?: { host: string; httpPort: number; smtpPort: number }
@@ -129,6 +129,7 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     BETTER_AUTH_SECRET: "e2e-only-secret-0123456789abcdef0123456789",
     BETTER_AUTH_URL: api,
     WEB_URL: panel,
+    ADMIN_URL: `https://admin.${runtime.baseDomain}:${runtime.proxyPort}`,
     COOKIE_DOMAIN: runtime.baseDomain,
     TRUSTED_ORIGINS: [base, panel, api, `https://*.${runtime.baseDomain}:${runtime.proxyPort}`].join(
       ",",

@@ -20,6 +20,7 @@ const mailer = createMailer({
 })
 const auth = createAuth({
   db,
+  ownerDb,
   mailer,
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
@@ -49,6 +50,8 @@ const app = createApp({
   trustedOrigins: env.trustedOrigins,
   cookieDomain: env.COOKIE_DOMAIN,
   webURL: env.WEB_URL,
+  adminURL: env.ADMIN_URL,
+  mailer,
   listenUrl: env.APP_DATABASE_URL,
   llm: platformLlmFromEnv(env),
   decisions: {
