@@ -147,10 +147,10 @@ export interface TaskItem {
   title: string
   contactId: string | null
   conversationId: string | null
+  /** La oportunidad de la que es la próxima acción (una sola tarea abierta por oportunidad). */
   opportunityId: string | null
   patientId: string | null
   patientName: string | null
-  kind: "manual" | "opportunity_follow_up"
   contactName: string | null
   opportunityTitle: string | null
   assigneeUserId: string | null
@@ -162,6 +162,16 @@ export interface TaskItem {
   area: "recepcion" | "caja" | "clinico" | "administracion" | null
   /** Por qué se creó, cuando la deja el Administrador. */
   reason: string | null
+  /** Por qué se cerró sola («Rosa confirmó su cita»); nula si la cerró una persona. */
+  settledReason?: string | null
+  createdAt?: string
+  updatedAt?: string
+  /**
+   * Es la tarea de un caso que pasó el agente («Te lo pasó el agente»), con su
+   * urgencia. Completarla puede resolver la conversación: antes se muestra lo
+   * mismo que «Resolver» (`useCompleteTask`).
+   */
+  agentCase?: { priority: string } | null
 }
 
 /** A quién va una tarea sin responsable, con las palabras de la pantalla. */
@@ -280,19 +290,64 @@ export interface ContactFull {
   }[]
 }
 
+/** Los cuatro pasos fijos de una venta (ADR 0028): la clínica los renombra, no los cambia. */
+export type SaleMoment = "interesado" | "evaluacion_agendada" | "presupuesto_enviado" | "decidio"
+
 export interface Stage {
   id: string
   pipelineId: string
   name: string
   position: number
-  kind: string
+  moment: SaleMoment
 }
+
+/** Qué hace avanzar sola a una oportunidad en cada paso, para Configuración. */
+export const SALE_MOMENT_HINT: Record<SaleMoment, string> = {
+  interesado: "La persona pidió algo concreto: un precio, un tratamiento o una evaluación.",
+  evaluacion_agendada: "Llega sola cuando la persona agenda una cita.",
+  presupuesto_enviado: "Llega sola cuando se le presenta un presupuesto.",
+  decidio: "Llega sola cuando acepta o rechaza el presupuesto, o cuando el equipo la cierra con su motivo.",
+}
+
+/** Motivos de cierre con sus palabras (las claves las valida el servidor). */
+export type CloseReason =
+  | "precio"
+  | "otra_clinica"
+  | "no_responde"
+  | "no_lo_necesita"
+  | "otro"
+  | "rechazo_presupuesto"
+  | "acepto"
+  | "acepto_presupuesto"
+
+export const CLOSE_REASON_LABEL: Record<CloseReason, string> = {
+  precio: "Precio",
+  otra_clinica: "Eligió otra clínica",
+  no_responde: "No responde",
+  no_lo_necesita: "Ya no lo necesita",
+  otro: "Otro",
+  rechazo_presupuesto: "Rechazó el presupuesto",
+  acepto: "Aceptó",
+  acepto_presupuesto: "Aceptó el presupuesto",
+}
+
+/** Los que elige una persona al perderla, en su orden. */
+export const LOST_REASONS = ["precio", "otra_clinica", "no_responde", "no_lo_necesita", "otro"] as const satisfies readonly CloseReason[]
 
 export interface Pipeline {
   id: string
   name: string
   isDefault: boolean
   stages: Stage[]
+}
+
+/** La tarea abierta de una oportunidad: su próxima acción, una sola. */
+export interface OpportunityTask {
+  id: string
+  title: string
+  dueAt: string | null
+  assigneeUserId: string | null
+  area: string | null
 }
 
 export interface OpportunityListItem {
@@ -305,38 +360,45 @@ export interface OpportunityListItem {
   pipelineId: string
   stageId: string
   stageName: string
-  stageKind: string
+  moment: SaleMoment
   status: "open" | "won" | "lost"
   amountCents: number | null
   currency: string
   interestText: string | null
+  serviceId: string | null
   serviceName: string | null
+  /** Sin responsable, la oportunidad es de Recepción hasta que alguien la toma. */
   assignedUserId: string | null
   conversationId: string | null
+  budgetId: string | null
+  closedAt: string | null
+  closeReason: CloseReason | null
+  closeNote: string | null
+  /** Por qué está donde está, dicho por el servidor con la fecha de la clínica. */
+  why: string | null
+  nextTask: OpportunityTask | null
   createdAt: string
-  nextActionNote: string | null
-  nextActionAt: string | null
   updatedAt: string
 }
 
 export interface OpportunityDetail extends OpportunityListItem {
   contactPhone: string | null
   contactEmail: string | null
-  serviceId: string | null
-  nextActionNote: string | null
-  closedAt: string | null
-  closeReason: string | null
-  budgetId: string | null
+  amountFromPriceList: boolean
   budgetTitle: string | null
+  budgetNumber: number | null
   budgetStatus: string | null
-  createdAt: string
+  /** Próxima cita de la persona, dicha por el servidor; solo para quien ve la agenda. */
+  nextAppointment: { startsAt: string; text: string } | null
+  /** Lo que la hará avanzar sola. */
+  after: string | null
   history: Array<{
     id: string
     action: string
-    fromStageId: string | null
-    toStageId: string | null
-    actorUserId: string | null
-    note: string | null
+    /** El nombre, «El agente» o «Automático». */
+    who: string
+    origin: "persona" | "agente" | "automatico"
+    what: string
     createdAt: string
   }>
 }

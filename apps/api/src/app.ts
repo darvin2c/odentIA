@@ -3,7 +3,7 @@ import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { CONVERSATION_STATE_ACTIONS, initialOrgRegion, type MailboxEnv, type SearchEmbedder, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
+import { CONVERSATION_STATE_ACTIONS, initialOrgRegion, type MailboxEnv, type SearchEmbedder, regionPresetForCountry, setBranchActive, type Storage, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -37,6 +37,7 @@ import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
+import { createPeopleRoute } from "./routes/people.js"
 import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
 import { createPromotionsRoute } from "./routes/promotions.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
@@ -397,6 +398,8 @@ export function createApp(deps: AppDeps) {
         countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter,
         applyCountryPreset: applyCountryPreset ?? !current,
       })
+      // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
+      if (!current) await turnOnNewClinicLines(tx, orgId, userId)
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: userId,
@@ -592,6 +595,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/patients", createFinancialDocumentsRoute(crmDeps))
   const llm: PlatformLlm = deps.llm ?? { fake: true }
   guarded.route("/patients", createPatientsRoute({ ...crmDeps, llm }))
+  guarded.route("/people", createPeopleRoute(crmDeps))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))
   guarded.route("/promotions", createPromotionsRoute(crmDeps))

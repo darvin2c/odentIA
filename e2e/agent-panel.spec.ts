@@ -102,32 +102,32 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
     201,
   )
 
-  // Desde Inicio: botón, badge del sidebar y panel sobre la página. Cuentan el caso, no la cita.
+  // Desde Inicio: el único número es el del menú (cuenta el caso, no la cita); el botón y las pestañas no lo repiten.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const button = agentButton(page)
-  await expect(button).toHaveAccessibleName("Agente, 1 por atender")
+  await expect(button).toHaveAccessibleName("Agente")
   const sidebarAgent = page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true })
   await expect(sidebarAgent.locator("..")).toContainText("1")
   await button.click()
   const panel = page.getByRole("dialog", { name: "Agente" })
   await expect(panel).toBeVisible()
   await expect(panel.getByText(/Activo|Pausado/)).toBeVisible()
-  await expect(panel.getByRole("tab", { name: "Derivadas · 1", exact: true })).toBeVisible()
+  await expect(panel.getByRole("tab", { name: "Casos del agente", exact: true })).toBeVisible()
   await expect(panel.getByRole("tab", { name: "Esperan al paciente · 1", exact: true })).toBeVisible()
   // La página sigue montada debajo (el cajón modal la saca del árbol accesible, no del DOM).
   await expect(page.locator("h1", { hasText: "Inicio" })).toHaveCount(1)
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toHaveCount(0)
 
-  // Abre en Derivadas: «Tomar» (la conversación del caso) lo deja con responsable sin sacarlo de la lista.
+  // Abre en «Casos del agente»: «Tomar» (la conversación del caso) lo deja con responsable sin sacarlo de la lista.
   const item = panel.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
-  await expect(item).toContainText("En cola por recoger")
+  await expect(item).toContainText("Nadie lo ha tomado")
   await info.attach("panel-derivadas", {
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   })
   await item.getByRole("button", { name: "Tomar", exact: true }).click()
-  await expect(item).toContainText("Responsable asignado")
+  await expect(item).toContainText("Ya lo tomaron")
   await expect(item.getByRole("button", { name: "Tomar", exact: true })).toHaveCount(0)
   const persisted = await call<Array<{ id: string; status: string }>>(
     page,
@@ -157,12 +157,13 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await expect(panel).toBeHidden()
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
   await expect(button).toBeFocused()
-  // Tomado no es resuelto: el caso sigue contando hasta que alguien lo resuelve.
-  await expect(button).toHaveAccessibleName("Agente, 1 por atender")
-  // «Te espera» trae el caso; no hay nada del agente que aprobar ni la cita del paciente.
-  const home = page.getByRole("region", { name: "Te espera" })
-  // La derivación deja además su tarea: el caso es la fila que dice de dónde viene.
-  await expect(home.getByRole("listitem").filter({ hasText: "Caso que pasó el agente" })).toContainText("Pide hablar con una persona")
+  // Tomado no es resuelto: el caso sigue contando para quien lo tomó hasta que lo resuelve.
+  await expect(sidebarAgent.locator("..")).toContainText("1")
+  // «Te espera» trae el caso una sola vez (ni su tarea ni su conversación son otra fila);
+  // no hay nada del agente que aprobar ni la cita del paciente.
+  const home = page.getByRole("region", { name: /^Te espera/ })
+  await expect(home.getByRole("listitem").filter({ hasText: "Te lo pasó el agente" })).toContainText("Pide hablar con una persona")
+  await expect(home.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })).toHaveCount(1)
   await expect(home).not.toContainText("espera tu aprobación")
   await expect(home).not.toContainText("Cita el jueves a las 10:00")
 
@@ -188,7 +189,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
 
   // Pendientes: primero los casos; la cita aparte, con solo registrar la confirmación del paciente.
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Casos que pasó a tu equipo" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Casos del agente" })).toBeVisible()
   const approvalCard = page.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
   await expect(approvalCard).toContainText("Espera al paciente")
   await expect(approvalCard.getByRole("button", { name: "Registrar confirmación del interlocutor" })).toBeVisible()
@@ -206,7 +207,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   const box = await mobilePanel.boundingBox()
   expect(box?.width).toBeGreaterThanOrEqual(370)
   expect(box?.height).toBeGreaterThanOrEqual(800)
-  await expect(mobilePanel.getByRole("tab", { name: "Derivadas · 1", exact: true })).toBeVisible()
+  await expect(mobilePanel.getByRole("tab", { name: "Casos del agente", exact: true })).toBeVisible()
   await mobilePanel.getByRole("tab", { name: /^Esperan al paciente/ }).click()
   const cold = mobilePanel.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
   await expect(cold.getByRole("link", { name: "Abrir conversación" })).toBeVisible()
@@ -242,7 +243,7 @@ test("panel del agente: recepción lo ve, otros roles no lo ven y el servidor lo
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await agentButton(page).click()
   const panel = page.getByRole("dialog", { name: "Agente" })
-  await expect(panel.getByText("Sin derivaciones abiertas")).toBeVisible()
+  await expect(panel.getByText("Ningún caso del agente espera")).toBeVisible()
   await panel.getByRole("tab", { name: /^Esperan al paciente/ }).click()
   await expect(panel.getByRole("alert")).toContainText("No pudimos cargar lo que espera al paciente")
   await page.unroute("**/api/agent/proposals**")

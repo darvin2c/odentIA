@@ -264,6 +264,28 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
   expect(reuse.status).toBe(201)
 })
 
+it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien ve la agenda", async () => {
+  const owner = buildApp("owner")
+  const created = await owner.request("/appointments", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ branchId, patientId, dentistUserId: DENTIST, chairId, startsAt: "2026-10-12T15:00:00Z", durationMin: 15, outsideSchedule: true }),
+  })
+  expect(created.status).toBe(201)
+  const cita = ((await created.json()) as { data: { id: string; notice?: unknown } }).data
+  // Sin «Recordar la cita» prendida nadie le avisa: lo dice la respuesta.
+  expect(cita.notice).toEqual({ queued: false })
+  const seen = await buildApp("reception").request(`/appointments/${cita.id}/context`)
+  expect(seen.status).toBe(200)
+  const context = ((await seen.json()) as { data: { person: { name: string; relationship: string } | null; origin: { source: string; conversationId: string | null }; confirmation: unknown } }).data
+  expect(context.person).toMatchObject({ name: "Paciente API", relationship: "self" })
+  expect(context.origin).toMatchObject({ source: "recepcion", conversationId: null })
+  expect(context.confirmation).toBeNull()
+  // Caja no ve la agenda: tampoco lo que dice la cita de la persona.
+  expect((await buildApp("cashier").request(`/appointments/${cita.id}/context`)).status).toBe(403)
+  await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "cancelada" }) })
+})
+
 it("valida el query y el body con 400", async () => {
   const owner = buildApp("owner")
   const badQuery = await owner.request("/appointments?from=nope&to=nope")

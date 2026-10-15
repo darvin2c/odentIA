@@ -4,7 +4,7 @@ import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
 
@@ -52,7 +52,7 @@ function describe(row: MessagePermission): string {
 }
 
 /** A quién se le escribe lo de este paciente: su persona preferida o él mismo. */
-function recipientOf(detail: PatientFull) {
+export function messageRecipientOf(detail: PatientFull) {
   const active = detail.contacts.filter((contact) => contact.isActive)
   return active.find((contact) => contact.isPreferred) ?? active.find((contact) => contact.relationship === "self") ?? null
 }
@@ -62,12 +62,18 @@ function recipientOf(detail: PatientFull) {
  * aparte: son las finalidades de mensajes del consentimiento de datos, y aquí
  * se ven y se corrigen cuando lo dice en persona o por la conversación.
  */
-export function MessagePermissionsSection({ detail }: { detail: PatientFull }): React.JSX.Element | null {
+export function MessagePermissionsSection({
+  contactId,
+  recipientName,
+}: {
+  contactId: string | null | undefined
+  /** Quien recibe los mensajes si no es la propia persona (el tutor de un menor). */
+  recipientName?: string | null
+}): React.JSX.Element | null {
   const uid = useId()
-  const canWrite = usePermission("patients.write")
+  const can = useCan()
+  const canWrite = can("patients.write") || can("crm.write")
   const queryClient = useQueryClient()
-  const recipient = recipientOf(detail)
-  const contactId = recipient?.contactId
   const key = ["message-permissions", contactId]
   const query = useQuery({
     queryKey: key,
@@ -87,16 +93,15 @@ export function MessagePermissionsSection({ detail }: { detail: PatientFull }): 
       setEditing(null)
     },
   })
-  if (!recipient) return null
+  if (!contactId) return null
   const rows = query.data?.data ?? []
-  const self = recipient.relationship === "self"
   const error = save.error instanceof ApiError ? (save.error.shape.message ?? "No se pudo guardar") : save.error ? "No se pudo guardar" : null
 
   return (
     <div className="flex flex-col gap-2 border-t pt-3 text-sm">
       <p className="text-xs font-medium text-muted-foreground">Mensajes de la clínica</p>
       <p className="text-muted-foreground">
-        Lo que {self ? "aceptó" : `${recipient.displayName} aceptó`} recibir sin haber escrito primero.
+        Lo que {recipientName ? `${recipientName} aceptó` : "aceptó"} recibir sin haber escrito primero.
       </p>
       {query.isPending ? (
         <LoadingState message="Cargando lo que aceptó recibir…" />

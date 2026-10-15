@@ -48,6 +48,7 @@ import {
   syncBudgetFollowUps,
   syncCancelledAppointments,
   syncCheckupReminders,
+  settleTasks,
   syncOpportunityFollowUps,
   syncVisitFollowUps,
 } from "./automation.js"
@@ -140,7 +141,7 @@ export interface AdminCase {
   controlId: string | null
   /** Persona del equipo que lleva el caso, si la hay. */
   ownerUserId: string | null
-  /** El vencimiento que originó el caso, cuando lo tiene (la próxima acción de una oportunidad). */
+  /** El vencimiento que originó el caso, cuando lo tiene (la tarea de una oportunidad). */
   dueAt?: string
 }
 
@@ -265,18 +266,16 @@ async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days
   }
 }
 
-/** Oportunidades abiertas con la próxima acción vencida y su seguimiento abierto: los casos de «Retomar una oportunidad». */
+/** Oportunidades abiertas con su tarea vencida: los casos de «Retomar una oportunidad». */
 async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; contact_id: string; name: string; title: string; next_action_at: Date | string; owner: string | null; total: number }>(sql`
-    select o.id, c.id as contact_id, c.display_name as name, o.title, o.next_action_at, o.assigned_user_id as owner,
+  const rows = await tx.execute<{ id: string; contact_id: string; name: string; title: string; task_title: string; due_at: Date | string; owner: string | null; total: number }>(sql`
+    select o.id, c.id as contact_id, c.display_name as name, o.title, t.title as task_title, t.due_at, o.assigned_user_id as owner,
            count(*) over ()::int as total
     from opportunity o
     join contact c on c.id = o.contact_id and c.organization_id = o.organization_id
-    where o.organization_id = ${orgId} and o.status = 'open' and o.next_action_at < now() and c.is_active
-      and exists (select 1 from task t
-        where t.organization_id = o.organization_id and t.opportunity_id = o.id
-          and t.kind = 'opportunity_follow_up' and t.status = 'open' and t.due_at = o.next_action_at)
-    order by o.next_action_at asc
+    join task t on t.organization_id = o.organization_id and t.opportunity_id = o.id and t.status = 'open'
+    where o.organization_id = ${orgId} and o.status = 'open' and t.due_at < now() and c.is_active
+    order by t.due_at asc
     limit ${ADMIN_LIST_LIMIT}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
@@ -285,15 +284,15 @@ async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Pro
       ...blank,
       id: row.id,
       personName: row.name,
-      line: `${row.title} · próxima acción el ${dayOf(row.next_action_at, zone)}`,
+      line: `${row.title} · «${row.task_title}» venció el ${dayOf(row.due_at, zone)}`,
       contactId: row.contact_id,
       opportunityId: row.id,
       ownerUserId: row.owner,
-      dueAt: new Date(row.next_action_at).toISOString(),
+      dueAt: new Date(row.due_at).toISOString(),
     })),
-    title: `${total} ${plural(total, "oportunidad tiene", "oportunidades tienen")} la próxima acción vencida`,
+    title: `${total} ${plural(total, "oportunidad tiene", "oportunidades tienen")} su tarea vencida`,
     detail: "Ordenadas de la más atrasada a la más reciente.",
-    how: "Oportunidades abiertas cuya próxima acción tenía fecha y ya pasó, de contactos activos.",
+    how: "Oportunidades abiertas cuya tarea tenía fecha y ya pasó, de contactos activos.",
   }
 }
 
@@ -434,35 +433,6 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
   }
 }
 
-async function followUpsWithoutOwner(tx: Db, orgId: string, zone: OrgLocale, scope?: Fresh): Promise<CaseResult> {
-  const rows = await tx.execute<{ id: string; contact_id: string; name: string; title: string; next_action_at: Date | string | null; total: number; due: number }>(sql`
-    select p.id, c.id as contact_id, c.display_name as name, p.title, p.next_action_at,
-           count(*) over ()::int as total,
-           (count(*) filter (where p.next_action_at < now()) over ())::int as due
-    from opportunity p
-    join contact c on c.id = p.contact_id and c.organization_id = p.organization_id
-    where p.organization_id = ${orgId} and p.status = 'open' and p.assigned_user_id is null
-      ${fresh(scope, sql`p.id::text`, sql`p.updated_at`)}
-    order by p.next_action_at asc nulls last, p.created_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
-  const total = Number(rows[0]?.total ?? 0)
-  const due = Number(rows[0]?.due ?? 0)
-  return {
-    total,
-    items: rows.map((row) => ({
-      ...blank,
-      id: row.id,
-      personName: row.name,
-      line: `${row.title}${row.next_action_at ? ` · próxima acción el ${dayOf(row.next_action_at, zone)}` : " · sin próxima acción"}`,
-      contactId: row.contact_id,
-      opportunityId: row.id,
-    })),
-    title: `${total} ${plural(total, "seguimiento abierto", "seguimientos abiertos")} sin responsable`,
-    detail: due > 0 ? `${due} ${plural(due, "tiene", "tienen")} la próxima acción vencida.` : "Ninguno tiene la próxima acción vencida todavía.",
-    how: "Oportunidades abiertas que no tienen a nadie del equipo asignado.",
-  }
-}
-
 /** Quien canceló su cita en la última semana y no tiene otra: cada persona una vez. */
 async function cancelledWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
   const days = 7
@@ -510,8 +480,7 @@ async function casesOf(tx: Db, orgId: string, key: AdminLineKey, zone: OrgLocale
   if (key === "cita_cancelada") return cancelledWithoutAppointment(tx, orgId, zone)
   if (key === "presupuestos_sin_cita") return budgetsWithoutAppointment(tx, orgId, zone, days ?? 7, scope)
   if (key === "atenciones_sin_firmar") return unsignedEncounters(tx, orgId, zone, days ?? 2, scope)
-  if (key === "cobranza_vencida") return overdueCollections(tx, orgId, zone, days ?? 30, scope)
-  return followUpsWithoutOwner(tx, orgId, zone, scope)
+  return overdueCollections(tx, orgId, zone, days ?? 30, scope)
 }
 
 function requireLine(key: string): AdminLine {
@@ -625,6 +594,8 @@ interface JobView extends Record<string, unknown> {
   booked: boolean
   task_status: string | null
   task_area: string | null
+  /** La tarea se cerró sola porque su motivo desapareció: por qué. */
+  task_settled: string | null
 }
 
 /** Consulta común de «qué pasó»: el caso con lo que se sabe de su mensaje, su cita y su tarea. */
@@ -633,7 +604,7 @@ function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
     select j.id, j.kind, j.status, j.cause, j.via, j.last_error, j.updated_at, j.scheduled_for,
            j.patient_id, j.contact_id, coalesce(p.display_name, c.display_name) as name,
            m.status as message_status, m.conversation_id,
-           a.status as appointment_status, t.status as task_status, t.area as task_area,
+           a.status as appointment_status, t.status as task_status, t.area as task_area, t.settled_reason as task_settled,
            (m.id is not null and exists (select 1 from message r
               where r.conversation_id = m.conversation_id and r.organization_id = j.organization_id
                 and r.direction = 'in' and r.created_at > m.created_at)) as replied,
@@ -654,6 +625,8 @@ function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
 function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outcome" | "text" | "fix" | "cause"> {
   const via = VIA_WORDS[row.via ?? ""] ?? "por WhatsApp"
   const taskDone = row.task_status === "done"
+  // Una tarea que se cerró sola no la resolvió nadie: se dice por qué ya no hacía falta.
+  const resolved = row.task_settled ? `Se cerró sola: ${row.task_settled.replace(/\.$/, "")}.` : "Una persona ya lo resolvió."
   const taskTeam = row.task_area && row.task_area in TASK_AREA_LABELS ? TASK_AREA_LABELS[row.task_area as keyof typeof TASK_AREA_LABELS].team : "una persona"
   if (row.status === "enviado") {
     if (row.kind === "recordatorio_cita" && row.appointment_status === "confirmada") return { outcome: "confirmo", text: `Confirmó, ${via}.`, fix: null, cause: null }
@@ -666,12 +639,12 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
   if (row.status === "fallido" || row.status === "omitido") {
     const cause = (row.cause ?? "proveedor") as AutomationCause
     const words = CAUSE_WORDS[cause] ?? CAUSE_WORDS.proveedor
-    const who = row.task_status ? (taskDone ? " Una persona ya lo resolvió." : ` Lo tiene ${taskTeam}.`) : ""
+    const who = row.task_status ? (taskDone ? ` ${resolved}` : ` Lo tiene ${taskTeam}.`) : ""
     return { outcome: "no_pudo", text: `El agente no pudo escribirle: ${words.one}.${who}`, fix: words.fix, cause }
   }
   if (row.status === "tarea") {
     return taskDone
-      ? { outcome: "tarea_resuelta", text: "Una persona ya lo resolvió.", fix: null, cause: null }
+      ? { outcome: "tarea_resuelta", text: resolved, fix: null, cause: null }
       : { outcome: "tarea", text: `Quedó una tarea para ${taskTeam}.`, fix: null, cause: null }
   }
   if (row.status === "cancelado") return { outcome: "no_hizo_falta", text: `No se hizo nada: ${(row.last_error ?? "ya no hacía falta").replace(/\.$/, "").toLowerCase()}.`, fix: null, cause: null }
@@ -1162,15 +1135,30 @@ export interface AdminAdvice {
 }
 
 /**
+ * ¿Puede quien lee atender esta recomendación? Si puede prender la línea
+ * (`agent.write`) o pedir «Solo esta vez»: cuando escribe el agente, quien
+ * decide por él (`agent.decide`); cuando quedan tareas, quien puede crearlas.
+ * Una línea sin «Solo esta vez» (recordar la cita) solo la atiende quien la prende.
+ */
+export function canActOnLine(line: AdminLine, rule: { agentPart?: boolean } | null, can: (permission: string) => boolean): boolean {
+  if (can("agent.write")) return true
+  if (line.key === "recordatorio_cita") return false
+  const writes = !!line.agent && (rule?.agentPart ?? true)
+  return writes ? can("agent.decide") : can("tasks.write")
+}
+
+/**
  * Lo que el Administrador recomienda prender: las líneas apagadas que hoy
  * tienen casos, que el rol de quien lee puede ver y que nadie pidió dejar de
  * recomendar. A lo sumo tres a la vez, en orden fijo. Con él apagado, ninguna.
+ * Con `actionable` (Inicio), solo las que quien lee puede atender
+ * (`canActOnLine`): a nadie le llega una recomendación sin nada que hacer.
  */
 export async function getAdminRecommendations(
   tx: Db,
   orgId: string,
   can: (permission: string) => boolean,
-  opts: { preview?: boolean; all?: boolean } = {},
+  opts: { preview?: boolean; all?: boolean; actionable?: boolean } = {},
 ): Promise<AdminAdvice> {
   const settings = await getAdminSettings(tx, orgId)
   if (!settings.enabled && !opts.preview) return { enabled: false, recommendations: [], more: 0 }
@@ -1180,6 +1168,7 @@ export async function getAdminRecommendations(
   for (const line of ADMIN_LINES) {
     const rule = rules.get(line.key) ?? null
     if (rule?.enabled || rule?.noRecommend || !can(line.permission)) continue
+    if (opts.actionable && !canActOnLine(line, rule, can)) continue
     const result = await casesOf(tx, orgId, line.key, zone, lineDays(rule, line.key))
     if (result.total > 0) found.push(toRecommendation(line, rule, result, ADMIN_PREVIEW_ITEMS))
   }
@@ -1313,10 +1302,11 @@ export interface TickSummary {
   programados: number
   entregados: number
   fallidos: number
-  /** Conversaciones en que el agente insistió, que cerró por silencio y avisos a quien tiene una a cargo. */
+  /** Conversaciones en que el agente insistió y que cerró por silencio. */
   insistidas: number
   cerradas: number
-  avisadas: number
+  /** Tareas que se cerraron solas porque su motivo desapareció. */
+  tareasCerradas: number
 }
 
 /** Las líneas que escriben a la persona, cada una con quien anota sus casos. */
@@ -1347,7 +1337,7 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, avisadas: 0 }
+  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0 }
   for (const { orgId } of orgRows) {
     // Ninguna conversación queda abierta (ADR 0024): es de Recepción, no del
     // Administrador, así que corre aunque este esté apagado.
@@ -1356,7 +1346,9 @@ export async function tickAutomations(
     )
     summary.insistidas += care.nudged
     summary.cerradas += care.closed
-    summary.avisadas += care.noticed
+    // Las tareas se cierran solas cuando su motivo desaparece, aunque el
+    // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
+    summary.tareasCerradas += await withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now))
     // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
     if (deps.templates) {

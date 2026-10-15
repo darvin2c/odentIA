@@ -102,6 +102,19 @@ export function awaitingPatientSql(conv: SQL): SQL {
   return sql`(${conv}.status = 'open' and (${awaitingPatientSinceSql(conv)} is not null or ${proposalPendingExistsSql(conv)}))`
 }
 
+/**
+ * Sigue abierta con una persona a cargo (ADR 0024): con Recepción encendida,
+ * una persona la lleva (o el agente no atiende su canal), no espera respuesta ni tiene un caso abierto y nadie
+ * escribe desde hace las horas que la clínica eligió para cerrar
+ * (`close_after_hours`). El ciclo no la cierra sola: la muestra «Te espera».
+ */
+export function stillOpenWithPersonSql(conv: SQL): SQL {
+  return sql`(${conv}.status = 'open' and (${personInChargeSql(conv)} or not ${agentAttendingSql(conv)}) and not ${unansweredSql(conv)} and not ${handoffOpenExistsSql(conv)}
+    and exists (select 1 from agent_config ac_q where ac_q.organization_id = ${conv}.organization_id and ac_q.enabled
+      and greatest(coalesce(${conv}.last_message_at, '-infinity'::timestamptz), ${conv}.attention_started_at)
+        <= now() - make_interval(hours => ac_q.close_after_hours)))`
+}
+
 /** Vistas de la Bandeja, cada una con su regla. */
 export const CONVERSATION_VIEWS = ["unanswered", "team", "awaiting_patient", "agent", "closed"] as const
 export type ConversationView = (typeof CONVERSATION_VIEWS)[number]

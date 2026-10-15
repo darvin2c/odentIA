@@ -43,7 +43,7 @@ function EncounterBreadcrumb({
     <Breadcrumb>
       <BreadcrumbList>
         <BreadcrumbItem>
-          <BreadcrumbLink render={<Link to="/patients" />}>Pacientes</BreadcrumbLink>
+          <BreadcrumbLink render={<Link to="/people" />}>Pacientes</BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
@@ -70,9 +70,10 @@ function EncounterPage() {
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
   const canWrite = usePermission("clinical.write")
+  // Con lo clínico (condiciones, medicación y salud declarada): es una lectura clínica y deja su traza.
   const patientQuery = useQuery({
-    queryKey: ["patient", patientId],
-    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    queryKey: ["patient", patientId, "clinical"],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}?clinical=1`),
     enabled: canRead,
   })
   const encounterQuery = useQuery({

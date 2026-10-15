@@ -12,6 +12,7 @@ import {
   removePersonFact,
   startContactConversation,
   updateContact,
+  writeToPerson,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -217,6 +218,26 @@ export function createContactsRoute(deps: CrmDeps) {
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
+  })
+
+  /**
+   * «Escribirle»: la conversación por la que se le escribe a la persona (la que
+   * tiene abierta, su WhatsApp o una nueva con su número). Con `phone` usa el
+   * número que eligió quien escribe: así, y solo así, un teléfono pasa a ser su
+   * WhatsApp (ADR 0027). No envía nada.
+   */
+  const writeInput = z.object({ phone: z.string().max(50).nullish() })
+
+  app.post("/:id/write", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    if (!canAccess(orgContextOf(c).memberRole, "conversations.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para escribir a las personas"), 403)
+    }
+    const parsed = writeInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => writeToPerson(tx, orgId, userId, c.req.param("id"), parsed.data)),
+    )
   })
 
   /**

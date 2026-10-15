@@ -1,12 +1,16 @@
 import { expect, it } from "vitest"
-import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingTask } from "./workspace-home.js"
+import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingTask, type WaitingUnconfirmed } from "./workspace-home.js"
 
 const caseOf = (id: string, priority: string): WaitingCase => ({
   id, priority, reason: `Caso ${id}`, contactName: "Elena Castro", channel: "whatsapp",
-  createdAt: "2026-10-12T15:00:00.000Z", conversationId: null,
+  createdAt: "2026-10-12T15:00:00.000Z", conversationId: null, unclaimed: true,
 })
 const taskOf = (id: string, due: WaitingTask["due"]): WaitingTask => ({
-  id, title: `Tarea ${id}`, dueAt: null, due, href: `/tasks?task=${id}`, mine: true, assigneeName: null,
+  id, title: `Tarea ${id}`, dueAt: null, due, href: `/tasks?task=${id}`, mine: true, assigneeName: null, opportunityTitle: null,
+})
+const unconfirmedOf = (id: string): WaitingUnconfirmed => ({
+  id, patientId: `p-${id}`, patientName: "Rosa Quispe", phone: "+51987654100", startsAt: "2026-10-17T15:30:00.000Z",
+  branchName: "Centro", serviceName: "Evaluación",
 })
 const nothing: WaitingParts = {
   cases: [], conversations: null, overdueTasks: [], nextTask: null, openTasks: 0, advice: [], budgets: null,
@@ -14,7 +18,7 @@ const nothing: WaitingParts = {
 /** Cada fila como «tipo:identidad», para leer el orden de un vistazo. */
 const shape = (parts: Partial<WaitingParts>) =>
   composeWaiting({ ...nothing, ...parts }).map((row) => {
-    if (row.kind === "case" || row.kind === "task") return `${row.kind}:${row.id}`
+    if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed") return `${row.kind}:${row.id}`
     if (row.kind === "advice") return `advice:${row.key}`
     if (row.kind === "more") return `more:${row.of}:${row.count}`
     return row.kind
@@ -26,9 +30,11 @@ it("sin nada pendiente no hay filas", () => {
   expect(composeWaiting({ ...nothing, conversations: { waiting: 0, oldestAt: null }, budgets: { total: 0, oldestPresentedAt: null, items: [] } })).toEqual([])
 })
 
-it("el orden es fijo: ahora, no pudo escribir, conversaciones, vencidas, hoy, siguiente tarea, asesor y presupuestos", () => {
+it("el orden es fijo: ahora, sin confirmar, no pudo escribir, conversaciones, vencidas, hoy, siguen abiertas, siguiente tarea, asesor y presupuestos", () => {
   expect(shape({
     cases: [caseOf("sin-apuro", "baja"), caseOf("hoy", "media"), caseOf("ahora", "alta")],
+    unconfirmed: { items: [unconfirmedOf("rosa")], total: 1 },
+    stillOpen: { total: 2, conversationId: null, contactName: null, quietSince: "2026-10-12T05:00:00.000Z" },
     conversations: { waiting: 5, oldestAt: "2026-10-12T13:00:00.000Z" },
     overdueTasks: [taskOf("vencida", "overdue")],
     nextTask: taskOf("de-hoy", "today"),
@@ -37,7 +43,8 @@ it("el orden es fijo: ahora, no pudo escribir, conversaciones, vencidas, hoy, si
     unreached: { total: 6, byCause: [{ total: 6, reason: "no aceptó mensajes de la clínica" }] },
     budgets: { total: 4, oldestPresentedAt: "2026-10-03T15:00:00.000Z", items: [] },
   })).toEqual([
-    "case:ahora", "unreached", "conversations", "task:vencida", "case:hoy", "case:sin-apuro", "task:de-hoy", "advice:recordatorio_control", "budgets",
+    "case:ahora", "unconfirmed:rosa", "unreached", "conversations", "task:vencida", "case:hoy", "case:sin-apuro", "stillOpen", "task:de-hoy",
+    "advice:recordatorio_control", "budgets",
   ])
 })
 
@@ -68,4 +75,12 @@ it("ninguna propuesta del agente espera al equipo: «Te espera» no tiene filas 
   const kinds = composeWaiting({ ...nothing, cases: [caseOf("ahora", "alta")], conversations: { waiting: 1, oldestAt: null } }).map((row) => row.kind)
   expect(kinds).toEqual(["case", "conversations"])
   expect(Object.keys(WAITING_LIMITS)).not.toContain("proposals")
+})
+
+it("las citas sin confirmar que no caben se resumen en una fila con su cuenta", () => {
+  const items = Array.from({ length: WAITING_LIMITS.unconfirmed }, (_, index) => unconfirmedOf(`c${index}`))
+  expect(shape({ unconfirmed: { items, total: WAITING_LIMITS.unconfirmed + 4 } })).toEqual([
+    ...items.map((item) => `unconfirmed:${item.id}`), "more:unconfirmed:4",
+  ])
+  expect(shape({ unconfirmed: { items: [], total: 0 } })).toEqual([])
 })

@@ -17,6 +17,7 @@ import { sumAcceptedCents } from "@odentia/clinical"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
+import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -872,6 +873,13 @@ export async function deliverBudget(
     patientId,
     itemCount: lines.length,
   })
+  // Se une sola a la oportunidad del mismo tratamiento (o a la más reciente),
+  // que pasa a «Presupuesto enviado» (ADR 0028).
+  await linkPresentedBudget(tx, orgId, {
+    patientId,
+    budgetId,
+    serviceIds: lines.map((line) => line.serviceId).filter((id): id is string => !!id),
+  })
   await notifyBudget(tx, orgId)
   return updated
 }
@@ -1156,6 +1164,13 @@ export async function decideBudget(
   if (!updated) throw notFound("Presupuesto")
   await audit(tx, orgId, actorUserId, "budget.decision", budgetId, {
     patientId, status, acceptedCount, decisionContactId: representative?.id ?? null,
+  })
+  // Aceptarlo, aunque sea en parte, gana su oportunidad; rechazarlo la pierde.
+  await decideBudgetOpportunity(tx, orgId, {
+    patientId,
+    budgetId,
+    status,
+    serviceIds: lines.map((line) => line.serviceId).filter((id): id is string => !!id),
   })
   await notifyBudget(tx, orgId)
   return withTotals(updated, await listBudgetLines(tx, orgId, patientId, budgetId))

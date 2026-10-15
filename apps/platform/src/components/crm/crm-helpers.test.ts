@@ -1,51 +1,12 @@
 import { describe, expect, it } from "vitest"
-import {
-  dateInputToIso,
-  formatDueAt,
-  isoToLocalInput,
-  isOverdue,
-  localInputToIso,
-} from "./crm-helpers"
+import { dueFromParts, dueParts, dueWords, formatDueAt, isOverdue } from "./crm-helpers"
 
-describe("localInputToIso / isoToLocalInput", () => {
-  it("conserva el instante en ida y vuelta con la zona local", () => {
-    const iso = localInputToIso("2026-09-30T14:30")
-    expect(iso).not.toBeNull()
-    // El ISO representa las 14:30 locales, no 14:30 UTC a secas.
-    const back = isoToLocalInput(iso)
-    expect(back).toBe("2026-09-30T14:30")
-  })
-
-  it("rechaza vacío e inválidos sin lanzar", () => {
-    expect(localInputToIso("")).toBeNull()
-    expect(localInputToIso("   ")).toBeNull()
-    expect(localInputToIso("no-fecha")).toBeNull()
-    expect(isoToLocalInput(null)).toBe("")
-    expect(isoToLocalInput("basura")).toBe("")
-  })
-})
-
-describe("dateInputToIso", () => {
-  it("convierte fecha calendario a ISO de medianoche local", () => {
-    const iso = dateInputToIso("2026-09-30")
-    expect(iso).not.toBeNull()
-    const back = new Date(iso as string)
-    expect(back.getFullYear()).toBe(2026)
-    expect(back.getMonth()).toBe(8)
-    expect(back.getDate()).toBe(30)
-    expect(back.getHours()).toBe(0)
-  })
-
-  it("rechaza vacío y formas no calendario", () => {
-    expect(dateInputToIso("")).toBeNull()
-    expect(dateInputToIso("30/09/2026")).toBeNull()
-    expect(dateInputToIso("2026-09-30T10:00")).toBeNull()
-  })
-})
+const LIMA = "America/Lima"
+const MADRID = "Europe/Madrid"
 
 describe("isOverdue", () => {
-  it("distingue pasado, futuro y ausente", () => {
-    const now = new Date("2026-09-30T12:00:00Z").getTime()
+  it("vence solo lo que ya pasó", () => {
+    const now = Date.parse("2026-09-30T12:00:00Z")
     expect(isOverdue("2026-09-30T11:59:00Z", now)).toBe(true)
     expect(isOverdue("2026-09-30T12:01:00Z", now)).toBe(false)
     expect(isOverdue(null, now)).toBe(false)
@@ -60,12 +21,30 @@ describe("formatDueAt", () => {
     expect(formatDueAt("basura")).toBe("Sin fecha")
   })
 
-  it("formatea pasada y futura con fecha y hora es-PE", () => {
-    for (const iso of ["2020-05-06T10:15:00Z", "2030-05-06T10:15:00Z"]) {
-      const label = formatDueAt(iso)
-      expect(label).not.toBe("")
-      expect(label).not.toBe("Sin fecha")
-      expect(label).toMatch(/\d{2}\/\d{2}\/\d{4}/)
-    }
+  it("dice la fecha en la zona de la clínica, no en la del navegador", () => {
+    // 03:30 UTC es el 30 en Lima y el 1 en Madrid: cada clínica ve su día.
+    expect(formatDueAt("2026-10-01T03:30:00Z", LIMA)).toMatch(/30\/09\/2026/)
+    expect(formatDueAt("2026-10-01T03:30:00Z", MADRID)).toMatch(/01\/10\/2026/)
+  })
+})
+
+describe("dueWords", () => {
+  const now = Date.parse("2026-10-15T15:00:00Z") // 10:00 en Lima
+  it("habla de hoy, mañana y ayer en la zona de la clínica", () => {
+    expect(dueWords("2026-10-15T20:00:00Z", now, LIMA)).toMatch(/^hoy, 15:00$/)
+    expect(dueWords("2026-10-16T14:00:00Z", now, LIMA)).toMatch(/^mañana, 09:00$/)
+    expect(dueWords("2026-10-14T14:00:00Z", now, LIMA)).toMatch(/^ayer, 09:00$/)
+    // Medianoche de Lima es la fecha sola.
+    expect(dueWords("2026-10-17T05:00:00Z", now, LIMA)).toBe("sáb 17")
+    expect(dueWords(null, now, LIMA)).toBe("sin fecha")
+  })
+})
+
+describe("dueParts / dueFromParts", () => {
+  it("una fecha y una hora elegidas en la clínica vuelven al mismo instante", () => {
+    const iso = dueFromParts("2026-10-17", 10 * 60 + 30, LIMA)
+    expect(iso).toBe("2026-10-17T15:30:00.000Z")
+    expect(dueParts(iso, LIMA)).toEqual({ date: "2026-10-17", minutes: 630 })
+    expect(dueParts("basura", LIMA)).toBeNull()
   })
 })

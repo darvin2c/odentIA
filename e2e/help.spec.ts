@@ -80,7 +80,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await fixtureDb.update(helpRequest)
     .set({ status: "respondida", answer: "Todavía no se puede exportar a Excel. Lo anotamos para una próxima versión.", answeredAt: new Date() })
     .where(eq(helpRequest.organizationId, org.id))
-  await gotoHydrated(page, tenant(org.slug, "/patients"))
+  await gotoHydrated(page, tenant(org.slug, "/people"))
   const button = page.getByRole("button", { name: "Ayuda, 1 respuesta nueva" })
   await button.click()
   const answered = help.getByRole("region", { name: "Respuestas de odentIA" })
@@ -106,7 +106,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await problem.getByRole("button", { name: "Enviar a odentIA" }).click()
   await expect(help.getByRole("status").filter({ hasText: "Enviado a odentIA." })).toBeVisible()
   const reported = await fixtureDb.select().from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema")))
-  expect(reported.map((row) => [row.question, row.screen, row.role, row.detail])).toEqual([["La lista de pacientes se queda cargando", "/patients", "Propietario", null]])
+  expect(reported.map((row) => [row.question, row.screen, row.role, row.detail])).toEqual([["La lista de pacientes se queda cargando", "/people", "Propietario", null]])
 
   // --- Teléfono: el mismo botón y la hoja de ayuda, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })

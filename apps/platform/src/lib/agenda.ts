@@ -44,6 +44,18 @@ export interface AgendaAppointment {
   endsAt: string
   reason: string | null
   version: number
+  /** De dónde salió la cita: recepción, una conversación, el agente o el enlace de reserva. */
+  source?: string
+  conversationId?: string | null
+  /** Solo al reservar, mover o cancelar: si el agente le avisará a la persona. */
+  notice?: { queued: boolean }
+}
+
+/** Lo que el cajón de la cita dice además de la cita (`GET /api/appointments/:id/context`). */
+export interface AppointmentContext {
+  person: { contactId: string; name: string; phone: string | null; relationship: string } | null
+  origin: { source: string; conversationId: string | null; channel: string | null; at: string }
+  confirmation: { askAt: string | null; askedAt: string | null } | null
 }
 
 export interface AgendaResources {

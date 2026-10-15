@@ -1,19 +1,25 @@
 /**
- * «Te espera»: la única lista de pendientes de Inicio. Aquí vive solo el orden,
+ * «Te espera»: la única lista de lo que hay que hacer. Aquí vive solo el orden,
  * como función pura: cada parte llega ya filtrada por lo que el rol puede ver
  * (lo decide `getWorkspaceHome`), y esta función no consulta nada.
  *
- * El orden es fijo y sin puntajes: casos «Ahora», las personas a las que el
+ * Cada asunto ocupa una sola fila: el caso que pasó el agente no se repite como
+ * tarea ni dentro de «N personas esperan respuesta» (eso lo quita la consulta).
+ * Lo que aparece aquí no llega a la campana, que es solo para enterarse.
+ *
+ * El orden es fijo y sin puntajes: casos «Ahora», citas que siguen sin
+ * confirmar tras el primer recordatorio del agente, las personas a las que el
  * agente no pudo escribir, conversaciones sin responder, tareas vencidas, casos
- * «Hoy» y «Sin apuro», la siguiente tarea con el resto resumido, lo que
- * recomienda el administrador y, solo si él está apagado, los presupuestos que
- * esperan respuesta (encendido, esa lista es una de sus líneas y saldría dos
- * veces). Ninguna propuesta del agente espera al equipo (ADR 0023): lo que el
- * agente no resuelve llega como caso.
+ * «Hoy» y «Sin apuro», conversaciones que siguen abiertas con una persona a
+ * cargo, la siguiente tarea con el resto resumido, lo que recomienda el
+ * administrador y, solo si él está apagado, los presupuestos que esperan
+ * respuesta (encendido, esa lista es una de sus líneas y saldría dos veces).
+ * Ninguna propuesta del agente espera al equipo (ADR 0023): lo que el agente no
+ * resuelve llega como caso.
  */
 
 /** Tope de filas por tipo: lo demás se resume en una fila «y N más». */
-export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3 } as const
+export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3 } as const
 
 export interface WaitingCase {
   id: string
@@ -24,6 +30,8 @@ export interface WaitingCase {
   channel: string | null
   createdAt: string
   conversationId: string | null
+  /** Nadie lo tomó todavía: la fila ofrece «Tomar». */
+  unclaimed: boolean
 }
 
 export interface WaitingTask {
@@ -36,6 +44,8 @@ export interface WaitingTask {
   href: string
   mine: boolean
   assigneeName: string | null
+  /** La oportunidad de la que sale, si el rol puede verla. */
+  opportunityTitle: string | null
 }
 
 export interface WaitingAdvice {
@@ -58,21 +68,47 @@ export interface WaitingBudgets {
   items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
 }
 
+/** Una cita que sigue sin confirmar después del primer recordatorio del agente: hay que llamar. */
+export interface WaitingUnconfirmed {
+  id: string
+  patientId: string
+  patientName: string
+  phone: string | null
+  startsAt: string
+  branchName: string
+  serviceName: string | null
+}
+
+/** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
+export interface WaitingStillOpen {
+  total: number
+  /** La única, cuando es una: la fila la abre directamente. */
+  conversationId: string | null
+  contactName: string | null
+  /** El último mensaje de la que más lleva quieta. */
+  quietSince: string | null
+}
+
 export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
+  | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unreached" } & WaitingUnreached)
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
+  | ({ kind: "stillOpen" } & WaitingStillOpen)
   /** `more`: tareas abiertas que no tienen fila propia; solo la lleva la última. */
   | ({ kind: "task"; more: number } & WaitingTask)
   | ({ kind: "advice" } & WaitingAdvice)
   | ({ kind: "budgets" } & WaitingBudgets)
   /** Lo que no cupo de un tipo, con su total. */
-  | { kind: "more"; of: "cases" | "tasks"; count: number }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed"; count: number }
 
 export interface WaitingParts {
-  /** Casos derivados sin resolver, del que más lleva esperando al más reciente. */
+  /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
   cases: WaitingCase[]
+  /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
+  unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
   conversations: { waiting: number; oldestAt: string | null } | null
+  stillOpen?: WaitingStillOpen | null
   /** Tareas vencidas, de la que venció antes a la más reciente. */
   overdueTasks: WaitingTask[]
   /** La siguiente tarea abierta que no está vencida. */
@@ -90,6 +126,13 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   const urgentShown = urgent.slice(0, WAITING_LIMITS.urgentCases)
   for (const item of urgentShown) rows.push({ kind: "case", ...item })
 
+  if (parts.unconfirmed && parts.unconfirmed.total > 0) {
+    const shown = parts.unconfirmed.items.slice(0, WAITING_LIMITS.unconfirmed)
+    for (const item of shown) rows.push({ kind: "unconfirmed", ...item })
+    const left = parts.unconfirmed.total - shown.length
+    if (left > 0) rows.push({ kind: "more", of: "unconfirmed", count: left })
+  }
+
   if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })
 
   if (parts.conversations && parts.conversations.waiting > 0) rows.push({ kind: "conversations", ...parts.conversations })
@@ -104,6 +147,8 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   for (const item of othersShown) rows.push({ kind: "case", ...item })
   const casesLeft = urgent.length - urgentShown.length + others.length - othersShown.length
   if (casesLeft > 0) rows.push({ kind: "more", of: "cases", count: casesLeft })
+
+  if (parts.stillOpen && parts.stillOpen.total > 0) rows.push({ kind: "stillOpen", ...parts.stillOpen })
 
   const tasksLeft = Math.max(parts.openTasks - overdue.length - (parts.nextTask ? 1 : 0), 0)
   if (parts.nextTask) rows.push({ kind: "task", ...parts.nextTask, more: tasksLeft })

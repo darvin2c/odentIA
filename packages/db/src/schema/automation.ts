@@ -14,7 +14,7 @@ import { orgFk, timestamps } from "./crm.js"
 
 /**
  * Lo que el agente Administrador hace por su cuenta cuando una persona lo
- * prende: nueve líneas, cada una con su estado por organización.
+ * prende: ocho líneas, cada una con su estado por organización.
  *
  * - `automation_rule`: el estado de una línea (una fila por organización y
  *   línea): prendida o apagada, desde cuándo, y cuál de sus dos partes va («el
@@ -30,8 +30,8 @@ import { orgFk, timestamps } from "./crm.js"
  */
 
 /**
- * Las líneas. Las nueve primeras vienen armadas: cinco escriben a la persona
- * (el agente Recepción) y cuatro dejan trabajo a una persona del equipo. Las
+ * Las líneas. Las ocho primeras vienen armadas: cinco escriben a la persona
+ * (el agente Recepción) y tres dejan trabajo a una persona del equipo. Las
  * de `CUSTOM_AUTOMATION_KINDS` son piezas que el sistema también sabe hacer y
  * que solo existen en una clínica cuando ella las crea pidiéndoselas al
  * Administrador.
@@ -47,7 +47,6 @@ export const AUTOMATION_KINDS = [
   "presupuestos_sin_cita",
   "atenciones_sin_firmar",
   "cobranza_vencida",
-  "seguimientos_sin_responsable",
   ...CUSTOM_AUTOMATION_KINDS,
 ] as const
 export type AutomationKind = (typeof AUTOMATION_KINDS)[number]

@@ -88,6 +88,7 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
@@ -100,7 +101,7 @@ import {
 import { createFieldDef } from "./fields.js"
 import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
 import { setCommissionRate } from "./finance.js"
-import { closeOpportunity, createOpportunity, listOpportunities } from "./opportunities.js"
+import { closeOpportunity, createOpportunity, listOpportunities, moveOpportunity, setOpportunityTask } from "./opportunities.js"
 import {
   createPatientRegistrationLink,
   registerPatient,
@@ -135,7 +136,7 @@ import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
 import { createService, updateService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
-import { completeTask, createTask } from "./tasks.js"
+import { completeTask, createTask, settleTask } from "./tasks.js"
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
@@ -341,6 +342,18 @@ async function wipeSeed(): Promise<void> {
     "automation_consent",
     "automation_rule",
     "agent_decision_log",
+    // Lo que aprende el agente y lo que recuerda: las dejan las conversaciones
+    // reales de desarrollo y referencian conversación, contacto y conocimiento
+    // sin cascada; van antes que ellos y en este orden (caso de prueba →
+    // lección → revisión → traza).
+    "agent_test_case",
+    "agent_lesson",
+    "agent_review_item",
+    "agent_answer_trace",
+    "agent_knowledge_gap",
+    "agent_person_fact",
+    // Lo enviado a odentIA desde la Ayuda de desarrollo.
+    "help_request",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
@@ -790,7 +803,7 @@ await db
     },
   })
   .where(eq(channelConnection.id, connA.id))
-// Sus mensajes: los siete con los que viene, en estados variados, y uno propio.
+// Sus mensajes: los diez con los que viene, en estados variados, y uno propio.
 await seedChannelTemplates(db, { orgId: ORG_A, connectionId: connA.id })
 const connB = await createConnection(
   db,
@@ -825,9 +838,47 @@ const CONTACTS_A = [
   { name: "Andrés Vega", phone: "+51987654310" },
 ]
 const contactIdByName = new Map<string, string>()
+/**
+ * El tablero de ventas de la demostración (ADR 0028): cada oportunidad es un
+ * interés concreto y está donde la dejó lo que pasó de verdad. Un «hola» no
+ * crea ninguna: las demás personas no tienen oportunidad.
+ */
+const stageOf = (moment: (typeof pipeA.stages)[number]["moment"]) => pipeA.stages.find((stage) => stage.moment === moment)!
+const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
+  // Lo pidió por WhatsApp: lo registró el agente y queda en Recepción.
+  "Rosa Quispe": async (contactId) => {
+    await createOpportunity(db, ORG_A, { contactId, title: "Blanqueamiento", interestText: "Preguntó cuánto cuesta el blanqueamiento" }, { userId: null, origin: "agente" })
+  },
+  // Interesado, con su tarea: «Llamar · vence mañana».
+  "Jorge Mamani": async (contactId) => {
+    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Implante", interestText: "Implante en la pieza 36" }, { userId: ANA_ID })
+    await setOpportunityTask(db, ORG_A, opp.id, { title: "Llamar a Jorge por su implante", dueAt: new Date(Date.now() + 24 * 3600_000).toISOString() }, { userId: ANA_ID, createdBy: "user" })
+  },
+  // Pasó sola: agendó su evaluación.
+  "Elena Huamán": async (contactId) => {
+    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Ortodoncia", interestText: "Evaluación de ortodoncia" }, { userId: null, origin: "agente" })
+    await moveOpportunity(db, ORG_A, opp.id, stageOf("evaluacion_agendada").id, {
+      userId: null, origin: "automatico", cause: "cita_agendada", causeAt: new Date(Date.now() + 2 * 24 * 3600_000),
+    })
+  },
+  // Pasó sola: presupuesto presentado.
+  "Carlos Paredes": async (contactId) => {
+    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Endodoncia", assignedUserId: ANA_ID }, { userId: ANA_ID })
+    await moveOpportunity(db, ORG_A, opp.id, stageOf("presupuesto_enviado").id, { userId: null, origin: "automatico", cause: "presupuesto_presentado" })
+  },
+  // Ganada: aceptó el presupuesto.
+  "Lucía Fernández": async (contactId) => {
+    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Limpieza" }, { userId: ANA_ID })
+    await closeOpportunity(db, ORG_A, opp.id, { outcome: "won", reason: "acepto_presupuesto" }, { userId: null, origin: "automatico" })
+  },
+  // Perdida: «Precio».
+  "Miguel Torres": async (contactId) => {
+    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Carillas" }, { userId: ANA_ID })
+    await closeOpportunity(db, ORG_A, opp.id, { outcome: "lost", reason: "precio" }, { userId: ANA_ID })
+  },
+}
 for (let i = 0; i < CONTACTS_A.length; i++) {
   const c = CONTACTS_A[i]!
-  const stageId = pipeA.stages[i % pipeA.stages.length]!.id
   const notes =
     c.name === "Jorge Mamani"
       ? `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)`
@@ -841,30 +892,7 @@ for (let i = 0; i < CONTACTS_A.length; i++) {
   if (c.name === "Rosa Quispe") {
     await updateContact(db, ORG_A, created.id, { preferredChannel: "whatsapp" }, { userId: ANA_ID })
   }
-  const historicalStage = pipeA.stages[i % pipeA.stages.length]!
-  const openStage = pipeA.stages.find((stage) => stage.kind === "open")!
-  const commercial = await createOpportunity(
-    db,
-    ORG_A,
-    {
-      contactId: created.id,
-      stageId: historicalStage.kind === "open" ? stageId : openStage.id,
-      title: `Seguimiento · ${c.name}`,
-    },
-    { userId: ANA_ID },
-  )
-  if (historicalStage.kind === "won" || historicalStage.kind === "lost") {
-    await closeOpportunity(
-      db,
-      ORG_A,
-      commercial.id,
-      {
-        outcome: historicalStage.kind,
-        reason: "Resultado del escenario de demostración",
-      },
-      { userId: ANA_ID },
-    )
-  }
+  await SEED_SALES[c.name]?.(created.id)
   await db.insert(contactIdentity).values({
     organizationId: ORG_A,
     contactId: created.id,
@@ -1167,6 +1195,26 @@ await createTask(db, ORG_A, {
   assigneeUserId: ANA_ID,
   createdBy: "user",
 })
+// Una tarea sin responsable de Recepción («Mías y de mi área») y una que se
+// cerró sola porque su motivo desapareció (ADR 0028).
+await createTask(db, ORG_A, {
+  title: "Llamar a Elena para ofrecerle otra fecha",
+  contactId: contactIdByName.get("Elena Huamán")!,
+  area: "recepcion",
+  dueAt: tomorrowIso(),
+  createdBy: "admin",
+  reason: "Canceló su cita y no tiene otra.",
+  idempotencyKey: "seed:tarea-recepcion",
+})
+const settledDemo = await createTask(db, ORG_A, {
+  title: "Llamar a Rosa Quispe para recordarle su cita",
+  contactId: contactIdByName.get("Rosa Quispe")!,
+  area: "recepcion",
+  createdBy: "admin",
+  reason: "Su cita es mañana y no la confirmó.",
+  idempotencyKey: "seed:tarea-se-cerro-sola",
+})
+await settleTask(db, ORG_A, settledDemo.id, "Rosa Quispe confirmó su cita")
 
 // --- Agente A (B sin fila: ejercita el default deshabilitado) ---
 await upsertAgentConfig(db, ORG_A, {
@@ -2050,16 +2098,6 @@ for (let i = 1; i <= 40; i++) {
   const created = await createContact(db, ORG_A, {
     displayName: `Paciente Demo ${n}`,
   })
-  await createOpportunity(
-    db,
-    ORG_A,
-    {
-      contactId: created.id,
-      stageId: pipeA.stages[0]!.id,
-      title: `Seguimiento · Paciente Demo ${n}`,
-    },
-    { userId: ANA_ID },
-  )
   await createPatient(db, ORG_A, ANA_ID, {
     displayName: `Paciente Demo ${n}`,
     contacts: [{ contactId: created.id, relationship: "self", isPreferred: true }],
@@ -2067,6 +2105,15 @@ for (let i = 1; i <= 40; i++) {
   })
 }
 
+// --- «Nueva conversación» y «Reservar cita» desde «Contexto» (ADR 0027): alguien
+// que recepción anotó por teléfono, todavía sin WhatsApp ni ficha de paciente.
+const carmen = await createContact(db, ORG_A, { displayName: "Carmen Huamán", phone: "+51987654100" })
+
+// --- Una persona, una página (ADR 0029): Carmen está «Por registrar» y tiene
+// una nota de recepción; Martín Salas no es paciente, es el responsable de su
+// hija Sofía (menor), que sí lo es: su página dice «Responsable de Sofía Salas»
+// y la de ella, «Habla por ella: Martín Salas».
+await createContactNote(db, ORG_A, carmen.id, { body: "Llamó para preguntar por blanqueamiento; prefiere la tarde." }, { userId: ANA_ID })
 // --- Org B mínima (aislamiento visual) ---
 const sofia = await createContact(db, ORG_B, {
   displayName: "Sofía Ramos",
@@ -2074,26 +2121,9 @@ const sofia = await createContact(db, ORG_B, {
 const hugo = await createContact(db, ORG_B, {
   displayName: "Hugo Díaz",
 })
-await createOpportunity(
-  db,
-  ORG_B,
-  {
-    contactId: sofia.id,
-    stageId: pipeB.stages[0]!.id,
-    title: "Seguimiento · Sofía Ramos",
-  },
-  { userId: CORA_ID },
-)
-await createOpportunity(
-  db,
-  ORG_B,
-  {
-    contactId: hugo.id,
-    stageId: pipeB.stages[1]!.id,
-    title: "Seguimiento · Hugo Díaz",
-  },
-  { userId: CORA_ID },
-)
+await createOpportunity(db, ORG_B, { contactId: sofia.id, title: "Ortodoncia" }, { userId: CORA_ID })
+const hugoSale = await createOpportunity(db, ORG_B, { contactId: hugo.id, title: "Limpieza" }, { userId: CORA_ID })
+await moveOpportunity(db, ORG_B, hugoSale.id, pipeB.stages.find((stage) => stage.moment === "evaluacion_agendada")!.id, { userId: CORA_ID })
 await db.insert(contactIdentity).values([
   {
     organizationId: ORG_B,
@@ -2246,6 +2276,47 @@ const pedro = await db.transaction((tx) =>
     },
   ),
 )
+// Martín Salas (no es paciente) responde por su hija Sofía: la vista «Responsables».
+const martin = await createContact(db, ORG_A, {
+  displayName: "Martín Salas",
+  givenNames: "Martín",
+  paternalSurname: "Salas",
+  phone: "+51987650001",
+})
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "internal", userId: ANA_ID, contactId: martin.id },
+    {
+      submissionId: randomUUID(),
+      answers: {
+        demographics: {
+          displayName: "Sofía Salas",
+          givenNames: "Sofía",
+          paternalSurname: "Salas",
+          birthDate: "2017-08-12",
+          sex: "F",
+        },
+        respondent: "representative",
+        representative: {
+          displayName: "Martín Salas",
+          relationship: "guardian",
+          relationshipDetail: "Padre",
+          phone: "+51987650001",
+          docType: "DNI",
+          docNumber: "41234567",
+        },
+        privacyAccepted: false,
+      },
+      contacts: [
+        { contactId: martin.id, relationship: "guardian", relationshipDetail: "Padre", isPreferred: true },
+      ],
+    },
+  ),
+)
+
+
 // Rosa ya es representante legal vigente desde el alta: decide por el menor.
 // Recorrido del menor: la propuesta se presenta y queda SIN decisión a propósito,
 // para ejercitar el selector «Quién decide» (Rosa como representante legal, no el

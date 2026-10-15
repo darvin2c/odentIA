@@ -115,14 +115,16 @@ for (const status of [500, 404, 403]) {
       submissionId: crypto.randomUUID(),
       answers: { demographics: { displayName: "Paciente recuperable" }, respondent: "staff", privacyAccepted: false },
     }, 201)
+    // La página es la de su persona (ADR 0029): lo que falla es su cabecera.
+    const { personId } = await call<{ personId: string }>(page, "GET", `/api/people/by-patient/${patient.id}`, org.slug)
     let failing = true
     let requests = 0
-    await page.route(url => url.pathname === `/api/patients/${patient.id}`, async route => {
+    await page.route(url => url.pathname === `/api/people/${personId}`, async route => {
       requests++
       if (failing) return failResponse(page, route, status)
       await route.continue()
     })
-    await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
+    await gotoHydrated(page, tenant(org.slug, `/people/${personId}`))
     const alert = page.getByRole("alert")
     await expect(alert).toBeVisible()
     await expect(page.getByRole("heading", { name: "Paciente recuperable", exact: true })).toBeHidden()

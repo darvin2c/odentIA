@@ -568,6 +568,20 @@
       "when": 1792043503093,
       "tag": "0080_conversaciones_abrir_y_cerrar",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1792078045714,
+      "tag": "0081_un_pendiente_un_lugar",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1792084231417,
+      "tag": "0082_ventas_que_se_mueven_solas",
+      "breakpoints": true
     }
   ]
 }

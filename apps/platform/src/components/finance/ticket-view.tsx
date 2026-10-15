@@ -7,7 +7,7 @@
  * Desde aquí se imprime, se envía al paciente y se anula el cobro (con motivo).
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
-import { formatMoney } from "@odentia/clinical"
+import { documentText, formatMoney } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, cn, Field, FieldLabel, Skeleton, Textarea } from "@odentia/ui"
 import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -175,7 +175,7 @@ export function TicketView({
 
   const person = snapshot.patient?.displayName || patientName
   const document = snapshot.patient?.docNumber
-    ? `${snapshot.patient.docType ? `${snapshot.patient.docType} ` : ""}${snapshot.patient.docNumber}`
+    ? documentText(snapshot.patient.docType, snapshot.patient.docNumber)
     : null
   const payerName = snapshot.payer?.displayName || null
   const clinicName = snapshot.clinic?.tradeName || snapshot.clinic?.legalName || orgName || ""

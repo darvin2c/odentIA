@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useOrgProfile } from "../../lib/org"
+import type { PersonPage } from "../../lib/people"
 import type { Patient } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
 import { UbigeoField } from "./ubigeo-field"
@@ -144,45 +145,80 @@ export const FILIACION_SECTIONS: Record<
   },
 }
 
-function initialValues(patient: Patient, fields: SectionField[]): Record<string, string> {
+/**
+ * Lo que guarda la persona aunque aún no sea paciente (ADR 0001): su
+ * identidad y cómo ubicarla. El resto de la filiación es de la ficha.
+ */
+const PERSON_FIELD_KEYS = new Set<string>([
+  "paternalSurname",
+  "maternalSurname",
+  "givenNames",
+  "docType",
+  "docNumber",
+  "docCountry",
+  "birthDate",
+  "sex",
+  "phone",
+  "email",
+])
+
+/** Las secciones que se editan en una persona que aún no es paciente. */
+export const PERSON_SECTIONS: FiliacionSectionKey[] = ["identidad", "contacto"]
+
+function sectionFields(section: FiliacionSectionKey, forPatient: boolean): SectionField[] {
+  const fields = FILIACION_SECTIONS[section].fields
+  return forPatient ? fields : fields.filter((field) => PERSON_FIELD_KEYS.has(field.key))
+}
+
+function initialValues(source: Partial<Record<string, unknown>>, fields: SectionField[]): Record<string, string> {
   return Object.fromEntries(
     fields.map((f) => {
-      const raw = patient[f.key]
+      const raw = source[f.key]
       return [f.key, typeof raw === "string" ? raw : ""]
     }),
   )
 }
 
 /**
- * Cajón de una sección de la filiación: mismos campos y catálogos que el
- * registro, validados en servidor. Solo envía lo que cambió.
+ * Cajón de una sección de los datos de la persona: el único formulario de
+ * datos de la aplicación (ADR 0029), con los mismos campos y catálogos que el
+ * registro y validado en servidor con las reglas de la ficha. Con ficha guarda
+ * en la ficha; sin ella, en la persona (solo identidad y contacto, que es lo
+ * que la persona tiene). Solo envía lo que cambió.
  */
 export function FiliacionSectionDrawer({
   patient,
+  person,
   section,
   open,
   onClose,
 }: {
-  patient: Patient
   section: FiliacionSectionKey
   open: boolean
   onClose: () => void
-}): React.JSX.Element {
+} & ({ patient: Patient; person?: undefined } | { patient?: undefined; person: PersonPage })): React.JSX.Element {
   const uid = useId()
   const queryClient = useQueryClient()
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const config = FILIACION_SECTIONS[section]
-  const [values, setValues] = useState(() => initialValues(patient, config.fields))
+  const fields = sectionFields(section, Boolean(patient))
+  const source = (patient ?? person ?? {}) as unknown as Partial<Record<string, unknown>>
+  const [values, setValues] = useState(() => initialValues(source, fields))
   const [confirmIdentity, setConfirmIdentity] = useState(false)
-  const original = initialValues(patient, config.fields)
-  const changed = config.fields.filter((f) => (values[f.key] ?? "") !== (original[f.key] ?? ""))
+  const original = initialValues(source, fields)
+  const changed = fields.filter((f) => (values[f.key] ?? "") !== (original[f.key] ?? ""))
   const set = (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value }))
   const save = useMutation({
     mutationFn: () => {
       const patch: Record<string, unknown> = Object.fromEntries(
         changed.map((f) => [f.key, values[f.key]?.trim() ? values[f.key]?.trim() : null]),
       )
+      if (!patient)
+        return apiFetch(`/api/people/${person.id}/identity`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        })
       if (confirmIdentity) patch.identityConfirmed = true
       return apiFetch(`/api/patients/${patient.id}`, {
         method: "PATCH",
@@ -190,8 +226,9 @@ export function FiliacionSectionDrawer({
       })
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
-      await queryClient.invalidateQueries({ queryKey: ["patients"] })
+      if (patient) await queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
+      await queryClient.invalidateQueries({ queryKey: ["person"] })
+      await queryClient.invalidateQueries({ queryKey: ["people"] })
       onClose()
     },
   })
@@ -221,7 +258,7 @@ export function FiliacionSectionDrawer({
       submitLabel="Guardar"
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        {config.fields.map((field) => {
+        {fields.map((field) => {
           const id = `${uid}-${field.key}`
           const value = values[field.key] ?? ""
           const t = field.type
@@ -299,7 +336,7 @@ export function FiliacionSectionDrawer({
             </option>
           ))}
         </datalist>
-        {section === "identidad" && patient.identityNeedsReview ? (
+        {section === "identidad" && patient?.identityNeedsReview ? (
           <label className="flex items-start gap-2 text-sm sm:col-span-2">
             <input
               type="checkbox"

@@ -3,6 +3,7 @@ import {
   isMinor,
   isRealDate,
   normalizePhone,
+  pendingRegistrationFields,
   registrationAnswersSchema,
   registrationConfigSchema,
   validateRegistrationAnswers,
@@ -23,6 +24,7 @@ import { contact, conversation, contactIdentity, channelConnection } from "@oden
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes } from "node:crypto"
 import { and, eq, sql, type SQL } from "drizzle-orm"
+import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { createPatient, patientOrganizationToday, requirePatient, type PatientRow } from "./patients.js"
@@ -367,7 +369,20 @@ export async function getPublicPatientRegistration(
 // --- Registro transaccional ---
 
 export type RegistrationContext =
-  | { kind: "internal"; userId: string; contactId?: string; conversationId?: string }
+  | {
+      kind: "internal"
+      userId: string
+      contactId?: string
+      conversationId?: string
+      /**
+       * `essentials`: el equipo registra con lo mínimo, al reservar, a la
+       * persona de una conversación (`contactId` y `conversationId`, ficha
+       * unida a ella como propia). La misma regla que el enlace de reserva: lo
+       * que la clínica exige y no se pidió queda anotado en el caso y la
+       * identidad, por revisar. Ningún otro alta interna lo usa.
+       */
+      scope?: "essentials"
+    }
   | {
       kind: "public"
       token?: string
@@ -433,6 +448,36 @@ async function lockTokenRow(tx: Db, orgId: string, token: string): Promise<Resol
   return { id: link.id, contactId: link.contactId, conversationId: link.conversationId }
 }
 
+/**
+ * Nota del caso tras un registro con lo esencial: qué pide la clínica y aún
+ * falta. Es corta: si la lista no cabe, dice cuántos más faltan en vez de cortarse.
+ */
+async function notePendingRegistration(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  who: string,
+  config: RegistrationConfig,
+  answers: RegistrationAnswers,
+): Promise<void> {
+  const pending = pendingRegistrationFields(config, answers).map((field) => field.label.toLowerCase())
+  const head = `${who}. Falta en la clínica: confirmar apellidos y nombres`
+  const named: string[] = []
+  for (const label of pending) {
+    const rest = pending.length - named.length - 1
+    const tail = rest > 0 ? ` y ${rest} más` : ""
+    if (`${head}, ${[...named, label].join(", ")}${tail}.`.length > CASE_NOTE_CHARS) break
+    named.push(label)
+  }
+  const left = pending.length - named.length
+  await addAgentCaseNote(
+    tx,
+    orgId,
+    conversationId,
+    `${head}${named.length ? `, ${named.join(", ")}` : ""}${left > 0 ? ` y ${left} más` : ""}.`,
+  )
+}
+
 export async function registerPatient(
   tx: Db,
   orgId: string,
@@ -469,8 +514,18 @@ export async function registerPatient(
   const internalContext = context.kind === "internal" ? context : null
   const publicToken = publicContext?.token
   const hasToken = publicToken !== undefined
-  const essentials = publicContext?.scope === "essentials"
-  if (essentials && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
+  const essentials = (publicContext ?? internalContext)?.scope === "essentials"
+  if (essentials && publicContext && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
+  // El equipo registra con lo mínimo solo a la persona de una conversación, como su propia ficha.
+  if (
+    essentials &&
+    internalContext &&
+    (!internalContext.contactId ||
+      !internalContext.conversationId ||
+      !input.contacts?.some((link) => link.contactId === internalContext.contactId && link.relationship === "self"))
+  ) {
+    throw validation("Lo mínimo solo se acepta al reservar a la persona de una conversación")
+  }
   const entryPoint: RegistrationEntryPoint = publicContext
     ? (hasToken ? "conversation" : publicContext.entryPoint)
     : (internalContext?.conversationId ? "conversation" : "platform")
@@ -484,6 +539,7 @@ export async function registerPatient(
         actorUserId,
         contactId: internalContext?.contactId ?? null,
         conversationId: internalContext?.conversationId ?? null,
+        ...(essentials ? { scope: "essentials" } : {}),
       }
   const payloadHash = sha256Hex(
     canonicalJson({
@@ -670,12 +726,19 @@ export async function registerPatient(
 
   // 5b. Con los datos esenciales los apellidos llegan de un solo campo y se
   // reparten sin certeza: la ficha queda «identidad por revisar» hasta que
-  // recepción los confirme.
+  // recepción los confirme. Lo que la clínica exige y no se pidió queda
+  // anotado en el caso de la conversación.
   if (essentials) {
     await tx
       .update(patient)
       .set({ identityNeedsReview: true })
       .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
+    if (conversationId) {
+      const who = publicContext
+        ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
+        : "El equipo creó su ficha con lo mínimo al reservar"
+      await notePendingRegistration(tx, orgId, conversationId, who, config, answers)
+    }
   }
 
   // 6. Salud declarada solo con contenido significativo; nunca firma revisión.

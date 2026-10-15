@@ -46,15 +46,15 @@ export function QuickNoteDrawer({
           setOpen(true)
         }}
       >
-        Nota rápida
+        Nota clínica
       </Button>
       <FormDrawer
         open={open}
         onClose={() => {
           if (!save.isPending) setOpen(false)
         }}
-        title="Nota rápida"
-        description="Para lo que ocurre fuera de una atención (una llamada, un aviso). Es inmutable: una corrección va en otra nota. Los diagnósticos se registran en la atención, con su tipo y firma."
+        title="Nota clínica"
+        description="Para lo clínico que ocurre fuera de una atención. Es inmutable: una corrección va en otra nota. Lo administrativo (una llamada, un acuerdo) va en las notas de la persona, en su Resumen; los diagnósticos, en la atención."
         onSubmit={(event) => {
           event.preventDefault()
           if (note.trim()) save.mutate()

@@ -1,21 +1,22 @@
 import {
   ageLabel,
-  DOC_TYPE_LABELS,
+  documentText,
   EDUCATION_LEVEL_LABELS,
-  isMinor,
   KINSHIP_LABELS,
   MARITAL_STATUS_LABELS,
 } from "@odentia/clinical"
 import { Badge, Button } from "@odentia/ui"
+import { internationalText } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { useState } from "react"
-import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
-import { usePermission } from "../../lib/crm"
+import type { RegistrationConfig } from "@odentia/clinical"
+import { apiFetch } from "../../lib/api"
+import { usePermission, useCan } from "../../lib/crm"
 import { sexLabel } from "../../lib/patient-overview"
-import { hcLabel, type PatientFull } from "../../lib/patients"
+import { hcLabel, missingFiliation, type PatientFull } from "../../lib/patients"
 import { DataConsentSection } from "./data-consent-section"
-import { MessagePermissionsSection } from "./message-permissions-section"
+import { MessagePermissionsSection, messageRecipientOf } from "./message-permissions-section"
 import {
   COUNTRY_LABELS,
   FiliacionSectionDrawer,
@@ -83,30 +84,27 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
   const birthPlace = useUbigeoLabel(p.birthPlaceUbigeo)
   const addressPlace = useUbigeoLabel(p.addressUbigeo)
   const branches = useBranches(canRead)
-  const responsibilities = useQuery({
-    queryKey: ["responsibilities", p.id],
-    queryFn: () => fetchResponsibilities(p.id),
-    enabled: canRead,
+  const can = useCan()
+  const canConfig = can("crm.read") || can("settings.read")
+  // Lo que falta es lo que «Registro de pacientes» pide como obligatorio: el
+  // mismo criterio que los pendientes del Resumen (`missingFiliation`).
+  const config = useQuery({
+    queryKey: ["patient-registration-config"],
+    queryFn: () =>
+      apiFetch<{ data: RegistrationConfig; meta: { today: string } }>("/api/patient-registration/config"),
+    enabled: canWrite && canConfig,
+    retry: false,
   })
-  const representatives = (responsibilities.data?.data ?? []).filter(
-    (r) => r.isCurrent && r.kind === "representante_legal",
-  )
   const age = ageLabel(p.birthDate)
   const edit = (section: FiliacionSectionKey) => (canWrite ? () => setEditing(section) : undefined)
-  const gaps = [
-    !p.docNumber && "documento",
-    !p.birthDate && "fecha de nacimiento",
-    !p.addressUbigeo && "ubigeo del domicilio",
-    !p.educationLevel && "grado de instrucción",
-    !p.emergencyContactName && "contacto de emergencia",
-  ].filter(Boolean)
+  const gaps = config.data ? missingFiliation(config.data.data, p) : []
   const legacy = p.identityLegacy ? Object.values(p.identityLegacy).join(", ") : null
 
   return (
     <section aria-labelledby="filiacion-titulo" className="flex min-w-0 flex-col gap-4">
       {/* Jerarquía de la ficha: h1 paciente, h2 sección, h3 bloques. */}
       <h2 id="filiacion-titulo" className="text-base font-semibold">
-        Filiación
+        Datos personales
       </h2>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge variant="outline">{hcLabel(p.patientNumber)}</Badge>
@@ -114,7 +112,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           <Badge variant="warning">Identidad por revisar: confirma apellidos y nombres</Badge>
         ) : null}
         {gaps.length > 0 ? (
-          <span className="text-muted-foreground">Filiación incompleta: {gaps.join(", ")}.</span>
+          <span className="text-muted-foreground">Faltan datos que la clínica pide: {gaps.join(", ")}.</span>
         ) : null}
       </div>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
@@ -134,7 +132,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           <Item label="Nombres">{p.givenNames}</Item>
           <Item label="Documento">
             {p.docNumber
-              ? `${DOC_TYPE_LABELS[p.docType as keyof typeof DOC_TYPE_LABELS] ?? p.docType ?? ""} ${p.docNumber}${p.docCountry ? ` · ${country(p.docCountry)}` : ""}`
+              ? `${documentText(p.docType, p.docNumber)}${p.docCountry ? ` · ${country(p.docCountry)}` : ""}`
               : null}
           </Item>
           <Item label="Nacimiento">
@@ -164,7 +162,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           <Item label="Procedencia">{p.origin}</Item>
         </Section>
         <Section title="Contacto" onEdit={edit("contacto")}>
-          <Item label="Teléfono">{p.phone}</Item>
+          <Item label="Teléfono">{p.phone ? internationalText(p.phone) : null}</Item>
           <Item label="Correo">{p.email}</Item>
           <Item label="Cómo nos conoció">{p.referralSource}</Item>
         </Section>
@@ -177,30 +175,23 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           <Item label="Detalle">{p.insuranceDetail}</Item>
         </Section>
         <Section
-          title="Representante y emergencia"
+          title="Contacto de emergencia"
           onEdit={edit("emergencia")}
           footer={
             <p className="text-xs text-muted-foreground">
-              En menores, el representante legal es una persona vinculada con documento; se gestiona
-              en Responsables.
+              El representante legal de un menor es una persona vinculada con documento: se
+              gestiona en Responsables.
             </p>
           }
         >
-          <Item label="Representante legal">
-            {representatives.length > 0
-              ? representatives
-                  .map((r) => `${r.contact.displayName} · ${RESPONSIBILITY_KIND_LABELS[r.kind]}`)
-                  .join("; ")
-              : p.birthDate && !isMinor(p.birthDate, new Date().toISOString().slice(0, 10))
-                ? "No aplica (mayor de edad)"
-                : null}
-          </Item>
           <Item label="Contacto de emergencia">
             {p.emergencyContactName
               ? `${p.emergencyContactName}${p.emergencyContactRelationship ? ` · ${KINSHIP_LABELS[p.emergencyContactRelationship as keyof typeof KINSHIP_LABELS] ?? p.emergencyContactRelationship}` : ""}`
               : null}
           </Item>
-          <Item label="Teléfono de emergencia">{p.emergencyContactPhone}</Item>
+          <Item label="Teléfono de emergencia">
+            {p.emergencyContactPhone ? internationalText(p.emergencyContactPhone) : null}
+          </Item>
         </Section>
         <section
           className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
@@ -220,7 +211,12 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
             </Item>
           </dl>
           <DataConsentSection detail={detail} />
-          <MessagePermissionsSection detail={detail} />
+          <MessagePermissionsSection
+            contactId={messageRecipientOf(detail)?.contactId}
+            recipientName={
+              messageRecipientOf(detail)?.relationship === "self" ? null : messageRecipientOf(detail)?.displayName
+            }
+          />
         </section>
       </div>
       {editing ? (

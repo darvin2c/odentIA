@@ -42,7 +42,7 @@ import { saveMessageText } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
 import { closeConversationWith } from "./conversation-close.js"
 import { ingestInbound } from "./conversations.js"
-import { closeOpportunity, createOpportunity, updateOpportunity } from "./opportunities.js"
+import { closeOpportunity, createOpportunity, setOpportunityTask } from "./opportunities.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -422,9 +422,9 @@ describe("por dónde le llega a cada persona", () => {
     // Sin mensaje aprobado no se intenta el envío: no hay un rechazo del canal que esperar.
     expect(of(cold.contactId)).toMatchObject({ status: "fallido", cause: "sin_plantilla", attempts: 1, sentMessageId: null })
     expect(of(refused.contactId)).toMatchObject({ status: "omitido", cause: "sin_permiso" })
-    const notices = await noticesOf(c)
-    expect(notices.map((notice) => notice.title)).toEqual(Array(3).fill("«Retomar un presupuesto»: no pude escribirle a 1 persona"))
-    expect(notices.every((notice) => notice.href === "/agent/administrador?linea=seguimiento_presupuesto&ver=no-pudo")).toBe(true)
+    // La campana no repite «Te espera»: el motivo queda en cada caso y lo muestra
+    // la fila «el agente no pudo escribirle a N personas» (ADR 0025).
+    expect(await noticesOf(c)).toEqual([])
     // Con la tarea para el equipo prendida, cada persona queda como tarea de llamada, con el motivo y cómo habilitarla.
     const tasks = await tasksOf(c)
     expect(tasks).toHaveLength(3)
@@ -437,11 +437,6 @@ describe("por dónde le llega a cada persona", () => {
       patientId: refused.patientId,
       status: "open",
     })
-    expect(notices.map((notice) => notice.body).sort()).toEqual([
-      "Motivo: no aceptaron recibir este mensaje. Para habilitarlo, pídeles el permiso la próxima vez que vengan o escriban.",
-      "Motivo: no escribieron en las últimas 24 horas y WhatsApp aún no aprueba el mensaje. El mensaje ya se pidió: empieza a salir cuando WhatsApp lo apruebe. Agregar su correo también lo habilita.",
-      "Motivo: no tienen WhatsApp ni correo registrados. Para habilitarlo, agrega su número o su correo en su ficha.",
-    ])
 
     const other = await clinic({ whatsapp: false })
     await ruleOn(other, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
@@ -452,20 +447,20 @@ describe("por dónde le llega a cada persona", () => {
     expect((await jobsOf(other))[0]).toMatchObject({ status: "fallido", cause: "sin_conexion" })
   })
 
-  it("un aviso por causa, con la cuenta: tres personas sin permiso son un aviso", async () => {
+  it("tres personas sin permiso no llenan la campana: cada caso queda con su motivo para «Te espera»", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR), { teamPart: false })
     for (const name of ["Uno", "Dos", "Tres"]) await dueBudget(c, (await person(c, name)).patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido", "omitido"])
-    const notices = await noticesOf(c)
-    expect(notices).toHaveLength(1)
-    expect(notices[0]).toMatchObject({ userId: c.ownerId, title: "«Retomar un presupuesto»: no pude escribirle a 3 personas" })
-    // Con la tarea apagada sigue el aviso (no se puede apagar) y no queda ninguna tarea.
+    expect(await noticesOf(c)).toEqual([])
+    expect((await jobsOf(c)).map((job) => job.cause)).toEqual(["sin_permiso", "sin_permiso", "sin_permiso"])
+    expect((await run(c, (tx) => listAdminLinePeople(tx, c.orgId, all, "seguimiento_presupuesto", { only: "no-pudo" })))).toMatchObject({ total: 3 })
+    // Con la tarea apagada no queda ninguna tarea.
     expect(await tasksOf(c)).toHaveLength(0)
   })
 
-  it("«enviado» no es «entregado»: se sigue al mensaje y, si el canal lo rechaza, pasa a un aviso", async () => {
+  it("«enviado» no es «entregado»: se sigue al mensaje y, si el canal lo rechaza, queda como «no pudo»", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
     const ok = await person(c, "Escribió hoy", { consent: ["seguimiento"], openWindow: true })
@@ -494,14 +489,12 @@ describe("por dónde le llega a cada persona", () => {
       fix: "Revisa su número.",
     })
     expect((await jobsOf(c)).find((job) => job.id === bouncedJob.id)).toMatchObject({ status: "fallido", lastError: "131026: número no válido" })
-    expect((await noticesOf(c)).map((notice) => [notice.title, notice.body])).toEqual([
-      ["«Retomar un presupuesto»: no pude escribirle a 1 persona", "Motivo: el canal no entregó el mensaje. Para habilitarlo, revisa su número."],
-    ])
+    expect(await noticesOf(c)).toEqual([])
     // Solo lo que no llegó: la lista de «no pude» de la línea.
     expect((await run(c, (tx) => listAdminLinePeople(tx, c.orgId, all, "seguimiento_presupuesto", { only: "no-pudo" })))).toMatchObject({ total: 1 })
     // Conciliar otra vez no repite ni suma.
     expect(await run(c, (tx) => reconcileDeliveries(tx, c.orgId, NOW))).toBe(0)
-    expect(await noticesOf(c)).toHaveLength(1)
+    expect(await noticesOf(c)).toHaveLength(0)
   })
 
   it("tras una inasistencia, si la persona ya reservó otra cita no se le escribe", async () => {
@@ -791,9 +784,12 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los siete, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los diez, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
+      ["odentia_aviso_cita_cancelada_v1", "en_revision", "aviso_cita_cancelada"],
+      ["odentia_aviso_cita_movida_v1", "en_revision", "aviso_cita_movida"],
+      ["odentia_aviso_cita_reservada_v1", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
       ["odentia_recordatorio_cita_v1", "en_revision", "recordatorio_cita"],
       ["odentia_recordatorio_control_v1", "en_revision", "recordatorio_control"],
@@ -925,6 +921,9 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     // Lo recién pedido puede no aparecer aún en la lectura de la cuenta: sigue en revisión.
     expect(synced.map((item) => [item.name, item.status, item.messageKey, item.variables])).toEqual([
       ["bienvenida", "aprobada", null, 1],
+      ["odentia_aviso_cita_cancelada_v1", "en_revision", "aviso_cita_cancelada", 3],
+      ["odentia_aviso_cita_movida_v1", "en_revision", "aviso_cita_movida", 3],
+      ["odentia_aviso_cita_reservada_v1", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
       ["odentia_recordatorio_cita_v1", "rechazada", "recordatorio_cita", 3],
       ["odentia_recordatorio_control_v1", "deshabilitada", "recordatorio_control", 0],
@@ -939,7 +938,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0 })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(8)
+    expect(rows).toHaveLength(11)
   })
 })
 
@@ -1358,22 +1357,25 @@ describe("el texto de un mensaje es de cada clínica", () => {
 })
 
 describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
-  /** Oportunidad del contacto con su próxima acción (y su seguimiento abierto), por la operación de siempre. */
+  /** Oportunidad del contacto con su tarea (su próxima acción, una sola), por la operación de siempre. */
   async function opportunityFor(c: Clinic, contactId: string, nextActionAt: Date, options: { title?: string; owner?: string } = {}) {
     const created = await run(c, (tx) =>
       createOpportunity(tx, c.orgId, {
-        contactId, title: options.title ?? "Ortodoncia", nextActionAt: nextActionAt.toISOString(),
+        contactId, title: options.title ?? "Ortodoncia",
         ...(options.owner ? { assignedUserId: options.owner } : {}),
       }, { userId: c.ownerId }),
     )
+    await run(c, (tx) => setOpportunityTask(tx, c.orgId, created.id, { dueAt: nextActionAt.toISOString() }, { userId: c.ownerId, createdBy: "user" }))
     return created.id
   }
+  const reschedule = (c: Clinic, opportunityId: string, dueAt: Date) =>
+    run(c, (tx) => setOpportunityTask(tx, c.orgId, opportunityId, { dueAt: dueAt.toISOString() }, { userId: c.ownerId, createdBy: "user" }))
   const sync = (c: Clinic, now = NOW) => run(c, (tx) => syncOpportunityFollowUps(tx, c.orgId, now))
   const opportunityRow = async (id: string) => (await ownerDb.select().from(opportunity).where(eq(opportunity.id, id)))[0]!
   const followUpTask = async (opportunityId: string) =>
-    (await ownerDb.select().from(crmTask).where(and(eq(crmTask.opportunityId, opportunityId), eq(crmTask.kind, "opportunity_follow_up"))))[0]!
+    (await ownerDb.select().from(crmTask).where(eq(crmTask.opportunityId, opportunityId)))[0]!
 
-  it("anota el caso cuando la próxima acción vence con la línea prendida, una vez por vencimiento", async () => {
+  it("anota el caso cuando la tarea de la oportunidad vence con la línea prendida, una vez por vencimiento", async () => {
     const c = await clinic()
     const enabledAt = new Date(NOW.getTime() - DAY)
     const old = await person(c, "Venció antes")
@@ -1390,12 +1392,12 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const [job] = await jobsOf(c)
     expect(job).toMatchObject({
       kind: "seguimiento_comercial", status: "pendiente", opportunityId: dueId, contactId: due.contactId, patientId: null,
-      payload: { dueAt: dueAt.toISOString(), ownerUserId: c.dentistId },
+      payload: { dueAt: dueAt.toISOString(), taskId: (await followUpTask(dueId)).id, ownerUserId: c.dentistId },
     })
     // Repetir el ciclo no lo duplica.
     expect((await sync(c)).programados).toBe(0)
     // Reprogramada y vencida otra vez es otro caso.
-    await run(c, (tx) => updateOpportunity(tx, c.orgId, dueId, { nextActionAt: new Date(NOW.getTime() - HOUR).toISOString() }, { userId: c.ownerId }))
+    await reschedule(c, dueId, new Date(NOW.getTime() - HOUR))
     expect((await sync(c)).programados).toBe(1)
     expect(await jobsOf(c)).toHaveLength(2)
   })
@@ -1420,9 +1422,12 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
         { id: replyId("baja", job!.id), title: "No enviar más" },
       ],
     })
-    // Recepción sigue la conversación con la oportunidad a la vista: el hilo queda en ella y en su seguimiento.
+    // Recepción sigue la conversación con la oportunidad a la vista: el hilo queda en ella y en su tarea,
+    // y la tarea se da por hecha porque el agente ya le escribió.
     expect((await opportunityRow(oppId)).conversationId).toBe(p.conversationId)
-    expect((await followUpTask(oppId)).conversationId).toBe(p.conversationId)
+    expect(await followUpTask(oppId)).toMatchObject({
+      conversationId: p.conversationId, status: "done", settledReason: "el agente le escribió para retomarla",
+    })
   })
 
   it("no escribió hace poco: sale el mensaje aprobado, con cada dato en su variable", async () => {
@@ -1458,7 +1463,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect(body).toMatch(/Si no quieres recibir más estos mensajes: https:\/\/clinica\.test\/baja\/\S+$/)
   })
 
-  it("sin permiso: cierra el caso con su causa y deja la tarea a quien lleva la oportunidad", async () => {
+  it("sin permiso: cierra el caso con su causa y la misma tarea queda para quien lleva la oportunidad, sin otra", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
     const owned = await person(c, "Con responsable")
@@ -1469,22 +1474,22 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido"])
     const jobs = await jobsOf(c)
     expect(jobs.every((job) => job.status === "omitido" && job.cause === "sin_permiso")).toBe(true)
-    const tasks = (await tasksOf(c)).filter((task) => task.createdBy === "admin")
-    const taskOf = (opportunityId: string) => tasks.find((task) => task.opportunityId === opportunityId)
-    expect(taskOf(ownedId)).toMatchObject({
-      title: "Llamar a Con responsable para retomar su consulta", assigneeUserId: c.dentistId, area: "recepcion",
+    const tasks = await tasksOf(c)
+    expect(tasks.filter((task) => task.createdBy === "admin")).toEqual([])
+    const taskOf = (opportunityId: string) => tasks.filter((task) => task.opportunityId === opportunityId)
+    expect(taskOf(ownedId)).toEqual([expect.objectContaining({
+      title: "Llamar a Con responsable por Ortodoncia", assigneeUserId: c.dentistId,
       contactId: owned.contactId, status: "open",
       reason: "El agente no pudo escribirle: no aceptó mensajes de la clínica. Pídele el permiso la próxima vez que venga o escriba.",
-    })
+    })])
+    expect(jobs.find((job) => job.opportunityId === ownedId)?.taskId).toBe(taskOf(ownedId)[0]?.id)
     // Sin responsable, la tarea va al equipo de recepción.
-    expect(taskOf(looseId)).toMatchObject({ assigneeUserId: null, area: "recepcion" })
-    const adminNotices = (await noticesOf(c)).filter((notice) => notice.href.startsWith("/agent/administrador"))
-    expect(adminNotices.map((notice) => [notice.title, notice.href])).toEqual([
-      ["«Retomar una oportunidad»: no pude escribirle a 2 personas", "/agent/administrador?linea=seguimiento_comercial&ver=no-pudo"],
-    ])
+    expect(taskOf(looseId)).toEqual([expect.objectContaining({ assigneeUserId: null, area: "recepcion" })])
+    // Sin aviso en la campana: lo dice «Te espera» a quien puede habilitarlo.
+    expect((await noticesOf(c)).filter((notice) => notice.href.startsWith("/agent/administrador"))).toEqual([])
   })
 
-  it("si la oportunidad se cerró o su próxima acción se reprogramó antes de escribir, no se escribe", async () => {
+  it("si la oportunidad se cerró o su tarea se reprogramó antes de escribir, no se escribe", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
     const closed = await person(c, "Ya decidió", { consent: ["seguimiento"], openWindow: true })
@@ -1492,12 +1497,12 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const closedId = await opportunityFor(c, closed.contactId, new Date(NOW.getTime() - HOUR))
     const movedId = await opportunityFor(c, moved.contactId, new Date(NOW.getTime() - HOUR))
     await sync(c)
-    await run(c, (tx) => closeOpportunity(tx, c.orgId, closedId, { outcome: "won", reason: "Aceptó el tratamiento" }, { userId: c.ownerId }))
-    await run(c, (tx) => updateOpportunity(tx, c.orgId, movedId, { nextActionAt: new Date(NOW.getTime() + 3 * DAY).toISOString() }, { userId: c.ownerId }))
+    await run(c, (tx) => closeOpportunity(tx, c.orgId, closedId, { outcome: "won", reason: "acepto" }, { userId: c.ownerId }))
+    await reschedule(c, movedId, new Date(NOW.getTime() + 3 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["cancelado", "cancelado"])
     const jobs = await jobsOf(c)
     expect(jobs.find((job) => job.opportunityId === closedId)).toMatchObject({ status: "cancelado", lastError: "La oportunidad ya se cerró", sentMessageId: null })
-    expect(jobs.find((job) => job.opportunityId === movedId)).toMatchObject({ status: "cancelado", lastError: "La próxima acción ya se atendió o se reprogramó", sentMessageId: null })
+    expect(jobs.find((job) => job.opportunityId === movedId)).toMatchObject({ status: "cancelado", lastError: "La tarea de la oportunidad ya se hizo o se reprogramó", sentMessageId: null })
     expect((await noticesOf(c)).filter((notice) => notice.href.startsWith("/agent/administrador"))).toHaveLength(0)
   })
 
@@ -1531,7 +1536,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const detail = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "seguimiento_comercial"))
     expect(detail).toMatchObject({
       actor: "agente",
-      description: "El agente Recepción le escribiría para retomar la conversación. Si no puede, avisa por qué y cómo habilitarlo, y quedaría una tarea para quien lo lleva.",
+      description: "El agente Recepción le escribiría para retomar la conversación y daría la tarea por hecha. Si no puede, avisa por qué y cómo habilitarlo, y la misma tarea quedaría para quien lleva la oportunidad.",
       message: { text: "Hola, Lucía. Te escribimos de Clínica Sonríe sobre tu consulta de «Ortodoncia». ¿Seguimos conversando?", buttons: ["Sí, continuemos", "No enviar más"] },
     })
     expect(detail.noticeExample).toContain("No pude escribirle a Tomás Rivas")

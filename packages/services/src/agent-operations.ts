@@ -45,11 +45,12 @@ import {
 } from "./conversations.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
+  CHOOSABLE_LOST_REASONS,
   closeOpportunity,
   createOpportunity,
   getOpportunity,
   moveOpportunity,
-  updateOpportunity,
+  setOpportunityTask,
 } from "./opportunities.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
@@ -342,6 +343,95 @@ export async function getAgentPatientSummary(
   }
 }
 
+/** Una cita que el interlocutor puede confirmar, dicha para el agente. */
+export interface ContactAppointmentOption {
+  appointmentId: string
+  patientName: string
+  startsAt: string
+  branchName: string
+  branchTimezone: string | null
+  dentistName: string
+}
+
+export type ContactConfirmOutcome =
+  | { outcome: "confirmada" | "ya_confirmada"; appointment: ContactAppointmentOption }
+  | { outcome: "ninguna" }
+  | { outcome: "varias"; options: ContactAppointmentOption[] }
+
+/**
+ * El interlocutor confirma por escrito («sí, ahí estaré») una cita que ya
+ * existe. Es la misma operación que el botón «Confirmar» del recordatorio
+ * (`setAppointmentStatus`), sin propuesta: confirmar su propia cita no cambia
+ * nada más y se deshace en la Agenda. Solo citas por venir de los pacientes
+ * que el interlocutor está autorizado a ver (`resolveAgentPatientContext`):
+ * nunca la de otra persona. Sin `appointmentId` confirma la única que espera
+ * su sí; con varias devuelve las opciones para que el agente pregunte.
+ * Queda auditado con `via: "conversacion"` y la conversación.
+ */
+export async function confirmAppointmentByContact(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; conversationId: string; appointmentId?: string },
+): Promise<ContactConfirmOutcome> {
+  const now = new Date()
+  const options: Array<ContactAppointmentOption & { status: string }> = []
+  for (const candidate of await listPatientsByContact(tx, orgId, input.contactId)) {
+    try {
+      await resolveAgentPatientContext(tx, orgId, input.contactId, candidate.id)
+    } catch (error) {
+      if (error instanceof ServiceError && error.code === "PATIENT_CONTEXT_FORBIDDEN") continue
+      throw error
+    }
+    const rows = await tx
+      .select({
+        appointmentId: appointment.id,
+        status: appointment.status,
+        startsAt: appointment.startsAt,
+        branchName: branch.name,
+        branchTimezone: branch.timezone,
+        dentistName: user.name,
+      })
+      .from(appointment)
+      .innerJoin(branch, eq(branch.id, appointment.branchId))
+      .innerJoin(user, eq(user.id, appointment.dentistUserId))
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.patientId, candidate.id),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          gt(appointment.startsAt, now),
+        ),
+      )
+      .orderBy(asc(appointment.startsAt))
+    for (const row of rows) {
+      options.push({ ...row, startsAt: row.startsAt.toISOString(), patientName: candidate.displayName })
+    }
+  }
+  const strip = ({ status: _status, ...option }: (typeof options)[number]): ContactAppointmentOption => option
+  let chosen: (typeof options)[number] | undefined
+  if (input.appointmentId) {
+    chosen = options.find((option) => option.appointmentId === input.appointmentId)
+    if (!chosen) {
+      throw new ServiceError(
+        "APPOINTMENT_NOT_CONFIRMABLE",
+        409,
+        "Esa cita no es una cita por venir de alguien que esta persona puede confirmar",
+      )
+    }
+  } else {
+    const waiting = options.filter((option) => option.status === "programada")
+    if (waiting.length > 1) return { outcome: "varias", options: waiting.map(strip) }
+    chosen = waiting[0] ?? (options.length === 1 ? options[0] : undefined)
+    if (!chosen) return options.length === 0 ? { outcome: "ninguna" } : { outcome: "varias", options: options.map(strip) }
+  }
+  if (chosen.status === "confirmada") return { outcome: "ya_confirmada", appointment: strip(chosen) }
+  await setAppointmentStatus(tx, orgId, null, chosen.appointmentId, "confirmada", {
+    via: "conversacion",
+    conversationId: input.conversationId,
+  })
+  return { outcome: "confirmada", appointment: strip(chosen) }
+}
+
 async function hasEconomicRole(tx: Db, orgId: string, patientId: string, contactId: string): Promise<boolean> {
   const today = new Date().toISOString().slice(0, 10)
   const [grant] = await tx
@@ -551,7 +641,7 @@ export const PROPOSAL_ACTION_LABEL: Record<ProposalAction, string> = {
   enviar_mensaje: "Enviar mensaje",
   mover_oportunidad: "Mover oportunidad",
   crear_oportunidad: "Crear oportunidad",
-  actualizar_seguimiento: "Actualizar seguimiento",
+  actualizar_seguimiento: "Dejar la tarea de una oportunidad",
   cerrar_oportunidad: "Cerrar oportunidad",
 }
 
@@ -563,6 +653,14 @@ async function stageNamesById(tx: Db, ids: string[]): Promise<Map<string, string
     .where(inArray(pipelineStage.id, ids))
   return new Map(stages.map((s) => [s.id, s.name]))
 }
+
+/** La próxima acción de una oportunidad es su tarea abierta: su vencimiento y su título. */
+const OPP_TASK_DUE = sql<Date | null>`(select t.due_at from task t where t.organization_id = ${opportunity.organizationId}
+  and t.opportunity_id = ${opportunity.id} and t.status = 'open' limit 1)`.mapWith((value: unknown) =>
+  value ? new Date(value as string) : null,
+)
+const OPP_TASK_TITLE = sql<string | null>`(select t.title from task t where t.organization_id = ${opportunity.organizationId}
+  and t.opportunity_id = ${opportunity.id} and t.status = 'open' limit 1)`
 
 /** Oportunidad del contacto o nulo (nunca la de otro interlocutor). */
 async function contactOpportunityOrNull(tx: Db, orgId: string, contactId: string, opportunityId: unknown) {
@@ -601,7 +699,7 @@ async function summarizeAfter(
     const line = [payloadText(payload["nextActionNote"]), payloadDate(payload["nextActionAt"], zone)]
       .filter(Boolean)
       .join(" · ")
-    return line ? `Nuevo seguimiento: ${line}` : label
+    return line ? `Nueva tarea: ${line}` : label
   }
   if (action === "cerrar_oportunidad") {
     const outcome = payload["outcome"] === "won" ? "Ganada" : payload["outcome"] === "lost" ? "Perdida" : null
@@ -637,8 +735,8 @@ async function summarizeBefore(
     if (!name) return null
     return action === "mover_oportunidad" ? `Etapa actual: ${name}` : `Abierta en etapa: ${name}`
   }
-  const line = [payloadText(opp.nextActionNote), payloadDate(opp.nextActionAt, zone)].filter(Boolean).join(" · ")
-  return line ? `Seguimiento actual: ${line}` : null
+  const line = [payloadText(opp.nextTask?.title), payloadDate(opp.nextTask?.dueAt, zone)].filter(Boolean).join(" · ")
+  return line ? `Tarea actual: ${line}` : null
 }
 
 /**
@@ -715,8 +813,8 @@ async function captureExpectedState(
       opportunityId: opp.id,
       stageId: opp.stageId,
       status: opp.status,
-      nextActionAt: opp.nextActionAt,
-      nextActionNote: opp.nextActionNote,
+      nextActionAt: opp.nextTask?.dueAt ?? null,
+      nextActionNote: opp.nextTask?.title ?? null,
     }
   }
   if ((action === "reprogramar_cita" || action === "cancelar_cita") && typeof payload["appointmentId"] === "string") {
@@ -758,7 +856,7 @@ function oppCurrentSummary(
   if (!live) return "La oportunidad ya no está disponible"
   if (action === "actualizar_seguimiento") {
     const line = [payloadText(live.nextActionNote), payloadDate(live.nextActionAt, zone)].filter(Boolean).join(" · ")
-    return line ? `Seguimiento actual: ${line}` : "Sin seguimiento programado"
+    return line ? `Tarea actual: ${line}` : "Sin tarea"
   }
   const stage = stageName ?? `etapa ${live.stageId.slice(0, 8)}…`
   return live.status === "open" ? `Etapa actual: ${stage}` : `Cerrada (${live.status}): ${stage}`
@@ -786,7 +884,7 @@ function oppFreshness(
     action === "actualizar_seguimiento" &&
     (live.nextActionAt !== (expected.nextActionAt ?? null) || live.nextActionNote !== (expected.nextActionNote ?? null))
   ) {
-    return { isStale: true, currentSummary, reason: "el seguimiento cambió desde la propuesta" }
+    return { isStale: true, currentSummary, reason: "la tarea de la oportunidad cambió desde la propuesta" }
   }
   return { isStale: false, currentSummary, reason: "" }
 }
@@ -864,8 +962,8 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
             patientId: opportunity.patientId,
             stageId: opportunity.stageId,
             status: opportunity.status,
-            nextActionAt: opportunity.nextActionAt,
-            nextActionNote: opportunity.nextActionNote,
+            nextActionAt: OPP_TASK_DUE,
+            nextActionNote: OPP_TASK_TITLE,
           })
           .from(opportunity)
           .where(inArray(opportunity.id, [...opportunityIds]))
@@ -1069,8 +1167,6 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
     if (typeof payload["title"] !== "string" || !payload["title"].trim() || payload["title"].length > 200) {
       throw validation("title debe tener 1–200 caracteres")
     }
-    uuidField(payload, "stageId", "stageId", true)
-    uuidField(payload, "pipelineId", "pipelineId", true)
     uuidField(payload, "patientId", "patientId", true)
     if (payload["interestText"] !== undefined && (typeof payload["interestText"] !== "string" || payload["interestText"].length > 500)) {
       throw validation("interestText supera 500 caracteres")
@@ -1110,7 +1206,10 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
   uuidField(payload, "opportunityId", "opportunityId")
   if (payload["outcome"] !== "won" && payload["outcome"] !== "lost") throw validation("outcome debe ser won|lost")
   if (typeof payload["reason"] !== "string" || !payload["reason"].trim() || payload["reason"].length > 500) {
-    throw validation("reason debe tener 1–500 caracteres")
+    throw validation("Elige el motivo del cierre de la lista")
+  }
+  if (payload["note"] !== undefined && payload["note"] !== null && (typeof payload["note"] !== "string" || payload["note"].length > 500)) {
+    throw validation("La nota del cierre supera 500 caracteres")
   }
 }
 
@@ -1493,7 +1592,13 @@ async function lockContactOpportunity(tx: Db, orgId: string, contactId: string, 
     .limit(1)
   if (!live) throw validation("La oportunidad ya no existe")
   if (live.contactId !== contactId) throw validation("La oportunidad no pertenece a este interlocutor")
-  return live
+  // Su próxima acción es su tarea abierta (una sola).
+  const [task] = await tx
+    .select({ dueAt: crmTask.dueAt, title: crmTask.title })
+    .from(crmTask)
+    .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.opportunityId, opportunityId), eq(crmTask.status, "open")))
+    .limit(1)
+  return { ...live, nextActionAt: task?.dueAt ?? null, nextActionNote: task?.title ?? null }
 }
 
 /**
@@ -1562,6 +1667,8 @@ export async function executeProposal(
         // El agente y el interlocutor que confirma no son usuarios: la cita
         // queda sin autora y quién la decidió consta en la auditoría.
         createdByUserId: teamUserId,
+        // Se le dijo en la misma conversación: «Recordar la cita» no repite el aviso.
+        notice: false,
       })
       result = { appointmentId: created.id, startsAt: created.startsAt, dentistName: created.dentistName }
     } else if (action === "reprogramar_cita") {
@@ -1595,7 +1702,7 @@ export async function executeProposal(
         endsAt: typeof payload["endsAt"] === "string" ? (payload["endsAt"] as string) : undefined,
         dentistUserId: typeof payload["dentistUserId"] === "string" ? (payload["dentistUserId"] as string) : undefined,
         chairId: typeof payload["chairId"] === "string" ? (payload["chairId"] as string) : undefined,
-      })
+      }, { notice: false })
       result = { appointmentId: moved.id, startsAt: moved.startsAt }
     } else if (action === "cancelar_cita") {
       const appointmentId = payload["appointmentId"] as string
@@ -1621,7 +1728,7 @@ export async function executeProposal(
         startsAt: liveAppt.startsAt,
       }, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada")
+      const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada", { notice: false })
       result = { appointmentId: cancelled.id, status: cancelled.status }
     } else if (action === "enviar_mensaje") {
       const conversationId = locked.conversationId
@@ -1669,38 +1776,50 @@ export async function executeProposal(
       }
       const fresh = oppFreshness("mover_oportunidad", expected, liveOpp, stageName, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const { detail } = await moveOpportunity(tx, orgId, opportunityId, payload["stageId"] as string, {
+      const detail = await moveOpportunity(tx, orgId, opportunityId, payload["stageId"] as string, {
         userId: teamUserId,
+        origin: "agente",
       })
       result = { opportunityId, stageId: detail.stageId, stageName: detail.stageName }
     } else if (action === "crear_oportunidad") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
+      // Nace en «Interesado» y, sin responsable, es de Recepción. Si la persona
+      // ya tiene abierta la del mismo interés, el agente sigue con esa.
       const created = await createOpportunity(
         tx,
         orgId,
         {
           contactId: locked.contactId,
           title: payload["title"] as string,
-          ...(typeof payload["pipelineId"] === "string" ? { pipelineId: payload["pipelineId"] as string } : {}),
-          ...(typeof payload["stageId"] === "string" ? { stageId: payload["stageId"] as string } : {}),
           ...(typeof payload["patientId"] === "string" ? { patientId: payload["patientId"] as string } : {}),
           ...(typeof payload["serviceId"] === "string" ? { serviceId: payload["serviceId"] as string } : {}),
           ...(typeof payload["interestText"] === "string" ? { interestText: payload["interestText"] as string } : {}),
-          ...(typeof payload["amountCents"] === "number" ? { amountCents: payload["amountCents"] as number } : {}),
-          ...(typeof payload["currency"] === "string" ? { currency: payload["currency"] as string } : {}),
           ...(typeof payload["assignedUserId"] === "string" ? { assignedUserId: payload["assignedUserId"] as string } : {}),
-          ...(payload["nextActionAt"] !== undefined ? { nextActionAt: payload["nextActionAt"] as string | null } : {}),
-          ...(payload["nextActionNote"] !== undefined ? { nextActionNote: payload["nextActionNote"] as string | null } : {}),
           ...(typeof payload["budgetId"] === "string" ? { budgetId: payload["budgetId"] as string } : {}),
           ...(locked.conversationId ? { conversationId: locked.conversationId } : {}),
         },
-        { userId: teamUserId },
+        { userId: teamUserId, origin: "agente" },
+        { reuseOpen: true },
       )
+      // Propuestas anteriores podían traer la próxima acción: ahora es su tarea.
+      if (typeof payload["nextActionAt"] === "string" || typeof payload["nextActionNote"] === "string") {
+        await setOpportunityTask(
+          tx,
+          orgId,
+          created.id,
+          {
+            title: typeof payload["nextActionNote"] === "string" ? (payload["nextActionNote"] as string) : null,
+            dueAt: typeof payload["nextActionAt"] === "string" ? (payload["nextActionAt"] as string) : null,
+          },
+          { userId: teamUserId, createdBy: "agent" },
+        )
+      }
       result = {
         opportunityId: created.id,
         createdOpportunityId: created.id,
         title: created.title,
         stageId: created.stageId,
+        ...(created.reused ? { reused: true } : {}),
       }
     } else if (action === "actualizar_seguimiento") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
@@ -1720,20 +1839,22 @@ export async function executeProposal(
       }
       const fresh = oppFreshness("actualizar_seguimiento", expected, liveOpp, null, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const updated = await updateOpportunity(
+      // La próxima acción es la tarea de la oportunidad: se crea o se cambia, nunca otra.
+      const task = await setOpportunityTask(
         tx,
         orgId,
         opportunityId,
         {
-          ...(payload["nextActionAt"] !== undefined ? { nextActionAt: payload["nextActionAt"] as string | null } : {}),
-          ...(payload["nextActionNote"] !== undefined ? { nextActionNote: payload["nextActionNote"] as string | null } : {}),
+          ...(typeof payload["nextActionNote"] === "string" ? { title: payload["nextActionNote"] as string } : {}),
+          ...(payload["nextActionAt"] !== undefined ? { dueAt: payload["nextActionAt"] as string | null } : {}),
         },
-        { userId: teamUserId },
+        { userId: teamUserId, createdBy: "agent" },
       )
       result = {
         opportunityId,
-        nextActionAt: updated.nextActionAt,
-        nextActionNote: updated.nextActionNote,
+        taskId: task.taskId,
+        nextActionAt: task.dueAt,
+        nextActionNote: task.title,
       }
     } else {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
@@ -1754,12 +1875,20 @@ export async function executeProposal(
       }
       const fresh = oppFreshness("cerrar_oportunidad", expected, liveOpp, stageName, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
+      // Los motivos son de la lista; una propuesta antigua con texto libre queda como «Otro» con su nota.
+      const outcome = payload["outcome"] as "won" | "lost"
+      const raw = typeof payload["reason"] === "string" ? (payload["reason"] as string) : ""
+      const listed = outcome === "won" ? raw === "acepto" : (CHOOSABLE_LOST_REASONS as readonly string[]).includes(raw)
       const closed = await closeOpportunity(
         tx,
         orgId,
         opportunityId,
-        { outcome: payload["outcome"] as "won" | "lost", reason: payload["reason"] as string },
-        { userId: teamUserId },
+        {
+          outcome,
+          reason: listed ? raw : outcome === "won" ? "acepto" : "otro",
+          note: typeof payload["note"] === "string" ? (payload["note"] as string) : listed ? null : raw.slice(0, 500) || null,
+        },
+        { userId: teamUserId, origin: "agente" },
       )
       result = { opportunityId, outcome: payload["outcome"], closedAt: closed.closedAt }
     }
@@ -1920,12 +2049,17 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
   })
 }
 
-/** Derivaciones que siguen abiertas (sin resolver), para contadores ligeros. */
-export async function countOpenHandoffs(tx: Db, orgId: string): Promise<number> {
+/**
+ * Casos que pasó el agente y siguen sin resolver. Con `forUserId`, el único
+ * contador de la aplicación (el del menú del Agente): lo que nadie ha tomado
+ * más lo que es de esa persona; lo que tomó otra no la espera.
+ */
+export async function countOpenHandoffs(tx: Db, orgId: string, opts: { forUserId?: string } = {}): Promise<number> {
   const [row] = await tx.execute<{ count: number }>(sql`
     select count(*)::int as count
     from agent_handoff h
-    where h.organization_id = ${orgId} and ${handoffOpenSql(sql.raw("h"))}`)
+    where h.organization_id = ${orgId} and ${handoffOpenSql(sql.raw("h"))}
+      ${opts.forUserId ? sql`and (h.assignee_user_id is null or h.assignee_user_id = ${opts.forUserId})` : sql``}`)
   return row?.count ?? 0
 }
 
@@ -1983,7 +2117,10 @@ export interface AgentPanelSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
-  /** Casos que el agente pasó a una persona y siguen sin resolver: lo que espera al equipo. */
+  /**
+   * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Es el
+   * único contador (el del menú del Agente); ninguna otra parte lo repite.
+   */
   openHandoffs: number
   /** Corridas de hoy que respondieron o derivaron (zona de la organización). */
   interventionsToday: number
@@ -1997,7 +2134,7 @@ export interface AgentPanelSummary {
  * Resumen ligero para el botón y la cabecera del panel del agente: legible
  * con `agent.decide` (recepción) sin exponer configuración ni modelo.
  */
-export async function getAgentPanelSummary(tx: Db, orgId: string): Promise<AgentPanelSummary> {
+export async function getAgentPanelSummary(tx: Db, orgId: string, userId: string): Promise<AgentPanelSummary> {
   await expireDueProposals(tx, orgId)
   const { locale, timezone } = await getOrgLocale(tx, orgId)
   const [cfg] = await tx
@@ -2009,7 +2146,7 @@ export async function getAgentPanelSummary(tx: Db, orgId: string): Promise<Agent
   return {
     enabled: cfg?.enabled ?? false,
     awaitingContact: await countAwaitingContact(tx, orgId),
-    openHandoffs: await countOpenHandoffs(tx, orgId),
+    openHandoffs: await countOpenHandoffs(tx, orgId, { forUserId: userId }),
     interventionsToday: today.ok + today.handoff,
     failedToday: today.error + today.sinRespuesta,
     locale,
@@ -2023,32 +2160,14 @@ async function enrichHandoff(tx: Db, row: HandoffRow): Promise<HandoffItem> {
   return item
 }
 
-async function teamUserIds(tx: Db, orgId: string): Promise<string[]> {
-  // Quienes deciden propuestas (`agent.decide`): owner/admin más recepción
-  // operativa. El aviso no lleva datos clínicos; solo título, acto y ruta.
-  const rows = await tx
-    .select({ userId: member.userId })
-    .from(member)
-    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin", "reception"])))
-    .limit(20)
-  return rows.map((r) => r.userId)
-}
-
 async function notifyUsers(
   tx: Db,
   orgId: string,
   userIds: string[],
-  input: { dedupeKey: string; title: string; body: string; href: string; permission: string },
+  input: { dedupeKey: string; title: string; body: string; href: string; permission: string; subject?: string },
 ) {
   for (const userId of [...new Set(userIds)]) {
-    await createWorkspaceNotification(tx, orgId, {
-      userId,
-      dedupeKey: `${input.dedupeKey}:${userId}`,
-      title: input.title,
-      body: input.body,
-      href: input.href,
-      permission: input.permission,
-    })
+    await createWorkspaceNotification(tx, orgId, { ...input, userId, dedupeKey: `${input.dedupeKey}:${userId}` })
   }
 }
 
@@ -2098,6 +2217,8 @@ export async function notifyAgentProviderProblem(
       body: `${problem.detail.slice(0, 900)} Mientras tanto, los casos pasan al equipo.`,
       href: "/settings/agent",
       permission: "agent.write",
+      // Se retira solo cuando el agente vuelve a responder.
+      subject: "modelo-del-agente",
     },
   )
 }
@@ -2108,9 +2229,8 @@ export async function notifyAgentProviderProblem(
  * hay un envío posterior al disparador, o uno a la espera de decisión
  * (reentrega del mismo trabajo, o una corrida previa que contestó varios
  * mensajes seguidos). Si quedó sin respuesta, el agente sigue activo en el
- * hilo, así que se avisa a quien atiende para que nadie dé por hecho que el
- * interlocutor fue atendido; no deriva ni apaga el agente, y el aviso es uno
- * por mensaje disparador.
+ * hilo y la conversación espera respuesta: así la muestra «Te espera», no la
+ * campana. No deriva ni apaga el agente.
  */
 export async function reportAgentNoReply(
   tx: Db,
@@ -2158,27 +2278,20 @@ export async function reportAgentNoReply(
       .limit(1)
     if (pending) return false
   }
-  const team = await teamUserIds(tx, orgId)
-  await notifyUsers(tx, orgId, team, {
-    dedupeKey: `agent-no-reply:${input.triggerMessageId}`,
-    title: "El agente no respondió",
-    body: "Un mensaje entrante quedó sin respuesta del agente. Revisa la conversación.",
-    href: `/inbox?conversation=${input.conversationId}`,
-    permission: "conversations.read",
-  })
+  // Sin aviso en la campana: la conversación espera respuesta y así la muestra «Te espera».
   return true
 }
 
 /**
  * Plazo de recogida/resolución de una derivación por prioridad (política
- * explícita de recepción): vencida, avisa al responsable o escala al equipo.
+ * explícita de recepción). Vencida sigue en «Te espera»; la campana no avisa.
  */
 const HANDOFF_DUE_HOURS: Record<HandoffPriority, number> = { alta: 4, media: 24, baja: 72 }
 
 /**
  * Derivación con resumen factual, motivo, prioridad, responsable y tarea de
- * seguimiento. Apaga el agente en la conversación y avisa al responsable o
- * al equipo. Sin datos clínicos en el aviso.
+ * seguimiento. Apaga el agente en la conversación; el caso aparece en «Te
+ * espera» de quien puede tomarlo (no en la campana).
  */
 export async function createHandoff(
   tx: Db,
@@ -2228,7 +2341,8 @@ export async function createHandoff(
   }
   const createdBy = input.createdBy === "user" ? "user" : "agent"
   task ??= await createTask(tx, orgId, {
-    title: `Derivación (${priority}): ${reason}`.slice(0, 200),
+    // Un solo nombre en toda la aplicación (decisión 1): la prioridad la dice la fila, no el título.
+    title: `Te lo pasó el agente: ${reason}`.slice(0, 200),
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
@@ -2262,16 +2376,7 @@ export async function createHandoff(
     entityId: row.id,
     metadata: { priority, taskId: task.id, assigneeUserId },
   })
-  const recipients = assigneeUserId ? [assigneeUserId] : await teamUserIds(tx, orgId)
-  if (recipients.length) {
-    await notifyUsers(tx, orgId, recipients, {
-      dedupeKey: `agent-handoff:${row.id}`,
-      title: "Derivación del agente",
-      body: `Prioridad ${priority}: ${reason}`.slice(0, 200),
-      href: `/inbox?conversation=${input.conversationId}&fallbackTask=${task.id}`,
-      permission: "tasks.read",
-    })
-  }
+  // Sin aviso en la campana: el caso aparece en «Te espera», una sola vez.
   await notify(tx, { orgId, kind: "agent.handoff.created", at: new Date().toISOString() })
   return enrichHandoff(tx, row)
 }
@@ -2309,9 +2414,6 @@ export async function listHandoffs(
   orgId: string,
   input: { conversationId?: string; limit?: number; open?: boolean } = {},
 ): Promise<HandoffItem[]> {
-  // Escalamiento perezoso (mismo patrón que la caducidad de propuestas):
-  // la primera lectura consolida el aviso de vencidas, sin jobs ni duplicados.
-  await escalateOverdueHandoffs(tx, orgId)
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
   if (input.open) conditions.push(handoffStillOpen())
@@ -2373,7 +2475,7 @@ export async function claimHandoff(
       .limit(1)
     if (!existing) throw notFound("Derivación")
     if (existing.taskId && (await getTask(tx, orgId, existing.taskId)).status !== "open") {
-      throw new ServiceError("HANDOFF_RESOLVED", 409, "La derivación ya se resolvió; no admite responsable")
+      throw new ServiceError("HANDOFF_RESOLVED", 409, "Este caso ya se resolvió: no se puede tomar")
     }
     if (existing.assigneeUserId === userId) {
       const [row] = await tx
@@ -2383,17 +2485,10 @@ export async function claimHandoff(
         .limit(1)
       return enrichHandoff(tx, row!)
     }
-    throw new ServiceError("HANDOFF_ALREADY_CLAIMED", 409, "Otro miembro ya tomó esta derivación")
+    throw new ServiceError("HANDOFF_ALREADY_CLAIMED", 409, "Otra persona ya tomó este caso")
   }
   if (claimed.taskId) {
-    const task = await getTask(tx, orgId, claimed.taskId)
-    if (task.kind === "opportunity_follow_up" && task.opportunityId) {
-      // El seguimiento comercial toma su responsable de la oportunidad (tasks.ts
-      // rechaza asignarlo directo); asignar la oportunidad resincroniza la tarea.
-      await updateOpportunity(tx, orgId, task.opportunityId, { assignedUserId: userId }, { userId })
-    } else {
-      await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
-    }
+    await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
   }
   // Quien toma el caso tiene también la conversación: así lo ven la Bandeja y el ciclo que cierra.
   if (claimed.conversationId) {
@@ -2411,46 +2506,6 @@ export async function claimHandoff(
     metadata: { taskId: claimed.taskId },
   })
   return enrichHandoff(tx, claimed)
-}
-
-/**
- * Vencimiento según el plazo por prioridad: avisa al responsable o escala al
- * equipo cuando la tarea de la derivación sigue abierta pasado su plazo. La
- * clave de dedupe hace el aviso una sola vez (no duplica tareas ni avisos).
- */
-async function escalateOverdueHandoffs(tx: Db, orgId: string): Promise<void> {
-  const overdue = await tx
-    .select({
-      id: agentHandoff.id,
-      conversationId: agentHandoff.conversationId,
-      reason: agentHandoff.reason,
-      priority: agentHandoff.priority,
-      assigneeUserId: agentHandoff.assigneeUserId,
-      taskId: crmTask.id,
-    })
-    .from(agentHandoff)
-    .innerJoin(crmTask, eq(crmTask.id, agentHandoff.taskId))
-    .where(
-      and(
-        eq(agentHandoff.organizationId, orgId),
-        eq(crmTask.status, "open"),
-        lt(crmTask.dueAt, new Date()),
-      ),
-    )
-    .limit(50)
-  for (const row of overdue) {
-    const recipients = row.assigneeUserId ? [row.assigneeUserId] : await teamUserIds(tx, orgId)
-    if (!recipients.length) continue
-    await notifyUsers(tx, orgId, recipients, {
-      dedupeKey: `agent-handoff-overdue:${row.id}`,
-      title: "Derivación vencida",
-      body: `La derivación (prioridad ${row.priority}) superó su plazo sin resolverse: ${row.reason}`.slice(0, 200),
-      href: row.conversationId
-        ? `/inbox?conversation=${row.conversationId}&fallbackTask=${row.taskId}`
-        : `/tasks?task=${row.taskId}`,
-      permission: "tasks.read",
-    })
-  }
 }
 
 /* ---------- Supervisión: libro de corridas reales ---------- */

@@ -28,6 +28,21 @@ export interface CrmAgentStatus {
   conversationId: string | null
   reason: string | null
   pendingProposalIds: string[]
+  /** Hay una cita propuesta que espera el sí del interlocutor, sea cual sea el estado (`state` sigue el orden de la Bandeja). */
+  awaitingContact: boolean
+}
+
+/** La próxima cita en pie de la persona o de quien ella lleva (solo para quien ve la agenda). */
+export interface CrmNextAppointment {
+  id: string
+  patientId: string
+  patientName: string
+  startsAt: string
+  status: string
+  branchName: string
+  timeZone: string
+  dentistName: string
+  serviceName: string | null
 }
 
 export interface CrmContactWorkspace {
@@ -36,6 +51,31 @@ export interface CrmContactWorkspace {
   tasks: TaskItem[]
   agent: CrmAgentStatus
   activity: { items: CrmActivityItem[]; nextCursor: string | null }
+  nextAppointment: CrmNextAppointment | null
+  /** Lo que aceptó recibir sin haber escrito primero; null: nunca se le preguntó. */
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null }
+}
+
+/** «Aceptó recordatorios», «No aceptó mensajes de la clínica»…, para «Contexto». */
+export function messagePermissionsSaid(messages: CrmContactWorkspace["messages"]): string {
+  const accepted = [messages.recordatorio ? "recordatorios" : null, messages.seguimiento ? "seguimientos" : null].filter(Boolean)
+  if (accepted.length > 0) return `Aceptó ${accepted.join(" y ")}`
+  if (messages.recordatorio === false || messages.seguimiento === false) return "No aceptó mensajes de la clínica"
+  return "Aún no se le preguntó"
+}
+
+/** «jue 17 oct, 10:30 · Evaluación · Dra. Ruiz», con la hora de la sede. */
+export function nextAppointmentSaid(next: CrmNextAppointment, locale: string | undefined, personName: string): string {
+  const when = new Intl.DateTimeFormat(locale, {
+    timeZone: next.timeZone,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(next.startsAt))
+  const who = next.patientName === personName ? "" : `${next.patientName}: `
+  return `${who}${when} · ${next.serviceName ?? "Cita"} · ${next.dentistName}`
 }
 
 /** Clave de caché del contexto del contacto (conversación opcional). */
@@ -96,7 +136,7 @@ export function agentStateLabel(state: CrmAgentState): string {
     case "approval":
       return "Espera al paciente"
     case "handoff":
-      return "Con el equipo · caso derivado"
+      return "Te lo pasó el agente"
     case "closed":
       return "Cerrada"
   }
@@ -115,7 +155,7 @@ export function agentStateDescription(agent: CrmAgentStatus): string {
     case "approval":
       return `Hay ${agent.pendingProposalIds.length} propuesta(s) del agente esperando la confirmación del interlocutor.`
     case "handoff":
-      return "El agente derivó el caso al equipo."
+      return "El agente te pasó este caso: falta resolverlo."
     case "closed":
       return "Si le escribes, la conversación se vuelve a abrir."
   }
@@ -130,7 +170,7 @@ export function agentNextSteps(agent: CrmAgentStatus): string[] {
     case "approval":
       return ["Revisa lo que propuso el agente", "Si confirmó en el chat, registra su confirmación"]
     case "handoff":
-      return ["Lee el motivo de la derivación", "Tómala y responde"]
+      return ["Lee qué pide y lo que se le dijo", "Tómalo y responde"]
     case "human":
       return ["Responde el mensaje pendiente", "Al terminar, resuélvela o devuélvela al agente"]
     case "agent":
@@ -154,6 +194,6 @@ export function activityKindLabel(kind: CrmActivityItem["kind"]): string {
     case "proposal":
       return "Propuesta del agente"
     case "handoff":
-      return "Derivación"
+      return "Te lo pasó el agente"
   }
 }

@@ -58,7 +58,7 @@ import {
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   Armchair,
   CalendarClock,
@@ -172,6 +172,7 @@ function AgendaPage() {
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
   const requested = Route.useSearch()
+  const navigate = useNavigate()
 
   const sede = useActiveBranch()
   const resourcesQuery = useQuery({
@@ -269,9 +270,10 @@ function AgendaPage() {
     setDetail({ id: linked.id, mode: "view" })
   }, [requested.appointmentId, linkedAppointment.data, resources, setParam, sede.choose])
 
+  // Desde «Contexto» llega la persona, con su paciente o sin él (aún no es paciente).
   const contextualPatient = useQuery({
     queryKey: ["crm-context", requested.contactId, requested.conversationId ?? "todas"],
-    enabled: canWrite && !!requested.contactId && !!requested.patientId,
+    enabled: canWrite && !!requested.contactId,
     queryFn: () => fetchCrmContext(requested.contactId ?? "", requested.conversationId),
   })
   const patientLink = contextualPatient.data?.data.contact.patients.find(
@@ -295,11 +297,29 @@ function AgendaPage() {
       setBooking({ patient: { id: solo.id, name: solo.displayName }, lockedPatient: true })
       return
     }
+    // Quien aún no es paciente: «Nueva cita» abre con su ficha mínima por crear, unida a ella.
+    const person = contextualPatient.data?.data.contact
+    if (requested.contactId && !requested.patientId && person && resources && canWrite) {
+      const personKey = `${requested.contactId}::${requested.conversationId ?? ""}`
+      if (openedRequest.current === personKey) return
+      openedRequest.current = personKey
+      const self = person.patients.find((item) => item.relationship === "self")
+      setBooking(
+        self
+          ? { patient: { id: self.id, name: self.displayName }, lockedPatient: true, conversationId: requested.conversationId }
+          : {
+              person: { contactId: person.contact.id, name: person.contact.displayName, phone: person.contact.phone },
+              lockedPatient: true,
+              conversationId: requested.conversationId,
+            },
+      )
+      return
+    }
     const key =
       requested.contactId && requested.patientId
         ? `${requested.contactId}:${requested.patientId}:${requested.conversationId ?? ""}`
         : null
-    if (!key && !requested.patientId) openedRequest.current = null
+    if (!key && !requested.patientId && !requested.contactId) openedRequest.current = null
     if (key && key !== openedRequest.current && patientLink && resources && canWrite) {
       openedRequest.current = key
       setBooking({
@@ -314,6 +334,7 @@ function AgendaPage() {
     requested.conversationId,
     patientLink,
     soloPatient.data,
+    contextualPatient.data,
     resources,
     canWrite,
   ])
@@ -943,10 +964,11 @@ function AgendaPage() {
         }
       />
 
-      {requested.patientId &&
+      {((requested.patientId &&
         (contextualPatient.error ||
           soloPatient.isError ||
-          (contextualPatient.isSuccess && !patientLink)) && (
+          (contextualPatient.isSuccess && requested.contactId && !patientLink))) ||
+        (requested.contactId && !requested.patientId && contextualPatient.isError)) && (
           <p role="alert" className="text-sm text-destructive">
             No se pudo preparar la cita: comprueba el vínculo del paciente y vuelve a abrir el caso.
           </p>
@@ -1175,7 +1197,15 @@ function AgendaPage() {
           onClose={closeBooking}
           onSaved={async (created) => {
             setMessage(`Cita de ${created.patientName} reservada`)
+            // Reservada desde una conversación: se vuelve al hilo, donde el agente le avisa.
+            const backTo = booking.conversationId
             closeBooking()
+            if (backTo) {
+              await invalidate()
+              await queryClient.invalidateQueries({ queryKey: ["crm-context"] })
+              void navigate({ to: "/inbox", search: { conversation: backTo } })
+              return
+            }
             // Se va al día de la cita: quien reserva ve lo que acaba de reservar.
             const date = zonedDateOf(created.startsAt, TZ)
             if (date !== day) goTo(date)

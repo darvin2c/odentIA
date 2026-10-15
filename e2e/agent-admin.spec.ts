@@ -1,6 +1,6 @@
 import { member } from "@odentia/db/schema/auth"
 import { automationJob, automationRule } from "@odentia/db/schema/automation"
-import { clinicalFollowUp } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, encounter } from "@odentia/db/schema/clinical"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
@@ -28,8 +28,7 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   const admin = () => call<PageData>(page, "GET", "/api/agent/admin", org.slug)
   const lineOf = async (key: string) => (await admin()).lines.find((line) => line.key === key)
 
-  // Un control vencido de un paciente sin cita (lo haría el agente) y un seguimiento que nadie lleva (le toca a una persona).
-  const contact = await call<{ id: string }>(page, "POST", "/api/contacts", org.slug, { displayName: "Interesada sin dueño" }, 201)
+  // Un control vencido de un paciente sin cita (lo haría el agente) y una atención sin firmar (le toca a una persona).
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
     submissionId: crypto.randomUUID(),
     answers: { demographics: { displayName: "Mariana Soto", docType: "DNI", docNumber: "87654321" }, respondent: "staff", privacyAccepted: false },
@@ -39,7 +38,10 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
     organizationId: org.id, patientId: patient.id, kind: "mantenimiento", title: "Control de ortodoncia",
     dueAt: new Date(Date.now() - 10 * 86_400_000),
   })
-  await call(page, "POST", "/api/opportunities", org.slug, { contactId: contact.id, title: "Blanqueamiento" }, 201)
+  await fixtureDb.insert(encounter).values({
+    organizationId: org.id, patientId: patient.id, dentistUserId: owner.user.id,
+    startedAt: new Date(Date.now() - 3 * 86_400_000),
+  })
 
   // --- Apagado: Inicio no muestra nada y su página enseña lo que recomendaría ---
   expect(await advice()).toEqual({ enabled: false, recommendations: [], more: 0 })
@@ -55,28 +57,35 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
   const preview = page.getByRole("region", { name: "Con tus datos de hoy, esto te recomendaría" })
   await expect(preview).toContainText("1 control vencido de un paciente sin cita")
-  await expect(preview).toContainText("1 seguimiento abierto sin responsable")
-  await expect(preview).toContainText("Al encenderlo no hace nada por su cuenta.")
-  // Una sola lista: las nueve líneas, todas apagadas y sin poder prenderse mientras él esté apagado.
+  await expect(preview).toContainText("1 atención lleva más de 2 días sin firmar")
+  // «Recordar la cita» viene prendida en toda clínica nueva (ADR 0026): se ve y se puede apagar aunque él esté apagado.
+  const onWhileOff = page.getByRole("region", { name: "Prendidas" })
+  await expect(onWhileOff.getByRole("switch")).toHaveCount(1)
+  await expect(onWhileOff.getByRole("switch", { name: "Apagar: Recordar la cita" })).toBeEnabled()
+  await expect(onWhileOff).toContainText("Empiezan a hacerse solas cuando enciendas al administrador.")
+  await expect(preview).toContainText("Al encenderlo solo hace lo que ya está prendido.")
+  // Con una línea prendida ya no dice que al encenderlo no hace nada.
+  await expect(preview).not.toContainText("Al encenderlo no hace nada por su cuenta.")
+  // Las otras siete, apagadas y sin poder prenderse mientras él esté apagado.
   const ready = page.getByRole("region", { name: "Listas para activar" })
-  await expect(ready.getByRole("switch")).toHaveCount(9)
+  await expect(ready.getByRole("switch")).toHaveCount(7)
   for (const item of await ready.getByRole("switch").all()) await expect(item).toBeDisabled()
-  await expect(page.getByRole("region", { name: "Prendidas" })).toHaveCount(0)
-  // Cada línea dice quién lo hace, con palabras.
-  await expect(ready.getByText("Lo hace el agente")).toHaveCount(5)
-  await expect(ready.getByText("Le toca a una persona")).toHaveCount(4)
+  // Cada línea dice quién lo hace, con palabras. «Seguimiento sin responsable» ya no existe: la oportunidad sin responsable es de Recepción.
+  await expect(ready.getByText("Lo hace el agente")).toHaveCount(4)
+  await expect(ready.getByText("Le toca a una persona")).toHaveCount(3)
+  await expect(ready).not.toContainText("Seguimiento sin responsable")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("administrador-apagado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  // --- Encenderlo no prende nada ---
+  // --- Encenderlo no prende nada más ---
   await preview.getByRole("button", { name: "Encender al administrador" }).click()
   await expect(page.getByRole("switch", { name: "Apagar al Administrador" })).toBeChecked()
   const on = page.getByRole("region", { name: "Prendidas" })
-  await expect(on).toContainText("Todavía no hay ninguna prendida.")
-  expect((await admin()).lines.every((line) => !line.enabled)).toBe(true)
+  await expect(on).toContainText("Una persona tiene una cita")
+  expect((await admin()).lines.filter((line) => line.enabled).map((line) => line.key)).toEqual(["recordatorio_cita"])
   await expect.poll(async () => (await advice()).recommendations.map((item) => [item.key, item.actor])).toEqual([
     ["recordatorio_control", "agente"],
-    ["seguimientos_sin_responsable", "persona"],
+    ["atenciones_sin_firmar", "persona"],
   ])
 
   // --- Una línea abierta: su flujo, entero mientras está apagada ---
@@ -124,54 +133,54 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   const today = page.getByRole("region", { name: "Te espera" })
   // La del control ya está prendida: no se recomienda.
   await expect(today.getByRole("listitem").filter({ hasText: "Lo recomienda el administrador" })).toHaveCount(1)
-  const card = today.getByRole("listitem").filter({ hasText: "1 seguimiento abierto sin responsable" })
+  const card = today.getByRole("listitem").filter({ hasText: "1 atención lleva más de 2 días sin firmar" })
   await expect(card).toContainText("le tocaría a tu equipo")
   await info.attach("inicio-administrador", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await card.getByRole("button", { name: /Ver la lista$/ }).click()
   const drawer = sideSurface(page, { name: "Recomendación del administrador", exact: true })
-  await expect(drawer).toContainText("Oportunidades abiertas que no tienen a nadie del equipo asignado.")
+  await expect(drawer).toContainText("Atenciones que siguen en borrador y se abrieron hace más de 2 días.")
   await expect(drawer).toContainText("Los números salen de la base de datos, no de un modelo.")
-  await expect(drawer.getByRole("link", { name: "Interesada sin dueño" })).toBeVisible()
+  await expect(drawer.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
   await expect(drawer).toContainText("Le toca a una persona")
   await info.attach("recomendacion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // «Solo esta vez»: nada se crea hasta que alguien lo pide y lo confirma, y la línea sigue apagada.
-  const tasks = () => call<Array<{ title: string; createdBy: string; area: string | null; reason: string | null }>>(page, "GET", "/api/tasks?status=open", org.slug)
+  const tasks = () => call<Array<{ title: string; createdBy: string; area: string | null; reason: string | null; patientId: string | null; contactId: string | null }>>(page, "GET", "/api/tasks?view=abiertas&scope=clinica", org.slug)
   expect(await tasks()).toEqual([])
   await drawer.getByRole("button", { name: "Crear 1 tarea" }).click()
   await page.getByRole("alertdialog", { name: "Crear 1 tarea" }).getByRole("button", { name: "Crear las tareas" }).click()
   await expect(drawer.getByRole("status")).toContainText("1 tarea creada")
+  // La tarea dice de quién es: el paciente y su propia persona.
   expect(await tasks()).toMatchObject([
-    { title: "Asignar responsable al seguimiento de Interesada sin dueño", createdBy: "admin", area: "administracion" },
+    { title: "Revisar y firmar la atención de Mariana Soto", createdBy: "admin", area: "clinico", patientId: patient.id, contactId: expect.any(String) },
   ])
   // Repetirlo el mismo día no duplica.
   await drawer.getByRole("button", { name: "Crear 1 tarea" }).click()
   await page.getByRole("alertdialog", { name: "Crear 1 tarea" }).getByRole("button", { name: "Crear las tareas" }).click()
   await expect(drawer.getByRole("status")).toContainText("ya se pidió hoy")
   expect(await tasks()).toHaveLength(1)
-  expect(await lineOf("seguimientos_sin_responsable")).toMatchObject({ enabled: false })
+  expect(await lineOf("atenciones_sin_firmar")).toMatchObject({ enabled: false })
 
   // «Ver su flujo y prender» lleva a su página con esa línea abierta.
   await drawer.getByRole("link", { name: "Ver su flujo y prender" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
-  const followUp = page.getByRole("region", { name: "Listas para activar" }).locator(":scope > ul > li").filter({ hasText: "Un seguimiento queda sin responsable" })
-  await expect(followUp.getByRole("list", { name: "Seguimiento sin responsable", exact: true }).getByRole("listitem")).toHaveText([
-    /Un seguimiento queda sin responsable/, /Tarea para asignarlo/, /Le toca a una persona/,
+  const unsigned = page.getByRole("region", { name: "Listas para activar" }).locator(":scope > ul > li").filter({ hasText: "Una atención lleva 2 días sin firmar" })
+  await expect(unsigned.getByRole("list", { name: "Atención sin firmar", exact: true }).getByRole("listitem")).toHaveText([
+    /Una atención lleva 2 días sin firmar/, /Espera 2 días/, /Tarea para firmar/, /Le toca a una persona/,
   ])
 
-  // --- Tareas: lo que deja el administrador se reconoce por su origen, a quién va y por qué ---
+  // --- Tareas: lo que deja el administrador se reconoce por su origen y por qué, y lleva a la persona ---
   await gotoHydrated(page, tenant(org.slug, "/tasks"))
-  const task = page.getByRole("row").filter({ hasText: "Asignar responsable al seguimiento de Interesada sin dueño" })
-  await expect(task).toContainText("Administrador")
-  await expect(task).toContainText("Administración")
-  await expect(task).toContainText("Blanqueamiento")
+  const task = page.getByRole("row").filter({ hasText: "Revisar y firmar la atención de Mariana Soto" })
+  await expect(task).toContainText("La dejó el Administrador")
+  await expect(task.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
   await info.attach("tareas-administrador", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Cada rol ve solo lo suyo, y solo quien administra el agente cambia una línea ---
   await fixtureDb.update(member).set({ role: "cashier" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   expect((await advice()).recommendations).toEqual([])
-  expect((await api(page, "GET", "/api/agent/admin/recommendations/seguimientos_sin_responsable", org.slug)).status).toBe(403)
+  expect((await api(page, "GET", "/api/agent/admin/recommendations/atenciones_sin_firmar", org.slug)).status).toBe(403)
   expect((await api(page, "PATCH", "/api/agent/admin/lines/cobranza_vencida", org.slug, { enabled: true })).status).toBe(403)
   expect((await api(page, "PUT", "/api/agent/admin/settings", org.slug, { enabled: false })).status).toBe(403)
   // Quien no supervisa al agente no llega a su página: el layout lo devuelve a Inicio.
@@ -195,7 +204,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await send.click()
   const unknown = page.getByRole("status").filter({ hasText: "No reconocí una línea" })
   await expect(unknown).toContainText("envíala como pedido desde Ayuda")
-  expect((await admin()).lines).toHaveLength(9)
+  expect((await admin()).lines).toHaveLength(8)
   // Y se puede enviar a odentIA tal cual, diciendo qué viaja con el pedido.
   await expect(unknown).toContainText("Se envía lo que escribiste, con el nombre de tu clínica, tu rol, esta pantalla y la versión de odentIA.")
   await unknown.getByRole("button", { name: "Enviarlo a odentIA como pedido" }).click()
@@ -292,7 +301,7 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(dialog).toContainText("Lo ya hecho se conserva")
   await dialog.getByRole("button", { name: "Eliminar" }).click()
   await expect(page.getByText("Una persona cancela su cita")).toHaveCount(0)
-  expect((await admin()).lines).toHaveLength(9)
+  expect((await admin()).lines).toHaveLength(8)
   // Una que viene armada no se elimina.
   expect((await api(page, "DELETE", "/api/agent/admin/lines/cobranza_vencida", org.slug)).status).toBe(400)
 })
@@ -312,13 +321,13 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   }, 201)
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // --- WhatsApp (Integraciones): los siete mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
+  // --- WhatsApp (Integraciones): los diez mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(7)
-  await expect(approved.getByRole("listitem").filter({ hasText: "Recordar la cita" })).toContainText("Aprobado")
-  await expect(approved).toContainText("1 aprobado · 6 en revisión")
+  await expect(approved.getByRole("listitem")).toHaveCount(10)
+  await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
+  await expect(approved).toContainText("1 aprobado · 9 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v1")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)

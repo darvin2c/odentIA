@@ -18,7 +18,9 @@ import {
   getOpportunity,
   getOpportunitySummary,
   listOpportunities,
+  moveOpportunity,
   reopenOpportunity,
+  setOpportunityTask,
   updateOpportunity,
 } from "./opportunities.js"
 import { createPatient } from "./patients.js"
@@ -221,7 +223,7 @@ it("contactos: openOpportunityCount es agregado completo aunque la página trunq
     createOpportunity(tx, "org_a", { contactId: a.id, title: `Cerrado ${TAG}` }),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
-    closeOpportunity(tx, "org_a", won.id, { outcome: "won", reason: "Pagó" }),
+    closeOpportunity(tx, "org_a", won.id, { outcome: "won", reason: "acepto" }),
   )
   // Página de 1: el conteo del contacto sigue siendo completo (2 abiertas, la cerrada no cuenta).
   const page = await withOrgContext(appDb, "org_a", (tx) =>
@@ -244,26 +246,19 @@ it("oportunidades: hilo origen del mismo contacto y rechazo entre contactos y te
     createOpportunity(
       tx,
       "org_a",
-      {
-        contactId: a.id,
-        title: `Negocio ${TAG}`,
-        conversationId: convA,
-        nextActionAt: new Date("2026-10-07T15:00:00.000Z").toISOString(),
-        nextActionNote: "Llamar",
-      },
+      { contactId: a.id, title: `Negocio ${TAG}`, conversationId: convA },
       { userId: ACTOR_A },
     ),
   )
   expect(opp.conversationId).toBe(convA)
   expect(opp.createdAt).toBeTruthy()
-  expect(opp.nextActionNote).toBe("Llamar")
+  expect(opp.moment).toBe("interesado")
   const listed = await withOrgContext(appDb, "org_a", (tx) =>
     listOpportunities(tx, "org_a", { contactId: a.id, limit: 10 }),
   )
   const found = listed.items.find((o) => o.id === opp.id)
   expect(found?.conversationId).toBe(convA)
   expect(found?.createdAt).toBeTruthy()
-  expect(found?.nextActionNote).toBe("Llamar")
   // Hilo de otro contacto: se rechaza.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
@@ -353,52 +348,39 @@ it("oportunidades: paciente vinculado estricto y presupuesto coherente al cambia
   expect(moved.budgetId).toBeNull()
 })
 
-it("oportunidades: summary agregado por filtros y boundaries de paginación", async () => {
+it("oportunidades: summary agregado por filtros; el valor solo suma lo abierto", async () => {
   const s = await makeContact("org_a", `Resumen ${TAG}`)
   const pipe = await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
-  const open = pipe.stages.filter((st) => st.kind === "open")
-  const first = open[0]!
-  const second = open[1] ?? first
+  const first = pipe.stages.find((st) => st.moment === "interesado")!
+  const second = pipe.stages.find((st) => st.moment === "evaluacion_agendada")!
+  const decided = pipe.stages.find((st) => st.moment === "decidio")!
   await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(tx, "org_a", {
-      contactId: s.id,
-      stageId: first.id,
-      title: `R1 ${TAG}`,
-      amountCents: 10000,
-      currency: "PEN",
-    }),
+    createOpportunity(tx, "org_a", { contactId: s.id, title: `R1 ${TAG}`, amountCents: 10000 }),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(tx, "org_a", {
-      contactId: s.id,
-      stageId: first.id,
-      title: `R2 ${TAG}`,
-      amountCents: 20000,
-      currency: "PEN",
-    }),
+    createOpportunity(tx, "org_a", { contactId: s.id, title: `R2 ${TAG}`, amountCents: 20000 }),
   )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(tx, "org_a", {
-      contactId: s.id,
-      stageId: second.id,
-      title: `R3 ${TAG}`,
-      amountCents: 50000,
-      currency: "USD",
-    }),
+  const r3 = await withOrgContext(appDb, "org_a", (tx) =>
+    createOpportunity(tx, "org_a", { contactId: s.id, title: `R3 ${TAG}`, amountCents: 50000 }),
   )
+  await withOrgContext(appDb, "org_a", (tx) => moveOpportunity(tx, "org_a", r3.id, second.id, { userId: ACTOR_A }))
   const closed = await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(tx, "org_a", { contactId: s.id, stageId: first.id, title: `R4 ${TAG}` }),
+    createOpportunity(tx, "org_a", { contactId: s.id, title: `R4 ${TAG}`, amountCents: 70000 }),
   )
   await withOrgContext(appDb, "org_a", (tx) =>
-    closeOpportunity(tx, "org_a", closed.id, { outcome: "lost", reason: "No interesado" }),
+    closeOpportunity(tx, "org_a", closed.id, { outcome: "lost", reason: "no_lo_necesita" }),
   )
   const summary = await withOrgContext(appDb, "org_a", (tx) =>
     getOpportunitySummary(tx, "org_a", { contactId: s.id }),
   )
   expect(summary.total).toBe(4)
+  expect(summary.open).toBe(3)
+  // El total del tablero suma solo lo abierto: la perdida no cuenta.
+  expect(summary.openAmounts).toEqual([{ currency: "PEN", amountCents: "80000" }])
   const byStage = new Map(summary.stages.map((st) => [st.stageId, st]))
   expect(byStage.get(first.id)?.count).toBe(2)
   expect(byStage.get(first.id)?.amounts).toContainEqual({ currency: "PEN", amountCents: "30000" })
+  expect(byStage.get(decided.id)).toMatchObject({ count: 1, amounts: [] })
   // Solo abiertas excluye la cerrada.
   const openOnly = await withOrgContext(appDb, "org_a", (tx) =>
     getOpportunitySummary(tx, "org_a", { contactId: s.id, status: "open" }),
@@ -408,7 +390,7 @@ it("oportunidades: summary agregado por filtros y boundaries de paginación", as
   const empty = await withOrgContext(appDb, "org_a", (tx) =>
     getOpportunitySummary(tx, "org_a", { contactId: randomUUID() }),
   )
-  expect(empty).toEqual({ total: 0, stages: [] })
+  expect(empty).toEqual({ total: 0, open: 0, openAmounts: [], stages: [] })
   // Paginación recorre todo el conjunto del contacto.
   const all: string[] = []
   let cursor: string | undefined
@@ -421,6 +403,22 @@ it("oportunidades: summary agregado por filtros y boundaries de paginación", as
     cursor = page.nextCursor
   }
   expect(new Set(all).size).toBe(4)
+})
+
+it("oportunidades: el tablero muestra lo abierto y lo cerrado de los últimos 30 días", async () => {
+  const s = await makeContact("org_a", `Tablero ${TAG}`)
+  const open = await withOrgContext(appDb, "org_a", (tx) => createOpportunity(tx, "org_a", { contactId: s.id, title: `Abierta ${TAG}` }))
+  const recent = await withOrgContext(appDb, "org_a", (tx) => createOpportunity(tx, "org_a", { contactId: s.id, title: `Reciente ${TAG}` }))
+  const old = await withOrgContext(appDb, "org_a", (tx) => createOpportunity(tx, "org_a", { contactId: s.id, title: `Vieja ${TAG}` }))
+  for (const id of [recent.id, old.id]) {
+    await withOrgContext(appDb, "org_a", (tx) => closeOpportunity(tx, "org_a", id, { outcome: "lost", reason: "precio" }, { userId: ACTOR_A }))
+  }
+  await ownerDb.execute(sql`update opportunity set closed_at = now() - interval '31 days' where id = ${old.id}`)
+  const board = await withOrgContext(appDb, "org_a", (tx) => listOpportunities(tx, "org_a", { contactId: s.id, recent: true, limit: 10 }))
+  expect(board.items.map((o) => o.id).sort()).toEqual([open.id, recent.id].sort())
+  expect(board.items.find((o) => o.id === recent.id)?.why).toBe("Perdida: «Precio»")
+  const summary = await withOrgContext(appDb, "org_a", (tx) => getOpportunitySummary(tx, "org_a", { contactId: s.id, recent: true }))
+  expect(summary).toMatchObject({ total: 2, open: 1 })
 })
 
 it("tareas: vínculos hilo/oportunidad con autovinculado y rechazos cross-tenant", async () => {
@@ -444,7 +442,6 @@ it("tareas: vínculos hilo/oportunidad con autovinculado y rechazos cross-tenant
       createdBy: "user",
     }),
   )
-  expect(full.kind).toBe("manual")
   expect(full.contactName).toBeTruthy()
   expect(full.opportunityTitle).toContain(TAG)
   // Solo hilo: autovincula al contacto del hilo.
@@ -452,11 +449,20 @@ it("tareas: vínculos hilo/oportunidad con autovinculado y rechazos cross-tenant
     createTask(tx, "org_a", { title: `Auto ${TAG}`, conversationId: convA, createdBy: "user" }),
   )
   expect(auto.contactId).toBe(a.id)
-  // Solo oportunidad: autovincula al contacto de la oportunidad.
-  const autoOpp = await withOrgContext(appDb, "org_a", (tx) =>
-    createTask(tx, "org_a", { title: `Auto opp ${TAG}`, opportunityId: oppA.id, createdBy: "user" }),
+  // Una oportunidad tiene una sola tarea abierta: la segunda se rechaza con su nombre.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      createTask(tx, "org_a", { title: `Otra ${TAG}`, opportunityId: oppA.id, createdBy: "user" }),
+    ),
+  ).rejects.toMatchObject({ code: "OPPORTUNITY_HAS_TASK", status: 409 })
+  // Solo oportunidad: autovincula al contacto de la oportunidad y, sin responsable, va a Recepción.
+  const oppA2 = await withOrgContext(appDb, "org_a", (tx) =>
+    createOpportunity(tx, "org_a", { contactId: a.id, title: `Opp tarea 2 ${TAG}` }),
   )
-  expect(autoOpp.contactId).toBe(a.id)
+  const autoOpp = await withOrgContext(appDb, "org_a", (tx) =>
+    createTask(tx, "org_a", { title: `Auto opp ${TAG}`, opportunityId: oppA2.id, createdBy: "user" }),
+  )
+  expect(autoOpp).toMatchObject({ contactId: a.id, area: "recepcion" })
   // Hilo y oportunidad de distintos contactos: se rechaza.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
@@ -559,130 +565,53 @@ it("tareas: filtros por vínculos, vencidas y responsable", async () => {
   expect(byAssignee.map((t) => t.id)).toContain(overdue.id)
 })
 
-it("próxima acción: sincroniza, actualiza, cancela, cierra y completa solo el vigente", async () => {
-  const a = await makeContact("org_a", `Seguimiento ${TAG}`)
+it("la próxima acción es una tarea, y solo una: sigue a quien la lleva y se cierra sola al cerrarse", async () => {
+  const a = await makeContact("org_a", `Tarea única ${TAG}`)
   const conv = await makeConversationDirect("org_a", a.id)
   const d1 = new Date("2026-10-10T15:00:00.000Z").toISOString()
   const d2 = new Date("2026-10-11T15:00:00.000Z").toISOString()
   const opp = await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(
-      tx,
-      "org_a",
-      {
-        contactId: a.id,
-        title: `Comercial ${TAG}`,
-        conversationId: conv,
-        assignedUserId: ACTOR_A,
-        nextActionAt: d1,
-        nextActionNote: `Llamar ${TAG}`,
-      },
-      { userId: ACTOR_A },
-    ),
+    createOpportunity(tx, "org_a", { contactId: a.id, title: `Comercial ${TAG}`, conversationId: conv }, { userId: ACTOR_A }),
   )
-  let open = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
+  // Sin responsable es de Recepción: su tarea también.
+  const first = await withOrgContext(appDb, "org_a", (tx) =>
+    setOpportunityTask(tx, "org_a", opp.id, { title: `Llamar ${TAG}`, dueAt: d1 }, { userId: ACTOR_A, createdBy: "user" }),
   )
-  expect(open).toHaveLength(1)
-  expect(open[0]?.kind).toBe("opportunity_follow_up")
-  expect(open[0]?.dueAt).toBe(d1)
-  expect(open[0]?.assigneeUserId).toBe(ACTOR_A)
-  const firstId = open[0]!.id
-  // Editar fecha actualiza la misma tarea (idempotente, sin duplicar).
+  expect((await withOrgContext(appDb, "org_a", (tx) => getTask(tx, "org_a", first.taskId)))).toMatchObject({
+    assigneeUserId: null, area: "recepcion", opportunityId: opp.id, dueAt: d1,
+  })
+  // Cambiarla no crea otra: es la misma tarea.
+  const again = await withOrgContext(appDb, "org_a", (tx) =>
+    setOpportunityTask(tx, "org_a", opp.id, { dueAt: d2 }, { userId: ACTOR_A, createdBy: "user" }),
+  )
+  expect(again.taskId).toBe(first.taskId)
+  const open = await withOrgContext(appDb, "org_a", (tx) => listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }))
+  expect(open.map((t) => [t.id, t.dueAt])).toEqual([[first.taskId, d2]])
+  // La oportunidad la muestra como su siguiente tarea.
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getOpportunity(tx, "org_a", opp.id))
+  expect(detail.nextTask).toMatchObject({ id: first.taskId, title: `Llamar ${TAG}`, dueAt: d2 })
+  // Tomarla: la tarea sin responsable pasa a quien la toma.
+  await withOrgContext(appDb, "org_a", (tx) => updateOpportunity(tx, "org_a", opp.id, { assignedUserId: ACTOR_A }, { userId: ACTOR_A }))
+  expect((await withOrgContext(appDb, "org_a", (tx) => getTask(tx, "org_a", first.taskId))).assigneeUserId).toBe(ACTOR_A)
+  // Reabrir una tarea hecha cuando ya hay otra abierta se rechaza.
+  await withOrgContext(appDb, "org_a", (tx) => completeTask(tx, "org_a", first.taskId))
+  const second = await withOrgContext(appDb, "org_a", (tx) =>
+    createTask(tx, "org_a", { title: `Segunda ${TAG}`, opportunityId: opp.id, createdBy: "user" }),
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => updateTask(tx, "org_a", first.taskId, { status: "open" })),
+  ).rejects.toMatchObject({ code: "OPPORTUNITY_HAS_TASK" })
+  // Cerrar la oportunidad cierra sola su tarea, diciendo por qué.
   await withOrgContext(appDb, "org_a", (tx) =>
-    updateOpportunity(tx, "org_a", opp.id, { nextActionAt: d2 }, { userId: ACTOR_A }),
+    closeOpportunity(tx, "org_a", opp.id, { outcome: "won", reason: "acepto" }, { userId: ACTOR_A }),
   )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateOpportunity(tx, "org_a", opp.id, { nextActionAt: d2 }, { userId: ACTOR_A }),
-  )
-  open = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
-  )
-  expect(open).toHaveLength(1)
-  expect(open[0]?.id).toBe(firstId)
-  expect(open[0]?.dueAt).toBe(d2)
-  // Fixture histórica con fecha divergente: completarla no limpia la programación vigente.
-  await ownerDb.update(crmTask).set({ dueAt: new Date(d1) }).where(eq(crmTask.id, firstId))
-  await withOrgContext(appDb, "org_a", (tx) => completeTask(tx, "org_a", firstId))
-  const kept = await withOrgContext(appDb, "org_a", (tx) => getOpportunity(tx, "org_a", opp.id))
-  expect(kept.nextActionAt).toBe(d2)
-  // Nuevo ciclo: fecha vigente y completar sí limpia.
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateOpportunity(tx, "org_a", opp.id, { nextActionAt: d2 }, { userId: ACTOR_A }),
-  )
-  const current = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
-  )
-  expect(current).toHaveLength(1)
-  await withOrgContext(appDb, "org_a", (tx) => completeTask(tx, "org_a", current[0]!.id))
-  const cleared = await withOrgContext(appDb, "org_a", (tx) => getOpportunity(tx, "org_a", opp.id))
-  expect(cleared.nextActionAt).toBeNull()
-  expect(cleared.nextActionNote).toBeNull()
-  // Completar una manual vinculada no limpia la próxima acción.
-  const opp2 = await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(
-      tx,
-      "org_a",
-      { contactId: a.id, title: `Comercial 2 ${TAG}`, nextActionAt: d1 },
-      { userId: ACTOR_A },
-    ),
-  )
-  const manual = await withOrgContext(appDb, "org_a", (tx) =>
-    createTask(tx, "org_a", { title: `Manual ${TAG}`, opportunityId: opp2.id, createdBy: "user" }),
-  )
-  await withOrgContext(appDb, "org_a", (tx) => completeTask(tx, "org_a", manual.id))
-  const intact = await withOrgContext(appDb, "org_a", (tx) => getOpportunity(tx, "org_a", opp2.id))
-  expect(intact.nextActionAt).toBe(d1)
-  // Limpiar fecha cancela el abierto; reprogramar crea uno nuevo sin reactivar el cancelado.
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateOpportunity(tx, "org_a", opp2.id, { nextActionAt: null }, { userId: ACTOR_A }),
-  )
-  const afterClear = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp2.id, status: "open" }),
-  )
-  expect(afterClear).toEqual([])
-  const cancelledBefore = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp2.id, status: "cancelled" }),
-  )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateOpportunity(tx, "org_a", opp2.id, { nextActionAt: d2 }, { userId: ACTOR_A }),
-  )
-  const recreated = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp2.id, status: "open" }),
-  )
-  expect(recreated).toHaveLength(1)
-  expect(cancelledBefore.map((t) => t.id)).not.toContain(recreated[0]!.id)
-  const opp3 = await withOrgContext(appDb, "org_a", (tx) =>
-    createOpportunity(
-      tx,
-      "org_a",
-      { contactId: a.id, title: `Comercial 3 ${TAG}`, nextActionAt: d1 },
-      { userId: ACTOR_A },
-    ),
-  )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    closeOpportunity(tx, "org_a", opp3.id, { outcome: "won", reason: "Aceptó" }),
-  )
-  const afterClose = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp3.id, status: "open" }),
-  )
-  expect(afterClose).toEqual([])
-  // Cerrar limpia la próxima acción; reabrir no reactiva ni restaura fecha.
-  const closedOpp = await withOrgContext(appDb, "org_a", (tx) => getOpportunity(tx, "org_a", opp3.id))
-  expect(closedOpp.nextActionAt).toBeNull()
-  expect(closedOpp.nextActionNote).toBeNull()
-  await withOrgContext(appDb, "org_a", (tx) => reopenOpportunity(tx, "org_a", opp3.id))
-  const afterReopen = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp3.id, status: "open" }),
-  )
-  expect(afterReopen).toEqual([])
-  const reopenedOpp = await withOrgContext(appDb, "org_a", (tx) =>
-    getOpportunity(tx, "org_a", opp3.id),
-  )
-  expect(reopenedOpp.nextActionAt).toBeNull()
-  const cancelled = await withOrgContext(appDb, "org_a", (tx) =>
-    listTasks(tx, "org_a", { opportunityId: opp3.id, status: "cancelled" }),
-  )
-  expect(cancelled.length).toBeGreaterThanOrEqual(1)
+  expect(await withOrgContext(appDb, "org_a", (tx) => getTask(tx, "org_a", second.id))).toMatchObject({
+    status: "done", settledReason: "la oportunidad se ganó",
+  })
+  // Cerrada, no admite otra tarea.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => createTask(tx, "org_a", { title: `Tarde ${TAG}`, opportunityId: opp.id, createdBy: "user" })),
+  ).rejects.toThrow("se cerró")
 })
 
 it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de paginar", async () => {
@@ -835,20 +764,28 @@ it("aislamiento: ningún dato CRM cruza de org", async () => {
   ).rejects.toThrow()
 })
 
-it("seguimiento: conserva microsegundos, no permite desengancharlo ni reactivar una programación terminada", async () => {
-  const person = await makeContact("org_a", `Seguimiento exacto ${TAG}`)
-  const commercial = await withOrgContext(appDb, "org_a", tx => createOpportunity(tx, "org_a", {
-    contactId: person.id, title: "Seguimiento exacto", nextActionAt: "2026-10-20T15:30:00.000Z",
-  }, { userId: ACTOR_A }))
-  const [scheduled] = await withOrgContext(appDb, "org_a", tx => listTasks(tx, "org_a", { opportunityId: commercial.id, status: "open" }))
-  await ownerDb.execute(sql`update opportunity set next_action_at='2026-10-20T15:30:00.000123Z'::timestamptz where id=${commercial.id}`)
-  await ownerDb.execute(sql`update task set due_at='2026-10-20T15:30:00.000123Z'::timestamptz where id=${scheduled!.id}`)
-  await expect(withOrgContext(appDb, "org_a", tx => updateTask(tx, "org_a", scheduled!.id, { dueAt: null }))).rejects.toThrow("oportunidad vinculada")
-  await withOrgContext(appDb, "org_a", tx => completeTask(tx, "org_a", scheduled!.id))
-  expect((await withOrgContext(appDb, "org_a", tx => getOpportunity(tx, "org_a", commercial.id))).nextActionAt).toBeNull()
-  expect((await withOrgContext(appDb, "org_a", tx => getTask(tx, "org_a", scheduled!.id))).status).toBe("done")
-  await expect(withOrgContext(appDb, "org_a", tx => getTask(tx, "org_b", scheduled!.id))).rejects.toThrow("Tarea")
-  await expect(withOrgContext(appDb, "org_a", tx => updateTask(tx, "org_a", scheduled!.id, { status: "open" }))).rejects.toThrow("nueva próxima acción")
+it("cerrar: una sola forma, con motivos de una lista; reabrir vuelve al paso en que estaba", async () => {
+  const person = await makeContact("org_a", `Cierre ${TAG}`)
+  const pipe = await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
+  const budgetStage = pipe.stages.find((st) => st.moment === "presupuesto_enviado")!
+  const decided = pipe.stages.find((st) => st.moment === "decidio")!
+  const row = await withOrgContext(appDb, "org_a", (tx) => createOpportunity(tx, "org_a", { contactId: person.id, title: `Cierre ${TAG}` }))
+  await withOrgContext(appDb, "org_a", (tx) => moveOpportunity(tx, "org_a", row.id, budgetStage.id, { userId: ACTOR_A }))
+  // «Decidió» no se alcanza moviendo.
+  await expect(withOrgContext(appDb, "org_a", (tx) => moveOpportunity(tx, "org_a", row.id, decided.id, { userId: ACTOR_A })))
+    .rejects.toThrow("Ganada o Perdida")
+  // Un motivo fuera de la lista, o uno que solo pone el sistema, se rechaza.
+  for (const reason of ["Se mudó", "rechazo_presupuesto"]) {
+    await expect(withOrgContext(appDb, "org_a", (tx) => closeOpportunity(tx, "org_a", row.id, { outcome: "lost", reason }, { userId: ACTOR_A })))
+      .rejects.toMatchObject({ status: 400 })
+  }
+  const lost = await withOrgContext(appDb, "org_a", (tx) =>
+    closeOpportunity(tx, "org_a", row.id, { outcome: "lost", reason: "otra_clinica", note: "Le quedaba más cerca" }, { userId: ACTOR_A }),
+  )
+  expect(lost).toMatchObject({ status: "lost", moment: "decidio", closeReason: "otra_clinica", closeNote: "Le quedaba más cerca", why: "Perdida: «Eligió otra clínica»" })
+  const reopened = await withOrgContext(appDb, "org_a", (tx) => reopenOpportunity(tx, "org_a", row.id, { userId: ACTOR_A }))
+  expect(reopened).toMatchObject({ status: "open", stageId: budgetStage.id, closeReason: null, closeNote: null })
+  expect(reopened.history.map((h) => h.who)).toContain("Persona de prueba")
 })
 
 it("oportunidades: el cursor conserva filas con marcas distintas dentro del mismo milisegundo", async () => {
@@ -877,46 +814,33 @@ it("oportunidades: el cursor conserva filas con marcas distintas dentro del mism
   expect(seen).toEqual(expected)
 })
 
-it("seguimiento automático: reprogramación y cancelación conservan transición y autor en actividad", async () => {
-  const person = await makeContact("org_a", `Historia del seguimiento ${TAG}`)
+it("tarea de una oportunidad: reprogramarla y que se cierre sola conservan transición y autor en actividad", async () => {
+  const person = await makeContact("org_a", `Historia de la tarea ${TAG}`)
   const firstDue = "2026-11-10T15:00:00.000Z"
   const nextDue = "2026-11-12T16:30:00.000Z"
   const row = await withOrgContext(appDb, "org_a", tx => createOpportunity(tx, "org_a", {
-    contactId: person.id, title: "Coordinar evaluación", nextActionAt: firstDue,
+    contactId: person.id, title: "Coordinar evaluación",
   }, { userId: ACTOR_A }))
-  const [task] = await withOrgContext(appDb, "org_a", tx => listTasks(tx, "org_a", { opportunityId: row.id }))
-  if (!task) throw new Error("Falta el seguimiento creado")
-  await withOrgContext(appDb, "org_a", tx => updateOpportunity(tx, "org_a", row.id, {
-    nextActionAt: nextDue,
-  }, { userId: ACTOR_A }))
-  // Repetir la misma fecha no inventa una transición de tarea.
-  await withOrgContext(appDb, "org_a", tx => updateOpportunity(tx, "org_a", row.id, {
-    nextActionAt: nextDue,
-  }, { userId: ACTOR_A }))
+  const created = await withOrgContext(appDb, "org_a", tx => setOpportunityTask(tx, "org_a", row.id, { title: "Llamar", dueAt: firstDue }, { userId: ACTOR_A, createdBy: "user" }))
+  await withOrgContext(appDb, "org_a", tx => setOpportunityTask(tx, "org_a", row.id, { dueAt: nextDue }, { userId: ACTOR_A, createdBy: "user" }))
   await withOrgContext(appDb, "org_a", tx => closeOpportunity(tx, "org_a", row.id, {
-    outcome: "lost", reason: "El interlocutor aplazó el tratamiento",
+    outcome: "lost", reason: "no_responde",
   }, { userId: ACTOR_A }))
-  const events = await ownerDb.select().from(auditEvent).where(and(
-    eq(auditEvent.organizationId, "org_a"), eq(auditEvent.entityId, task.id), eq(auditEvent.action, "task.updated"),
+  const updates = await ownerDb.select().from(auditEvent).where(and(
+    eq(auditEvent.organizationId, "org_a"), eq(auditEvent.entityId, created.taskId), eq(auditEvent.action, "task.updated"),
   ))
-  expect(events).toHaveLength(2)
-  expect(events.map(event => event.metadata)).toEqual(expect.arrayContaining([
+  expect(updates.map(event => event.metadata)).toEqual([
     expect.objectContaining({ statusPrev: "open", statusNext: "open", dueAtPrev: firstDue, dueAtNext: nextDue }),
-    expect.objectContaining({ statusPrev: "open", statusNext: "cancelled", dueAtPrev: nextDue, dueAtNext: nextDue }),
-  ]))
-  expect(events.every(event => event.actorUserId === ACTOR_A)).toBe(true)
-  const activity = await withOrgContext(appDb, "org_a", tx => listContactActivity(tx, "org_a", person.id, {
-    capabilities: { tasks: true, conversations: false, agent: false },
-  }))
-  expect(activity.items.filter(item => item.id.startsWith("task-audit:")).map(item => ({
-    taskId: item.taskId, opportunityId: item.opportunityId, status: item.status,
-  }))).toEqual(expect.arrayContaining([
-    { taskId: task.id, opportunityId: row.id, status: "open" },
-    { taskId: task.id, opportunityId: row.id, status: "cancelled" },
-  ]))
+  ])
+  expect(updates.every(event => event.actorUserId === ACTOR_A)).toBe(true)
+  const settled = await ownerDb.select().from(auditEvent).where(and(
+    eq(auditEvent.organizationId, "org_a"), eq(auditEvent.entityId, created.taskId), eq(auditEvent.action, "task.settled"),
+  ))
+  expect(settled).toHaveLength(1)
+  expect(settled[0]?.actorUserId).toBeNull()
 })
 
-it("oportunidad legada: permite seguimiento sin inventar representación y rechaza nuevos vínculos no verificados", async () => {
+it("oportunidad legada: permite su tarea sin inventar representación y rechaza nuevos vínculos no verificados", async () => {
   const person = await makeContact("org_a", `Interlocutor legado ${TAG}`)
   const other = await makeContact("org_a", `Otro interlocutor ${TAG}`)
   const patient = await withOrgContext(appDb, "org_a", tx => createPatient(tx, "org_a", ACTOR_A, {
@@ -928,11 +852,9 @@ it("oportunidad legada: permite seguimiento sin inventar representación y recha
   await ownerDb.update(opportunity).set({ patientId: patient.id }).where(eq(opportunity.id, row.id))
   const edited = await withOrgContext(appDb, "org_a", tx => updateOpportunity(tx, "org_a", row.id, {
     title: "Llamar para revisar representación", patientId: patient.id,
-    nextActionAt: "2026-11-15T15:00:00.000Z",
   }))
-  expect(edited).toMatchObject({
-    patientId: patient.id, title: "Llamar para revisar representación", nextActionAt: "2026-11-15T15:00:00.000Z",
-  })
+  expect(edited).toMatchObject({ patientId: patient.id, title: "Llamar para revisar representación" })
+  await withOrgContext(appDb, "org_a", tx => setOpportunityTask(tx, "org_a", row.id, { dueAt: "2026-11-15T15:00:00.000Z" }, { userId: null, createdBy: "user" }))
   const links = await ownerDb.select().from(patientContact).where(and(
     eq(patientContact.patientId, patient.id), eq(patientContact.contactId, person.id),
   ))
@@ -941,3 +863,4 @@ it("oportunidad legada: permite seguimiento sin inventar representación y recha
     contactId: other.id,
   }))).rejects.toMatchObject({ code: "VALIDATION" })
 })
+

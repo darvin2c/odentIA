@@ -3,46 +3,42 @@ import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
-type Stage = { id: string; name: string; kind: string }
+type Stage = { id: string; name: string; moment: string }
 type Field = { id: string; key: string; label: string; type: string; options: string[] | null }
 
-test("etapas de venta y campos de contacto: la lista se edita al lado, con palabras y sin claves", async ({ owner }) => {
+test("etapas de venta y campos de contacto: se editan al lado, con palabras y sin claves", async ({ owner }) => {
   const { page, org } = owner
   await page.setViewportSize({ width: 1440, height: 900 })
   const stages = async () => (await call<Array<{ stages: Stage[] }>>(page, "GET", "/api/pipelines", org.slug))[0]?.stages ?? []
   const fields = () => call<Field[]>(page, "GET", "/api/fields", org.slug)
 
-  // --- Etapas de venta: el tipo se lee con palabras y renombrar tiene su «Guardar» ---
+  // --- Etapas de venta: cuatro pasos fijos que solo se renombran, cada uno con cuándo llega sola ---
   await gotoHydrated(page, tenant(org.slug, "/settings/pipelines"))
   await expect(page.getByRole("heading", { level: 1, name: "Etapas de venta" })).toBeVisible()
-  const won = page.getByRole("row").filter({ hasText: "Ganado" })
-  await expect(won).toContainText("Cierra como ganada")
-  await expect(page.getByRole("row").filter({ hasText: "Nuevo" })).toContainText("En curso")
-  // El código del tipo no llega a la pantalla.
-  await expect(page.getByRole("table")).not.toContainText(/\b(won|lost|open)\b/)
+  await expect(page.getByRole("row").filter({ hasText: "Evaluación agendada" })).toContainText("Llega sola cuando la persona agenda una cita")
+  // Ni crear, ni eliminar, ni códigos en pantalla.
+  await expect(page.getByRole("button", { name: /Nueva etapa/ })).toHaveCount(0)
+  await expect(page.getByRole("table")).not.toContainText(/(interesado|evaluacion_agendada|presupuesto_enviado|decidio)/)
 
-  await page.getByRole("button", { name: "Acciones de Nuevo", exact: true }).click()
-  await page.getByRole("menuitem", { name: "Editar", exact: true }).click()
-  const stageForm = surface(page, { name: "Editar etapa", exact: true })
+  await page.getByRole("button", { name: "Acciones de Interesado", exact: true }).click()
+  await expect(page.getByRole("menuitem", { name: "Eliminar" })).toHaveCount(0)
+  await page.getByRole("menuitem", { name: "Cambiar el nombre", exact: true }).click()
+  const stageForm = surface(page, { name: "Cambiar el nombre del paso", exact: true })
   const stageName = stageForm.getByLabel("Nombre", { exact: true })
-  await expect(stageName).toHaveValue("Nuevo")
-  await stageName.fill("Recién llegado")
+  await expect(stageName).toHaveValue("Interesado")
+  await stageName.fill("Pidió precio")
   // Lo escrito no vale hasta pulsar «Guardar».
-  expect((await stages()).map((stage) => stage.name)).toContain("Nuevo")
+  expect((await stages()).map((stage) => stage.name)).toContain("Interesado")
   await stageForm.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(stageForm).toBeHidden()
-  await expect(page.getByText("Etapa «Recién llegado» guardada", { exact: true })).toBeVisible()
-  await expect(page.getByRole("row").filter({ hasText: "Recién llegado" })).toBeVisible()
-  expect((await stages()).map((stage) => stage.name)).toContain("Recién llegado")
-
-  // Eliminar pregunta antes y dice la consecuencia; cancelar no cambia nada.
-  await page.getByRole("button", { name: "Acciones de Contactado", exact: true }).click()
-  await page.getByRole("menuitem", { name: "Eliminar", exact: true }).click()
-  const removeStage = page.getByRole("alertdialog", { name: "Eliminar la etapa «Contactado»" })
-  await expect(removeStage).toContainText("Deja de ser una columna del tablero de oportunidades")
-  await removeStage.getByRole("button", { name: "Cancelar" }).click()
-  await expect(removeStage).toBeHidden()
-  expect((await stages()).map((stage) => stage.name)).toContain("Contactado")
+  await expect(page.getByText("Paso «Pidió precio» guardado", { exact: true })).toBeVisible()
+  await expect(page.getByRole("row").filter({ hasText: "Pidió precio" })).toBeVisible()
+  expect((await stages()).map((stage) => [stage.name, stage.moment])).toEqual([
+    ["Pidió precio", "interesado"],
+    ["Evaluación agendada", "evaluacion_agendada"],
+    ["Presupuesto enviado", "presupuesto_enviado"],
+    ["Decidió", "decidio"],
+  ])
 
   // --- Campos de contacto: el vacío trae su botón y solo se escribe el nombre ---
   await gotoHydrated(page, tenant(org.slug, "/settings/fields"))

@@ -92,12 +92,10 @@ async function makeConversation(orgId: string, contactId: string): Promise<strin
 
 async function makeOpportunity(orgId: string, contactId: string, patientId?: string): Promise<string> {
   return withOrgContext(appDb, orgId, async (tx) => {
-    const { stages } = await ensureDefaultPipeline(tx, orgId)
-    const open = stages.filter((s) => s.kind === "open")
     const created = await createOpportunity(
       tx,
       orgId,
-      { contactId, patientId: patientId ?? null, stageId: open[0]!.id, title: tag("Oportunidad") },
+      { contactId, patientId: patientId ?? null, title: tag("Oportunidad") },
       { userId: null },
     )
     return created.id
@@ -405,7 +403,7 @@ it("timeline: reúne mensajes, tareas, oportunidad, propuesta y derivación seg�
   const oppId = await makeOpportunity("org_a", contactId)
   await withOrgContext(appDb, "org_a", async (tx) => {
     const { stages } = await ensureDefaultPipeline(tx, "org_a")
-    const second = stages.filter((s) => s.kind === "open")[1] ?? stages[0]!
+    const second = stages.find((s) => s.moment === "evaluacion_agendada")!
     await moveOpportunity(tx, "org_a", oppId, second.id, { userId: null })
   })
   const at = new Date()
@@ -495,7 +493,7 @@ it("contexto: workspace con estado del agente verdadero y capacidades", async ()
   expect(active.agent).toMatchObject({ state: "agent", conversationId: convId, enabled: true })
   expect(active.opportunities.items).toHaveLength(1)
   expect(active.tasks).toHaveLength(1)
-  expect(active.tasks[0]).toMatchObject({ kind: "manual", status: "open", contactId })
+  expect(active.tasks[0]).toMatchObject({ status: "open", contactId })
   expect(active.tasks[0]?.contactName).toBe(active.contact.contact.displayName)
   expect(active.activity.items.length).toBeGreaterThan(0)
 
@@ -538,6 +536,18 @@ it("contexto: workspace con estado del agente verdadero y capacidades", async ()
   )
   expect(approvalBlind.agent.state).toBe("approval")
   expect(approvalBlind.agent.pendingProposalIds).toEqual([])
+  expect(approvalBlind.agent.awaitingContact).toBe(true)
+
+  // El mismo orden que la Bandeja: el caso que pasó el agente va antes que la
+  // cita que espera el sí, que sigue viajando para poder registrarla.
+  await withOrgContext(appDb, "org_a", (tx) =>
+    tx.insert(agentHandoff).values({ organizationId: "org_a", conversationId: convId, contactId, reason: "Reembolso", summary: "Reembolso", priority: "alta" }),
+  )
+  const withCase = await withOrgContext(appDb, "org_a", (tx) =>
+    getContactWorkspace(tx, "org_a", contactId, { capabilities: FULL }),
+  )
+  expect(withCase.agent).toMatchObject({ state: "handoff", awaitingContact: true })
+  expect(withCase.agent.pendingProposalIds).toHaveLength(1)
 
   // Conversación ajena y cerrada: validación y estado real.
   const other = await makeContact("org_a", tag("Contacto contexto otro"))

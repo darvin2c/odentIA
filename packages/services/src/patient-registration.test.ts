@@ -3,6 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
+import { getCaseBrief } from "./agent-case-brief.js"
 import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, getContact } from "./contacts.js"
@@ -656,6 +657,62 @@ it("interno exige el contacto contextual en los vínculos y lo público rechaza 
       ),
     ),
   ).rejects.toMatchObject({ status: 400 })
+})
+
+it("al reservar, el equipo registra con lo mínimo a la persona de la conversación: lo que falta queda anotado y la identidad por revisar", async () => {
+  await seedActor()
+  // La clínica exige la fecha de nacimiento (configuración por defecto, publicada).
+  await publish("org_a")
+  const { person, threadId } = await makeContactWithConversation("org_a", "Carmen Huamán")
+  const minimal: RegistrationAnswers = {
+    demographics: { displayName: "Carmen Huamán", givenNames: "Carmen", paternalSurname: "Huamán", phone: "+51977000100" },
+    respondent: "staff",
+    privacyAccepted: false,
+  }
+  const self = [{ contactId: person.id, relationship: "self" as const, isPreferred: true }]
+  const register = (
+    context: Partial<{ conversationId: string; scope: "essentials" }>,
+    answers: RegistrationAnswers = minimal,
+    contacts: RegistrationInput["contacts"] = self,
+  ) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(
+        tx,
+        "org_a",
+        { kind: "internal", userId: ACTOR, contactId: person.id, ...context },
+        { submissionId: randomUUID(), answers, contacts },
+      ),
+    )
+
+  // El alta interna de siempre sigue exigiendo lo que pide la clínica (el fallo que se veía al reservar).
+  await expect(register({ conversationId: threadId })).rejects.toMatchObject({
+    status: 400,
+    message: "Fecha de nacimiento: obligatorio según la configuración del registro",
+  })
+  // Lo mínimo solo vale para la persona de una conversación, como su propia ficha, y solo con lo esencial.
+  await expect(register({ scope: "essentials" })).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, minimal, [{ ...self[0]!, relationship: "family" }]),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, { ...minimal, demographics: { ...minimal.demographics, occupation: "Abogada" } }),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, { ...minimal, health: emptyClinical() }),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, { ...minimal, demographics: { displayName: "Carmen", givenNames: "Carmen" } }),
+  ).rejects.toMatchObject({ status: 400 })
+  expect(await withOrgContext(appDb, "org_a", (tx) => listPatientsByContact(tx, "org_a", person.id))).toEqual([])
+
+  const created = await register({ conversationId: threadId, scope: "essentials" })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  expect(detail.patient).toMatchObject({ displayName: "Carmen Huamán", birthDate: null, identityNeedsReview: true })
+  expect(detail.contacts).toEqual([expect.objectContaining({ contactId: person.id, relationship: "self" })])
+  expect(detail.registration).toMatchObject({ entryPoint: "conversation", respondent: "staff", contextContactId: person.id, conversationId: threadId })
+  // Lo que la clínica pide y falta queda en el caso, con las mismas palabras que el enlace de reserva.
+  const notes = (await withOrgContext(appDb, "org_a", (tx) => getCaseBrief(tx, "org_a", threadId))).known.map((item) => item.text)
+  expect(notes).toContain("El equipo creó su ficha con lo mínimo al reservar. Falta en la clínica: confirmar apellidos y nombres, fecha de nacimiento.")
 })
 
 it("enlace inválido o vacío no cae al formulario genérico", async () => {

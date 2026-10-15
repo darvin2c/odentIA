@@ -8,6 +8,15 @@ export function urgencyWord(priority: string): string {
   return URGENCY_WORDS[priority as keyof typeof URGENCY_WORDS] ?? URGENCY_WORDS.media
 }
 
+/**
+ * Lo que el agente le pasa al equipo tiene un solo nombre (decisión 1 de la
+ * fase 2): cada fila dice «Te lo pasó el agente» (Inicio, Bandeja, panel,
+ * Tareas) y la lista se llama «Casos del agente». La urgencia es siempre
+ * «Ahora / Hoy / Sin apuro». En el código sigue llamándose handoff.
+ */
+export const AGENT_CASE_ROW = "Te lo pasó el agente"
+export const AGENT_CASES_TITLE = "Casos del agente"
+
 /** Etiquetas en español para las acciones del agente autónomo. */
 export const ACTION_LABEL: Record<string, string> = {
   reservar_cita: "Reservar cita",
@@ -16,7 +25,7 @@ export const ACTION_LABEL: Record<string, string> = {
   enviar_mensaje: "Enviar mensaje",
   mover_oportunidad: "Cambiar etapa comercial",
   crear_oportunidad: "Crear oportunidad",
-  actualizar_seguimiento: "Programar seguimiento",
+  actualizar_seguimiento: "Dejar la tarea de una oportunidad",
   cerrar_oportunidad: "Cerrar oportunidad",
 }
 
@@ -239,7 +248,7 @@ export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
 
 export interface AgentOverview {
   enabled: boolean
-  needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
+  needsYou: { gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   learned: AgentLearned

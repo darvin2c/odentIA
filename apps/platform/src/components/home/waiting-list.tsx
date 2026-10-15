@@ -1,9 +1,9 @@
 import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
-import { CheckCircle2, FileText, Lightbulb, type LucideIcon, MessageCircle, SquareCheckBig, UserRound } from "lucide-react"
+import { CalendarClock, CheckCircle2, FileText, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, SquareCheckBig, UserRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { type HomeTextContext, PHONE_ROWS, waitingKey, waitingText } from "../../lib/home"
+import { type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import type { WaitingRow } from "../../lib/workspace"
 import { HandoffUrgency } from "../agent/handoff-badges"
 
@@ -14,11 +14,17 @@ export interface WaitingHandlers {
   onAdvice: (row: RowOf<"advice">) => void
   onUnreached: () => void
   onBudgets: (row: RowOf<"budgets">) => void
+  /** «Tomar» un caso que nadie ha tomado; sin esto (sin permiso) la fila solo abre el caso. */
+  onTake?: (row: RowOf<"case">) => void
+  /** «Hecha» en una tarea; sin esto (sin permiso) la fila solo la abre. */
+  onDone?: (row: RowOf<"task">) => void
+  /** La fila cuya acción está en curso: su botón se desactiva y dice que trabaja. */
+  busyKey?: string | null
 }
 
 /** Toda la fila es el control: mismo alto, mismo orden y la acción a la derecha. */
 const ROW =
-  "h-auto min-h-[60px] w-full justify-start gap-3 rounded-lg px-2 py-2 text-left text-sm font-normal whitespace-normal"
+  "h-auto min-h-[60px] w-full min-w-0 flex-1 justify-start gap-3 rounded-lg px-2 py-2 text-left text-sm font-normal whitespace-normal"
 
 function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }) {
   return (
@@ -38,7 +44,9 @@ function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "unreached") return <AgentMark className="rounded-full" />
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
+  if (row.kind === "unconfirmed" || (row.kind === "more" && row.of === "unconfirmed")) return <TypeIcon icon={CalendarClock} />
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
+  if (row.kind === "stillOpen") return <TypeIcon icon={MessagesSquare} />
   if (row.kind === "advice") return <TypeIcon icon={Lightbulb} />
   if (row.kind === "budgets") return <TypeIcon icon={FileText} />
   return <TypeIcon icon={SquareCheckBig} />
@@ -55,16 +63,26 @@ function badgeOf(row: WaitingRow): ReactNode {
  * A dónde lleva la fila cuando se resuelve navegando; null si abre algo en esta pantalla.
  * Lo que navega es un enlace con aspecto de fila, no un botón: así lo anuncia el lector de pantalla.
  */
-function linkOf(row: WaitingRow, props: { className: string; children: ReactNode }): ReactElement | null {
+function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: string; children: ReactNode }): ReactElement | null {
+  // «y N tareas más» abre Tareas en la vista de quien mira: la del equipo para quien dirige, las suyas para los demás.
+  const tasksView = context.allTasks ? "todas" : "mias"
   switch (row.kind) {
     case "case":
       return row.conversationId ? null : <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
+    case "unconfirmed":
+      return <Link to="/agenda" search={{ appointmentId: row.id }} {...props} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
+    case "stillOpen":
+      return row.conversationId
+        ? <Link to="/inbox" search={{ conversation: row.conversationId }} {...props} />
+        : <Link to="/inbox" search={{ conversation: undefined, view: "team" }} {...props} />
     case "task":
-      return row.more > 0 ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to={row.href} {...props} />
+      return row.more > 0 ? <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} /> : <Link to={row.href} {...props} />
     case "more":
-      return row.of === "tasks" ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
+      if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
+      if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
+      return <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
     default:
       return null
   }
@@ -77,9 +95,30 @@ function open(row: WaitingRow, handlers: WaitingHandlers) {
   else if (row.kind === "budgets") handlers.onBudgets(row)
 }
 
+/**
+ * La acción que la fila hace sin salir de Inicio: «Tomar» un caso que nadie
+ * tomó y «Hecha» en una tarea. Es un botón aparte de la fila, que sigue
+ * abriendo el caso o la tarea.
+ */
+function quickAction(row: WaitingRow, handlers: WaitingHandlers): { label: string; run: () => void; primary: boolean } | null {
+  // «Tomar» toma la conversación del caso, como en la Bandeja: sin conversación la fila lleva a Pendientes.
+  if (row.kind === "case" && row.unclaimed && row.conversationId && handlers.onTake) {
+    const take = handlers.onTake
+    return { label: "Tomar", run: () => take(row), primary: true }
+  }
+  if (row.kind === "task" && row.more === 0 && handlers.onDone) {
+    const done = handlers.onDone
+    return { label: "Hecha", run: () => done(row), primary: false }
+  }
+  return null
+}
+
 function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow; context: HomeTextContext; handlers: WaitingHandlers; className?: string }) {
   const text = waitingText(row, context)
   const badge = badgeOf(row)
+  const action = quickAction(row, handlers)
+  const key = waitingKey(row)
+  const busy = handlers.busyKey === key
   const content = (
     <>
       {iconOf(row)}
@@ -94,35 +133,57 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
           <span className="min-w-0">{text.detail}</span>
         </span>
       </span>
-      {/* En teléfono la acción no ocupa sitio, pero sigue nombrando la fila. */}
-      <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
+      {/* Con un botón propio, la fila solo abre: a la vista lo dice el botón, y la fila sigue nombrando a dónde lleva para el lector de pantalla. En teléfono la acción no ocupa sitio, pero sigue nombrando la fila. */}
+      {action ? (
+        <span className="sr-only">{waitingOpenText(row, context)}</span>
+      ) : (
+        <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
+      )}
     </>
   )
-  const link = linkOf(row, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
+  const link = linkOf(row, context, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
   return (
-    <li className={className}>
+    <li className={cn("flex items-center gap-2", className)}>
       {link ?? (
         <Button type="button" variant="ghost" className={ROW} onClick={() => open(row, handlers)}>
           {content}
         </Button>
       )}
+      {action ? (
+        <Button
+          type="button"
+          size="sm"
+          variant={action.primary ? "default" : "outline"}
+          className="min-h-11 shrink-0 sm:min-h-8"
+          disabled={busy}
+          aria-label={`${action.label}: ${text.title}`}
+          onClick={action.run}
+        >
+          {busy ? "Guardando…" : action.label}
+        </Button>
+      ) : null}
     </li>
   )
 }
 
 /**
- * «Te espera»: todo lo que necesita a una persona en una sola lista, en el
- * orden que entrega el servidor. Cada fila abre lo que ya existe (el resumen
- * del caso, la recomendación del administrador) o lleva a donde se resuelve.
+ * «Te espera»: la única lista de lo que hay que hacer, una fila por asunto, en
+ * el orden que entrega el servidor. Cada fila abre lo que ya existe (el
+ * resumen del caso, la recomendación del administrador) o lleva a donde se
+ * resuelve; «Tomar» y «Hecha» se hacen aquí mismo. Lo que está aquí no llega a
+ * la campana.
  */
 export function WaitingList({
   rows,
   context,
   handlers,
+  error,
 }: {
   rows: WaitingRow[]
   context: HomeTextContext
   handlers: WaitingHandlers
+  /** Lo que no se pudo hacer con «Tomar» o «Hecha». */
+  error?: string | null
 }) {
   const headingId = useId()
   const [expanded, setExpanded] = useState(false)
@@ -135,11 +196,22 @@ export function WaitingList({
   return (
     <section aria-labelledby={headingId} className="enter elevated flex min-w-0 flex-col rounded-xl border bg-card p-3 sm:p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 px-2 pb-1.5">
-        <h2 id={headingId} className="text-[17px] font-bold tracking-tight">
+        <h2 id={headingId} className="flex items-center gap-2 text-[17px] font-bold tracking-tight">
           Te espera
+          {rows.length > 0 ? (
+            <Badge variant="secondary" className="tabular-nums">
+              {rows.length}
+              <span className="sr-only"> {rows.length === 1 ? "asunto" : "asuntos"}</span>
+            </Badge>
+          ) : null}
         </h2>
         {rows.length > 0 ? <p className="text-sm text-muted-foreground">Por orden de urgencia</p> : null}
       </div>
+      {error ? (
+        <p role="alert" className="px-2 pb-1 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
       {rows.length === 0 ? (
         <p className="flex items-center gap-2 px-2 py-3 font-semibold">
           <CheckCircle2 className="size-5 shrink-0 text-success" aria-hidden />
@@ -153,7 +225,7 @@ export function WaitingList({
               row={row}
               context={context}
               handlers={handlers}
-              className={index >= PHONE_ROWS && !expanded ? "hidden sm:block" : undefined}
+              className={index >= PHONE_ROWS && !expanded ? "hidden sm:flex" : undefined}
             />
           ))}
         </ul>

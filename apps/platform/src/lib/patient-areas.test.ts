@@ -4,6 +4,7 @@ import {
   areaNav,
   defaultSection,
   resolveSection,
+  sectionFromSearch,
   suggestedDentition,
   visibleAreas,
   visibleSections,
@@ -11,50 +12,72 @@ import {
 
 const as = (role: string) => (permission: string) => canAccess(role, permission)
 
-describe("áreas de la ficha por rol", () => {
-  it("recepción coordina sin clínica ni caja y entra por el resumen", () => {
-    const can = as("reception")
-    expect(visibleAreas(can).map((area) => area.id)).toEqual(["resumen", "relacion", "datos"])
-    expect(defaultSection(can)).toBe("resumen")
-    expect(visibleSections(can).some((section) => section.area === "clinica")).toBe(false)
-    // Coordina el tratamiento sin leer la clínica; el clínico usa su plan completo.
-    expect(areaNav("relacion", can).map((entry) => entry.label)).toEqual([
-      "Actividad",
-      "Citas",
+describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve cada rol»)", () => {
+  const ids = (role: string, isPatient = true) =>
+    visibleAreas(as(role), isPatient).map((area) => area.id)
+
+  it("recepción: resumen, conversaciones, citas y datos; ni clínica, ni plan, ni cobros", () => {
+    expect(ids("reception")).toEqual(["resumen", "conversaciones", "citas", "datos"])
+    expect(defaultSection(as("reception"))).toBe("resumen")
+    // Coordina el tratamiento sin leer la clínica.
+    expect(areaNav("citas", as("reception")).map((entry) => entry.label)).toEqual([
+      "Sus citas",
       "Tratamiento",
-      "Seguimiento",
-      "Interlocutores",
     ])
-    // Odontología ve la actividad y las citas, pero no el seguimiento comercial.
-    expect(areaNav("relacion", as("dentist")).map((entry) => entry.label)).toEqual([
-      "Actividad",
-      "Citas",
-      "Interlocutores",
+  })
+
+  it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
+    expect(ids("dentist")).toEqual([
+      "resumen",
+      "conversaciones",
+      "citas",
+      "clinica",
+      "plan",
+      "datos",
     ])
+    // Quien lee la clínica tiene el plan completo: no ve la coordinación aparte.
     expect(visibleSections(as("dentist")).map((section) => section.id)).not.toContain(
       "coordinacion",
     )
-    expect(visibleSections(as("admin")).map((section) => section.id)).not.toContain("coordinacion")
+    // Ni canales ni portal: son del CRM y de quien edita la filiación.
+    expect(areaNav("datos", as("dentist")).map((entry) => entry.label)).toEqual([
+      "Datos personales",
+      "Personas vinculadas",
+      "Responsables",
+    ])
   })
 
-  it("odontología entra por el resumen clínico y no ve la cuenta ni el portal", () => {
-    const can = as("dentist")
-    expect(defaultSection(can)).toBe("resumen")
-    expect(visibleAreas(can).map((area) => area.id)).toEqual([
+  it("caja: resumen, plan (solo presupuestos), cobros y datos; entra por los cobros", () => {
+    expect(ids("cashier")).toEqual(["resumen", "plan", "cobros", "datos"])
+    expect(defaultSection(as("cashier"))).toBe("cuenta")
+  })
+
+  it("propietario: todas las pestañas", () => {
+    expect(ids("owner")).toEqual([
       "resumen",
+      "conversaciones",
+      "citas",
       "clinica",
-      "relacion",
+      "plan",
+      "cobros",
       "datos",
     ])
-    // Dentro de Clínica, el odontograma sigue siendo la primera sección.
-    expect(visibleAreas(can).find((area) => area.id === "clinica")?.target).toBe("odontograma")
-    expect(visibleSections(can).map((section) => section.id)).not.toContain("portal")
   })
 
-  it("caja entra por la cuenta", () => {
-    const can = as("cashier")
-    expect(defaultSection(can)).toBe("cuenta")
-    expect(visibleAreas(can).map((area) => area.id)).toEqual(["resumen", "cuenta", "datos"])
+  it("quien aún no es paciente no tiene clínica, plan ni cobros: aparecen al registrarla", () => {
+    expect(ids("owner", false)).toEqual(["resumen", "conversaciones", "citas", "datos"])
+    expect(ids("cashier", false)).toEqual(["resumen", "datos"])
+    // Caja sin ficha no tiene cobros: entra por el resumen.
+    expect(defaultSection(as("cashier"), false)).toBe("resumen")
+    expect(resolveSection("odontograma", as("owner"), false)).toBe("resumen")
+  })
+
+  it("quien solo es responsable de otros no tiene citas propias", () => {
+    expect(visibleAreas(as("reception"), "responsable").map((area) => area.id)).toEqual([
+      "resumen",
+      "conversaciones",
+      "datos",
+    ])
   })
 
   it("una sección sin permiso cae en la entrada del rol; sin acceso no hay sección", () => {
@@ -64,12 +87,19 @@ describe("áreas de la ficha por rol", () => {
     expect(resolveSection(undefined, as("member"))).toBeNull()
   })
 
+  it("los enlaces guardados de la ficha anterior abren la sección que hace ese trabajo", () => {
+    expect(sectionFromSearch("actividad")).toBe("resumen")
+    expect(sectionFromSearch("seguimiento")).toBe("conversaciones")
+    expect(sectionFromSearch("odontograma")).toBe("odontograma")
+    expect(sectionFromSearch("no-existe")).toBeUndefined()
+  })
+
   it("los documentos se agrupan en una sola entrada de Clínica", () => {
     const entries = areaNav("clinica", as("dentist"))
     expect(entries.map((entry) => entry.label)).toEqual([
-      "Odontograma y plan",
+      "Resumen clínico",
+      "Odontograma",
       "Tratamientos",
-      "Planes y presupuestos",
       "Controles",
       "Atenciones",
       "Historia",

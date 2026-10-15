@@ -110,13 +110,13 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       },
       {
         id: "seguimiento",
-        label: "Seguimiento comercial",
+        label: "Oportunidades",
         description:
-          "Registra al interesado, mueve su oportunidad de etapa y anota el próximo seguimiento. La cierra como perdida solo si la persona lo dice claro, con el motivo. Lo ves y lo deshaces en la oportunidad.",
+          "Registra lo que la persona pide en concreto (un precio, un tratamiento, una evaluación) como oportunidad, sin repetir una abierta, y deja su tarea. La cierra como perdida solo si la persona lo dice claro, con un motivo de la lista. El historial de la oportunidad dice lo que hizo el agente; ahí lo ves y lo deshaces.",
         fixed: false,
         tools: ["create_opportunity", "update_followup", "close_opportunity", "move_to_stage", "listar_oportunidades"],
-        whenOff: "No creas ni cambias oportunidades ni seguimientos comerciales.",
-        offNote: "Apagada: no crea ni mueve oportunidades. Tu equipo lleva el seguimiento.",
+        whenOff: "No creas ni cambias oportunidades ni sus tareas.",
+        offNote: "Apagada: no crea ni mueve oportunidades. Tu equipo las lleva.",
       },
       {
         id: "ordenar",
@@ -140,6 +140,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "send_template",
       // El enlace de reserva no depende de Agendar: con Agendar apagado es la vía para sacar una cita.
       "enviar_enlace_cita",
+      // Confirmar por escrito su propia cita es lo mismo que el botón del recordatorio: no depende de Agendar.
+      "confirmar_cita",
       "confirmar_propuesta",
       "ver_contexto_paciente",
       "ver_resumen_paciente",

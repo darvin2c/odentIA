@@ -94,6 +94,8 @@ describe("la guía coincide con el código", () => {
     expect(helpTopicForScreen("/settings/integrations/whatsapp")?.id).toBe("whatsapp")
     expect(describeHelpScreen("/settings/team")).toMatchObject({ title: "Equipo" })
     expect(helpTopicForScreen("/patients/123/encounters/456")?.id).toBe("pacientes")
+    expect(helpTopicForScreen("/people/123")?.id).toBe("pacientes")
+    expect(first("¿dónde están los contactos?")).toBe("pacientes")
     expect(describeHelpScreen("/agenda")).toMatchObject({ title: "Agenda" })
     expect(describeHelpScreen("/agenda").suggestions[0]).toBe("¿Cómo bloqueo un horario?")
   })

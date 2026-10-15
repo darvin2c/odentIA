@@ -37,11 +37,11 @@ afterEach(() => {
 })
 
 describe("en qué está una conversación abierta", () => {
-  it("un caso que pasó al equipo dice quién la atiende o, sin nadie, su urgencia", () => {
-    expect(conversationWords(open({ handoffPriority: "alta" }))).toEqual({ text: "Con el equipo · ahora", tone: "urgent" })
-    expect(conversationWords(open({ handoffPriority: "baja" }))?.text).toBe("Con el equipo · sin apuro")
+  it("un caso que te pasó el agente lleva su único nombre y dice quién la atiende o, sin nadie, su urgencia", () => {
+    expect(conversationWords(open({ handoffPriority: "alta" }))).toEqual({ text: "Te lo pasó el agente · Ahora", tone: "urgent" })
+    expect(conversationWords(open({ handoffPriority: "baja" }))?.text).toBe("Te lo pasó el agente · Sin apuro")
     expect(conversationWords(open({ handoffPriority: "alta", assignedName: "Rosa Díaz" }))).toEqual({
-      text: "Con el equipo · la atiende Rosa Díaz",
+      text: "Te lo pasó el agente · la atiende Rosa Díaz",
       tone: "team",
     })
   })
@@ -109,7 +109,7 @@ describe("confirmaciones de cierre", () => {
     expect(resolveWords("Ana Ruiz", { farewell: true, farewellText: "¡Gracias!", handoffs: 1, pendingContact: 1 })).toEqual({
       description:
         "Se cerrará la conversación con Ana Ruiz, se le enviará la despedida de la clínica y el agente volverá a atenderla si escribe de nuevo.",
-      also: ["También se dará por resuelto el caso que pasó al equipo.", "Vencerá la cita propuesta que esperaba su sí."],
+      also: ["También se dará por resuelto el caso que te pasó el agente.", "Vencerá la cita propuesta que esperaba su sí."],
     })
     expect(resolveWords("Ana Ruiz", { farewell: false, farewellText: null, handoffs: 0, pendingContact: 0 })).toEqual({
       description:

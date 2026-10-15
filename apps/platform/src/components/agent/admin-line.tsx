@@ -2,7 +2,7 @@ import { Badge, Button, cn, Field, FieldDescription, FieldLabel, Input, Select, 
 import { Switch } from "@odentia/ui/components/switch"
 import { FlowDiagram, type FlowDiagramStep, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { PersonLink } from "../person-link"
 import { Bot, ChevronDown, User } from "lucide-react"
 import { useId, useState } from "react"
 import {
@@ -123,7 +123,8 @@ export function AdminLine({
         </button>
         <Switch
           checked={line.enabled}
-          disabled={!canWrite || !adminOn || save.isPending}
+          // Con el Administrador apagado no se prende nada, pero lo prendido se puede apagar.
+          disabled={!canWrite || (!adminOn && !line.enabled) || save.isPending}
           aria-label={`${line.enabled ? "Apagar" : "Prender"}: ${line.name}`}
           onCheckedChange={(next: boolean) => save.mutate(next)}
         />
@@ -146,14 +147,10 @@ function PersonRow({ row, lineName }: { row: AdminPersonRow; lineName?: string }
   return (
     <li className="flex flex-col gap-0.5 px-3 py-2 text-sm">
       <span className="flex flex-wrap items-baseline justify-between gap-x-3">
-        {row.patientId ? (
-          <Link to="/patients/$patientId" params={{ patientId: row.patientId }} className="font-semibold text-primary hover:underline">
+        {row.patientId || row.contactId ? (
+          <PersonLink contactId={row.contactId} patientId={row.patientId} className="font-semibold text-primary hover:underline">
             {row.personName}
-          </Link>
-        ) : row.contactId ? (
-          <Link to="/contacts/$contactId" params={{ contactId: row.contactId }} className="font-semibold text-primary hover:underline">
-            {row.personName}
-          </Link>
+          </PersonLink>
         ) : (
           <span className="font-semibold">{row.personName}</span>
         )}

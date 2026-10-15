@@ -322,6 +322,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "opportunity.reopened": say("Reabrió una oportunidad"),
   "task.created": say("Creó una tarea"),
   "task.updated": say("Cambió una tarea"),
+  "task.settled": say("Una tarea se cerró sola: su motivo ya no estaba", "sistema"),
   // Conversaciones
   "conversation.started": say("Empezó una conversación"),
   "conversation.updated": say("Cambió una conversación"),
@@ -345,6 +346,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "agent.admin_once": say("Pidió al Administrador atender una línea solo esta vez"),
   "admin_line.updated": say("Cambió una línea del Administrador"),
   "admin_line.deleted": say("Eliminó una línea del Administrador"),
+  "admin_line.default_on": say("Prendió «Recordar la cita» al crear la clínica"),
   "admin_line.draft_saved": say("Dejó un borrador de cambio para una línea del Administrador"),
   "admin_line.draft_discarded": say("Descartó un borrador de cambio de una línea del Administrador"),
   "agent.proposal_created": say("Propuso una acción", "agente"),

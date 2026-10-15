@@ -7,6 +7,7 @@ import {
   deleteScheduleBlock,
   getAgendaAvailability,
   getAppointment,
+  getAppointmentContext,
   getProfessionalSchedule,
   listAppointments,
   listChairs,
@@ -349,6 +350,21 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getAppointment(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  /**
+   * Lo que el cajón de la cita dice además de la cita: a quién se le escribe
+   * (con su teléfono), de qué conversación salió y cuándo le pedirá el agente
+   * que confirme. Lo lee quien ve la agenda.
+   */
+  app.get("/:id/context", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAppointmentContext(tx, orgId, c.req.param("id"))),
     )
   })
 

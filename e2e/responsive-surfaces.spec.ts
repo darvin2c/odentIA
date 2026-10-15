@@ -1,6 +1,6 @@
 import type { Browser, Page } from "@playwright/test"
 import { tenant, tenantPattern } from "./env"
-import { expect, fillPatientNames, type OwnerFixture, test } from "./fixtures"
+import { call, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
@@ -35,13 +35,18 @@ async function withTouchPage(
 
 test("móvil: el alta de paciente mantiene las acciones operables", async ({ owner, browser }) => {
   await withTouchPage(browser, owner, async (page) => {
-    await gotoHydrated(page, tenant(owner.org.slug, "/patients"))
+    // El alta se hace en la página de la persona: «Registrar» trae lo que ya se sabe (ADR 0029).
+    // La página táctil aún está en blanco (sin origen): la API se llama desde la sesión del propietario.
+    const person = await call<{ id: string }>(owner.page, "POST", "/api/people", owner.org.slug, {
+      givenNames: "Paciente",
+      paternalSurname: "Móvil",
+    }, 201)
+    await gotoHydrated(page, tenant(owner.org.slug, `/people/${person.id}`))
 
-    await page.getByRole("button", { name: "Nuevo paciente", exact: true }).tap()
+    await page.getByRole("button", { name: "Registrar", exact: true }).tap()
     const dialog = surface(page, { name: "Nuevo paciente" })
     await expect(dialog).toBeVisible()
 
-    await fillPatientNames(dialog, "Paciente móvil")
     const next = dialog.getByRole("button", { name: "Siguiente", exact: true })
     await expect(next).toBeInViewport()
     await next.tap()

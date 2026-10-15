@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import type { ContactFull } from "../../lib/crm"
+import { fetchPerson, type PersonPage, personQueryKey } from "../../lib/people"
 import { useOrgProfile } from "../../lib/org"
 import { hcLabel, type Patient } from "../../lib/patients"
 import {
@@ -58,21 +58,50 @@ async function fetchDuplicates(answers: RegistrationAnswers): Promise<DuplicateS
 
 const FORM_DESCRIPTION =
   "Completa los datos de registro. Al guardar continuarás con los antecedentes de salud."
+const FROM_PERSON_DESCRIPTION =
+  "Ya viene escrito lo que se sabe de esta persona: revisa y completa lo que falta. Al guardar sigues en su página."
+
+/** Lo que ya se sabe de la persona, para no volver a escribirlo al registrarla. */
+function knownDemographics(person: PersonPage): Partial<RegistrationDemographics> {
+  const text = (value: string | null) => value ?? ""
+  return {
+    displayName: person.displayName,
+    givenNames: text(person.givenNames),
+    paternalSurname: text(person.paternalSurname),
+    maternalSurname: text(person.maternalSurname),
+    docType: text(person.docType),
+    docNumber: text(person.docNumber),
+    docCountry: text(person.docCountry),
+    birthDate: text(person.birthDate),
+    sex: text(person.sex),
+    phone: text(person.phone),
+    email: text(person.email),
+  } as Partial<RegistrationDemographics>
+}
 
 export function CreatePatientDrawer({
   open,
   onClose,
   contactId,
+  person: givenPerson,
+  stayOnPage = false,
+  registerOther = false,
   /**
    * En modo panel el formulario vive al costado de la tabla (no modal): la
-   * página lo monta dentro de `MasterDetail`. Por defecto sigue siendo drawer,
-   * que es lo correcto en la ficha de contacto (sin tabla que mantener visible).
+   * página lo monta dentro de `MasterDetail`. Por defecto es cajón.
    */
   asPanel = false,
 }: {
   open: boolean
   onClose: () => void
+  /** La persona que se registra (o desde cuya página se registra a otra). */
   contactId?: string
+  /** La persona ya cargada por su página: no se vuelve a pedir. */
+  person?: PersonPage
+  /** Registrar no saca de la página de la persona: la página crece con ella. */
+  stayOnPage?: boolean
+  /** Se registra a alguien a cargo de esta persona (un hijo), no a ella. */
+  registerOther?: boolean
   asPanel?: boolean
 }) {
   const queryClient = useQueryClient()
@@ -85,13 +114,20 @@ export function CreatePatientDrawer({
   const confirmedRef = useRef(false)
   const [duplicates, setDuplicates] = useState<DuplicateSuggestion[]>([])
 
-  const contactQuery = useQuery({
-    queryKey: ["contact", contactId ?? "none"],
-    queryFn: () => apiFetch<{ data: ContactFull }>(`/api/contacts/${contactId}`),
-    enabled: open && Boolean(contactId),
+  const personQuery = useQuery({
+    queryKey: personQueryKey(contactId ?? "none"),
+    queryFn: () => fetchPerson(contactId ?? ""),
+    enabled: open && Boolean(contactId) && !givenPerson,
     retry: false,
   })
-  const contact = contactQuery.data?.data
+  const person = givenPerson ?? personQuery.data?.data
+  const contact = person
+    ? {
+        id: person.id,
+        displayName: person.displayName,
+        selfPatient: person.patient ? { id: person.patient.id, displayName: person.displayName } : null,
+      }
+    : undefined
 
   const branchesQuery = useQuery({
     queryKey: ["branches"],
@@ -128,7 +164,14 @@ export function CreatePatientDrawer({
       }),
     })
     await queryClient.invalidateQueries({ queryKey: ["patients"] })
+    await queryClient.invalidateQueries({ queryKey: ["people"] })
     toast.success("Paciente registrado")
+    if (stayOnPage && contactId) {
+      // La página es la misma: aparecen su número de historia, Clínica, Plan y Cobros.
+      await queryClient.invalidateQueries({ queryKey: personQueryKey(contactId) })
+      onClose()
+      return
+    }
     await navigate({
       to: "/patients/$patientId",
       params: { patientId: created.data.id },
@@ -171,8 +214,8 @@ export function CreatePatientDrawer({
   }
 
   const today = configQuery.data?.meta.today ?? new Date().toISOString().slice(0, 10)
-  const queryError = contactQuery.isError
-    ? contactQuery.error.message
+  const queryError = personQuery.isError
+    ? personQuery.error.message
     : configQuery.isError
       ? configQuery.error instanceof ApiError
         ? (configQuery.error.shape.message ?? "No se pudo cargar la configuración del registro")
@@ -225,15 +268,18 @@ export function CreatePatientDrawer({
       context={contact ? { kind: "contact", contact } : { kind: "generic" }}
       branches={branchesQuery.data?.data}
       initialValues={
-        contact ? { demographics: { displayName: contact.contact.displayName } } : undefined
+        person && !person.patient && !registerOther
+          ? { demographics: knownDemographics(person) as RegistrationDemographics }
+          : undefined
       }
+      defaultRecipient={registerOther ? "other" : undefined}
       onSubmit={handleSubmit}
     >
       {(view) => {
         const shellProps = {
           onClose,
-          title: "Nuevo paciente",
-          description: FORM_DESCRIPTION,
+          title: registerOther ? "Registrar a alguien a su cargo" : "Nuevo paciente",
+          description: person && !person.patient && !registerOther ? FROM_PERSON_DESCRIPTION : FORM_DESCRIPTION,
           isDirty: view.isDirty,
           isSubmitting: view.isSubmitting,
           submitDisabled: view.submitDisabled,

@@ -164,6 +164,11 @@ it("datos de la clínica: vaciar un dato lo guarda vacío y lo que la pantalla y
     ...region,
   })
   expect(created.status).toBe(200)
+  // Al crear la clínica viene prendida «Recordar la cita», a nombre de quien la crea, y nada más (ADR 0026).
+  const lines = await ownerDb.execute<{ kind: string; enabled: boolean; enabled_by: string | null }>(
+    sql`select kind, enabled, enabled_by from automation_rule where organization_id = ${ORG}`,
+  )
+  expect([...lines].map((row) => [row.kind, row.enabled, row.enabled_by])).toEqual([["recordatorio_cita", true, "u-set-owner"]])
 
   // La pantalla ya no muestra el correo de facturación: no lo envía y no se borra.
   const saved = await request("owner", "PUT", "/org-profile", {

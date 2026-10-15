@@ -1,37 +1,23 @@
 import { withOrgContext } from "@odentia/db"
-import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { sanitizeCustomFields } from "./contacts.js"
 import { createFieldDef, deleteFieldDef, listFieldDefs, updateFieldDef } from "./fields.js"
-import { createOpportunity } from "./opportunities.js"
-import {
-  createPipeline,
-  deleteStage,
-  ensureDefaultPipeline,
-  listPipelines,
-  reorderStages,
-} from "./pipelines.js"
+import { ensureDefaultPipeline, listPipelines, renameStage } from "./pipelines.js"
 import { completeTask, createTask, listTasks } from "./tasks.js"
 import { appDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
-it("ensureDefaultPipeline crea Ventas con 5 etapas y es idempotente", async () => {
+it("ensureDefaultPipeline crea Ventas con los cuatro pasos fijos y es idempotente", async () => {
   const first = await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
-  expect(first.stages.map((s) => s.name)).toEqual([
-    "Nuevo",
-    "Contactado",
-    "Cita agendada",
-    "Ganado",
-    "Perdido",
-  ])
-  expect(first.stages.map((s) => s.kind)).toEqual(["open", "open", "open", "won", "lost"])
+  expect(first.stages.map((s) => s.name)).toEqual(["Interesado", "Evaluación agendada", "Presupuesto enviado", "Decidió"])
+  expect(first.stages.map((s) => s.moment)).toEqual(["interesado", "evaluacion_agendada", "presupuesto_enviado", "decidio"])
   const second = await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
   expect(second.pipelineId).toBe(first.pipelineId)
-  expect(second.stages).toHaveLength(5)
+  expect(second.stages).toHaveLength(4)
 })
 
 it("listPipelines aísla por org", async () => {
@@ -43,51 +29,14 @@ it("listPipelines aísla por org", async () => {
   expect(a[0]?.id).not.toBe(b[0]?.id)
 })
 
-it("createPipeline + reorderStages reordenan posiciones", async () => {
-  const created = await withOrgContext(appDb, "org_b", (tx) =>
-    createPipeline(tx, "org_b", { name: "Postventa" }),
-  )
-  expect(created.isDefault).toBe(false)
-  const reversed = await withOrgContext(appDb, "org_a", async (tx) => {
-    const { stages } = await ensureDefaultPipeline(tx, "org_a")
-    return reorderStages(
-      tx,
-      "org_a",
-      stages[0]?.pipelineId ?? "",
-      [...stages.map((s) => s.id)].reverse(),
-    )
-  })
-  expect(reversed.map((s) => s.position)).toEqual([0, 1, 2, 3, 4])
-  // Restaurar orden original para no contaminar otros tests.
-  await withOrgContext(appDb, "org_a", async (tx) => {
-    const { stages } = await ensureDefaultPipeline(tx, "org_a")
-    await reorderStages(
-      tx,
-      "org_a",
-      stages[0]?.pipelineId ?? "",
-      [...stages.map((s) => s.id)].reverse(),
-    )
-  })
-  void created
-})
-
-it("deleteStage con oportunidades en uso da STAGE_IN_USE", async () => {
-  await withOrgContext(appDb, "org_a", async (tx) => {
-    const { stages } = await ensureDefaultPipeline(tx, "org_a")
-    const [created] = await tx
-      .insert(contact)
-      .values({ organizationId: "org_a", displayName: "Con oportunidad" })
-      .returning({ id: contact.id })
-    await createOpportunity(tx, "org_a", {
-      contactId: created?.id ?? "",
-      stageId: stages[0]?.id ?? "",
-      title: "Caso de prueba",
-    })
-    await expect(deleteStage(tx, "org_a", stages[0]?.id ?? "")).rejects.toMatchObject({
-      code: "STAGE_IN_USE",
-      status: 409,
-    })
-  })
+it("un paso se renombra, pero no cambia su momento ni su orden; otra organización no lo toca", async () => {
+  const { stages } = await withOrgContext(appDb, "org_a", (tx) => ensureDefaultPipeline(tx, "org_a"))
+  const first = stages[0]!
+  const renamed = await withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "Pidió precio" }))
+  expect(renamed).toMatchObject({ name: "Pidió precio", moment: "interesado", position: 0 })
+  await expect(withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "   " }))).rejects.toMatchObject({ status: 400 })
+  await expect(withOrgContext(appDb, "org_b", (tx) => renameStage(tx, "org_b", first.id, { name: "Ajeno" }))).rejects.toMatchObject({ status: 404 })
+  await withOrgContext(appDb, "org_a", (tx) => renameStage(tx, "org_a", first.id, { name: "Interesado" }))
 })
 
 it("custom fields: valida tipos, descarta desconocidas", async () => {

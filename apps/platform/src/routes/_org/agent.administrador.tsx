@@ -326,8 +326,17 @@ function AdministratorPage() {
               {canWrite ? <AdminPreview /> : <p className="text-sm text-muted-foreground">La vista previa la ve quien administra el agente.</p>}
               <div className="flex flex-wrap items-center gap-3 rounded-xl bg-muted p-4 text-sm">
                 <p className="min-w-0 flex-1 basis-64">
-                  <span className="font-semibold">Al encenderlo no hace nada por su cuenta.</span> Las líneas de la lista empiezan apagadas. Él te
-                  recomienda en Inicio las que hoy tienen casos, y tú prendes las que quieras, una por una.
+                  {on.length > 0 ? (
+                    <>
+                      <span className="font-semibold">Al encenderlo solo hace lo que ya está prendido.</span> Las demás líneas empiezan
+                      apagadas: él te recomienda en Inicio las que hoy tienen casos, y tú prendes las que quieras, una por una.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-semibold">Al encenderlo no hace nada por su cuenta.</span> Las líneas de la lista empiezan
+                      apagadas. Él te recomienda en Inicio las que hoy tienen casos, y tú prendes las que quieras, una por una.
+                    </>
+                  )}
                 </p>
                 {canWrite ? (
                   <Button type="button" className="min-h-11" disabled={power.isPending} onClick={() => power.mutate(true)}>
@@ -342,11 +351,16 @@ function AdministratorPage() {
 
           {page.enabled && canWrite ? <AdminRequest onOpen={open} /> : null}
 
-          {page.enabled ? (
+          {/* Con él apagado también se ven las prendidas: «Recordar la cita» viene prendida en toda clínica nueva (ADR 0026). */}
+          {page.enabled || on.length > 0 ? (
             <LineBlock
               id="administrador-prendidas"
               title="Prendidas"
-              hint="Esto se hace solo. Cada línea dice quién lo hace: el agente, o una persona de tu equipo. Al tocar una, se abre con su flujo."
+              hint={
+                page.enabled
+                  ? "Esto se hace solo. Cada línea dice quién lo hace: el agente, o una persona de tu equipo. Al tocar una, se abre con su flujo."
+                  : "Empiezan a hacerse solas cuando enciendas al administrador. Puedes apagarlas antes. Al tocar una, se abre con su flujo."
+              }
               lines={on}
               empty="Todavía no hay ninguna prendida. Prende abajo las que quieras, una por una."
               open={linea}

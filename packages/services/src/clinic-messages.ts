@@ -7,6 +7,7 @@ import {
   type TemplateStatus,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
+import { member, user } from "@odentia/db/schema/auth"
 import { automationRule } from "@odentia/db/schema/automation"
 import {
   channelConnection,
@@ -19,7 +20,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
-import { adminLineOf, beforePhrase, hourPhrase, type LineTiming } from "./admin-lines.js"
+import { adminLineOf, beforePhrase, hourPhrase, type LineTiming, lineOfJobKind } from "./admin-lines.js"
 import { lineDays, lineTiming } from "./automation.js"
 import {
   AUTOMATION_MESSAGE_KEYS,
@@ -63,9 +64,10 @@ import { findOrgLocale } from "./locale.js"
  * Los mensajes de WhatsApp de una clínica. Son suyos: viven en su cuenta,
  * vienen escritos por odentIA y cada clínica puede cambiarles el texto.
  *
- * - Siete vienen con odentIA: los seis que envía el agente
- *   (`AUTOMATION_MESSAGES`) y «Retomar la conversación», que envía una persona
- *   desde la Bandeja. La clínica puede además crear los suyos para la Bandeja.
+ * - Diez vienen con odentIA: los nueve que envía el agente
+ *   (`AUTOMATION_MESSAGES`: uno por línea que escribe y los tres avisos de
+ *   «Recordar la cita» cuando la cita cambia) y «Retomar la conversación», que
+ *   envía una persona desde la Bandeja. La clínica puede además crear los suyos para la Bandeja.
  * - Un texto nuevo es otra versión, con otro nombre de plantilla, que se pide a
  *   WhatsApp. Mientras está en revisión, o si la rechazan, sigue saliendo la
  *   versión vigente: un cambio nunca deja a la clínica sin mensaje.
@@ -156,8 +158,16 @@ const OWN_DATA: MessageDef["data"] = [
   { key: "clinica", required: false },
 ]
 
+/** Los avisos de «Recordar la cita» no son una línea: cada uno dice qué avisa. */
+const NOTICE_TITLES: Record<string, string> = {
+  aviso_cita_reservada: "Recordar la cita: cita reservada",
+  aviso_cita_movida: "Recordar la cita: cambio de fecha",
+  aviso_cita_cancelada: "Recordar la cita: cita cancelada",
+}
+
 function catalogTitle(key: CatalogMessageKey): string {
-  return key === RESUME_MESSAGE_KEY ? "Retomar la conversación" : (adminLineOf(key)?.name ?? key)
+  if (key === RESUME_MESSAGE_KEY) return "Retomar la conversación"
+  return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
 function catalogDef(
@@ -809,6 +819,9 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
     `Al día siguiente de que una persona falta a su cita${timing.hour === undefined ? "" : `, a las ${hourPhrase(timing.hour)}`}.`,
   cita_cancelada: (_, timing) =>
     `${capital(HOURS(timing.delayHours ?? adminLineOf("cita_cancelada")?.delayHours ?? 1))} después de que se cancela una cita.`,
+  aviso_cita_reservada: () => "Al reservar una cita desde la Agenda, la ficha o la conversación.",
+  aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
+  aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",
 }
 
 function buttonDoes(def: MessageDef, button: MessageButton): string {
@@ -908,15 +921,16 @@ function itemOf(
   const current = stateOf(text, templates, context.values)
   const waitingText = pendingText(def)
   const pending = waitingText ? stateOf(waitingText, templates, context.values) : null
-  const rule = context.rules.get(def.id) ?? null
-  const line = def.origin === "agente" ? adminLineOf(def.id) : null
+  // Un aviso de cita es de la línea «Recordar la cita»: su estado es el de ella.
+  const line = def.origin === "agente" ? lineOfJobKind(def.id) : null
+  const rule = context.rules.get(line?.key ?? def.id) ?? null
   const category = templates.get(text.templateName)?.category ?? def.category
   return {
     id: def.id,
     origin: def.origin,
     title: def.title,
     when: line
-      ? WHEN[def.id as AutomationMessageKey](lineDays(rule, def.id), lineTiming(rule))
+      ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule))
       : null,
     line: line
       ? { key: line.key, title: line.name, enabled: !!rule?.enabled && rule.agentPart }
@@ -1575,7 +1589,8 @@ async function sendables(
   if (!wrote) {
     return {
       options,
-      why: `Esta persona todavía no escribió por aquí. ${title} solo sirve para continuar una consulta; para escribirle primero hace falta un mensaje aprobado creado por la clínica.`,
+      // Que nunca escribió ya lo dice la zona de escritura (`whatsappWindow`): aquí solo por qué no hay mensaje.
+      why: `${title} solo sirve para continuar una consulta; para escribirle primero hace falta un mensaje aprobado creado por la clínica.`,
       fixable: true,
     }
   }
@@ -1615,14 +1630,31 @@ export async function listApprovedMessages(
   }))
   if (data.length > 0 || !why) return { data, none: null }
   // Los mensajes se administran en Configuración: solo se ofrece ir a quien puede abrirla.
+  // A quien no puede, se le dice a quién pedírselo, con su nombre.
   const fix = fixable && can("settings.read")
   return {
     data,
     none: {
-      text: fixable && !fix ? `${why} Avísale a quien administra la clínica.` : why,
+      text: fixable && !fix ? `${why} ${await askAdminWords(tx, orgId)}` : why,
       fixHref: fix ? MESSAGES_HREF : null,
     },
   }
+}
+
+/** «Pídeselo a Ana Torres, que administra la clínica.»: quién puede crear o arreglar un mensaje. */
+async function askAdminWords(tx: Db, orgId: string): Promise<string> {
+  const rows = await tx
+    .select({ name: user.name })
+    .from(member)
+    .innerJoin(user, eq(user.id, member.userId))
+    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
+    .orderBy(asc(member.createdAt))
+    .limit(2)
+  const names = rows.map((row) => row.name.trim()).filter(Boolean)
+  if (names.length === 0) return "Pídeselo a quien administra la clínica."
+  return names.length === 1
+    ? `Pídeselo a ${names[0]}, que administra la clínica.`
+    : `Pídeselo a ${names[0]} o a ${names[1]}, que administran la clínica.`
 }
 
 /**

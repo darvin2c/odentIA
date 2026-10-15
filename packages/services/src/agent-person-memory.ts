@@ -367,7 +367,8 @@ export async function getPersonMemory(
   return { contactId, facts, derived, lastTime }
 }
 
-const CHANNEL_NAME: Record<string, string> = {
+/** Cómo se nombra cada canal en una frase: «por WhatsApp», «por correo». */
+export const CHANNEL_NAME: Record<string, string> = {
   whatsapp: "WhatsApp",
   telegram: "Telegram",
   instagram: "Instagram",

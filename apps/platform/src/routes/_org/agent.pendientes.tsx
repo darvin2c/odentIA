@@ -8,7 +8,7 @@ import { HandoffNotice } from "../../components/agent/handoff-badges"
 import { AgentTabs } from "../../components/agent-tabs"
 import { canTakeCase, takeCase } from "../../components/agent-panel"
 import { ApiError, apiFetch } from "../../lib/api"
-import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
+import { ACTION_LABEL, AGENT_CASES_TITLE, permissionForAction, proposalErrorMessage, type AgentHandoff, type AgentProposal } from "../../lib/agent"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
@@ -65,9 +65,10 @@ function AgentPendingPage() {
     },
     enabled: canRead,
   })
+  // Solo los casos abiertos, igual que el panel: uno resuelto ya no espera a nadie.
   const handoffsQuery = useQuery({
     queryKey: ["agent-handoffs", search.conversationId],
-    queryFn: () => apiFetch<{ data: AgentHandoff[] }>(`/api/agent/handoffs?limit=30${search.conversationId ? `&conversationId=${encodeURIComponent(search.conversationId)}` : ""}`),
+    queryFn: () => apiFetch<{ data: AgentHandoff[] }>(`/api/agent/handoffs?open=1&limit=100${search.conversationId ? `&conversationId=${encodeURIComponent(search.conversationId)}` : ""}`),
     enabled: canRead,
   })
   const invalidate = () => {
@@ -111,29 +112,29 @@ function AgentPendingPage() {
   const handoffs = handoffsQuery.data?.data ?? []
 
   return <PageShell className="flex flex-col gap-6">
-    <PageHeader title="Agente" subtitle="Los casos que el agente pasó a tu equipo y las citas que esperan el sí del paciente." />
+    <PageHeader title="Agente" subtitle="Lo que el agente te pasó y las citas que esperan el sí del paciente." />
     <AgentTabs />
     {!canRead ? <EmptyState title="Sin acceso" description="No tienes acceso a los pendientes del agente." /> : <>
       <section className="elevated rounded-xl border bg-card p-5">
-        <h2 className="font-medium">Casos que pasó a tu equipo</h2>
+        <h2 className="font-medium">{AGENT_CASES_TITLE}</h2>
         {handoffsQuery.isPending ? (
           <LoadingState />
         ) : handoffsQuery.isError ? (
           <div role="alert">
-            <p>No pudimos cargar las derivaciones.</p>
+            <p>No pudimos cargar los casos del agente.</p>
             <Button variant="outline" onClick={() => void handoffsQuery.refetch()}>
               Volver a intentar
             </Button>
           </div>
         ) : handoffs.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">Sin derivaciones para estos casos.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Ningún caso del agente espera a tu equipo.</p>
         ) : (
           <ul className="mt-3 flex flex-col gap-4">
             {handoffs.map((handoff) => (
               <li key={handoff.id} className="border-b pb-4 last:border-b-0 last:pb-0">
                 <HandoffNotice handoff={handoff} onOpenCase={setBriefFor}>
                   <span className="text-sm text-muted-foreground">
-                    {handoff.assigneeUserId ? "Responsable asignado" : "En cola por recoger"}
+                    {handoff.status === "tomada" ? "Ya lo tomaron" : "Nadie lo ha tomado"}
                     {handoff.dueAt ? ` · vence ${new Date(handoff.dueAt).toLocaleString(activeOrgLocale())}` : ""}
                   </span>
                   {handoff.conversationId ? (
@@ -147,10 +148,11 @@ function AgentPendingPage() {
                   ) : null}
                   {handoff.taskId ? (
                     <Link to="/tasks" search={{ task: handoff.taskId }} className="text-primary underline">
-                      Abrir pendiente
+                      Abrir la tarea
                     </Link>
                   ) : null}
-                  {!handoff.assigneeUserId && canTakeCase(handoff, canConversations, canTasks) ? (
+                  {/* «Tomar» solo en un caso abierto que nadie tomó: uno resuelto no se toma. */}
+                  {handoff.status === "abierta" && canTakeCase(handoff, canConversations, canTasks) ? (
                     <SubmitButton
                       size="sm"
                       variant="outline"

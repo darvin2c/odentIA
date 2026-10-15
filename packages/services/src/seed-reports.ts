@@ -175,6 +175,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<void
           channelConnectionId: connection.id,
           externalThreadId: `seed-reportes-${plan.monthsBack}-${index}`,
           status: reply ? "closed" : "open",
+          // Una cerrada dice cuándo y por qué (ADR 0024): la respondida se resolvió ese día.
+          ...(reply ? { closedAt: new Date(inboundAt.getTime() + 3_600_000), closeReason: "resuelta" as const } : {}),
         })
         .returning({ id: conversation.id })
       if (!thread) continue

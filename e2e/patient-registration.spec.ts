@@ -150,8 +150,9 @@ async function findPatientByName(page: Page, slug: string, displayName: string) 
   return found!
 }
 
-async function getPatientDetail(page: Page, slug: string, patientId: string) {
-  return call<PatientDetail>(page, "GET", `/api/patients/${patientId}`, slug)
+/** La ficha administrativa; con `clinical`, la lectura clínica (lo que pide Clínica y deja traza). */
+async function getPatientDetail(page: Page, slug: string, patientId: string, clinical = false) {
+  return call<PatientDetail>(page, "GET", `/api/patients/${patientId}${clinical ? "?clinical=1" : ""}`, slug)
 }
 
 test("registro público QR en escritorio: conserva borrador, declara salud y no vincula por teléfono", async ({
@@ -213,7 +214,11 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   // El teléfono coincidente no reclama el contacto existente: la persona del
   // paciente es nueva (todo paciente es una persona).
   const created = await findPatientByName(page, org.slug, patientName)
-  const detail = await getPatientDetail(page, org.slug, created.id)
+  // Abrir la ficha no es una lectura clínica: lo administrativo del registro viaja sin la salud declarada.
+  const administrative = await getPatientDetail(page, org.slug, created.id)
+  expect(administrative.registration).toMatchObject({ entryPoint: "qr", respondent: "patient" })
+  expect(administrative.registration?.answers).not.toHaveProperty("health")
+  const detail = await getPatientDetail(page, org.slug, created.id, true)
   expect(detail.contacts).toEqual([expect.objectContaining({ relationship: "self" })])
   expect(detail.contacts[0]?.contactId).not.toBe(contactId)
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient" })
@@ -577,7 +582,8 @@ test("vista previa de configuración no crea pacientes", async ({ createOwner })
   await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
   await dialog.getByRole("button", { name: "Finalizar vista previa", exact: true }).click()
   await expect(dialog.getByText("Vista previa: no se guardaron datos")).toBeVisible()
-  await dialog.getByRole("button", { name: "Cerrar", exact: true }).click()
+  // El «Cerrar» del pie; la equis del diálogo también se llama «Cerrar».
+  await dialog.getByRole("button", { name: "Cerrar", exact: true }).first().click()
 
   expect(await call<unknown[]>(page, "GET", "/api/patients", org.slug)).toEqual([])
 })
@@ -692,10 +698,10 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
   const linked = await fixtureDb.select({ patientId: patientContact.patientId, relationship: patientContact.relationship }).from(patientContact).where(eq(patientContact.contactId, conversation.contact.id))
   expect(linked).toEqual([{ patientId: rows[0]!.patientId, relationship: "self" }])
 
-  // Recepción ve en la ficha que quedó con lo esencial: filiación incompleta e identidad por revisar.
+  // Recepción ve en su página que quedó con lo esencial: faltan datos que la clínica pide.
   const detail = await getPatientDetail(page, org.slug, rows[0]!.patientId)
   expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: true })
   await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
-  await expect(page.getByText("Filiación incompleta").first()).toBeVisible()
+  await expect(page.getByText("Faltan datos que la clínica pide").first()).toBeVisible()
   await info.attach("reserva-ficha-incompleta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })

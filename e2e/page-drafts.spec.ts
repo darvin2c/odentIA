@@ -107,7 +107,7 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
   await expect(page.getByText("No pudimos guardar los datos", { exact: true })).toBeVisible()
   await expect(name).toHaveValue("Borrador para adelante")
   await expect(page.getByLabel("Dirección fiscal", { exact: true })).toHaveValue("Dirección conservada")
-  await page.getByRole("link", { name: "Contactos", exact: true }).click()
+  await page.getByRole("link", { name: "Pacientes", exact: true }).click()
   await expect(confirmation).toBeVisible()
   await confirmation.getByRole("button", { name: "Continuar editando" }).click()
 
@@ -125,8 +125,8 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
   await name.fill("Cambio temporal")
   await name.fill("Borrador para adelante")
   // Revertir al valor guardado no debe preguntar aunque el campo haya sido tocado.
-  await page.getByRole("link", { name: "Contactos", exact: true }).click()
-  await expect(page).toHaveURL(/\/contacts\/?$/)
+  await page.getByRole("link", { name: "Pacientes", exact: true }).click()
+  await expect(page).toHaveURL(/\/people\/?$/)
   await expect(confirmation).toBeHidden()
 })
 
@@ -193,10 +193,10 @@ test("Portal del paciente conserva campos con auxiliares tardíos, fallo de guar
     await openAdvanced()
     await expect(ttl).toHaveValue(nextTtl)
     await ttl.fill("90")
-    await page.getByRole("link", { name: "Contactos", exact: true }).click()
+    await page.getByRole("link", { name: "Pacientes", exact: true }).click()
     await confirmation.getByRole("button", { name: "Descartar y salir" }).click()
-    await expect(page).toHaveURL(/\/contacts\/?$/)
-    await expect(page.getByRole("heading", { level: 1, name: "Contactos" })).toBeVisible()
+    await expect(page).toHaveURL(/\/people\/?$/)
+    await expect(page.getByRole("heading", { level: 1, name: "Pacientes" })).toBeVisible()
     await page.evaluate(() => window.history.back())
     await openAdvanced()
     await expect(ttl).toHaveValue(nextTtl)

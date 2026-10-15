@@ -1,5 +1,7 @@
-import { label } from "../../lib/glossary"
+import { documentText } from "@odentia/clinical"
 import {
+  Avatar,
+  AvatarFallback,
   Badge,
   Breadcrumb,
   BreadcrumbItem,
@@ -17,45 +19,20 @@ import {
 import { ConfirmDialog, useHeaderUtilities } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { MoreHorizontal } from "lucide-react"
+import { MessageCircle, MoreHorizontal } from "lucide-react"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
-import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { usePermission } from "../../lib/crm"
-import {
-  appointmentWhen,
-  nextAppointment,
-  usePatientAppointments,
-} from "../../lib/patient-appointments"
+import { label } from "../../lib/glossary"
 import type { PatientSectionId } from "../../lib/patient-areas"
+import { sexLabel } from "../../lib/patient-overview"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
-import { formatMoney } from "@odentia/clinical"
-import { activeOrgLocale } from "../../lib/locale"
-import { useOrgProfile } from "../../lib/org"
+import { PERSON_KIND_LABELS, type PersonPage, RELATIONSHIP_WORDS } from "../../lib/people"
+import { WriteToPersonDialog } from "../write-to-person"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PatientAvatar } from "./patient-avatar"
-
-const dateLabel = (value: string) =>
-  new Date(value).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short" })
-function pendingLine(summary: PatientSummary, locale: string | undefined): string {
-  const accepted = summary.planPending.count
-  const proposed = summary.proposedBudgets.length
-  const parts = [`${accepted} tratamiento(s) aceptado(s) por ejecutar`]
-  if (proposed > 0) parts.push("Presupuestos por revisar")
-  // Sin formato de la clínica no se inventa importe: la cuenta muestra el saldo real.
-  const totals = locale
-    ? summary.planPending.totals
-        .map((total) => `${formatMoney(total.totalCents, total.currency, locale)}`)
-        .join(" · ")
-    : ""
-  // Lo acordado por ejecutar no es deuda: el saldo real vive en la pestaña Cuenta.
-  if (totals) parts.push(`acordado por ejecutar: ${totals} (no es saldo pendiente)`)
-  if (summary.planPending.unpricedCount)
-    parts.push(`${summary.planPending.unpricedCount} sin precio (no incluidos)`)
-  return parts.join(" · ")
-}
 
 /** Alertas prioritarias: primero alergias severas, luego el resto. Siempre visibles, nunca tras un desplegable. */
 export function clinicalAlerts(
@@ -136,95 +113,136 @@ export function PatientClinicalStrip({
   )
 }
 
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase()
+}
+
+function relationshipText(relationship: string, detail: string | null): string {
+  return detail?.trim() || RELATIONSHIP_WORDS[relationship] || relationship
+}
+
 /**
- * Cabecera persistente de la ficha: identidad, quién decide por el paciente,
- * alertas de seguridad, estado operativo y la acción principal del rol.
+ * Cabecera de la página de la persona (ADR 0029): quién es, qué es para la
+ * clínica, quién habla por ella o de quién es responsable, las alergias que
+ * alertan y la acción principal del rol. Es la misma antes y después de
+ * registrarla: el número de historia aparece al registrarla.
  */
-export function PatientHeader({
+export function PersonHeader({
+  person,
   detail,
   summary,
-  onAntecedentes,
   onSection,
 }: {
-  detail: PatientFull
+  person: PersonPage
+  /** Ficha administrativa del paciente, si lo es (alergias, foto, edad). */
+  detail?: PatientFull
+  /** Resumen clínico ya cargado por la pestaña Clínica (no se pide aquí). */
   summary?: PatientSummary
-  onAntecedentes?: () => void
   onSection: (section: PatientSectionId) => void
 }) {
-  const canWrite = usePermission("patients.write")
-  // La ficha no usa PageHeader; las utilidades globales (avisos, agente) van aquí.
+  // La página no usa PageHeader; las utilidades globales (avisos, agente) van aquí.
   const utilities = useHeaderUtilities()
-  const canRead = usePermission("patients.read")
-  const canEncounter = usePermission("clinical.write")
-  const canAppointments = usePermission("appointments.read")
-  const canBook = usePermission("appointments.write")
-  const canFinance = usePermission("finance.read")
-  const canCharge = usePermission("finance.write")
   const queryClient = useQueryClient()
-  // Formato de la clínica para saldos y totales históricos (moneda de cada registro).
-  const profile = useOrgProfile()
-  const orgLocale = profile.data?.locale
+  const canRead = usePermission("patients.read")
+  const canEditPatient = usePermission("patients.write")
+  const canEditPerson = usePermission("crm.write")
+  const canMessage = usePermission("conversations.write")
+  const canReadChats = usePermission("conversations.read")
+  const canBook = usePermission("appointments.write")
+  const canCrm = usePermission("crm.read")
+  const canCharge = usePermission("finance.write")
+  const canEncounter = usePermission("clinical.write")
+  const patient = person.patient
+  // Cambiar a la persona: con ficha, quien edita la filiación; sin ella, también quien lleva el CRM.
+  const canEdit = patient ? canEditPatient : canEditPatient || canEditPerson
   const [editing, setEditing] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
-  const patient = detail.patient
+  const [writeOpen, setWriteOpen] = useState(false)
   const archiveMutation = useMutation({
-    mutationFn: (nextActive: boolean) =>
-      apiFetch(`/api/patients/${patient.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ isActive: nextActive }),
+    mutationFn: (archived: boolean) =>
+      apiFetch(`/api/people/${person.id}/archived`, {
+        method: "PUT",
+        body: JSON.stringify({ archived }),
       }),
     onSuccess: () => {
       setArchiveError(null)
       setArchiveOpen(false)
-      void queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
-      void queryClient.invalidateQueries({ queryKey: ["patients"] })
+      void queryClient.invalidateQueries({ queryKey: ["person", person.id] })
+      void queryClient.invalidateQueries({ queryKey: ["people"] })
+      if (patient) void queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
     },
     onError: (mutationError: unknown) => {
       setArchiveError(
         mutationError instanceof ApiError
-          ? (mutationError.shape.message ?? "No se pudo actualizar el estado.")
-          : "No se pudo actualizar el estado.",
+          ? (mutationError.shape.message ?? "No se pudo actualizar.")
+          : "No se pudo actualizar.",
       )
     },
   })
   const responsibilities = useQuery({
-    queryKey: ["responsibilities", patient.id],
-    queryFn: () => fetchResponsibilities(patient.id),
-    enabled: canRead,
+    queryKey: ["responsibilities", patient?.id ?? "none"],
+    queryFn: () => fetchResponsibilities(patient?.id ?? ""),
+    enabled: canRead && Boolean(patient),
   })
-  const appointments = usePatientAppointments(patient.id, canAppointments)
-  const account = useQuery({
-    queryKey: ["patient-account", patient.id],
-    queryFn: () => fetchPatientAccount3(patient.id),
-    enabled: canFinance,
-  })
-  const age = ageFrom(patient.birthDate)
+  const age = ageFrom(person.birthDate)
   const isMinor = age !== "" && Number(age) < 18
   const representatives = (responsibilities.data?.data ?? []).filter(
     (row) => row.isCurrent && row.kind === "representante_legal",
   )
-  const upcoming = appointments.data ? nextAppointment(appointments.data.data) : null
-  const outstanding = (account.data?.data.byCurrency ?? []).filter(
-    (balance) => balance.porCobrar > 0,
-  )
-  const primary = canEncounter ? "encounter" : canBook ? "book" : canCharge ? "charge" : null
-  const docLabel =
-    patient.docType && patient.docNumber
-      ? `${patient.docType} ${patient.docNumber}`
-      : (patient.docNumber ?? null)
+  const primary = patient
+    ? canEncounter
+      ? "encounter"
+      : canBook
+        ? "book"
+        : canCharge
+          ? "charge"
+          : null
+    : canMessage
+      ? "write"
+      : null
+  const docLabel = person.docNumber ? documentText(person.docType, person.docNumber) : null
+  const facts = [
+    patient ? hcLabel(patient.patientNumber) : null,
+    docLabel,
+    age ? `${age} años` : null,
+    person.sex ? sexLabel(person.sex) : null,
+  ].filter(Boolean)
+  // Reservar para quien aún no es paciente crea su ficha mínima unida a la persona:
+  // la Agenda la lee en el CRM.
+  const bookSearch = patient ? { patientId: patient.id } : canCrm ? { contactId: person.id } : null
+  const writeTargets = [
+    {
+      contactId: person.id,
+      displayName: person.displayName,
+      detail: person.spokenForBy.length > 0 ? "La propia persona" : undefined,
+    },
+    ...person.spokenForBy.map((other) => ({
+      contactId: other.personId,
+      displayName: other.displayName,
+      detail: relationshipText(other.relationship, other.relationshipDetail),
+      isPreferred: other.isPreferred,
+    })),
+  ]
+  const archivedWord = person.archived ? "Archivada" : null
   return (
     <header className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
         <Breadcrumb className="min-w-0 flex-1">
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbLink render={<Link to="/patients" />}>Pacientes</BreadcrumbLink>
+              <BreadcrumbLink render={<Link to="/people" />}>Pacientes</BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator />
             <BreadcrumbItem>
-              <BreadcrumbPage>{detail.patient.displayName}</BreadcrumbPage>
+              <BreadcrumbPage>{person.displayName}</BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
@@ -232,53 +250,73 @@ export function PatientHeader({
           <div className="ml-auto flex shrink-0 items-center gap-1">{utilities}</div>
         ) : null}
       </div>
-      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
+      <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
-            <PatientAvatar
-              patientId={patient.id}
-              name={detail.patient.displayName}
-              storageKey={patient.avatarStorageKey}
-            />
+            {patient ? (
+              <PatientAvatar
+                patientId={patient.id}
+                name={person.displayName}
+                storageKey={patient.avatarStorageKey}
+              />
+            ) : (
+              <Avatar style={{ width: 80, height: 80 }}>
+                <AvatarFallback>{initials(person.displayName)}</AvatarFallback>
+              </Avatar>
+            )}
             <div className="flex min-w-0 flex-col gap-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="min-w-0 break-words text-xl font-semibold sm:text-2xl">
-                  {detail.patient.displayName}
+                  {person.displayName}
                 </h1>
-                <Badge>{hcLabel(patient.patientNumber)}</Badge>
-                {isMinor ? <Badge variant="warning">Menor de edad</Badge> : null}
-                {!patient.isActive ? <Badge variant="outline">Archivado</Badge> : null}
+                <Badge variant={person.kind === "por_registrar" ? "warning" : "secondary"}>
+                  {PERSON_KIND_LABELS[person.kind]}
+                </Badge>
+                {patient && isMinor ? <Badge variant="warning">Menor de edad</Badge> : null}
+                {archivedWord ? <Badge variant="outline">{archivedWord}</Badge> : null}
               </div>
               <p className="text-sm text-muted-foreground">
                 {[
-                  docLabel,
-                  age ? `${age} años` : null,
-                  patient.sex === "M" ? "Masculino" : patient.sex === "F" ? "Femenino" : null,
+                  ...facts,
+                  !patient && person.responsibleFor.length > 0
+                    ? `Responsable de ${person.responsibleFor.length === 1 ? "1 paciente" : `${person.responsibleFor.length} pacientes`}`
+                    : null,
                 ]
                   .filter(Boolean)
-                  .join(" · ") || "Sin filiación registrada"}
+                  .join(" · ") || "Sin datos personales todavía"}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canBook ? (
+            {canMessage && !person.archived ? (
+              <Button
+                type="button"
+                variant={primary === "write" ? "default" : "outline"}
+                onClick={() => setWriteOpen(true)}
+              >
+                <MessageCircle aria-hidden className="size-4" />
+                Escribirle
+              </Button>
+            ) : null}
+            {canBook && bookSearch && !person.archived ? (
               <Link
                 to="/agenda"
-                search={{ patientId: patient.id }}
+                search={bookSearch}
                 className={buttonVariants({ variant: primary === "book" ? "default" : "outline" })}
               >
-                Agendar cita
+                Reservar cita
               </Link>
             ) : null}
             {primary === "charge" ? (
               <Button onClick={() => onSection("cuenta")}>Cobrar</Button>
             ) : null}
-            <NewEncounterButton
-              patientId={patient.id}
-              detail={detail}
-              openEncounterId={summary?.openEncounterId}
-            />
-            {canWrite ? (
+            {patient && !person.archived ? (
+              <NewEncounterButton
+                patientId={patient.id}
+                openEncounterId={summary?.openEncounterId}
+              />
+            ) : null}
+            {canEdit ? (
               <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger
                   render={<Button variant="outline" size="icon" aria-label="Más acciones" />}
@@ -301,14 +339,47 @@ export function PatientHeader({
                       setArchiveOpen(true)
                     }}
                   >
-                    {patient.isActive ? "Archivar paciente" : "Reactivar paciente"}
+                    {person.archived ? "Recuperar" : "Archivar"}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
           </div>
         </div>
-        {isMinor || representatives.length > 0 ? (
+        {patient && person.spokenForBy.length > 0 ? (
+          <p className="text-sm">
+            <span className="font-medium">Habla por ella: </span>
+            {person.spokenForBy.map((other, index) => (
+              <span key={other.personId}>
+                {index > 0 ? ", " : ""}
+                <Link
+                  to="/people/$personId"
+                  params={{ personId: other.personId }}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {other.displayName}
+                </Link>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · {relationshipText(other.relationship, other.relationshipDetail)}
+                </span>
+                {canReadChats && other.conversationId ? (
+                  <>
+                    {" · "}
+                    <Link
+                      to="/inbox"
+                      search={{ conversation: other.conversationId }}
+                      className="text-primary hover:underline"
+                    >
+                      Ver su conversación
+                    </Link>
+                  </>
+                ) : null}
+              </span>
+            ))}
+          </p>
+        ) : null}
+        {patient && (isMinor || representatives.length > 0) ? (
           <p className="rounded-lg bg-warning-soft px-3 py-2 text-sm">
             {representatives.length > 0 ? (
               <>
@@ -335,62 +406,7 @@ export function PatientHeader({
             )}
           </p>
         ) : null}
-        <PatientClinicalStrip detail={detail} onAntecedentes={onAntecedentes} />
-        <dl className="flex flex-wrap gap-x-8 gap-y-2 border-t pt-4 text-sm">
-          {canAppointments ? (
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground">Próxima cita</dt>
-              <dd className="font-medium">
-                {appointments.isPending
-                  ? "Consultando…"
-                  : appointments.isError
-                    ? "No disponible"
-                    : upcoming
-                      ? `${appointmentWhen(upcoming)} · ${upcoming.dentistName}`
-                      : "Sin cita reservada"}
-              </dd>
-            </div>
-          ) : null}
-          {summary ? (
-            <>
-              <div className="flex gap-2">
-                <dt className="text-muted-foreground">Última atención</dt>
-                <dd className="font-medium">
-                  {summary.lastEncounter
-                    ? dateLabel(
-                        summary.lastEncounter.finalizedAt ?? summary.lastEncounter.createdAt,
-                      )
-                    : "Sin atenciones"}
-                </dd>
-              </div>
-              {summary.nextAppointmentAt ? (
-                <div className="flex gap-2">
-                  <dt className="text-muted-foreground">Revisión sugerida en la última atención</dt>
-                  <dd className="font-medium">{dateLabel(summary.nextAppointmentAt)}</dd>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-          {canFinance && account.isSuccess ? (
-            <div className="flex gap-2">
-              <dt className="text-muted-foreground">Saldo por cobrar</dt>
-              <dd className="font-medium tabular-nums">
-                {outstanding.length === 0
-                  ? "Sin saldo"
-                  : !orgLocale
-                    ? "…"
-                    : outstanding
-                        .map((balance) =>
-                          formatMoney(balance.porCobrar, balance.currency, orgLocale),
-                        )
-                        .join(" · ")}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-        {summary ? (
-          <p className="text-sm text-muted-foreground">Trabajo pendiente: {pendingLine(summary, orgLocale)}</p>
-        ) : null}
+        {detail ? <PatientClinicalStrip detail={detail} /> : null}
       </div>
       <ConfirmDialog
         open={archiveOpen}
@@ -400,25 +416,42 @@ export function PatientHeader({
             setArchiveError(null)
           }
         }}
-        title={patient.isActive ? "Archivar paciente" : "Reactivar paciente"}
+        title={
+          person.archived ? `Recuperar a ${person.displayName}` : `Archivar a ${person.displayName}`
+        }
         description={
           archiveError ??
-          (patient.isActive
-            ? "La ficha se archiva pero conserva su historia clínica y relaciones. No se borra."
-            : "La ficha vuelve a estar activa en el padrón.")
+          (person.archived
+            ? "Vuelve entera: su página, su ficha y sus conversaciones quedan como estaban. Los enlaces de registro que se anularon al archivar no vuelven."
+            : "Se archiva entera: su ficha y sus conversaciones se conservan, pero deja de aparecer en las listas y no admite conversaciones, vínculos ni enlaces de registro nuevos. Se recupera desde esta misma página.")
         }
-        confirmLabel={patient.isActive ? "Archivar" : "Reactivar"}
+        confirmLabel={person.archived ? "Recuperar" : "Archivar"}
+        variant={person.archived ? "default" : "destructive"}
         pending={archiveMutation.isPending}
-        onConfirm={() => archiveMutation.mutate(!patient.isActive)}
+        onConfirm={() => archiveMutation.mutate(!person.archived)}
       />
       {editing ? (
-        <FiliacionSectionDrawer
-          patient={patient}
-          section="identidad"
-          open
-          onClose={() => setEditing(false)}
-        />
+        detail ? (
+          <FiliacionSectionDrawer
+            patient={detail.patient}
+            section="identidad"
+            open
+            onClose={() => setEditing(false)}
+          />
+        ) : !patient ? (
+          <FiliacionSectionDrawer
+            person={person}
+            section="identidad"
+            open
+            onClose={() => setEditing(false)}
+          />
+        ) : null
       ) : null}
+      <WriteToPersonDialog
+        open={writeOpen}
+        onClose={() => setWriteOpen(false)}
+        people={writeTargets}
+      />
     </header>
   )
 }

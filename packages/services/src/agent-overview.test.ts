@@ -175,7 +175,7 @@ describe("resumen del agente", () => {
     const overview = await run((tx) => getAgentOverview(tx, OTHER), OTHER)
     expect(overview).toMatchObject({
       enabled: false,
-      needsYou: { approvals: 0, gaps: 0 },
+      needsYou: { gaps: 0 },
       week: { attended: 0, corrected: 0, passed: 0, alone: 0, booked: 0 },
       learned: { officialAnswers: 0, rules: 0, examples: 0, latest: null },
       provider: { problem: null, at: null },

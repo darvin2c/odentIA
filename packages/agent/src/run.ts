@@ -493,9 +493,10 @@ export async function processAgentRun(
     } else {
       await invokeGraph()
     }
-    // Sin envío ni derivación en esta corrida: se avisa al equipo salvo que
-    // el hilo ya tenga una respuesta posterior al disparador (reentrega o
-    // cola atrasada). Un fallo del aviso no reintenta la corrida: volvería a
+    // Sin envío ni derivación en esta corrida: queda como sin respuesta salvo
+    // que el hilo ya tenga una respuesta posterior al disparador (reentrega o
+    // cola atrasada). El equipo lo ve en «Te espera» (espera respuesta), no en
+    // la campana. Un fallo al comprobarlo no reintenta la corrida: volvería a
     // llamar al modelo.
     const attendedMessageId = inboundMessageId
     const unanswered =

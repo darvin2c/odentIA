@@ -141,9 +141,10 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
   })
 
   /** Las personas a las que el agente no pudo escribir hoy, con cómo habilitar a cada una. */
+  // Mismo permiso que la fila de Inicio que lo abre (`agent.read` o `agent.decide`): recepción lo ve.
   app.get("/unreached", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAdminUnreached(tx, orgId, canOf(memberRole))))
   })
 

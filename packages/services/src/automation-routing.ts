@@ -131,8 +131,10 @@ export async function composeJobMessage(
   const clinic = await clinicName(tx, orgId)
   const values: Partial<Record<MessageVariable, string>> = { persona: firstName(person), clinica: clinic }
 
-  const pastVisit = spec.key === "seguimiento_no_asistencia" || spec.key === "cita_cancelada"
-  if (spec.key === "recordatorio_cita" || pastVisit) {
+  const pastVisit =
+    spec.key === "seguimiento_no_asistencia" || spec.key === "cita_cancelada" || spec.key === "aviso_cita_cancelada"
+  const upcoming = spec.key === "recordatorio_cita" || spec.key === "aviso_cita_reservada" || spec.key === "aviso_cita_movida"
+  if (upcoming || pastVisit) {
     const ids = jobs.map((job) => job.appointmentId).filter((id): id is string => !!id)
     if (ids.length === 0) return null
     const rows = await tx

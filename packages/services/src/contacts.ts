@@ -1,12 +1,7 @@
 import {
-  FOREIGN_DOC_TYPES,
-  IDENTITY_DOC_TYPES,
-  identityDocumentError,
-  ISO_COUNTRY_RE,
   normalizePhone,
   normalizeTags,
   phoneFormatError,
-  SEX_CODES,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient, patientContact, patientRegistrationLink } from "@odentia/db/schema/clinical"
@@ -22,10 +17,15 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
+import { identityPatchOf, setPersonArchived, updatePersonIdentity } from "./people.js"
 
 /** Aviso en vivo mínimo para refresco CRM: solo `{ orgId, kind, at }`, sin PII. */
+export async function notifyContactChange(tx: Db, orgId: string): Promise<void> {
+  await notifyCrm(tx, orgId, "contact.updated")
+}
+
 async function notifyCrm(tx: Db, orgId: string, kind: string): Promise<void> {
   await tx.execute(sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind, at: new Date().toISOString() })})`)
 }
@@ -55,9 +55,6 @@ export interface ContactListItem {
   openOpportunityCount: number
 }
 
-/** Identidad documental de la persona; igual a la de su ficha si es paciente. */
-export const PERSON_DOC_TYPES = IDENTITY_DOC_TYPES
-export const PERSON_SEXES = SEX_CODES
 
 export interface ContactDetail extends ContactListItem {
   docType: string | null
@@ -155,11 +152,16 @@ export async function listContacts(
   const conditions = [eq(contact.organizationId, orgId)]
   if (q) {
     const like = `%${q}%`
+    // «987 654» encuentra «+51987654100»: el teléfono se compara por sus dígitos.
+    const digits = /^[\d\s\-()+.]+$/.test(q) ? q.replace(/\D/g, "") : ""
     conditions.push(
       or(
         ilike(contact.displayName, like),
         ilike(contact.phone, like),
         ilike(contact.email, like),
+        ...(digits.length >= 4
+          ? [sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`]
+          : []),
       )!,
     )
   }
@@ -454,7 +456,7 @@ async function auditContact(
  * sin prefijo se completa con el perfil del país de la clínica, que solo se
  * consulta cuando hace falta: el campo de la interfaz ya entrega E.164.
  */
-async function cleanContactPhone(
+export async function cleanContactPhone(
   tx: Db,
   orgId: string,
   input: string | null | undefined,
@@ -472,7 +474,7 @@ async function cleanContactPhone(
   return normalized
 }
 
-function cleanContactEmail(input: string | null | undefined): string | null | undefined {
+export function cleanContactEmail(input: string | null | undefined): string | null | undefined {
   if (input === undefined) return undefined
   if (input === null) return null
   const value = input.trim()
@@ -488,6 +490,10 @@ export async function createContact(
   orgId: string,
   input: {
     displayName: string
+    /** Nombre separado (ADR 0004): la base deriva de él el nombre visible. */
+    givenNames?: string | null
+    paternalSurname?: string | null
+    maternalSurname?: string | null
     phone?: string | null
     email?: string | null
     isActive?: boolean
@@ -504,6 +510,9 @@ export async function createContact(
     .values({
       organizationId: orgId,
       displayName,
+      givenNames: input.givenNames ?? null,
+      paternalSurname: input.paternalSurname ?? null,
+      maternalSurname: input.maternalSurname ?? null,
       phone: (await cleanContactPhone(tx, orgId, input.phone)) ?? null,
       email: cleanContactEmail(input.email) ?? null,
       isActive: input.isActive ?? true,
@@ -599,7 +608,7 @@ export async function updateContact(
     /** Fecha calendario ISO (AAAA-MM-DD). */
     birthDate?: string | null
     sex?: string | null
-    /** Archivar/reactivar: la ruta lo restringe a owner/admin. */
+    /** Archivar/recuperar: archiva o recupera a la persona entera (`setPersonArchived`). */
     isActive?: boolean
     notes?: string | null
     tags?: string[]
@@ -610,29 +619,14 @@ export async function updateContact(
 ): Promise<ContactDetail> {
   const { isActive, ...fields } = input
   await requireContact(tx, orgId, id)
+  // La identidad es una sola y se cambia con las reglas de la ficha, también
+  // desde el CRM y el agente (`updatePersonIdentity`: catálogos, país emisor,
+  // regla del menor si es paciente).
+  const identity = identityPatchOf(fields)
+  if (Object.keys(identity).length > 0)
+    await updatePersonIdentity(tx, orgId, { userId: actor?.userId ?? null, ...(actor?.origin ? { origin: actor.origin } : {}) }, id, identity)
   const patch: Partial<typeof contact.$inferInsert> = { updatedAt: new Date() }
   const changed: string[] = []
-  if (fields.displayName !== undefined) {
-    const displayName = fields.displayName.trim()
-    if (!displayName) throw validation("El nombre del contacto es obligatorio")
-    patch.displayName = displayName
-    changed.push("displayName")
-  }
-  for (const key of ["givenNames", "paternalSurname", "maternalSurname"] as const) {
-    if (fields[key] === undefined) continue
-    const value = fields[key]?.trim().replace(/\s+/g, " ") || null
-    if (value && value.length > 100) throw validation("Cada parte del nombre admite hasta 100 caracteres")
-    patch[key] = value
-    if (!changed.includes("displayName")) changed.push("displayName")
-  }
-  if (fields.phone !== undefined) {
-    patch.phone = (await cleanContactPhone(tx, orgId, fields.phone)) ?? null
-    changed.push("phone")
-  }
-  if (fields.email !== undefined) {
-    patch.email = cleanContactEmail(fields.email) ?? null
-    changed.push("email")
-  }
   if (fields.preferredChannel !== undefined) {
     const preferred = fields.preferredChannel?.trim() || null
     if (preferred && !PREFERRED_CHANNELS.includes(preferred as (typeof PREFERRED_CHANNELS)[number]))
@@ -657,63 +651,6 @@ export async function updateContact(
     patch.preferredChannel = preferred
     changed.push("preferredChannel")
   }
-  if (fields.docType !== undefined || fields.docNumber !== undefined) {
-    const docNumber = (fields.docNumber ?? "").trim() || null
-    const docType = (fields.docType ?? "").trim() || null
-    if (docType && !(PERSON_DOC_TYPES as readonly string[]).includes(docType))
-      throw validation("Tipo de documento inválido")
-    if (docNumber && !docType) throw validation("Indica el tipo de documento")
-    if (docNumber && docNumber.length > 20) throw validation("El documento admite hasta 20 caracteres")
-    // Mismo formato que la ficha: «DNI 123» se rechaza también desde Contactos.
-    const formatError = identityDocumentError(docType, docNumber)
-    if (formatError) throw validation(formatError)
-    const docCountry = fields.docCountry?.trim().toUpperCase() || null
-    if (docCountry && !ISO_COUNTRY_RE.test(docCountry))
-      throw validation("País emisor en código ISO de dos letras (p. ej. VE)")
-    if (docNumber && docType && FOREIGN_DOC_TYPES.includes(docType as never) && !docCountry)
-      throw validation("Indica el país que emitió el documento")
-    patch.docType = docNumber ? docType : null
-    patch.docNumber = docNumber
-    patch.docCountry = docNumber ? docCountry : null
-    changed.push("document")
-  }
-  if (fields.birthDate !== undefined) {
-    const birthDate = fields.birthDate?.trim() || null
-    if (birthDate && (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || Number.isNaN(Date.parse(birthDate))))
-      throw validation("Fecha de nacimiento inválida")
-    if (birthDate && birthDate > new Date().toISOString().slice(0, 10))
-      throw validation("La fecha de nacimiento no puede ser futura")
-    patch.birthDate = birthDate
-    changed.push("birthDate")
-  }
-  if (fields.sex !== undefined) {
-    const sex = fields.sex?.trim() || null
-    if (sex && !(PERSON_SEXES as readonly string[]).includes(sex)) throw validation("Sexo inválido")
-    patch.sex = sex
-    changed.push("sex")
-  }
-  // La identidad de quien ya es paciente es la de su ficha clínica: la cambia
-  // el equipo, nunca el agente por su cuenta.
-  const IDENTITY_FIELDS = ["displayName", "phone", "email", "document", "birthDate", "sex"]
-  if (actor?.origin === "agent" && changed.some((field) => IDENTITY_FIELDS.includes(field))) {
-    const [own] = await tx
-      .select({ id: patientContact.id })
-      .from(patientContact)
-      .where(
-        and(
-          eq(patientContact.organizationId, orgId),
-          eq(patientContact.contactId, id),
-          eq(patientContact.relationship, "self"),
-        ),
-      )
-      .limit(1)
-    if (own)
-      throw new ServiceError(
-        "PATIENT_IDENTITY_PROTECTED",
-        409,
-        "Esta persona es paciente: su identidad solo la modifica el equipo de la clínica",
-      )
-  }
   if (fields.notes !== undefined) {
     patch.notes = fields.notes
     changed.push("notes")
@@ -730,29 +667,16 @@ export async function updateContact(
     patch.customFields = await sanitizeCustomFields(tx, orgId, fields.customFields)
     changed.push("customFields")
   }
-  if (isActive !== undefined) await applyContactActive(tx, orgId, id, isActive, actor)
+  if (isActive !== undefined) await setPersonArchived(tx, orgId, { userId: actor?.userId ?? null }, id, !isActive)
   if (changed.length > 0) {
-    try {
-      await tx
-        .update(contact)
-        .set(patch)
-        .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
-    } catch (error) {
-      // El documento identifica a una sola persona (y a una sola ficha).
-      if (isUniqueViolation(error))
-        throw new ServiceError(
-          "DUPLICATE_DOCUMENT",
-          409,
-          "Ya existe otra persona o paciente con ese documento",
-        )
-      throw error
-    }
+    await tx
+      .update(contact)
+      .set(patch)
+      .where(and(eq(contact.id, id), eq(contact.organizationId, orgId)))
     await auditContact(tx, orgId, actor, "contact.updated", id, {
       fields: changed,
       ...(actor?.origin ? { origin: actor.origin } : {}),
     })
-    await notifyCrm(tx, orgId, "contact.updated")
-  } else if (isActive !== undefined) {
     await notifyCrm(tx, orgId, "contact.updated")
   }
   const full = await getContact(tx, orgId, id)
@@ -765,7 +689,7 @@ export async function updateContact(
  * después el contacto FOR UPDATE con revalidación. Al archivar revoca los
  * enlaces pendientes; reactivar no revive enlaces revocados.
  */
-async function applyContactActive(
+export async function applyContactActive(
   tx: Db,
   orgId: string,
   contactId: string,
@@ -809,8 +733,11 @@ async function applyContactActive(
 /* WhatsApp, Telegram, Messenger e Instagram. gmail/microsoft365 y      */
 /* web_chat los amplían sus slices en OMNI_CHANNELS/normalize. El       */
 /* teléfono/correo declarado del contacto NUNCA genera ni infiere una   */
-/* identidad: solo el alta manual o la ingesta autenticada por el       */
-/* proveedor crean filas en contact_identity.                           */
+/* identidad por sí solo: solo crean filas en contact_identity la       */
+/* ingesta autenticada por el proveedor y la decisión explícita de una  */
+/* persona del equipo (alta manual o «Escribirle», `writeToPerson`, que */
+/* usa el número que esa persona eligió). Un entrante nunca se empareja */
+/* con una ficha por coincidencia de teléfono (ADR 0027).               */
 /* ------------------------------------------------------------------ */
 
 export const OMNI_CHANNELS = ["whatsapp", "telegram", "messenger", "instagram"] as const
@@ -1145,7 +1072,6 @@ export async function moveContactIdentity(
           and(
             eq(crmTask.organizationId, orgId),
             inArray(crmTask.opportunityId, [...detachOppIds].sort()),
-            eq(crmTask.kind, "opportunity_follow_up"),
             eq(crmTask.status, "open"),
             isNotNull(crmTask.conversationId),
           ),

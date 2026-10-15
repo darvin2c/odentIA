@@ -25,8 +25,9 @@ export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]
 export type RegistrationFieldMode = "hidden" | "optional" | "required"
 /**
- * Alcance del registro público. `essentials` son los datos esenciales para
- * reservar desde el enlace de cita: identidad y un celular. Lo demás que la
+ * Alcance del registro. `essentials` son los datos esenciales para reservar:
+ * desde el enlace de cita, identidad y un celular; cuando el equipo registra
+ * al reservar a la persona de una conversación, su nombre. Lo demás que la
  * clínica configuró no se pide ahí y queda por completar en la clínica.
  */
 export type RegistrationScope = "full" | "essentials"
@@ -225,6 +226,20 @@ export function pendingRegistrationFields(config: RegistrationConfig, answers: R
     return isUnanswered(registrationFieldValue(answers, field))
   }).map(({ key, label }) => ({ key, label }))
 }
+/**
+ * Lo común del alcance `essentials`, lo registre la persona (enlace de reserva)
+ * o el equipo (al reservar): solo datos de identidad y contacto, nada de salud,
+ * y nombres y apellidos.
+ */
+function essentialIdentityErrors(data: RegistrationAnswers, errors: Record<string, string>): void {
+  const demographics = data.demographics
+  for (const [key, value] of Object.entries(demographics)) {
+    if (!(ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key) && value !== null && value !== "") errors[`demographics.${key}`] ??= "Este dato se completa en la clínica"
+  }
+  if (data.health !== undefined) errors.health = "Los datos de salud se completan en la clínica"
+  if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Indica los nombres"
+  if (!demographics.paternalSurname && !demographics.maternalSurname) errors["demographics.paternalSurname"] ??= "Indica los apellidos"
+}
 export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope; countryCode?: string | null }): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = registrationAnswersSchema.safeParse(answers)
@@ -255,13 +270,8 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       // Datos esenciales para reservar: la identidad y un celular, siempre los
       // mismos. La configuración de la clínica no los quita ni añade otros: lo
       // que ella exige y aquí no se pide queda pendiente (`pendingRegistrationFields`).
+      essentialIdentityErrors(data, errors)
       const demographics = data.demographics
-      for (const [key, value] of Object.entries(demographics)) {
-        if (!(ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key) && value !== null && value !== "") errors[`demographics.${key}`] ??= "Este dato se completa en la clínica"
-      }
-      if (data.health !== undefined) errors.health = "Los datos de salud se completan en la clínica"
-      if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Indica los nombres"
-      if (!demographics.paternalSurname && !demographics.maternalSurname) errors["demographics.paternalSurname"] ??= "Indica los apellidos"
       if (!demographics.docType) errors["demographics.docType"] ??= "Indica el tipo de documento"
       if (!demographics.docNumber) errors["demographics.docNumber"] ??= "Indica el número de documento"
       if (!demographics.phone && !representativeContact) errors["demographics.phone"] ??= "Indica un celular"
@@ -284,6 +294,12 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
       if (["allergies", "conditions", "medications"].includes(key) && value === undefined) errors[path] = "Indica una respuesta, incluido Sin responder"
     }
     if (!data.demographics.phone && !data.demographics.email && !(needsRepresentative && (data.representative?.phone || data.representative?.email))) errors["demographics.phone"] = "Indica al menos un medio de contacto"
+  } else if (context.scope === "essentials") {
+    // Lo mínimo que registra el equipo al reservar a una persona que ya conoce
+    // (su nombre; el teléfono y los canales ya son de ella). Como en el enlace
+    // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
+    // pendiente (`pendingRegistrationFields`) y la identidad, por revisar.
+    essentialIdentityErrors(data, errors)
   } else if (config.version > 0) {
     // Alta interna: lo que la clínica configuró como obligatorio también lo es
     // para recepción (el aviso de privacidad y los campos ocultos no aplican).

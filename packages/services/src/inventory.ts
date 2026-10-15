@@ -36,7 +36,7 @@ import {
   validation,
 } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
-import { createWorkspaceNotification } from "./workspace.js"
+import { createWorkspaceNotification, settleWorkspaceNotifications } from "./workspace.js"
 
 /* ---------------- validaciones ---------------- */
 
@@ -201,6 +201,8 @@ async function notifyLowStock(
     body: `Quedan ${onHand} unidades. Revisa el inventario para reponer.`,
     href: `/inventory/${productId}`,
     permission: "inventory.read",
+    // Se retira al reponerse; si vuelve a bajar, avisa otra vez.
+    subject: `producto:${productId}`,
   })
 }
 
@@ -222,6 +224,9 @@ async function checkLowStock(
   const onHand = await productOnHand(tx, orgId, productId)
   if (onHand < item.minStock) {
     await notifyLowStock(tx, orgId, actorUserId, productId, item.name, onHand)
+  } else {
+    // Repuesto: el aviso anterior se retira ya, para que una nueva bajada vuelva a avisar.
+    await settleWorkspaceNotifications(tx, orgId, { subject: `producto:${productId}` })
   }
 }
 

@@ -108,7 +108,7 @@ function BreadcrumbEllipsis({
     >
       <RiMoreLine
       />
-      <span className="sr-only">More</span>
+      <span className="sr-only">Más</span>
     </span>
   )
 }

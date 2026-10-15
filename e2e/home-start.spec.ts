@@ -123,17 +123,20 @@ for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 844 })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const waiting = page.getByRole("region", { name: "Te espera" })
-      await expect(waiting.getByRole("heading", { name: "Te espera", exact: true })).toBeInViewport()
+      // El título dice cuántos asuntos esperan, también al lector de pantalla.
+      await expect(waiting.getByRole("heading", { name: "Te espera 2 asuntos", exact: true })).toBeInViewport()
       await expect(page.getByRole("region", { name: "Siguiente paso" })).toHaveCount(0)
       // El caso «Ahora» va antes que la tarea: el orden lo entrega el servidor. Nada espera tu aprobación.
       const rows = waiting.getByRole("listitem")
       await expect(rows).toHaveCount(2)
-      await expect(rows.nth(0)).toContainText("Interlocutor pendiente: Pide hablar con una persona")
-      await expect(rows.nth(0)).toContainText("Caso que pasó el agente")
+      await expect(rows.nth(0)).toContainText("Interlocutor pendiente · Pide hablar con una persona")
+      await expect(rows.nth(0)).toContainText("Te lo pasó el agente")
       await expect(rows.nth(0).getByRole("link", { name: /Revisar$/ })).toBeVisible()
       await expect(waiting).not.toContainText("espera tu aprobación")
       await expect(rows.nth(1)).toContainText("Confirmar seguimiento pendiente")
-      await expect(rows.nth(1)).toContainText("Tarea tuya · sin fecha")
+      await expect(rows.nth(1)).toContainText("Sin fecha")
+      // La tarea se marca hecha desde la propia fila.
+      await expect(rows.nth(1).getByRole("button", { name: /^Hecha/ })).toBeVisible()
 
       // La agenda de la sede, con su resumen igual al de la Agenda de ese día.
       const agenda = page.getByRole("region", { name: "Agenda de hoy" })
@@ -192,7 +195,8 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("link", { name: /^Caja de hoy/ })).toHaveCount(0)
       await observe(page, info, "odontologo")
       await mine.getByRole("link", { name: /Paciente con cita/ }).click()
-      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/patients/"))
+      // La ficha lleva a la página de su persona (ADR 0029).
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/people/"))
     })
 
     test("caja: «Por cobrar» con la persona atendida hoy y «Cobrar» abre el cobro", async ({ owner, fixtureDb }, info) => {
