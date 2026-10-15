@@ -13,7 +13,7 @@ interface Conversation {
   id: string
   contact: { id: string }
   preview: { body: string | null } | null
-  attention: { pendingTeam: number; handoffPriority: string | null; agentAttending: boolean }
+  attention: { pendingTeam: number; pendingContact: number; handoffPriority: string | null; agentAttending: boolean }
 }
 
 const WAITING_TEXT = "Quiero una cita para mañana"
@@ -29,10 +29,11 @@ async function conversationWith(page: Page, slug: string, text: string): Promise
 }
 
 /**
- * Dos hilos de Telegram: uno con una propuesta que decide el equipo y otro
- * con una derivación de prioridad alta. Con la política fija (ADR 0021) ningún
- * recorrido deja un mensaje esperando al equipo en un hilo: la propuesta se
- * inserta como la registraría el agente. Es el límite de esta evidencia; su
+ * Dos hilos de Telegram: en uno el agente propuso una cita que espera el sí del
+ * paciente y en el otro derivó con prioridad alta. Con la política fija
+ * (ADR 0021) en un hilo nada espera al equipo: lo que el equipo decide son las
+ * propuestas sin hilo (seguimiento vencido con plantilla). Las propuestas se
+ * insertan como las registraría el agente; es el límite de esta evidencia y su
  * lógica se cubre en services.
  */
 async function seedThreads(owner: OwnerFixture, fixtureDb: Db, nextEventId: () => number) {
@@ -46,20 +47,31 @@ async function seedThreads(owner: OwnerFixture, fixtureDb: Db, nextEventId: () =
   }
   const waiting = await conversationWith(page, org.slug, WAITING_TEXT)
   const derived = await conversationWith(page, org.slug, DERIVED_TEXT)
-  const propose = async (conversation: Conversation, text: string) => {
+  // Una cita que el agente propuso en el hilo: espera el sí del paciente.
+  const proposeAppointment = async (conversation: Conversation, summary: string) => {
     const [row] = await fixtureDb.insert(agentProposal).values({
-      organizationId: org.id, contactId: conversation.contact.id, conversationId: conversation.id, action: "enviar_mensaje",
-      payload: { kind: "text", text }, afterSummary: `Enviar: ${text}`,
-      reason: "El interlocutor escribió", idempotencyKey: randomUUID(),
+      organizationId: org.id, contactId: conversation.contact.id, conversationId: conversation.id, action: "reservar_cita",
+      payload: { patientId: randomUUID(), dentistUserId: owner.user.id, chairId: randomUUID(), startsAt: "2026-11-03T15:00:00.000Z" },
+      afterSummary: summary, reason: "El interlocutor pidió una cita", idempotencyKey: randomUUID(),
     }).returning({ id: agentProposal.id })
     if (!row) throw new Error("No se pudo sembrar la propuesta")
     return row.id
   }
-  await propose(waiting, "Te confirmo la cita de mañana.")
+  // Un seguimiento vencido sin conversación: lo decide el equipo.
+  const proposeFollowUp = async (conversation: Conversation) => {
+    const [row] = await fixtureDb.insert(agentProposal).values({
+      organizationId: org.id, contactId: conversation.contact.id, conversationId: null, action: "enviar_mensaje",
+      payload: { kind: "template", name: "seguimiento_presupuesto", language: "es_PE" },
+      afterSummary: "Plantilla seguimiento_presupuesto", reason: "Seguimiento vencido sin conversación.", idempotencyKey: randomUUID(),
+    }).returning({ id: agentProposal.id })
+    if (!row) throw new Error("No se pudo sembrar la propuesta")
+    return row.id
+  }
+  const firstAppointment = await proposeAppointment(waiting, "Cita el martes 3 de noviembre a las 10:00")
   await call(page, "POST", "/api/agent/handoffs", org.slug, {
     conversationId: derived.id, reason: "Pide hablar con una persona", summary: "Prefiere atención humana.", priority: "alta",
   }, 201)
-  return { waiting, derived, propose }
+  return { waiting, derived, firstAppointment, proposeAppointment, proposeFollowUp }
 }
 
 const overflow = (page: Page) =>
@@ -71,14 +83,15 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   nextEventId,
 }, info) => {
   const { page, org } = owner
-  const { waiting, derived, propose } = await seedThreads(owner, fixtureDb, nextEventId)
+  const { waiting, derived, firstAppointment, proposeAppointment, proposeFollowUp } = await seedThreads(owner, fixtureDb, nextEventId)
 
   // El servidor cuenta las vistas sobre todo lo filtrado y describe cada hilo.
   expect(await call(page, "GET", "/api/conversations/summary?status=open", org.slug)).toEqual({ all: 2, waiting: 2, withAgent: 0, handoffs: 1 })
   const listed = await call<Conversation[]>(page, "GET", "/api/conversations?view=handoff", org.slug)
   expect(listed.map((c) => c.id)).toEqual([derived.id])
   expect(listed[0]?.attention.handoffPriority).toBe("alta")
-  expect((await call<{ attention: Conversation["attention"] }>(page, "GET", `/api/conversations/${waiting.id}`, org.slug)).attention.pendingTeam).toBe(1)
+  expect((await call<{ attention: Conversation["attention"] }>(page, "GET", `/api/conversations/${waiting.id}`, org.slug)).attention)
+    .toMatchObject({ pendingTeam: 0, pendingContact: 1 })
 
   await page.setViewportSize({ width: 1440, height: 900 })
   // Una vista sin chip en la URL no filtra a escondidas: queda «Todas».
@@ -90,7 +103,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await expect(chip("Con el agente · 0")).toBeVisible()
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
   const derivedRow = page.getByRole("button").filter({ hasText: DERIVED_TEXT })
-  await expect(waitingRow).toContainText("Espera tu aprobación")
+  await expect(waitingRow).toContainText("Espera al interlocutor")
   await expect(derivedRow).toContainText("Derivada · ahora")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
@@ -108,34 +121,38 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   // este hilo va primero aunque haya otra propuesta más reciente.
   await waitingRow.click()
   const band = page.getByRole("status").filter({ hasText: "El agente propuso" })
-  await expect(band).toContainText("enviar mensaje")
-  await expect(band).toContainText("No se ejecuta hasta que alguien lo apruebe")
+  await expect(band).toContainText("reservar cita")
+  await expect(band).toContainText("Espera la confirmación del interlocutor en este hilo.")
   await info.attach("hilo-con-banda", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  const otherProposal = await propose(derived, "En un momento te atiende una persona.")
+  await proposeAppointment(derived, "Cita el miércoles 4 de noviembre a las 11:00")
   const review = band.getByRole("button", { name: "Revisar" })
   await review.click()
   const panel = page.getByRole("dialog", { name: "Agente" })
   const cards = panel.getByRole("tabpanel").getByRole("listitem")
   await expect(cards).toHaveCount(2)
   await expect(cards.first()).toContainText("De esta conversación")
-  await expect(cards.first()).toContainText("Te confirmo la cita de mañana.")
+  await expect(cards.first()).toContainText("Espera al interlocutor")
+  await expect(cards.first()).toContainText("Cita el martes 3 de noviembre a las 10:00")
   await expect(cards.first().getByRole("link", { name: /Abrir caso|Abrir conversación/ })).toHaveCount(0)
+  // Lo que espera al paciente no se decide desde el panel: no ofrece aprobar ni rechazar.
+  await expect(cards.first().getByRole("button")).toHaveCount(0)
   await expect(cards.nth(1)).not.toContainText("De esta conversación")
-  await expect(cards.nth(1).getByRole("link", { name: "Abrir caso" })).toBeVisible()
+  await expect(cards.nth(1).getByRole("link", { name: "Abrir conversación" })).toBeVisible()
   await info.attach("panel-de-esta-conversacion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  // Decidir desde el panel actualiza la bandeja: desaparecen la banda y la
-  // marca de la fila, y al cerrar el foco vuelve a donde se abrió.
-  await cards.first().getByRole("button", { name: "Rechazar…" }).click()
-  await panel.getByLabel("Motivo del rechazo").fill("Ya se le respondió por teléfono")
-  await panel.getByRole("button", { name: "Confirmar rechazo" }).click()
-  await expect(panel.getByRole("status")).toContainText("Propuesta rechazada")
   await page.keyboard.press("Escape")
   await expect(panel).toBeHidden()
+  // Cuando la propuesta se cierra en otro lado (aquí se rechaza por la API) la
+  // bandeja se actualiza sola: desaparecen la banda y la marca de la fila.
+  await call(page, "POST", `/api/agent/proposals/${firstAppointment}/decision`, org.slug, { decision: "rechazada", reason: "Ya se agendó por teléfono" })
   await expect(band).toHaveCount(0)
-  await expect(waitingRow).not.toContainText("Espera tu aprobación")
+  await expect(waitingRow).not.toContainText("Espera al interlocutor")
 
-  // Inicio: lo que espera aprobación y el caso derivado son filas de la misma lista, «Te espera».
-  await propose(waiting, "Te confirmo la cita de mañana.")
+  // Inicio: lo que espera la aprobación del equipo (seguimientos vencidos sin
+  // conversación) y el caso derivado son filas de la misma lista, «Te espera».
+  // Lo que espera al paciente no está ahí: no le toca a nadie del equipo.
+  await proposeAppointment(waiting, "Cita el martes 3 de noviembre a las 10:00")
+  await proposeFollowUp(waiting)
+  const otherProposal = await proposeFollowUp(derived)
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const pending = page.getByRole("region", { name: "Te espera" })
   await expect(pending.getByRole("button", { name: /Revisar$/ })).toHaveCount(2)
@@ -158,7 +175,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   // Bandeja en móvil: una vista por vez; con el hilo abierto ceden la pantalla vistas y filtros.
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   await expect(chip("Derivadas · 1")).toBeVisible()
-  await expect(waitingRow).toContainText("Espera tu aprobación")
+  await expect(waitingRow).toContainText("Espera al interlocutor")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await waitingRow.click()
@@ -267,7 +284,7 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
-  await expect(waitingRow).toContainText("Espera aprobación del equipo")
+  await expect(waitingRow).toContainText("Espera al interlocutor")
   await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Derivada · ahora")
   await waitingRow.click()
   const band = page.getByRole("status").filter({ hasText: "El agente propuso" })

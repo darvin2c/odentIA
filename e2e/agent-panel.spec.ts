@@ -69,18 +69,19 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
     }),
   ).toBe(200)
   const conversation = await conversationFor(page, org.slug, tg.id)
-  // Un mensaje que espera la decisión del equipo. Con la política fija
-  // (ADR 0021) ningún recorrido lo deja así en un hilo: la propuesta se inserta
-  // como la registraría el agente (proposed_by=agent). Ese es el límite de esta
-  // evidencia; la lógica de propuesta se cubre en services.
+  // Lo que espera la decisión del equipo: un seguimiento vencido sin
+  // conversación (plantilla anclada al contacto), como lo deja `createProposal`
+  // con `requireTeamDecision`. En un hilo los mensajes salen directo (ADR 0021).
+  // La fila se inserta como la registraría el agente (proposed_by=agent); la
+  // lógica de propuesta se cubre en services.
   await fixtureDb.insert(agentProposal).values({
     organizationId: org.id,
     contactId: conversation.contact.id,
-    conversationId: conversation.id,
+    conversationId: null,
     action: "enviar_mensaje",
-    payload: { kind: "text", text: "Te confirmo la cita del jueves." },
-    afterSummary: "Enviar: Te confirmo la cita del jueves.",
-    reason: "El interlocutor pidió confirmación",
+    payload: { kind: "template", name: "seguimiento_presupuesto", language: "es_PE" },
+    afterSummary: "Plantilla seguimiento_presupuesto",
+    reason: "Seguimiento vencido sin conversación.",
     idempotencyKey: randomUUID(),
   })
   // Derivación hecha por una persona: entra en Derivadas (sigue abierta) pero

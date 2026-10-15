@@ -66,8 +66,6 @@ const proposalInput = z.object({
 const decideInput = z.object({
   decision: z.enum(["aprobada", "rechazada"]),
   reason: z.string().max(2000).optional(),
-  /** Aprobar con edición: el texto que sale en lugar del borrador del agente. */
-  editedText: z.string().min(1).max(4000).optional(),
 })
 
 // Los campos de una derivación se declaran una vez, para la pantalla y para el agente.

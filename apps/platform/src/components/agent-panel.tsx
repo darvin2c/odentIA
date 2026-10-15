@@ -30,7 +30,6 @@ import {
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { Bot } from "lucide-react"
-import { ApproveMessageDrawer, messageDraftOf } from "./agent/approve-message-drawer"
 import { CaseBriefDrawer } from "./agent/case-brief"
 import { HandoffNotice } from "./agent/handoff-badges"
 import {
@@ -558,8 +557,6 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
   const canAgenda = usePermission("appointments.write")
   const canCrm = usePermission("crm.write")
   const [approving, setApproving] = useState<AgentProposal | null>(null)
-  // Un mensaje se revisa y se edita en su cajón, igual que en Aprobaciones.
-  const [message, setMessage] = useState<AgentProposal | null>(null)
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [reason, setReason] = useState("")
   const [outcome, setOutcome] = useState<string | null>(null)
@@ -587,7 +584,6 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
             : approvalOutcomeMessage(proposal),
       )
       setApproving(null)
-      setMessage(null)
       setRejecting(null)
       setReason("")
       invalidateAfterAgentDecision(queryClient)
@@ -721,8 +717,7 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
                 disabled={decide.isPending}
                 onClick={() => {
                   decide.reset()
-                  if (messageDraftOf(proposal) !== null) setMessage(proposal)
-                  else setApproving(proposal)
+                  setApproving(proposal)
                 }}
               >
                 Revisar y aprobar
@@ -811,7 +806,6 @@ function ProposalsTab({ when }: { when: WhenFormatter }) {
         }}
         onConfirm={() => approving && decide.mutate({ id: approving.id, decision: "aprobada" })}
       />
-      <ApproveMessageDrawer proposal={message} onClose={() => setMessage(null)} onDecided={settle} />
     </div>
   )
 }

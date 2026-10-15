@@ -488,8 +488,6 @@ export interface ProposalItem {
   mode: AutonomyMode
   status: ProposalStatus
   payload: Record<string, unknown>
-  /** Texto que el equipo aprobó cuando cambió el borrador; el `payload` conserva lo propuesto. */
-  editedText: string | null
   reason: string | null
   idempotencyKey: string
   result: Record<string, unknown> | null
@@ -514,7 +512,6 @@ function baseProposal(row: ProposalRow, mode: AutonomyMode, context: ProposalCon
     mode,
     status: row.status as ProposalStatus,
     payload: row.payload,
-    editedText: row.editedText,
     reason: row.reason,
     idempotencyKey: row.idempotencyKey,
     result: row.result,
@@ -1497,7 +1494,7 @@ export async function decideProposal(
   orgId: string,
   actorUserId: string,
   id: string,
-  input: { decision: "aprobada" | "rechazada"; reason?: unknown; editedText?: unknown },
+  input: { decision: "aprobada" | "rechazada"; reason?: unknown },
   opts: { secretsKey?: Buffer } = {},
 ): Promise<ProposalItem> {
   const expired = await takeExpiredProposal(tx, orgId, actorUserId, id)
@@ -1507,19 +1504,6 @@ export async function decideProposal(
     throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
   }
   const reason = cleanReason(input.reason)
-  // Aprobar con edición: solo el texto de un mensaje, y solo al aprobar. El
-  // borrador del agente se conserva en el payload como evidencia.
-  let editedText: string | null = null
-  if (input.editedText !== undefined && input.editedText !== null) {
-    const draft = (current.payload as Record<string, unknown>)["text"]
-    if (input.decision !== "aprobada" || current.action !== "enviar_mensaje" || typeof draft !== "string") {
-      throw validation("Solo se puede editar el texto de un mensaje al aprobarlo")
-    }
-    if (typeof input.editedText !== "string" || !input.editedText.trim() || input.editedText.length > 4000) {
-      throw validation("El mensaje no puede quedar vacío ni pasar de 4000 caracteres")
-    }
-    if (input.editedText.trim() !== draft.trim()) editedText = input.editedText.trim()
-  }
   if (input.decision === "rechazada") {
     const [row] = await tx
       .update(agentProposal)
@@ -1551,7 +1535,7 @@ export async function decideProposal(
   }
   const [row] = await tx
     .update(agentProposal)
-    .set({ status: "aprobada", editedText, reason: reason ?? current.reason, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "aprobada", reason: reason ?? current.reason, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(agentProposal.id, id), eq(agentProposal.status, "propuesta")))
     .returning()
   if (!row) throw await pendingConflict(tx, orgId, id)
@@ -1561,22 +1545,11 @@ export async function decideProposal(
     action: "agent.proposal_approved",
     entity: "agent_proposal",
     entityId: id,
-    metadata: { reason: reason ?? current.reason, edited: editedText !== null },
+    metadata: { reason: reason ?? current.reason },
   })
   await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
   const executed = await executeProposal(tx, orgId, actorUserId, id, opts)
   await syncCommercialCoordination(tx, orgId, executed)
-  // El mensaje ya salió con el texto del equipo; guardarlo para la próxima vez
-  // es una lección propuesta que aprueba quien administra el agente.
-  if (editedText !== null && executed.status === "ejecutada") {
-    const { proposeLessonFromEditedApproval } = await import("./agent-learning.js")
-    await proposeLessonFromEditedApproval(tx, orgId, actorUserId, {
-      proposalId: id,
-      conversationId: executed.conversationId,
-      originalText: String((current.payload as Record<string, unknown>)["text"] ?? ""),
-      editedText,
-    })
-  }
   return executed
 }
 
@@ -1951,9 +1924,9 @@ export async function executeProposal(
           conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
-          content: { type: "text", text: locked.editedText ?? (payload["text"] as string) },
+          content: { type: "text", text: payload["text"] as string },
         })
-        result = { messageId: sent.id, kind: "text", ...(locked.editedText ? { edited: true } : {}) }
+        result = { messageId: sent.id, kind: "text" }
       }
     } else if (action === "mover_oportunidad") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
