@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { agentPolicy, agentProposal } from "@odentia/db/schema/agent"
+import { agentProposal } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -19,8 +19,6 @@ async function seedInbox() {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `inbox-${orgId}`)
   await ownerDb.insert(agentConfig).values({ organizationId: orgId, enabled: true })
-  // Mensajes exigen al interlocutor; el resto de actos, al equipo (por defecto).
-  await ownerDb.insert(agentPolicy).values({ organizationId: orgId, modes: { enviar_mensaje: "confirmar_usuario" } })
   const [connection] = await ownerDb.insert(channelConnection).values({
     organizationId: orgId, channel: "telegram", provider: "telegram_bot_api", displayName: "Bot",
     configEncrypted: "config", webhookSecret: "secret", status: "active",
@@ -39,7 +37,9 @@ async function seedInbox() {
   const proposal = (conv: { id: string; contactId: string }, action: string, createdAt = new Date()) =>
     ownerDb.insert(agentProposal).values({
       organizationId: orgId, contactId: conv.contactId, conversationId: conv.id, action,
-      payload: action === "enviar_mensaje" ? { kind: "text", text: "Hola" } : { title: "Ortodoncia" },
+      payload: action === "reservar_cita"
+        ? { patientId: randomUUID(), dentistUserId: "dentista", chairId: randomUUID(), startsAt: new Date(Date.now() + 86_400_000).toISOString() }
+        : { title: "Ortodoncia" },
       afterSummary: "Cambio previsto", idempotencyKey: randomUUID(), createdAt,
     })
   const handoff = (conv: { id: string }, priority: string) =>
@@ -64,7 +64,7 @@ it("cada conversación trae su estado de atención y las vistas cuentan con las 
   // Propuesta que decide el equipo, otra que espera al interlocutor y una vencida.
   const approval = await thread("Por aprobar")
   await proposal(approval, "crear_oportunidad")
-  await proposal(approval, "enviar_mensaje")
+  await proposal(approval, "reservar_cita")
   await proposal(approval, "crear_oportunidad", new Date(Date.now() - 49 * 3_600_000))
   const closed = await thread("Cerrada", { status: "closed" })
   // Hilo cuya única propuesta ya venció aunque su fila siga `propuesta`.

@@ -13,7 +13,6 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { organization } from "./auth.js"
 import { contact, conversation, crmTask, orgFk } from "./crm.js"
 import { opportunity } from "./opportunities.js"
 import { branch } from "./org.js"
@@ -138,15 +137,6 @@ export type AutonomyAction = (typeof AUTONOMY_ACTIONS)[number]
 export const AUTONOMY_MODES = ["directo", "confirmar_usuario", "aprobar_equipo"] as const
 export type AutonomyMode = (typeof AUTONOMY_MODES)[number]
 
-export const agentPolicy = pgTable("agent_policy", {
-  organizationId: text("organization_id")
-    .primaryKey()
-    .references(() => organization.id),
-  modes: jsonb("modes").$type<Partial<Record<AutonomyAction, AutonomyMode>>>().notNull().default({}),
-  updatedBy: text("updated_by"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
-
 export const PROPOSAL_ACTIONS = [
   "reservar_cita",
   "reprogramar_cita",
@@ -202,11 +192,6 @@ export const agentProposal = pgTable(
     expectedState: jsonb("expected_state").$type<Record<string, unknown>>(),
     idempotencyKey: text("idempotency_key").notNull(),
     result: jsonb("result").$type<Record<string, unknown>>(),
-    /**
-     * Texto que el equipo aprobó cuando cambió el borrador de un mensaje. El
-     * `payload` conserva lo que propuso el agente: es la evidencia.
-     */
-    editedText: text("edited_text"),
     error: text("error"),
     proposedBy: text("proposed_by").notNull().default("agent"),
     decidedBy: text("decided_by"),
@@ -528,14 +513,14 @@ export const agentAnswerTrace = pgTable(
 /* ---------- Aprender: lo que se revisa, lo que se corrige y lo que queda aprendido ---------- */
 
 /** Por qué una respuesta entró en «Por revisar». */
-export const REVIEW_REASONS = ["equipo_tomo", "repitio_pregunta", "muestra", "marcada", "editada"] as const
+export const REVIEW_REASONS = ["equipo_tomo", "repitio_pregunta", "muestra", "marcada"] as const
 export type ReviewReason = (typeof REVIEW_REASONS)[number]
 
 /**
  * Una respuesta del agente que conviene que una persona mire: porque el
  * equipo tomó la conversación justo después, porque el interlocutor repitió la
- * pregunta, por muestra al azar, porque alguien la marcó o porque el equipo
- * editó el borrador antes de aprobarlo. Una fila por respuesta.
+ * pregunta, por muestra al azar o porque alguien la marcó. Una fila por
+ * respuesta.
  */
 export const agentReviewItem = pgTable(
   "agent_review_item",
@@ -563,7 +548,7 @@ export const agentReviewItem = pgTable(
   (table) => [
     uniqueIndex("agent_review_item_trace_uidx").on(table.organizationId, table.traceId),
     index("agent_review_item_org_idx").on(table.organizationId, table.status, table.createdAt),
-    check("agent_review_item_reason_check", sql`${table.reason} in ('equipo_tomo','repitio_pregunta','muestra','marcada','editada')`),
+    check("agent_review_item_reason_check", sql`${table.reason} in ('equipo_tomo','repitio_pregunta','muestra','marcada')`),
     check("agent_review_item_status_check", sql`${table.status} in ('pendiente','bien','corregida')`),
   ],
 )
@@ -707,8 +692,8 @@ export interface AgentPatientContext {
  * Quién dice que sí a cada acción del agente. Es fija para todas las clínicas
  * (ADR 0021): el agente siempre responde, la cita la confirma el paciente y lo
  * comercial es interno y se deshace. La clínica elige qué funciones enciende,
- * no niveles. `agent_policy` queda solo para que las pruebas ejerciten los
- * otros modos de la máquina de propuestas.
+ * no niveles. No se guarda por organización: los otros modos solo los usan
+ * las propuestas sin hilo, que decide siempre el equipo (`aprobar_equipo`).
  */
 export const DEFAULT_AUTONOMY_MODES: Record<AutonomyAction, AutonomyMode> = {
   reservar_cita: "confirmar_usuario",

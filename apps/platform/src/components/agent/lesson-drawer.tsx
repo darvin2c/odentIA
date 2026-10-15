@@ -61,10 +61,6 @@ export function lessonOriginText(lesson: LessonItem, options: { short?: boolean 
   const who = lesson.proposedByName
   const agent = agentName(lesson.agent)
   const received = lesson.contactName ? `, la que recibió ${lesson.contactName}` : ""
-  if (lesson.origin === "borrador_editado") {
-    if (options.short) return `De un borrador que tu equipo cambió antes de aprobarlo, ${day}.`
-    return `De un borrador de ${agent} que ${who ?? "tu equipo"} cambió antes de aprobarlo, ${day}${lesson.contactName ? `. Era para ${lesson.contactName}` : ""}.`
-  }
   if (lesson.origin === "respuesta_buena") {
     if (options.short) return `De una respuesta que tu equipo dio por buena, ${day}.`
     return `De una respuesta de ${agent} que ${who ?? "tu equipo"} dio por buena, ${day}${received}.`

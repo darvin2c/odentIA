@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { agentProposal } from "@odentia/db/schema/agent"
@@ -11,11 +12,10 @@ import {
   decideProposal,
   executeProposal,
   getProposal,
-  updateAutonomyPolicy,
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, listMessages } from "./conversations.js"
-import { createOpportunity, getOpportunity, listOpportunities, moveOpportunity, updateOpportunity } from "./opportunities.js"
+import { createOpportunity, getOpportunity, listOpportunities, updateOpportunity } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
@@ -116,10 +116,17 @@ describe("clave de idempotencia", () => {
   })
 })
 
-describe("recorrido comercial con aprobación del equipo", () => {
-  it("crear_oportunidad se aprueba y ejecuta una sola vez aunque se reintente", async () => {
+/**
+ * Una cita propuesta en el hilo: el único acto que espera el sí del paciente
+ * (ADR 0021). Los datos solo tienen que pasar la validación; nadie la ejecuta.
+ */
+function booking(startsAt = "2026-11-02T15:00:00.000Z"): Record<string, unknown> {
+  return { patientId: randomUUID(), dentistUserId: "owner-1", chairId: randomUUID(), startsAt }
+}
+
+describe("recorrido comercial directo", () => {
+  it("crear_oportunidad va directo y se ejecuta una sola vez aunque se reintente", async () => {
     const { conversationId, contactId } = await openConversation("comercial-1", "evt-com-1")
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { crear_oportunidad: "aprobar_equipo" }))
     const created = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "crear_oportunidad",
@@ -127,10 +134,8 @@ describe("recorrido comercial con aprobación del equipo", () => {
         idempotencyKey: "test:crm-agent:crear-1",
       }),
     )
-    expect(created.status).toBe("propuesta")
-    expect(created.mode).toBe("aprobar_equipo")
-    const approved = await run((tx) => decideProposal(tx, ORG, "owner-1", created.id, { decision: "aprobada" }))
-    expect(approved.status).toBe("ejecutada")
+    expect(created.status).toBe("ejecutada")
+    expect(created.mode).toBe("directo")
     const again = await run((tx) => executeProposal(tx, ORG, "owner-1", created.id))
     expect(again.status).toBe("ejecutada")
     const { items } = await run((tx) => listOpportunities(tx, ORG, { contactId, status: "open" }))
@@ -141,7 +146,6 @@ describe("recorrido comercial con aprobación del equipo", () => {
 
   it("replay con la misma clave devuelve la propuesta sin reenviar el mensaje", async () => {
     const { conversationId } = await openConversation("comercial-2", "evt-com-2")
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { enviar_mensaje: "directo" }))
     const first = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "enviar_mensaje",
@@ -168,7 +172,6 @@ describe("recorrido comercial con aprobación del equipo", () => {
     const foreign = await run((tx) =>
       createOpportunity(tx, ORG, { contactId: other.contactId, title: "Ajena" }, { userId: null }),
     )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { cerrar_oportunidad: "aprobar_equipo" }))
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "cerrar_oportunidad",
@@ -176,11 +179,10 @@ describe("recorrido comercial con aprobación del equipo", () => {
         idempotencyKey: "test:crm-agent:cross-1",
       }),
     )
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
-    expect(decided.status).toBe("fallida")
-    expect(decided.error).toMatch(/^VALIDATION: /)
-    expect(decided.error).toContain("este interlocutor")
-    expect(decided.result).toMatchObject({ errorCode: "VALIDATION" })
+    expect(proposal.status).toBe("fallida")
+    expect(proposal.error).toMatch(/^VALIDATION: /)
+    expect(proposal.error).toContain("este interlocutor")
+    expect(proposal.result).toMatchObject({ errorCode: "VALIDATION" })
     const untouched = await run(tx => getOpportunity(tx, ORG, foreign.id))
     expect(untouched.status).toBe("open")
     await expect(
@@ -191,16 +193,16 @@ describe("recorrido comercial con aprobación del equipo", () => {
     expect(reread.result).toMatchObject({ errorCode: "VALIDATION" })
   })
 
-  it("en confirmar_usuario el equipo no aprueba y ejecuta: solo rechaza o confirma el paciente", async () => {
+  it("una cita la confirma el paciente: el equipo no la aprueba, solo puede rechazarla", async () => {
     const { conversationId } = await openConversation("comercial-5", "evt-com-5")
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { crear_oportunidad: "confirmar_usuario" }))
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
-        conversationId, action: "crear_oportunidad",
-        payload: { title: "Brackets metálicos" },
+        conversationId, action: "reservar_cita",
+        payload: booking(),
         idempotencyKey: "test:crm-agent:policy-1",
       }),
     )
+    expect(proposal.status).toBe("propuesta")
     expect(proposal.mode).toBe("confirmar_usuario")
     await expect(
       run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" })),
@@ -208,90 +210,15 @@ describe("recorrido comercial con aprobación del equipo", () => {
     const rejected = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "rechazada" }))
     expect(rejected.status).toBe("rechazada")
   })
-
-  it("confirmación explícita del paciente ejecuta el seguimiento propuesto", async () => {
-    const sender = "comercial-6"
-    const { conversationId, contactId, connectionId: connId } = await openConversation(sender, "evt-com-6")
-    const { openA } = await openStages()
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Limpieza", stageId: openA }, { userId: null }),
-    )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "confirmar_usuario" }))
-    const proposal = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Llamar para confirmar asistencia" },
-        idempotencyKey: "test:crm-agent:confirm-1",
-      }),
-    )
-    expect(proposal.status).toBe("propuesta")
-    await inbound(sender, connId, "evt-com-6-si", "Sí, confirmo")
-    const confirmed = await run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id))
-    expect(confirmed.status).toBe("ejecutada")
-    expect((await run(tx => getOpportunity(tx, ORG, opp.id))).nextActionNote).toBe("Llamar para confirmar asistencia")
-    const reread = await run((tx) => getProposal(tx, ORG, proposal.id))
-    expect(reread.result).toMatchObject({ opportunityId: opp.id })
-  })
-
-  it("el sí del interlocutor no ejecuta una propuesta que exige aprobación del equipo", async () => {
-    const sender = "comercial-7"
-    const { conversationId, contactId, connectionId: connId } = await openConversation(sender, "evt-com-7")
-    const { openA } = await openStages()
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Ortodoncia equipo", stageId: openA }, { userId: null }),
-    )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { cerrar_oportunidad: "aprobar_equipo" }))
-    const proposal = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "cerrar_oportunidad",
-        payload: { opportunityId: opp.id, outcome: "lost", reason: "El paciente desistió" },
-        idempotencyKey: "test:crm-agent:team-confirm-1",
-      }),
-    )
-    expect(proposal.status).toBe("propuesta")
-    expect(proposal.mode).toBe("aprobar_equipo")
-    await inbound(sender, connId, "evt-com-7-si", "Sí, confirmo")
-    await expect(
-      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id)),
-    ).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_TEAM_APPROVAL", status: 409 })
-    expect((await run((tx) => getProposal(tx, ORG, proposal.id))).status).toBe("propuesta")
-    expect((await run((tx) => getOpportunity(tx, ORG, opp.id))).status).toBe("open")
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
-    expect(decided.status).toBe("ejecutada")
-    expect((await run((tx) => getOpportunity(tx, ORG, opp.id))).status).toBe("lost")
-  })
-
-  it("endurecer la política a aprobar_equipo bloquea el sí aunque se creó como confirmar_usuario", async () => {
-    const sender = "comercial-8"
-    const { conversationId, contactId, connectionId: connId } = await openConversation(sender, "evt-com-8")
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { crear_oportunidad: "confirmar_usuario" }))
-    const proposal = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "crear_oportunidad",
-        payload: { title: "Endurecida a equipo" },
-        idempotencyKey: "test:crm-agent:team-harden-1",
-      }),
-    )
-    expect(proposal.mode).toBe("confirmar_usuario")
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { crear_oportunidad: "aprobar_equipo" }))
-    await inbound(sender, connId, "evt-com-8-si", "Sí, confirmo")
-    await expect(
-      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id)),
-    ).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_TEAM_APPROVAL", status: 409 })
-    expect((await run((tx) => getProposal(tx, ORG, proposal.id))).status).toBe("propuesta")
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
-    expect(decided.status).toBe("ejecutada")
-  })
 })
 
 describe("evidencia congelada de lo aprobado", () => {
-  it("el seguimiento pendiente muestra el antes original y el después nuevo", async () => {
+  it("el seguimiento muestra el antes original y el después nuevo", async () => {
     const { conversationId, contactId } = await openConversation("evidencia-1", "evt-evi-1")
     const { openA } = await openStages()
     const opp = await run((tx) =>
       createOpportunity(tx, ORG, { contactId, title: "Ortodoncia", stageId: openA, nextActionNote: "Nota original" }, { userId: null }),
     )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo" }))
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "actualizar_seguimiento",
@@ -299,19 +226,18 @@ describe("evidencia congelada de lo aprobado", () => {
         idempotencyKey: "test:crm-agent:evi-1",
       }),
     )
-    expect(proposal.status).toBe("propuesta")
+    expect(proposal.status).toBe("ejecutada")
     expect(proposal.context.beforeSummary).toContain("Nota original")
     expect(proposal.context.afterSummary).toContain("Nota nueva")
     expect(typeof proposal.context.afterSummary).toBe("string")
   })
 
-  it("la ejecución y cambios posteriores no reescriben la evidencia", async () => {
+  it("los cambios posteriores a la ejecución no reescriben la evidencia", async () => {
     const { conversationId, contactId } = await openConversation("evidencia-2", "evt-evi-2")
     const { openA } = await openStages()
     const opp = await run((tx) =>
       createOpportunity(tx, ORG, { contactId, title: "Implante", stageId: openA, nextActionNote: "Nota base" }, { userId: null }),
     )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo" }))
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "actualizar_seguimiento",
@@ -319,16 +245,13 @@ describe("evidencia congelada de lo aprobado", () => {
         idempotencyKey: "test:crm-agent:evi-2",
       }),
     )
-    const pendingBefore = proposal.context.beforeSummary
-    const pendingAfter = proposal.context.afterSummary
-    const approved = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
-    expect(approved.status).toBe("ejecutada")
-    expect(approved.context.beforeSummary).toBe(pendingBefore)
-    expect(approved.context.afterSummary).toBe(pendingAfter)
+    expect(proposal.status).toBe("ejecutada")
+    const executedBefore = proposal.context.beforeSummary
+    const executedAfter = proposal.context.afterSummary
     await run((tx) => updateOpportunity(tx, ORG, opp.id, { nextActionNote: "Nota posterior" }, { userId: null }))
     const reread = await run((tx) => getProposal(tx, ORG, proposal.id))
-    expect(reread.context.beforeSummary).toBe(pendingBefore)
-    expect(reread.context.afterSummary).toBe(pendingAfter)
+    expect(reread.context.beforeSummary).toBe(executedBefore)
+    expect(reread.context.afterSummary).toBe(executedAfter)
     expect(reread.context.beforeSummary).toContain("Nota base")
   })
 
@@ -338,7 +261,6 @@ describe("evidencia congelada de lo aprobado", () => {
     const opp = await run((tx) =>
       createOpportunity(tx, ORG, { contactId, title: "Endodoncia", stageId: openA }, { userId: null }),
     )
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { cerrar_oportunidad: "aprobar_equipo" }))
     const first = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "cerrar_oportunidad",
@@ -381,74 +303,39 @@ describe("evidencia congelada de lo aprobado", () => {
 })
 
 describe("el hilo nunca se silencia: mensajes y caducidad", () => {
-  it("una propuesta comercial pendiente no bloquea comunicar en modo directo", async () => {
-    const { conversationId, contactId } = await openConversation("hilo-1", "evt-hilo-1")
-    const { openA } = await openStages()
-    await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo", enviar_mensaje: "directo" }),
-    )
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Evaluación", stageId: openA }, { userId: null }),
-    )
-    const followup = await run((tx) =>
+  it("una cita esperando el sí deja salir los mensajes, pero frena otra cita y lo comercial", async () => {
+    const { conversationId } = await openConversation("hilo-1", "evt-hilo-1")
+    const waiting = await run((tx) =>
       createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Llamar mañana" },
-        idempotencyKey: "test:crm-agent:hilo-1",
+        conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:hilo-1",
       }),
     )
-    expect(followup.status).toBe("propuesta")
+    expect(waiting.status).toBe("propuesta")
+    await expect(run((tx) => createProposal(tx, ORG, {
+      conversationId, action: "reservar_cita", payload: booking("2026-11-03T15:00:00.000Z"),
+      idempotencyKey: "test:crm-agent:hilo-1-otra",
+    }))).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
+    await expect(run((tx) => createProposal(tx, ORG, {
+      conversationId, action: "crear_oportunidad", payload: { title: "Otra consulta pendiente" },
+      idempotencyKey: "test:crm-agent:hilo-1-comercial",
+    }))).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
     const message = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "enviar_mensaje",
-        payload: { kind: "text", text: "El equipo revisará el cambio de horario." },
+        payload: { kind: "text", text: "Te avisaremos por aquí." },
         idempotencyKey: "test:crm-agent:hilo-2",
       }),
     )
     expect(message.status).toBe("ejecutada")
     expect(message.result).toMatchObject({ kind: "text" })
-    const pending = await run((tx) => getProposal(tx, ORG, followup.id))
-    expect(pending.status).toBe("propuesta")
-  })
-
-  it("un mensaje pendiente no frena la propuesta comercial", async () => {
-    const { conversationId, contactId } = await openConversation("hilo-2", "evt-hilo-2")
-    await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { enviar_mensaje: "aprobar_equipo", crear_oportunidad: "aprobar_equipo" }),
-    )
-    const message = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "enviar_mensaje",
-        payload: { kind: "text", text: "Te escribimos de la clínica." },
-        idempotencyKey: "test:crm-agent:hilo-3",
-      }),
-    )
-    expect(message.status).toBe("propuesta")
-    const commercial = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "crear_oportunidad",
-        payload: { title: "Interés en ortodoncia" },
-        idempotencyKey: "test:crm-agent:hilo-4",
-      }),
-    )
-    expect(commercial.status).toBe("propuesta")
-    expect(commercial.contactId).toBe(contactId)
+    expect((await run((tx) => getProposal(tx, ORG, waiting.id))).status).toBe("propuesta")
   })
 
   it("las propuestas viejas caducan, persisten y no bloquean la conversación", async () => {
     const { conversationId, contactId } = await openConversation("hilo-3", "evt-hilo-3")
-    const { openA } = await openStages()
-    await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo" }),
-    )
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Limpieza", stageId: openA }, { userId: null }),
-    )
     const old = await run((tx) =>
       createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Nota vieja" },
-        idempotencyKey: "test:crm-agent:hilo-5",
+        conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:hilo-5",
       }),
     )
     await run((tx) =>
@@ -462,28 +349,17 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     expect(reread.status).toBe("expirada")
     const fresh = await run((tx) =>
       createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Nota nueva" },
-        idempotencyKey: "test:crm-agent:hilo-6",
+        conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:hilo-6",
       }),
     )
     expect(fresh.status).toBe("propuesta")
   })
 
   it("decidir una propuesta vencida no ejecuta y devuelve expirada", async () => {
-    const { conversationId, contactId } = await openConversation("hilo-4", "evt-hilo-4")
-    const { openA } = await openStages()
-    await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo" }),
-    )
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Frenillos", stageId: openA, nextActionNote: "Nota base" }, { userId: null }),
-    )
+    const { conversationId } = await openConversation("hilo-4", "evt-hilo-4")
     const old = await run((tx) =>
       createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Nota vencida" },
-        idempotencyKey: "test:crm-agent:hilo-7",
+        conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:hilo-7",
       }),
     )
     await run((tx) =>
@@ -491,140 +367,14 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     )
     const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", old.id, { decision: "aprobada" }))
     expect(decided.status).toBe("expirada")
-    const kept = await run((tx) => getOpportunity(tx, ORG, opp.id))
-    expect(kept.nextActionNote).toBe("Nota base")
-  })
-
-  it("una sola propuesta espera confirmación del paciente por hilo", async () => {
-    const { conversationId, contactId } = await openConversation("hilo-5", "evt-hilo-5")
-    const { openA } = await openStages()
-    await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "confirmar_usuario", enviar_mensaje: "confirmar_usuario", crear_oportunidad: "aprobar_equipo" }),
-    )
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Blanqueamiento", stageId: openA }, { userId: null }),
-    )
-    const first = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Llamar hoy" },
-        idempotencyKey: "test:crm-agent:hilo-8",
-      }),
-    )
-    expect(first.status).toBe("propuesta")
-    await expect(run(tx => createProposal(tx, ORG, {
-      conversationId, action: "crear_oportunidad", payload: { title: "Otra consulta pendiente" },
-      idempotencyKey: "test:crm-agent:hilo-8-equipo",
-    }))).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
-    await expect(
-      run((tx) =>
-        createProposal(tx, ORG, {
-          conversationId, action: "enviar_mensaje",
-          payload: { kind: "text", text: "Confirmamos tu cita." },
-          idempotencyKey: "test:crm-agent:hilo-9",
-        }),
-      ),
-    ).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
-    // En modo directo el mensaje sí coexiste con la espera de confirmación.
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { enviar_mensaje: "directo" }))
-    const direct = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "enviar_mensaje",
-        payload: { kind: "text", text: "Te avisaremos por aquí." },
-        idempotencyKey: "test:crm-agent:hilo-10",
-      }),
-    )
-    expect(direct.status).toBe("ejecutada")
-  })
-
-  it("la segunda comercial pendiente del equipo usa código de aprobación, no de confirmación", async () => {
-    const { conversationId, contactId } = await openConversation("hilo-6", "evt-hilo-6")
-    const { openA } = await openStages()
-    await run((tx) =>
-      updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo", crear_oportunidad: "aprobar_equipo" }),
-    )
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Corona", stageId: openA }, { userId: null }),
-    )
-    const first = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Llamar mañana" },
-        idempotencyKey: "test:crm-agent:hilo-11",
-      }),
-    )
-    expect(first.status).toBe("propuesta")
-    await expect(
-      run((tx) =>
-        createProposal(tx, ORG, {
-          conversationId, action: "crear_oportunidad",
-          payload: { title: "Segunda comercial" },
-          idempotencyKey: "test:crm-agent:hilo-12",
-        }),
-      ),
-    ).rejects.toMatchObject({ code: "PROPOSAL_PENDING_APPROVAL", status: 409 })
+    expect((await run((tx) => getProposal(tx, ORG, old.id))).status).toBe("expirada")
   })
 })
 
 describe("obsolescencia y fallo transaccional", () => {
-  it("mover tras la decisión humana queda fallida sin pisarla", async () => {
-    const { conversationId, contactId } = await openConversation("stale-1", "evt-stale-1")
-    const { openA, openB } = await openStages()
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { mover_oportunidad: "aprobar_equipo" }))
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Ortodoncia", stageId: openA }, { userId: null }),
-    )
-    const proposal = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "mover_oportunidad",
-        payload: { opportunityId: opp.id, stageId: openB },
-        idempotencyKey: "test:crm-agent:stale-1",
-      }),
-    )
-    expect(proposal.status).toBe("propuesta")
-    expect(proposal.context.isStale).toBe(false)
-    await run((tx) => moveOpportunity(tx, ORG, opp.id, openB, { userId: null }))
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
-    expect(decided.status).toBe("fallida")
-    expect(decided.error).toMatch(/^PROPOSAL_STALE: /)
-    expect(decided.error).toContain("obsoleta")
-    expect(decided.result).toMatchObject({ errorCode: "PROPOSAL_STALE" })
-    expect(decided.context.isStale).toBe(true)
-    expect(decided.context.currentSummary).toContain("Etapa actual")
-    const kept = await run((tx) => getOpportunity(tx, ORG, opp.id))
-    expect(kept.stageId).toBe(openB)
-    const reread = await run((tx) => getProposal(tx, ORG, proposal.id))
-    expect(reread.status).toBe("fallida")
-    expect(reread.context.isStale).toBe(true)
-  })
-
-  it("el seguimiento cambiado por un humano no se sobrescribe", async () => {
-    const { conversationId, contactId } = await openConversation("stale-2", "evt-stale-2")
-    const { openA } = await openStages()
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { actualizar_seguimiento: "aprobar_equipo" }))
-    const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Implante", stageId: openA, nextActionNote: "Nota original" }, { userId: null }),
-    )
-    const proposal = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "actualizar_seguimiento",
-        payload: { opportunityId: opp.id, nextActionNote: "Nota propuesta" },
-        idempotencyKey: "test:crm-agent:stale-2",
-      }),
-    )
-    await run((tx) => updateOpportunity(tx, ORG, opp.id, { nextActionNote: "Nota humana" }, { userId: null }))
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" }))
-    expect(decided.status).toBe("fallida")
-    expect(decided.result).toMatchObject({ errorCode: "PROPOSAL_STALE" })
-    expect(decided.context.currentSummary).toContain("Nota humana")
-    const kept = await run((tx) => getOpportunity(tx, ORG, opp.id))
-    expect(kept.nextActionNote).toBe("Nota humana")
-  })
-
   it("una propuesta sin evidencia de estado no ejecuta a ciegas", async () => {
     const { conversationId, contactId } = await openConversation("stale-3", "evt-stale-3")
     const { openA } = await openStages()
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { cerrar_oportunidad: "aprobar_equipo" }))
     const opp = await run((tx) =>
       createOpportunity(tx, ORG, { contactId, title: "Corona", stageId: openA }, { userId: null }),
     )
@@ -651,7 +401,6 @@ describe("obsolescencia y fallo transaccional", () => {
   it("la evidencia congelada no se reescribe por SQL directo", async () => {
     const { conversationId, contactId } = await openConversation("stale-4", "evt-stale-4")
     const { openA, openB } = await openStages()
-    await run((tx) => updateAutonomyPolicy(tx, ORG, "owner-1", { mover_oportunidad: "aprobar_equipo" }))
     const opp = await run((tx) =>
       createOpportunity(tx, ORG, { contactId, title: "Puente", stageId: openA }, { userId: null }),
     )
@@ -662,13 +411,13 @@ describe("obsolescencia y fallo transaccional", () => {
         idempotencyKey: "test:crm-agent:stale-4",
       }),
     )
+    expect(proposal.status).toBe("ejecutada")
     await expect(
       run((tx) =>
         tx.update(agentProposal).set({ expectedState: { manipulated: true } }).where(eq(agentProposal.id, proposal.id)),
       ),
     ).rejects.toMatchObject({ cause: { code: "23514" } })
     const intact = await run((tx) => getProposal(tx, ORG, proposal.id))
-    expect(intact.status).toBe("propuesta")
-    expect(intact.context.isStale).toBe(false)
+    expect(intact.status).toBe("ejecutada")
   })
 })

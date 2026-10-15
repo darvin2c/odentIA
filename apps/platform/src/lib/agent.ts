@@ -18,8 +18,6 @@ export interface AgentProposal {
   mode: "directo" | "confirmar_usuario" | "aprobar_equipo"
   status: string
   payload: Record<string, unknown>
-  /** Texto que el equipo aprobó cuando cambió el borrador de un mensaje. */
-  editedText?: string | null
   reason: string | null
   result: Record<string, unknown> | null
   error: string | null
@@ -306,7 +304,7 @@ export function clockToMinutes(clock: string): number | null {
 
 /* ---------- Aprender: por revisar, lecciones y casos de prueba ---------- */
 
-export type ReviewReason = "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada" | "editada"
+export type ReviewReason = "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada"
 
 export interface ReviewItem {
   id: string
@@ -330,7 +328,6 @@ export const REVIEW_REASON_LABEL: Record<ReviewReason, string> = {
   repitio_pregunta: "El paciente repitió la pregunta",
   muestra: "Muestra al azar",
   marcada: "La marcó alguien de tu equipo",
-  editada: "El equipo cambió el borrador",
 }
 
 export type CorrectionFailure = "dato_equivocado" | "falto_dato" | "tono" | "no_debio_responder" | "otra_cosa"
@@ -360,8 +357,8 @@ export function lessonScopeLabel(scope: string): string {
   return scope
 }
 
-/** De dónde sale una lección: una corrección, un borrador cambiado al aprobar o una respuesta que se dio por buena. */
-export type LessonOrigin = "correccion" | "borrador_editado" | "respuesta_buena"
+/** De dónde sale una lección: una corrección o una respuesta que se dio por buena. */
+export type LessonOrigin = "correccion" | "respuesta_buena"
 
 export interface LessonItem {
   id: string

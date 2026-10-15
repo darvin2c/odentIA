@@ -3,7 +3,6 @@ import { ConfirmDialog, EmptyState, LoadingState, PageHeader, PageShell, SubmitB
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useState } from "react"
-import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { HandoffNotice } from "../../components/agent/handoff-badges"
 import { AgentTabs } from "../../components/agent-tabs"
@@ -53,8 +52,7 @@ function AgentApprovalsPage() {
   const status = search.status ?? "propuesta"
   const [rejectReason, setRejectReason] = useState<Record<string, string>>({})
   const [confirm, setConfirm] = useState<AgentProposal | null>(null)
-  // El mensaje que se está revisando para aprobar, y el caso cuyo resumen está abierto.
-  const [approving, setApproving] = useState<AgentProposal | null>(null)
+  // El caso cuyo resumen está abierto.
   const [briefFor, setBriefFor] = useState<AgentHandoff | null>(null)
   const canClaim = usePermission("tasks.write")
   const [outcome, setOutcome] = useState<DecisionOutcome | null>(null)
@@ -90,11 +88,10 @@ function AgentApprovalsPage() {
       setOutcome(null)
     }
     setConfirm(null)
-    setApproving(null)
     invalidate()
   }
   const decideMutation = useMutation({
-    mutationFn: (input: { id: string; decision: "aprobada" | "rechazada"; reason?: string; editedText?: string }) =>
+    mutationFn: (input: { id: string; decision: "aprobada" | "rechazada"; reason?: string }) =>
       apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${input.id}/decision`, { method: "POST", body: JSON.stringify(input) }),
     onSuccess: settleProposal,
   })
@@ -165,11 +162,7 @@ function AgentApprovalsPage() {
             {authorized && canConversations && proposal.status === "propuesta" && proposal.mode === "confirmar_usuario" && <div className="flex flex-wrap gap-2">
               <SubmitButton size="sm" pending={confirmMutation.isPending} disabled={!proposal.contactId} onClick={() => { confirmMutation.reset(); confirmMutation.mutate(proposal) }}>Registrar confirmación del interlocutor</SubmitButton>
             </div>}
-            {/* Un mensaje se revisa, se edita y se decide en su cajón; el resto de cambios, aquí. */}
-            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && messageDraftOf(proposal) !== null && <div className="flex flex-wrap gap-2">
-              <Button size="sm" className="min-h-11 sm:min-h-8" onClick={() => setApproving(proposal)}>Revisar y aprobar</Button>
-            </div>}
-            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && messageDraftOf(proposal) === null && <div className="flex flex-col gap-2">
+            {authorized && proposal.status === "propuesta" && proposal.mode === "aprobar_equipo" && <div className="flex flex-col gap-2">
               <Field><FieldLabel htmlFor={`rechazo-${proposal.id}`}>Motivo para rechazar</FieldLabel><Input id={`rechazo-${proposal.id}`} value={rejectReason[proposal.id] ?? ""} onChange={event => setRejectReason({ ...rejectReason, [proposal.id]: event.target.value })} maxLength={2000} /></Field>
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" disabled={decideMutation.isPending} onClick={() => { decideMutation.reset(); setConfirm(proposal) }}>Revisar y aprobar</Button>
@@ -233,7 +226,6 @@ function AgentApprovalsPage() {
         )}
       </section>
       <ConfirmDialog open={confirm !== null} title="Aprobar y ejecutar el cambio" description={confirm ? `${confirm.context.contactName ?? "Interlocutor"}: ${confirm.context.afterSummary}` : ""} confirmLabel="Aprobar y ejecutar" variant="default" pending={decideMutation.isPending} onClose={() => { if (!decideMutation.isPending) setConfirm(null) }} onConfirm={() => { if (!confirm) return; decideMutation.mutate({ id: confirm.id, decision: "aprobada" }) }} />
-      <ApproveMessageDrawer proposal={approving} onClose={() => setApproving(null)} onDecided={settleProposal} />
       <CaseBriefDrawer
         conversationId={briefFor?.conversationId ?? null}
         name={briefFor?.contactName ?? "Interlocutor"}

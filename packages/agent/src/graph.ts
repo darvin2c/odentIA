@@ -5,6 +5,7 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { withOrgContext } from "@odentia/db"
+import { DEFAULT_AUTONOMY_MODES } from "@odentia/db/schema/agent"
 import {
   AGENT_BASE_PRINCIPLES,
   AGENT_ROLES,
@@ -21,7 +22,6 @@ import {
   getAgentCaseState,
   getAgentClinicData,
   getAgentConfig,
-  getAutonomyPolicy,
   getClinicInfoSnapshot,
   getContact,
   getOrgLocale,
@@ -108,6 +108,11 @@ const KNOWLEDGE_PICKED_SOURCE = "Respuestas oficiales elegidas para este mensaje
 
 /** Mensajes del hilo que el modelo ve en cada turno; lo anterior queda en las notas del caso. */
 const HISTORY_LIMIT = 20
+
+/** Quién dice que sí a cada acción: la misma para todas las clínicas (ADR 0021). */
+const POLICY_LINE = `Política de autonomía: ${Object.entries(DEFAULT_AUTONOMY_MODES)
+  .map(([action, mode]) => `${action}=${mode}`)
+  .join(", ")}.`
 
 /** Herramientas que comunican algo al interlocutor. */
 const SEND_TOOLS = new Set(["send_reply", "send_template"])
@@ -603,15 +608,11 @@ export function compileAgentGraph(
     const asked = draft ?? trailingBurst(items) ?? latestInbound
     const overrides = toolCtx.lessonOverrides
     const hiddenEntries = new Set(overrides?.skipEntryIds ?? [])
-    const { cfg, orgPrompt, policyLine, snapshot, clinicData, faqs, lessons } = await withOrgContext(
+    const { cfg, orgPrompt, snapshot, clinicData, faqs, lessons } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
       async (tx) => {
         const cfg = await getAgentConfig(tx, toolCtx.orgId)
-        const policy = await getAutonomyPolicy(tx, toolCtx.orgId)
-        const modes = (Object.entries(policy) as Array<[string, string]>)
-          .map(([action, mode]) => `${action}=${mode}`)
-          .join(", ")
         // Con «Informar» apagado el agente no recibe tarifas, promociones,
         // profesionales ni respuestas oficiales: solo las sedes y su horario,
         // que agendar necesita.
@@ -621,7 +622,6 @@ export function compileAgentGraph(
         return {
           cfg,
           orgPrompt: cfg.systemPrompt,
-          policyLine: `Política de autonomía: ${modes}.`,
           snapshot: informs ? snapshot : { ...snapshot, services: [] },
           clinicData,
           faqs: informs ? (await listPublishedForPrompt(tx, toolCtx.orgId)).filter((entry) => !hiddenEntries.has(entry.id)) : [],
@@ -676,7 +676,7 @@ export function compileAgentGraph(
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
-    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, policyLine, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
+    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const said = (who: "contact" | "agent" | "team") =>

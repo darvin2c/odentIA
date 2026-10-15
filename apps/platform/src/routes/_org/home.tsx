@@ -4,7 +4,6 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
-import { ApproveMessageDrawer, messageDraftOf } from "../../components/agent/approve-message-drawer"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
@@ -73,9 +72,6 @@ function HomePage() {
   useOrgEvents(HOME_EVENTS, refresh)
 
   const [approving, setApproving] = useState<ProposalRow | null>(null)
-  // Un mensaje se revisa y se edita en su cajón, igual que en Aprobaciones; la
-  // fila no trae el borrador, así que se pide al abrirlo.
-  const [message, setMessage] = useState<AgentProposal | null>(null)
   // Un 200 con `fallida`/`expirada` saca la propuesta de la lista: el resultado
   // queda fijo en pantalla junto a la vuelta al caso.
   const [outcome, setOutcome] = useState<{ status: string; detail: string | null; conversationId: string | null } | null>(null)
@@ -86,7 +82,6 @@ function HomePage() {
 
   function settle(response: { data: AgentProposal }) {
     setApproving(null)
-    setMessage(null)
     const proposal = response.data
     setOutcome(
       proposal.status === "fallida" || proposal.status === "expirada"
@@ -104,20 +99,6 @@ function HomePage() {
       }),
     onSuccess: settle,
   })
-  const review = async (proposal: ProposalRow) => {
-    if (proposal.action === "enviar_mensaje") {
-      try {
-        const full = await apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${proposal.id}`)
-        if (messageDraftOf(full.data) !== null) {
-          setMessage(full.data)
-          return
-        }
-      } catch {
-        // Sin el borrador se decide con la confirmación de siempre.
-      }
-    }
-    setApproving(proposal)
-  }
   const decideError =
     decideMutation.error instanceof ApiError
       ? (decideMutation.error.shape.message ?? "No pudimos aprobar la propuesta")
@@ -179,7 +160,7 @@ function HomePage() {
             notice={notice}
             handlers={{
               canApprove,
-              onReview: (row) => void review(row),
+              onReview: setApproving,
               onCase: (row) => row.conversationId && setBriefFor({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" }),
               onAdvice: (row) => setAdvice(row.key),
               onUnreached: () => setUnreached(true),
@@ -205,7 +186,6 @@ function HomePage() {
       </div>
     )}
 
-    <ApproveMessageDrawer proposal={message} onClose={() => setMessage(null)} onDecided={settle} />
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canClaim={canClaim} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />

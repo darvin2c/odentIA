@@ -6,7 +6,6 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
-import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 
 interface Conversation {
@@ -70,20 +69,19 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
     }),
   ).toBe(200)
   const conversation = await conversationFor(page, org.slug, tg.id)
-  // El acto exige aprobación del equipo. La propuesta se inserta como la
-  // registra el agente (proposed_by=agent): sin proveedor real no hay corrida
-  // que la genere, y la vía HTTP la marcaría como propuesta por una persona.
-  // Ese es el límite de esta evidencia; la lógica de propuesta se cubre en
-  // services y en crm.spec.ts con el modelo falso.
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
+  // Lo que espera la decisión del equipo: un seguimiento vencido sin
+  // conversación (plantilla anclada al contacto), como lo deja `createProposal`
+  // con `requireTeamDecision`. En un hilo los mensajes salen directo (ADR 0021).
+  // La fila se inserta como la registraría el agente (proposed_by=agent); la
+  // lógica de propuesta se cubre en services.
   await fixtureDb.insert(agentProposal).values({
     organizationId: org.id,
     contactId: conversation.contact.id,
-    conversationId: conversation.id,
+    conversationId: null,
     action: "enviar_mensaje",
-    payload: { kind: "text", text: "Te confirmo la cita del jueves." },
-    afterSummary: "Enviar: Te confirmo la cita del jueves.",
-    reason: "El interlocutor pidió confirmación",
+    payload: { kind: "template", name: "seguimiento_presupuesto", language: "es_PE" },
+    afterSummary: "Plantilla seguimiento_presupuesto",
+    reason: "Seguimiento vencido sin conversación.",
     idempotencyKey: randomUUID(),
   })
   // Derivación hecha por una persona: entra en Derivadas (sigue abierta) pero
@@ -189,9 +187,8 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await expect(agentButton(page)).toBeVisible()
 
   // Trabajo proactivo: propuesta sin hilo (seguimiento vencido) anclada al
-  // contacto y a su oportunidad; el caso que se abre es la oportunidad. Con la
-  // política por defecto de mensajes (directo) sigue siendo decisión del equipo.
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "directo" })
+  // contacto y a su oportunidad; el caso que se abre es la oportunidad. Aunque
+  // en un hilo los mensajes salen directo, sin hilo decide el equipo.
   const opportunity = await call<{ id: string }>(
     page,
     "POST",

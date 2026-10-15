@@ -37,7 +37,7 @@ export interface AgentCaseProposal {
   label: string
   summary: string
   status: string
-  /** Quién resuelve hoy la pendiente, con la política vigente. */
+  /** Quién resuelve la pendiente: el interlocutor (cita en el hilo) o el equipo. */
   decider: "contact" | "team"
   detail: string | null
   at: string

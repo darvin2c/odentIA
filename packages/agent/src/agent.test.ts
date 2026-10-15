@@ -1,5 +1,6 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
+import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createServer } from "node:http"
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
@@ -37,7 +38,6 @@ import {
   READ_TOOLS,
   TOOL_OPERATION,
   TOOLS_WITHOUT_OPERATION,
-  getAutonomyPolicy,
   ingestInbound,
   listHandoffs,
   createTask,
@@ -48,7 +48,6 @@ import {
   secretsKeyFromEnv,
   setPatientContact,
   setProfessionalSchedule,
-  updateAutonomyPolicy,
   upsertAgentConfig,
 } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
@@ -973,9 +972,6 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
-  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: "aprobar_equipo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
     triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
@@ -1034,11 +1030,10 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   const pending = await withOrgContext(appDb, "org_a", (tx) =>
     listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect(pending).toHaveLength(1)
-  const decided = await withOrgContext(appDb, "org_a", (tx) =>
-    decideProposal(tx, "org_a", actorId, pending[0]!.id, { decision: "aprobada" }))
-  expect(decided.status).toBe("ejecutada")
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: prevPolicy.reservar_cita }))
+  expect(pending[0]!.mode).toBe("confirmar_usuario")
+  await ingestText("tg:reserva-ctx", "evt-reserva-ctx-si", "Sí, confirmo")
+  const confirmed = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending[0]!.id }))
+  expect(confirmed).toContain("Confirmado y ejecutado")
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(
       and(eq(appointment.patientId, patientId), eq(appointment.chairId, chairId))))
@@ -1141,14 +1136,12 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(rows).toHaveLength(1)
   expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
 
-  // Cancelar con aprobación del equipo (la política fija la pide al paciente,
-  // ADR 0021; la prueba ejercita el otro modo): la confirmación del interlocutor
-  // no basta; reentregar el mismo trigger no duplica la propuesta.
-  await withOrgContext(appDb, "org_a", (tx) => updateAutonomyPolicy(tx, "org_a", actorId, { cancelar_cita: "aprobar_equipo" }))
+  // Cancelar también lo confirma el paciente; reentregar el mismo trigger no
+  // duplica la propuesta y el equipo no puede aprobarla en su lugar.
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
-  expect(pendingMsg).toContain("aprobación del equipo")
+  expect(pendingMsg).toContain("pide al interlocutor que confirme")
   const repeatedMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   const cancelId = /Propuesta ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
   expect(cancelId).toBeTruthy()
@@ -1156,11 +1149,11 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const pendingCancels = await withOrgContext(appDb, "org_a", (tx) =>
     listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect(pendingCancels.filter((p) => p.action === "cancelar_cita")).toHaveLength(1)
+  await expect(withOrgContext(appDb, "org_a", (tx) =>
+    decideProposal(tx, "org_a", actorId, cancelId!, { decision: "aprobada" }))).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_CONTACT_CONFIRM" })
+  await ingestText("tg:reprog-ctx", "evt-cancel-si-1", "Sí")
   const confirmCancel = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: cancelId! }))
-  expect(confirmCancel).toContain("exige aprobación del equipo")
-  const decided = await withOrgContext(appDb, "org_a", (tx) =>
-    decideProposal(tx, "org_a", actorId, cancelId!, { decision: "aprobada" }))
-  expect(decided.status).toBe("ejecutada")
+  expect(confirmCancel).toContain("Confirmado y ejecutado")
   rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
   expect(rows).toHaveLength(1)
@@ -1171,149 +1164,39 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const lateMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   const lateId = /Propuesta ([0-9a-f-]{36})/.exec(lateMsg)?.[1]
   expect(lateId).toBeTruthy()
-  const lateDecided = await withOrgContext(appDb, "org_a", (tx) =>
-    decideProposal(tx, "org_a", actorId, lateId!, { decision: "aprobada" }))
-  expect(lateDecided.status).toBe("fallida")
-  expect(lateDecided.error ?? "").toMatch(/obsoleta|cancelada/)
-  await withOrgContext(appDb, "org_a", (tx) => updateAutonomyPolicy(tx, "org_a", actorId, { cancelar_cita: "confirmar_usuario" }))
+  await ingestText("tg:reprog-ctx", "evt-cancel-si-2", "Sí")
+  const lateConfirm = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: lateId! }))
+  expect(lateConfirm).toContain("No se pudo ejecutar al confirmar")
+  expect(lateConfirm).toMatch(/obsoleta|cancelada/)
 })
 
-it("proponer_cita en directo fallido no se reporta como aprobación", async () => {
-  const [createdBranch] = await ownerDb
-    .insert(branch)
-    .values({ organizationId: "org_a", name: "Sede Agente Fallida", timezone: "America/Lima" })
-    .returning({ id: branch.id })
-  const branchId = createdBranch!.id
-  const stamp = Date.now()
-  const actorId = `agent-actor-f-${stamp}`
-  const dentistId = `agent-dentist-f-${stamp}`
-  await ownerDb.insert(user).values([
-    { id: actorId, name: "Actor Agente F", email: `actor-f-${stamp}@example.test` },
-    { id: dentistId, name: "Dentista Agente F", email: `dentista-f-${stamp}@example.test` },
-  ])
-  await ownerDb.execute(sql`
-    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const { conversationId } = await ingestText("tg:reserva-fallida", "evt-reserva-fallida", "Quiero una cita")
-  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
-  expect(conv).toBeDefined()
-  const contactId = conv!.contactId
-  const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: "Paciente Fallida Agente", patientNumber })
-    .returning({ id: patient.id })
-  const patientId = createdPatient!.id
-  await withOrgContext(appDb, "org_a", (tx) =>
-    setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
-  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: "directo" }))
-  const ctx: AgentToolCtx = {
-    db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
-    toolsUsed: [], usage: emptyUsage(),
-  }
-  const booking = makeAgentTools(ctx).find((t) => t.name === "proponer_cita")
-  expect(booking).toBeDefined()
-  const result = String(await booking!.invoke({
-    patientId,
-    dentistUserId: dentistId,
-    chairId: "00000000-0000-4000-8000-000000000000",
-    startsAt: "2026-10-05T14:00:00.000Z",
-    branchId,
-    durationMin: 45,
-  }))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { reservar_cita: prevPolicy.reservar_cita }))
-  expect(result).not.toContain("aprobación")
-  const failed = await withOrgContext(appDb, "org_a", (tx) =>
-    listProposals(tx, "org_a", { conversationId, status: "fallida" }))
-  expect(failed).toHaveLength(1)
-  expect(failed[0]!.error).toBeTruthy()
-  const rows = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ id: appointment.id }).from(appointment).where(eq(appointment.patientId, patientId)))
-  expect(rows).toHaveLength(0)
-})
-
-it("segunda propuesta en espera guía a confirmar en vez de romper el turno", async () => {
+it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper el turno", async () => {
   const { conversationId } = await ingestText("tg:doble-si", "evt-doble-si", "Quiero confirmar")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   expect(conv).toBeDefined()
-  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
-  const stamp = Date.now()
-  const actorId = `agent-actor-p-${stamp}`
-  await ownerDb.insert(user).values([
-    { id: actorId, name: "Actor Agente P", email: `actor-p-${stamp}@example.test` },
-  ])
-  await ownerDb.execute(sql`
-    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now())`)
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { enviar_mensaje: "confirmar_usuario" }))
-  const ctx: AgentToolCtx = {
-    db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
-    toolsUsed: [], usage: emptyUsage(),
-  }
-  const sender = makeAgentTools(ctx).find((t) => t.name === "send_reply")
-  expect(sender).toBeDefined()
-  await sender!.invoke({ text: "Te propongo el plan de tratamiento." })
-  const second = String(await sender!.invoke({ text: "Te propongo el plan alternativo." }))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { enviar_mensaje: prevPolicy.enviar_mensaje }))
-  expect(second).toContain("confirmar_propuesta")
-  const pending = await withOrgContext(appDb, "org_a", (tx) =>
-    listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-  expect(pending).toHaveLength(1)
-})
-
-it("en modo equipo el segundo intento y confirmar_propuesta no piden sí ni ejecutan", async () => {
-  const { conversationId } = await ingestText("tg:equipo-si", "evt-equipo-si", "Quiero abrir mi caso")
-  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
-  expect(conv).toBeDefined()
-  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
-  const stamp = Date.now()
-  const actorId = `agent-actor-e-${stamp}`
-  await ownerDb.insert(user).values([
-    { id: actorId, name: "Actor Equipo", email: `actor-e-${stamp}@example.test` },
-  ])
-  await ownerDb.execute(sql`
-    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now())`)
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: "aprobar_equipo" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
     triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
-  const creator = tools.find((t) => t.name === "create_opportunity")
-  expect(creator).toBeDefined()
-  const before = await withOrgContext(appDb, "org_a", tx =>
+  // La cita propuesta espera el sí del interlocutor (los datos solo tienen que validar).
+  const booked = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
+    patientId: randomUUID(), dentistUserId: "dentista-doble-si", chairId: randomUUID(),
+    startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
+  }))
+  expect(booked).toContain("pide al interlocutor que confirme")
+  const before = await withOrgContext(appDb, "org_a", (tx) =>
     listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
-  await creator!.invoke({ title: "Caso equipo" })
-  await creator!.invoke({ title: "Segundo caso equipo" })
-  const pendingTeam = await withOrgContext(appDb, "org_a", (tx) =>
+  const second = String(await tools.find((t) => t.name === "create_opportunity")!.invoke({ title: "Plan alternativo" }))
+  expect(second).toContain("confirmar_propuesta")
+  const pending = await withOrgContext(appDb, "org_a", (tx) =>
     listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-  expect(pendingTeam).toHaveLength(1)
-  await ingestText("tg:equipo-si", "evt-equipo-si-2", "Sí, confirmo")
-  const confirmer = tools.find((t) => t.name === "confirmar_propuesta")
-  expect(confirmer).toBeDefined()
-  await confirmer!.invoke({ proposalId: pendingTeam[0]!.id })
-  const stillPending = await withOrgContext(appDb, "org_a", (tx) =>
-    listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-  expect(stillPending).toHaveLength(1)
-  const opportunities = await withOrgContext(appDb, "org_a", tx =>
+  expect(pending.map((p) => p.action)).toEqual(["reservar_cita"])
+  const after = await withOrgContext(appDb, "org_a", (tx) =>
     listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
-  expect(opportunities.items.map(row => row.id)).toEqual(before.items.map(row => row.id))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", actorId, { crear_oportunidad: prevPolicy.crear_oportunidad }))
+  expect(after.items.map((row) => row.id)).toEqual(before.items.map((row) => row.id))
 })
 
 it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {
@@ -1478,117 +1361,106 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   const first = await ingestText("tg:dos-turnos", "evt-dos-turnos-1", "Quiero una cita")
   const { conversationId } = first
   const fx = await bookingFixture(conversationId, "dos-turnos")
-  const prevPolicy = await withOrgContext(appDb, "org_a", (tx) => getAutonomyPolicy(tx, "org_a"))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    updateAutonomyPolicy(tx, "org_a", fx.actorId, { reservar_cita: "confirmar_usuario", enviar_mensaje: "directo" }))
-  try {
-    const day = upcomingMonday()
-    const turnOne = new ScriptedModel((messages, call) => {
-      if (call === 1) {
-        return toolCall(
-          "buscar_huecos",
-          { branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45 },
-          "t1-huecos",
-        )
-      }
-      if (call === 2) {
-        const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[1] ?? ""
-        return toolCall(
-          "proponer_cita",
-          {
-            patientId: fx.patientId,
-            dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-            chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
-            startsAt: line.match(ISO_INSTANT)?.[0],
-            branchId: fx.branchId,
-            durationMin: 45,
-          },
-          "t1-propuesta",
-        )
-      }
-      if (call === 3) {
-        return toolCall("anotar_caso", { nota: "La cita es para Paciente dos-turnos; prefiere las mañanas." }, "t1-nota")
-      }
-      return toolCall("send_reply", { text: "Tengo un espacio el lunes a las 9:00 a. m. ¿Confirmas la cita?" }, "t1-envio")
-    })
-    expect(await runScripted(turnOne, conversationId, first.messageId)).toBe("done")
-    const pending = await withOrgContext(appDb, "org_a", (tx) =>
-      listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-    expect(pending.map((p) => p.action)).toEqual(["reservar_cita"])
+  const day = upcomingMonday()
+  const turnOne = new ScriptedModel((messages, call) => {
+    if (call === 1) {
+      return toolCall(
+        "buscar_huecos",
+        { branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45 },
+        "t1-huecos",
+      )
+    }
+    if (call === 2) {
+      const line = String(messages[messages.length - 1]?.content ?? "").split("\n")[1] ?? ""
+      return toolCall(
+        "proponer_cita",
+        {
+          patientId: fx.patientId,
+          dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
+          chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+          startsAt: line.match(ISO_INSTANT)?.[0],
+          branchId: fx.branchId,
+          durationMin: 45,
+        },
+        "t1-propuesta",
+      )
+    }
+    if (call === 3) {
+      return toolCall("anotar_caso", { nota: "La cita es para Paciente dos-turnos; prefiere las mañanas." }, "t1-nota")
+    }
+    return toolCall("send_reply", { text: "Tengo un espacio el lunes a las 9:00 a. m. ¿Confirmas la cita?" }, "t1-envio")
+  })
+  expect(await runScripted(turnOne, conversationId, first.messageId)).toBe("done")
+  const pending = await withOrgContext(appDb, "org_a", (tx) =>
+    listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect(pending.map((p) => p.action)).toEqual(["reservar_cita"])
 
-    const second = await ingestText("tg:dos-turnos", "evt-dos-turnos-2", "Sí")
-    // El modelo del segundo turno solo sabe lo que recibe: confirma si el id de
-    // la propuesta pendiente está a la vista; si no, solo puede volver a preguntar.
-    const turnTwo = new ScriptedModel((messages, call) => {
-      if (call > 1) return toolCall("send_reply", { text: "Listo, tu cita quedó reservada." }, "t2-envio")
-      const visible = messages.map((m) => String(m.content)).join("\n")
-      const proposalId = /propuesta[^\n]*\bid ([0-9a-f-]{36})/i.exec(visible)?.[1]
-      return proposalId
-        ? toolCall("confirmar_propuesta", { proposalId }, "t2-confirma")
-        : toolCall("send_reply", { text: "¿Me confirmas la cita, por favor?" }, "t2-repregunta")
-    })
-    // Aunque el modelo de decisión lea ese «Sí» como un saludo, con una propuesta
-    // por confirmar el turno recibe todas las herramientas: sin confirmar_propuesta
-    // a la vista, el sí se perdería.
-    const greeting: DecisionModel = {
-      provider: "fake",
-      reportsProbabilities: true,
-      decide: async (_state, questions) => ({
-        answers: questions.map((q): Awaited<ReturnType<DecisionModel["decide"]>>["answers"][number] =>
-          q.kind === "yesno"
-            ? { id: q.id, kind: "yesno", probability: 0.02 }
-            : q.kind === "choice"
-              ? q.id === "intent"
-                ? { id: q.id, kind: "choice", choice: "greeting_or_thanks", probabilities: { greeting_or_thanks: 0.95 }, confidence: 0.9 }
-                : { id: q.id, kind: "choice", choice: "none", probabilities: { none: 0.95 }, confidence: 0.9 }
-              : { id: q.id, kind: "score", score: 0, probabilities: null, confidence: null }),
-        model: "guion",
-        usage: null,
-        latencyMs: 1,
-      }),
-    }
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
-    try {
-      expect(await processAgentRun(appDb, { ...runtime, createModel: async () => turnTwo, createDecisionModel: () => greeting }, {
-        msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId: second.messageId },
-      })).toBe("done")
-    } finally {
-      await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
-    }
-    expect(systemTextOf(turnTwo.seen[0] ?? [])).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: un saludo")
-    expect(turnTwo.offered[0]).toContain("confirmar_propuesta")
-    expect(turnTwo.offered[0]).not.toContain("ampliar_herramientas")
-    // El segundo turno recibió lo que dejó el primero: la nota, la consulta de
-    // agenda y cuándo escribió el interlocutor.
-    const seen = turnTwo.seen[0] ?? []
-    const system = systemTextOf(seen)
-    expect(system).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita")
-    expect(system).toContain("- La cita es para Paciente dos-turnos; prefiere las mañanas.")
-    expect(system).toContain("[buscar_huecos · ")
-    expect(String(seen[seen.length - 1]?.content)).toMatch(/^\[[^\]]+\] Sí$/)
-    const booked = await withOrgContext(appDb, "org_a", (tx) =>
-      tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
-    expect(booked).toEqual([{ status: "programada" }])
-    const runs = await ledgerRows(conversationId)
-    expect(runs[runs.length - 1]?.toolsUsed).toEqual(["confirmar_propuesta", "send_reply"])
-    expect(await agentMessages(conversationId)).toContain("Listo, tu cita quedó reservada.")
-    // Lo hecho queda en el estado del caso y cada respuesta dice en qué se basó.
-    const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
-    expect(state.pending).toEqual([])
-    expect(state.recent.map((item) => `${item.action}:${item.status}`)).toEqual(["reservar_cita:ejecutada"])
-    const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
-    expect(traces.map((trace) => trace.outcome)).toEqual(["enviada", "enviada"])
-    const offered = traces[1]!
-    expect(offered.basis).toEqual([{ kind: "agenda", label: "Agenda: horarios disponibles", detail: expect.stringMatching(/horarios?$/) }])
-    expect(offered.checks).toEqual([{ kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" }])
-    expect(offered.messageId).toBeTruthy()
-  } finally {
-    await withOrgContext(appDb, "org_a", (tx) =>
-      updateAutonomyPolicy(tx, "org_a", fx.actorId, {
-        reservar_cita: prevPolicy.reservar_cita,
-        enviar_mensaje: prevPolicy.enviar_mensaje,
-      }))
+  const second = await ingestText("tg:dos-turnos", "evt-dos-turnos-2", "Sí")
+  // El modelo del segundo turno solo sabe lo que recibe: confirma si el id de
+  // la propuesta pendiente está a la vista; si no, solo puede volver a preguntar.
+  const turnTwo = new ScriptedModel((messages, call) => {
+    if (call > 1) return toolCall("send_reply", { text: "Listo, tu cita quedó reservada." }, "t2-envio")
+    const visible = messages.map((m) => String(m.content)).join("\n")
+    const proposalId = /propuesta[^\n]*\bid ([0-9a-f-]{36})/i.exec(visible)?.[1]
+    return proposalId
+      ? toolCall("confirmar_propuesta", { proposalId }, "t2-confirma")
+      : toolCall("send_reply", { text: "¿Me confirmas la cita, por favor?" }, "t2-repregunta")
+  })
+  // Aunque el modelo de decisión lea ese «Sí» como un saludo, con una propuesta
+  // por confirmar el turno recibe todas las herramientas: sin confirmar_propuesta
+  // a la vista, el sí se perdería.
+  const greeting: DecisionModel = {
+    provider: "fake",
+    reportsProbabilities: true,
+    decide: async (_state, questions) => ({
+      answers: questions.map((q): Awaited<ReturnType<DecisionModel["decide"]>>["answers"][number] =>
+        q.kind === "yesno"
+          ? { id: q.id, kind: "yesno", probability: 0.02 }
+          : q.kind === "choice"
+            ? q.id === "intent"
+              ? { id: q.id, kind: "choice", choice: "greeting_or_thanks", probabilities: { greeting_or_thanks: 0.95 }, confidence: 0.9 }
+              : { id: q.id, kind: "choice", choice: "none", probabilities: { none: 0.95 }, confidence: 0.9 }
+            : { id: q.id, kind: "score", score: 0, probabilities: null, confidence: null }),
+      model: "guion",
+      usage: null,
+      latencyMs: 1,
+    }),
   }
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
+  try {
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => turnTwo, createDecisionModel: () => greeting }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId: second.messageId },
+    })).toBe("done")
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
+  }
+  expect(systemTextOf(turnTwo.seen[0] ?? [])).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: un saludo")
+  expect(turnTwo.offered[0]).toContain("confirmar_propuesta")
+  expect(turnTwo.offered[0]).not.toContain("ampliar_herramientas")
+  // El segundo turno recibió lo que dejó el primero: la nota, la consulta de
+  // agenda y cuándo escribió el interlocutor.
+  const seen = turnTwo.seen[0] ?? []
+  const system = systemTextOf(seen)
+  expect(system).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita")
+  expect(system).toContain("- La cita es para Paciente dos-turnos; prefiere las mañanas.")
+  expect(system).toContain("[buscar_huecos · ")
+  expect(String(seen[seen.length - 1]?.content)).toMatch(/^\[[^\]]+\] Sí$/)
+  const booked = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
+  expect(booked).toEqual([{ status: "programada" }])
+  const runs = await ledgerRows(conversationId)
+  expect(runs[runs.length - 1]?.toolsUsed).toEqual(["confirmar_propuesta", "send_reply"])
+  expect(await agentMessages(conversationId)).toContain("Listo, tu cita quedó reservada.")
+  // Lo hecho queda en el estado del caso y cada respuesta dice en qué se basó.
+  const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
+  expect(state.pending).toEqual([])
+  expect(state.recent.map((item) => `${item.action}:${item.status}`)).toEqual(["reservar_cita:ejecutada"])
+  const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+  expect(traces.map((trace) => trace.outcome)).toEqual(["enviada", "enviada"])
+  const offered = traces[1]!
+  expect(offered.basis).toEqual([{ kind: "agenda", label: "Agenda: horarios disponibles", detail: expect.stringMatching(/horarios?$/) }])
+  expect(offered.checks).toEqual([{ kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" }])
+  expect(offered.messageId).toBeTruthy()
 })
 
 it("una respuesta con un precio que no está en lo consultado no sale y, a la segunda, el caso pasa a una persona", async () => {

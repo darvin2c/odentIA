@@ -762,10 +762,6 @@ it("aprender: lectura, corrección y aprobación piden permisos distintos y vali
   }
   expect((await post(app, `/agent/learning/lessons/${trace}/approve`)).status).toBe(404)
   expect((await post(app, `/agent/learning/lessons/${trace}/preview`)).status).toBe(404)
-
-  // Editar el texto solo vale al aprobar un mensaje.
-  const rejected = await post(app, `/agent/proposals/${randomUUID()}/decision`, { decision: "aprobada", editedText: "" })
-  expect(rejected.status).toBe(400)
 })
 
 it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y la prueba piden administrar", async () => {

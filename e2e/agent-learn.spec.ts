@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
-import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
 
@@ -29,7 +28,7 @@ interface Knowledge {
 const overflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
-test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un mensaje editándolo", async ({
+test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir desde la Bandeja", async ({
   owner,
   fixtureDb,
   nextEventId,
@@ -224,43 +223,29 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   expect((await knowledge())[0]).toMatchObject({ state: "vigente" })
   expect(await learning()).toMatchObject({ cases: 1 })
 
-  // --- Aprobar un mensaje editándolo: sale el texto del equipo y queda una lección por aprobar ---
-  // Sin niveles (ADR 0021): para que el equipo apruebe el mensaje, la prueba fija la política en la base.
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
+  // --- Desde la Bandeja: corregir otra respuesta deja una lección por aprobar ---
   const andres = nextEventId()
   await send(andres, "¿Tienen estacionamiento?")
   await expect.poll(async () => (await conversations()).length, { timeout: 30_000 }).toBe(2)
-  await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
-  // Un mensaje se revisa en su cajón: lo que escribió la persona, el borrador y las tres decisiones.
-  await page.getByRole("button", { name: "Revisar y aprobar" }).click({ timeout: 45_000 })
-  const approve = sideSurface(page, { name: "Aprobar un mensaje" })
-  await expect(approve).toContainText("¿Tienen estacionamiento?")
-  const draft = approve.getByLabel("Borrador del agente")
-  await expect(draft).toHaveValue(FAKE_REPLY)
-  await expect(approve.getByRole("button", { name: "Responder yo" })).toBeVisible()
-  await expect(approve.getByRole("button", { name: "Rechazar" })).toBeVisible()
-  await expect(approve).toContainText("Nada sale a la persona hasta que apruebes.")
-  const edited = "En Miraflores tenemos estacionamiento gratis para pacientes."
-  await draft.fill(edited)
-  await expect(approve.getByText("Lo editaste")).toBeVisible()
-  await expect(approve).toContainText("se propondrá guardar tu texto como respuesta oficial")
-  await approve.getByRole("button", { name: "Ver lo que había escrito el agente" }).click()
-  await expect(approve.getByText(FAKE_REPLY, { exact: true })).toBeVisible()
-  await info.attach("aprobar-con-edicion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await approve.getByRole("button", { name: "Aprobar y enviar" }).click()
-  await expect(approve).toBeHidden()
   const second = (await conversations()).find((row) => row.id !== conversationId)!.id
-  await expect
-    .poll(async () => {
-      const rows = await call<Array<{ body: string | null; direction: string }>>(page, "GET", `/api/conversations/${second}/messages`, org.slug)
-      return rows.filter((row) => row.direction === "out").map((row) => row.body)
-    })
-    .toEqual([edited])
-  await expect.poll(async () => (await learning()).proposed.map((row) => row.body)).toEqual([edited])
+  await expect.poll(async () => (await traces(second)).length, { timeout: 45_000 }).toBe(1)
+  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${second}`))
+  await page.getByRole("button", { name: "En qué se basó" }).click()
+  await page.getByRole("dialog", { name: "En qué se basó" }).getByRole("button", { name: "Corregir", exact: true }).click()
+  const parking = page.getByRole("dialog", { name: "Corregir una respuesta" })
+  await expect(parking).toContainText("¿Tienen estacionamiento?")
+  await parking.getByRole("button", { name: "Le faltó un dato" }).click()
+  const corrected = "En Miraflores tenemos estacionamiento gratis para pacientes."
+  await parking.getByLabel("¿Cómo debió responder?").fill(corrected)
+  await info.attach("corregir-desde-bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await parking.getByRole("button", { name: "Enviar corrección" }).click()
+  await expect(parking).toBeHidden()
+  // Nada cambió por sí solo: el agente sigue sabiendo lo mismo hasta que se apruebe.
+  await expect.poll(async () => (await learning()).proposed.map((row) => row.body)).toEqual([corrected])
   expect((await learning()).proposed[0]).toMatchObject({ kind: "respuesta_oficial", question: "¿Tienen estacionamiento?" })
+  expect(await knowledge()).toHaveLength(1)
 
-  // --- Desde la Bandeja: «En qué se basó» ofrece corregir esa respuesta ---
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "directo" })
+  // --- Una respuesta ya corregida no se corrige dos veces ---
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
   await page.getByRole("button", { name: "En qué se basó" }).click()
   const trace = page.getByRole("dialog", { name: "En qué se basó" })
@@ -287,7 +272,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   const open = toApprove.getByRole("button", { name: /^Ver y aprobar/ })
   await expect(open).toBeHidden()
   await toApprove.getByRole("button", { name: /^Lecciones por aprobar/ }).click()
-  await expect(toApprove).toContainText("De un borrador que tu equipo cambió antes de aprobarlo")
+  await expect(toApprove).toContainText("De una corrección de hoy.")
   expect((await open.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await learned.getByRole("button", { name: /^Lo aprendido/ }).click()
   await expect(learned.getByRole("button", { name: /^Retirar/ })).toBeVisible()

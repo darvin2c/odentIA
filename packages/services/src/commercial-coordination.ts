@@ -13,7 +13,6 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import {
   createHandoff,
   expireDueProposals,
-  getAutonomyPolicy,
   getProposal,
   type ProposalItem,
 } from "./agent-operations.js"
@@ -335,15 +334,6 @@ export async function beginCommercialFollowUpCoordination(
       row,
       "La ejecución cayó fuera del horario permitido",
       "Gestiona el seguimiento dentro del horario de atención.",
-    )
-  }
-  const policy = await getAutonomyPolicy(tx, orgId)
-  if (policy.enviar_mensaje === "confirmar_usuario") {
-    return deriveLocked(
-      tx,
-      row,
-      "La política exige una confirmación que no existe en este recorrido",
-      "Una persona debe decidir el siguiente contacto.",
     )
   }
   await tx

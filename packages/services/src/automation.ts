@@ -34,7 +34,7 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming } from "./admin-lines.js"
-import { createProposal, getAutonomyPolicy } from "./agent-operations.js"
+import { createProposal } from "./agent-operations.js"
 import { setAppointmentStatus } from "./appointments.js"
 import { automationMessageOf, parseReplyId } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
@@ -924,8 +924,6 @@ export async function syncOverdueCommercialFollowUps(
   const timeZone = await timezoneOf(tx, orgId)
   let programados = 0
   let omitidos = 0
-  // Sin hilo no hay interlocutor que confirme: con esa política se deriva.
-  let coldAllowed: boolean | null = null
   for (const row of rows) {
     if (!row.opportunityId || !row.dueAt) continue
     if (
@@ -943,10 +941,7 @@ export async function syncOverdueCommercialFollowUps(
     if (!row.conversationId) {
       reason = "La próxima acción no tiene una conversación vinculada"
       if (row.contactId && row.agentEnabled && opts.secretsKey) {
-        coldAllowed ??= (await getAutonomyPolicy(tx, orgId)).enviar_mensaje !== "confirmar_usuario"
-        if (coldAllowed) {
-          cold = await findTemplateChannel(tx, orgId, row.contactId, "seguimiento", opts.secretsKey)
-        }
+        cold = await findTemplateChannel(tx, orgId, row.contactId, "seguimiento", opts.secretsKey)
       }
     } else if (row.agentStatus !== "on") reason = "El agente está desactivado en la conversación"
     else if (!row.agentEnabled) reason = "El agente está desactivado en la organización"

@@ -1,12 +1,9 @@
 import type { Db } from "@odentia/db"
 import {
   agentHandoff,
-  agentPolicy,
   agentProposal,
   agentRunLedger,
   AGENT_RUN_STATUSES,
-  AUTONOMY_ACTIONS,
-  AUTONOMY_MODES,
   DEFAULT_AUTONOMY_MODES,
   HANDOFF_PRIORITIES,
   PROPOSAL_ACTIONS,
@@ -118,18 +115,6 @@ function assertAction(action: string): asserts action is ProposalAction {
   }
 }
 
-function assertAutonomyAction(action: string): asserts action is AutonomyAction {
-  if (!(AUTONOMY_ACTIONS as readonly string[]).includes(action)) {
-    throw validation("Acción de autonomía inválida")
-  }
-}
-
-function assertMode(mode: string): asserts mode is AutonomyMode {
-  if (!(AUTONOMY_MODES as readonly string[]).includes(mode)) {
-    throw validation("Modo inválido (directo|confirmar_usuario|aprobar_equipo)")
-  }
-}
-
 function cleanReason(value: unknown, max = 2000): string | null {
   if (value === undefined || value === null) return null
   const text = String(value).trim()
@@ -193,50 +178,13 @@ export function buildAgentProposalKey(input: {
 
 /* ---------- Política de autonomía ---------- */
 
-export type AutonomyPolicy = Record<AutonomyAction, AutonomyMode>
-
-export async function getAutonomyPolicy(tx: Db, orgId: string): Promise<AutonomyPolicy> {
-  const [row] = await tx.select().from(agentPolicy).where(eq(agentPolicy.organizationId, orgId)).limit(1)
-  const modes = (row?.modes ?? {}) as Partial<Record<AutonomyAction, AutonomyMode>>
-  const out = { ...DEFAULT_AUTONOMY_MODES }
-  for (const action of AUTONOMY_ACTIONS) {
-    const mode = modes[action]
-    if (mode !== undefined) {
-      assertMode(mode)
-      out[action] = mode
-    }
-  }
-  return out
-}
-
-export async function updateAutonomyPolicy(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  input: Partial<Record<AutonomyAction, AutonomyMode>>,
-): Promise<AutonomyPolicy> {
-  const patch: Partial<Record<AutonomyAction, AutonomyMode>> = {}
-  for (const [rawAction, mode] of Object.entries(input)) {
-    assertAutonomyAction(rawAction)
-    if (mode === undefined) continue
-    assertMode(mode)
-    patch[rawAction as AutonomyAction] = mode
-  }
-  const current = await getAutonomyPolicy(tx, orgId)
-  const merged = { ...current, ...patch }
-  await tx
-    .insert(agentPolicy)
-    .values({ organizationId: orgId, modes: merged, updatedBy: actorUserId })
-    .onConflictDoUpdate({ target: agentPolicy.organizationId, set: { modes: merged, updatedBy: actorUserId, updatedAt: new Date() } })
-  await tx.insert(auditEvent).values({
-    organizationId: orgId,
-    actorUserId,
-    action: "agent.policy_updated",
-    entity: "agent_policy",
-    entityId: orgId,
-    metadata: patch,
-  })
-  return merged
+/**
+ * Quién dice que sí a cada acción del agente. Es la misma para todas las
+ * clínicas (ADR 0021) y no se guarda: la cita la confirma el interlocutor y lo
+ * demás va directo. Las propuestas sin hilo las decide siempre el equipo.
+ */
+export function autonomyModeOf(action: AutonomyAction): AutonomyMode {
+  return DEFAULT_AUTONOMY_MODES[action]
 }
 
 /* ---------- Contexto mínimo verificado del paciente ---------- */
@@ -536,12 +484,10 @@ export interface ProposalItem {
   conversationId: string | null
   contactId: string | null
   action: ProposalAction
-  /** Modo vigente de la política para este acto (lo que la UI puede ofrecer). */
+  /** Quién resuelve este acto (lo que la UI puede ofrecer); sin hilo, el equipo. */
   mode: AutonomyMode
   status: ProposalStatus
   payload: Record<string, unknown>
-  /** Texto que el equipo aprobó cuando cambió el borrador; el `payload` conserva lo propuesto. */
-  editedText: string | null
   reason: string | null
   idempotencyKey: string
   result: Record<string, unknown> | null
@@ -566,7 +512,6 @@ function baseProposal(row: ProposalRow, mode: AutonomyMode, context: ProposalCon
     mode,
     status: row.status as ProposalStatus,
     payload: row.payload,
-    editedText: row.editedText,
     reason: row.reason,
     idempotencyKey: row.idempotencyKey,
     result: row.result,
@@ -875,7 +820,6 @@ function apptFreshness(
  * la misma tx: sin anidar contextos RLS y sin cortes mudos.
  */
 async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Promise<ProposalItem[]> {
-  const policy = await getAutonomyPolicy(tx, orgId)
   const zone = await getOrgLocale(tx, orgId)
   const contactIds = new Set<string>()
   const conversationIds = new Set<string>()
@@ -1055,13 +999,12 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
         currentSummary = "seguimiento atendido o reprogramado"
       }
     }
-    // El modo dice quién resuelve HOY la propuesta. Una pendiente bajo política
-    // directa, o sin hilo (no hay interlocutor que confirme), es del equipo.
-    const policyMode = policy[action] ?? "aprobar_equipo"
+    // El modo dice quién resuelve la propuesta. Una pendiente sin hilo (no hay
+    // interlocutor que confirme) es del equipo.
     const mode: AutonomyMode =
-      row.status === "propuesta" && pendingProposalDecider(policy, action, row.conversationId !== null) === "team"
+      row.status === "propuesta" && pendingProposalDecider(action, row.conversationId !== null) === "team"
         ? "aprobar_equipo"
-        : policyMode
+        : autonomyModeOf(action)
     return baseProposal(row, mode, {
       contactName: row.contactId ? (contactById.get(row.contactId) ?? null) : null,
       patientName: patientId ? (patientById.get(patientId) ?? null) : null,
@@ -1217,13 +1160,14 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
 }
 
 /**
- * Crea una propuesta idempotente por clave. Si la política del acto es
- * `directo`, se ejecuta en el mismo acto; si exige confirmación o
- * aprobación, queda en `propuesta` y avisa al equipo cuando corresponde.
+ * Crea una propuesta idempotente por clave. Si el acto es `directo`, se
+ * ejecuta en el mismo acto; si lo confirma el interlocutor (citas) o lo decide
+ * el equipo (`requireTeamDecision`), queda en `propuesta` y, en el segundo
+ * caso, avisa al equipo.
  * Congela la evidencia (before/after) y el estado vivo esperado tras validar
  * el payload: ningún camino posterior los reescribe. Solo una propuesta
  * comercial pendiente por conversación; los mensajes (`enviar_mensaje`)
- * fluyen siempre bajo su propia política y confirmación inequívoca (sin
+ * fluyen siempre por su propio camino y confirmación inequívoca (sin
  * bypass): una cita pendiente nunca silencia al agente. La caducidad se
  * consolida antes de bloquear y las propuestas viejas no frenan el hilo.
  * El replay nunca consulta tras unique violation (la tx queda abortada):
@@ -1304,13 +1248,12 @@ export async function createProposal(
     }
     finalKey = `${key.slice(0, 100)}:r${Date.now().toString(36)}`
   }
-  const policy = await getAutonomyPolicy(tx, orgId)
-  const mode = policy[input.action]
+  const mode = autonomyModeOf(input.action)
   if (!sameKey) {
     // Solo una propuesta comercial pendiente y vigente por conversación, y
     // solo una esperando confirmación del interlocutor por hilo: un mismo
-    // «sí» no puede autorizar dos propuestas distintas. Los mensajes en modo
-    // directo o con aprobación del equipo coexisten siempre.
+    // «sí» no puede autorizar dos propuestas distintas. Los mensajes directos
+    // coexisten siempre.
     // Sin hilo, la unidad es el contacto: una sola propuesta proactiva pendiente.
     const pendings = await tx
       .select({ action: agentProposal.action })
@@ -1326,7 +1269,7 @@ export async function createProposal(
         ),
       )
       .limit(100)
-    const pendingModes = pendings.map((p) => policy[p.action as ProposalAction] ?? "aprobar_equipo")
+    const pendingModes = pendings.map((p) => autonomyModeOf(p.action as ProposalAction))
     if (mode === "confirmar_usuario" && pendingModes.includes("confirmar_usuario")) {
       throw new ServiceError(
         "PROPOSAL_PENDING_CONFIRM",
@@ -1343,7 +1286,7 @@ export async function createProposal(
       )
     }
     if (input.action !== "enviar_mensaje" && pendingCommercial) {
-      const awaitingContact = policy[pendingCommercial.action as ProposalAction] === "confirmar_usuario"
+      const awaitingContact = autonomyModeOf(pendingCommercial.action as ProposalAction) === "confirmar_usuario"
       throw new ServiceError(
         awaitingContact ? "PROPOSAL_PENDING_CONFIRM" : "PROPOSAL_PENDING_APPROVAL",
         409,
@@ -1400,7 +1343,7 @@ export async function createProposal(
       return executeProposal(tx, orgId, input.actorUserId ?? "agent", row.id, { secretsKey: input.secretsKey })
     }
     const created = await enrichProposal(tx, orgId, row)
-    if (mode === "aprobar_equipo" || input.requireTeamDecision) {
+    if (input.requireTeamDecision) {
       await notifyApprovers(tx, orgId, created)
     }
     return created
@@ -1551,7 +1494,7 @@ export async function decideProposal(
   orgId: string,
   actorUserId: string,
   id: string,
-  input: { decision: "aprobada" | "rechazada"; reason?: unknown; editedText?: unknown },
+  input: { decision: "aprobada" | "rechazada"; reason?: unknown },
   opts: { secretsKey?: Buffer } = {},
 ): Promise<ProposalItem> {
   const expired = await takeExpiredProposal(tx, orgId, actorUserId, id)
@@ -1561,19 +1504,6 @@ export async function decideProposal(
     throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
   }
   const reason = cleanReason(input.reason)
-  // Aprobar con edición: solo el texto de un mensaje, y solo al aprobar. El
-  // borrador del agente se conserva en el payload como evidencia.
-  let editedText: string | null = null
-  if (input.editedText !== undefined && input.editedText !== null) {
-    const draft = (current.payload as Record<string, unknown>)["text"]
-    if (input.decision !== "aprobada" || current.action !== "enviar_mensaje" || typeof draft !== "string") {
-      throw validation("Solo se puede editar el texto de un mensaje al aprobarlo")
-    }
-    if (typeof input.editedText !== "string" || !input.editedText.trim() || input.editedText.length > 4000) {
-      throw validation("El mensaje no puede quedar vacío ni pasar de 4000 caracteres")
-    }
-    if (input.editedText.trim() !== draft.trim()) editedText = input.editedText.trim()
-  }
   if (input.decision === "rechazada") {
     const [row] = await tx
       .update(agentProposal)
@@ -1594,10 +1524,9 @@ export async function decideProposal(
     await syncCommercialCoordination(tx, orgId, rejected)
     return rejected
   }
-  const policy = await getAutonomyPolicy(tx, orgId)
-  // Sin hilo decide el equipo; si la política vigente exige al interlocutor,
-  // la ejecución falla con código estable en vez de dejar la tarjeta sin salida.
-  if (current.conversationId && policy[current.action as ProposalAction] === "confirmar_usuario") {
+  // Sin hilo decide el equipo; si el acto lo confirma el interlocutor, la
+  // ejecución falla con código estable en vez de dejar la tarjeta sin salida.
+  if (current.conversationId && autonomyModeOf(current.action as ProposalAction) === "confirmar_usuario") {
     throw new ServiceError(
       "PROPOSAL_NEEDS_CONTACT_CONFIRM",
       409,
@@ -1606,7 +1535,7 @@ export async function decideProposal(
   }
   const [row] = await tx
     .update(agentProposal)
-    .set({ status: "aprobada", editedText, reason: reason ?? current.reason, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "aprobada", reason: reason ?? current.reason, decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(agentProposal.id, id), eq(agentProposal.status, "propuesta")))
     .returning()
   if (!row) throw await pendingConflict(tx, orgId, id)
@@ -1616,22 +1545,11 @@ export async function decideProposal(
     action: "agent.proposal_approved",
     entity: "agent_proposal",
     entityId: id,
-    metadata: { reason: reason ?? current.reason, edited: editedText !== null },
+    metadata: { reason: reason ?? current.reason },
   })
   await notify(tx, { orgId, kind: "agent.proposal.decided", at: new Date().toISOString() })
   const executed = await executeProposal(tx, orgId, actorUserId, id, opts)
   await syncCommercialCoordination(tx, orgId, executed)
-  // El mensaje ya salió con el texto del equipo; guardarlo para la próxima vez
-  // es una lección propuesta que aprueba quien administra el agente.
-  if (editedText !== null && executed.status === "ejecutada") {
-    const { proposeLessonFromEditedApproval } = await import("./agent-learning.js")
-    await proposeLessonFromEditedApproval(tx, orgId, actorUserId, {
-      proposalId: id,
-      conversationId: executed.conversationId,
-      originalText: String((current.payload as Record<string, unknown>)["text"] ?? ""),
-      editedText,
-    })
-  }
   return executed
 }
 
@@ -1657,13 +1575,13 @@ async function pendingConflict(tx: Db, orgId: string, id: string): Promise<Servi
 }
 
 /**
- * Confirmación del interlocutor en el chat (solo modo `confirmar_usuario`
- * vigente). Evidencia estricta y ligada a la propuesta: un mensaje entrante
+ * Confirmación del interlocutor en el chat (solo actos `confirmar_usuario`
+ * con hilo). Evidencia estricta y ligada a la propuesta: un mensaje entrante
  * posterior a ESTA propuesta cuyo texto completo sea una afirmación (sin
  * negaciones ni preguntas). El mensaje que confirma queda en la auditoría.
- * Los modos `aprobar_equipo` y `directo` no aceptan confirmación del contacto:
- * el sí del interlocutor jamás autoriza un acto del equipo. Si la política
- * se endureció tras crear la propuesta, la vigente manda.
+ * Las propuestas sin hilo (del equipo) y los actos directos no aceptan
+ * confirmación del contacto: el sí del interlocutor jamás autoriza un acto
+ * del equipo.
  * Vencida a las 48h: se devuelve `expirada` (HTTP 200, sin
  * reintento), nunca update+throw. El staff que confirma desde consola queda
  * auditado. Devuelve `ejecutada`, `fallida` o `expirada` (HTTP 200; ver
@@ -1721,15 +1639,12 @@ export async function confirmProposalByContact(
       "Esta propuesta no tiene conversación: la decide el equipo, no el sí del interlocutor",
     )
   }
-  const policy = await getAutonomyPolicy(tx, orgId)
-  const effectiveMode = policy[current.action as ProposalAction] ?? "aprobar_equipo"
-  if (effectiveMode !== "confirmar_usuario") {
+  // Con hilo, solo las citas esperan el sí del interlocutor; lo demás va directo.
+  if (autonomyModeOf(current.action as ProposalAction) !== "confirmar_usuario") {
     throw new ServiceError(
-      effectiveMode === "aprobar_equipo" ? "PROPOSAL_NEEDS_TEAM_APPROVAL" : "PROPOSAL_NOT_CONTACT_CONFIRMABLE",
+      "PROPOSAL_NOT_CONTACT_CONFIRMABLE",
       409,
-      effectiveMode === "directo"
-        ? "Esta propuesta es de ejecución directa; no se confirma con el sí del interlocutor"
-        : "Esta propuesta exige aprobación del equipo; el sí del interlocutor no la ejecuta",
+      "Esta propuesta es de ejecución directa; no se confirma con el sí del interlocutor",
     )
   }
   let confirmationId: string | null = null
@@ -1944,15 +1859,8 @@ export async function executeProposal(
             )
           }
         }
-        // La política y el consentimiento vigentes mandan sobre lo que valía al
-        // proponer: pudieron endurecerse o revocarse mientras esperaba.
-        if ((await getAutonomyPolicy(tx, orgId)).enviar_mensaje === "confirmar_usuario") {
-          throw new ServiceError(
-            "POLICY_REQUIRES_CONTACT_CONFIRM",
-            409,
-            "La política vigente exige la confirmación del interlocutor y este seguimiento no tiene conversación; gestiónalo manualmente",
-          )
-        }
+        // El consentimiento vigente manda sobre lo que valía al proponer: pudo
+        // revocarse mientras esperaba.
         const [identity] = await tx
           .select({ channel: contactIdentity.channel })
           .from(contactIdentity)
@@ -2016,9 +1924,9 @@ export async function executeProposal(
           conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
-          content: { type: "text", text: locked.editedText ?? (payload["text"] as string) },
+          content: { type: "text", text: payload["text"] as string },
         })
-        result = { messageId: sent.id, kind: "text", ...(locked.editedText ? { edited: true } : {}) }
+        result = { messageId: sent.id, kind: "text" }
       }
     } else if (action === "mover_oportunidad") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
@@ -2346,27 +2254,22 @@ export interface PendingProposalCounts {
 }
 
 /**
- * Quién resuelve HOY una propuesta pendiente: el interlocutor solo cuando la
- * política vigente lo exige y existe un hilo donde pueda confirmar; en
- * cualquier otro caso (política directa, aprobación del equipo o sin hilo),
- * el equipo. Única regla para el modo, los contadores y la bandeja.
+ * Quién resuelve una propuesta pendiente: el interlocutor solo cuando el acto
+ * lo exige (las citas) y existe un hilo donde pueda confirmar; en cualquier
+ * otro caso (sin hilo), el equipo. Única regla para el modo, los contadores y
+ * la bandeja.
  */
-export function pendingProposalDecider(
-  policy: AutonomyPolicy,
-  action: string,
-  hasThread: boolean,
-): "team" | "contact" {
-  return hasThread && policy[action as AutonomyAction] === "confirmar_usuario" ? "contact" : "team"
+export function pendingProposalDecider(action: string, hasThread: boolean): "team" | "contact" {
+  return hasThread && autonomyModeOf(action as AutonomyAction) === "confirmar_usuario" ? "contact" : "team"
 }
 
-/** Propuestas pendientes separadas según quién puede resolverlas con la política vigente. */
+/** Propuestas pendientes separadas según quién puede resolverlas. */
 export async function countPendingProposals(tx: Db, orgId: string): Promise<PendingProposalCounts> {
-  const policy = await getAutonomyPolicy(tx, orgId)
   const rows = await tx.execute<{ action: string; threadless: boolean; count: number }>(sql`
     select action, (conversation_id is null) as threadless, count(*)::int as count from agent_proposal
     where organization_id = ${orgId} and status = 'propuesta' group by action, (conversation_id is null)`)
   const counts = { team: 0, contact: 0 }
-  for (const row of rows) counts[pendingProposalDecider(policy, row.action, !row.threadless)] += row.count
+  for (const row of rows) counts[pendingProposalDecider(row.action, !row.threadless)] += row.count
   return counts
 }
 
