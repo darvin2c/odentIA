@@ -61,15 +61,14 @@ it("cada conversación trae su estado de atención y las vistas cuentan con las 
   const resolved = await thread("Resuelta")
   const done = await handoff(resolved, "media")
   await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, done.taskId as string))
-  // Propuesta que decide el equipo, otra que espera al interlocutor y una vencida.
-  const approval = await thread("Por aprobar")
-  await proposal(approval, "crear_oportunidad")
+  // Una cita que espera al interlocutor y otra vencida: lo único pendiente es lo que confirma él.
+  const approval = await thread("Espera al interlocutor")
   await proposal(approval, "reservar_cita")
-  await proposal(approval, "crear_oportunidad", new Date(Date.now() - 49 * 3_600_000))
+  await proposal(approval, "reservar_cita", new Date(Date.now() - 49 * 3_600_000))
   const closed = await thread("Cerrada", { status: "closed" })
   // Hilo cuya única propuesta ya venció aunque su fila siga `propuesta`.
   const stale = await thread("Vencida")
-  await proposal(stale, "crear_oportunidad", new Date(Date.now() - 49 * 3_600_000))
+  await proposal(stale, "reservar_cita", new Date(Date.now() - 49 * 3_600_000))
   // Hilo cerrado que conserva una derivación sin resolver.
   const closedCase = await thread("Cerrada con caso")
   await handoff(closedCase, "media")
@@ -79,14 +78,14 @@ it("cada conversación trae su estado de atención y las vistas cuentan con las 
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   const { items } = await list()
   const of = (id: string) => items.find((item) => item.id === id)?.attention
-  expect(of(waiting.id)).toEqual({ agentAttending: true, pendingTeam: 0, pendingContact: 0, handoffPriority: null })
-  expect(of(derived.id)).toEqual({ agentAttending: false, pendingTeam: 0, pendingContact: 0, handoffPriority: "alta" })
+  expect(of(waiting.id)).toEqual({ agentAttending: true, pendingContact: 0, handoffPriority: null })
+  expect(of(derived.id)).toEqual({ agentAttending: false, pendingContact: 0, handoffPriority: "alta" })
   // Derivar apaga el agente en el hilo; resolver la derivación no lo reactiva solo.
-  expect(of(resolved.id)).toEqual({ agentAttending: false, pendingTeam: 0, pendingContact: 0, handoffPriority: null })
-  expect(of(approval.id)).toEqual({ agentAttending: true, pendingTeam: 1, pendingContact: 1, handoffPriority: null })
+  expect(of(resolved.id)).toEqual({ agentAttending: false, pendingContact: 0, handoffPriority: null })
+  expect(of(approval.id)).toEqual({ agentAttending: true, pendingContact: 1, handoffPriority: null })
   expect(of(closed.id)?.agentAttending).toBe(false)
-  expect(of(stale.id)).toEqual({ agentAttending: true, pendingTeam: 0, pendingContact: 0, handoffPriority: null })
-  expect(of(closedCase.id)).toEqual({ agentAttending: false, pendingTeam: 0, pendingContact: 0, handoffPriority: "media" })
+  expect(of(stale.id)).toEqual({ agentAttending: true, pendingContact: 0, handoffPriority: null })
+  expect(of(closedCase.id)).toEqual({ agentAttending: false, pendingContact: 0, handoffPriority: "media" })
   // El hilo abierto recibe la misma atención aunque su fila no esté en la lista cargada.
   const detail = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, approval.id))
   expect(detail.attention).toEqual(of(approval.id))

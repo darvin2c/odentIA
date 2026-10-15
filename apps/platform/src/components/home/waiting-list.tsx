@@ -10,9 +10,6 @@ import { HandoffUrgency } from "../agent/handoff-badges"
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
 
 export interface WaitingHandlers {
-  /** Puede decidir lo que propone el agente (`agent.decide`); si no, la fila lleva a Aprobaciones. */
-  canApprove: boolean
-  onReview: (row: RowOf<"proposal">) => void
   onCase: (row: RowOf<"case">) => void
   onAdvice: (row: RowOf<"advice">) => void
   onUnreached: () => void
@@ -38,9 +35,7 @@ function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }
 }
 
 function iconOf(row: WaitingRow): ReactNode {
-  if (row.kind === "proposal" || row.kind === "unreached" || (row.kind === "more" && row.of === "proposals")) {
-    return <AgentMark className="rounded-full" />
-  }
+  if (row.kind === "unreached") return <AgentMark className="rounded-full" />
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
@@ -60,12 +55,10 @@ function badgeOf(row: WaitingRow): ReactNode {
  * A dónde lleva la fila cuando se resuelve navegando; null si abre algo en esta pantalla.
  * Lo que navega es un enlace con aspecto de fila, no un botón: así lo anuncia el lector de pantalla.
  */
-function linkOf(row: WaitingRow, handlers: WaitingHandlers, props: { className: string; children: ReactNode }): ReactElement | null {
+function linkOf(row: WaitingRow, props: { className: string; children: ReactNode }): ReactElement | null {
   switch (row.kind) {
     case "case":
       return row.conversationId ? null : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} {...props} />
-    case "proposal":
-      return handlers.canApprove ? null : <Link to="/agent/approvals" search={{ conversationId: row.conversationId ?? undefined, status: undefined }} {...props} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
     case "task":
@@ -79,7 +72,6 @@ function linkOf(row: WaitingRow, handlers: WaitingHandlers, props: { className: 
 
 function open(row: WaitingRow, handlers: WaitingHandlers) {
   if (row.kind === "case") handlers.onCase(row)
-  else if (row.kind === "proposal") handlers.onReview(row)
   else if (row.kind === "advice") handlers.onAdvice(row)
   else if (row.kind === "unreached") handlers.onUnreached()
   else if (row.kind === "budgets") handlers.onBudgets(row)
@@ -106,7 +98,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
       <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
     </>
   )
-  const link = linkOf(row, handlers, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
+  const link = linkOf(row, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
   return (
     <li className={className}>
       {link ?? (
@@ -120,20 +112,17 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
 
 /**
  * «Te espera»: todo lo que necesita a una persona en una sola lista, en el
- * orden que entrega el servidor. Cada fila abre lo que ya existe (aprobar, el
- * resumen del caso, la recomendación del administrador) o lleva a donde se resuelve.
+ * orden que entrega el servidor. Cada fila abre lo que ya existe (el resumen
+ * del caso, la recomendación del administrador) o lleva a donde se resuelve.
  */
 export function WaitingList({
   rows,
   context,
   handlers,
-  notice,
 }: {
   rows: WaitingRow[]
   context: HomeTextContext
   handlers: WaitingHandlers
-  /** Aviso sobre lo último que se decidió aquí (una propuesta que falló o caducó). */
-  notice?: ReactNode
 }) {
   const headingId = useId()
   const [expanded, setExpanded] = useState(false)
@@ -151,7 +140,6 @@ export function WaitingList({
         </h2>
         {rows.length > 0 ? <p className="text-sm text-muted-foreground">Por orden de urgencia</p> : null}
       </div>
-      {notice ? <div className="px-2 pb-2">{notice}</div> : null}
       {rows.length === 0 ? (
         <p className="flex items-center gap-2 px-2 py-3 font-semibold">
           <CheckCircle2 className="size-5 shrink-0 text-success" aria-hidden />

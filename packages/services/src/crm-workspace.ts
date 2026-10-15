@@ -232,7 +232,7 @@ async function resolveAgentState(
       state: "approval",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: "Propuesta del agente pendiente de aprobación",
+      reason: "Propuesta del agente que espera la confirmación del interlocutor",
       pendingProposalIds: caps.agent ? pending.map((p) => p.id) : [],
     }
   }

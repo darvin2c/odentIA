@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { agentAnswerTrace, agentCaseMemory } from "@odentia/db/schema/agent"
+import { agentAnswerTrace, agentCaseMemory, agentProposal } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
@@ -15,7 +15,7 @@ import {
   recordAgentCaseLookup,
   recordAnswerTrace,
 } from "./agent-case.js"
-import { createProposal, decideProposal, getAgentRunStats, recordAgentRun } from "./agent-operations.js"
+import { createProposal, getAgentRunStats, recordAgentRun } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -84,7 +84,7 @@ it("un hilo nuevo no tiene estado que contar y no gasta prompt en una sección v
   expect(formatAgentCaseForPrompt(state, ZONE, 20)).toBeNull()
 })
 
-it("el estado dice lo que espera al interlocutor y recuerda lo rechazado con su motivo", async () => {
+it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo con su motivo", async () => {
   const conversationId = await openConversation("estado")
   // Una cita es el acto que espera el sí del interlocutor en el hilo (ADR 0021).
   const booking = await run((tx) => createProposal(tx, ORG, {
@@ -92,18 +92,19 @@ it("el estado dice lo que espera al interlocutor y recuerda lo rechazado con su 
     payload: { patientId: randomUUID(), dentistUserId: OWNER, chairId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
   }))
   const pending = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(pending.pending.map((item) => `${item.action}:${item.decider}`)).toEqual(["reservar_cita:contact"])
+  expect(pending.pending.map((item) => item.action)).toEqual(["reservar_cita"])
   const prompt = formatAgentCaseForPrompt(pending, ZONE, 20) ?? ""
   expect(prompt).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita — ")
   expect(prompt).toContain(`(id ${booking.id}`)
 
-  await run((tx) => decideProposal(tx, ORG, OWNER, booking.id, { decision: "rechazada", reason: "Prefiere llamar" }))
+  // Al confirmarla, la agenda ya no tenía el horario: queda fallida con su motivo.
+  await ownerDb.update(agentProposal).set({ status: "fallida", error: "El horario ya no está libre", executedAt: new Date() }).where(eq(agentProposal.id, booking.id))
   const after = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(after.pending).toEqual([])
-  expect(after.recent).toMatchObject([{ action: "reservar_cita", status: "rechazada", detail: "Prefiere llamar" }])
+  expect(after.recent).toMatchObject([{ action: "reservar_cita", status: "fallida", detail: "El horario ya no está libre" }])
   const afterPrompt = formatAgentCaseForPrompt(after, ZONE, 20) ?? ""
   expect(afterPrompt).toContain("No se hizo: Reservar cita — ")
-  expect(afterPrompt).toContain("(rechazada: Prefiere llamar;")
+  expect(afterPrompt).toContain("(fallida: El horario ya no está libre;")
 })
 
 it("las notas del caso son acotadas y no se repiten", async () => {

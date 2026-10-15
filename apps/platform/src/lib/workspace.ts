@@ -34,14 +34,13 @@ export interface WaitingBudgets {
 }
 export type WaitingRow =
   | { kind: "case"; id: string; priority: string; reason: string; contactName: string | null; channel: string | null; createdAt: string; conversationId: string | null }
-  | { kind: "proposal"; id: string; action: string; summary: string; createdAt: string; conversationId: string | null; contactName: string | null; patientName: string | null }
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   | ({ kind: "task"; more: number } & WaitingTask)
   | { kind: "advice"; key: string; title: string; detail: string; actor: "agente" | "persona" }
   /** Personas a las que el agente no pudo escribir hoy, por motivo. */
   | { kind: "unreached"; total: number; byCause: Array<{ total: number; reason: string }> }
   | ({ kind: "budgets" } & WaitingBudgets)
-  | { kind: "more"; of: "cases" | "proposals" | "tasks"; count: number }
+  | { kind: "more"; of: "cases" | "tasks"; count: number }
 export interface WorkspaceAppointment {
   id: string
   patientId: string

@@ -15,8 +15,6 @@ export interface AdminLineView {
   hasAgent: boolean
   agentPart: boolean
   teamPart: boolean
-  /** La tarea para el equipo no se apaga por separado. */
-  teamFixed: boolean
   /** «el equipo de recepción». */
   team: string
   days: number | null

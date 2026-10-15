@@ -4,7 +4,7 @@ import { member } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
-import { API, tenant, tenantPattern } from "./env"
+import { API, tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -40,7 +40,7 @@ function agentButton(page: Page) {
   return page.locator("header").getByRole("button", { name: /^Agente/ })
 }
 
-test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier pantalla", async ({
+test("panel del agente: casos que esperan a una persona, citas que esperan al paciente y actividad, desde cualquier pantalla", async ({
   owner,
   fixtureDb,
   nextEventId,
@@ -69,23 +69,25 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
     }),
   ).toBe(200)
   const conversation = await conversationFor(page, org.slug, tg.id)
-  // Lo que espera la decisión del equipo: un seguimiento vencido sin
-  // conversación (plantilla anclada al contacto), como lo deja `createProposal`
-  // con `requireTeamDecision`. En un hilo los mensajes salen directo (ADR 0021).
-  // La fila se inserta como la registraría el agente (proposed_by=agent); la
-  // lógica de propuesta se cubre en services.
+  // Ninguna propuesta espera al equipo (ADR 0023): lo único pendiente es la cita
+  // que el paciente confirma en su conversación. La fila se inserta como la
+  // registraría el agente (proposed_by=agent); la lógica se cubre en services.
   await fixtureDb.insert(agentProposal).values({
     organizationId: org.id,
     contactId: conversation.contact.id,
-    conversationId: null,
-    action: "enviar_mensaje",
-    payload: { kind: "template", name: "seguimiento_presupuesto", language: "es_PE" },
-    afterSummary: "Plantilla seguimiento_presupuesto",
-    reason: "Seguimiento vencido sin conversación.",
+    conversationId: conversation.id,
+    action: "reservar_cita",
+    payload: {
+      patientId: randomUUID(),
+      dentistUserId: owner.user.id,
+      chairId: randomUUID(),
+      startsAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    },
+    afterSummary: "Cita el jueves a las 10:00",
     idempotencyKey: randomUUID(),
   })
-  // Derivación hecha por una persona: entra en Derivadas (sigue abierta) pero
-  // no es actividad del agente.
+  // Lo que espera a una persona: un caso derivado (hecho por una persona: no es
+  // actividad del agente).
   const handoff = await call<{ id: string }>(
     page,
     "POST",
@@ -100,45 +102,30 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
     201,
   )
 
-  // Desde Inicio: botón, badge del sidebar y panel sobre la página.
+  // Desde Inicio: botón, badge del sidebar y panel sobre la página. Cuentan el caso, no la cita.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const button = agentButton(page)
-  await expect(button).toHaveAccessibleName("Agente, 1 por decidir")
+  await expect(button).toHaveAccessibleName("Agente, 1 por atender")
   const sidebarAgent = page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true })
   await expect(sidebarAgent.locator("..")).toContainText("1")
   await button.click()
   const panel = page.getByRole("dialog", { name: "Agente" })
   await expect(panel).toBeVisible()
   await expect(panel.getByText(/Activo|Pausado/)).toBeVisible()
-  await expect(panel.getByRole("tab", { name: "Por decidir · 1", exact: true })).toBeVisible()
-  await expect(panel.getByText("Enviar mensaje", { exact: true })).toBeVisible()
+  await expect(panel.getByRole("tab", { name: "Derivadas · 1", exact: true })).toBeVisible()
+  await expect(panel.getByRole("tab", { name: "Esperan al paciente · 1", exact: true })).toBeVisible()
   // La página sigue montada debajo (el cajón modal la saca del árbol accesible, no del DOM).
   await expect(page.locator("h1", { hasText: "Inicio" })).toHaveCount(1)
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toHaveCount(0)
-  await info.attach("panel-por-decidir", {
+
+  // Abre en Derivadas: tomar el caso lo deja con responsable sin sacarlo de la lista.
+  const item = panel.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
+  await expect(item).toContainText("En cola por recoger")
+  await info.attach("panel-derivadas", {
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
   })
-
-  // Rechazar pide el motivo; cambiar de pestaña no lo pierde.
-  await panel.getByRole("button", { name: "Rechazar…" }).click()
-  const reason = panel.getByLabel("Motivo del rechazo")
-  await reason.fill("Ya lo confirmó recepción por teléfono")
-  await panel.getByRole("tab", { name: /^Derivadas/ }).click()
-  await panel.getByRole("tab", { name: /^Por decidir/ }).click()
-  await expect(reason).toHaveValue("Ya lo confirmó recepción por teléfono")
-  await panel.getByRole("button", { name: "Confirmar rechazo" }).click()
-  await expect(panel.getByRole("status")).toContainText("Propuesta rechazada")
-  // El contador baja en la pestaña (botón y sidebar se comprueban al cerrar:
-  // bajo el cajón modal quedan fuera del árbol accesible).
-  await expect(panel.getByRole("tab", { name: "Por decidir", exact: true })).toBeVisible()
-  await expect(panel.getByText("Nada por decidir")).toBeVisible()
-
-  // Derivadas: solo las abiertas; tomar el caso la deja con responsable sin sacarla de la lista.
-  await panel.getByRole("tab", { name: /^Derivadas/ }).click()
-  const item = panel.getByRole("listitem").filter({ hasText: "Pide hablar con una persona" })
-  await expect(item).toContainText("En cola por recoger")
   await item.getByRole("button", { name: "Tomar caso" }).click()
   await expect(item).toContainText("Responsable asignado")
   await expect(item.getByRole("button", { name: "Tomar caso" })).toHaveCount(0)
@@ -150,11 +137,19 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   )
   expect(persisted.find((h) => h.id === handoff.id)?.status).toBe("tomada")
 
-  // Actividad: legible, con el desenlace de la propuesta; lo humano no aparece.
+  // Esperan al paciente: la cita se ve y se abre su conversación; nadie la aprueba ni la rechaza.
+  await panel.getByRole("tab", { name: /^Esperan al paciente/ }).click()
+  const waiting = panel.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
+  await expect(waiting).toContainText("Espera al paciente")
+  await expect(waiting).toContainText("Reservar cita")
+  await expect(waiting.getByRole("link", { name: "Abrir conversación" })).toBeVisible()
+  await expect(panel.getByRole("button", { name: /Revisar y aprobar|Rechazar/ })).toHaveCount(0)
+
+  // Actividad: legible, con la cita propuesta; lo humano no aparece.
   await panel.getByRole("tab", { name: "Actividad" }).click()
   const activity = panel.getByRole("tabpanel", { name: "Actividad" })
-  await expect(activity.getByText("Preparó un mensaje")).toBeVisible()
-  await expect(activity.getByText("rechazada", { exact: true })).toBeVisible()
+  await expect(activity.getByText("Propuso reservar una cita")).toBeVisible()
+  await expect(activity.getByText("pendiente", { exact: true })).toBeVisible()
   await expect(activity.getByText("Pide hablar con una persona")).toHaveCount(0)
 
   // Esc cierra el cajón sin cambiar de página y devuelve el foco al botón.
@@ -162,9 +157,14 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await expect(panel).toBeHidden()
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
   await expect(button).toBeFocused()
-  // Sin pendientes: el botón pierde el contador y el sidebar su badge.
-  await expect(button).toHaveAccessibleName("Agente")
-  await expect(sidebarAgent.locator("..")).not.toContainText("1")
+  // Tomado no es resuelto: el caso sigue contando hasta que alguien lo resuelve.
+  await expect(button).toHaveAccessibleName("Agente, 1 por atender")
+  // «Te espera» trae el caso; no hay nada del agente que aprobar ni la cita del paciente.
+  const home = page.getByRole("region", { name: "Te espera" })
+  // La derivación deja además su tarea: el caso es la fila que dice de dónde viene.
+  await expect(home.getByRole("listitem").filter({ hasText: "Caso que pasó el agente" })).toContainText("Pide hablar con una persona")
+  await expect(home).not.toContainText("espera tu aprobación")
+  await expect(home).not.toContainText("Cita el jueves a las 10:00")
 
   // La ficha de paciente no usa PageHeader: el botón sigue disponible.
   const patient = await call<{ id: string }>(
@@ -186,49 +186,16 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await expect(agentButton(page)).toBeVisible()
 
-  // Trabajo proactivo: propuesta sin hilo (seguimiento vencido) anclada al
-  // contacto y a su oportunidad; el caso que se abre es la oportunidad. Aunque
-  // en un hilo los mensajes salen directo, sin hilo decide el equipo.
-  const opportunity = await call<{ id: string }>(
-    page,
-    "POST",
-    "/api/opportunities",
-    org.slug,
-    { contactId: conversation.contact.id, title: "Ortodoncia sin hilo" },
-    201,
-  )
-  await fixtureDb.insert(agentProposal).values({
-    organizationId: org.id,
-    contactId: conversation.contact.id,
-    conversationId: null,
-    action: "enviar_mensaje",
-    payload: {
-      kind: "template",
-      name: "seguimiento_presupuesto",
-      language: "es_PE",
-      opportunityId: opportunity.id,
-    },
-    afterSummary: "Plantilla seguimiento_presupuesto",
-    reason: "Seguimiento vencido sin conversación (Ortodoncia sin hilo).",
-    idempotencyKey: randomUUID(),
-  })
-  // Inicio la ofrece al equipo, no como espera del interlocutor.
-  await gotoHydrated(page, tenant(org.slug, "/home"))
-  const homeCard = page.getByRole("region", { name: "Te espera" }).getByRole("listitem").filter({ hasText: "Plantilla seguimiento_presupuesto" })
-  await expect(homeCard).toContainText("El agente espera tu aprobación")
-  await expect(homeCard.getByRole("button", { name: /Revisar$/ })).toBeVisible()
-  // Aprobaciones permite decidirla y abre la oportunidad como caso.
+  // Aprobaciones: primero los casos; la cita aparte, con solo registrar la confirmación del paciente.
   await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
-  const approvalCard = page.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
-  await expect(approvalCard.getByRole("button", { name: "Revisar y aprobar" })).toBeVisible()
-  await expect(approvalCard.getByRole("link", { name: "Abrir oportunidad" })).toBeVisible()
-  // Desde el panel, «Abrir oportunidad» navega al caso y el cajón se cierra.
-  await agentButton(page).click()
-  const desktopCold = panel.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
-  await expect(desktopCold).toContainText("Espera tu aprobación")
-  await desktopCold.getByRole("link", { name: "Abrir oportunidad" }).click()
-  await expect(page).toHaveURL(tenantPattern(org.slug, `/opportunities/${opportunity.id}`))
-  await expect(panel).toBeHidden()
+  await expect(page.getByRole("heading", { name: "Casos que pasó a tu equipo" })).toBeVisible()
+  const approvalCard = page.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
+  await expect(approvalCard).toContainText("Espera al paciente")
+  await expect(approvalCard.getByRole("button", { name: "Registrar confirmación del interlocutor" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /Revisar y aprobar|Rechazar/ })).toHaveCount(0)
+  // Nadie decide por el paciente: no hay ruta para aprobar o rechazar.
+  const decision = await api(page, "POST", `/api/agent/proposals/${randomUUID()}/decision`, org.slug, { decision: "aprobada" })
+  expect(decision.status).toBe(404)
 
   // Móvil: el mismo cajón que los formularios (hoja inferior a casi toda la pantalla).
   await page.setViewportSize({ width: 390, height: 844 })
@@ -239,11 +206,10 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   const box = await mobilePanel.boundingBox()
   expect(box?.width).toBeGreaterThanOrEqual(370)
   expect(box?.height).toBeGreaterThanOrEqual(800)
-  await expect(mobilePanel.getByRole("tab", { name: "Por decidir · 1", exact: true })).toBeVisible()
-  const cold = mobilePanel.getByRole("listitem").filter({ hasText: "Ortodoncia sin hilo" })
-  await expect(cold).toContainText("Espera tu aprobación")
-  await expect(cold.getByRole("link", { name: "Abrir oportunidad" })).toBeVisible()
-  await expect(cold.getByRole("link", { name: /Abrir caso|Abrir conversación/ })).toHaveCount(0)
+  await expect(mobilePanel.getByRole("tab", { name: "Derivadas · 1", exact: true })).toBeVisible()
+  await mobilePanel.getByRole("tab", { name: /^Esperan al paciente/ }).click()
+  const cold = mobilePanel.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
+  await expect(cold.getByRole("link", { name: "Abrir conversación" })).toBeVisible()
   await info.attach("panel-movil", {
     body: await page.screenshot({ fullPage: false }),
     contentType: "image/png",
@@ -253,7 +219,7 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await expect(agentButton(page)).toBeFocused()
 })
 
-test("panel del agente: recepción decide, otros roles no lo ven y el servidor lo niega", async ({
+test("panel del agente: recepción lo ve, otros roles no lo ven y el servidor lo niega", async ({
   owner,
   fixtureDb,
 }) => {
@@ -276,10 +242,12 @@ test("panel del agente: recepción decide, otros roles no lo ven y el servidor l
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await agentButton(page).click()
   const panel = page.getByRole("dialog", { name: "Agente" })
-  await expect(panel.getByRole("alert")).toContainText("No pudimos cargar las propuestas")
+  await expect(panel.getByText("Sin derivaciones abiertas")).toBeVisible()
+  await panel.getByRole("tab", { name: /^Esperan al paciente/ }).click()
+  await expect(panel.getByRole("alert")).toContainText("No pudimos cargar lo que espera al paciente")
   await page.unroute("**/api/agent/proposals**")
   await panel.getByRole("button", { name: "Volver a intentar" }).click()
-  await expect(panel.getByText("Nada por decidir")).toBeVisible()
+  await expect(panel.getByText("Nada espera al paciente")).toBeVisible()
   await panel.getByRole("tab", { name: "Actividad" }).click()
   await expect(panel.getByText("Sin actividad")).toBeVisible()
   await page.keyboard.press("Escape")

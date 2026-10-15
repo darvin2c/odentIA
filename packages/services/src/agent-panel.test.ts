@@ -10,7 +10,7 @@ import { beforeAll, expect, it } from "vitest"
 import { listAgentActivity } from "./agent-activity.js"
 import {
   claimHandoff,
-  countPendingProposals,
+  countAwaitingContact,
   createHandoff,
   createProposal,
   getAgentPanelSummary,
@@ -26,7 +26,7 @@ import { updateTask } from "./tasks.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
- * Panel lateral del agente: lo que recepción ve y decide desde cualquier
+ * Panel lateral del agente: lo que recepción ve y atiende desde cualquier
  * pantalla. Base propia por archivo, así los contadores son deterministas.
  */
 setupTestDb()
@@ -86,17 +86,21 @@ async function openConversation(sender: string): Promise<{ conversationId: strin
   return { conversationId, contactId }
 }
 
-it("el resumen separa lo que decide el equipo de lo que espera al interlocutor y no cuenta fallos como intervenciones", async () => {
-  const { conversationId, contactId } = await openConversation("resumen")
-  // Espera al interlocutor: una cita propuesta en el hilo.
+it("el resumen cuenta lo que espera al paciente y los casos por atender, y no cuenta fallos como intervenciones", async () => {
+  const { conversationId } = await openConversation("resumen")
+  // Espera al interlocutor: una cita propuesta en el hilo. Es lo único que queda pendiente.
   await run((tx) => createProposal(tx, ORG, {
     conversationId, action: "reservar_cita", idempotencyKey: "panel:cita-1",
     payload: { patientId: randomUUID(), dentistUserId: OWNER, chairId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
   }))
-  // Decide el equipo: una propuesta sin hilo, como la del seguimiento vencido.
-  await run((tx) => createProposal(tx, ORG, {
-    contactId, action: "enviar_mensaje", idempotencyKey: "panel:frio-1", requireTeamDecision: true,
-    payload: { kind: "template", name: "seguimiento", language: "es", connectionId: connId, identityId: randomUUID() },
+  // Un mensaje del agente sale directo: no queda nada que decidir.
+  const message = await run((tx) => createProposal(tx, ORG, {
+    conversationId, action: "enviar_mensaje", idempotencyKey: "panel:mensaje-1", payload: { kind: "text", text: "Hola" },
+  }))
+  expect(message.status).toBe("ejecutada")
+  // Lo que espera al equipo es un caso derivado.
+  await run((tx) => createHandoff(tx, ORG, null, {
+    conversationId, reason: "Pide hablar con una persona", summary: "Prefiere atención humana", createdBy: "agent",
   }))
   await ownerDb.insert(agentRunLedger).values([
     { organizationId: ORG, model: "prueba", status: "ok", startedAt: new Date() },
@@ -105,11 +109,12 @@ it("el resumen separa lo que decide el equipo de lo que espera al interlocutor y
     { organizationId: ORG, model: "prueba", status: "sin_respuesta", startedAt: new Date() },
     { organizationId: ORG, model: "prueba", status: "omitida", startedAt: new Date() },
   ])
-  expect(await run((tx) => countPendingProposals(tx, ORG))).toEqual({ team: 1, contact: 1 })
+  expect(await run((tx) => countAwaitingContact(tx, ORG))).toBe(1)
   const summary = await run((tx) => getAgentPanelSummary(tx, ORG))
   expect(summary).toMatchObject({
-    pendingProposals: 1, awaitingContact: 1, interventionsToday: 2, failedToday: 2, enabled: false,
+    awaitingContact: 1, openHandoffs: 1, interventionsToday: 2, failedToday: 2, enabled: false,
   })
+  expect(summary).not.toHaveProperty("pendingProposals")
   expect(summary.timezone).toBeTruthy()
   expect(summary.locale).toBeTruthy()
 })

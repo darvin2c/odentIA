@@ -164,19 +164,19 @@ export function ResumenTab({
   )
 
   const pending: Pending[] = []
-  // Primero lo que el agente dejó esperando una decisión humana.
+  // Primero lo que el agente dejó esperando el sí del paciente.
   for (const proposal of proposalsQuery.data?.data ?? [])
     pending.push({
       id: `proposal-${proposal.id}`,
       agent: true,
       title: `El agente propone: ${ACTION_LABEL[proposal.action] ?? proposal.action}`,
-      detail: proposal.context.afterSummary || proposal.reason || "Requiere aprobación del equipo.",
+      detail: proposal.context.afterSummary || proposal.reason || "Espera la confirmación del paciente.",
       action: (
         <Link
           to="/agent/approvals"
           search={{
             status: undefined,
-            conversationId: proposal.conversationId ?? undefined,
+            conversationId: proposal.conversationId,
           }}
           className={buttonVariants({ size: "sm" })}
         >

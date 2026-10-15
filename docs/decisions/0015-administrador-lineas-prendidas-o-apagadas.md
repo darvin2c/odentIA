@@ -36,6 +36,7 @@ El objetivo es una sola superficie, simple para una clínica mediana, donde qued
 - Sacrificio: una línea nueva es código (catálogo, casos y, si escribe, su mensaje declarado y aprobado por WhatsApp). Pedir con palabras solo combina lo que ya existe.
 - El coste del modelo se mide con una prueba real antes de abrirlo a una clínica: el mayor gasto no es entender pedidos sino las conversaciones que siguen cuando la persona responde con texto.
 - Se revisa si las clínicas piden líneas que el catálogo no puede expresar, o si los flujos dejan de ser una línea con una rama.
+- Desde [0023](0023-el-administrador-detecta-y-recepcion-habla.md) las nueve líneas siguen la misma regla: «Retomar una oportunidad» dejó su camino propio (corrida de coordinación y propuestas que aprobaba el equipo) y escribe con su mensaje del catálogo.
 
 ## Referencias
 

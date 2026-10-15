@@ -1,6 +1,5 @@
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
-import { pendingProposalDecider } from "./agent-operations.js"
 import {
   type ConversationFilters,
   type ConversationListItem,
@@ -24,9 +23,7 @@ export type HandoffPriorityLevel = (typeof PRIORITY_ORDER)[number]
 export interface ConversationAttention {
   /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
   agentAttending: boolean
-  /** Propuestas pendientes del hilo que decide el equipo. */
-  pendingTeam: number
-  /** Propuestas pendientes que esperan la confirmación del interlocutor. */
+  /** Propuestas pendientes que esperan la confirmación del interlocutor: las únicas que quedan pendientes. */
   pendingContact: number
   /** Prioridad más alta entre las derivaciones sin resolver del hilo; null si no hay. */
   handoffPriority: HandoffPriorityLevel | null
@@ -54,22 +51,19 @@ async function conversationAttention(
   for (const item of items) {
     out.set(item.id, {
       agentAttending: agentEnabled && item.status === "open" && item.agentStatus === "on",
-      pendingTeam: 0,
       pendingContact: 0,
       handoffPriority: null,
     })
   }
   // Las pendientes vencidas dejan de contar aunque su fila aún no se marcó
   // `expirada` (la caducidad es perezosa); no se escribe en una lectura.
-  const proposals = await tx.execute<{ conversation_id: string; action: string; count: number }>(sql`
-    select p.conversation_id, p.action, count(*)::int as count from agent_proposal p
+  const proposals = await tx.execute<{ conversation_id: string; count: number }>(sql`
+    select p.conversation_id, count(*)::int as count from agent_proposal p
     where p.organization_id = ${orgId} and p.conversation_id in (${ids}) and ${proposalPendingSql(sql.raw("p"))}
-    group by p.conversation_id, p.action`)
+    group by p.conversation_id`)
   for (const row of proposals) {
     const attention = out.get(row.conversation_id)
-    if (!attention) continue
-    if (pendingProposalDecider(row.action, true) === "team") attention.pendingTeam += row.count
-    else attention.pendingContact += row.count
+    if (attention) attention.pendingContact += row.count
   }
   const handoffs = await tx.execute<{ conversation_id: string; priority: string }>(sql`
     select h.conversation_id, h.priority from agent_handoff h
@@ -103,7 +97,6 @@ export async function listInboxConversations(
 
 const NO_ATTENTION: ConversationAttention = {
   agentAttending: false,
-  pendingTeam: 0,
   pendingContact: 0,
   handoffPriority: null,
 }

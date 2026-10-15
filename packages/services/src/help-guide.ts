@@ -37,7 +37,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/home",
     title: "Inicio",
     parent: null,
-    purpose: "Lo que te toca hoy. «Te espera» reúne en una lista, por orden de urgencia, los casos que pasó el agente, lo que espera tu aprobación, las conversaciones sin responder, las tareas, lo que recomienda el administrador y las personas a las que el agente no pudo escribir. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo.",
+    purpose: "Lo que te toca hoy. «Te espera» reúne en una lista, por orden de urgencia, los casos que pasó el agente, las conversaciones sin responder, las tareas, lo que recomienda el administrador y las personas a las que el agente no pudo escribir. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo.",
     terms: ["resumen del día", "pendientes", "panel", "dashboard", "qué tengo hoy", "recomendaciones"],
   },
   {
@@ -110,11 +110,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/agent",
     title: "Agente",
     parent: null,
-    purpose: "El resumen de tus agentes: cómo van, qué necesita de ti y la entrada para configurar cada uno, aprobar lo que proponen, revisar lo que aprenden y mantener su conocimiento.",
+    purpose: "El resumen de tus agentes: cómo van, qué necesita de ti y la entrada para configurar cada uno, atender los casos que te pasan, revisar lo que aprenden y mantener su conocimiento.",
     terms: ["inteligencia artificial", "ia", "bot", "asistente virtual", "automático", "aprobaciones", "conocimiento", "aprender", "tope diario", "autonomía"],
     writePermission: "agent.write",
     faqs: [
-      { q: "¿Cómo enciendo el agente?", a: "En Agente, en la fila de Recepción, usa el interruptor. Te muestra cuatro comprobaciones (canal, lo básico de tu clínica, si lo probaste y quién recibe los casos) y con qué nivel empieza." },
+      { q: "¿Cómo enciendo el agente?", a: "En Agente, en la fila de Recepción, usa el interruptor. Te muestra cuatro comprobaciones (canal, lo básico de tu clínica, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve." },
       { q: "¿Cómo le enseño algo al agente?", a: "Los datos de tu clínica (precios, horarios, políticas) van en Agente › Conocimiento. Si respondió mal, corrígelo en Agente › Aprender: tu corrección queda como una lección que apruebas." },
     ],
   },
@@ -123,7 +123,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/agent/administrador",
     title: "Administrador",
     parent: "Agente",
-    purpose: "El agente que mira cómo va la clínica. Su página es la lista de lo que puede hacer por su cuenta: recordar citas, avisar controles, retomar presupuestos o dejar tareas a tu equipo. Cada línea se prende o se apaga con su interruptor y dice quién lo hace, el agente o una persona.",
+    purpose: "El agente que mira cómo va la clínica. Su página es la lista de lo que puede hacer por su cuenta: recordar citas, avisar controles, retomar presupuestos u oportunidades o dejar tareas a tu equipo. Cada línea se prende o se apaga con su interruptor y dice quién lo hace, el agente o una persona.",
     terms: ["recordatorios", "mensajes automáticos", "automatizaciones", "confirmar cita", "avisos", "reglas", "seguimientos", "recomendaciones", "asesor"],
     writePermission: "agent.write",
     faqs: [

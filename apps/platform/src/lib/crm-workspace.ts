@@ -94,7 +94,7 @@ export function agentStateLabel(state: CrmAgentState): string {
     case "human":
       return "Atiende recepción"
     case "approval":
-      return "Requiere aprobación"
+      return "Espera al interlocutor"
     case "handoff":
       return "Necesita al equipo"
     case "closed":
@@ -113,7 +113,7 @@ export function agentStateDescription(agent: CrmAgentStatus): string {
         ? "El agente está activo, pero este hilo lo atiende una persona."
         : "El agente está pausado para este hilo."
     case "approval":
-      return `Hay ${agent.pendingProposalIds.length} propuesta(s) del agente esperando decisión.`
+      return `Hay ${agent.pendingProposalIds.length} propuesta(s) del agente esperando la confirmación del interlocutor.`
     case "handoff":
       return "El agente derivó el caso al equipo."
     case "closed":
@@ -128,7 +128,7 @@ export function agentStateDescription(agent: CrmAgentStatus): string {
 export function agentNextSteps(agent: CrmAgentStatus): string[] {
   switch (agent.state) {
     case "approval":
-      return ["Revisa la propuesta del agente", "Aprueba o rechaza con motivo"]
+      return ["Revisa lo que propuso el agente", "Si confirmó en el chat, registra su confirmación"]
     case "handoff":
       return ["Lee el motivo de la derivación", "Toma la atención y responde"]
     case "human":

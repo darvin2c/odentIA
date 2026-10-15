@@ -1,9 +1,8 @@
 import { createHash, randomBytes } from "node:crypto"
 import type { NormalizedTemplateStatus } from "@odentia/channels"
-import { sendAgentRun, type Db } from "@odentia/db"
+import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
-import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
 import type {
   AutomationCause,
   AutomationJobStatus,
@@ -25,7 +24,6 @@ import {
   agentConfig,
   channelConnection,
   contact,
-  contactIdentity,
   conversation,
   crmTask,
   message,
@@ -34,7 +32,6 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming } from "./admin-lines.js"
-import { createProposal } from "./agent-operations.js"
 import { setAppointmentStatus } from "./appointments.js"
 import { automationMessageOf, parseReplyId } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
@@ -47,13 +44,12 @@ import {
   settleMessageTexts,
   templateReasonWords,
 } from "./clinic-messages.js"
-import { reconcileProposedCoordinations } from "./commercial-coordination.js"
-import { getConnectionTemplates } from "./connections.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { updateOpportunity } from "./opportunities.js"
 import { createTask } from "./tasks.js"
-import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
+import { upsertWorkspaceNotification } from "./workspace.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -138,6 +134,11 @@ export interface JobPayload {
   detail?: string
   /** Lo pidió una persona con «Solo esta vez»: sale aunque la línea esté apagada. */
   once?: boolean
+  /**
+   * La próxima acción vencida que originó el caso (ISO). Si se atiende o se
+   * reprograma antes de escribir, el caso ya no aplica.
+   */
+  dueAt?: string
 }
 
 /** Lee el payload JSONB de un caso campo por campo (sin casts ciegos). */
@@ -149,6 +150,7 @@ export function jobPayloadOf(value: unknown): JobPayload {
   if ("ownerUserId" in value && typeof value.ownerUserId === "string") payload.ownerUserId = value.ownerUserId
   if ("detail" in value && typeof value.detail === "string") payload.detail = value.detail
   if ("once" in value && value.once === true) payload.once = true
+  if ("dueAt" in value && typeof value.dueAt === "string" && Number.isFinite(Date.parse(value.dueAt))) payload.dueAt = value.dueAt
   return payload
 }
 
@@ -225,8 +227,7 @@ export async function setLine(
     config: lineConfigOf(existing?.config),
   }
   const agentPart = line.agent ? (input.agentPart ?? was.agentPart) : false
-  // El seguimiento comercial siempre pasa a una persona cuando el agente no puede.
-  const teamPart = kind === "seguimiento_comercial" ? true : (input.teamPart ?? was.teamPart)
+  const teamPart = input.teamPart ?? was.teamPart
   let enabled = input.enabled ?? was.enabled
   if (!agentPart && !teamPart) {
     if (input.enabled === true) {
@@ -756,317 +757,6 @@ export function notYetQueued(orgId: string, prefix: string, idColumn: unknown) {
     where j.organization_id = ${orgId} and j.dedupe_key = ${prefix + ":"} || ${idColumn}::text)`
 }
 
-const COMMERCIAL_QUIET_START = "20:00"
-const COMMERCIAL_QUIET_END = "08:00"
-
-export interface TemplateChannel {
-  identityId: string
-  connectionId: string
-  channel: string
-  template: { name: string; language: string }
-}
-
-/**
- * Convención: la plantilla con la que se retoma un seguimiento en frío es la
- * aprobada cuyo nombre lo dice («seguimiento…», «follow_up…») y no lleva
- * variables (se envía sin parámetros). Sin una así no se propone nada: jamás
- * se sustituye por otra plantilla de la conexión.
- */
-const FOLLOW_UP_TEMPLATE = /seguimiento|follow[-_ ]?up/i
-
-/**
- * Canal por el que la clínica puede iniciar un hilo en frío con este contacto:
- * contacto activo con identidad de WhatsApp (el único canal que abre
- * conversación sin mensaje previo, siempre con plantilla), consentimiento
- * vigente para la finalidad, conexión activa con una plantilla de seguimiento
- * aprobada y ningún hilo previo con esa persona en la conexión (si ya conversa,
- * no es un inicio en frío: decide una persona). No crea nada.
- */
-export async function findTemplateChannel(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  purpose: ConsentPurpose,
-  secretsKey: Buffer,
-): Promise<TemplateChannel | null> {
-  const [person] = await tx
-    .select({ isActive: contact.isActive })
-    .from(contact)
-    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
-    .limit(1)
-  if (!person?.isActive) return null
-  const [identity] = await tx
-    .select()
-    .from(contactIdentity)
-    .where(
-      and(
-        eq(contactIdentity.organizationId, orgId),
-        eq(contactIdentity.contactId, contactId),
-        eq(contactIdentity.channel, "whatsapp"),
-      ),
-    )
-    .orderBy(desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
-    .limit(1)
-  if (!identity) return null
-  if (!(await hasConsent(tx, orgId, contactId, purpose))) return null
-  const connections = await tx
-    .select({ id: channelConnection.id })
-    .from(channelConnection)
-    .where(
-      and(
-        eq(channelConnection.organizationId, orgId),
-        eq(channelConnection.channel, identity.channel),
-        eq(channelConnection.status, "active"),
-      ),
-    )
-    .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
-    .limit(5)
-  for (const connection of connections) {
-    const [thread] = await tx
-      .select({ id: conversation.id })
-      .from(conversation)
-      .where(
-        and(
-          eq(conversation.organizationId, orgId),
-          eq(conversation.contactId, contactId),
-          eq(conversation.contactIdentityId, identity.id),
-          eq(conversation.channelConnectionId, connection.id),
-        ),
-      )
-      .limit(1)
-    if (thread) return null
-    // Solo plantillas aprobadas y sin variables: se envía tal cual.
-    const templates = await getConnectionTemplates(tx, orgId, connection.id, secretsKey)
-    const template = templates.find((t) => FOLLOW_UP_TEMPLATE.test(t.name) && t.variables === 0)
-    if (template) {
-      return {
-        identityId: identity.id,
-        connectionId: connection.id,
-        channel: identity.channel,
-        template: { name: template.name, language: template.language },
-      }
-    }
-  }
-  return null
-}
-
-/**
- * Convierte una próxima acción comercial vencida en una sola decisión durable.
- * No agenda otra reiteración: una nueva coordinación exige que una persona
- * vuelva a fijar `nextActionAt`.
- *
- * Sin conversación vinculada, el agente no conversa: si existe un canal con
- * plantillas y consentimiento, propone al equipo abrir el hilo con la plantilla
- * aprobada (sin modelo, determinista) y la propuesta espera en el panel; si no,
- * deriva a una persona como siempre.
- */
-export async function syncOverdueCommercialFollowUps(
-  tx: Db,
-  orgId: string,
-  now: Date,
-  opts: { secretsKey?: Buffer } = {},
-): Promise<SyncSummary> {
-  await reconcileProposedCoordinations(tx, orgId)
-  const rows = await tx
-    .select({
-      taskId: crmTask.id,
-      opportunityId: crmTask.opportunityId,
-      conversationId: crmTask.conversationId,
-      contactId: crmTask.contactId,
-      assigneeUserId: crmTask.assigneeUserId,
-      dueAt: crmTask.dueAt,
-      agentStatus: conversation.agentStatus,
-      channel: channelConnection.channel,
-      connectionStatus: channelConnection.status,
-      agentEnabled: agentConfig.enabled,
-    })
-    .from(crmTask)
-    .innerJoin(
-      opportunity,
-      and(
-        eq(opportunity.id, crmTask.opportunityId),
-        eq(opportunity.organizationId, crmTask.organizationId),
-      ),
-    )
-    .leftJoin(
-      conversation,
-      and(
-        eq(conversation.id, crmTask.conversationId),
-        eq(conversation.organizationId, crmTask.organizationId),
-      ),
-    )
-    .leftJoin(
-      channelConnection,
-      and(
-        eq(channelConnection.id, conversation.channelConnectionId),
-        eq(channelConnection.organizationId, crmTask.organizationId),
-      ),
-    )
-    .leftJoin(agentConfig, eq(agentConfig.organizationId, crmTask.organizationId))
-    .where(
-      and(
-        eq(crmTask.organizationId, orgId),
-        eq(crmTask.kind, "opportunity_follow_up"),
-        eq(crmTask.status, "open"),
-        lte(crmTask.dueAt, now),
-        eq(opportunity.status, "open"),
-        sql`${opportunity.nextActionAt} = ${crmTask.dueAt}`,
-        // Lo ya coordinado para este vencimiento no vuelve a ocupar el lote:
-        // con atraso acumulado, los 25 más antiguos taparían a los nuevos.
-        sql`not exists (
-          select 1 from commercial_follow_up_coordination c
-          where c.organization_id = ${crmTask.organizationId} and c.task_id = ${crmTask.id}
-            and c.trigger_due_at = date_trunc('milliseconds', ${crmTask.dueAt}))`,
-      ),
-    )
-    .orderBy(asc(crmTask.dueAt), asc(crmTask.id))
-    .limit(25)
-  const timeZone = await timezoneOf(tx, orgId)
-  let programados = 0
-  let omitidos = 0
-  for (const row of rows) {
-    if (!row.opportunityId || !row.dueAt) continue
-    if (
-      row.conversationId &&
-      row.channel &&
-      row.agentStatus === "on" &&
-      row.connectionStatus === "active" &&
-      row.agentEnabled &&
-      inQuietHours(now, timeZone, COMMERCIAL_QUIET_START, COMMERCIAL_QUIET_END)
-    ) {
-      continue
-    }
-    let reason: string | null = null
-    let cold: TemplateChannel | null = null
-    if (!row.conversationId) {
-      reason = "La próxima acción no tiene una conversación vinculada"
-      if (row.contactId && row.agentEnabled && opts.secretsKey) {
-        cold = await findTemplateChannel(tx, orgId, row.contactId, "seguimiento", opts.secretsKey)
-      }
-    } else if (row.agentStatus !== "on") reason = "El agente está desactivado en la conversación"
-    else if (!row.agentEnabled) reason = "El agente está desactivado en la organización"
-    else if (!row.channel || row.connectionStatus !== "active") reason = "El canal no está disponible"
-    else if (!row.contactId || !(await hasConsent(tx, orgId, row.contactId, "seguimiento"))) {
-      reason = "No existe consentimiento vigente para seguimiento en el canal"
-    }
-    const derive = reason !== null && cold === null
-    const recipient = derive ? await failureRecipient(tx, orgId, row.assigneeUserId) : null
-    const [created] = await tx
-      .insert(commercialFollowUpCoordination)
-      .values({
-        organizationId: orgId,
-        taskId: row.taskId,
-        opportunityId: row.opportunityId,
-        conversationId: row.conversationId,
-        triggerDueAt: row.dueAt,
-        status: derive ? "derivada" : cold ? "propuesta" : "pendiente",
-        reason: derive ? reason : null,
-        result: derive ? { code: "HUMAN_REQUIRED" } : null,
-        nextResponsibleKind: derive ? (recipient ? "user" : "team") : cold ? "team" : "agent",
-        nextResponsibleUserId: recipient,
-        decidedAt: derive ? now : null,
-      })
-      .onConflictDoNothing()
-      .returning({ id: commercialFollowUpCoordination.id })
-    if (!created) continue
-    const deriveCreated = async (why: string) => {
-      omitidos++
-      const who = recipient ?? (await failureRecipient(tx, orgId, row.assigneeUserId))
-      await tx
-        .update(commercialFollowUpCoordination)
-        .set({
-          status: "derivada",
-          reason: why,
-          result: { code: "HUMAN_REQUIRED" },
-          nextResponsibleKind: who ? "user" : "team",
-          nextResponsibleUserId: who,
-          decidedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(commercialFollowUpCoordination.id, created.id))
-      if (who) {
-        await createWorkspaceNotification(tx, orgId, {
-          userId: who,
-          dedupeKey: `commercial-coordination:${created.id}`,
-          title: "Seguimiento comercial requiere intervención",
-          body: why,
-          href: `/tasks?task=${row.taskId}`,
-          permission: "tasks.read",
-        })
-      }
-      await audit(tx, orgId, null, "commercial_follow_up.derived", created.id, {
-        taskId: row.taskId,
-        opportunityId: row.opportunityId,
-        reason: why,
-      })
-    }
-    if (derive) {
-      await deriveCreated(reason as string)
-      continue
-    }
-    if (cold) {
-      // Propuesta determinista al equipo: nada sale hasta que una persona la aprueba.
-      const [opp] = await tx
-        .select({ title: opportunity.title, note: opportunity.nextActionNote })
-        .from(opportunity)
-        .where(and(eq(opportunity.id, row.opportunityId), eq(opportunity.organizationId, orgId)))
-        .limit(1)
-      try {
-        const proposal = await createProposal(tx, orgId, {
-          contactId: row.contactId as string,
-          action: "enviar_mensaje",
-          payload: {
-            kind: "template",
-            name: cold.template.name,
-            language: cold.template.language,
-            connectionId: cold.connectionId,
-            identityId: cold.identityId,
-            opportunityId: row.opportunityId,
-            followUpDueAt: row.dueAt.toISOString(),
-          },
-          reason: `Seguimiento vencido sin conversación (${opp?.title ?? "oportunidad"}${opp?.note ? `: ${opp.note}` : ""}). Abrir WhatsApp con la plantilla aprobada «${cold.template.name}».`,
-          idempotencyKey: `commercial-coordination:${created.id}`,
-          requireTeamDecision: true,
-        })
-        await tx
-          .update(commercialFollowUpCoordination)
-          .set({
-            reason: proposal.reason,
-            result: { proposalId: proposal.id, proposalStatus: proposal.status },
-            updatedAt: now,
-          })
-          .where(eq(commercialFollowUpCoordination.id, created.id))
-        await audit(tx, orgId, null, "commercial_follow_up.proposed", created.id, {
-          taskId: row.taskId,
-          opportunityId: row.opportunityId,
-          proposalId: proposal.id,
-        })
-        programados++
-      } catch (error) {
-        // Regla de dominio (p. ej. otra propuesta proactiva pendiente para el
-        // contacto): deriva. Un conflicto de clave nace de un error SQL que ya
-        // abortó la transacción: se propaga y el siguiente tick lo reintenta.
-        if (!(error instanceof ServiceError) || error.code === "PROPOSAL_CONFLICT") throw error
-        await deriveCreated(`${reason}. ${error.message}`)
-      }
-      continue
-    }
-    if (!row.conversationId) throw new Error("La coordinación encolable perdió su conversación")
-    await sendAgentRun(tx, {
-      kind: "overdue_opportunity_follow_up",
-      orgId,
-      conversationId: row.conversationId,
-      coordinationId: created.id,
-    })
-    programados++
-    await audit(tx, orgId, null, "commercial_follow_up.queued", created.id, {
-      taskId: row.taskId,
-      opportunityId: row.opportunityId,
-    })
-  }
-  return { programados, omitidos }
-}
-
 /** La línea, si está prendida; null si está apagada o nunca se prendió. */
 async function enabledLine(tx: Db, orgId: string, kind: AutomationKind): Promise<RuleRow | null> {
   const rule = await findLineRule(tx, orgId, kind)
@@ -1174,6 +864,72 @@ export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Pro
       contactId,
       patientId: budget.patientId,
       budgetId: budget.id,
+    })
+    if (job) programados++
+  }
+  return { programados, omitidos }
+}
+
+/**
+ * El vencimiento que identifica un caso de «Retomar una oportunidad»: la
+ * oportunidad y su próxima acción, en milisegundos. Si se reprograma y vuelve a
+ * vencer, es otro caso.
+ */
+const OPPORTUNITY_DUE_KEY = sql<string>`(${opportunity.id}::text || ':' || floor(extract(epoch from ${opportunity.nextActionAt}) * 1000)::bigint::text)`
+
+/**
+ * Casos de «Retomar una oportunidad»: oportunidades abiertas cuya próxima acción
+ * venció con la línea ya prendida y siguen con su seguimiento abierto. A quien
+ * tenía la próxima acción vencida desde antes de prenderla no se le escribe.
+ */
+export async function syncOpportunityFollowUps(tx: Db, orgId: string, now: Date): Promise<SyncSummary> {
+  const rule = await enabledLine(tx, orgId, "seguimiento_comercial")
+  let programados = 0
+  const omitidos = 0
+  if (!rule) return { programados, omitidos }
+  const due = await tx
+    .select({
+      key: OPPORTUNITY_DUE_KEY,
+      id: opportunity.id,
+      contactId: opportunity.contactId,
+      ownerUserId: opportunity.assignedUserId,
+      nextActionAt: opportunity.nextActionAt,
+    })
+    .from(opportunity)
+    .innerJoin(
+      crmTask,
+      and(
+        eq(crmTask.organizationId, opportunity.organizationId),
+        eq(crmTask.opportunityId, opportunity.id),
+        eq(crmTask.kind, "opportunity_follow_up"),
+        eq(crmTask.status, "open"),
+      ),
+    )
+    .where(
+      and(
+        eq(opportunity.organizationId, orgId),
+        eq(opportunity.status, "open"),
+        lte(opportunity.nextActionAt, now),
+        gte(opportunity.nextActionAt, activeSince(rule)),
+        sql`${crmTask.dueAt} = ${opportunity.nextActionAt}`,
+        notYetQueued(orgId, "seguimiento_comercial", OPPORTUNITY_DUE_KEY),
+      ),
+    )
+    .orderBy(asc(opportunity.nextActionAt), asc(opportunity.id))
+    .limit(BATCH_LIMIT)
+  for (const opp of due) {
+    if (!opp.nextActionAt) continue
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: "seguimiento_comercial",
+      dedupeKey: `seguimiento_comercial:${opp.key}`,
+      scheduledFor: now,
+      contactId: opp.contactId,
+      opportunityId: opp.id,
+      payload: {
+        dueAt: opp.nextActionAt.toISOString(),
+        ...(opp.ownerUserId ? { ownerUserId: opp.ownerUserId } : {}),
+      },
     })
     if (job) programados++
   }
@@ -1438,6 +1194,23 @@ async function stillValid(
     if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
       return { valid: false, reason: "Ya tiene una cita reservada" }
     }
+    return { valid: true }
+  }
+  if (job.kind === "seguimiento_comercial" && job.opportunityId) {
+    const [opp] = await tx
+      .select({ status: opportunity.status, nextActionAt: opportunity.nextActionAt, contactActive: contact.isActive })
+      .from(opportunity)
+      .innerJoin(contact, and(eq(contact.id, opportunity.contactId), eq(contact.organizationId, opportunity.organizationId)))
+      .where(and(eq(opportunity.id, job.opportunityId), eq(opportunity.organizationId, orgId)))
+      .limit(1)
+    if (!opp || opp.status !== "open") return { valid: false, reason: "La oportunidad ya se cerró" }
+    if (!opp.contactActive) return { valid: false, reason: "El contacto está archivado" }
+    // Atendida o reprogramada antes de escribir: lo decidió una persona.
+    const { dueAt } = jobPayloadOf(job.payload)
+    const stillDue = dueAt
+      ? opp.nextActionAt?.getTime() === Date.parse(dueAt)
+      : !!opp.nextActionAt && opp.nextActionAt.getTime() <= now.getTime()
+    if (!stillDue) return { valid: false, reason: "La próxima acción ya se atendió o se reprogramó" }
     return { valid: true }
   }
   if (job.kind === "seguimientos_sin_responsable" && job.opportunityId) {
@@ -1716,6 +1489,27 @@ async function leaveTask(
     idempotencyKey: `admin:${job.id}`,
   })
   return task.id
+}
+
+/**
+ * La oportunidad que se retoma queda con el hilo por el que se le escribió, si
+ * aún no tenía uno: su seguimiento y quien abra la oportunidad llegan a esa
+ * conversación. Un hilo que ya tenía no se cambia. Si no se puede vincular, el
+ * mensaje que ya salió no se deshace.
+ */
+async function linkOpportunityThread(tx: Db, orgId: string, job: JobRow, conversationId: string): Promise<void> {
+  if (job.kind !== "seguimiento_comercial" || !job.opportunityId) return
+  const [opp] = await tx
+    .select({ conversationId: opportunity.conversationId })
+    .from(opportunity)
+    .where(and(eq(opportunity.id, job.opportunityId), eq(opportunity.organizationId, orgId)))
+    .limit(1)
+  if (!opp || opp.conversationId) return
+  try {
+    await updateOpportunity(tx, orgId, job.opportunityId, { conversationId }, { userId: null })
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+  }
 }
 
 /** Hasta cuándo sirve llamar por el recordatorio de una cita: hasta que empieza. */
@@ -2020,6 +1814,7 @@ export async function deliverJob(
         },
       })
     }
+    await linkOpportunityThread(tx, orgId, job, route.conversationId)
     await tx
       .update(automationJob)
       .set({
@@ -2544,7 +2339,7 @@ export async function automationReplyOf(
 
 /**
  * Pide a WhatsApp, en cada conexión activa, los mensajes de la clínica que aún
- * no tiene: los seis con los que viene y los que haya creado, sin esperar a que
+ * no tiene: los siete con los que viene y los que haya creado, sin esperar a que
  * una línea se prenda. Al conectar ya se pidieron todos; este ciclo cubre lo
  * que faltó. Una solicitud que el proveedor no acepta se avisa una vez al día,
  * con su motivo, y se reintenta al día siguiente.

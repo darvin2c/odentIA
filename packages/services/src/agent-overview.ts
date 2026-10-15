@@ -3,7 +3,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { agentLesson } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
-import { countAgentModelRunsToday, countPendingProposals } from "./agent-operations.js"
+import { countAgentModelRunsToday, countOpenHandoffs } from "./agent-operations.js"
 import { countLearningPending } from "./agent-learning.js"
 import { getAgentConfig } from "./agentConfig.js"
 import { countOpenKnowledgeGaps, getClinicInfoSnapshot, getKnowledgeBasics, listActiveKnowledge } from "./knowledge.js"
@@ -42,7 +42,11 @@ export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
 export interface AgentOverview {
   enabled: boolean
-  /** `review` y `lessons`: respuestas por revisar y lecciones por aprobar en Aprender. */
+  /**
+   * `approvals`: casos que el agente pasó a una persona y siguen sin resolver
+   * (lo que espera al equipo en Aprobaciones; ninguna propuesta lo espera).
+   * `review` y `lessons`: respuestas por revisar y lecciones por aprobar en Aprender.
+   */
   needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
@@ -170,7 +174,6 @@ async function startOfOrgDay(tx: Db, timezone: string): Promise<Date> {
 export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOverview> {
   const cfg = await getAgentConfig(tx, orgId)
   const zone = await getOrgLocale(tx, orgId)
-  const pending = await countPendingProposals(tx, orgId)
   const basics = await getKnowledgeBasics(tx, orgId)
   const snapshot = await getClinicInfoSnapshot(tx, orgId)
   const connections = await tx
@@ -195,7 +198,7 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
   return {
     enabled: cfg.enabled,
     needsYou: {
-      approvals: pending.team,
+      approvals: await countOpenHandoffs(tx, orgId),
       gaps: await countOpenKnowledgeGaps(tx, orgId),
       basicsMissing: basics.total - basics.covered,
       ...(await countLearningPending(tx, orgId)),

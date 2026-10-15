@@ -4,7 +4,6 @@
  * las palabras de la pantalla. Ninguna regla de qué espera o qué se debe vive
  * en este archivo.
  */
-import { ACTION_LABEL } from "./agent"
 import { channelLabel } from "./channels"
 import { timeAgo } from "./crm"
 import { dayKeyOf, daysBetween } from "./finance-cash"
@@ -40,18 +39,6 @@ function dueText(row: Extract<WaitingRow, { kind: "task" }>, context: HomeTextCo
   return `para el ${new Date(row.dueAt).toLocaleDateString(context.locale, { day: "numeric", month: "long", timeZone: context.timezone })}`
 }
 
-/** De quién o para quién es lo que propone el agente, dicho como tarea. */
-function proposalTitle(row: Extract<WaitingRow, { kind: "proposal" }>): string {
-  const patient = row.patientName ?? row.contactName
-  const label = ACTION_LABEL[row.action] ?? row.action
-  if (row.action === "enviar_mensaje") return row.contactName ? `Mensaje para ${row.contactName}` : label
-  if (!patient) return label
-  if (row.action === "reservar_cita") return `Reservar una cita para ${patient}`
-  if (row.action === "reprogramar_cita") return `Cambiar la cita de ${patient}`
-  if (row.action === "cancelar_cita") return `Cancelar la cita de ${patient}`
-  return `${label}: ${row.contactName ?? patient}`
-}
-
 /** Título, detalle y acción de una fila de «Te espera». */
 export function waitingText(row: WaitingRow, context: HomeTextContext): { title: string; detail: string; action: string } {
   switch (row.kind) {
@@ -60,12 +47,6 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         title: row.contactName ? `${row.contactName}: ${row.reason}` : row.reason,
         detail: joined(["Caso que pasó el agente", row.channel ? channelLabel(row.channel) : null, timeAgo(row.createdAt)]),
         action: row.conversationId ? "Ver el caso" : "Revisar",
-      }
-    case "proposal":
-      return {
-        title: proposalTitle(row),
-        detail: joined(["El agente espera tu aprobación", row.summary, timeAgo(row.createdAt)]),
-        action: "Revisar",
       }
     case "conversations":
       return {
@@ -106,13 +87,6 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         action: "Ver cuáles",
       }
     case "more":
-      if (row.of === "proposals") {
-        return {
-          title: row.count === 1 ? "1 cambio más espera tu aprobación" : `${row.count} cambios más esperan tu aprobación`,
-          detail: "Los propuso el agente",
-          action: "Ver todos",
-        }
-      }
       if (row.of === "cases") {
         return {
           title: row.count === 1 ? "1 caso más que pasó el agente" : `${row.count} casos más que pasó el agente`,
@@ -130,7 +104,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "proposal" || row.kind === "task") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind

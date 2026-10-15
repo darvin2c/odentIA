@@ -3,7 +3,7 @@ import { channelAdapters, type OutboundMessage } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { decryptConfig, markCommercialFollowUpUncertain, type Storage } from "@odentia/services"
+import { decryptConfig, type Storage } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 
@@ -167,7 +167,6 @@ export async function processOutbound(
           entityId: messageId,
           metadata: { op: "send-uncertain", error: detail.slice(0, 500) },
         })
-        await markCommercialFollowUpUncertain(tx, orgId, messageId, detail.slice(0, 500))
       }).catch(() => {})
       return "done"
     }

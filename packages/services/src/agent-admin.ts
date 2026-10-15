@@ -48,7 +48,7 @@ import {
   syncBudgetFollowUps,
   syncCancelledAppointments,
   syncCheckupReminders,
-  syncOverdueCommercialFollowUps,
+  syncOpportunityFollowUps,
   syncVisitFollowUps,
 } from "./automation.js"
 import type { TemplateDeps } from "./channel-templates.js"
@@ -139,6 +139,8 @@ export interface AdminCase {
   controlId: string | null
   /** Persona del equipo que lleva el caso, si la hay. */
   ownerUserId: string | null
+  /** El vencimiento que originó el caso, cuando lo tiene (la próxima acción de una oportunidad). */
+  dueAt?: string
 }
 
 interface CaseResult {
@@ -262,13 +264,17 @@ async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days
   }
 }
 
+/** Oportunidades abiertas con la próxima acción vencida y su seguimiento abierto: los casos de «Retomar una oportunidad». */
 async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; contact_id: string; name: string; title: string; next_action_at: Date | string; owner: string | null; total: number }>(sql`
     select o.id, c.id as contact_id, c.display_name as name, o.title, o.next_action_at, o.assigned_user_id as owner,
            count(*) over ()::int as total
     from opportunity o
     join contact c on c.id = o.contact_id and c.organization_id = o.organization_id
-    where o.organization_id = ${orgId} and o.status = 'open' and o.next_action_at < now()
+    where o.organization_id = ${orgId} and o.status = 'open' and o.next_action_at < now() and c.is_active
+      and exists (select 1 from task t
+        where t.organization_id = o.organization_id and t.opportunity_id = o.id
+          and t.kind = 'opportunity_follow_up' and t.status = 'open' and t.due_at = o.next_action_at)
     order by o.next_action_at asc
     limit ${ADMIN_LIST_LIMIT}`)
   const total = Number(rows[0]?.total ?? 0)
@@ -282,10 +288,11 @@ async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Pro
       contactId: row.contact_id,
       opportunityId: row.id,
       ownerUserId: row.owner,
+      dueAt: new Date(row.next_action_at).toISOString(),
     })),
     title: `${total} ${plural(total, "oportunidad tiene", "oportunidades tienen")} la próxima acción vencida`,
     detail: "Ordenadas de la más atrasada a la más reciente.",
-    how: "Oportunidades abiertas cuya próxima acción tenía fecha y ya pasó.",
+    how: "Oportunidades abiertas cuya próxima acción tenía fecha y ya pasó, de contactos activos.",
   }
 }
 
@@ -560,6 +567,7 @@ async function enqueueCase(
       detail: item.line,
       ...(item.controlId ? { controlId: item.controlId } : {}),
       ...(item.ownerUserId ? { ownerUserId: item.ownerUserId } : {}),
+      ...(item.dueAt ? { dueAt: item.dueAt } : {}),
       ...extra,
     },
   })
@@ -799,8 +807,6 @@ export interface AdminLineView {
   hasAgent: boolean
   agentPart: boolean
   teamPart: boolean
-  /** La tarea para el equipo no se apaga por separado. */
-  teamFixed: boolean
   team: string
   days: number | null
   defaultDays: number | null
@@ -857,7 +863,6 @@ async function lineView(
     description: describeLine(line, state, timing),
     ...state,
     hasAgent: !!line.agent,
-    teamFixed: line.key === "seguimiento_comercial",
     team: TASK_AREA_LABELS[line.team.area].team,
     days,
     defaultDays: line.defaultDays,
@@ -920,7 +925,7 @@ export const PERMISSION_GAP_MIN = 5
 
 async function permissionGaps(tx: Db, orgId: string, rules: Map<string, RuleRow>): Promise<PermissionGap[]> {
   const kinds = [...ADMIN_LINES, ...CUSTOM_LINES]
-    .filter((line) => line.agent && line.key !== "seguimiento_comercial" && rules.get(line.key)?.enabled && rules.get(line.key)?.agentPart)
+    .filter((line) => line.agent && rules.get(line.key)?.enabled && rules.get(line.key)?.agentPart)
     .map((line) => line.key)
   if (kinds.length === 0) return []
   const rows = await tx.execute<{ kind: string; refused: number; total: number }>(sql`
@@ -1061,9 +1066,7 @@ export async function getAdminLine(tx: Db, orgId: string, can: (permission: stri
     flow: flowOf(line, view, { days: view.days, timing }),
     fullFlow: flowOf(line, view, { days: view.days, timing, all: true }),
     message: spec && example ? { text: example.text, buttons: spec.buttons.map((button) => button.title) } : null,
-    noticeExample: line.agent && line.key !== "seguimiento_comercial"
-      ? `No pude escribirle a Tomás Rivas: ${words.one}. ${words.fix}`
-      : null,
+    noticeExample: line.agent ? `No pude escribirle a Tomás Rivas: ${words.one}. ${words.fix}` : null,
     weekStats: week.get(line.key) ?? null,
     people: people.items,
     peopleTotal: people.total,
@@ -1122,7 +1125,7 @@ function toRecommendation(line: AdminLine, rule: RuleRow | null, result: CaseRes
   const team = TASK_AREA_LABELS[line.team.area].team
   const writes = !!line.agent && state.agentPart
   const once =
-    line.key === "seguimiento_comercial" || line.key === "recordatorio_cita"
+    line.key === "recordatorio_cita"
       ? null
       : writes
         ? {
@@ -1305,7 +1308,6 @@ export interface TickDeps {
 export interface TickSummary {
   orgs: number
   programados: number
-  coordinados: number
   entregados: number
   fallidos: number
 }
@@ -1315,6 +1317,7 @@ const AGENT_SYNCS: Array<[AdminLineKey, (tx: Db, orgId: string, now: Date) => Pr
   ["recordatorio_cita", syncAppointmentReminders],
   ["recordatorio_control", syncCheckupReminders],
   ["seguimiento_presupuesto", syncBudgetFollowUps],
+  ["seguimiento_comercial", syncOpportunityFollowUps],
   ["seguimiento_no_asistencia", syncVisitFollowUps],
   ["cita_cancelada", syncCancelledAppointments],
 ]
@@ -1337,7 +1340,7 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, coordinados: 0, entregados: 0, fallidos: 0 }
+  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0 }
   for (const { orgId } of orgRows) {
     // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
@@ -1353,11 +1356,7 @@ export async function tickAutomations(
     // Secuencial: las sincronizaciones comparten la transacción del tenant.
     const synced = await withOrgContext(appDb, orgId, async (tx) => {
       let total = 0
-      let coordinated = 0
       const rules = new Map((await listLineRules(tx, orgId)).map((rule) => [rule.kind, rule]))
-      if (rules.get("seguimiento_comercial")?.enabled) {
-        coordinated = (await syncOverdueCommercialFollowUps(tx, orgId, now, { secretsKey: deps.secretsKey })).programados
-      }
       for (const [key, sync] of AGENT_SYNCS) {
         const rule = rules.get(key)
         // En pausa: Recepción es quien escribe. Si la línea solo deja tareas, sigue.
@@ -1365,10 +1364,9 @@ export async function tickAutomations(
         total += (await sync(tx, orgId, now)).programados
       }
       total += await syncTeamLines(tx, orgId, now)
-      return { total, coordinated }
+      return total
     })
-    summary.programados += synced.total
-    summary.coordinados += synced.coordinated
+    summary.programados += synced
     const delivered = await withOrgContext(appDb, orgId, async (tx) => {
       await reconcileDeliveries(tx, orgId, now)
       return deliverDueJobs(

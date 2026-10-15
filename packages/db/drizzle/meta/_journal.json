@@ -554,6 +554,13 @@
       "when": 1792035645855,
       "tag": "0078_sin_borrador_editado",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1792038142191,
+      "tag": "0079_retomar_oportunidad_como_las_demas",
+      "breakpoints": true
     }
   ]
 }

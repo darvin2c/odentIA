@@ -488,7 +488,6 @@ function InboxPage() {
               onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
-              canDecide={canDecideAgent}
             />
           </ResizablePanel>
           <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
@@ -530,7 +529,6 @@ function InboxPage() {
               onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
-              canDecide={canDecideAgent}
             />
           ) : showContext ? (
             (workspace ?? (
@@ -560,26 +558,19 @@ function InboxPage() {
 
 /**
  * Lo que la conversación espera, en una sola etiqueta y con la misma
- * precedencia que el panel de contexto: una decisión del equipo, después una
- * derivación sin resolver y, si no, quién la atiende. El estado nunca se
- * comunica solo con color: lleva texto y una marca de forma distinta.
+ * precedencia que el panel de contexto: una derivación sin resolver, después
+ * la cita que espera el sí del interlocutor y, si no, quién la atiende. Ninguna
+ * propuesta espera al equipo (ADR 0023). El estado nunca se comunica solo con
+ * color: lleva texto y una marca de forma distinta.
  */
 function needsTeam(item: ConversationListItem): boolean {
   const attention = item.attention
-  return Boolean(attention && (attention.pendingTeam > 0 || attention.pendingContact > 0 || attention.handoffPriority))
+  return Boolean(attention && (attention.pendingContact > 0 || attention.handoffPriority))
 }
 
-function AttentionLabel({ item, canDecide }: { item: ConversationListItem; canDecide: boolean }) {
+function AttentionLabel({ item }: { item: ConversationListItem }) {
   const attention = item.attention
   if (!attention) return null
-  if (attention.pendingTeam > 0) {
-    return (
-      <span className="flex min-w-0 items-center gap-1 font-semibold text-primary-soft-foreground">
-        <Bot className="size-3.5 shrink-0" aria-hidden />
-        <span className="truncate">{canDecide ? "Espera tu aprobación" : "Espera aprobación del equipo"}</span>
-      </span>
-    )
-  }
   if (attention.handoffPriority) {
     const high = attention.handoffPriority === "alta"
     return (
@@ -603,9 +594,10 @@ function AttentionLabel({ item, canDecide }: { item: ConversationListItem; canDe
 }
 
 /**
- * Banda del hilo: el agente dejó algo a la espera en esta conversación. Dice
- * qué y deja claro que nada se ejecuta solo; «Revisar» abre el panel del
- * agente, donde esa propuesta aparece primero.
+ * Banda del hilo: el agente propuso una cita en esta conversación y espera el
+ * sí del interlocutor. Dice qué y deja claro que nada se ejecuta sin ese sí;
+ * «Ver» abre el panel del agente en «Esperan al paciente», donde esa propuesta
+ * aparece primero.
  */
 function AgentPendingBand({
   conversationId,
@@ -618,7 +610,7 @@ function AgentPendingBand({
   canSeeProposals: boolean
 }) {
   const { setOpen } = useAgentPanel()
-  const hinted = attention ? attention.pendingTeam + attention.pendingContact : null
+  const hinted = attention ? attention.pendingContact : null
   // Misma clave y petición que el panel de contexto: comparten la caché.
   const query = useQuery({
     queryKey: ["agent-proposals", "workspace", conversationId],
@@ -630,25 +622,16 @@ function AgentPendingBand({
   })
   const proposals = query.data?.data ?? []
   // Sin la lista (enlace directo) manda lo que devuelve la consulta del hilo.
-  const pendingTeam = attention?.pendingTeam ?? proposals.filter((p) => p.mode !== "confirmar_usuario").length
-  const pendingContact = attention?.pendingContact ?? proposals.filter((p) => p.mode === "confirmar_usuario").length
-  const total = pendingTeam + pendingContact
+  const total = attention?.pendingContact ?? proposals.length
   if (total === 0) return null
-  const first = proposals.find((p) => p.mode !== "confirmar_usuario") ?? proposals[0]
+  const first = proposals[0]
   const label = first ? (ACTION_LABEL[first.action] ?? first.action) : null
   const what =
     total > 1 ? `${total} cambios` : label ? label.charAt(0).toLowerCase() + label.slice(1) : "un cambio"
-  // Cada frase concuerda con lo que hay: del equipo, del interlocutor o de ambos.
   const outcome =
-    pendingTeam > 0 && pendingContact > 0
-      ? `${pendingTeam} ${pendingTeam === 1 ? "espera" : "esperan"} la aprobación del equipo y ${pendingContact} la confirmación del interlocutor.`
-      : pendingTeam > 0
-        ? total === 1
-          ? "No se ejecuta hasta que alguien lo apruebe."
-          : "No se ejecutan hasta que alguien los apruebe."
-        : total === 1
-          ? "Espera la confirmación del interlocutor en este hilo."
-          : "Esperan la confirmación del interlocutor en este hilo."
+    total === 1
+      ? "Espera la confirmación del interlocutor en este hilo."
+      : "Esperan la confirmación del interlocutor en este hilo."
   return (
     <div
       role="status"
@@ -659,8 +642,8 @@ function AgentPendingBand({
         El agente propuso <span className="font-semibold">{what}</span>. {outcome}
       </p>
       {canSeeProposals ? (
-        <Button type="button" size="sm" variant="outline" className="min-h-11 rounded-full sm:min-h-9" onClick={() => setOpen(true)}>
-          Revisar
+        <Button type="button" size="sm" variant="outline" className="min-h-11 rounded-full sm:min-h-9" onClick={() => setOpen(true, "paciente")}>
+          Ver
         </Button>
       ) : null}
     </div>
@@ -680,7 +663,6 @@ function ConversationList({
   onSelect,
   onFetchNextPage,
   onRetry,
-  canDecide,
 }: {
   items: ConversationListItem[]
   selectedId: string | null
@@ -693,7 +675,6 @@ function ConversationList({
   onSelect: (id: string) => void
   onFetchNextPage: () => void
   onRetry: () => void
-  canDecide: boolean
 }) {
   return (
     <div className="elevated flex min-h-0 flex-1 flex-col divide-y overflow-y-auto rounded-xl border bg-card">
@@ -733,7 +714,7 @@ function ConversationList({
               <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
               {/* Con algo pendiente, el canal queda en su icono: el estado no debe recortarse. */}
               <span className={needsTeam(item) ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
-              <AttentionLabel item={item} canDecide={canDecide} />
+              <AttentionLabel item={item} />
               {item.unreadCount > 0 && (
                 <span
                   className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"

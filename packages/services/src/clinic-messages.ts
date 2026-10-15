@@ -63,7 +63,7 @@ import { findOrgLocale } from "./locale.js"
  * Los mensajes de WhatsApp de una clínica. Son suyos: viven en su cuenta,
  * vienen escritos por odentIA y cada clínica puede cambiarles el texto.
  *
- * - Seis vienen con odentIA: los cinco que envía el agente
+ * - Siete vienen con odentIA: los seis que envía el agente
  *   (`AUTOMATION_MESSAGES`) y «Retomar la conversación», que envía una persona
  *   desde la Bandeja. La clínica puede además crear los suyos para la Bandeja.
  * - Un texto nuevo es otra versión, con otro nombre de plantilla, que se pide a
@@ -804,6 +804,7 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
   recordatorio_control: () => "Dos días antes de un control pendiente.",
   seguimiento_presupuesto: (days) =>
     `Cuando un presupuesto lleva ${days === 1 ? "1 día" : `${days ?? 2} días`} sin respuesta.`,
+  seguimiento_comercial: () => "Cuando una oportunidad tiene su próxima acción vencida.",
   seguimiento_no_asistencia: (_, timing) =>
     `Al día siguiente de que una persona falta a su cita${timing.hour === undefined ? "" : `, a las ${hourPhrase(timing.hour)}`}.`,
   cita_cancelada: (_, timing) =>
@@ -823,6 +824,7 @@ function buttonDoes(def: MessageDef, button: MessageButton): string {
   }
   if (button.asks === "cambiar") return "Recepción le busca otra fecha en la conversación."
   if (button.asks === "reservar") return "Recepción le ofrece horarios en la conversación."
+  if (def.origin === "agente") return "Recepción sigue la conversación con la persona."
   return "La persona responde y tu equipo puede escribirle con libertad durante 24 horas."
 }
 
@@ -1527,7 +1529,7 @@ async function sendables(
   const wrote = row.lastInboundAt !== null
   const options: Sendable[] = []
   for (const def of defs) {
-    // Los que envía el agente piden los datos de una cita o de un presupuesto: no se envían a mano.
+    // Los que envía el agente piden los datos de una cita, un presupuesto o una oportunidad: no se envían a mano.
     if (def.origin === "agente") continue
     // «Retomar» continúa una consulta: solo donde la persona ya escribió.
     if (def.origin === "bandeja" && !wrote) continue
@@ -1594,7 +1596,7 @@ async function sendables(
  * Los mensajes aprobados que una persona puede enviar a mano en una
  * conversación de WhatsApp: «Retomar la conversación», los que creó la clínica
  * y las plantillas aprobadas que ya estaban en la cuenta, con los datos de esa
- * persona ya puestos. Los cinco del agente no se ofrecen.
+ * persona ya puestos. Los seis del agente no se ofrecen.
  */
 export async function listApprovedMessages(
   tx: Db,

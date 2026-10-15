@@ -5,6 +5,7 @@ import { user } from "@odentia/db/schema/auth"
 import type { AutomationCause, AutomationVia, automationJob } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { type AutomationMessage, type MessageVariable, placePhrase, renderMessage, replyId } from "./automation-messages.js"
@@ -105,7 +106,8 @@ async function patientName(tx: Db, orgId: string, patientId: string): Promise<st
 /**
  * Arma el mensaje de uno o varios trabajos del mismo tipo para una persona
  * (varios recordatorios de cita del mismo día salen juntos). Los datos se leen
- * ahora de la agenda, el presupuesto o el control: no se guarda un texto viejo.
+ * ahora de la agenda, el presupuesto, el control o la oportunidad: no se guarda
+ * un texto viejo.
  * `spec` trae el texto vigente de la clínica (`currentAutomationMessage`).
  * Devuelve null si el trabajo ya no tiene de dónde sacar sus datos.
  */
@@ -191,6 +193,17 @@ export async function composeJobMessage(
       .limit(1)
     if (!budget) return null
     values.presupuesto = budget.title
+  }
+
+  if (spec.key === "seguimiento_comercial") {
+    if (!lead.opportunityId) return null
+    const [opp] = await tx
+      .select({ title: opportunity.title })
+      .from(opportunity)
+      .where(and(eq(opportunity.id, lead.opportunityId), eq(opportunity.organizationId, orgId)))
+      .limit(1)
+    if (!opp) return null
+    values.oportunidad = opp.title
   }
 
   const { params, text } = renderMessage(spec, values)

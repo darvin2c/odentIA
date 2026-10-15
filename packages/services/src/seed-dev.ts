@@ -17,7 +17,7 @@ import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { agentSearchItem, commercialFollowUpCoordination } from "@odentia/db/schema/agent"
+import { agentSearchItem } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -63,7 +63,6 @@ import {
   contact,
   contactIdentity,
   conversation,
-  crmTask,
   customFieldDef,
   message,
   pipeline,
@@ -341,7 +340,6 @@ async function wipeSeed(): Promise<void> {
     "automation_job",
     "automation_consent",
     "automation_rule",
-    "commercial_follow_up_coordination",
     "agent_decision_log",
     "agent_run_ledger",
     "agent_proposal",
@@ -787,7 +785,7 @@ await db
     },
   })
   .where(eq(channelConnection.id, connA.id))
-// Sus mensajes: los seis con los que viene, en estados variados, y uno propio.
+// Sus mensajes: los siete con los que viene, en estados variados, y uno propio.
 await seedChannelTemplates(db, { orgId: ORG_A, connectionId: connA.id })
 const connB = await createConnection(
   db,
@@ -2480,35 +2478,6 @@ await db.transaction(async (tx) => {
   const commercial = items[0]
   if (!commercial) throw new Error("Falta la oportunidad de demostración conectada")
   await seedCrmActivity(tx, { ...domainSeed, opportunityId: commercial.id })
-  const [followUpTask] = await tx
-    .select()
-    .from(crmTask)
-    .where(
-      and(
-        eq(crmTask.organizationId, ORG_A),
-        eq(crmTask.opportunityId, commercial.id),
-        eq(crmTask.kind, "opportunity_follow_up"),
-      ),
-    )
-    .limit(1)
-  if (!followUpTask?.dueAt) throw new Error("Falta el pendiente comercial de demostración")
-  await tx
-    .insert(commercialFollowUpCoordination)
-    .values({
-      organizationId: ORG_A,
-      taskId: followUpTask.id,
-      opportunityId: commercial.id,
-      conversationId: followUpTask.conversationId,
-      triggerDueAt: followUpTask.dueAt,
-      status: "omitida",
-      reason: "Escenario histórico revisado manualmente",
-      result: { code: "NO_LONGER_APPLICABLE" },
-      nextResponsibleKind: "none",
-      decidedAt: new Date("2026-10-06T15:00:00.000Z"),
-      createdAt: new Date("2026-10-06T15:00:00.000Z"),
-      updatedAt: new Date("2026-10-06T15:00:00.000Z"),
-    })
-    .onConflictDoNothing()
 })
 await db.transaction((tx) => seedChannels(tx, domainSeed, secretsKey, { fetch }))
 await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))

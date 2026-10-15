@@ -460,7 +460,8 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   events.sort((a, b) => a.at - b.at)
 
   // Las líneas, prendidas al empezar el mes: actúan sobre lo que pase desde entonces.
-  const lines = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.key !== "seguimiento_comercial")
+  // La clínica inventada no tiene oportunidades: «Retomar una oportunidad» queda prendida y sin casos.
+  const lines = [...ADMIN_LINES, ...CUSTOM_LINES]
   await inOrg(async (tx) => {
     for (const line of lines) await setLine(tx, ORG, owner, line.key, { enabled: true })
   })
