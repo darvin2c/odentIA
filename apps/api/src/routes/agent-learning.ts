@@ -1,4 +1,4 @@
-import { describeProviderProblem, isProviderConfigError, type PlatformLlm, previewLesson } from "@odentia/agent"
+import { describeProviderProblem, isProviderConfigError, meterAiUse, type PlatformLlm, previewLesson } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   approveLesson,
@@ -14,6 +14,7 @@ import {
   saveTestCase,
   updateLesson,
   withdrawLesson,
+  assertAgentTestBudget,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -156,9 +157,12 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.write")) return forbidden(c)
     try {
-      return await runService(c, 200, () =>
-        previewLesson(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, lessonId: c.req.param("id") }),
-      )
+      return await runService(c, 200, async () => {
+        await withOrgContext(deps.db, orgId, (tx) => assertAgentTestBudget(tx, orgId))
+        return meterAiUse(deps.db, orgId, "vista_previa", () =>
+          previewLesson(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, lessonId: c.req.param("id") }),
+        )
+      })
     } catch (error) {
       if (isProviderConfigError(error)) {
         const problem = describeProviderProblem(error)

@@ -1030,11 +1030,13 @@ export interface SaasUsageSummary {
   inputTokens: number | null
   outputTokens: number | null
   cachedInputTokens: number | null
-  /** Micro-unidades del proveedor, SIN moneda (no la entrega): null si nadie informó. */
-  costMicros: number | null
-  /** Cobertura: cuántas corridas informaron tokens y costo. */
+  /**
+   * Cobertura: cuántas corridas informaron tokens. El costo real de IA no
+   * va aquí: es de odentIA y lo ve solo su administración
+   * (`OrganizationDetail.aiCost`); la clínica verá lo que se le cobra por
+   * acción (ADR 0030).
+   */
   runsWithTokens: number
-  runsWithCost: number
   /** Mes calendario evaluado (nunca "últimos 30 días"). */
   periodLabel: string
   periodStart: Date
@@ -1066,7 +1068,8 @@ function zonedMonthStartUtc(year: number, month: number, timeZone: string): Date
   return new Date(guess - (asUtc - guess))
 }
 
-function usageMonthBounds(timeZone: string, now: Date): { start: Date; end: Date; label: string } {
+/** Mes calendario de `now` en la zona de la clínica, con su etiqueta AAAA-MM. */
+export function usageMonthBounds(timeZone: string, now: Date): { start: Date; end: Date; label: string } {
   const head = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
@@ -1105,9 +1108,7 @@ export async function getSaasUsage30d(
       input: sql<number | null>`sum(${agentRunLedger.inputTokens})`,
       output: sql<number | null>`sum(${agentRunLedger.outputTokens})`,
       cached: sql<number | null>`sum(${agentRunLedger.cachedInputTokens})`,
-      cost: sql<number | null>`sum(${agentRunLedger.costMicros})`,
       withTokens: sql<number>`count(${agentRunLedger.inputTokens})`,
-      withCost: sql<number>`count(${agentRunLedger.costMicros})`,
     })
     .from(agentRunLedger)
     .where(
@@ -1123,16 +1124,13 @@ export async function getSaasUsage30d(
     return Number.isFinite(parsed) ? parsed : null
   }
   const runsWithTokens = Number(row?.withTokens ?? 0)
-  const runsWithCost = Number(row?.withCost ?? 0)
   return {
     agentRuns: Number(row?.runs ?? 0),
     llmCalls: Number(row?.calls ?? 0),
     inputTokens: runsWithTokens > 0 ? numberOrNull(row?.input) : null,
     outputTokens: runsWithTokens > 0 ? numberOrNull(row?.output) : null,
     cachedInputTokens: runsWithTokens > 0 ? numberOrNull(row?.cached) : null,
-    costMicros: runsWithCost > 0 ? numberOrNull(row?.cost) : null,
     runsWithTokens,
-    runsWithCost,
     periodLabel: bounds.label,
     periodStart: bounds.start,
     periodEnd: bounds.end,

@@ -10,7 +10,7 @@ import { convertToOpenAITool } from "@langchain/core/utils/function_calling"
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
-import { agentRunLedger } from "@odentia/db/schema/agent"
+import { agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { message } from "@odentia/db/schema/crm"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import {
@@ -339,4 +339,50 @@ it("los medios de pago activos de caja viajan en cada turno, en lo que comparte 
   const wallet = methods.find((method) => method.name === "Yape")
   await ownerDb.update(organizationPaymentMethod).set({ isActive: false }).where(eq(organizationPaymentMethod.id, wallet!.id))
   expect(await ask("tg:uso-pago-3", "¿Aceptan tarjeta?")).toContain("(lista completa; ningún otro): Efectivo, Tarjeta.")
+})
+
+it("con Claude, la parte fija va marcada para su caché y la corrida guarda su costo por proveedor", async () => {
+  await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { llm: "claude_5_5" }))
+  try {
+    // El proveedor informa lo nuevo, lo leído de la caché y lo escrito en ella.
+    const model = new RecordingModel(() =>
+      new AIMessage({
+        content: "",
+        tool_calls: [{ name: "send_reply", args: { text: "Hola, ¿en qué te ayudo?" }, id: "call-claude", type: "tool_call" }],
+        usage_metadata: {
+          input_tokens: 3_000,
+          output_tokens: 50,
+          total_tokens: 3_050,
+          input_token_details: { cache_read: 2_000, cache_creation: 400 },
+        },
+      }),
+    )
+    const inbound = await ingest("tg:uso-claude", "uso-claude-1", "Hola")
+    const result = await processAgentRun(
+      appDb,
+      { ...runtime, platform: { anthropic: { apiKey: "clave-sintetica" } }, createModel: async () => model },
+      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: ORG, conversationId: inbound.conversationId, messageId: inbound.messageId } },
+    )
+    expect(result).toBe("done")
+    const system = model.calls[0]?.[0]?.content
+    expect(Array.isArray(system)).toBe(true)
+    const blocks = system as Array<{ type: string; text: string; cache_control?: unknown }>
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral" })
+    expect(blocks[1]?.cache_control).toBeUndefined()
+    // Lo propio del turno (la hora) va después de la marca: no rompe la caché de lo fijo.
+    expect(blocks[0]?.text).not.toContain("Fecha y hora actual")
+    expect(blocks[1]?.text).toContain("Fecha y hora actual")
+    const [ledgerRow] = await withOrgContext(appDb, ORG, (tx) =>
+      tx.select().from(agentRunLedger).where(eq(agentRunLedger.conversationId, inbound.conversationId)))
+    // 600 nuevos a 0,10 + 2.000 leídos a 0,01 + 400 escritos a 0,125 + 50 de salida a 0,50 (USD por millón).
+    expect(ledgerRow).toMatchObject({ status: "ok", cachedInputTokens: 2_000, cacheWriteTokens: 400, costMicros: 155 })
+    const usage = await withOrgContext(appDb, ORG, (tx) =>
+      tx.select().from(aiUsage).where(eq(aiUsage.conversationId, inbound.conversationId)))
+    expect(usage).toEqual([
+      expect.objectContaining({ origin: "recepcion", provider: "anthropic", model: "claude-haiku-5-5", calls: 1, costMicros: 155 }),
+    ])
+  } finally {
+    await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { llm: "chatgpt_6" }))
+  }
 })

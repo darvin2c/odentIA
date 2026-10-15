@@ -1,4 +1,4 @@
-import { asAdminDecider, createAdminDecisionModel, type PlatformDecisions, type PlatformLlm } from "@odentia/agent"
+import { asAdminDecider, createAdminDecisionModel, meterAiUse, type PlatformDecisions, type PlatformLlm } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   ADMIN_MODEL_DOWN,
@@ -181,9 +181,11 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
     return runService(c, 200, async () => {
       let understood: AdminInterpretation
       try {
-        const model = await createAdminDecisionModel(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions }, orgId)
-        // Con el modelo de demostración responde el doble determinista de los servicios.
-        understood = await interpretAdminRequest(parsed.data.text, model ? asAdminDecider(model) : keywordAdminDecider())
+        understood = await meterAiUse(deps.db, orgId, "administrador", async () => {
+          const model = await createAdminDecisionModel(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions }, orgId)
+          // Con el modelo de demostración responde el doble determinista de los servicios.
+          return interpretAdminRequest(parsed.data.text, model ? asAdminDecider(model) : keywordAdminDecider())
+        })
       } catch {
         return { understood: false, key: null, draft: false, message: ADMIN_MODEL_DOWN, confirmDelete: false, model: null, usage: null, unavailable: true }
       }

@@ -78,6 +78,21 @@ it("normaliza texto con hilo y remitente mail:", () => {
   }
 })
 
+it("marca como automático lo que escribió una máquina; lo de una persona no", () => {
+  const withHeaders = (headers: Array<{ name: string; value: string }>) =>
+    fullMessage({ payload: { mimeType: "text/plain", headers, body: { data: Buffer.from("Hola", "utf8").toString("base64url") } } })
+  const from = { name: "From", value: "Paciente <paciente@example.com>" }
+  const automated = (headers: Array<{ name: string; value: string }>) => gmailMessageToEvents(withHeaders(headers), "clinica@example.com")[0]?.automated
+  // La persona sigue llegando como siempre.
+  expect(automated([from])).toBeUndefined()
+  expect(automated([from, { name: "Auto-Submitted", value: "no" }])).toBeUndefined()
+  // Respuesta automática, boletín o remitente que no lee respuestas: entra, pero marcado.
+  expect(automated([from, { name: "Auto-Submitted", value: "auto-replied" }])).toBe(true)
+  expect(automated([from, { name: "List-Unsubscribe", value: "<https://example.com/baja>" }])).toBe(true)
+  expect(automated([from, { name: "Precedence", value: "bulk" }])).toBe(true)
+  expect(automated([{ name: "From", value: "Banco <no-reply@banco.example>" }])).toBe(true)
+})
+
 it("omite los enviados por el propio buzón", () => {
   const self = fullMessage({
     labelIds: ["SENT"],

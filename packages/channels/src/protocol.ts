@@ -41,6 +41,32 @@ export interface NormalizedInbound {
   content: InboundContent
   /** ISO-8601 del instante de envío según el proveedor. */
   sentAt: string
+  /**
+   * Lo escribió una máquina (correo noreply, respuesta automática, boletín):
+   * entra a la bandeja, pero el agente no lo atiende (ADR 0030).
+   */
+  automated?: boolean
+}
+
+/** Remitentes que por convención no leen respuestas. */
+const MACHINE_SENDER = /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|postmaster|bounces?|notifications?)([+._-]|$)/i
+
+/**
+ * Correo que escribió una máquina y no una persona: remitente sin buzón de
+ * respuesta, respuesta automática (`Auto-Submitted` distinto de `no`, RFC
+ * 3834), lista o envío masivo (`List-Id` y `List-Unsubscribe`, RFC 2919 y
+ * 2369; `Precedence: bulk | list | junk`). Sin encabezados decide solo el
+ * remitente.
+ */
+export function isAutomatedEmail(input: { from: string; header?: (name: string) => string | null }): boolean {
+  const local = input.from.split("@")[0] ?? ""
+  if (MACHINE_SENDER.test(local)) return true
+  const header = input.header
+  if (!header) return false
+  const autoSubmitted = header("Auto-Submitted")?.trim().toLowerCase()
+  if (autoSubmitted && autoSubmitted !== "no") return true
+  if (header("List-Id") || header("List-Unsubscribe")) return true
+  return /^(bulk|list|junk)$/i.test(header("Precedence")?.trim() ?? "")
 }
 
 export interface NormalizedStatus {

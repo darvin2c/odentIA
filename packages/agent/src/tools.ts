@@ -226,6 +226,8 @@ export interface AgentToolCtx {
     inputTokens: number
     outputTokens: number
     cachedInputTokens: number
+    /** Entrada escrita en la caché del proveedor (Anthropic la cobra aparte). */
+    cacheWriteTokens: number
     calls: number
     reported: boolean
     cacheReported: boolean
@@ -250,6 +252,11 @@ export interface AgentToolCtx {
   lastChecks?: AnswerCheck[]
   /** Modelo que escribe en esta corrida, para la traza. */
   modelName?: string
+  /**
+   * Proveedor del modelo que escribe: con `anthropic` la parte fija del
+   * sistema viaja marcada para su caché; con `fake` no se anota uso.
+   */
+  modelProvider?: string
   /** Lo último que escribió el interlocutor: la pregunta que queda anotada si falta conocimiento. */
   lastInboundText?: string
   /**

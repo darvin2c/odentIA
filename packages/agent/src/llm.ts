@@ -47,6 +47,11 @@ interface LlmCatalogEntry {
   reasoningEffort?: string
   /** Tope de salida por llamada (Anthropic lo exige). */
   maxTokens?: number
+  /**
+   * Esfuerzo de razonamiento (Anthropic, `output_config.effort`). Haiku 5.5
+   * piensa por defecto con esfuerzo medio y lo pensado se cobra como salida.
+   */
+  effort?: "low" | "medium" | "high"
 }
 
 /**
@@ -58,8 +63,9 @@ interface LlmCatalogEntry {
 export const LLM_CATALOG: Record<AgentLlm, LlmCatalogEntry> = {
   // gpt-6-luna en chat/completions rechaza herramientas si el razonamiento no va en `none`.
   chatgpt_6: { provider: "openai", modelName: "gpt-6-luna", reasoningEffort: "none" },
-  // 2048 sobra para una respuesta de chat o una llamada a herramienta.
-  claude_5_5: { provider: "anthropic", modelName: "claude-haiku-5-5", maxTokens: 2048 },
+  // 2048 sobra para una respuesta de chat o una llamada a herramienta. Responder
+  // a un paciente o llamar a una herramienta no necesita pensar mucho: esfuerzo bajo.
+  claude_5_5: { provider: "anthropic", modelName: "claude-haiku-5-5", maxTokens: 2048, effort: "low" },
 }
 
 /** Variable de entorno con la clave de cada proveedor: el error la nombra. */
@@ -80,6 +86,7 @@ export interface LlmSpec {
   maxRetries: number
   reasoningEffort?: string
   maxTokens?: number
+  effort?: "low" | "medium" | "high"
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -116,6 +123,7 @@ export function resolveLlmSpec(cfg: { llm: AgentLlm }, platform: PlatformLlm): L
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
     ...(entry.maxTokens ? { maxTokens: entry.maxTokens } : {}),
+    ...(entry.effort ? { effort: entry.effort } : {}),
   }
 }
 
@@ -185,6 +193,7 @@ export async function createConfiguredChatModel(spec: LlmSpec) {
       apiKey: spec.apiKey,
       maxRetries: spec.maxRetries,
       maxTokens: spec.maxTokens ?? 2048,
+      ...(spec.effort ? { outputConfig: { effort: spec.effort } } : {}),
       // Sin URL propia, la pública: nunca la de ANTHROPIC_BASE_URL del proceso.
       anthropicApiUrl: spec.baseUrl ?? "https://api.anthropic.com",
       clientOptions: { timeout: spec.timeoutMs, fetch: noRedirectFetch },

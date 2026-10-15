@@ -4,7 +4,7 @@
 // JWT de Google); este slice usa polling durable con historyId como cursor.
 // Referencias: https://developers.google.com/workspace/gmail/api/guides/sync
 // y https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list
-import { splitColdSubject } from "./protocol.js"
+import { isAutomatedEmail, splitColdSubject } from "./protocol.js"
 import type {
   ChannelAdapter,
   ChannelAdapterDeps,
@@ -412,6 +412,7 @@ export function gmailMessageToEvents(
   if (!fromEmail || fromEmail === selfEmail.toLowerCase()) return []
   const threadId = `gmail-thread:${msg.threadId}`
   const sentAt = sentAtOf(msg)
+  const automated = isAutomatedEmail({ from: fromEmail, header: (name) => headerOf(msg, name) })
   const events: NormalizedInbound[] = []
   const body = extractBody(msg)
   if (body) {
@@ -454,7 +455,7 @@ export function gmailMessageToEvents(
       sentAt,
     })
   }
-  return events
+  return automated ? events.map((event) => ({ ...event, automated: true })) : events
 }
 
 /* ------------------------- Poll incremental ------------------------- */

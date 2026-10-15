@@ -280,7 +280,7 @@ it("una ráfaga la atiende la primera corrida y las demás no repiten la respues
 })
 
 function emptyUsage(): AgentToolCtx["usage"] {
-  return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, calls: 0, reported: false, cacheReported: false }
+  return { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, calls: 0, reported: false, cacheReported: false }
 }
 
 /** Modelo guionizado: decide cada respuesta a partir de los mensajes vistos. */

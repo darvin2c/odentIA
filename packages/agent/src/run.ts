@@ -32,6 +32,7 @@ import { createDecisionModel, type DecisionModel, type DecisionProvider, type Pl
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
 import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
+import { meterAiUse, takeAiUsage } from "./ai-usage.js"
 import { compileAgentGraph } from "./graph.js"
 import {
   createConfiguredChatModel,
@@ -200,6 +201,7 @@ function baseToolCtx(
       inputTokens: 0,
       outputTokens: 0,
       cachedInputTokens: 0,
+      cacheWriteTokens: 0,
       calls: 0,
       reported: false,
       cacheReported: false,
@@ -207,8 +209,14 @@ function baseToolCtx(
   }
 }
 
-async function ledger(db: Db, orgId: string, input: RecordRunInput): Promise<void> {
-  await withOrgContext(db, orgId, (tx) => recordAgentRun(tx, orgId, input)).catch(() => {})
+/**
+ * Fila del libro con lo gastado hasta ahora en la corrida (modelo que
+ * escribe, modelo de decisión, vectores): queda en el mismo registro y su
+ * suma es el costo de la fila. Lo que se gaste después se guarda al terminar.
+ */
+async function ledger(db: Db, orgId: string, input: Omit<RecordRunInput, "usage">): Promise<void> {
+  const usage = takeAiUsage()
+  await withOrgContext(db, orgId, (tx) => recordAgentRun(tx, orgId, { ...input, usage })).catch(() => {})
 }
 
 /**
@@ -222,6 +230,17 @@ async function ledger(db: Db, orgId: string, input: RecordRunInput): Promise<voi
  * equipo: nunca cuenta como correcta.
  */
 export async function processAgentRun(
+  db: Db,
+  runtime: AgentRuntime,
+  msg: QueueMessage<AgentRunJob>,
+): Promise<"done" | "retry"> {
+  const { orgId, conversationId } = msg.message
+  // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0030),
+  // también si falla o se reintenta.
+  return meterAiUse(db, orgId, "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+}
+
+async function attendAgentRun(
   db: Db,
   runtime: AgentRuntime,
   msg: QueueMessage<AgentRunJob>,
@@ -424,6 +443,7 @@ export async function processAgentRun(
     effectiveModel = spec.modelName
     toolCtx.treatment = cfg.treatment
     toolCtx.modelName = spec.modelName
+    toolCtx.modelProvider = spec.provider
     toolCtx.verifyReplies = cfg.replyCheckEnabled
     toolCtx.emojis = cfg.emojis
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
@@ -531,6 +551,7 @@ export async function processAgentRun(
       inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,
       outputTokens: toolCtx.usage.reported ? toolCtx.usage.outputTokens : null,
       cachedInputTokens: toolCtx.usage.cacheReported ? toolCtx.usage.cachedInputTokens : null,
+      cacheWriteTokens: toolCtx.usage.cacheReported ? toolCtx.usage.cacheWriteTokens : null,
       llmCalls: toolCtx.usage.calls,
       toolsUsed: toolCtx.toolsUsed,
     })
@@ -596,6 +617,7 @@ export async function processAgentRun(
         inputTokens: runUsage?.reported ? runUsage.inputTokens : null,
         outputTokens: runUsage?.reported ? runUsage.outputTokens : null,
         cachedInputTokens: runUsage?.cacheReported ? runUsage.cachedInputTokens : null,
+        cacheWriteTokens: runUsage?.cacheReported ? runUsage.cacheWriteTokens : null,
         llmCalls: runUsage?.calls ?? null,
         error: detail.slice(0, 500),
       })
@@ -717,6 +739,8 @@ export async function simulateAgentTurn(
   toolCtx.dryRun = true
   toolCtx.verifyReplies = verifyReplies
   toolCtx.emojis = emojis
+  toolCtx.modelName = modelName
+  toolCtx.modelProvider = spec.provider
   toolCtx.draftText = text.slice(0, 4000)
   const model = await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
@@ -795,6 +819,7 @@ export async function simulateAgentSandbox(
   toolCtx.verifyReplies = cfg.replyCheckEnabled
   toolCtx.emojis = cfg.emojis
   toolCtx.modelName = spec.modelName
+  toolCtx.modelProvider = spec.provider
   toolCtx.draftText = text.slice(0, 4000)
   if (deps.embedder) toolCtx.embedder = deps.embedder
   const state = structuredClone(input.state ?? EMPTY_SANDBOX_STATE)

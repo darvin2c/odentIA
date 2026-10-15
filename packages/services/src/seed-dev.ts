@@ -18,7 +18,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { agentSearchItem } from "@odentia/db/schema/agent"
+import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -353,6 +353,7 @@ async function wipeSeed(): Promise<void> {
     "automation_consent",
     "automation_rule",
     "agent_decision_log",
+    "ai_usage",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
@@ -2609,6 +2610,17 @@ await db.transaction(async (tx) => {
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })
+// Uso de IA del mes para la ficha de la clínica en la administración (ADR 0030).
+// Cifras de ejemplo con el costo que da la tabla de precios del agente; no
+// salen de ningún proveedor. Jev queda sin costo: no tiene precio cargado.
+await db.insert(aiUsage).values([
+  { organizationId: ORG_A, origin: "recepcion", provider: "anthropic", model: "claude-haiku-5-5", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
+  { organizationId: ORG_A, origin: "dictado", provider: "openai", model: "gpt-6-luna", calls: 14, inputTokens: 28_000, outputTokens: 4_200, costMicros: 4_900 },
+  { organizationId: ORG_A, origin: "probar", provider: "openai", model: "gpt-6-luna", calls: 9, inputTokens: 27_000, outputTokens: 900, costMicros: 3_150 },
+  { organizationId: ORG_A, origin: "transcripcion", provider: "transcripcion", model: "whisper-1", calls: 6, audioSeconds: 240, costMicros: 24_000 },
+  { organizationId: ORG_A, origin: "vectores", provider: "vectores", model: "text-embedding-3-small", calls: 3, inputTokens: 15_000, costMicros: 300 },
+  { organizationId: ORG_A, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: null },
+])
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

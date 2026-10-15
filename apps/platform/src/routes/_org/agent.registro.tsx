@@ -27,7 +27,6 @@ interface RunStats {
   totalLlmCalls: number | null
   runsWithLlmCalls: number
   conversationsWithLlmCalls: number
-  totalCostMicros: number | null
   topTools: Array<{ tool: string; uses: number }>
   byRoute: Array<{ path: string; runs: number; avgLlmCalls: number | null; avgInputTokens: number | null }>
 }
@@ -61,7 +60,6 @@ interface RunItem {
   outputTokens: number | null
   cachedInputTokens: number | null
   llmCalls: number | null
-  costMicros: number | null
   toolsUsed: string[]
   error: string | null
 }
@@ -302,9 +300,6 @@ function AgentSupervisionPage() {
         <KpiCard
           title="Tokens (entrada/salida)"
           value={stats?.totalInputTokens == null ? "—" : `${stats.totalInputTokens}/${stats.totalOutputTokens ?? 0}`}
-          description={
-            stats?.totalCostMicros != null ? `Costo acumulado $${(stats.totalCostMicros / 1_000_000).toFixed(2)}` : undefined
-          }
         />
         <div className="elevated rounded-xl border bg-card p-6">
           <div className="text-sm font-medium text-muted-foreground">Por estado</div>

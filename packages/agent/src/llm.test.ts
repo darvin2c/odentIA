@@ -1,7 +1,7 @@
 import { once } from "node:events"
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http"
 import { ChatAnthropic } from "@langchain/anthropic"
-import { HumanMessage, ToolMessage } from "@langchain/core/messages"
+import { HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
 import { tool } from "@langchain/core/tools"
 import { ChatOpenAI } from "@langchain/openai"
 import { AGENT_LLMS } from "@odentia/services"
@@ -188,10 +188,47 @@ it("Claude 5.5 crea ChatAnthropic y enlaza las herramientas igual, con su tope d
     for (const request of provider.requests) {
       expect(request.url).toBe("/v1/messages")
       expect(request.headers["x-api-key"]).toBe("clave-sintetica")
-      expect(request.body).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 2048 })
+      // Responder o llamar a una herramienta no necesita pensar mucho: lo pensado se cobra como salida.
+      expect(request.body).toMatchObject({ model: "claude-haiku-5-5", max_tokens: 2048, output_config: { effort: "low" } })
       expect(request.body).not.toHaveProperty("reasoning_effort")
       expect((request.body.tools as Array<{ name: string }>)[0]?.name).toBe("consultar_horario")
     }
+  } finally {
+    await provider.close()
+  }
+})
+
+it("Claude 5.5 recibe marcada para su caché la parte fija del sistema y devuelve lo leído y lo escrito en ella", async () => {
+  const provider = await fakeProvider((n, response) => {
+    json(response, 200, {
+      id: `msg_${n}`,
+      type: "message",
+      role: "assistant",
+      model: "claude-haiku-5-5",
+      content: [{ type: "text", text: "Hola" }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 600, cache_read_input_tokens: 2_000, cache_creation_input_tokens: 400, output_tokens: 50 },
+    })
+  })
+  try {
+    const spec = resolveLlmSpec({ llm: "claude_5_5" }, { anthropic: { apiKey: "clave-sintetica", baseUrl: provider.origin }, maxRetries: 0 })
+    const model = await createConfiguredChatModel(spec)
+    const reply = await model.invoke([
+      new SystemMessage({
+        content: [
+          { type: "text", text: "Lo de toda la clínica", cache_control: { type: "ephemeral" } },
+          { type: "text", text: "Lo de este hilo" },
+        ],
+      }),
+      new HumanMessage("Hola"),
+    ])
+    expect(provider.requests[0]?.body.system).toEqual([
+      { type: "text", text: "Lo de toda la clínica", cache_control: { type: "ephemeral" } },
+      { type: "text", text: "Lo de este hilo" },
+    ])
+    // LangChain suma en input_tokens lo nuevo, lo leído y lo escrito; el costo los separa.
+    expect(reply.usage_metadata).toMatchObject({ input_tokens: 3_000, output_tokens: 50, input_token_details: { cache_read: 2_000, cache_creation: 400 } })
   } finally {
     await provider.close()
   }

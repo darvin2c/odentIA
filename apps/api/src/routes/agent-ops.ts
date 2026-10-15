@@ -1,6 +1,7 @@
 import {
   describeProviderProblem,
   isProviderConfigError,
+  meterAiUse,
   type PlatformDecisions,
   type PlatformLlm,
   simulateAgentSandbox,
@@ -8,6 +9,7 @@ import {
 } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
+  assertAgentTestBudget,
   confirmProposalByContact,
   createHandoff,
   operationBodySchema,
@@ -344,7 +346,8 @@ const sandboxInput = z.object({
 
   /**
    * «Probar»: un turno de una conversación de prueba, sin hilo ni persona
-   * real. No envía ni escribe; solo cuenta que la clínica probó a su agente.
+   * real. No envía ni escribe; cuenta que la clínica probó a su agente y lo
+   * que gastó, dentro del tope de pruebas (ADR 0030).
    */
   app.post("/sandbox", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -353,10 +356,13 @@ const sandboxInput = z.object({
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       return await runService(c, 200, async () => {
-        const result = await simulateAgentSandbox(
-          deps.db,
-          { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions, embedder: deps.embedder },
-          { orgId, ...parsed.data },
+        await withOrgContext(deps.db, orgId, (tx) => assertAgentTestBudget(tx, orgId))
+        const result = await meterAiUse(deps.db, orgId, "probar", () =>
+          simulateAgentSandbox(
+            deps.db,
+            { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions, embedder: deps.embedder },
+            { orgId, ...parsed.data },
+          ),
         )
         await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
         return result
@@ -376,13 +382,21 @@ const sandboxInput = z.object({
     const parsed = simulateInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
-      return await runService(c, 200, () =>
-        simulateAgentTurn(
+      return await runService(c, 200, async () => {
+        await withOrgContext(deps.db, orgId, (tx) => assertAgentTestBudget(tx, orgId))
+        return meterAiUse(
           deps.db,
-          { secretsKey: deps.secretsKey, platform: deps.llm },
-          { orgId, conversationId: parsed.data.conversationId, text: parsed.data.text },
-        ),
-      )
+          orgId,
+          "simulacion",
+          () =>
+            simulateAgentTurn(
+              deps.db,
+              { secretsKey: deps.secretsKey, platform: deps.llm },
+              { orgId, conversationId: parsed.data.conversationId, text: parsed.data.text },
+            ),
+          parsed.data.conversationId,
+        )
+      })
     } catch (error) {
       // Proveedor inutilizable (configuración, credencial, cuota): es un
       // estado de la organización, no un error del servidor, y nunca se

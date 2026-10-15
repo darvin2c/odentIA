@@ -4,7 +4,7 @@
 // el deltaLink como cursor.
 // Referencias: https://learn.microsoft.com/en-us/graph/delta-query-messages
 // y https://learn.microsoft.com/en-us/graph/api/message-delta
-import { splitColdSubject } from "./protocol.js"
+import { isAutomatedEmail, splitColdSubject } from "./protocol.js"
 import type {
   ChannelAdapter,
   ChannelAdapterDeps,
@@ -366,6 +366,8 @@ export function graphMessageToEvents(
   if (!fromEmail || fromEmail === selfEmail.toLowerCase()) return []
   const threadId = threadIdOf(msg)
   const sentAt = msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString()
+  // La consulta delta no pide encabezados: decide el remitente.
+  const automated = isAutomatedEmail({ from: fromEmail })
   const events: NormalizedInbound[] = []
   const body = extractBody(msg)
   if (body) {
@@ -379,7 +381,7 @@ export function graphMessageToEvents(
       sentAt,
     })
   }
-  return events
+  return automated ? events.map((event) => ({ ...event, automated: true })) : events
 }
 
 function attachmentEvents(
@@ -519,7 +521,8 @@ export async function pollMicrosoftMailbox(
         sentAt,
       })
     }
-    events.push(...mine)
+    // La consulta delta no pide encabezados: decide el remitente.
+    events.push(...(isAutomatedEmail({ from: fromEmail }) ? mine.map((event) => ({ ...event, automated: true })) : mine))
   }
   return { events, nextCursor }
 }
