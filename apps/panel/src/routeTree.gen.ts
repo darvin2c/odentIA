@@ -15,10 +15,13 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as TwoFactorRouteImport } from './routes/two-factor'
 import { Route as VerifyEmailSentRouteImport } from './routes/verify-email-sent'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
+import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation/$invitationId'
+import { Route as AppBillingOrganizationIdRouteImport } from './routes/_app/billing.$organizationId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -49,6 +52,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TwoFactorRoute = TwoFactorRouteImport.update({
+  id: '/two-factor',
+  path: '/two-factor',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const VerifyEmailSentRoute = VerifyEmailSentRouteImport.update({
   id: '/verify-email-sent',
   path: '/verify-email-sent',
@@ -64,11 +72,22 @@ const AppProfileRoute = AppProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSupportRoute = AppSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AppRoute,
+} as any)
 const AcceptInvitationInvitationIdRoute =
   AcceptInvitationInvitationIdRouteImport.update({
     id: '/accept-invitation/$invitationId',
     path: '/accept-invitation/$invitationId',
     getParentRoute: () => rootRouteImport,
+  } as any)
+const AppBillingOrganizationIdRoute =
+  AppBillingOrganizationIdRouteImport.update({
+    id: '/billing/$organizationId',
+    path: '/billing/$organizationId',
+    getParentRoute: () => AppRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
@@ -78,9 +97,12 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/two-factor': typeof TwoFactorRoute
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/profile': typeof AppProfileRoute
+  '/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
+  '/billing/$organizationId': typeof AppBillingOrganizationIdRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
@@ -88,10 +110,13 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/two-factor': typeof TwoFactorRoute
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/profile': typeof AppProfileRoute
+  '/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/': typeof AppIndexRoute
+  '/billing/$organizationId': typeof AppBillingOrganizationIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -101,10 +126,13 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/register': typeof RegisterRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/two-factor': typeof TwoFactorRoute
   '/verify-email-sent': typeof VerifyEmailSentRoute
   '/_app/profile': typeof AppProfileRoute
+  '/_app/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/billing/$organizationId': typeof AppBillingOrganizationIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -115,9 +143,12 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/register'
     | '/reset-password'
+    | '/two-factor'
     | '/verify-email-sent'
     | '/profile'
+    | '/support'
     | '/accept-invitation/$invitationId'
+    | '/billing/$organizationId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -125,10 +156,13 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/register'
     | '/reset-password'
+    | '/two-factor'
     | '/verify-email-sent'
     | '/profile'
+    | '/support'
     | '/accept-invitation/$invitationId'
     | '/'
+    | '/billing/$organizationId'
   id:
     | '__root__'
     | '/_app'
@@ -137,10 +171,13 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/register'
     | '/reset-password'
+    | '/two-factor'
     | '/verify-email-sent'
     | '/_app/profile'
+    | '/_app/support'
     | '/accept-invitation/$invitationId'
     | '/_app/'
+    | '/_app/billing/$organizationId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -150,6 +187,7 @@ export interface RootRouteChildren {
   OnboardingRoute: typeof OnboardingRoute
   RegisterRoute: typeof RegisterRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  TwoFactorRoute: typeof TwoFactorRoute
   VerifyEmailSentRoute: typeof VerifyEmailSentRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
 }
@@ -198,6 +236,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/two-factor': {
+      id: '/two-factor'
+      path: '/two-factor'
+      fullPath: '/two-factor'
+      preLoaderRoute: typeof TwoFactorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/verify-email-sent': {
       id: '/verify-email-sent'
       path: '/verify-email-sent'
@@ -219,6 +264,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProfileRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/support': {
+      id: '/_app/support'
+      path: '/support'
+      fullPath: '/support'
+      preLoaderRoute: typeof AppSupportRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/accept-invitation/$invitationId': {
       id: '/accept-invitation/$invitationId'
       path: '/accept-invitation/$invitationId'
@@ -226,17 +278,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AcceptInvitationInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/billing/$organizationId': {
+      id: '/_app/billing/$organizationId'
+      path: '/billing/$organizationId'
+      fullPath: '/billing/$organizationId'
+      preLoaderRoute: typeof AppBillingOrganizationIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppProfileRoute: typeof AppProfileRoute
+  AppSupportRoute: typeof AppSupportRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppBillingOrganizationIdRoute: typeof AppBillingOrganizationIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppProfileRoute: AppProfileRoute,
+  AppSupportRoute: AppSupportRoute,
   AppIndexRoute: AppIndexRoute,
+  AppBillingOrganizationIdRoute: AppBillingOrganizationIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -248,6 +311,7 @@ const rootRouteChildren: RootRouteChildren = {
   OnboardingRoute: OnboardingRoute,
   RegisterRoute: RegisterRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  TwoFactorRoute: TwoFactorRoute,
   VerifyEmailSentRoute: VerifyEmailSentRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
 }

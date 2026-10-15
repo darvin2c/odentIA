@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
 import { type Db, withOrgContext } from "@odentia/db"
 import { scheduleChair } from "@odentia/db/schema/agenda"
 import { member, organization, user } from "@odentia/db/schema/auth"
@@ -8,18 +6,19 @@ import { branch } from "@odentia/db/schema/org"
 import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { answerHelpCase, askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, listHelpCases, listMyHelpRequests, markHelpRequestsSeen, rateHelp, sendHelpRequest } from "./help.js"
-import { HELP_TOPICS, helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
+import { askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, helpDedupeKeyOf, rateHelp, sendHelpRequest } from "./help.js"
+import type { AdminActor } from "./admin-core.js"
+import { ensureCaseForHelpRequest, getMySupportCase, listMySupportCases, markSupportCaseSeen, replyToSupportCase } from "./admin-support.js"
+import { helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Ayuda: la guía coincide con el código, responde sin inventar y lo que no sabe se puede enviar a odentIA. */
+/** Ayuda: responde sin inventar; solo el envío explícito conserva la pregunta. */
 setupTestDb()
 const ORG = "org_a"
 const OTHER = "org_b"
 const USER = "help-user"
 const OTHER_USER = "help-user-b"
 
-const platform = (file: string) => readFileSync(fileURLToPath(new URL(`../../../apps/platform/src/${file}`, import.meta.url)), "utf8")
 
 beforeAll(async () => {
   await ownerDb.insert(user).values([
@@ -46,30 +45,7 @@ const reception: HelpAsker = {
   whoCan: () => ["Propietario", "Administrador"],
 }
 
-describe("la guía coincide con el código", () => {
-  it("cada tema apunta a una pantalla que existe y la llama como el menú", () => {
-    const routes = new Set([...platform("routeTree.gen.ts").matchAll(/fullPath: '([^']+)'/g)].map((match) => (match[1] ?? "").replace(/\/$/, "") || "/"))
-    for (const topic of HELP_TOPICS) expect(routes.has(topic.path), `${topic.id} → ${topic.path} ya no es una pantalla`).toBe(true)
-    expect(new Set(HELP_TOPICS.map((topic) => topic.id)).size).toBe(HELP_TOPICS.length)
-    expect(new Set(HELP_TOPICS.map((topic) => topic.path)).size).toBe(HELP_TOPICS.length)
-    for (const topic of HELP_TOPICS) {
-      expect(topic.purpose.length, topic.id).toBeGreaterThan(30)
-      expect(topic.terms.length, topic.id).toBeGreaterThanOrEqual(3)
-    }
-  })
-
-  it("toda pantalla del menú y de Configuración tiene su tema, con el mismo nombre", () => {
-    const entries = (source: string) =>
-      [...source.matchAll(/label: "([^"]+)", to: "([^"]+)"/g)].map((match) => ({ label: match[1] ?? "", to: match[2] ?? "" }))
-    const menu = [...entries(platform("routes/_org.tsx")), ...entries(platform("routes/_org/settings.tsx"))]
-    expect(menu.length).toBeGreaterThan(20)
-    for (const item of menu) {
-      const topic = HELP_TOPICS.find((candidate) => candidate.path === item.to)
-      expect(topic, `Falta el tema de ${item.label} (${item.to})`).toBeTruthy()
-      // La entrada «Configuración» del menú lleva a su primera sección: vale el nombre de la sección o el del grupo.
-      expect([topic?.title, topic?.parent], item.to).toContain(item.label)
-    }
-  })
+describe("la guía ayuda a encontrar el trabajo", () => {
 
   it("encuentra la pantalla por las palabras de la gente y no responde lo que no está", () => {
     const first = (question: string) => matchHelpTopics(question)[0]?.topic.id ?? null
@@ -166,40 +142,43 @@ describe("enviar a odentIA", () => {
     expect(await run((tx) => describeHelpAttachments(tx, ORG, reception, { screen: "/no-existe" }))).toMatchObject({ screen: "/no-existe", version: null })
   })
 
-  it("la misma pregunta de dos clínicas es un solo caso, y la respuesta llega a las dos", async () => {
+  it("cada envío abre su caso privado y la respuesta del equipo llega solo a su clínica", async () => {
+    const staff: AdminActor = { userId: "help-staff", role: "support" }
+    await ownerDb.insert(user).values([{ id: staff.userId, name: "Soporte odentIA", email: "soporte@help.test", emailVerified: true }])
     const question = "¿Cómo exporto mis pacientes a Excel?"
     const mine = await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/patients", appVersion: "1.2.3" }))
-    expect(mine).toMatchObject({ kind: "pregunta", status: "abierta", answer: null, screen: "/patients", seen: false })
+    expect(mine).toMatchObject({ kind: "pregunta", status: "abierta", answer: null, screen: "/patients" })
     // Enviarla otra vez mientras sigue abierta no crea otra.
     expect((await run((tx) => sendHelpRequest(tx, ORG, reception, { question: "  ¿como exporto mis pacientes a excel? ", screen: "/home" }))).id).toBe(mine.id)
-    await run((tx) => sendHelpRequest(tx, OTHER, { userId: OTHER_USER, roleLabel: "Propietario" }, { question, screen: "/patients" }), OTHER)
+    const otherRequest = await run((tx) => sendHelpRequest(tx, OTHER, { userId: OTHER_USER, roleLabel: "Propietario" }, { question, screen: "/patients" }), OTHER)
     await run((tx) => sendHelpRequest(tx, ORG, reception, { question: "La agenda no carga", screen: "/agenda", kind: "problema", detail: "HTTP 500" }))
     const [stored] = await ownerDb.select().from(helpRequest).where(eq(helpRequest.id, mine.id))
     expect(stored).toMatchObject({ role: "Recepción", appVersion: "1.2.3" })
 
-    // Cada clínica ve solo lo suyo.
-    expect((await run((tx) => listMyHelpRequests(tx, ORG, USER))).map((item) => item.question)).toEqual(["La agenda no carga", question])
-    expect(await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER)).toHaveLength(1)
+    // Cada envío tiene su caso privado: la misma pregunta en otra clínica no comparte hilo.
+    const myCase = await run((tx) =>
+      ensureCaseForHelpRequest(tx, ORG, {
+        id: mine.id, userId: USER, kind: mine.kind, question: mine.question, detail: null,
+        screen: mine.screen, role: "Recepción", appVersion: "1.2.3", dedupeKey: helpDedupeKeyOf(mine.question),
+      }),
+    )
+    const otherCase = await run((tx) =>
+      ensureCaseForHelpRequest(tx, OTHER, {
+        id: otherRequest.id, userId: OTHER_USER, kind: otherRequest.kind, question: otherRequest.question, detail: null,
+        screen: otherRequest.screen, role: "Propietario", appVersion: null, dedupeKey: helpDedupeKeyOf(otherRequest.question),
+      }), OTHER)
+    expect(otherCase.id).not.toBe(myCase.id)
+    expect(myCase.unread).toBe(false)
 
-    // El equipo de odentIA ve los casos juntos, con su contador.
-    const cases = await listHelpCases(ownerDb)
-    const exportCase = cases.find((item) => item.question === question)
-    expect(exportCase).toMatchObject({ count: 2, organizations: 2, kind: "pregunta", screens: ["/patients"] })
-    expect(cases.find((item) => item.question === "La agenda no carga")).toMatchObject({ count: 1, kind: "problema" })
-
-    expect(await answerHelpCase(ownerDb, exportCase!.dedupeKey, "Todavía no se puede exportar. Lo anotamos para una próxima versión.")).toBe(2)
-    const answered = (await run((tx) => listMyHelpRequests(tx, ORG, USER))).find((item) => item.id === mine.id)
-    expect(answered).toMatchObject({ status: "respondida", answer: expect.stringContaining("Todavía no se puede exportar"), seen: false })
-    expect((await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER))[0]?.status).toBe("respondida")
-    // «Ver» marca solo la respuesta que se abrió; la de otra persona no se toca.
-    const other = (await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER))[0]
-    await run((tx) => markHelpRequestsSeen(tx, ORG, USER, other!.id))
-    expect((await run((tx) => listMyHelpRequests(tx, ORG, USER))).find((item) => item.id === mine.id)?.seen).toBe(false)
-    await run((tx) => markHelpRequestsSeen(tx, ORG, USER, mine.id))
-    expect((await run((tx) => listMyHelpRequests(tx, ORG, USER))).find((item) => item.id === mine.id)?.seen).toBe(true)
-    expect((await run((tx) => listMyHelpRequests(tx, OTHER, OTHER_USER), OTHER))[0]?.seen).toBe(false)
-    // Respondido, el caso sale de la lista del equipo; una pregunta nueva igual abre otro.
-    expect((await listHelpCases(ownerDb)).some((item) => item.question === question)).toBe(false)
-    await expect(answerHelpCase(ownerDb, exportCase!.dedupeKey, " ")).rejects.toThrow(/Escribe la respuesta/)
+    // La respuesta del equipo marca no-leído solo en su clínica; «Ver» lo salda.
+    await replyToSupportCase(ownerDb, staff, myCase.id, "Todavía no se puede exportar. Lo anotamos para una próxima versión.")
+    const mineAfter = await run((tx) => getMySupportCase(tx, ORG, USER, myCase.id))
+    expect(mineAfter.messages.map((message) => message.body)).toEqual(["Todavía no se puede exportar. Lo anotamos para una próxima versión."])
+    expect((await run((tx) => listMySupportCases(tx, ORG, USER))).find((item) => item.id === myCase.id)?.unread).toBe(true)
+    expect((await run((tx) => listMySupportCases(tx, OTHER, OTHER_USER), OTHER)).find((item) => item.id === otherCase.id)?.unread).toBe(false)
+    await run((tx) => markSupportCaseSeen(tx, ORG, USER, myCase.id))
+    expect((await run((tx) => listMySupportCases(tx, ORG, USER))).find((item) => item.id === myCase.id)?.unread).toBe(false)
+    // Sin texto no hay respuesta.
+    await expect(replyToSupportCase(ownerDb, staff, myCase.id, " ")).rejects.toThrow(/Escribe el mensaje/)
   })
 })

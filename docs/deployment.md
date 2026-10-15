@@ -16,9 +16,9 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Cambiarlo por una imagen stock sin esas extensiones no es una sustitución válida.
 - `migrate` termina después de aplicar las migraciones; detenido con código cero
   es su estado normal. API y worker dependen de su finalización.
-- API, panel y platform publican únicamente en loopback. Los dominios se asignan
-  al servicio correspondiente en OpenShip; el dominio raíz queda reservado para
-  marketing y platform atiende los hosts de las organizaciones.
+- API, admin, panel y platform publican únicamente en loopback. `admin.<dominio>`
+  apunta a admin (host 3012, puerto interno 3000); `app.` a panel, `api.` a API,
+  y los hosts de organizaciones a platform. El dominio raíz queda para marketing.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 
@@ -42,7 +42,7 @@ forma parte del stack: fuera de OpenShip es necesario un proxy HTTPS propio.
 En OpenShip, las variables comunes viven en el entorno **production del proyecto**.
 No copiar `.env.example` a los entornos de cada servicio ni mantener copias de los
 secretos. Los overrides por servicio tienen precedencia y pueden eclipsar cambios
-del proyecto. Panel y platform solo necesitan el override declarado `PORT=3000`;
+del proyecto. Admin, panel y platform necesitan el override declarado `PORT=3000`;
 la API usa `PORT=3001`.
 
 Para Compose manual, la misma fuente es `infra/prod/.env`, excluido de Git y del
@@ -53,6 +53,12 @@ un procedimiento explícito; no regenerarlos para corregir un deploy.
 requiere reconstruir las webs. Las variables de runtime requieren **Apply/refresh**,
 que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
 
+`ADMIN_URL` es el origen HTTPS exacto de administración y forma parte de la
+frontera de autorización de sus peticiones. Añadirlo a `TRUSTED_ORIGINS`, publicar
+su DNS y enrutarlo al servicio `admin` antes de habilitar personal. Aplicar las
+migraciones antes de API/worker; no hay fallback de seguridad para tablas
+administrativas ausentes. El bootstrap nominal y TOTP se describen en
+`development.md`.
 ### Modelo del agente
 
 La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta
@@ -146,8 +152,8 @@ protección de `main` debe exigir únicamente `check`. Pasos de `up`:
    `pr-<número>.<OPENSHIP_PREVIEW_DOMAIN>`. Los secretos (PostgreSQL, Better Auth,
    `SECRETS_KEY`, MinIO) se generan una vez por entorno y no se rotan después.
 4. Despliega el commit del PR con `openship deploy --watch`.
-5. Expone `app.` (panel, 3000, primario), `api.` (3001), `storage.` (MinIO, 9000)
-   y `*.` (platform, 3000). El dominio se crea al exponer el servicio. Publica
+5. Expone `app.` (panel, 3000, primario), `admin.` (admin, 3000), `api.` (3001),
+   `storage.` (MinIO, 9000) y `*.` (platform, 3000). El dominio nace al exponer el servicio. Publica
    los registros con el proveedor DNS de OpenShip y espera al DNS autoritativo
    antes de verificar: el comodín usa DNS-01 y el resto HTTP-01.
 6. Comenta la URL en el PR, actualizando el mismo comentario en cada push.
@@ -162,8 +168,8 @@ marca como fallidos los que no llegaron a desplegarse porque otro falló antes;
 esos checks no los crea el repositorio y no indican un fallo de código.
 
 Los PR desde forks no reciben secretos y no generan preview. Cada preview es un
-stack completo (PostgreSQL, MinIO, Mailpit, API, worker, panel, platform, unos
-4 GB de límite de memoria): los PR abiertos compiten con producción en el VPS.
+stack completo (PostgreSQL, MinIO, Mailpit, API, worker, admin, panel y platform):
+los PR abiertos compiten con producción por memoria y recursos del VPS.
 
 Configuración en GitHub:
 

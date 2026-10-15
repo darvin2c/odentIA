@@ -4,41 +4,42 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { ArrowRight, CircleHelp } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
 import { mutationErrorMessage } from "../lib/query-error"
+import { casesEnvelope, SupportCasesSection } from "./support-cases"
 
-interface HelpAnswer {
-  topicId: string
-  where: string
-  text: string
-  path: string | null
-  restriction: string | null
-}
+const helpAnswer = z.object({
+  topicId: z.string(),
+  where: z.string(),
+  text: z.string(),
+  path: z.string().nullable(),
+  restriction: z.string().nullable(),
+})
 
-interface HelpReply {
-  askId: string
-  kind: "guia" | "estado" | "nada"
-  answers: HelpAnswer[]
-  blockers: Array<{ text: string; where: string | null; path: string | null }>
-  basedOn: string
-}
+const helpReply = z.object({
+  askId: z.string(),
+  kind: z.enum(["guia", "estado", "nada"]),
+  answers: z.array(helpAnswer),
+  blockers: z.array(z.object({ text: z.string(), where: z.string().nullable(), path: z.string().nullable() })),
+  basedOn: z.string(),
+})
+type HelpReply = z.infer<typeof helpReply>
+const askEnvelope = z.object({ data: helpReply })
 
-interface HelpRequestItem {
-  id: string
-  kind: "pregunta" | "problema"
-  question: string
-  status: "abierta" | "respondida"
-  answer: string | null
-  seen: boolean
-}
+type SupportKind = "pregunta" | "problema"
 
 /** Lo que un envío a odentIA lleva sin que la persona lo escriba, con sus valores. */
-interface HelpAttachments {
-  screen: string
-  role: string
-  clinic: string | null
-  version: string | null
-}
+const helpAttachments = z.object({
+  screen: z.string(),
+  role: z.string(),
+  clinic: z.string().nullable(),
+  version: z.string().nullable(),
+})
+type HelpAttachments = z.infer<typeof helpAttachments>
+const screenEnvelope = z.object({
+  data: z.object({ title: z.string().nullable(), suggestions: z.array(z.string()), attached: helpAttachments.optional() }),
+})
 
 interface Exchange {
   question: string
@@ -53,14 +54,14 @@ interface Exchange {
 
 /** Mensaje directo a odentIA desde el pie del panel: una consulta a soporte o un problema. */
 interface DirectMessage {
-  kind: HelpRequestItem["kind"]
+  kind: SupportKind
   text: string
   sent: boolean
 }
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary underline underline-offset-4 sm:min-h-8"
 const ANSWER = "flex flex-col gap-2 rounded-2xl rounded-bl-md border border-primary/20 bg-primary-soft px-3.5 py-3 text-sm text-primary-soft-foreground"
-const DIRECT: Record<HelpRequestItem["kind"], { title: string; label: string }> = {
+const DIRECT: Record<SupportKind, { title: string; label: string }> = {
   pregunta: { title: "Escribir a soporte de odentIA", label: "Tu mensaje para odentIA" },
   problema: { title: "Reportar un problema", label: "Qué pasó" },
 }
@@ -156,32 +157,31 @@ export function HelpButton() {
   const [draft, setDraft] = useState("")
   const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [direct, setDirect] = useState<DirectMessage | null>(null)
-  /** Respuestas de odentIA abiertas con «Ver»: siguen a la vista aunque ya cuenten como leídas. */
-  const [viewed, setViewed] = useState<string[]>([])
 
   const screen = useQuery({
     queryKey: ["help-screen", pathname],
     queryFn: () =>
-      apiFetch<{ data: { title: string | null; suggestions: string[]; attached?: HelpAttachments } }>(`/api/help/screen?path=${encodeURIComponent(pathname)}`),
+      apiFetch(`/api/help/screen?path=${encodeURIComponent(pathname)}`).then((body: unknown) =>
+        screenEnvelope.parse(body).data,
+      ),
     enabled: open,
     staleTime: Number.POSITIVE_INFINITY,
   })
-  const requests = useQuery({
-    queryKey: ["help-requests"],
-    queryFn: () => apiFetch<{ data: HelpRequestItem[] }>("/api/help/requests"),
-    staleTime: 60_000,
+  // Casos como única fuente de respuestas: el insigne cuenta no leídos del equipo.
+  const supportCases = useQuery({
+    queryKey: ["support-cases"],
+    queryFn: () => apiFetch("/api/help/cases").then((body: unknown) => casesEnvelope.parse(body).data),
+    staleTime: 30_000,
     retry: false,
   })
-  const answered = (requests.data?.data ?? []).filter((item) => item.status === "respondida")
-  const unseen = answered.filter((item) => !item.seen)
-  const shown = answered.filter((item) => !item.seen || viewed.includes(item.id))
+  const unseen = (supportCases.data ?? []).filter((item) => item.unread)
 
   const ask = useMutation({
     retry: false,
     mutationFn: (question: string) =>
-      apiFetch<{ data: HelpReply }>("/api/help/ask", { method: "POST", body: JSON.stringify({ question, screen: pathname }) }).then((response) => ({
+      apiFetch("/api/help/ask", { method: "POST", body: JSON.stringify({ question, screen: pathname }) }).then((body: unknown) => ({
         question,
-        reply: response.data,
+        reply: askEnvelope.parse(body).data,
       })),
     onSuccess: (exchange) => {
       setExchanges((current) => [...current, exchange])
@@ -197,18 +197,13 @@ export function HelpButton() {
   // Un solo envío para lo que no supo, para soporte y para un problema: siempre un caso para el equipo de odentIA.
   const send = useMutation({
     retry: false,
-    mutationFn: (input: { index: number | null; text: string; kind: HelpRequestItem["kind"] }) =>
+    mutationFn: (input: { index: number | null; text: string; kind: SupportKind }) =>
       apiFetch("/api/help/requests", { method: "POST", body: JSON.stringify({ question: input.text, screen: pathname, kind: input.kind }) }),
     onSuccess: (_data, input) => {
       if (input.index === null) setDirect((current) => (current ? { ...current, sent: true } : current))
       else setExchanges((current) => current.map((item, index) => (index === input.index ? { ...item, sent: "enviada" } : item)))
-      void queryClient.invalidateQueries({ queryKey: ["help-requests"] })
+      void queryClient.invalidateQueries({ queryKey: ["support-cases"] })
     },
-  })
-  const markSeen = useMutation({
-    retry: false,
-    mutationFn: (id: string) => apiFetch("/api/help/requests/seen", { method: "POST", body: JSON.stringify({ id }) }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["help-requests"] }),
   })
   // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de pantalla, un mensaje a medio escribir diría otra pantalla de la que se adjunta.
   useEffect(() => {
@@ -221,13 +216,7 @@ export function HelpButton() {
     if (question.length >= 3 && !ask.isPending) ask.mutate(question)
   }
 
-  function view(item: HelpRequestItem) {
-    const showing = viewed.includes(item.id)
-    setViewed(showing ? viewed.filter((id) => id !== item.id) : [...viewed, item.id])
-    if (!showing && !item.seen) markSeen.mutate(item.id)
-  }
-
-  function openDirect(kind: HelpRequestItem["kind"]) {
+  function openDirect(kind: SupportKind) {
     send.reset()
     setDirect({ kind, text: "", sent: false })
   }
@@ -238,8 +227,8 @@ export function HelpButton() {
       : ask.error
         ? "No pude responder ahora. Vuelve a intentarlo."
         : null
-  const title = screen.data?.data.title
-  const attached = screen.data?.data.attached
+  const title = screen.data?.title
+  const attached = screen.data?.attached
   const sendError = (index: number | null) => (send.isError && send.variables?.index === index ? mutationErrorMessage(send.error) : null)
   const sendPending = (index: number | null) => send.isPending && send.variables?.index === index
 
@@ -271,42 +260,6 @@ export function HelpButton() {
           isSubmitting={ask.isPending || send.isPending}
         >
           <div className="flex flex-col gap-5">
-            {shown.length > 0 ? (
-              <section aria-label="Respuestas de odentIA">
-                <ul className="flex flex-col gap-2">
-                  {shown.map((item) => {
-                    const showing = viewed.includes(item.id)
-                    return (
-                      <li key={item.id} className="flex flex-col gap-2 rounded-xl bg-success-soft px-3.5 py-3 text-sm">
-                        <div className="flex items-center gap-2.5">
-                          <div className="flex min-w-0 flex-1 flex-col">
-                            <span className="font-bold">odentIA respondió tu pregunta</span>
-                            <span className="break-words">«{item.question}»</span>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="min-h-11 shrink-0 sm:min-h-9"
-                            aria-expanded={showing}
-                            aria-controls={`ayuda-respuesta-${item.id}`}
-                            onClick={() => view(item)}
-                          >
-                            {showing ? "Ocultar" : "Ver"}
-                          </Button>
-                        </div>
-                        {showing ? (
-                          <p id={`ayuda-respuesta-${item.id}`} className="whitespace-pre-wrap rounded-lg bg-card px-3 py-2">
-                            {item.answer}
-                          </p>
-                        ) : null}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </section>
-            ) : null}
-
             {exchanges.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Pregúntame dónde se configura algo, dónde se ve o si se puede hacer con el sistema. También por qué algo no te deja.
@@ -377,7 +330,7 @@ export function HelpButton() {
                         </div>
                         {exchange.sent === "enviada" ? (
                           <p role="status" className="text-sm font-semibold">
-                            Enviado a odentIA. Cuando respondan, lo verás aquí mismo.
+                            Se abrió tu caso con soporte. Cuando respondan, lo verás en «Tus casos con soporte», aquí mismo.
                           </p>
                         ) : exchange.sent === "no" ? null : (
                           <WhatIsSent
@@ -424,10 +377,11 @@ export function HelpButton() {
               </ol>
             )}
 
-            {(screen.data?.data.suggestions ?? []).length > 0 ? (
+            <SupportCasesSection />
+            {(screen.data?.suggestions ?? []).length > 0 ? (
               <section aria-label="En esta pantalla suelen preguntar" className="flex flex-col gap-1.5 border-t pt-3">
                 <h3 className="text-[13px] font-bold text-muted-foreground">En esta pantalla suelen preguntar</h3>
-                {(screen.data?.data.suggestions ?? []).map((suggestion) => (
+                {(screen.data?.suggestions ?? []).map((suggestion) => (
                   <Button
                     key={suggestion}
                     type="button"
@@ -487,7 +441,7 @@ export function HelpButton() {
 
               {direct?.sent ? (
                 <p role="status" className="text-sm font-semibold">
-                  Enviado a odentIA. Cuando respondan, lo verás aquí mismo.
+                  Se abrió tu caso con soporte. Cuando respondan, lo verás en «Tus casos con soporte», aquí mismo.
                 </p>
               ) : direct ? (
                 <section aria-label={DIRECT[direct.kind].title} className="flex flex-col gap-2">

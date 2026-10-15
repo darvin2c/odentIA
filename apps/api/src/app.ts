@@ -3,7 +3,8 @@ import type { Auth } from "@odentia/auth"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { CONVERSATION_STATE_ACTIONS, initialOrgRegion, type MailboxEnv, type SearchEmbedder, regionPresetForCountry, setBranchActive, type Storage, updateOrgRegion } from "@odentia/services"
+import type { Mailer } from "@odentia/mail"
+import { assertSaasBranchAvailable, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -13,6 +14,13 @@ import postgres from "postgres"
 import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
+import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
+import { createAdminCoreRoute, createAccountAdminAccessRoute, createAdminFactorBoundary } from "./routes/admin-core.js"
+import { createAccountRoute } from "./routes/account.js"
+import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
+import { createAccountBillingRoute, createSaasBillingRoute, createSaasPreAuthGuard, requireSaasAccess } from "./routes/saas-billing.js"
+import { createAdminSupportRoute } from "./routes/admin-support.js"
+import { createAccountSupportRoute } from "./routes/account-support.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
@@ -60,8 +68,8 @@ export interface AppDeps {
   auth: Auth
   db: Db
   /**
-   * Rol owner (bypasea RLS): USO LIMITADO a rutas webhook — leer la conexión
-   * por id sin org, ledger de dedupe y encolado. Nunca datos de tenant.
+   * Rol owner: webhooks y operaciones internas explícitamente autorizadas.
+   * Las rutas clínicas siguen usando db + withOrgContext, nunca esta conexión.
    */
   ownerDb: Db
   /** Clave AES-256-GCM para configs de conexión (SECRETS_KEY). */
@@ -74,6 +82,8 @@ export interface AppDeps {
   trustedOrigins: string[]
   cookieDomain: string
   webURL: string
+  adminURL: string
+  mailer: Mailer
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
@@ -191,7 +201,21 @@ export function createApp(deps: AppDeps) {
     }),
   )
 
+  // Una página de una clínica no puede usar la cookie compartida para operar
+  // el backoffice. SSR solo reenvía cookies para lecturas sin Origin.
+  const adminOrigin = new URL(deps.adminURL).origin
+  app.use("/api/admin/*", async (c, next) => {
+    const origin = c.req.header("origin")
+    const readOnly = c.req.method === "GET" || c.req.method === "HEAD"
+    if ((origin && origin !== adminOrigin) || (!readOnly && origin !== adminOrigin)) {
+      return c.json(errorBody(c, "ADMIN_ORIGIN_REQUIRED", "Abre esta operación desde la administración de odentIA"), 403)
+    }
+    c.header("Cache-Control", "no-store")
+    await next()
+  })
+
   app.onError((err, c) => {
+    if (err instanceof ServiceError) return c.json(errorBody(c, err.code, err.message), err.status)
     console.error(err)
     return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
   })
@@ -203,7 +227,7 @@ export function createApp(deps: AppDeps) {
   })
 
   // Subdominios reservados: nunca son slugs de tenant (colisionarían con app./api./www.).
-  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, www: true }
+  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, storage: true }
   app.use("/api/auth/organization/create", async (c, next) => {
     if (c.req.method !== "POST") return next()
     const body = (await c.req.raw
@@ -217,8 +241,30 @@ export function createApp(deps: AppDeps) {
     return next()
   })
 
+  app.use("/api/auth/organization/*", createSaasPreAuthGuard(deps))
+  app.use("/api/auth/*", createAdminFactorBoundary(deps))
+
   // Better Auth: montado ANTES de los guards.
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+
+  app.use("/api/admin/*", requireAdminContext(deps))
+  app.route("/api/admin/access", createAdminCoreRoute(deps))
+  app.route("/api/admin/organizations", createAdminOrganizationsRoute({
+    ...deps,
+    getBillingSummary: getOrganizationBillingSummary,
+    startTrial: startSaasTrial,
+  }))
+  app.route("/api/admin/billing", createSaasBillingRoute(deps))
+  app.route("/api/admin/support", createAdminSupportRoute(deps))
+  app.get("/api/admin/overview", (c) => runService(c, 200, () =>
+    deps.ownerDb.transaction((tx) => getBackofficeOverview(tx, adminContextOf(c))),
+  ))
+  app.all("/api/admin/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso administrativo no encontrado"), 404))
+  app.route("/api/account/admin-access", createAccountAdminAccessRoute(deps))
+  app.route("/api/account/billing", createAccountBillingRoute(deps))
+  app.route("/api/account/support", createAccountSupportRoute(deps))
+  app.route("/api/account", createAccountRoute(deps))
+  app.all("/api/account/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso de cuenta no encontrado"), 404))
 
   app.route(
     "/api/public/patient-registration",
@@ -344,6 +390,10 @@ export function createApp(deps: AppDeps) {
     if (isWebhook(c)) return next()
     return requireOrgContext(deps)(c, next)
   })
+  guarded.use("*", async (c, next) => {
+    if (isWebhook(c) || c.req.method === "GET" || c.req.method === "HEAD" || c.req.path.startsWith("/api/help/")) return next()
+    return requireSaasAccess(db, "operar")(c, next)
+  })
 
   function validationError(c: Context, issues: z.ZodIssue[]) {
     return c.json(errorBody(c, "VALIDATION", issues[0]?.message ?? "Datos inválidos"), 400)
@@ -439,6 +489,7 @@ export function createApp(deps: AppDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
 
     const row = await withOrgContext(db, orgId, async (tx) => {
+      await assertSaasBranchAvailable(tx, orgId)
       const [created] = await tx
         .insert(branch)
         .values({ organizationId: orgId, ...parsed.data })
@@ -504,7 +555,12 @@ export function createApp(deps: AppDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reactivar sedes"), 403)
     }
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), true)),
+      withOrgContext(db, orgId, async (tx) => {
+        const [current] = await tx.select({ isActive: branch.isActive }).from(branch)
+          .where(and(eq(branch.id, c.req.param("id")), eq(branch.organizationId, orgId))).for("update")
+        if (current && !current.isActive) await assertSaasBranchAvailable(tx, orgId)
+        return setBranchActive(tx, orgId, userId, c.req.param("id"), true)
+      }),
     )
   })
 

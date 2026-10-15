@@ -52,6 +52,7 @@ import {
   syncVisitFollowUps,
 } from "./automation.js"
 import type { TemplateDeps } from "./channel-templates.js"
+import { shouldSkipSaasOrg } from "./saas-billing.js"
 import { type ConversationCareDeps, tickConversationCare } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
@@ -1349,6 +1350,9 @@ export async function tickAutomations(
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
   const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, avisadas: 0 }
   for (const { orgId } of orgRows) {
+    // Restricción/pausa comercial: no se programa, coordina ni entrega nada;
+    // lo encolado se conserva para la reanudación. La ingesta no pasa por aquí.
+    if (await shouldSkipSaasOrg(ownerDb, orgId)) continue
     // Ninguna conversación queda abierta (ADR 0024): es de Recepción, no del
     // Administrador, así que corre aunque este esté apagado.
     const care = await withOrgContext(appDb, orgId, (tx) =>

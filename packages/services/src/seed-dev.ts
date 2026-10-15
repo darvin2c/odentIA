@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
+import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentSearchItem } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
@@ -133,6 +134,10 @@ import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
+import { seedAdminCore } from "./seed-admin-core.js"
+import { seedAdminOrganizations } from "./seed-admin-organizations.js"
+import { seedAdminSupport } from "./seed-admin-support.js"
+import { seedSaasBillingDemo } from "./seed-saas-billing.js"
 import { createService, updateService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask } from "./tasks.js"
@@ -324,6 +329,13 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
+    "support_access_audit",
+    "support_access_grant",
+    "support_attachment",
+    "support_message",
+    "support_case",
+    "saas_notice",
+    "saas_usage_daily",
     "portal_challenge",
     "portal_passkey",
     "portal_verification",
@@ -619,10 +631,13 @@ async function countWhere(table: string, orgId: string): Promise<number> {
 await wipeSeed()
 
 // --- Identidad fija ---
-await db.insert(organization).values([
-  { id: ORG_A, name: "Dental Smile", slug: "dental-smile", createdAt: new Date() },
-  { id: ORG_B, name: "Clínica Norte", slug: "clinica-norte", createdAt: new Date() },
-])
+await db.transaction(async (tx) => {
+  await tx.insert(organization).values([
+    { id: ORG_A, name: "Dental Smile", slug: "dental-smile", createdAt: new Date() },
+    { id: ORG_B, name: "Clínica Norte", slug: "clinica-norte", createdAt: new Date() },
+  ])
+  await tx.update(saasSubscription).set({ isDemo: true }).where(inArray(saasSubscription.organizationId, SEED_ORGS))
+})
 await db.insert(user).values([
   {
     id: ANA_ID,
@@ -2588,6 +2603,12 @@ await db.transaction((tx) =>
     patientIds: [...patientIdByName.values()],
   }),
 )
+await db.transaction(async (tx) => {
+  const staff = await seedAdminCore(tx)
+  await seedSaasBillingDemo(tx, storage)
+  await seedAdminOrganizations(tx)
+  await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
+})
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

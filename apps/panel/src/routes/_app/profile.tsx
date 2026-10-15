@@ -30,8 +30,10 @@ import { createFileRoute, getRouteApi, Link, useNavigate, useSearch } from "@tan
 import { Monitor, Smartphone, XIcon } from "lucide-react"
 import { useRef, useState } from "react"
 import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { API_URL, authClient } from "../../lib/auth-client"
-import { parseUserAgent, relativeTime } from "../../lib/user-agent"
+import { tenantUrl } from "../../lib/host"
+ import { parseUserAgent, relativeTime } from "../../lib/user-agent"
 
 export const Route = createFileRoute("/_app/profile")({
   validateSearch: (search: Record<string, unknown>): { edit?: "profile" | "password" | "email" } =>
@@ -311,6 +313,9 @@ function ProfilePage() {
         </div>
       </div>
       <SessionsCard />
+      <MyClinicsCard />
+      <MyInvitationsCard />
+      <CloseAccountCard />
       <EditProfileDrawer
         key={`${user.firstName}|${user.lastName}`}
         open={edit === "profile"}
@@ -720,5 +725,248 @@ function ChangeEmailDrawer({
         )}
       </form.Field>
     </FormDrawer>
+  )
+}
+
+const accountOrgsSchema = z.object({
+  data: z.array(
+    z.object({
+      organizationId: z.string(),
+      organizationName: z.string(),
+      slug: z.string(),
+      role: z.string(),
+      roleLabel: z.string(),
+      canLeave: z.boolean(),
+      provisioning: z.object({ hasProfile: z.boolean(), hasBranch: z.boolean() }),
+    }),
+  ),
+})
+
+const accountInvitesSchema = z.object({
+  data: z.array(
+    z.object({
+      id: z.string(),
+      organizationId: z.string(),
+      organizationName: z.string(),
+      slug: z.string(),
+      roleLabel: z.string(),
+    }),
+  ),
+})
+
+function MyClinicsCard() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [leaveTarget, setLeaveTarget] = useState<{ id: string; name: string } | null>(null)
+  const [leaving, setLeaving] = useState(false)
+  const orgsQuery = useQuery({
+    queryKey: ["account-organizations"],
+    queryFn: async () => accountOrgsSchema.parse(await apiFetch<unknown>("/api/account/organizations")),
+  })
+
+  async function handleLeave() {
+    if (!leaveTarget) return
+    setLeaving(true)
+    try {
+      await apiFetch("/api/account/organizations/" + encodeURIComponent(leaveTarget.id) + "/leave", {
+        method: "POST",
+      })
+      await queryClient.invalidateQueries({ queryKey: ["account-organizations"] })
+      toast.success("Saliste de la clínica")
+      setLeaveTarget(null)
+    } catch {
+      toast.error(common.errors.generic)
+    } finally {
+      setLeaving(false)
+    }
+  }
+
+  const orgs = orgsQuery.data?.data ?? []
+  return (
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Mis clínicas</div>
+        <p className="text-sm text-muted-foreground">Clínicas a las que perteneces y tu rol en cada una.</p>
+      </div>
+      {orgsQuery.isPending ? (
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-12 w-full" />
+        </div>
+      ) : orgsQuery.isError ? (
+        <ErrorState
+          error={orgsQuery.error}
+          onRetry={() => {
+            void orgsQuery.refetch()
+          }}
+        />
+      ) : orgs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Aún no perteneces a ninguna clínica.</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {orgs.map((org) => {
+            const incomplete = !org.provisioning.hasProfile || !org.provisioning.hasBranch
+            const canFinish = (org.role === "owner" || org.role === "admin") && incomplete
+            return (
+              <li
+                key={org.organizationId}
+                className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{org.organizationName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {org.roleLabel}
+                    {incomplete ? " · Alta incompleta" : ""}
+                  </p>
+                </div>
+                <span className="ml-auto flex gap-2">
+                  {canFinish ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() =>
+                        void navigate({
+                          to: "/onboarding",
+                          search: { continue: org.organizationId },
+                        })
+                      }
+                    >
+                      Terminar alta
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => window.location.assign(tenantUrl(org.slug, "/home"))}
+                    >
+                      Abrir
+                    </Button>
+                  )}
+                  {org.canLeave ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setLeaveTarget({ id: org.organizationId, name: org.organizationName })
+                      }
+                    >
+                      Salir
+                    </Button>
+                  ) : org.role === "owner" ? (
+                    <span className="self-center text-xs text-muted-foreground">
+                      Única propietaria
+                    </span>
+                  ) : null}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <ConfirmDialog
+        open={leaveTarget !== null}
+        title="Salir de la clínica"
+        description={`Dejarás de tener acceso a ${leaveTarget?.name ?? ""}. Podrán volverte a invitar.`}
+        confirmLabel="Salir"
+        variant="destructive"
+        pending={leaving}
+        onConfirm={() => void handleLeave()}
+        onClose={() => setLeaveTarget(null)}
+      />
+    </div>
+  )
+}
+
+function MyInvitationsCard() {
+  const navigate = useNavigate()
+  const invitesQuery = useQuery({
+    queryKey: ["account-invitations"],
+    queryFn: async () => accountInvitesSchema.parse(await apiFetch<unknown>("/api/account/invitations/pending")),
+  })
+  const invites = invitesQuery.data?.data ?? []
+  if (invitesQuery.isPending || invitesQuery.isError || invites.length === 0) return null
+  return (
+    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Invitaciones pendientes</div>
+        <p className="text-sm text-muted-foreground">Clínicas que te invitaron y aún no aceptas.</p>
+      </div>
+      <ul className="flex flex-col gap-3">
+        {invites.map((invite) => (
+          <li
+            key={invite.id}
+            className="flex items-center gap-3 rounded-lg border p-3 text-sm"
+          >
+            <div className="min-w-0">
+              <p className="truncate font-medium">{invite.organizationName}</p>
+              <p className="text-xs text-muted-foreground">{invite.roleLabel}</p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="ml-auto"
+              onClick={() =>
+                void navigate({
+                  to: "/accept-invitation/$invitationId",
+                  params: { invitationId: invite.id },
+                })
+              }
+            >
+              Aceptar
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function CloseAccountCard() {
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+
+  async function handleClose() {
+    setPending(true)
+    try {
+      await apiFetch("/api/account/close", {
+        method: "POST",
+        body: JSON.stringify({ confirm: true }),
+      })
+      await authClient.signOut()
+      await navigate({ to: "/login" })
+    } catch {
+      toast.error(common.errors.generic)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6 elevated rounded-xl border border-destructive/30 bg-card p-6">
+      <div className="flex flex-col gap-1.5">
+        <div className="font-heading text-base font-medium">Cerrar cuenta</div>
+        <p className="text-sm text-muted-foreground">
+          Sales de tus clínicas y se bloquea tu acceso. Tu trabajo previo conserva tu autoría.
+          Si eres la única propietaria de alguna clínica, nombra antes a otra persona.
+        </p>
+      </div>
+      <div>
+        <Button type="button" variant="destructive" onClick={() => setOpen(true)}>
+          Cerrar mi cuenta
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={open}
+        title="Cerrar tu cuenta"
+        description="Perderás el acceso a tus clínicas. Esta acción bloquea tu cuenta de inmediato."
+        confirmLabel="Cerrar cuenta"
+        variant="destructive"
+        pending={pending}
+        onConfirm={() => void handleClose()}
+        onClose={() => setOpen(false)}
+      />
+    </div>
   )
 }

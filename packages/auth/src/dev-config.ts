@@ -7,11 +7,14 @@
  *     --output packages/db/src/schema/auth.ts --yes
  *
  * Debe listar las tablas: user, session, account, verification,
- * organization, member, invitation.
+ * organization, member, invitation, twoFactor. OJO: regenerar SOBREESCRIBE
+ * auth.ts (incluye tablas hand-written y la columna two_factor_enabled de
+ * la 0071): difuminar a mano, nunca pisar destructivo.
  */
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { organization } from "better-auth/plugins"
+import { twoFactor } from "better-auth/plugins"
 
 export const auth = betterAuth({
   appName: "Odentia32",
@@ -19,5 +22,5 @@ export const auth = betterAuth({
   // El adapter nunca se usa: el CLI solo lee opciones/plugins.
   database: drizzleAdapter({} as never, { provider: "pg" }),
   emailAndPassword: { enabled: true, requireEmailVerification: true },
-  plugins: [organization()],
+  plugins: [twoFactor({ allowPasswordless: true }), organization()],
 })

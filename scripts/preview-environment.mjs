@@ -87,6 +87,7 @@ function configureVariables(project, base) {
     POSTGRES_USER: "dentalagent",
     BETTER_AUTH_URL: `https://api.${base}`,
     WEB_URL: `https://app.${base}`,
+    ADMIN_URL: `https://admin.${base}`,
     COOKIE_DOMAIN: base,
     TRUSTED_ORIGINS: `https://app.${base},https://api.${base},https://*.${base}`,
     SMTP_HOST: "mailpit",
@@ -132,6 +133,7 @@ function setVariables(project, variables, secret) {
 async function ensureDomains(project, base) {
   const wanted = [
     { hostname: `app.${base}`, service: "panel", port: 3000, primary: true },
+    { hostname: `admin.${base}`, service: "admin", port: 3000 },
     { hostname: `api.${base}`, service: "api", port: 3001 },
     { hostname: `storage.${base}`, service: "minio", port: 9000 },
     // Las clínicas se sirven por subdominio: el comodín usa DNS-01.

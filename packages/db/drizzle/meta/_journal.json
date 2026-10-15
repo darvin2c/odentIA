@@ -568,6 +568,34 @@
       "when": 1792043503093,
       "tag": "0080_conversaciones_abrir_y_cerrar",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1792071843222,
+      "tag": "0081_personal_admin_seguridad",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1792071843223,
+      "tag": "0082_saas_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1792071843224,
+      "tag": "0083_casos_de_soporte",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1792071843225,
+      "tag": "0084_organizaciones_y_cuentas",
+      "breakpoints": true
     }
   ]
 }

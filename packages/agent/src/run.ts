@@ -15,6 +15,7 @@ import {
   getLesson,
   lessonImpact,
   ServiceError,
+  isSaasSendBlocked,
   DEFAULT_AGENT_LLM,
   getOrgLocale,
   nextAgentOpening,
@@ -226,6 +227,21 @@ export async function processAgentRun(
   msg: QueueMessage<AgentRunJob>,
 ): Promise<"done" | "retry"> {
   const { orgId, conversationId } = msg.message
+  // Restricción/pausa comercial: ni herramientas ni mensajes. La ingesta ya
+  // quedó guardada por su propio camino; la corrida derivada se descarta con
+  // traza (al reanudar, los mensajes nuevos generan corridas nuevas).
+  if (await isSaasSendBlocked(db, orgId).catch(() => false)) {
+    await withOrgContext(db, orgId, (tx) =>
+      tx.insert(auditEvent).values({
+        organizationId: orgId,
+        action: "agent.updated",
+        entity: "conversation",
+        entityId: conversationId,
+        metadata: { op: "run-skipped", reason: "saas-restricted" },
+      }),
+    ).catch(() => {})
+    return "done"
+  }
   const clock = runtime.now ?? (() => new Date())
   // Mensaje que la corrida atiende; con una ráfaga pasa a ser el último leído,
   // y el resto de la ráfaga se anota al terminar para que sus corridas no repitan.

@@ -29,7 +29,7 @@ import {
   zonesForCountry,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
@@ -39,6 +39,9 @@ import { BASE_DOMAIN, tenantUrl } from "../lib/host"
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: () => requireVerifiedSession(),
+  validateSearch: (search: Record<string, unknown>) => ({
+    continue: typeof search.continue === "string" ? search.continue : undefined,
+  }),
   component: OnboardingPage,
 })
 
@@ -62,7 +65,8 @@ const STEP_FIELDS = [
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
-const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, www: true }
+// Subdominios reservados (misma lista que el servidor).
+const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, storage: true }
 
 const personaSchema = z.object({
   firstName: z.string().min(1, "Ingresa tu nombre"),
@@ -90,6 +94,10 @@ const onboardingSchema = personaSchema.extend({
   branchTimezone: z.string().min(1, "Elige la zona horaria"),
 })
 
+const onboardingSubmitSchema = onboardingSchema.extend({
+  orgName: z.string(),
+  slug: z.string(),
+})
 /** Schema por campo; valida al salir de su paso y en el submit final. */
 const FIELD_SCHEMAS = {
   firstName: personaSchema.shape.firstName,
@@ -142,12 +150,25 @@ function splitName(full: string): { firstName: string; lastName: string } {
 
 function OnboardingPage() {
   const sessionUser = authClient.useSession().data?.user
+  const navigate = useNavigate()
+  const { continue: continueOrgId } = useSearch({ from: "/onboarding" })
+  // Alta asistida: la clínica ya existe (invitación aceptada); se completa su
+  // perfil y sede sin crear otra. El servidor solo deja a owner/admin
+  // (settings.write); el resto espera al responsable.
+  const skipOrg = typeof continueOrgId === "string" && continueOrgId.length > 0
   // Quien se registró por email ya dio nombre y apellidos: el paso "Tu perfil"
   // solo aparece cuando la sesión no los tiene (p. ej. cuenta vía Google).
   const hasStoredName = Boolean(sessionUser?.firstName || sessionUser?.lastName)
   const offset = hasStoredName ? 1 : 0
   const [step, setStep] = useState(0)
   const [visited, setVisited] = useState<number[]>([0])
+  // La organización activa apunta a la clínica invitada para que el perfil y
+  // la sede se guarden en ella (el contexto la deduce de la sesión).
+  useEffect(() => {
+    if (skipOrg && continueOrgId) {
+      authClient.organization.setActive({ organizationId: continueOrgId }).catch(() => {})
+    }
+  }, [skipOrg, continueOrgId])
   // El tipo sale del esquema: `branchPhone` es `string | null` y `countryCode`
   // es un ISO de 2 letras, no el literal del valor inicial.
   const initialValues: z.infer<typeof onboardingSchema> = {
@@ -169,13 +190,13 @@ function OnboardingPage() {
   }
   const form = useForm({
     defaultValues: initialValues,
-    validators: { onSubmit: onboardingSchema },
+    validators: { onSubmit: onboardingSubmitSchema },
     onSubmitInvalid: () => {
       // Si algún paso previo quedó inválido, lleva al usuario al primero con errores.
       const invalidStep = STEP_FIELDS.findIndex((fields) =>
         fields.some((field) => (form.getFieldMeta(field)?.errors.length ?? 0) > 0),
       )
-      if (invalidStep !== -1 && invalidStep !== step) goTo(invalidStep)
+      if (invalidStep !== -1 && invalidStep !== step) goTo(skipOrg && invalidStep === 1 ? 2 : invalidStep)
     },
     onSubmit: async ({ value }) => {
       const { error: nameError } = await authClient.updateUser({
@@ -187,14 +208,21 @@ function OnboardingPage() {
         toast.error("No pudimos guardar tu nombre.")
         return
       }
-      const { error: orgError } = await authClient.organization.create({
-        name: value.orgName,
-        slug: value.slug,
-      })
-      if (orgError) {
-        goTo(1)
-        toast.error(orgError.message ?? "No se pudo crear la organización (¿slug en uso?).")
-        return
+      let slug = value.slug
+      if (!skipOrg) {
+        const { error: orgError } = await authClient.organization.create({
+          name: value.orgName,
+          slug: value.slug,
+        })
+        if (orgError) {
+          goTo(1)
+          toast.error(orgError.message ?? "No se pudo crear la organización (¿slug en uso?).")
+          return
+        }
+      } else if (continueOrgId) {
+        await authClient.organization.setActive({ organizationId: continueOrgId }).catch(() => {})
+        const { data: orgs } = await authClient.organization.list()
+        slug = orgs?.find((org) => org.id === continueOrgId)?.slug ?? ""
       }
       try {
         await apiFetch("/api/org-profile", {
@@ -220,9 +248,40 @@ function OnboardingPage() {
         toast.error(cause instanceof Error ? cause.message : "Error al guardar los datos.")
         return
       }
-      window.location.assign(tenantUrl(value.slug, "/home"))
+      if (skipOrg) {
+        // La clínica ya existía: el launcher decide a dónde seguir.
+        await navigate({ to: "/" })
+        return
+      }
+      window.location.assign(tenantUrl(slug, "/home"))
     },
   })
+  // Alta reanudada: precarga lo que el alta asistida ya dejó (país, moneda,
+  // razón social) para no repetirlo.
+  useEffect(() => {
+    if (!skipOrg) return
+    let cancelled = false
+    apiFetch<unknown>("/api/org-profile")
+      .then((raw) => {
+        const parsed = z
+          .object({
+            data: z
+              .object({ legalName: z.string(), countryCode: z.string(), currency: z.string() })
+              .nullable(),
+          })
+          .safeParse(raw)
+        const profile = parsed.success ? parsed.data.data : null
+        if (cancelled || !profile) return
+        if (!form.getFieldValue("legalName")) form.setFieldValue("legalName", profile.legalName)
+        if (profile.countryCode) form.setFieldValue("countryCode", profile.countryCode)
+        if (profile.currency) form.setFieldValue("currency", profile.currency)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipOrg])
 
   // El país elegido alimenta la máscara del teléfono y las zonas sugeridas.
   const country = useStore(form.store, (state) => state.values.countryCode)
@@ -261,7 +320,7 @@ function OnboardingPage() {
       if (lastName) form.setFieldValue("lastName", lastName)
     }
     if ((sessionUser.firstName || sessionUser.lastName) && step === 0 && !visited.includes(1)) {
-      goTo(1)
+      goTo(skipOrg ? 2 : 1)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionUser])
@@ -271,10 +330,11 @@ function OnboardingPage() {
     setVisited((prev) => (prev.includes(index) ? prev : [...prev, index]))
   }
 
-  /** Validador de campo activo solo desde su paso en adelante. */
+  /** Validador de campo activo solo desde su paso en adelante (nunca org en reanudada). */
   function stepValidator(key: keyof typeof FIELD_SCHEMAS) {
     return {
       onSubmit: ({ value }: { value: string }) => {
+        if (skipOrg && (key === "orgName" || key === "slug")) return undefined
         if (step < FIELD_STEP[key]) return undefined
         const parsed = FIELD_SCHEMAS[key].safeParse(value)
         return parsed.success ? undefined : (parsed.error.issues[0]?.message ?? undefined)
@@ -288,23 +348,30 @@ function OnboardingPage() {
       STEP_FIELDS[step].map((field) => Promise.resolve(form.validateField(field, "submit"))),
     )
     if (results.some((errors) => errors.length > 0)) return
-    goTo(step + 1)
+    goTo(step + 1 === 1 && skipOrg ? 2 : step + 1)
   }
 
-  const visibleSteps = STEPS.slice(offset)
+  /** Pasos visibles: en reanudada no se crea la organización; con nombre
+   * guardado se salta el perfil. Todo índice visual sale de aquí. */
+  const shownIndexes = STEPS.map((_, index) => index)
+    .filter((index) => !(skipOrg && index === 1))
+    .slice(offset)
+  const visibleSteps = shownIndexes.map((index) => STEPS[index])
+  const shownTopics = shownIndexes.map((index) => STEP_TOPICS[index])
+  const currentPosition = shownIndexes.indexOf(step)
 
   return (
     <main>
       <PageShell maxWidth="md" className="py-10">
         <PageHeader
-          title="Configura tu clínica"
-          subtitle={`Paso ${step - offset + 1} de ${visibleSteps.length}: ${STEP_TOPICS[step]}`}
+          title={skipOrg ? "Termina el alta de tu clínica" : "Configura tu clínica"}
+          subtitle={`Paso ${currentPosition + 1} de ${visibleSteps.length}: ${shownTopics[currentPosition] ?? ""}`}
         />
         <WizardSteps
           steps={visibleSteps}
-          current={step - offset}
-          visited={visited.map((v) => v - offset).filter((v) => v >= 0)}
-          onGo={(index) => goTo(index + offset)}
+          current={currentPosition}
+          visited={visited.map((v) => shownIndexes.indexOf(v)).filter((v) => v >= 0)}
+          onGo={(index) => goTo(shownIndexes[index] ?? 0)}
           className="mt-6"
         />
         <form
@@ -359,7 +426,7 @@ function OnboardingPage() {
               </form.Field>
             </div>
 
-            <div className={step === 1 ? "flex flex-col gap-4" : "hidden"}>
+            <div className={step === 1 && !skipOrg ? "flex flex-col gap-4" : "hidden"}>
               <form.Field name="orgName" validators={stepValidator("orgName")}>
                 {(field) => (
                   <Field>
@@ -573,8 +640,12 @@ function OnboardingPage() {
             </div>
 
             <div className="flex justify-between">
-              {step > offset ? (
-                <Button type="button" variant="outline" onClick={() => goTo(step - 1)}>
+              {currentPosition > 0 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => goTo(shownIndexes[currentPosition - 1] ?? 0)}
+                >
                   Atrás
                 </Button>
               ) : (
@@ -583,7 +654,11 @@ function OnboardingPage() {
               <form.Subscribe selector={(state) => state.isSubmitting}>
                 {(isSubmitting) => (
                   <SubmitButton type="submit" pending={isSubmitting}>
-                    {step === STEPS.length - 1 ? "Crear organización" : "Continuar"}
+                    {step === STEPS.length - 1
+                      ? skipOrg
+                        ? "Terminar alta"
+                        : "Crear organización"
+                      : "Continuar"}
                   </SubmitButton>
                 )}
               </form.Subscribe>

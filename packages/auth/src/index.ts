@@ -8,9 +8,12 @@ import {
   verifyEmailTemplate,
 } from "@odentia/mail"
 import { betterAuth } from "better-auth"
+import { APIError } from "better-auth/api"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { organization } from "better-auth/plugins"
 import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access"
+import { twoFactor } from "better-auth/plugins"
+import { sql } from "drizzle-orm"
 
 export interface CreateAuthOptions {
   db: Db
@@ -24,6 +27,8 @@ export interface CreateAuthOptions {
   googleClientId: string
   /** Client secret de Google OAuth; vacío si no hay OAuth configurado. */
   googleClientSecret: string
+  /** Conexión owner: denial de sesiones con bloqueo global activo. */
+  ownerDb: Db
 }
 
 function isChangeEmailToken(token: string): boolean {
@@ -47,6 +52,7 @@ export function createAuth({
   trustedOrigins,
   googleClientId,
   googleClientSecret,
+  ownerDb,
 }: CreateAuthOptions) {
   return betterAuth({
     appName: "Odentia32",
@@ -93,9 +99,35 @@ export function createAuth({
       crossSubDomainCookies: { enabled: true, domain: cookieDomain },
     },
     trustedOrigins,
+    // Denial de sesiones para cuentas con bloqueo global (tabla user_global_block).
+    // Sin fallback fail-open: la frontera siempre rechaza closed/blocked.
+    databaseHooks: {
+      session: {
+        create: {
+          before: async (created) => {
+            // Despliegue exige migraciones antes del API: sin tolerancias.
+            // Un error de infra propaga (no suprime el denial).
+            const rows = await ownerDb.execute(
+              sql`select 1 from "user_global_block" where "user_id" = ${created.userId} and "active" and ("expires_at" is null or "expires_at" > now()) limit 1`,
+            )
+            if (Array.isArray(rows) && rows.length > 0) {
+              throw APIError.from("FORBIDDEN", { code: "ACCOUNT_BLOCKED", message: "Cuenta bloqueada" })
+            }
+            return { data: created }
+          },
+        },
+      },
+    },
     plugins: [
+      // Segundo factor TOTP del personal admin (estándar Better Auth: sin
+      // cripto propia; secreto + códigos de respaldo cifrados en `two_factor`).
+      // Aditivo: el panel no cambia salvo que alguien lo active. Solo TOTP;
+      // sin OTP por correo/SMS (sin otpOptions el método `otp` queda inútil).
+      // allowPasswordless: las cuentas solo-OAuth (Google) enrolan con sesión
+      // fresca verificada en /api/admin/access (regla propia); con credencial
+      // siempre exige contraseña. Solo lo enrolan staff (única UI).
+      twoFactor({ allowPasswordless: true }),
       organization({
-        // Roles operativos: existen en `member.role` para que la matriz de
         // `permissions.ts` decida por dominio. Sin gestión de miembros ni
         // invitaciones (igual que `member`): solo owner/admin administran,
         // BetterAuth impide la escalada propia y el último owner persiste.

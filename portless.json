@@ -3,6 +3,7 @@
   "apps": {
     "apps/platform": { "name": "odentia" },
     "apps/panel": { "name": "app.odentia" },
+    "apps/admin": { "name": "admin.odentia" },
     "apps/api": { "name": "api.odentia" },
     "apps/worker": { "proxy": false }
   }

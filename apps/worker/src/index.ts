@@ -2,6 +2,7 @@ import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
+import { createMailer } from "@odentia/mail"
 import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { env } from "./env.js"
@@ -11,10 +12,19 @@ import { consumeOutbound } from "./outbound.js"
 import { createTranscriber } from "./transcribe.js"
 import { runAutomationTick } from "./automation.js"
 import { tickMailboxes } from "./mailboxes.js"
+import { runSaasBillingTick } from "./saas-billing.js"
+import { runAccountLifecycleTick } from "./account-lifecycle.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
+const mailer = createMailer({
+  host: env.SMTP_HOST,
+  port: env.SMTP_PORT,
+  user: env.SMTP_USER || undefined,
+  pass: env.SMTP_PASS || undefined,
+  from: env.SMTP_FROM,
+})
 const storage: Storage = createStorage({
   endpoint: env.S3_ENDPOINT,
   region: env.S3_REGION,
@@ -166,6 +176,36 @@ queues.push({
       microsoft365: { clientId: env.MICROSOFT_MAIL_CLIENT_ID, clientSecret: env.MICROSOFT_MAIL_CLIENT_SECRET, redirectUri: env.MICROSOFT_MAIL_REDIRECT_URI, tenant: env.MICROSOFT_MAIL_TENANT },
     })
     return result.ingested > 0
+  },
+})
+
+let nextSaasPoll = 0
+let nextAccountPoll = 0
+queues.push({
+  name: "saas_billing",
+  poll: async () => {
+    if (Date.now() < nextSaasPoll) return false
+    nextSaasPoll = Date.now() + 60_000
+    await runSaasBillingTick({ ownerDb, mailer })
+    return true
+  },
+}, {
+  name: "account_lifecycle",
+  poll: async () => {
+    if (Date.now() < nextAccountPoll) return false
+    nextAccountPoll = Date.now() + 86_400_000
+    const result = await runAccountLifecycleTick(ownerDb, {
+      notify: {
+        sendReminder: async (email, subject, text) => {
+          await mailer.send({
+            to: email, subject, text,
+            html: `<p>${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\n", "<br>")}</p>`,
+          })
+        },
+      },
+    })
+    for (const error of result.errors) console.error(`worker: account_lifecycle ${error}`)
+    return result.reminders > 0 || result.cleaned > 0
   },
 })
 

@@ -19,7 +19,35 @@ pnpm db:seed
 
 `.env` con finales LF: CRLF rompe su carga en sh. Los scripts tsx de db/services cargan `infra/dev/.env` con `--env-file-if-exists`; variables existentes tienen prioridad. Semilla manual determinista/idempotente, no para tests/CI.
 
-Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; plataforma: `odentia.localhost`.
+Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`.
+
+### Administración de odentIA
+
+`apps/admin` usa la API compartida, no un backend ni una base independientes.
+Configurar `ADMIN_URL` con el origen HTTPS exacto del backoffice. La cuenta del
+cliente conserva organizaciones, invitaciones, soporte y Plan y pagos en `panel`.
+`admin` y `storage` son subdominios reservados: la migración rechaza una colisión
+con una clínica existente para que se resuelva explícitamente antes del despliegue.
+
+Para el primer administrador, registrar y verificar antes su cuenta nominal y,
+con `DATABASE_URL` propietario disponible, ejecutar:
+
+```sh
+pnpm --filter @odentia/api bootstrap:admin -- correo@ejemplo.pe
+```
+
+El comando rechaza crear otro administrador cuando ya existe uno activo; las altas
+siguientes son invitaciones desde Equipo. Abrir `ADMIN_URL`, iniciar sesión y
+enrolar TOTP en Seguridad de acceso; guardar los códigos de respaldo fuera del
+navegador. Ser propietario de una clínica nunca habilita el backoffice.
+
+La semilla manual incluye `admin@odentia.dev` y `support@odentia.dev` con la
+contraseña de demostración `Demo1234`, sin segundo factor preconfigurado; hay que
+enrolarlo. No ejecutar esa semilla en producción. Planes, medios y clínicas
+comerciales de la semilla son ficticios. En producción se configuran planes y
+datos de cobro reales desde administración; no hay cobro automático con tarjeta
+ni emisión fiscal integrada.
+
 
 ### Modelo real
 
