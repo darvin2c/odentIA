@@ -173,15 +173,14 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   expect((await overview()).provider.problem).toBe("rechazado")
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const problem = page.getByRole("alert").filter({ hasText: "El agente no puede responder ahora" })
-  await expect(problem).toContainText("El proveedor del modelo rechazó la conexión.")
-  await expect(problem).toContainText("Los mensajes nuevos están pasando a tu equipo.")
+  await expect(problem).toContainText("El modelo no está respondiendo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.")
   // El texto del proveedor no llega a la pantalla.
   await expect(page.getByText(/detalle-interno/)).toHaveCount(0)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("resumen-problema-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
   await info.attach("resumen-problema", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await problem.getByRole("link", { name: "Revisar el proveedor" }).click()
+  await problem.getByRole("link", { name: "Cambiar de modelo" }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/model"))
 })
 

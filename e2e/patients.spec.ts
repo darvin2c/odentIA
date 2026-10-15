@@ -361,7 +361,7 @@ test("paciente: agregación del recorrido, historia y aislamiento", async ({ cre
   await openSection(page, "Historia")
   await expect(page.getByText("Presupuesto", { exact: true }).first()).toBeVisible()
   await expect(page.getByText("Pago", { exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Ver la propuesta", exact: true }).first().click()
+  await page.getByRole("link", { name: "Ver la propuesta", exact: true }).first().click()
   await expect(page).toHaveURL(/tab=plan/)
   await expect(page.getByText("Anamnesis no encontrado")).toHaveCount(0)
 

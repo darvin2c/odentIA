@@ -24,7 +24,13 @@ import {
 import { decideBudget, getBudgetDetail, listBudgets, type BudgetWithTotals } from "./budgets.js"
 import { getPatientDocument, listPatientDocuments } from "./clinical.js"
 import { sendOutbound } from "./conversations.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  branchNotFound,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { getPatientAccount } from "./payments.js"
 import { getOrgLocale } from "./locale.js"
@@ -975,7 +981,7 @@ export async function confirmPortalAppointment(
     .from(branch)
     .where(eq(branch.id, updated.branchId))
     .limit(1)
-  if (!branchRow) throw notFound("Sucursal")
+  if (!branchRow) throw branchNotFound()
   return {
     id: updated.id,
     startsAt: updated.startsAt,
@@ -1058,7 +1064,7 @@ export interface PortalRescheduleSlotsInput {
 
 /**
  * Huecos reales para reprogramar la cita, con sus mismos recursos
- * (sucursal, profesional, sillón y duración). Delega en Agenda
+ * (sede, profesional, sillón y duración). Delega en Agenda
  * (listAvailableSlots): el portal nunca calcula disponibilidad.
  */
 export async function getPortalRescheduleSlots(

@@ -1,26 +1,15 @@
-import {
-  assertSafeBaseUrl,
-  describeProviderProblem,
-  extractDictation,
-  isProviderConfigError,
-  LlmConfigError,
-  type PlatformLlm,
-  resolveLlmSpec,
-  testLlmConnection,
-} from "@odentia/agent"
+import { describeProviderProblem, extractDictation, isProviderConfigError, type PlatformLlm } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
+  AGENT_LLM_IDS,
   AGENT_ROLE_IDS,
   AGENT_ROLES,
   getAgentConfig,
-  getAgentLlmSecrets,
   getAgentOverview,
   operationFillsOf,
   previewDictationSuggestions,
-  ServiceError,
   upsertAgentConfig,
-  validateLlmBaseUrl,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -30,10 +19,8 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const putInput = z.object({
   enabled: z.boolean().optional(),
-  model: z.string().max(120).nullable().optional(),
-  llmBaseUrl: z.string().max(300).nullable().optional(),
-  /** Solo se envía para cambiarla; null la borra. Nunca se devuelve. */
-  llmApiKey: z.string().max(500).nullable().optional(),
+  /** Uno de los modelos que odentIA validó (`AGENT_LLMS`); la cuenta es de odentIA. */
+  llm: z.enum(AGENT_LLM_IDS).optional(),
   dailyRunLimit: z.number().int().min(1).max(100_000).optional(),
   decisionProvider: z.enum(["none", "baseline", "jev", "openai_decisions"]).optional(),
   systemPrompt: z.string().max(8000).optional(),
@@ -45,6 +32,7 @@ const putInput = z.object({
   personaName: z.string().max(40).nullable().optional(),
   treatment: z.enum(["tu", "usted"]).nullable().optional(),
   tone: z.enum(["cercano", "neutro", "formal"]).optional(),
+  emojis: z.enum(["no", "pocos"]).optional(),
   about: z.string().max(600).optional(),
   disabledFunctions: z.array(z.string().max(40)).max(20).optional(),
   functionNotes: z.record(z.string().max(40), z.string().max(300)).optional(),
@@ -53,20 +41,12 @@ const putInput = z.object({
   channels: z.array(z.string().max(40)).max(20).nullable().optional(),
 })
 
-const testInput = z.object({
-  model: z.string().max(120).nullable().optional(),
-  llmBaseUrl: z.string().max(300).nullable().optional(),
-  /** Ausente: se prueba con la clave guardada, si la hay. */
-  llmApiKey: z.string().max(500).nullable().optional(),
-})
-
 export interface AgentRouteDeps extends CrmDeps {
   llm: PlatformLlm
 }
 
 export function createAgentRoute(deps: AgentRouteDeps) {
   const app = new Hono()
-  const allowInsecure = deps.llm.allowInsecureBaseUrl === true
 
   app.get("/config", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -81,68 +61,9 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = putInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    // La URL se resuelve por DNS antes de guardarla: una organización no puede
-    // apuntar el agente a la red interna aunque el nombre parezca público.
-    if (parsed.data.llmBaseUrl) {
-      try {
-        await assertSafeBaseUrl(parsed.data.llmBaseUrl, { allowInsecure })
-      } catch (error) {
-        if (error instanceof LlmConfigError) return c.json(errorBody(c, "VALIDATION", error.message), 400)
-        throw error
-      }
-    }
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        upsertAgentConfig(tx, orgId, parsed.data, {
-          secretsKey: deps.secretsKey,
-          actorUserId: userId,
-          allowInsecureBaseUrl: allowInsecure,
-        }),
-      ),
+      withOrgContext(deps.db, orgId, (tx) => upsertAgentConfig(tx, orgId, parsed.data, { actorUserId: userId })),
     )
-  })
-
-  /**
-   * Prueba de conexión con los valores del formulario (o los guardados): una
-   * petición mínima al proveedor. No escribe nada ni acredita calidad.
-   */
-  app.post("/config/llm/test", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
-    const parsed = testInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const body = parsed.data
-    try {
-      // Lecturas dentro de la transacción; la red (DNS y la petición) fuera.
-      const { cfg, stored } = await withOrgContext(deps.db, orgId, async (tx) => {
-        const cfg = await getAgentConfig(tx, orgId)
-        const stored = cfg.hasLlmApiKey ? await getAgentLlmSecrets(tx, orgId, deps.secretsKey) : null
-        return { cfg, stored }
-      })
-      const baseUrl =
-        body.llmBaseUrl === undefined
-          ? cfg.llmBaseUrl
-          : body.llmBaseUrl?.trim()
-            ? validateLlmBaseUrl(body.llmBaseUrl, { allowInsecure })
-            : null
-      // La clave guardada solo se reutiliza con su misma URL: nunca viaja a un host nuevo.
-      const apiKey = body.llmApiKey?.trim() || (baseUrl && stored && baseUrl === stored.baseUrl ? stored.apiKey : null)
-      if ((baseUrl === null) !== (apiKey === null)) {
-        throw new LlmConfigError(
-          baseUrl === null ? "BASE_URL_INVALID" : "API_KEY_REQUIRED",
-          baseUrl === null ? "Indica la URL base del proveedor" : "Indica la clave de API del proveedor",
-        )
-      }
-      if (baseUrl) await assertSafeBaseUrl(baseUrl, { allowInsecure })
-      const model = body.model === undefined ? cfg.model : body.model
-      const spec = resolveLlmSpec({ model }, baseUrl && apiKey ? { baseUrl, apiKey } : null, deps.llm)
-      return c.json({ data: await testLlmConnection(spec) })
-    } catch (error) {
-      if (error instanceof LlmConfigError || error instanceof ServiceError) {
-        return c.json({ data: { ok: false, latencyMs: 0, model: null, error: error.message } })
-      }
-      throw error
-    }
   })
 
   /**

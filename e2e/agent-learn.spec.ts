@@ -273,8 +273,9 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   await fromInbox.getByRole("button", { name: "Enviar corrección" }).click()
   await expect(fromInbox).toContainText("conflicto con el estado actual")
   // Cerrar con cambios sin guardar pregunta antes.
-  page.once("dialog", (dialog) => void dialog.accept())
   await fromInbox.getByRole("button", { name: "Cancelar" }).click()
+  const leave = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
+  await leave.getByRole("button", { name: "Descartar y salir", exact: true }).click()
   await expect(fromInbox).toBeHidden()
 
   // --- Teléfono: pestañas en píldoras y secciones que se abren ---

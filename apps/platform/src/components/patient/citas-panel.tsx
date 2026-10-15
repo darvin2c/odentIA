@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { CalendarDays } from "lucide-react"
@@ -33,14 +33,13 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
         <Badge variant={statusVariant(appointment)}>
           {APPOINTMENT_STATUS_LABELS[appointment.status]}
         </Badge>
-        <Button
-          size="sm"
-          variant="outline"
-          nativeButton={false}
-          render={<Link to="/agenda" search={{ appointmentId: appointment.id }} />}
+        <Link
+          to="/agenda"
+          search={{ appointmentId: appointment.id }}
+          className={buttonVariants({ size: "sm", variant: "outline" })}
         >
           Ver en agenda
-        </Button>
+        </Link>
       </div>
     </li>
   )

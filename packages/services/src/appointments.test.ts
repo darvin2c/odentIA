@@ -304,7 +304,7 @@ it("editar congela el nuevo servicio y cancelar libera el recurso", async () => 
   expect(reuse.status).toBe("programada")
 })
 
-it("listScheduleResources devuelve miembros, sillones y la zona de la sucursal", async () => {
+it("listScheduleResources devuelve miembros, sillones y la zona de la sede", async () => {
   const resources = await run((tx) => listScheduleResources(tx, ORG, {}))
   expect(resources.branchId).toBe(branchId)
   expect(resources.timeZone).toBe("America/Lima")

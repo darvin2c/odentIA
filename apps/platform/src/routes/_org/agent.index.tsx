@@ -177,12 +177,12 @@ function AgentSummaryPage() {
               action={
                 canWrite ? (
                   <Link to="/settings/integrations/model" className={outlineLink}>
-                    Revisar el proveedor
+                    Cambiar de modelo
                   </Link>
                 ) : null
               }
             >
-              {PROVIDER_PROBLEM[overview.provider.problem]} Los mensajes nuevos están pasando a tu equipo.
+              {PROVIDER_PROBLEM[overview.provider.problem]}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
               {canWrite ? "" : " Avisa a quien administra la clínica."}
             </SummaryNotice>

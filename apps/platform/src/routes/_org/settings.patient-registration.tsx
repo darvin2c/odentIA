@@ -9,7 +9,9 @@ import {
   Alert,
   AlertDescription,
   Button,
+  buttonVariants,
   Checkbox,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -480,14 +482,14 @@ function RegistrationSettings() {
               >
                 Volver a generar
               </Button>
-              <Button
-                variant="outline"
-                className="min-h-11"
-                nativeButton={false}
-                render={<a href={qrDataUrl} download={`registro-${slug}.png`} />}
+              {/* Descarga de un archivo: es un enlace (`download`), no un botón. */}
+              <a
+                href={qrDataUrl}
+                download={`registro-${slug}.png`}
+                className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}
               >
                 Descargar el código QR
-              </Button>
+              </a>
             </>
           ) : null}
         </div>

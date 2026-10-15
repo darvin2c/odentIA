@@ -1,5 +1,5 @@
 import { formatMoney } from "@odentia/clinical"
-import { Button, cn } from "@odentia/ui"
+import { Button, buttonVariants, cn } from "@odentia/ui"
 import { EmptyState } from "@odentia/ui-patterns"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { CalendarDays, Wallet } from "lucide-react"
@@ -108,11 +108,11 @@ function PatientRow({ item, locale, timezone, multiBranch }: { item: WorkspaceAp
   const place = detailOf([item.serviceName, item.chairName, multiBranch && item.branchName])
   return (
     <li className={item.next ? undefined : "border-b last:border-b-0"}>
-      <Button
-        variant="ghost"
-        nativeButton={false}
-        render={<Link to="/patients/$patientId" params={{ patientId: item.patientId }} />}
+      <Link
+        to="/patients/$patientId"
+        params={{ patientId: item.patientId }}
         className={cn(
+          buttonVariants({ variant: "ghost" }),
           "h-auto min-h-11 w-full justify-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm font-normal whitespace-normal",
           item.next && "bg-primary-soft py-2.5 hover:bg-primary-soft",
           attended && "text-muted-foreground",
@@ -138,7 +138,7 @@ function PatientRow({ item, locale, timezone, multiBranch }: { item: WorkspaceAp
         ) : (
           <StateText status={item.status} />
         )}
-      </Button>
+      </Link>
     </li>
   )
 }
@@ -204,14 +204,14 @@ function ToCollectRow({ row, cash, locale, onCollect }: { row: DebtRow; cash: Wo
           {content}
         </Button>
       ) : (
-        <Button
-          variant="ghost"
-          nativeButton={false}
-          render={<Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "cuenta" }} />}
-          className={className}
+        <Link
+          to="/patients/$patientId"
+          params={{ patientId: row.patientId }}
+          search={{ tab: "cuenta" }}
+          className={cn(buttonVariants({ variant: "ghost" }), className)}
         >
           {content}
-        </Button>
+        </Link>
       )}
     </li>
   )
@@ -270,11 +270,13 @@ export function TodayCash({
 export function CashLine({ cash, locale }: { cash: WorkspaceCash; locale: string }) {
   const pending = cash.toCollect.length
   return (
-    <Button
-      variant="ghost"
-      nativeButton={false}
-      render={<Link to="/finance" search={{ branch: cash.branchId }} />}
-      className="enter elevated h-auto min-h-11 w-full justify-start gap-3 rounded-xl border-border bg-card px-4 py-4 text-left text-sm font-normal whitespace-normal hover:bg-card sm:px-5"
+    <Link
+      to="/finance"
+      search={{ branch: cash.branchId }}
+      className={cn(
+        buttonVariants({ variant: "ghost" }),
+        "enter elevated h-auto min-h-11 w-full justify-start gap-3 rounded-xl border-border bg-card px-4 py-4 text-left text-sm font-normal whitespace-normal hover:bg-card sm:px-5",
+      )}
     >
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="text-[17px] font-bold tracking-tight">Caja de hoy</span>
@@ -283,6 +285,6 @@ export function CashLine({ cash, locale }: { cash: WorkspaceCash; locale: string
         </span>
       </span>
       <span className="shrink-0 font-semibold text-primary">Ir a Caja</span>
-    </Button>
+    </Link>
   )
 }

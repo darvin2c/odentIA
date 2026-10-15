@@ -21,32 +21,26 @@ pnpm db:seed
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; plataforma: `odentia.localhost`.
 
-### Modelo real con API compatible
+### Modelo real
 
-El agente habla un solo protocolo: cualquier endpoint compatible con OpenAI
-(OpenAI, OpenRouter, DeepSeek, Groq, Mistral, Ollama, vLLM, pasarela propia).
-Otros prefijos (`anthropic:`, `google-genai:`…) se rechazan con un error
-explícito; ver `docs/decisions/0016-proveedor-llm-por-organizacion.md`.
+La clínica elige entre dos modelos que odentIA validó y odentIA pone la cuenta
+(`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`):
+«ChatGPT 6» (OpenAI, el de toda clínica) y «Claude 5.5» (Anthropic). El modelo
+exacto y sus opciones viven en `packages/agent/src/llm.ts` (`LLM_CATALOG`).
 
-Proveedor de la plataforma: en `infra/dev/.env`, `LLM_MODEL=<nombre que espera
-el endpoint>` (el prefijo `openai:` es opcional), `LLM_API_KEY` y `LLM_BASE_URL`
-con la URL base publicada por el proveedor (incluido `/v1` o el prefijo que
-indique). `LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada.
+En `infra/dev/.env`: quitar `LLM_MODEL=fake` y poner `LLM_OPENAI_API_KEY` y, para
+probar Claude, `LLM_ANTHROPIC_API_KEY`. `LLM_OPENAI_BASE_URL` y
+`LLM_ANTHROPIC_BASE_URL` solo hacen falta con una pasarela propia; sin ellas va la
+API pública de cada proveedor. Sin la clave del proveedor del modelo elegido el
+agente deriva y avisa con el nombre de la variable que falta.
+`LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada. Las evaluaciones
+(`eval:decisions`, `eval:admin`…) aceptan `--llm=chatgpt_6|claude_5_5`.
 `AGENT_BURST_WINDOW_SECONDS` (worker, 6 por defecto, 0–30) es lo que el agente
 espera tras un mensaje entrante antes de leer el hilo: normalmente agrupa una
 ráfaga en una sola corrida y una sola respuesta (mejor esfuerzo; límites en
 `docs/decisions/0005-uso-del-modelo-rafagas-y-prefijo.md`), a cambio de esa
 demora en cada respuesta; `0` responde sin esperar.
-`LLM_ALLOW_INSECURE_BASE_URL=true` solo en dev: admite http y destinos privados
-para un servidor local de prueba; en producción la URL debe ser https y pública.
 
-Proveedor propio de una organización: en Configuración → Agente, «Usar la
-cuenta propia de la clínica» con URL base, clave y modelo; «Probar conexión»
-hace una petición mínima. La clave se guarda cifrada y no vuelve a mostrarse;
-los cambios quedan auditados. El campo Modelo sin cuenta propia sobrescribe
-`LLM_MODEL` contra el endpoint de la plataforma.
-
-El modelo elegido debe admitir llamadas a herramientas (`tools`/`tool_calls`).
 API y worker leen las mismas variables; reiniciarlos tras cambiarlas. Nunca
 poner la key en una variable `VITE_*`, un campo de conversación ni el repositorio.
 

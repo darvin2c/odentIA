@@ -257,8 +257,10 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await expect(text).toBeFocused()
   await expect(text).toHaveValue(/\[Clínica y sede\]/)
   // Cancelar con cambios pregunta antes y, si se desiste, el borrador sigue ahí.
-  page.once("dialog", (dialog) => void dialog.dismiss())
   await editor.getByRole("button", { name: "Cancelar", exact: true }).click()
+  const leave = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
+  await leave.getByRole("button", { name: "Continuar editando", exact: true }).click()
+  await expect(leave).toBeHidden()
   await expect(text).toHaveValue(/\[Clínica y sede\]/)
 
   const changed = original.replace("Te recordamos", "Le recordamos")

@@ -17,6 +17,11 @@ export function notFound(entity: string): ServiceError {
   return new ServiceError("NOT_FOUND", 404, `${entity} no encontrado`)
 }
 
+/** La sede no existe (o no es de la organización): `notFound` concuerda en masculino. */
+export function branchNotFound(): ServiceError {
+  return new ServiceError("NOT_FOUND", 404, "Sede no encontrada")
+}
+
 /** true si el error es violación de unique (Postgres 23505, incluso envuelto por Drizzle). */
 export function isUniqueViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23505"

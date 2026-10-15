@@ -77,7 +77,7 @@ export interface AppDeps {
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
-  /** Proveedor LLM de la plataforma (LLM_*); la organización puede traer el suyo. */
+  /** Cuentas de odentIA en los proveedores del modelo (LLM_*); la organización solo elige el modelo. */
   llm?: PlatformLlm
   /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
   decisions?: PlatformDecisions
@@ -593,7 +593,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))
   guarded.route("/patients", createFinancialDocumentsRoute(crmDeps))
-  const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
+  const llm: PlatformLlm = deps.llm ?? { fake: true }
   guarded.route("/patients", createPatientsRoute({ ...crmDeps, llm }))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))

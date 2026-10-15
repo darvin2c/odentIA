@@ -37,7 +37,6 @@ import {
   READ_TOOLS,
   TOOL_OPERATION,
   TOOLS_WITHOUT_OPERATION,
-  getAgentLlmSecrets,
   getAutonomyPolicy,
   ingestInbound,
   listHandoffs,
@@ -135,8 +134,8 @@ async function agentMessages(conversationId: string): Promise<string[]> {
   return rows.map((r) => r.body ?? "")
 }
 
-async function runAgent(conversationId: string, messageId: string, readCt = 0) {
-  return processAgentRun(appDb, runtime, {
+async function runAgent(conversationId: string, messageId: string, readCt = 0, platform = runtime.platform) {
+  return processAgentRun(appDb, { ...runtime, platform }, {
     msg_id: 1,
     read_ct: readCt,
     message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
@@ -176,7 +175,7 @@ beforeAll(async () => {
   const checkpointer = PostgresSaver.fromConnString(ownerUri)
   await checkpointer.setup()
   await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { modelName: "fake", allowInsecureBaseUrl: true }, secretsKey: KEY }
+  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY }
   const created = await withOrgContext(appDb, "org_a", (tx) =>
     createConnection(
       tx,
@@ -509,55 +508,21 @@ async function rejectingProvider() {
   }
 }
 
-it("el proveedor propio se guarda cifrado como par URL+clave, se audita y nunca sale a la lectura", async () => {
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { llmApiKey: "sk-propia" }, { secretsKey: KEY, allowInsecureBaseUrl: true }),
-    ),
-  ).rejects.toThrow(/URL base/)
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { llmBaseUrl: "https://10.0.0.5/v1", llmApiKey: "sk-propia" }, { secretsKey: KEY }),
-    ),
-  ).rejects.toThrow(/privada/)
-  const saved = await withOrgContext(appDb, "org_a", (tx) =>
-    upsertAgentConfig(
-      tx,
-      "org_a",
-      { llmBaseUrl: "https://proveedor.example/v1", llmApiKey: "sk-propia", model: "modelo-propio" },
-      { secretsKey: KEY, actorUserId: null },
-    ),
-  )
-  expect(saved).toMatchObject({ llmBaseUrl: "https://proveedor.example/v1", hasLlmApiKey: true, model: "modelo-propio" })
-  expect(JSON.stringify(saved)).not.toContain("sk-propia")
-  const secrets = await withOrgContext(appDb, "org_a", (tx) => getAgentLlmSecrets(tx, "org_a", KEY))
-  expect(secrets).toEqual({ baseUrl: "https://proveedor.example/v1", apiKey: "sk-propia" })
-  const audited = await withOrgContext(appDb, "org_a", (tx) =>
-    tx
-      .select({ metadata: auditEvent.metadata })
-      .from(auditEvent)
-      .where(and(eq(auditEvent.organizationId, "org_a"), eq(auditEvent.action, "agent.config_updated"))),
-  )
-  expect(audited.length).toBeGreaterThan(0)
-  expect(JSON.stringify(audited)).not.toContain("sk-propia")
-  // Cambiar la URL sin reescribir la clave se rechaza: la guardada no viaja a otro host.
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { llmBaseUrl: "https://otro.example/v1" }, { secretsKey: KEY }),
-    ),
-  ).rejects.toThrow(/vuelve a indicar su clave/)
-  // Un proveedor propio sin modelo tampoco se acepta.
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { llmBaseUrl: "https://otro.example/v1", llmApiKey: "sk-2", model: null }, { secretsKey: KEY }),
-    ),
-  ).rejects.toThrow(/modelo/)
-  // Quitar la URL también quita la clave: el par nunca queda a medias.
-  const cleared = await withOrgContext(appDb, "org_a", (tx) =>
-    upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
-  )
-  expect(cleared).toMatchObject({ llmBaseUrl: null, hasLlmApiKey: false })
-  expect(await withOrgContext(appDb, "org_a", (tx) => getAgentLlmSecrets(tx, "org_a", KEY))).toBeNull()
+it("si odentIA no tiene la cuenta del proveedor del modelo elegido, el caso pasa al equipo sin llamar a nadie", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { llm: "claude_5_5" }))
+  try {
+    const { conversationId, messageId } = await ingestText("tg:ag-sin-cuenta", "evt-ag-sin-cuenta", "Hola")
+    // Solo hay cuenta de OpenAI: la clave de un proveedor nunca sirve para el otro.
+    expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave-openai", baseUrl: "http://127.0.0.1:9/v1" } })).toBe("done")
+    expect(await agentStatusOf(conversationId)).toBe("off")
+    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ error: agentRunLedger.error, model: agentRunLedger.model }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
+    )
+    expect(row?.error).toMatch(/^API_KEY_REQUIRED: .*LLM_ANTHROPIC_API_KEY/)
+    expect(row?.model).toBe("claude-haiku-5-5")
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { llm: "chatgpt_6" }))
+  }
 })
 
 it("una credencial rechazada no reintenta: deriva, avisa una vez a quien administra y queda como error", async () => {
@@ -569,16 +534,9 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${adminId}`}, 'org_a', ${adminId}, 'admin', now())`)
   try {
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(
-        tx,
-        "org_a",
-        { llmBaseUrl: provider.baseUrl, llmApiKey: "clave-rechazada", model: "modelo-propio" },
-        { secretsKey: KEY, allowInsecureBaseUrl: true },
-      ),
-    )
+    const platform = { openai: { apiKey: "clave-rechazada", baseUrl: provider.baseUrl } }
     const first = await ingestText("tg:ag-401", "evt-ag-401", "Hola")
-    expect(await runAgent(first.conversationId, first.messageId)).toBe("done")
+    expect(await runAgent(first.conversationId, first.messageId, 0, platform)).toBe("done")
     expect(provider.hits()).toBe(1)
     expect(await agentStatusOf(first.conversationId)).toBe("off")
     expect(await agentMessages(first.conversationId)).toEqual([])
@@ -592,7 +550,7 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
         .where(eq(agentRunLedger.conversationId, first.conversationId)),
     )
     expect(ledgerRow?.error).toMatch(/^PROVIDER_REJECTED: HTTP 401: Incorrect API key provided$/)
-    expect(ledgerRow?.model).toBe("modelo-propio")
+    expect(ledgerRow?.model).toBe("gpt-6-luna")
     // El motivo que ve recepción es fijo: nunca el cuerpo de la respuesta del proveedor.
     const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
       tx
@@ -604,7 +562,7 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     expect(handoff?.summary).not.toContain("Incorrect API key")
     // Segunda conversación el mismo día: otra derivación, pero un solo aviso.
     const second = await ingestText("tg:ag-401-b", "evt-ag-401-b", "Buenas")
-    expect(await runAgent(second.conversationId, second.messageId)).toBe("done")
+    expect(await runAgent(second.conversationId, second.messageId, 0, platform)).toBe("done")
     const notices = await withOrgContext(appDb, "org_a", (tx) =>
       tx
         .select({ title: workspaceNotification.title, href: workspaceNotification.href })
@@ -615,9 +573,6 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     expect(notices).toEqual([{ title: "El agente no puede usar el modelo", href: "/settings/agent" }])
   } finally {
     await provider.close()
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
-    )
   }
 })
 
@@ -633,16 +588,8 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
   const address = server.address()
   if (!address || typeof address === "string") throw new Error("El servidor de prueba no abrió un puerto")
   try {
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(
-        tx,
-        "org_a",
-        { llmBaseUrl: `http://127.0.0.1:${address.port}/v1`, llmApiKey: "clave", model: "modelo-propio" },
-        { secretsKey: KEY, allowInsecureBaseUrl: true },
-      ),
-    )
     const { conversationId, messageId } = await ingestText("tg:ag-402", "evt-ag-402", "Hola")
-    expect(await runAgent(conversationId, messageId)).toBe("done")
+    expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave", baseUrl: `http://127.0.0.1:${address.port}/v1` } })).toBe("done")
     expect(hits).toBe(1)
     expect(await agentStatusOf(conversationId)).toBe("off")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
@@ -659,9 +606,6 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
   } finally {
     server.closeAllConnections()
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
-    await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { llmBaseUrl: null, model: null }, { secretsKey: KEY }),
-    )
   }
 })
 
@@ -748,10 +692,10 @@ it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", asy
   }
 })
 
-it("la configuración por defecto no expone la clave y el resolvedor usa la plataforma", async () => {
+it("la configuración por defecto usa ChatGPT 6 y no guarda cuentas de proveedor", async () => {
   const cfg = await withOrgContext(appDb, "org_a", (tx) => getAgentConfig(tx, "org_a"))
-  expect(cfg).toMatchObject({ llmBaseUrl: null, hasLlmApiKey: false, dailyRunLimit: 500 })
-  expect("llmApiKeyEncrypted" in cfg).toBe(false)
+  expect(cfg).toMatchObject({ llm: "chatgpt_6", dailyRunLimit: 500 })
+  expect(Object.keys(cfg).filter((key) => /apikey|baseurl|^model$/i.test(key))).toEqual([])
 })
 
 it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", async () => {
@@ -1951,24 +1895,43 @@ it("la voz de la clínica entra en el prompt solo cuando se configura", async ()
     return systemTextOf(model.seen[0] ?? [])
   }
   const plain = await promptOf("tg:voz-0", "evt-voz-0")
-  expect(plain).toContain("tono cercano y profesional")
+  expect(plain).toContain("Tono cercano y profesional")
   expect(plain).toContain("Responde solo con datos reales. Si no tiene el dato, lo dice.")
   expect(plain).not.toContain("Te presentas como")
   expect(plain).not.toContain("Tratas de")
+  expect(plain).toContain("No uses emojis.")
   await withOrgContext(appDb, "org_a", (tx) =>
     upsertAgentConfig(tx, "org_a", {
-      personaName: "Sofi", treatment: "usted", tone: "formal",
+      personaName: "Sofi", treatment: "usted", tone: "formal", emojis: "pocos",
       about: "Clínica familiar con dos sedes. No presionamos para vender tratamientos.",
     }))
   try {
     const voiced = await promptOf("tg:voz-1", "evt-voz-1")
     expect(voiced).toContain("Te presentas como Sofi, asistente virtual de la clínica.")
     expect(voiced).toContain("Tratas de usted al interlocutor.")
-    expect(voiced).toContain("tono formal y respetuoso")
+    expect(voiced).toContain("Tono formal y respetuoso")
     expect(voiced).toContain("Sobre la clínica: Clínica familiar con dos sedes.")
+    expect(voiced).toContain("como mucho uno por mensaje")
+    expect(voiced).not.toContain("No uses emojis.")
   } finally {
     await withOrgContext(appDb, "org_a", (tx) =>
-      upsertAgentConfig(tx, "org_a", { personaName: null, treatment: null, tone: "cercano", about: "" }))
+      upsertAgentConfig(tx, "org_a", { personaName: null, treatment: null, tone: "cercano", emojis: "no", about: "" }))
+  }
+})
+
+it("con «No usar» los emojis se quitan antes de enviar; con «Pocos» salen tal cual", async () => {
+  const sent = async (thread: string, eventId: string) => {
+    const { conversationId, messageId } = await ingestText(thread, eventId, "Hola")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "¡Hola! 😊 ¿En qué te ayudo? 👍🏽" }, `e-${eventId}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    return agentMessages(conversationId)
+  }
+  expect(await sent("tg:emoji-0", "evt-emoji-0")).toEqual(["¡Hola! ¿En qué te ayudo?"])
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { emojis: "pocos" }))
+  try {
+    expect(await sent("tg:emoji-1", "evt-emoji-1")).toEqual(["¡Hola! 😊 ¿En qué te ayudo? 👍🏽"])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { emojis: "no" }))
   }
 })
 

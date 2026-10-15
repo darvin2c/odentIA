@@ -78,7 +78,7 @@ function buildApp(role: string): Hono {
   app.route("/contacts", createContactsRoute(deps))
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
-  const llm = { modelName: "fake", allowInsecureBaseUrl: true }
+  const llm = { fake: true }
   app.route("/agent/learning", createAgentLearningRoute({ ...deps, llm }))
   app.route("/agent", createAgentRoute({ ...deps, llm }))
   app.route("/agent", createAgentOpsRoute({ ...deps, llm }))
@@ -328,6 +328,24 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
     body: JSON.stringify({ enabled: true }),
   })
   expect(put.status).toBe(200)
+  // El modelo es uno de los dos de odentIA; la clínica ya no trae proveedor ni lo prueba.
+  const chosen = await app.request("/agent/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ llm: "claude_5_5" }),
+  })
+  expect(chosen.status).toBe(200)
+  const chosenBody = (await chosen.json()) as { data: Record<string, unknown> }
+  expect(chosenBody.data.llm).toBe("claude_5_5")
+  expect(Object.keys(chosenBody.data).filter((key) => /model|baseurl|apikey/i.test(key))).toEqual([])
+  const unknown = await app.request("/agent/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ llm: "gpt-4o" }),
+  })
+  expect(unknown.status).toBe(400)
+  const probe = await app.request("/agent/config/llm/test", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+  expect(probe.status).toBe(404)
   const member = buildApp("member")
   const forbidden = await member.request("/agent/config", {
     method: "PUT",

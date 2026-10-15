@@ -13,7 +13,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
-import { notFound, validation } from "./errors.js"
+import { branchNotFound, notFound, validation } from "./errors.js"
 import { formatOrgMoney, getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { listServices } from "./service-catalog.js"
@@ -199,7 +199,7 @@ async function requireBranchOfOrg(tx: Db, orgId: string, branchId: string): Prom
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.id, branchId)))
     .limit(1)
-  if (!row) throw notFound("Sede")
+  if (!row) throw branchNotFound()
   return row.name
 }
 
@@ -561,6 +561,8 @@ export interface ClinicInfoSnapshot {
   branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
   services: Array<{ id: string; name: string; code: string | null; specialty: string | null; priceCents: number; currency: string; durationMin: number | null }>
   paymentMethods: Array<{ id: string; name: string; typeCode: string }>
+  /** Medios que la clínica desactivó: se dicen como no aceptados para que el agente no los ofrezca. */
+  refusedPaymentMethods: string[]
   /** Promociones vigentes: el agente las nombra sin inventar precios finales. */
   promotions: Array<{ id: string; name: string; endsAt: string | null }>
 }
@@ -596,7 +598,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     .orderBy(asc(branch.name), asc(branch.id))
     .limit(20)
   const { data } = await listServices(tx, orgId, { state: "active", limit: 50 })
-  const methods = await listPaymentMethods(tx, orgId, { activeOnly: true })
+  const allMethods = await listPaymentMethods(tx, orgId, { activeOnly: false })
+  const methods = allMethods.filter((m) => m.isActive)
   const promos = await listClinicPromotionSummaries(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
@@ -613,6 +616,7 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       durationMin: s.durationMin,
     })),
     paymentMethods: methods.map((m) => ({ id: m.id, name: m.name, typeCode: m.typeCode })),
+    refusedPaymentMethods: allMethods.filter((m) => !m.isActive).map((m) => m.name),
     promotions: promos.map((p) => ({ id: p.id, name: p.name, endsAt: p.endsAt ? p.endsAt.toISOString() : null })),
   }
 }
@@ -734,6 +738,13 @@ export function formatKnowledgeForPrompt(
     lines.push(
       `Medios de pago que acepta la clínica (lista completa; ningún otro): ${snapshot.paymentMethods.map((m) => m.name).join(", ")}.`,
     )
+    if (snapshot.refusedPaymentMethods.length) {
+      lines.push(`La clínica NO acepta: ${snapshot.refusedPaymentMethods.join(", ")}.`)
+    }
+    lines.push("Si preguntan por un medio que no está en esa lista, di que no figura entre los que acepta la clínica.")
+  } else {
+    // Sin medios registrados no se afirma ninguno: ni los habituales ni los que pregunten.
+    lines.push("La clínica no registró sus medios de pago: no digas cuáles acepta; ofrece confirmarlo con el equipo.")
   }
   const active = entries.filter((entry) => entry.state === "vigente")
   if (active.length) {

@@ -10,6 +10,7 @@ import {
   Badge,
   Button,
   ButtonGroup,
+  buttonVariants,
   Checkbox,
   cn,
   Field,
@@ -2176,17 +2177,14 @@ function DeciderPicker({
   onChange: (contactId: string) => void
 }): React.JSX.Element {
   const responsiblesLink = (
-    <Button
-      nativeButton={false}
-      variant="link"
-      size="sm"
-      className="h-auto self-start p-0"
-      render={
-        <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "responsables" }} />
-      }
+    <Link
+      to="/patients/$patientId"
+      params={{ patientId }}
+      search={{ tab: "responsables" }}
+      className={cn(buttonVariants({ variant: "link", size: "sm" }), "h-auto self-start p-0")}
     >
       Registrar un representante en Responsables
-    </Button>
+    </Link>
   )
   return (
     <div className="flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-sm">

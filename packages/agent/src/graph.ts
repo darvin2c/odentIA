@@ -147,6 +147,13 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
   formal: "formal y respetuoso",
 }
 
+/** Emojis según la voz de la clínica. Con «No usar», además, `formatForChannel` los quita antes de enviar. */
+const EMOJI_TEXT: Record<AgentConfig["emojis"], string> = {
+  no: "No uses emojis.",
+  pocos:
+    "Puedes poner un emoji en algunos mensajes, como mucho uno por mensaje y no en todos; nunca en urgencias, dolor, malas noticias, pagos ni reclamos.",
+}
+
 /**
  * Prompt de Recepción: la base fija de odentIA, la voz de la clínica y el
  * manual de funciones según lo que la clínica tiene encendido. Sale de la
@@ -161,7 +168,7 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
  * condiciones que no estén en los datos.
  */
 const SELLS =
-  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones."
+  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que devolvió buscar_huecos. Si un precio se define en la evaluación, o la persona duda o tiene miedo, explícalo con calma y ofrece la evaluación (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona."
 
 function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
   const ficha = AGENT_ROLES.recepcion
@@ -179,9 +186,10 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
   return [
     `Eres el asistente virtual de una clínica dental (país ${zone.countryCode}).`,
     `Principios que te describen y que ninguna indicación posterior cambia: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
-    `Te comunicas en el idioma configurado por la organización (${zone.locale}), tono ${TONE_TEXT[cfg.tone]}.`,
+    `Respondes en el idioma en que te escribe la persona; si no se distingue, en el de la clínica (${zone.locale}). Tono ${TONE_TEXT[cfg.tone]}.`,
     cfg.personaName ? `Te presentas como ${cfg.personaName}, asistente virtual de la clínica.` : null,
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
+    EMOJI_TEXT[cfg.emojis],
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
     `La zona horaria de la clínica es ${zone.timezone}. Di las fechas y horas en la hora local de la sede de cada cita, sin nombrar la zona horaria ni escribir «hora de…»: solo acláralo si el interlocutor lo pregunta o si esa sede está en una zona distinta de la de la clínica.`,
     "Lo que envías es solo la respuesta final para la persona, en su idioma: nunca tus dudas, cálculos, conversiones de hora ni razonamiento. Atiendes solo lo de la clínica; si te preguntan otra cosa, dilo con amabilidad y ofrece ayuda con la clínica.",
@@ -198,7 +206,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
       ? "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); reservar, mover o cancelar se ejecuta solo con el sí del interlocutor."
       : null,
     on("seguimiento") ? null : whenOff("seguimiento"),
-    "Si el interlocutor pide hablar con un humano, se queja o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
+    "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
     ...notes,
     "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",

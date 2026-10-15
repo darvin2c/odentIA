@@ -34,6 +34,7 @@ import {
   listContactChannelHistory,
   listContactNotes,
   listOpportunities,
+  listPaymentMethods,
   listTasks,
   noteLessonUse,
   operationAgentSchema,
@@ -54,7 +55,7 @@ import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
 import type { AgentRoute } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
-import { describeUnsupported, type Evidence, type ReplyVerdict, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -244,6 +245,10 @@ export interface AgentToolCtx {
   basis?: AnswerBasisItem[]
   /** `false` desactiva la comprobación previa al envío (configuración de la organización). */
   verifyReplies?: boolean
+  /** Medios de pago que la clínica desactivó (se leen una vez por corrida). */
+  refusedPayments?: string[]
+  /** Emojis de la voz de la clínica: con `no` se quitan antes de enviar. Ausente = se dejan. */
+  emojis?: "no" | "pocos"
   /** Respuestas del turno que no salieron por un dato sin sustento. */
   checkFailures?: number
   /** Comprobaciones de la última respuesta (también en simulación). */
@@ -525,6 +530,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
     const verdict = verifyReply(text, ctx.evidence ?? [], await orgZone())
     ctx.lastChecks = verdict.checks
+    // Un medio de pago que la clínica desactivó no se ofrece: la lista del prompt no bastó (ADR 0022).
+    ctx.refusedPayments ??= await inOrg(async (tx) =>
+      (await listPaymentMethods(tx, ctx.orgId, { activeOnly: false })).filter((m) => !m.isActive).map((m) => m.name),
+    )
+    const refused = refusedPaymentMentions(text, ctx.refusedPayments)
+    if (verdict.ok && refused.length > 0) {
+      await traceAnswer(text, "bloqueada", verdict.checks, null)
+      return {
+        verdict,
+        blocked: `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la clínica no acepta ${refused.join(", ")}. Di solo los medios de pago de la lista (o que ese no se acepta) y vuelve a enviar la respuesta sola en su paso.`,
+      }
+    }
     if (verdict.ok) return { verdict, blocked: null }
     ctx.checkFailures = (ctx.checkFailures ?? 0) + 1
     const missing = describeUnsupported(verdict)
@@ -550,7 +567,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const sendReply = tool(
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
-      const text = formatForChannel(written, await conversationChannel(ctx))
+      const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -717,6 +734,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (informs && snapshot.paymentMethods.length) {
         lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
         for (const m of snapshot.paymentMethods) lines.push(`- ${m.name}`)
+        if (snapshot.refusedPaymentMethods.length) lines.push(`La clínica NO acepta: ${snapshot.refusedPaymentMethods.join(", ")}.`)
       }
       return lines.join("\n")
     },
@@ -1322,7 +1340,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
-      const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx)) : undefined
+      const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {

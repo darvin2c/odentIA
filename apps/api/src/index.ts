@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server"
-import { embedderFromEnv } from "@odentia/agent"
+import { embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import { createAuth } from "@odentia/auth"
 import { createAppDb, createOwnerDb } from "@odentia/db"
 import { createMailer } from "@odentia/mail"
@@ -50,15 +50,7 @@ const app = createApp({
   cookieDomain: env.COOKIE_DOMAIN,
   webURL: env.WEB_URL,
   listenUrl: env.APP_DATABASE_URL,
-  llm: {
-    modelName: env.LLM_MODEL,
-    apiKey: env.LLM_API_KEY || undefined,
-    baseUrl: env.LLM_BASE_URL,
-    timeoutMs: env.LLM_TIMEOUT_MS,
-    maxRetries: env.LLM_MAX_RETRIES,
-    ...(env.LLM_REASONING_EFFORT ? { reasoningEffort: env.LLM_REASONING_EFFORT } : {}),
-    allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
-  },
+  llm: platformLlmFromEnv(env),
   decisions: {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
     ...(env.OPENAI_DECISIONS_API_KEY

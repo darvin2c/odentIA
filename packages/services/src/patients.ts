@@ -17,7 +17,13 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { decodeCursor } from "./cursors.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  branchNotFound,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
 import { findOrgCountry, NEUTRAL_TIMEZONE } from "./locale.js"
 
 const PAGE_DEFAULT = 30
@@ -576,7 +582,7 @@ async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Prom
     .from(branch)
     .where(and(eq(branch.id, branchId), eq(branch.organizationId, orgId)))
     .limit(1)
-  if (!row) throw notFound("Sucursal")
+  if (!row) throw branchNotFound()
 }
 const PATCH_FIELDS = [
   "displayName",

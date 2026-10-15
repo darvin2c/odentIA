@@ -53,6 +53,16 @@ un procedimiento explícito; no regenerarlos para corregir un deploy.
 requiere reconstruir las webs. Las variables de runtime requieren **Apply/refresh**,
 que recrea los contenedores. Un restart solo reinicia con la configuración antigua.
 
+### Modelo del agente
+
+La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta
+(`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`). API y
+worker leen `LLM_OPENAI_API_KEY` y `LLM_ANTHROPIC_API_KEY`; sin la del proveedor
+del modelo elegido, el agente deriva cada caso y avisa a quien lo administra
+nombrando la variable que falta. `LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL`
+solo hacen falta con una pasarela propia. `LLM_MODEL=fake` es solo para previews
+y pruebas.
+
 ### SMTP
 
 `SMTP_PORT=465` usa TLS implícito; `587` usa STARTTLS cuando el servidor lo

@@ -982,7 +982,7 @@ export function EncounterEditor({
     {
       key: "consulta",
       title: "Consulta",
-      description: "Motivo, enfermedad actual, sucursal y piezas evaluadas.",
+      description: "Motivo, enfermedad actual, sede y piezas evaluadas.",
       summary: reason.trim() === "" ? "Sin motivo registrado" : reason.trim(),
       empty: reason.trim() === "",
     },
@@ -1170,7 +1170,7 @@ export function EncounterEditor({
   const consultaBody = (
     <div className="flex flex-col gap-3">
       <Field>
-        <FieldLabel htmlFor={`${uid}-branch`}>Sucursal de la atención</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-branch`}>Sede de la atención</FieldLabel>
         <ChoiceSelect
           id={`${uid}-branch`}
           
@@ -1187,20 +1187,20 @@ export function EncounterEditor({
               })
               await onChanged()
             } catch (err) {
-              setSaveError(saveMessage(err, "No se pudo guardar la sucursal."))
+              setSaveError(saveMessage(err, "No se pudo guardar la sede."))
             } finally {
               handlePendingChange(false)
             }
           }}
         >
-          <option value="">Sin sucursal asignada</option>
+          <option value="">Sin sede asignada</option>
           {(branchesQuery.data?.data ?? []).map((branch) => (
             <option key={branch.id} value={branch.id}>
               {branch.name}
             </option>
           ))}
         </ChoiceSelect>
-        {branchesQuery.isError && <p role="alert">No se pudieron cargar las sucursales.</p>}
+        {branchesQuery.isError && <p role="alert">No se pudieron cargar las sedes.</p>}
       </Field>
       <Field>
         <FieldLabel htmlFor={`${uid}-reason`}>Motivo (máx. {MAX_REASON})</FieldLabel>

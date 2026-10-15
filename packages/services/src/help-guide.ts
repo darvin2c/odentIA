@@ -311,8 +311,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/settings/integrations/model",
     title: "Modelo del agente",
     parent: INTEGRATIONS,
-    purpose: "Con qué entiende y escribe el agente: el modelo incluido con odentIA o la cuenta propia de la clínica, con su prueba de conexión. Lo del día a día —encenderlo, hasta dónde llega solo, el tope diario y sus indicaciones— está en Agente › Recepción.",
-    terms: ["modelo", "proveedor", "clave de api", "cuenta propia", "probar conexión", "ajustes técnicos"],
+    purpose: "Con qué entiende y escribe el agente: ChatGPT 6 o Claude 5.5, con la cuenta de odentIA; la clínica no necesita clave propia. Lo del día a día —encenderlo, hasta dónde llega solo, el tope diario y sus indicaciones— está en Agente › Recepción.",
+    terms: ["modelo", "proveedor", "chatgpt", "claude", "inteligencia artificial", "ajustes técnicos"],
     writePermission: "agent.write",
   },
   {

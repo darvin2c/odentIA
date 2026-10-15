@@ -1,5 +1,6 @@
 import {
   Button,
+  buttonVariants,
   Checkbox,
   cn,
   FieldLabel,
@@ -303,24 +304,19 @@ export function AbsenceForm({
               {namesSaid([...new Set(affected.map((item) => item.patientName))])}. No se cancelan
               solas: hay que moverlas.
             </span>
-            <Button
-              variant="outline"
-              className="justify-self-start bg-card"
-              render={
-                <Link
-                  to="/agenda"
-                  target="_blank"
-                  search={{
-                    view: "lista",
-                    date: zonedDateOf(firstAffected.startsAt, timeZone),
-                    who: who ?? undefined,
-                    branch: branchId,
-                  }}
-                />
-              }
+            <Link
+              to="/agenda"
+              target="_blank"
+              search={{
+                view: "lista",
+                date: zonedDateOf(firstAffected.startsAt, timeZone),
+                who: who ?? undefined,
+                branch: branchId,
+              }}
+              className={cn(buttonVariants({ variant: "outline" }), "justify-self-start bg-card")}
             >
               Ver y reprogramar
-            </Button>
+            </Link>
           </div>
         ) : null}
       </div>

@@ -186,6 +186,7 @@ describe("bloque de conocimiento del prompt", () => {
     timezone: "America/Lima",
     locale: "es-PE",
     paymentMethods: [],
+    refusedPaymentMethods: [],
     promotions: [],
     branches: [{ id: "b1", name: "Sede Centro", address: "Av. Larco 123", phone: null, mapsUrl: null, timezone: null }],
     services: [
@@ -209,9 +210,10 @@ describe("bloque de conocimiento del prompt", () => {
     expect(block).toMatch(/- Blanqueamiento \(id [^)]+\): USD\s120\.00/)
   })
 
-  it("lleva los medios de pago activos en una sola línea, y nada si no hay ninguno", () => {
-    // Sin medios activos no se afirma nada.
+  it("lleva los medios de pago activos en una sola línea, y que no se registraron si no hay ninguno", () => {
+    // Sin medios activos no se afirma ninguno, y se dice que no se registraron.
     expect(formatKnowledgeForPrompt(snapshot, [])).not.toContain("Medios de pago")
+    expect(formatKnowledgeForPrompt(snapshot, [])).toContain("La clínica no registró sus medios de pago")
     const withMethods: ClinicInfoSnapshot = {
       ...snapshot,
       paymentMethods: [
@@ -226,6 +228,10 @@ describe("bloque de conocimiento del prompt", () => {
     ])
     // También con el índice: es un dato del sistema, no una respuesta oficial.
     expect(formatKnowledgeForPrompt(withMethods, [entry(1, "Respuesta.")], "indice")).toContain("Efectivo, Tarjeta, Yape.")
+    // Lo desactivado se dice como no aceptado, para que no se ofrezca.
+    expect(formatKnowledgeForPrompt({ ...withMethods, refusedPaymentMethods: ["Transferencia"] }, [])).toContain(
+      "La clínica NO acepta: Transferencia.",
+    )
   })
 
   it("cuando no caben todas va el índice, y una respuesta de sede lo dice", () => {

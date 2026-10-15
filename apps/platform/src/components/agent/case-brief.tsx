@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { DetailDrawer, DetailSection, LoadingState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -151,9 +151,10 @@ export function CaseBriefDrawer({
                 Ver la conversación completa
               </Button>
             ) : (
-              <Button variant="outline" nativeButton={false} render={<Link to="/inbox" search={{ conversation: conversationId }} />}>
+              // Lleva a la Bandeja: es un enlace con aspecto de botón, no un botón.
+              <Link to="/inbox" search={{ conversation: conversationId }} className={buttonVariants({ variant: "outline" })}>
                 Ver la conversación completa
-              </Button>
+              </Link>
             )}
             {handoff?.status === "abierta" && canClaim ? (
               <SubmitButton pending={claim.isPending} onClick={() => claim.mutate(handoff.id)}>

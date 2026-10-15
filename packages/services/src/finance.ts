@@ -38,7 +38,13 @@ import {
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { promotionServicePrice } from "@odentia/db/schema/promotions"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  branchNotFound,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
 import { monthStart } from "./report-periods.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -128,7 +134,7 @@ export async function requireBranch(tx: Db, orgId: string, branchId: string) {
     .select()
     .from(branch)
     .where(and(eq(branch.id, branchId), eq(branch.organizationId, orgId)))
-  if (!row) throw notFound("Sucursal")
+  if (!row) throw branchNotFound()
   return row
 }
 /** Moneda de la clínica con bloqueo compartido: orden perfil→caja, sin deadlocks con el cambio de región. */

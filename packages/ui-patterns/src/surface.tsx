@@ -1,6 +1,7 @@
 import { cn, ScrollArea, Skeleton } from "@odentia/ui"
 import * as React from "react"
 import { common } from "./common.js"
+import { ConfirmDialog } from "./confirm-dialog.js"
 
 /**
  * Chrome compartido por las dos familias de superficies laterales: el
@@ -127,21 +128,58 @@ export interface CloseGuardOptions {
   onClose: () => void
 }
 
+export interface CloseGuard {
+  /** Cierre protegido: el botón Cerrar/Cancelar, el Esc y el clic fuera pasan por aquí. */
+  handleClose: () => void
+  /**
+   * La pregunta «¿Salir sin guardar?». El contenedor la monta DENTRO de su
+   * superficie (en el cajón, dentro del popup): así Base UI la trata como un
+   * diálogo anidado y ni el foco atrapado ni el clic fuera del cajón chocan
+   * con ella.
+   */
+  confirmDialog: React.ReactNode
+}
+
 /**
  * Cierre protegido compartido: no interrumpe un envío en curso y pregunta antes
  * de descartar cambios sin guardar. Lo usan el drawer (onOpenChange y Esc de
  * Base UI) y el panel (Esc propio) para comportarse igual en los dos modos.
+ *
+ * La pregunta es la confirmación propia de la interfaz (`ConfirmDialog`), no
+ * la del navegador: lleva el foco al diálogo y, al seguir editando, Base UI lo
+ * devuelve a donde estaba (el campo o el botón que pidió cerrar).
  */
 export function useCloseGuard({
   isSubmitting = false,
   isDirty = false,
   onClose,
-}: CloseGuardOptions) {
-  return React.useCallback(() => {
+}: CloseGuardOptions): CloseGuard {
+  const [asking, setAsking] = React.useState(false)
+  const handleClose = React.useCallback(() => {
     if (isSubmitting) return
-    if (isDirty && !window.confirm(common.confirm.unsavedMessage)) return
+    if (isDirty) {
+      setAsking(true)
+      return
+    }
     onClose()
   }, [isSubmitting, isDirty, onClose])
+
+  const confirmDialog = (
+    <ConfirmDialog
+      open={asking}
+      title={common.confirm.unsaved.title}
+      description={common.confirm.unsaved.description}
+      cancelLabel={common.confirm.unsaved.keepEditing}
+      confirmLabel={common.confirm.unsaved.discard}
+      onClose={() => setAsking(false)}
+      onConfirm={() => {
+        setAsking(false)
+        onClose()
+      }}
+    />
+  )
+
+  return { handleClose, confirmDialog }
 }
 
 // Base UI monta el popup de dialog/drawer/alert-dialog mientras está abierto;

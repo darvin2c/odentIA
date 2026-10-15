@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { describeUnsupported, SOURCE_CALENDAR, SOURCE_SUM, verifyReply } from "./verify.js"
+import { describeUnsupported, refusedPaymentMentions, SOURCE_CALENDAR, SOURCE_SUM, verifyReply } from "./verify.js"
 
 // Lo que recibe la comprobación en una corrida: la zona, la moneda y el formato de la clínica.
 const LIMA = { timezone: "America/Lima", currency: "PEN", locale: "es-PE" }
@@ -149,4 +149,15 @@ it("un mínimo («desde») solo sale dicho como mínimo", () => {
   // Que el mismo número aparezca suelto en otra fuente (lo escribió la persona) no lo vuelve precio final.
   const said = { source: "Lo dijo el interlocutor", text: "¿la ortodoncia cuesta 2,500, no?" }
   expect(check("Sí, la ortodoncia cuesta S/ 2,500.", [desde, said]).ok).toBe(false)
+})
+
+it("un medio de pago desactivado no se ofrece; decir que no se acepta sí pasa", () => {
+  const refused = ["Transferencia", "Cheque"]
+  expect(refusedPaymentMentions("Aceptamos efectivo, tarjeta, transferencia, Yape y Plin.", refused)).toEqual(["Transferencia"])
+  expect(refusedPaymentMentions("Sí, aceptamos tarjeta. La transferencia no está entre nuestros medios de pago.", refused)).toEqual([])
+  expect(refusedPaymentMentions("No aceptamos cheque ni transferencia; sí efectivo y tarjeta.", refused)).toEqual([])
+  expect(refusedPaymentMentions("We take cash and bank TRANSFERENCIA.", refused)).toEqual(["Transferencia"])
+  // Una palabra que solo contiene el nombre no cuenta.
+  expect(refusedPaymentMentions("Chequeamos tu cita.", refused)).toEqual([])
+  expect(refusedPaymentMentions("Aceptamos tarjeta.", [])).toEqual([])
 })

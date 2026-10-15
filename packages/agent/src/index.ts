@@ -9,16 +9,17 @@ export {
   createConfiguredChatModel,
   describeProviderProblem,
   isProviderConfigError,
+  LLM_CATALOG,
   LlmConfigError,
-  type LlmConnectionTest,
+  llmModelName,
+  type LlmProvider,
   type LlmSpec,
-  type OrgLlmSecrets,
   type PlatformLlm,
+  type PlatformLlmEnv,
+  platformLlmFromEnv,
+  type ProviderAccount,
   resolveLlmSpec,
-  resolveModelName,
-  testLlmConnection,
 } from "./llm.js"
-export { assertSafeBaseUrl, createPinnedDispatcher, isPrivateAddress, parseLlmBaseUrl, parseSafeBaseUrl } from "./llm-endpoint.js"
 export * from "./decision/index.js"
 export { embedderFromEnv, type EmbeddingsEnv, FAKE_EMBEDDINGS_MODEL, fakeEmbedder, openAiEmbedder } from "./embeddings.js"
 export { type AdminModelDeps, ALREADY_TOLD_MIN, asAdminDecider, createAdminDecisionModel, createAlreadyTold } from "./admin.js"
@@ -28,7 +29,6 @@ export {
   consumeAgentRun,
   processAgentRun,
   EMPTY_SANDBOX_STATE,
-  resolveOrgLlm,
   type LessonPreview,
   type SandboxResult,
   type SandboxTurn,

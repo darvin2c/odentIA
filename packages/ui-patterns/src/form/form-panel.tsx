@@ -51,7 +51,7 @@ export function FormPanel({
   submitDisabled = false,
   hideSubmit = false,
 }: FormPanelProps) {
-  const handleClose = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
 
@@ -81,6 +81,7 @@ export function FormPanel({
       >
         {children}
       </FormSurface>
+      {confirmDialog}
     </section>
   )
 }

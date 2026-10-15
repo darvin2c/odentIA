@@ -1,4 +1,4 @@
-import { Button } from "@odentia/ui"
+import { Button, buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -78,17 +78,13 @@ export function OpenEncounterCard({
           {missing.length > 0 ? ` · falta ${missing.join(", ")}` : " · lista para cerrar"}
         </p>
       </div>
-      <Button
-        nativeButton={false}
-        render={
-          <Link
-            to="/patients/$patientId/encounters/$encounterId"
-            params={{ patientId, encounterId: encounter.id }}
-          />
-        }
+      <Link
+        to="/patients/$patientId/encounters/$encounterId"
+        params={{ patientId, encounterId: encounter.id }}
+        className={buttonVariants()}
       >
         {canWrite && mine ? "Continuar" : "Ver atención"}
-      </Button>
+      </Link>
     </section>
   )
 }

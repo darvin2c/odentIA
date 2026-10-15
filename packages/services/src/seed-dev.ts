@@ -736,7 +736,7 @@ const [miraflores] = await db
     },
   ])
   .returning({ id: branch.id })
-if (!miraflores) throw new Error("No se pudo crear la sucursal Sede Miraflores")
+if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
 await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima" }])
 
 // --- CRM con servicios ---
@@ -1077,7 +1077,7 @@ await createTask(db, ORG_A, {
 // --- Agente A (B sin fila: ejercita el default deshabilitado) ---
 await upsertAgentConfig(db, ORG_A, {
   enabled: true,
-  model: null,
+  llm: "chatgpt_6",
   systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
@@ -2244,7 +2244,7 @@ await db.transaction((tx) =>
 const surco = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede Surco")),
 })
-if (!surco) throw new Error("Falta la sucursal Sede Surco")
+if (!surco) throw new Error("Falta la Sede Surco")
 const chairsMiraflores = await Promise.all(
   ["Sillón 1", "Sillón 2", "Sillón 3"].map((name) =>
     createChair(db, ORG_A, { branchId: miraflores.id, name }),

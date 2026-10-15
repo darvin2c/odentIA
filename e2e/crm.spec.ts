@@ -195,7 +195,7 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
     org.slug,
   )
   expect(decisions).toEqual([
-    expect.objectContaining({ point: "route.v2", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
+    expect.objectContaining({ point: "route.v3", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
   ])
   const shadow = page.getByRole("region", { name: "Decisiones del modelo de decisión" })
   await expect(shadow).toBeVisible()
@@ -312,7 +312,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await queueItem.getByRole("button", { name: "Ver el caso" }).click()
   const fromNotice = surface(page, { name: "Resumen del caso" })
   await expect(fromNotice).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(fromNotice.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
+  await expect(fromNotice.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(fromNotice).toBeHidden()
   await queueItem.getByRole("button", { name: "Tomar caso" }).click()
