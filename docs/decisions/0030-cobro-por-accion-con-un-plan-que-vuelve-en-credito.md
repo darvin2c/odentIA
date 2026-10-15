@@ -8,20 +8,21 @@ La suscripción de hoy (`saas_plan`) cobra una cuota fija por plan con topes de 
 
 ## Decisión y motivo
 
-- **Un solo plan, sin tamaños:** USD 25 al mes, que vuelven íntegros como crédito para las acciones de los agentes. Todo el sistema, sin límite de odontólogos, sedes ni cuentas: el tamaño de la clínica se refleja en el uso.
+- **Un solo plan, sin tamaños:** USD 29 al mes, que vuelven íntegros como crédito para las acciones de los agentes. Todo el sistema, sin límite de odontólogos, sedes ni cuentas: el tamaño de la clínica se refleja en el uso.
 - **Se cobra por acción, cuando hay un resultado que la clínica reconoce:**
-  - Conversación de Recepción, una por persona cada 24 horas (la atención de la ADR 0024): USD 0,25.
+  - Conversación de Recepción, una por persona cada 24 horas (la atención de la ADR 0024): USD 0,50. Es la parte baja de los agentes de atención internacionales, que cobran entre USD 0,50 y 2 por conversación o resolución.
   - Consulta dictada y confirmada por el odontólogo (ADR 0012): USD 0,40. El borrador descartado no se cobra.
   - Cita recuperada: reservada dentro de los 7 días siguientes a un mensaje del Administrador, en su conversación o desde su enlace (ADR 0014 y 0023), y atendida: USD 4. Si salió de una conversación, la conversación queda dentro.
   - Recordatorios, avisos al equipo y el sistema no se cobran aparte.
-- **Descuentos solo en las acciones, nunca en la cuota,** y siempre junto al precio base. El vendedor da hasta 10 %; la administración de odentIA, hasta el precio mínimo (60 % menos). Ningún precio queda por debajo del doble de su peor costo, y el servidor lo comprueba.
+- **Descuentos solo en las acciones, nunca en la cuota,** y siempre junto al precio base. El vendedor da hasta 10 %; la administración de odentIA, hasta el precio mínimo (60 % menos: USD 0,20 por conversación). Ningún precio queda por debajo del doble de su peor costo, y el servidor lo comprueba.
+- **Las cifras se configuran en la administración** (cuota, crédito, precio base, precio mínimo y cuánto descuenta el vendedor), sin tocar código y sin reescribir cargos ya emitidos.
 - **Precios en dólares y sin impuestos;** la factura muestra el total con el impuesto del país (IGV en Perú).
 - **El mes de cada clínica empieza el día que activa el plan.** Lo variable se factura cada mes o cada 15 días, según se configure por clínica.
 - **Prueba:** 30 días del sistema y USD 50 de crédito de regalo, configurables por clínica hasta USD 130 y 60 días con aprobación. Si el crédito se acaba, los agentes se pausan.
 - **Tope de gasto por clínica,** con aviso y alarma antes de llegar. Al tope, los casos nuevos pasan al equipo y el paciente siempre recibe respuesta (ADR 0021).
 - **WhatsApp lo paga la clínica directo a Meta.** odentIA muestra una estimación y dice que depende por completo de Meta.
 
-Así la clínica paga por lo que le da valor, entra por menos que el software más básico y el ingreso crece con el uso. Con los costos medidos en #63, el margen queda por encima de 44 % en el peor caso: negociado al mínimo, con todo el crédito gastado en conversaciones y después de una comisión de vendedor del 10 %.
+Así la clínica paga por lo que le da valor, entra por lo mismo que el software más básico y el ingreso crece con el uso. Con los costos medidos en #63, el margen queda por encima de 64 % en el peor caso: negociado al mínimo, con todo el crédito gastado en conversaciones y después de una comisión de vendedor del 10 %.
 
 ## Alternativas descartadas
 
