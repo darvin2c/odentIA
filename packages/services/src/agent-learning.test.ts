@@ -1,6 +1,6 @@
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { agentAnswerTrace, agentLesson, agentReviewItem, agentTestCase } from "@odentia/db/schema/agent"
+import { agentAnswerTrace, agentLesson, agentProposal, agentReviewItem, agentTestCase } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { message } from "@odentia/db/schema/crm"
 import { and, desc, eq } from "drizzle-orm"
@@ -28,7 +28,7 @@ import {
   updateLesson,
   withdrawLesson,
 } from "./agent-learning.js"
-import { createProposal, decideProposal, updateAutonomyPolicy } from "./agent-operations.js"
+import { decideProposal } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js"
 import { createKnowledgeEntry, getKnowledgeEntry, listActiveKnowledge, setKnowledgeStatus, updateKnowledgeEntry } from "./knowledge.js"
@@ -319,11 +319,19 @@ describe("lo aprendido dentro del turno", () => {
 describe("aprobar con edición", () => {
   it("sale el texto del equipo, el borrador queda como evidencia y se propone guardarlo", async () => {
     const asked = await inbound("editada", "¿Tienen estacionamiento en Miraflores?")
-    await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "aprobar_equipo" }))
+    // Un borrador de texto esperando al equipo. Con la política fija (ADR 0021)
+    // ningún recorrido lo crea: la fila se deja tal cual para ejercitar la
+    // aprobación con edición que ofrecen Aprobaciones y el panel.
+    const pendingText = async (text: string, idempotencyKey: string) => {
+      const [row] = await ownerDb.insert(agentProposal).values({
+        organizationId: ORG, conversationId: asked.conversationId, action: "enviar_mensaje",
+        payload: { kind: "text", text }, afterSummary: text, idempotencyKey,
+      }).returning({ id: agentProposal.id })
+      if (!row) throw new Error("propuesta")
+      return row
+    }
     const draft = "Nuestra sede Miraflores está en Av. Larco 345."
-    const proposal = await run((tx) => createProposal(tx, ORG, {
-      conversationId: asked.conversationId, action: "enviar_mensaje", payload: { kind: "text", text: draft }, idempotencyKey: "learn:edit-1",
-    }))
+    const proposal = await pendingText(draft, "learn:edit-1")
     await run((tx) => recordAnswerTrace(tx, ORG, {
       conversationId: asked.conversationId, triggerMessageId: asked.messageId, proposalId: proposal.id,
       outcome: "pendiente", replyText: draft, basis: [], checks: [],
@@ -348,14 +356,11 @@ describe("aprobar con edición", () => {
     })
 
     // Aprobar sin cambiar nada no propone ninguna lección.
-    const same = await run((tx) => createProposal(tx, ORG, {
-      conversationId: asked.conversationId, action: "enviar_mensaje", payload: { kind: "text", text: "Gracias por escribir." }, idempotencyKey: "learn:edit-2",
-    }))
+    const same = await pendingText("Gracias por escribir.", "learn:edit-2")
     const before = (await ownerDb.select({ id: agentLesson.id }).from(agentLesson)).length
     const plain = await run((tx) => decideProposal(tx, ORG, OWNER, same.id, { decision: "aprobada", editedText: " Gracias por escribir. " }))
     expect(plain.editedText).toBeNull()
     expect((await ownerDb.select({ id: agentLesson.id }).from(agentLesson)).length).toBe(before)
-    await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "directo" }))
     expect(await ownerDb.select({ id: agentAnswerTrace.id }).from(agentAnswerTrace).where(eq(agentAnswerTrace.proposalId, proposal.id))).toHaveLength(1)
     expect(await ownerDb.select({ id: agentTestCase.id }).from(agentTestCase).where(eq(agentTestCase.lessonId, lesson!.id))).toEqual([])
   })

@@ -16,8 +16,8 @@ const lima = (dayOffset: number, hhmm: string): string => {
 }
 
 /**
- * Seed del dominio IA: FAQs publicadas deterministas, una en borrador y la
- * política de autonomía por defecto. Idempotente por ids fijos.
+ * Seed del dominio IA: FAQs publicadas deterministas y una en borrador.
+ * Idempotente por ids fijos.
  */
 export async function seedAgent(
   tx: Db,

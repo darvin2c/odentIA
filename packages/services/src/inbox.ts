@@ -1,6 +1,6 @@
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
-import { getAutonomyPolicy, pendingProposalDecider } from "./agent-operations.js"
+import { pendingProposalDecider } from "./agent-operations.js"
 import {
   type ConversationFilters,
   type ConversationListItem,
@@ -65,14 +65,11 @@ async function conversationAttention(
     select p.conversation_id, p.action, count(*)::int as count from agent_proposal p
     where p.organization_id = ${orgId} and p.conversation_id in (${ids}) and ${proposalPendingSql(sql.raw("p"))}
     group by p.conversation_id, p.action`)
-  if (proposals.length > 0) {
-    const policy = await getAutonomyPolicy(tx, orgId)
-    for (const row of proposals) {
-      const attention = out.get(row.conversation_id)
-      if (!attention) continue
-      if (pendingProposalDecider(policy, row.action, true) === "team") attention.pendingTeam += row.count
-      else attention.pendingContact += row.count
-    }
+  for (const row of proposals) {
+    const attention = out.get(row.conversation_id)
+    if (!attention) continue
+    if (pendingProposalDecider(row.action, true) === "team") attention.pendingTeam += row.count
+    else attention.pendingContact += row.count
   }
   const handoffs = await tx.execute<{ conversation_id: string; priority: string }>(sql`
     select h.conversation_id, h.priority from agent_handoff h

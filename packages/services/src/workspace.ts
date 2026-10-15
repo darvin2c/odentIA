@@ -5,7 +5,6 @@ import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import {
   countPendingProposals,
-  getAutonomyPolicy,
   listHandoffs,
   listProposals,
   pendingProposalDecider,
@@ -257,9 +256,8 @@ async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean)
 /** Propuestas pendientes que decide el equipo; las que esperan al interlocutor no esperan a nadie de aquí. */
 async function waitingProposals(tx: Db, orgId: string): Promise<{ items: WaitingProposal[]; total: number }> {
   const rows = await listProposals(tx, orgId, { status: "propuesta", limit: 50 })
-  const policy = await getAutonomyPolicy(tx, orgId)
   const items = rows
-    .filter(row => pendingProposalDecider(policy, row.action, row.conversationId !== null) === "team")
+    .filter(row => pendingProposalDecider(row.action, row.conversationId !== null) === "team")
     .slice(0, WAITING_LIMITS.proposals)
     .map(row => ({
       id: row.id, action: row.action, summary: row.context.afterSummary, createdAt: row.createdAt,

@@ -6,7 +6,6 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
-import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 
 interface Conversation {
@@ -70,12 +69,10 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
     }),
   ).toBe(200)
   const conversation = await conversationFor(page, org.slug, tg.id)
-  // El acto exige aprobación del equipo. La propuesta se inserta como la
-  // registra el agente (proposed_by=agent): sin proveedor real no hay corrida
-  // que la genere, y la vía HTTP la marcaría como propuesta por una persona.
-  // Ese es el límite de esta evidencia; la lógica de propuesta se cubre en
-  // services y en crm.spec.ts con el modelo falso.
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
+  // Un mensaje que espera la decisión del equipo. Con la política fija
+  // (ADR 0021) ningún recorrido lo deja así en un hilo: la propuesta se inserta
+  // como la registraría el agente (proposed_by=agent). Ese es el límite de esta
+  // evidencia; la lógica de propuesta se cubre en services.
   await fixtureDb.insert(agentProposal).values({
     organizationId: org.id,
     contactId: conversation.contact.id,
@@ -189,9 +186,8 @@ test("panel del agente: decidir, tomar derivadas y ver actividad desde cualquier
   await expect(agentButton(page)).toBeVisible()
 
   // Trabajo proactivo: propuesta sin hilo (seguimiento vencido) anclada al
-  // contacto y a su oportunidad; el caso que se abre es la oportunidad. Con la
-  // política por defecto de mensajes (directo) sigue siendo decisión del equipo.
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "directo" })
+  // contacto y a su oportunidad; el caso que se abre es la oportunidad. Aunque
+  // en un hilo los mensajes salen directo, sin hilo decide el equipo.
   const opportunity = await call<{ id: string }>(
     page,
     "POST",

@@ -5,7 +5,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { beforeAll, describe, expect, it } from "vitest"
 import { randomUUID } from "node:crypto"
 import { recordAgentDecision } from "./agent-decisions.js"
-import { getAgentRunStats, getAutonomyPolicy } from "./agent-operations.js"
+import { autonomyModeOf, getAgentRunStats } from "./agent-operations.js"
 import { getAgentOverview, noteSandboxTurn } from "./agent-overview.js"
 import {
   AGENT_ROLE_IDS,
@@ -107,9 +107,9 @@ describe("fichas de los agentes", () => {
 })
 
 describe("quién dice que sí: fijo para todas las clínicas", () => {
-  it("el agente responde solo, la cita la confirma el paciente y lo comercial va directo", async () => {
+  it("el agente responde solo, la cita la confirma el paciente y lo comercial va directo", () => {
     expect(Object.keys(DEFAULT_AUTONOMY_MODES).sort()).toEqual([...AUTONOMY_ACTIONS].sort())
-    expect(await run((tx) => getAutonomyPolicy(tx, ORG))).toEqual({
+    expect(Object.fromEntries(AUTONOMY_ACTIONS.map((action) => [action, autonomyModeOf(action)]))).toEqual({
       reservar_cita: "confirmar_usuario",
       reprogramar_cita: "confirmar_usuario",
       cancelar_cita: "confirmar_usuario",

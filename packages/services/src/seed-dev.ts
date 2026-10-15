@@ -125,7 +125,6 @@ import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
-import { seedCrmAgent } from "./seed-crm-agent.js"
 import { seedFinance } from "./seed-finance.js"
 import { seedInventory } from "./seed-inventory.js"
 import { seedMailbox } from "./seed-mailbox.js"
@@ -349,7 +348,6 @@ async function wipeSeed(): Promise<void> {
     "agent_handoff",
     "agent_knowledge_revision",
     "agent_knowledge_entry",
-    "agent_policy",
     "crm_note",
     "task",
     "workspace_notification",
@@ -2481,13 +2479,7 @@ await db.transaction(async (tx) => {
   })
   const commercial = items[0]
   if (!commercial) throw new Error("Falta la oportunidad de demostración conectada")
-  const openStages = pipeA.stages.filter((stage) => stage.kind === "open")
   await seedCrmActivity(tx, { ...domainSeed, opportunityId: commercial.id })
-  await seedCrmAgent(tx, {
-    ...domainSeed,
-    opportunityId: commercial.id,
-    stageId: (openStages[1] ?? openStages[0])!.id,
-  })
   const [followUpTask] = await tx
     .select()
     .from(crmTask)

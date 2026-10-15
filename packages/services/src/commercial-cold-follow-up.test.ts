@@ -26,7 +26,6 @@ import {
   createProposal,
   decideProposal,
   getProposal,
-  updateAutonomyPolicy,
 } from "./agent-operations.js"
 import { syncOverdueCommercialFollowUps } from "./automation.js"
 import { recordCommercialFollowUpProposal } from "./commercial-coordination.js"
@@ -164,11 +163,15 @@ it("sin conversación pero con canal apto, propone al equipo abrir WhatsApp con 
   const proposalId = await proposalIdOf(f.orgId, f.taskId)
   expect(await ownerDb.select().from(agentProposal).where(eq(agentProposal.organizationId, f.orgId))).toHaveLength(1)
   const proposal = await withOrgContext(appDb, f.orgId, (tx) => getProposal(tx, f.orgId, proposalId))
-  // La política por defecto de enviar_mensaje es «directo»; aun así espera al
-  // equipo y así se presenta en panel, Aprobaciones e Inicio.
+  // En un hilo, enviar_mensaje va directo; sin hilo espera al equipo y así se
+  // presenta en panel, Aprobaciones e Inicio.
   expect(proposal.status).toBe("propuesta")
   expect(proposal.mode).toBe("aprobar_equipo")
   expect(await withOrgContext(appDb, f.orgId, (tx) => countPendingProposals(tx, f.orgId))).toEqual({ team: 1, contact: 0 })
+  // Sin hilo no hay interlocutor que confirme: su sí jamás la ejecuta.
+  await expect(withOrgContext(appDb, f.orgId, (tx) =>
+    confirmProposalByContact(tx, f.orgId, f.contactId, proposalId, { staffUserId: f.userId, secretsKey: KEY }),
+  )).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_TEAM_APPROVAL", status: 409 })
   expect(proposal.conversationId).toBeNull()
   expect(proposal.contactId).toBe(f.contactId)
   expect(proposal.payload).toMatchObject({ kind: "template", name: "seguimiento_presupuesto", connectionId: f.connectionId, opportunityId: f.opportunityId })
@@ -247,7 +250,7 @@ it("una propuesta proactiva que nadie decide caduca y el siguiente tick deriva l
   expect(await noticesOf(coordination.id)).toHaveLength(1)
 })
 
-it("lo vigente al aprobar manda: consentimiento revocado, política endurecida o plantilla retirada no envían y derivan", async () => {
+it("lo vigente al aprobar manda: consentimiento revocado o plantilla retirada no envían y derivan", async () => {
   // Consentimiento revocado entre la propuesta y la aprobación.
   const revoked = await seed()
   await tick(revoked.orgId)
@@ -255,19 +258,6 @@ it("lo vigente al aprobar manda: consentimiento revocado, política endurecida o
   const noConsent = await decide(revoked, await proposalIdOf(revoked.orgId, revoked.taskId), "aprobada")
   expect(noConsent.status).toBe("fallida")
   expect(noConsent.result?.["errorCode"]).toBe("CONSENT_REQUIRED")
-
-  // La política pasa a exigir al interlocutor: sin hilo nadie puede confirmar.
-  const hardened = await seed()
-  await tick(hardened.orgId)
-  const hardenedId = await proposalIdOf(hardened.orgId, hardened.taskId)
-  await withOrgContext(appDb, hardened.orgId, (tx) => updateAutonomyPolicy(tx, hardened.orgId, hardened.userId, { enviar_mensaje: "confirmar_usuario" }))
-  await expect(withOrgContext(appDb, hardened.orgId, (tx) =>
-    confirmProposalByContact(tx, hardened.orgId, hardened.contactId, hardenedId, { staffUserId: hardened.userId, secretsKey: KEY }),
-  )).rejects.toThrow("la decide el equipo")
-  expect(await withOrgContext(appDb, hardened.orgId, (tx) => countPendingProposals(tx, hardened.orgId))).toEqual({ team: 1, contact: 0 })
-  const blocked = await decide(hardened, hardenedId, "aprobada")
-  expect(blocked.status).toBe("fallida")
-  expect(blocked.result?.["errorCode"]).toBe("POLICY_REQUIRES_CONTACT_CONFIRM")
 
   // WhatsApp pausa la plantilla entre la propuesta y la aprobación: el fallo
   // llega con el hilo ya abierto y todo lo parcial se deshace.
@@ -281,7 +271,7 @@ it("lo vigente al aprobar manda: consentimiento revocado, política endurecida o
   const [untouched] = await ownerDb.select().from(opportunity).where(eq(opportunity.id, withdrawn.opportunityId))
   expect(untouched?.conversationId).toBeNull()
 
-  for (const f of [revoked, hardened, withdrawn]) {
+  for (const f of [revoked, withdrawn]) {
     expect(await threadsOf(f.orgId), f.orgId).toHaveLength(0)
     expect(await messagesOf(f.orgId), f.orgId).toHaveLength(0)
     const coordination = await coordinationOf(f.orgId, f.taskId)
@@ -308,10 +298,6 @@ it("sin canal apto deriva como antes y nunca tumba el tick", async () => {
     { name: "sin consentimiento", seed: { consent: false } },
     { name: "sin identidad", seed: { identity: false } },
     { name: "sin clave", key: false },
-    {
-      name: "política confirmar_usuario",
-      prepare: (f) => withOrgContext(appDb, f.orgId, (tx) => updateAutonomyPolicy(tx, f.orgId, f.userId, { enviar_mensaje: "confirmar_usuario" })),
-    },
     {
       name: "WhatsApp aún no aprueba la plantilla de seguimiento",
       prepare: (f) => ownerDb.update(channelTemplate).set({ status: "en_revision" }).where(eq(channelTemplate.connectionId, f.connectionId)),
@@ -363,22 +349,21 @@ it("con atraso acumulado, los vencimientos ya coordinados no tapan a los nuevos"
 })
 
 /**
- * Recorrido con hilo: el agente propuso un mensaje y el equipo decide después.
- * La coordinación ya no queda en `propuesta` para siempre.
+ * Recorrido con hilo: en la coordinación el agente propuso una cita, que espera
+ * el sí de la persona. La coordinación ya no queda en `propuesta` para siempre.
  */
 async function threadedProposal() {
   const f = await seed({ thread: true })
   if (!f.threadId) throw new Error("hilo")
   const threadId = f.threadId
-  await withOrgContext(appDb, f.orgId, (tx) => updateAutonomyPolicy(tx, f.orgId, f.userId, { enviar_mensaje: "aprobar_equipo" }))
   expect(await tick(f.orgId)).toEqual({ programados: 1, omitidos: 0 })
   const coordination = await coordinationOf(f.orgId, f.taskId)
   expect(coordination.status).toBe("pendiente")
-  // Lo que hace la herramienta del agente al proponer el mensaje de seguimiento.
+  // Lo que hace la herramienta del agente al proponer la cita.
   const proposal = await withOrgContext(appDb, f.orgId, async (tx) => {
     const created = await createProposal(tx, f.orgId, {
-      conversationId: threadId, action: "enviar_mensaje",
-      payload: { kind: "text", text: "Hola, ¿retomamos tu presupuesto?" }, idempotencyKey: `coord:${coordination.id}`,
+      conversationId: threadId, action: "reservar_cita", idempotencyKey: `coord:${coordination.id}`,
+      payload: { patientId: randomUUID(), dentistUserId: f.userId, chairId: randomUUID(), startsAt: "2026-10-06T15:00:00.000Z" },
     })
     await recordCommercialFollowUpProposal(tx, f.orgId, coordination.id, created)
     return created
@@ -388,14 +373,7 @@ async function threadedProposal() {
   return { ...f, threadId, proposalId: proposal.id }
 }
 
-it("con hilo, la decisión tardía del equipo cierra la coordinación: aprobar la ejecuta, rechazar avisa y caducar deriva", async () => {
-  const approved = await threadedProposal()
-  const executed = await decide(approved, approved.proposalId, "aprobada")
-  expect(executed.status).toBe("ejecutada")
-  const done = await coordinationOf(approved.orgId, approved.taskId)
-  expect(done.status).toBe("ejecutada")
-  expect((done.result as Record<string, unknown>)?.["messageId"]).toBe(executed.result?.["messageId"])
-
+it("con hilo, lo que espera a la persona cierra la coordinación al terminar: rechazar avisa y caducar deriva", async () => {
   // Rechazar: una persona ya decidió; avisa al responsable sin abrir una
   // derivación ni apagar el agente del hilo.
   const rejected = await threadedProposal()

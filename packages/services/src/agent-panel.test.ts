@@ -13,11 +13,9 @@ import {
   countPendingProposals,
   createHandoff,
   createProposal,
-  decideProposal,
   getAgentPanelSummary,
   getAgentPatientSummary,
   listHandoffs,
-  updateAutonomyPolicy,
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js"
@@ -89,13 +87,16 @@ async function openConversation(sender: string): Promise<{ conversationId: strin
 }
 
 it("el resumen separa lo que decide el equipo de lo que espera al interlocutor y no cuenta fallos como intervenciones", async () => {
-  const { conversationId } = await openConversation("resumen")
-  await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "confirmar_usuario", crear_oportunidad: "aprobar_equipo" }))
+  const { conversationId, contactId } = await openConversation("resumen")
+  // Espera al interlocutor: una cita propuesta en el hilo.
   await run((tx) => createProposal(tx, ORG, {
-    conversationId, action: "enviar_mensaje", payload: { kind: "text", text: "¿Te va el jueves?" }, idempotencyKey: "panel:msg-1",
+    conversationId, action: "reservar_cita", idempotencyKey: "panel:cita-1",
+    payload: { patientId: randomUUID(), dentistUserId: OWNER, chairId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
   }))
+  // Decide el equipo: una propuesta sin hilo, como la del seguimiento vencido.
   await run((tx) => createProposal(tx, ORG, {
-    conversationId, action: "crear_oportunidad", payload: { title: "Ortodoncia" }, idempotencyKey: "panel:opp-1",
+    contactId, action: "enviar_mensaje", idempotencyKey: "panel:frio-1", requireTeamDecision: true,
+    payload: { kind: "template", name: "seguimiento", language: "es", connectionId: connId, identityId: randomUUID() },
   }))
   await ownerDb.insert(agentRunLedger).values([
     { organizationId: ORG, model: "prueba", status: "ok", startedAt: new Date() },
@@ -111,20 +112,15 @@ it("el resumen separa lo que decide el equipo de lo que espera al interlocutor y
   })
   expect(summary.timezone).toBeTruthy()
   expect(summary.locale).toBeTruthy()
-  // Cambiar la política mueve la misma propuesta de columna sin tocarla.
-  await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "aprobar_equipo" }))
-  expect(await run((tx) => countPendingProposals(tx, ORG))).toEqual({ team: 2, contact: 0 })
 })
 
 it("la actividad muestra la entrega real de lo enviado y solo lo que hizo el agente", async () => {
   const { conversationId } = await openConversation("actividad")
-  await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "aprobar_equipo" }))
   const proposal = await run((tx) => createProposal(tx, ORG, {
     conversationId, action: "enviar_mensaje", payload: { kind: "text", text: "Te confirmo la cita." }, idempotencyKey: "panel:act-1",
   }))
-  const executed = await run((tx) => decideProposal(tx, ORG, OWNER, proposal.id, { decision: "aprobada" }))
-  expect(executed.status).toBe("ejecutada")
-  const messageId = executed.result?.["messageId"]
+  expect(proposal.status).toBe("ejecutada")
+  const messageId = proposal.result?.["messageId"]
   expect(typeof messageId).toBe("string")
   // Un recordatorio automático también sale con sender_kind=agent, pero no es obra del agente.
   const automation = await run((tx) => sendOutbound(tx, ORG, {

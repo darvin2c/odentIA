@@ -7,7 +7,6 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant } from "./env"
 import { api, call, expect, type OwnerFixture, test } from "./fixtures"
-import { setAgentPolicy } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 
 interface Conversation {
@@ -31,9 +30,10 @@ async function conversationWith(page: Page, slug: string, text: string): Promise
 
 /**
  * Dos hilos de Telegram: uno con una propuesta que decide el equipo y otro
- * con una derivación de prioridad alta. La propuesta se inserta como la
- * registra el agente (sin proveedor real no hay corrida que la genere): es el
- * límite de esta evidencia; su lógica se cubre en services.
+ * con una derivación de prioridad alta. Con la política fija (ADR 0021) ningún
+ * recorrido deja un mensaje esperando al equipo en un hilo: la propuesta se
+ * inserta como la registraría el agente. Es el límite de esta evidencia; su
+ * lógica se cubre en services.
  */
 async function seedThreads(owner: OwnerFixture, fixtureDb: Db, nextEventId: () => number) {
   const { page, org } = owner
@@ -46,7 +46,6 @@ async function seedThreads(owner: OwnerFixture, fixtureDb: Db, nextEventId: () =
   }
   const waiting = await conversationWith(page, org.slug, WAITING_TEXT)
   const derived = await conversationWith(page, org.slug, DERIVED_TEXT)
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
   const propose = async (conversation: Conversation, text: string) => {
     const [row] = await fixtureDb.insert(agentProposal).values({
       organizationId: org.id, contactId: conversation.contact.id, conversationId: conversation.id, action: "enviar_mensaje",

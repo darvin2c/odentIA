@@ -540,6 +540,13 @@
       "when": 1792027802668,
       "tag": "0076_modelo_elegido_de_dos",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1792033545876,
+      "tag": "0077_sin_tabla_de_niveles",
+      "breakpoints": true
     }
   ]
 }

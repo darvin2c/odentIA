@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
-import { setAgentPolicy } from "./fixture-db"
+import { insertPendingReply } from "./fixture-db"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
 
@@ -225,11 +225,14 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   expect(await learning()).toMatchObject({ cases: 1 })
 
   // --- Aprobar un mensaje editándolo: sale el texto del equipo y queda una lección por aprobar ---
-  // Sin niveles (ADR 0021): para que el equipo apruebe el mensaje, la prueba fija la política en la base.
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "aprobar_equipo" })
+  // El agente responde al momento (ADR 0021); el borrador que espera al equipo
+  // se deja en la base, como lo dejaría el agente (ver `insertPendingReply`).
   const andres = nextEventId()
   await send(andres, "¿Tienen estacionamiento?")
   await expect.poll(async () => (await conversations()).length, { timeout: 30_000 }).toBe(2)
+  const second = (await conversations()).find((row) => row.id !== conversationId)!.id
+  await expect.poll(async () => (await traces(second)).length, { timeout: 45_000 }).toBe(1)
+  await insertPendingReply(fixtureDb, { orgId: org.id, conversationId: second, text: FAKE_REPLY })
   await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
   // Un mensaje se revisa en su cajón: lo que escribió la persona, el borrador y las tres decisiones.
   await page.getByRole("button", { name: "Revisar y aprobar" }).click({ timeout: 45_000 })
@@ -249,18 +252,16 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y aprobar un m
   await info.attach("aprobar-con-edicion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await approve.getByRole("button", { name: "Aprobar y enviar" }).click()
   await expect(approve).toBeHidden()
-  const second = (await conversations()).find((row) => row.id !== conversationId)!.id
   await expect
     .poll(async () => {
       const rows = await call<Array<{ body: string | null; direction: string }>>(page, "GET", `/api/conversations/${second}/messages`, org.slug)
-      return rows.filter((row) => row.direction === "out").map((row) => row.body)
+      return rows.filter((row) => row.direction === "out").map((row) => row.body).sort()
     })
-    .toEqual([edited])
+    .toEqual([FAKE_REPLY, edited].sort())
   await expect.poll(async () => (await learning()).proposed.map((row) => row.body)).toEqual([edited])
   expect((await learning()).proposed[0]).toMatchObject({ kind: "respuesta_oficial", question: "¿Tienen estacionamiento?" })
 
   // --- Desde la Bandeja: «En qué se basó» ofrece corregir esa respuesta ---
-  await setAgentPolicy(fixtureDb, org.id, { enviar_mensaje: "directo" })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
   await page.getByRole("button", { name: "En qué se basó" }).click()
   const trace = page.getByRole("dialog", { name: "En qué se basó" })

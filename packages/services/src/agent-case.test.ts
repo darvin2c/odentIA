@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { agentAnswerTrace, agentCaseMemory } from "@odentia/db/schema/agent"
@@ -14,7 +15,7 @@ import {
   recordAgentCaseLookup,
   recordAnswerTrace,
 } from "./agent-case.js"
-import { createProposal, decideProposal, getAgentRunStats, recordAgentRun, updateAutonomyPolicy } from "./agent-operations.js"
+import { createProposal, decideProposal, getAgentRunStats, recordAgentRun } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -83,33 +84,26 @@ it("un hilo nuevo no tiene estado que contar y no gasta prompt en una sección v
   expect(formatAgentCaseForPrompt(state, ZONE, 20)).toBeNull()
 })
 
-it("el estado separa lo que espera al interlocutor de lo que decide el equipo y recuerda lo rechazado con su motivo", async () => {
+it("el estado dice lo que espera al interlocutor y recuerda lo rechazado con su motivo", async () => {
   const conversationId = await openConversation("estado")
-  await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "confirmar_usuario", crear_oportunidad: "aprobar_equipo" }))
-  const message = await run((tx) => createProposal(tx, ORG, {
-    conversationId, action: "enviar_mensaje", payload: { kind: "text", text: "¿Te va el jueves?" }, idempotencyKey: "case:msg-1",
-  }))
-  const opportunity = await run((tx) => createProposal(tx, ORG, {
-    conversationId, action: "crear_oportunidad", payload: { title: "Ortodoncia" }, idempotencyKey: "case:opp-1",
+  // Una cita es el acto que espera el sí del interlocutor en el hilo (ADR 0021).
+  const booking = await run((tx) => createProposal(tx, ORG, {
+    conversationId, action: "reservar_cita", idempotencyKey: "case:cita-1",
+    payload: { patientId: randomUUID(), dentistUserId: OWNER, chairId: randomUUID(), startsAt: "2026-11-02T15:00:00.000Z" },
   }))
   const pending = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(pending.pending.map((item) => `${item.action}:${item.decider}`).sort()).toEqual([
-    "crear_oportunidad:team",
-    "enviar_mensaje:contact",
-  ])
+  expect(pending.pending.map((item) => `${item.action}:${item.decider}`)).toEqual(["reservar_cita:contact"])
   const prompt = formatAgentCaseForPrompt(pending, ZONE, 20) ?? ""
-  expect(prompt).toContain(`Propuesta pendiente de que el interlocutor confirme: Enviar mensaje — ¿Te va el jueves? (id ${message.id}`)
-  expect(prompt).toContain(`Propuesta pendiente de decisión del equipo: Crear oportunidad — Nueva oportunidad: Ortodoncia (id ${opportunity.id}`)
-  expect(prompt).toContain("No pidas un sí")
+  expect(prompt).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita — ")
+  expect(prompt).toContain(`(id ${booking.id}`)
 
-  await run((tx) => decideProposal(tx, ORG, OWNER, opportunity.id, { decision: "rechazada", reason: "Ya tiene una abierta" }))
+  await run((tx) => decideProposal(tx, ORG, OWNER, booking.id, { decision: "rechazada", reason: "Prefiere llamar" }))
   const after = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(after.pending.map((item) => item.action)).toEqual(["enviar_mensaje"])
-  expect(after.recent).toMatchObject([{ action: "crear_oportunidad", status: "rechazada", detail: "Ya tiene una abierta" }])
-  expect(formatAgentCaseForPrompt(after, ZONE, 20)).toContain(
-    "No se hizo: Crear oportunidad — Nueva oportunidad: Ortodoncia (rechazada: Ya tiene una abierta;",
-  )
-  await run((tx) => updateAutonomyPolicy(tx, ORG, OWNER, { enviar_mensaje: "directo" }))
+  expect(after.pending).toEqual([])
+  expect(after.recent).toMatchObject([{ action: "reservar_cita", status: "rechazada", detail: "Prefiere llamar" }])
+  const afterPrompt = formatAgentCaseForPrompt(after, ZONE, 20) ?? ""
+  expect(afterPrompt).toContain("No se hizo: Reservar cita — ")
+  expect(afterPrompt).toContain("(rechazada: Prefiere llamar;")
 })
 
 it("las notas del caso son acotadas y no se repiten", async () => {

@@ -13,7 +13,6 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { organization } from "./auth.js"
 import { contact, conversation, crmTask, orgFk } from "./crm.js"
 import { opportunity } from "./opportunities.js"
 import { branch } from "./org.js"
@@ -137,15 +136,6 @@ export type AutonomyAction = (typeof AUTONOMY_ACTIONS)[number]
 
 export const AUTONOMY_MODES = ["directo", "confirmar_usuario", "aprobar_equipo"] as const
 export type AutonomyMode = (typeof AUTONOMY_MODES)[number]
-
-export const agentPolicy = pgTable("agent_policy", {
-  organizationId: text("organization_id")
-    .primaryKey()
-    .references(() => organization.id),
-  modes: jsonb("modes").$type<Partial<Record<AutonomyAction, AutonomyMode>>>().notNull().default({}),
-  updatedBy: text("updated_by"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-})
 
 export const PROPOSAL_ACTIONS = [
   "reservar_cita",
@@ -707,8 +697,8 @@ export interface AgentPatientContext {
  * Quién dice que sí a cada acción del agente. Es fija para todas las clínicas
  * (ADR 0021): el agente siempre responde, la cita la confirma el paciente y lo
  * comercial es interno y se deshace. La clínica elige qué funciones enciende,
- * no niveles. `agent_policy` queda solo para que las pruebas ejerciten los
- * otros modos de la máquina de propuestas.
+ * no niveles. No se guarda por organización: los otros modos solo los usan
+ * las propuestas sin hilo, que decide siempre el equipo (`aprobar_equipo`).
  */
 export const DEFAULT_AUTONOMY_MODES: Record<AutonomyAction, AutonomyMode> = {
   reservar_cita: "confirmar_usuario",

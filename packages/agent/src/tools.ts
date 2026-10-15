@@ -20,7 +20,7 @@ import {
   deriveCommercialFollowUpCoordination,
   findFreeGaps,
   getAgentPatientSummary,
-  getAutonomyPolicy,
+  autonomyModeOf,
   getContact,
   getClinicInfoSnapshot,
   getOpportunity,
@@ -402,13 +402,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   /**
    * En una conversación de prueba el acto no se crea: queda en el estado de la
-   * prueba con el mismo recorrido que tendría (ejecutado, esperando el sí del
-   * interlocutor o la decisión del equipo) para que el turno siguiente lo vea.
+   * prueba con el mismo recorrido que tendría (ejecutado o esperando el sí del
+   * interlocutor) para que el turno siguiente lo vea.
    */
   const sandboxPropose = async (action: ProposalAction, summary: string): Promise<string> => {
     const sandbox = ctx.sandbox
     if (!sandbox) return ""
-    const mode = (await inOrg((tx) => getAutonomyPolicy(tx, ctx.orgId)))[action]
+    const mode = autonomyModeOf(action)
     const now = new Date()
     const proposal: AgentCaseProposal = {
       id: randomUUID(),
@@ -426,9 +426,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return `[SIMULACIÓN] Ejecutado en modo directo (propuesta ${proposal.id}).`
     }
     sandbox.state.pending = [...sandbox.state.pending, proposal]
-    return mode === "confirmar_usuario"
-      ? `[SIMULACIÓN] Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
-      : `[SIMULACIÓN] Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al interlocutor que lo contactaremos.`
+    return `[SIMULACIÓN] Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
   }
 
   const sandboxWhen = async (iso: string): Promise<string> => {

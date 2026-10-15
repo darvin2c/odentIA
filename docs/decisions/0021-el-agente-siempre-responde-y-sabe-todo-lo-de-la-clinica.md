@@ -28,7 +28,7 @@ Fecha: 2026-10-14 · Estado: aceptada · Reemplaza en [0008](0008-fichas-de-agen
 
 ## Consecuencias
 
-- `agent_policy` queda solo para que las pruebas ejerciten los otros modos de la máquina de propuestas; ninguna ruta ni pantalla la cambia.
+- La tabla `agent_policy` se retiró (migración `0077`): quién dice que sí es una constante del código (`DEFAULT_AUTONOMY_MODES`, `autonomyModeOf`) y con ella se fueron las ramas que solo servían a modos que ninguna clínica alcanza. Lo único que espera al equipo son las propuestas sin hilo (`requireTeamDecision`).
 - La imagen de Postgres de desarrollo y pruebas incluye pgvector; la base de producción debe tenerlo.
 - Medido el 2026-10-14 con `eval:search` (banco propio de 38 preguntas, `text-embedding-3-small`, umbral 0,65): lo correcto sale primero en 32 de 35 preguntas con respuesta (33 entre los tres primeros), frente a 11 de 35 solo por palabras; igual con 3 024 servicios, y el modelo recibe unos 1 000 caracteres por búsqueda. El índice lleva qué es cada cosa y las palabras con que la gente nombra cada especialidad: sin eso eran 27 de 35. Lo que la clínica no ofrece («cirugía de nariz») queda a la misma distancia que una pregunta válida: ningún umbral lo separa, así que la búsqueda trae lo más parecido y le dice al modelo que diga que la clínica no lo ofrece si no es lo pedido. Banco chico y propio: no es una medición independiente.
 - ~~`LLM_REASONING_EFFORT` (opcional) fija `reasoning_effort` del modelo de la plataforma.~~ Reemplazado por [0022](0022-la-clinica-elige-entre-dos-modelos-de-odentia.md): `reasoning_effort: "none"` (sin él `gpt-6-luna` en chat/completions rechaza herramientas) va fijo en el catálogo de modelos.

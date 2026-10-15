@@ -334,7 +334,6 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "message.error": say("No pudo procesar un mensaje"),
   // Agente
   "agent.config_updated": say("Cambió la configuración del agente"),
-  "agent.policy_updated": say("Cambió hasta dónde llega solo el agente"),
   "agent.admin_updated": say("Cambió los ajustes del Administrador"),
   "agent.admin_once": say("Pidió al Administrador atender una línea solo esta vez"),
   "admin_line.updated": say("Cambió una línea del Administrador"),
