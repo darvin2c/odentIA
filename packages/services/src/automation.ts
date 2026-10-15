@@ -1324,6 +1324,12 @@ export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; f
     fix: "Agrega su número o su correo en su ficha.",
     fixMany: "Para habilitarlo, agrega su número o su correo en su ficha.",
   },
+  correo_ajeno: {
+    one: "su correo está vinculado a otra persona de la clínica",
+    many: "su correo está vinculado a otra persona de la clínica",
+    fix: "Revisa el correo en su ficha y en la de la otra persona.",
+    fixMany: "Para habilitarlo, revisa el correo en sus fichas: está vinculado a otra persona.",
+  },
   sin_conexion: {
     one: "la clínica no tiene conectado un canal por el que llegarle",
     many: "la clínica no tiene conectado un canal por el que llegarles",

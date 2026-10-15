@@ -84,16 +84,20 @@ export async function processInbound(
       })
       if (!result.created) return
       // Un botón de un mensaje automático («Confirmar», «No enviar más») lo
-      // resuelve el sistema: no llega al modelo ni gasta una corrida.
+      // resuelve el sistema: no llega al modelo ni gasta una corrida. Va en su
+      // propio punto de guardado: si su respuesta no puede salir, el mensaje
+      // ya ingresado no se pierde y la conversación sigue su curso normal.
       const content = msg.message.event.content
-      if (
-        content.type === "text" &&
-        (await handleAutomationReply(tx, orgId, {
-          conversationId: result.conversationId,
-          replyId: content.replyId,
-        }))
-      ) {
-        return
+      if (content.type === "text") {
+        const handled = await tx
+          .transaction((inner) =>
+            handleAutomationReply(inner, orgId, { conversationId: result.conversationId, replyId: content.replyId }),
+          )
+          .catch((error: unknown) => {
+            if (error instanceof ServiceError) return false
+            throw error
+          })
+        if (handled) return
       }
       if (deps.webURL && deps.cookieDomain) {
         const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
@@ -110,7 +114,7 @@ export async function processInbound(
         }
       }
       const [conv] = await tx
-        .select({ agentStatus: conversation.agentStatus })
+        .select({ agentStatus: conversation.agentStatus, status: conversation.status })
         .from(conversation)
         .where(eq(conversation.id, result.conversationId))
         .limit(1)
@@ -119,7 +123,8 @@ export async function processInbound(
         .from(agentConfig)
         .where(eq(agentConfig.organizationId, orgId))
         .limit(1)
-      if (conv?.agentStatus === "on" && cfg?.enabled) {
+      // El agente nunca responde en una conversación cerrada (ADR 0024); la ingesta ya la reabrió.
+      if (conv?.status === "open" && conv.agentStatus === "on" && cfg?.enabled) {
         await sendAgentRun(
           tx,
           {

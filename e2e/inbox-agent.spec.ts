@@ -13,7 +13,14 @@ interface Conversation {
   id: string
   contact: { id: string }
   preview: { body: string | null } | null
-  attention: { pendingContact: number; handoffPriority: string | null; agentAttending: boolean }
+  attention: {
+    pendingContact: number
+    handoffPriority: string | null
+    agentAttending: boolean
+    awaitingPatientSince: string | null
+    assignedName: string | null
+  }
+  closure: { reason: string; at: string; byName: string | null } | null
 }
 
 const WAITING_TEXT = "Quiero una cita para mañana"
@@ -75,38 +82,56 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const { waiting, derived, firstAppointment, proposeAppointment } = await seedThreads(owner, fixtureDb, nextEventId)
 
   // El servidor cuenta las vistas sobre todo lo filtrado y describe cada hilo.
-  expect(await call(page, "GET", "/api/conversations/summary?status=open", org.slug)).toEqual({ all: 2, waiting: 2, withAgent: 0, handoffs: 1 })
-  const listed = await call<Conversation[]>(page, "GET", "/api/conversations?view=handoff", org.slug)
+  expect(await call(page, "GET", "/api/conversations/summary", org.slug)).toEqual({
+    open: 2, unanswered: 2, team: 1, awaitingPatient: 1, closed: 0,
+  })
+  const listed = await call<Conversation[]>(page, "GET", "/api/conversations?view=team", org.slug)
   expect(listed.map((c) => c.id)).toEqual([derived.id])
   expect(listed[0]?.attention.handoffPriority).toBe("alta")
+  expect(listed[0]?.closure).toBeNull()
+  // Las vistas retiradas ya no existen: el servidor las rechaza.
+  for (const retired of ["human", "approval", "handoff"]) {
+    expect((await api(page, "GET", `/api/conversations?view=${retired}`, org.slug)).status).toBe(400)
+  }
   const waitingAttention = (await call<{ attention: Conversation["attention"] }>(page, "GET", `/api/conversations/${waiting.id}`, org.slug)).attention
   expect(waitingAttention).toMatchObject({ pendingContact: 1 })
   // Nada de lo que propone el agente espera al equipo.
   expect(waitingAttention).not.toHaveProperty("pendingTeam")
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  // Una vista sin chip en la URL no filtra a escondidas: queda «Todas».
-  await gotoHydrated(page, tenant(org.slug, "/inbox?view=human"))
-  await expect(page.getByText("2 conversaciones esperan respuesta")).toBeVisible()
+  // Una vista sin chip en la URL no filtra a escondidas: queda «Abiertas». La
+  // vista «La atiende el agente» existe en el servidor, pero no tiene chip.
   const chip = (name: string) => page.getByRole("button", { name, exact: true })
-  await expect(chip("Todas · 2")).toHaveAttribute("aria-pressed", "true")
+  for (const hidden of ["human", "agent"]) {
+    await gotoHydrated(page, tenant(org.slug, `/inbox?view=${hidden}`))
+    await expect(chip("Abiertas · 2")).toHaveAttribute("aria-pressed", "true")
+  }
+  await expect(page.getByText("2 conversaciones esperan respuesta")).toBeVisible()
   await expect(chip("Esperan respuesta · 2")).toHaveAttribute("aria-pressed", "false")
-  await expect(chip("Con el agente · 0")).toBeVisible()
+  await expect(chip("Con el equipo · 1")).toBeVisible()
+  await expect(chip("Esperan al paciente · 1")).toBeVisible()
+  await expect(chip("Cerradas · 0")).toBeVisible()
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
   const derivedRow = page.getByRole("button").filter({ hasText: DERIVED_TEXT })
-  await expect(waitingRow).toContainText("Espera al interlocutor")
-  await expect(derivedRow).toContainText("Derivada · ahora")
+  // Cada fila dice en qué está con palabras del servidor, no solo con color.
+  await expect(waitingRow).toContainText("Espera respuesta")
+  await expect(derivedRow).toContainText("Con el equipo · ahora")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // La vista filtra en servidor y queda en la URL.
-  await chip("Derivadas · 1").click()
-  await expect(chip("Derivadas · 1")).toHaveAttribute("aria-pressed", "true")
+  await chip("Con el equipo · 1").click()
+  await expect(chip("Con el equipo · 1")).toHaveAttribute("aria-pressed", "true")
   await expect(derivedRow).toBeVisible()
   await expect(waitingRow).toHaveCount(0)
-  await expect(page).toHaveURL(/view=handoff/)
-  await chip("Todas · 2").click()
+  await expect(page).toHaveURL(/view=team/)
+  await chip("Esperan al paciente · 1").click()
   await expect(waitingRow).toBeVisible()
+  await expect(derivedRow).toHaveCount(0)
+  await expect(page).toHaveURL(/view=awaiting_patient/)
+  await chip("Abiertas · 2").click()
+  await expect(waitingRow).toBeVisible()
+  await expect(derivedRow).toBeVisible()
 
   // La banda del hilo dice qué propuso el agente y abre el panel en «Esperan al
   // paciente», donde lo de este hilo va primero aunque haya otra más reciente.
@@ -133,12 +158,13 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await info.attach("panel-de-esta-conversacion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.keyboard.press("Escape")
   await expect(panel).toBeHidden()
-  // Sin el sí del paciente, la propuesta caduca a las 48 horas: desaparecen la
-  // banda y la marca de la fila. Nadie del equipo la rechaza.
+  // Sin el sí del paciente, la propuesta caduca a las 48 horas: desaparece la
+  // banda. La conversación sigue esperando al paciente porque lo último lo dijo
+  // el agente, hasta que el agente se despida y la cierre (ADR 0024).
   await fixtureDb.update(agentProposal).set({ createdAt: new Date(Date.now() - 49 * 3_600_000) }).where(eq(agentProposal.id, firstAppointment))
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${waiting.id}`))
   await expect(band).toHaveCount(0)
-  await expect(waitingRow).not.toContainText("Espera al interlocutor")
+  await expect(chip("Esperan al paciente · 1")).toBeVisible()
 
   // Inicio: el caso derivado es una fila de «Te espera». Lo que espera al
   // paciente no está ahí, y no hay nada del agente que aprobar (ADR 0023).
@@ -164,17 +190,17 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
 
   // Bandeja en móvil: una vista por vez; con el hilo abierto ceden la pantalla vistas y filtros.
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
-  await expect(chip("Derivadas · 1")).toBeVisible()
-  await expect(waitingRow).toContainText("Espera al interlocutor")
+  await expect(chip("Con el equipo · 1")).toBeVisible()
+  await expect(waitingRow).toContainText("Espera respuesta")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await waitingRow.click()
   await expect(band).toBeVisible()
-  await expect(chip("Derivadas · 1")).toBeHidden()
+  await expect(chip("Con el equipo · 1")).toBeHidden()
   await expect(page.getByPlaceholder("Buscar contacto")).toHaveCount(0)
   await info.attach("hilo-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByRole("button", { name: "Volver" }).click()
-  await expect(chip("Derivadas · 1")).toBeVisible()
+  await expect(chip("Con el equipo · 1")).toBeVisible()
 })
 
 test("panel del agente: columna fija en pantalla grande y cajón cuando no cabe", async ({
@@ -276,8 +302,8 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
-  await expect(waitingRow).toContainText("Espera al interlocutor")
-  await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Derivada · ahora")
+  await expect(waitingRow).toContainText("Espera respuesta")
+  await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Con el equipo · ahora")
   await waitingRow.click()
   const band = page.getByRole("status").filter({ hasText: "El agente propuso" })
   await expect(band).toContainText("un cambio")

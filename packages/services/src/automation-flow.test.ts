@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
@@ -39,6 +40,8 @@ import {
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
 import { saveMessageText } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
+import { closeConversationWith } from "./conversation-close.js"
+import { ingestInbound } from "./conversations.js"
 import { closeOpportunity, createOpportunity, updateOpportunity } from "./opportunities.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
@@ -594,6 +597,45 @@ describe("los botones que resuelve el sistema, sin modelo", () => {
     await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("confirmar", job.id) }))
     const again = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
     expect(again.at(-1)?.body).toBe("Tu cita ya estaba confirmada. ¡Te esperamos!")
+  })
+
+  it("«Confirmar» en una conversación cerrada: el toque la reabre, confirma la cita y el mensaje no se pierde", async () => {
+    const { c, p, appointmentId, job } = await remindedByWhatsApp()
+    await run(c, (tx) => closeConversationWith(tx, c.orgId, p.conversationId!, { reason: "sin_respuesta", byUserId: null }))
+    const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, p.conversationId!))
+    const tapped = await run(c, (tx) =>
+      ingestInbound(
+        tx,
+        {
+          orgId: c.orgId,
+          connectionId: c.whatsappId!,
+          event: {
+            externalEventId: `evt-${randomUUID()}`,
+            externalMessageId: `wamid-${randomUUID()}`,
+            externalThreadId: thread!.externalThreadId,
+            senderExternalId: thread!.externalThreadId,
+            content: { type: "text", text: "Confirmar", replyId: replyId("confirmar", job.id) },
+            sentAt: new Date().toISOString(),
+          },
+        },
+        channelAdapters.whatsapp_cloud_api!,
+        { storage: {} as never, fetch, secretsKey: KEY },
+      ),
+    )
+    expect(tapped.conversationId).toBe(p.conversationId)
+    const handled = await run(c, (tx) =>
+      handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("confirmar", job.id) }),
+    )
+    expect(handled).toBe(true)
+    const [reopened] = await ownerDb.select().from(conversation).where(eq(conversation.id, p.conversationId!))
+    expect(reopened).toMatchObject({ status: "open", closeReason: null, closedAt: null, agentStatus: "on", nudgedAt: null })
+    const [row] = await ownerDb.select().from(appointment).where(eq(appointment.id, appointmentId))
+    expect(row?.status).toBe("confirmada")
+    const messages = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
+    expect(messages.some((item) => item.id === tapped.messageId && item.body === "Confirmar")).toBe(true)
+    expect(messages.at(-1)).toMatchObject({ direction: "out", body: "¡Listo! Tu cita quedó confirmada. Te esperamos." })
+    const reopenedBy = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.entityId, p.conversationId!), eq(auditEvent.action, "conversation.reopened_by_message")))
+    expect(reopenedBy).toHaveLength(1)
   })
 
   it("«No podré ir» y un texto cualquiera siguen la conversación; un botón ajeno no hace nada", async () => {

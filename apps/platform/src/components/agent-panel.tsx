@@ -528,10 +528,10 @@ function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
       </ScrollArea>
       <div className="border-t p-4 sm:p-5">
         <Link
-          to="/agent/approvals"
+          to="/agent/pendientes"
           className="flex min-h-11 items-center justify-center rounded-full border font-semibold hover:bg-accent/60"
         >
-          Ver todas las aprobaciones
+          Ver todos los pendientes
         </Link>
       </div>
     </Tabs>
@@ -627,17 +627,34 @@ function AwaitingTab({ when }: { when: WhenFormatter }) {
   )
 }
 
+/**
+ * «Tomar» un caso derivado es tomar su conversación, la misma acción que en la
+ * Bandeja (`POST /api/conversations/:id/take`): queda a nombre de quien la toma,
+ * el agente deja de responder en el hilo y el caso queda tomado. Un caso sin
+ * conversación se toma como caso.
+ */
+export function takeCase(handoff: Pick<AgentHandoff, "id" | "conversationId">): Promise<unknown> {
+  return handoff.conversationId
+    ? apiFetch(`/api/conversations/${handoff.conversationId}/take`, { method: "POST" })
+    : apiFetch(`/api/agent/handoffs/${handoff.id}/claim`, { method: "POST" })
+}
+
+/** Quién puede tomarlo: la conversación pide `conversations.write`; un caso suelto, `tasks.write`. */
+export function canTakeCase(handoff: Pick<AgentHandoff, "conversationId">, canConversations: boolean, canTasks: boolean): boolean {
+  return handoff.conversationId ? canConversations : canTasks
+}
+
 function HandoffsTab({ when }: { when: WhenFormatter }) {
   const queryClient = useQueryClient()
   const canTasks = usePermission("tasks.write")
+  const canConversations = usePermission("conversations.write")
   const [briefFor, setBriefFor] = useState<AgentHandoff | null>(null)
   const query = useQuery({
     queryKey: ["agent-panel-handoffs"],
     queryFn: () => apiFetch<{ data: AgentHandoff[] }>("/api/agent/handoffs?open=1&limit=50"),
   })
   const claim = useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ data: AgentHandoff }>(`/api/agent/handoffs/${id}/claim`, { method: "POST" }),
+    mutationFn: (handoff: AgentHandoff) => takeCase(handoff),
     onSuccess: () => invalidateAfterAgentDecision(queryClient),
   })
   if (query.isPending) return <LoadingState />
@@ -682,14 +699,14 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
                   {handoff.status === "tomada" ? "Responsable asignado" : "En cola por recoger"}
                   {handoff.dueAt ? ` · vence ${when(handoff.dueAt)}` : ""}
                 </span>
-                {handoff.status === "abierta" && canTasks ? (
+                {handoff.status === "abierta" && canTakeCase(handoff, canConversations, canTasks) ? (
                   <SubmitButton
                     size="sm"
                     className={`rounded-full ${TOUCH_SM}`}
                     pending={claim.isPending}
-                    onClick={() => claim.mutate(handoff.id)}
+                    onClick={() => claim.mutate(handoff)}
                   >
-                    Tomar caso
+                    Tomar
                   </SubmitButton>
                 ) : null}
                 {handoff.conversationId ? (
@@ -714,7 +731,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
       <CaseBriefDrawer
         conversationId={briefFor?.conversationId ?? null}
         name={briefFor?.contactName ?? "Interlocutor"}
-        canClaim={canTasks}
+        canTake={canConversations}
         onClose={() => setBriefFor(null)}
         onClaimed={() => invalidateAfterAgentDecision(queryClient)}
       />

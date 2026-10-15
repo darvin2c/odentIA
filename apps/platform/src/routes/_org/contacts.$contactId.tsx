@@ -36,6 +36,7 @@ import { CreatePatientDrawer } from "../../components/patient/create-patient-dra
 import { TagsInput } from "../../components/patient/tags-input"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelIcon, channelLabel } from "../../lib/channels"
+import { conversationStatusLabel } from "../../lib/glossary"
 import {
   type ContactFull,
   type ContactListItem,
@@ -928,7 +929,7 @@ function ContactDetailPage() {
                       : undefined
                   }
                 >
-                  {conv.status}
+                  {conversationStatusLabel(conv.status, conv.closure)}
                 </Badge>
                 <span className="font-medium">{channelLabel(conv.channel)}</span>
                 {conv.connectionName && (

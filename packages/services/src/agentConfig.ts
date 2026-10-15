@@ -37,6 +37,8 @@ export interface AgentConfig {
   activeUntilMin: number | null
   /** Canales donde atiende; nulo = todos los conectados. */
   channels: string[] | null
+  /** Horas de silencio del paciente tras las que el agente se despide y cierra (6 a 23; ADR 0024). */
+  closeAfterHours: number
 }
 
 export const AGENT_TREATMENTS = ["tu", "usted"] as const
@@ -93,6 +95,7 @@ const DEFAULTS = {
   activeFromMin: null as number | null,
   activeUntilMin: null as number | null,
   channels: null as string[] | null,
+  closeAfterHours: 22,
 }
 
 function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
@@ -120,6 +123,7 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     activeFromMin: row.activeFromMin,
     activeUntilMin: row.activeUntilMin,
     channels: row.channels,
+    closeAfterHours: row.closeAfterHours,
   }
 }
 
@@ -155,6 +159,8 @@ export interface UpsertAgentConfigInput {
   activeFromMin?: number | null
   activeUntilMin?: number | null
   channels?: string[] | null
+  /** Entero de 6 a 23: después de 24 horas WhatsApp ya no deja despedirse sin mensaje aprobado. */
+  closeAfterHours?: number
 }
 
 export interface UpsertAgentConfigOpts {
@@ -188,6 +194,12 @@ export async function upsertAgentConfig(
     input.handoffKeywords.some((k) => typeof k !== "string")
   ) {
     throw validation("handoffKeywords debe ser lista de texto")
+  }
+  if (
+    input.closeAfterHours !== undefined &&
+    (!Number.isInteger(input.closeAfterHours) || input.closeAfterHours < 6 || input.closeAfterHours > 23)
+  ) {
+    throw validation("Las horas para cerrar por silencio van de 6 a 23")
   }
   if (input.llm !== undefined && !isAgentLlm(input.llm)) {
     throw validation(`El modelo del agente debe ser ${AGENT_LLMS.map((option) => option.label).join(" o ")}`)
@@ -310,6 +322,7 @@ export async function upsertAgentConfig(
     "activeFromMin",
     "activeUntilMin",
     "channels",
+    "closeAfterHours",
   ] as const) {
     if (patch[field] !== undefined && JSON.stringify(patch[field]) !== JSON.stringify(current?.[field] ?? DEFAULTS[field])) {
       changed.push(field)

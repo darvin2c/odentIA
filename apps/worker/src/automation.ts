@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { formatForChannel } from "@odentia/agent"
 import { refreshAgentSearch, type SearchEmbedder, tickAutomations, type TickDeps } from "@odentia/services"
 import { sql } from "drizzle-orm"
 
@@ -81,11 +82,14 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
     publicBaseUrl,
     templates: { fetch, validateExternal: senderMode === "live" },
     alreadyTold,
+    // Lo que el agente escribe por su cuenta (insistir, despedirse) sale con el formato del canal.
+    format: (text, channel, opts) => formatForChannel(text, channel, opts),
   })
   console.log(
     `worker: automations despertadores=${pending} orgs=${summary.orgs} ` +
       `programados=${summary.programados} ` +
-      `entregados=${summary.entregados} fallidos=${summary.fallidos}`,
+      `entregados=${summary.entregados} fallidos=${summary.fallidos} ` +
+      `conversaciones insistidas=${summary.insistidas} cerradas=${summary.cerradas} avisadas=${summary.avisadas}`,
   )
   // El índice del agente se refresca aparte, sin esperarlo (`refreshSearchInBackground`).
   if (embedder) refreshSearchInBackground(deps, embedder)

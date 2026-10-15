@@ -7,7 +7,7 @@ import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
-import { agentDecisionLog, agentHandoff, agentRunLedger } from "@odentia/db/schema/agent"
+import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
 import {
   addContactIdentity,
@@ -49,6 +49,7 @@ import {
   setProfessionalSchedule,
   upsertAgentConfig,
 } from "@odentia/services"
+import { closeConversationWith } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -121,6 +122,9 @@ async function ingestOn(connectionId: string, thread: string, eventId: string, t
     ),
   )
 }
+
+/** Aviso fijo que recibe la persona cuando su caso pasa al equipo y nadie redactó otro. */
+const HANDOFF_NOTICE = "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."
 
 async function agentMessages(conversationId: string): Promise<string[]> {
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
@@ -227,7 +231,7 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .where(eq(conversation.id, conversationId)),
   )
   expect(conv?.agentStatus).toBe("off")
-  expect(await agentMessages(conversationId)).toEqual([])
+  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
   const tasks = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ title: crmTask.title })
@@ -344,7 +348,7 @@ it("maxTurns deriva cuando el modelo no llega a responder", async () => {
     const model = new ScriptedModel((_messages, call) => toolCall("listar_tareas", {}, `call-${call}`))
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
     expect(await agentStatusOf(conversationId)).toBe("off")
-    expect(await agentMessages(conversationId)).toEqual([])
+    expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { maxTurns: 10 }))
@@ -537,7 +541,7 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     expect(await runAgent(first.conversationId, first.messageId, 0, platform)).toBe("done")
     expect(provider.hits()).toBe(1)
     expect(await agentStatusOf(first.conversationId)).toBe("off")
-    expect(await agentMessages(first.conversationId)).toEqual([])
+    expect(await agentMessages(first.conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     const rows = await ledgerRows(first.conversationId)
     expect(rows).toHaveLength(1)
     expect(rows[0]?.status).toBe("error")
@@ -675,7 +679,7 @@ it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", asy
     const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería enviarse." }, "call-1"))
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
     expect(model.seen.length).toBe(0)
-    expect(await agentMessages(conversationId)).toEqual([])
+    expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     expect(await agentStatusOf(conversationId)).toBe("off")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx
@@ -1300,9 +1304,12 @@ it("la derivación tiene plazo, toma atómica de la cola y escalamiento único a
   const [resolved] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
   expect(resolved!.status).toBe("done")
+  // Era el único caso del hilo: completarlo resuelve la conversación (ADR 0024),
+  // con el equipo como motivo y el agente encendido para la próxima atención.
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ agentStatus: conversation.agentStatus }).from(conversation).where(eq(conversation.id, conversationId)))
-  expect(conv!.agentStatus).toBe("off")
+    tx.select({ agentStatus: conversation.agentStatus, status: conversation.status, closeReason: conversation.closeReason, closedByUserId: conversation.closedByUserId })
+      .from(conversation).where(eq(conversation.id, conversationId)))
+  expect(conv).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: winner, agentStatus: "on" })
 })
 
 /** Sede con sillón, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
@@ -1468,7 +1475,7 @@ it("una respuesta con un precio que no está en lo consultado no sale y, a la se
   expect(model.seen).toHaveLength(2)
   const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
   expect(feedback).toContain("No enviado: precio «S/ 99»")
-  expect(await agentMessages(conversationId)).toEqual([])
+  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
   expect(await agentStatusOf(conversationId)).toBe("off")
   expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
   const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
@@ -1830,8 +1837,13 @@ it("fuera de sus canales o de su horario el agente no responde y el hilo queda p
     // Franja que empieza dentro de una hora: ahora está fuera.
     await withOrgContext(appDb, "org_a", (tx) =>
       upsertAgentConfig(tx, "org_a", { channels: null, activeFromMin: (nowMin + 60) % 1440, activeUntilMin: ((nowMin + 120) % 1440) || 1440 }))
+    // Fuera de horario no se omite para siempre: la misma corrida vuelve a la cola para cuando abra.
     const offHours = await attempt("tg:limite-hora", "evt-lim-3")
-    expect(offHours).toMatchObject({ calls: 0, replies: [], rows: [{ status: "omitida", error: "fuera-de-horario" }] })
+    expect(offHours).toMatchObject({ calls: 0, replies: [], rows: [] })
+    const deferred = await ownerDb.execute<{ message: { conversationId: string; deferred?: boolean } }>(
+      sql`select message from pgmq.q_agent_runs where message->>'deferred' = 'true'`,
+    )
+    expect(deferred.some((row) => row.message.deferred === true)).toBe(true)
     // Franja que cruza la medianoche y contiene este momento.
     await withOrgContext(appDb, "org_a", (tx) =>
       upsertAgentConfig(tx, "org_a", { activeFromMin: (nowMin + 1380) % 1440, activeUntilMin: ((nowMin + 60) % 1440) || 1440 }))
@@ -2427,4 +2439,83 @@ it("varios mensajes seguidos nunca van por el camino «saludo», aunque el model
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
+})
+
+/* ---------- Ninguna conversación queda abierta (ADR 0024) ---------- */
+
+it("el agente no corre en una conversación cerrada", async () => {
+  const { conversationId, messageId } = await ingestText("tg:cerrada", "evt-cerrada-1", "Hola")
+  await withOrgContext(appDb, "org_a", (tx) => closeConversationWith(tx, "org_a", conversationId, { reason: "manual", byUserId: null }))
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-cerrada"))
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen).toHaveLength(0)
+  expect(await agentMessages(conversationId)).toEqual([])
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+  expect(rows).toEqual([{ status: "omitida", error: "conversation-closed" }])
+})
+
+it("despedirse_y_cerrar se despide y cierra como resuelta; con una propuesta esperando el sí, no cierra", async () => {
+  const { conversationId, messageId } = await ingestText("tg:despedida", "evt-despedida-1", "Muchas gracias, eso era todo")
+  const bye = new ScriptedModel(() => toolCall("despedirse_y_cerrar", { text: "Gracias a ti. Cuando quieras retomar, escríbenos: estamos atentos." }, "call-bye"))
+  expect(await runScripted(bye, conversationId, messageId)).toBe("done")
+  expect(bye.tools).toContain("despedirse_y_cerrar")
+  expect(await agentMessages(conversationId)).toEqual(["Gracias a ti. Cuando quieras retomar, escríbenos: estamos atentos."])
+  const [closed] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: conversation.status, closeReason: conversation.closeReason, closedByUserId: conversation.closedByUserId }).from(conversation).where(eq(conversation.id, conversationId)))
+  expect(closed).toEqual({ status: "closed", closeReason: "resuelta", closedByUserId: null })
+  expect((await ledgerRows(conversationId)).map((row) => row.status)).toEqual(["ok"])
+
+  // Con algo pendiente, «gracias» no cierra: el modelo recibe por qué y responde.
+  const pending = await ingestText("tg:despedida-pendiente", "evt-despedida-2", "Gracias")
+  const [thread] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, pending.conversationId)))
+  await ownerDb.insert(agentProposal).values({
+    organizationId: "org_a", conversationId: pending.conversationId, contactId: thread!.contactId, action: "reservar_cita",
+    payload: { startsAt: new Date(Date.now() + 86_400_000).toISOString() }, afterSummary: "Cita", idempotencyKey: randomUUID(),
+  })
+  const careful = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall("despedirse_y_cerrar", { text: "Gracias, estamos atentos." }, "call-bye-1")
+      : toolCall("send_reply", { text: "¡De nada! ¿Te confirmo la cita?" }, "call-bye-2"))
+  expect(await runScripted(careful, pending.conversationId, pending.messageId)).toBe("done")
+  expect(String(careful.seen[1]?.at(-1)?.content)).toContain("No cerrado")
+  expect(await agentMessages(pending.conversationId)).toEqual(["¡De nada! ¿Te confirmo la cita?"])
+  const [open] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: conversation.status }).from(conversation).where(eq(conversation.id, pending.conversationId)))
+  expect(open?.status).toBe("open")
+})
+
+it("un error que se repite deriva y avisa a la persona con el texto fijo", async () => {
+  const { conversationId, messageId } = await ingestText("tg:error-repetido", "evt-error-1", "Hola")
+  const broken = processAgentRun(appDb, { ...runtime, createModel: async () => { throw new Error("modelo caído") } }, {
+    msg_id: 1,
+    read_ct: 2,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+  })
+  expect(await broken).toBe("done")
+  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
+})
+
+it("pospuesta hasta que abre su horario, la corrida atiende todo lo que quedó sin responder aunque sea antiguo", async () => {
+  const first = await ingestText("tg:pospuesta", "evt-pospuesta-1", "Hola, ¿atienden mañana?")
+  const second = await ingestText("tg:pospuesta", "evt-pospuesta-2", "Es para una limpieza")
+  // Escribió de noche: hace cinco horas, mucho más que la ventana de ráfaga.
+  await ownerDb.update(message).set({ createdAt: new Date(Date.now() - 5 * 3_600_000) }).where(eq(message.id, first.messageId))
+  await ownerDb.update(message).set({ createdAt: new Date(Date.now() - 5 * 3_600_000 + 60_000) }).where(eq(message.id, second.messageId))
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Sí, mañana atendemos." }, "call-pospuesta"))
+  const result = await processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+    msg_id: 1,
+    read_ct: 0,
+    message: { kind: "inbound_message", orgId: "org_a", conversationId: first.conversationId, messageId: first.messageId, deferred: true },
+  })
+  expect(result).toBe("done")
+  expect(await agentMessages(first.conversationId)).toEqual(["Sí, mañana atendemos."])
+  // El otro mensaje quedó atendido por la misma corrida: su propia corrida no vuelve a responder.
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ trigger: agentRunLedger.triggerMessageId, status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger)
+      .where(eq(agentRunLedger.conversationId, first.conversationId)))
+  expect(rows).toContainEqual({ trigger: first.messageId, status: "omitida", error: "burst-covered" })
+  expect(rows).toContainEqual({ trigger: second.messageId, status: "ok", error: null })
 })

@@ -21,6 +21,44 @@ export interface ConversationAttention {
   pendingContact: number
   /** Prioridad más alta entre sus derivaciones sin resolver. */
   handoffPriority: "alta" | "media" | "baja" | null
+  /**
+   * Abierta, el último mensaje es un saliente aceptado y no hay derivación
+   * abierta: desde cuándo se espera al paciente.
+   */
+  awaitingPatientSince: string | null
+  /** El agente ya le recordó en esta atención. */
+  nudgedAt: string | null
+  /** Escribió fuera del horario del agente y la respuesta quedó para cuando abra. */
+  outOfHours: boolean
+  /** Nombre de quien tiene la conversación, si alguien la tiene. */
+  assignedName: string | null
+  /**
+   * Hay un entrante posterior al último saliente aceptado (la vista
+   * «Esperan respuesta»). Fuera del contrato de cierre: mientras el servidor
+   * no lo entregue, la fila no dice «Espera respuesta» salvo fuera de horario.
+   */
+  unanswered?: boolean
+}
+
+/** Motivos de cierre (`conversation.close_reason`). */
+export type ConversationCloseReason = "resuelta" | "sin_respuesta" | "equipo" | "manual"
+
+/** Cómo y cuándo se cerró; null si está abierta. `byName` nulo = la cerró el agente o el sistema. */
+export interface ConversationClosure {
+  reason: ConversationCloseReason
+  at: string
+  byName: string | null
+}
+
+/** Lo que pasará al pulsar «Resolver» (`GET /api/conversations/:id/resolve-preview`). */
+export interface ResolvePreview {
+  /** Se le envía la despedida: falso si pasaron más de 23 h de su último mensaje o el canal no deja escribir. */
+  farewell: boolean
+  farewellText: string | null
+  /** Derivaciones abiertas del hilo, que quedan resueltas. */
+  handoffs: number
+  /** Citas propuestas que esperan su sí, que vencen. */
+  pendingContact: number
 }
 
 export interface ConversationListItem {
@@ -35,14 +73,17 @@ export interface ConversationListItem {
   preview: ConversationPreview | null
   /** Ausente en respuestas antiguas en caché: tratar como sin estado. */
   attention?: ConversationAttention
+  /** Cómo se cerró; null si está abierta. Ausente en respuestas antiguas en caché. */
+  closure?: ConversationClosure | null
 }
 
-/** Totales de las vistas de la bandeja para los filtros vigentes. */
+/** Totales de los chips de la Bandeja para los filtros vigentes (sin `status`). */
 export interface InboxSummary {
-  all: number
-  waiting: number
-  withAgent: number
-  handoffs: number
+  open: number
+  unanswered: number
+  team: number
+  awaitingPatient: number
+  closed: number
 }
 
 export interface ChatMessage {
@@ -66,6 +107,8 @@ export interface ChatMessage {
 export interface ConversationDetail {
   /** Atención del hilo según el servidor (no depende de la página cargada de la lista). */
   attention?: ConversationAttention
+  /** Cómo se cerró; null si está abierta. */
+  closure?: ConversationClosure | null
   conversation: {
     id: string
     status: string
@@ -73,6 +116,8 @@ export interface ConversationDetail {
     unreadCount: number
     assignedUserId: string | null
     lastMessageAt: string | null
+    /** Por si el servidor lo entrega dentro de la conversación en vez de junto a `attention`. */
+    closure?: ConversationClosure | null
   }
   contact: { id: string; displayName: string; isActive: boolean }
   connection: {
@@ -225,6 +270,8 @@ export interface ContactFull {
   conversations: {
     id: string
     status: string
+    /** Cómo se cerró, si el servidor lo entrega en la ficha; sin él se dice solo «Cerrada». */
+    closure?: ConversationClosure | null
     channel: string
     connectionId: string | null
     connectionName: string | null
@@ -390,6 +437,8 @@ export interface AgentConfig {
   activeFromMin: number | null
   activeUntilMin: number | null
   channels: string[] | null
+  /** Horas sin respuesta del paciente tras las que el agente se despide y cierra (6 a 23). */
+  closeAfterHours: number
 }
 
 /** Los dos modelos que odentIA validó, con el nombre que ve la clínica. El modelo exacto lo decide el servidor. */

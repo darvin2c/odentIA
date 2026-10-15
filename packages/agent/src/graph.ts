@@ -60,6 +60,7 @@ import {
   type AgentToolCtx,
   conversationChannel,
   makeAgentTools,
+  noticeAfterHandoff,
   performHandoff,
   SANDBOX_PATIENT_ID,
   SANDBOX_PERSON,
@@ -115,7 +116,7 @@ const POLICY_LINE = `Política de autonomía: ${Object.entries(DEFAULT_AUTONOMY_
   .join(", ")}.`
 
 /** Herramientas que comunican algo al interlocutor. */
-const SEND_TOOLS = new Set(["send_reply", "send_template"])
+const SEND_TOOLS = new Set(["send_reply", "send_template", "despedirse_y_cerrar"])
 
 const NOT_SENT =
   "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
@@ -212,6 +213,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
       : null,
     on("seguimiento") ? null : whenOff("seguimiento"),
     "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
+    "Ninguna conversación queda abierta: cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo, ninguna pregunta suya sin responder), despídete en una sola línea cordial, en el tono de la clínica, diciendo que estamos atentos si quiere volver a escribir, y usa despedirse_y_cerrar en lugar de send_reply. Si su agradecimiento llega con algo pendiente o con otra pregunta, responde con send_reply y no cierres. Nunca digas «te dejo por ahora».",
     ...notes,
     "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
@@ -799,6 +801,8 @@ export function compileAgentGraph(
     })
     if (state.turnCount >= maxTurns) {
       await performHandoff(toolCtx, "límite de turnos del agente")
+      // La persona no queda sin respuesta: recibe el aviso fijo de que sigue una persona.
+      await noticeAfterHandoff(toolCtx)
       return END
     }
     return "llm"

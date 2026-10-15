@@ -39,6 +39,7 @@ interface WidgetMessage {
 }
 
 interface PollData {
+  /** Una cerrada no bloquea: si el visitante escribe, el servidor la reabre. */
   status: "open" | "closed" | null
   items: WidgetMessage[]
   nextCursor: string | null
@@ -76,7 +77,6 @@ function WebchatWidget() {
   const [started, setStarted] = useState(false)
   const [session, setSession] = useState<{ token: string; expiresAt: number } | null>(null)
   const [messages, setMessages] = useState<WidgetMessage[]>([])
-  const [closed, setClosed] = useState(false)
   const [starting, setStarting] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -148,7 +148,6 @@ function WebchatWidget() {
         )
         if (cancelled) return
         mergeMessages(result.data.items)
-        if (result.data.status === "closed") setClosed(true)
       } catch {
         // polling best-effort: el siguiente ciclo reintenta
       }
@@ -167,7 +166,7 @@ function WebchatWidget() {
 
   async function send(message: PromptInputMessage) {
     const text = message.text.trim()
-    if (!text || sending || !session || !slug || closed) return
+    if (!text || sending || !session || !slug) return
     setSending(true)
     setError(null)
     try {
@@ -268,27 +267,21 @@ function WebchatWidget() {
             })}
             <div ref={bottomRef} />
           </div>
-          {closed ? (
-            <p className="border-t px-4 py-3 text-center text-sm text-muted-foreground">
-              Esta conversación fue cerrada. Gracias por escribirnos.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-1.5 border-t p-2">
-              <PromptInput onSubmit={send} className="h-auto min-h-10 items-end bg-background">
-                <PromptInputTextarea
-                  aria-label="Mensaje"
-                  rows={1}
-                  placeholder="Escribe tu mensaje… (Enter para enviar)"
-                />
-                <PromptInputSubmit aria-label="Enviar" disabled={sending} />
-              </PromptInput>
-              {error ? (
-                <p className="px-1 text-xs text-destructive" role="alert">
-                  {error}
-                </p>
-              ) : null}
-            </div>
-          )}
+          <div className="flex flex-col gap-1.5 border-t p-2">
+            <PromptInput onSubmit={send} className="h-auto min-h-10 items-end bg-background">
+              <PromptInputTextarea
+                aria-label="Mensaje"
+                rows={1}
+                placeholder="Escribe tu mensaje… (Enter para enviar)"
+              />
+              <PromptInputSubmit aria-label="Enviar" disabled={sending} />
+            </PromptInput>
+            {error ? (
+              <p className="px-1 text-xs text-destructive" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </div>
         </>
       )}
     </div>

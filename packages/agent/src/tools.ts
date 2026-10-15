@@ -14,6 +14,8 @@ import {
   BOOKING_LINK_TTL_HOURS,
   createBookingLink,
   annotateHandoff,
+  closeConversationWith,
+  closurePendingReason,
   createHandoff,
   createProposal,
   createTask,
@@ -29,6 +31,7 @@ import {
   formatOrgMoney,
   formatZoned,
   getAgentClinicData,
+  getAgentConfig,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
@@ -51,7 +54,7 @@ import {
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
-import type { AgentRoute } from "./decision/route.js"
+import { type AgentRoute, handoffFallbackNotice } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
 import { describeUnsupported, type Evidence, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
@@ -141,6 +144,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   anotar_caso: "Anotó un dato del caso para después.",
   recordar_dato: "Guardó un dato de la persona para próximas conversaciones.",
   request_human_handoff: "Pasó el caso a una persona.",
+  despedirse_y_cerrar: "Se despidió y cerró la conversación.",
 }
 
 /** Respuestas seguidas sin sustento que el agente puede intentar antes de pasar el caso a una persona. */
@@ -253,6 +257,10 @@ export interface AgentToolCtx {
    * oficiales viajan completas en el turno. Nunca decide un acto.
    */
   decision?: DecisionModel | null
+  /** Trato de la clínica, para el aviso fijo al derivar; si falta se lee de la configuración. */
+  treatment?: "tu" | "usted" | null
+  /** El agente se despidió y cerró la conversación en esta corrida. */
+  closed?: boolean
 }
 
 /**
@@ -281,6 +289,41 @@ export async function performHandoff(
     ctx.handoffId = handoff.id
   })
   ctx.handedOff = true
+}
+
+/**
+ * Derivar siempre avisa (ADR 0024): si el caso pasó a una persona y la persona
+ * aún no recibió nada en esta corrida, sale el aviso fijo, sin modelo, por el
+ * mismo camino que cualquier respuesta. Si el canal no deja escribir, queda
+ * dicho en la derivación para quien la tome.
+ */
+export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
+  if (!ctx.handedOff || ctx.replySettled || ctx.dryRun) return
+  const treatment =
+    ctx.treatment !== undefined
+      ? ctx.treatment
+      : await withOrgContext(ctx.db, ctx.orgId, async (tx) => (await getAgentConfig(tx, ctx.orgId)).treatment).catch(() => null)
+  const notify = makeAgentTools(ctx).find((item) => item.name === "request_human_handoff")
+  let outcome = ""
+  try {
+    const result: unknown = await notify?.invoke({
+      reason: "Aviso al interlocutor",
+      summary: "Aviso al interlocutor",
+      message: handoffFallbackNotice(treatment ?? null),
+    })
+    outcome = typeof result === "string" ? result : ""
+  } catch (error) {
+    outcome = error instanceof Error ? error.message : String(error)
+  }
+  if (ctx.replySettled) return
+  console.error(`agent: el aviso fijo de derivación no salió (${outcome.slice(0, 200)})`)
+  const handoffId = ctx.handoffId
+  if (!handoffId) return
+  await withOrgContext(ctx.db, ctx.orgId, (tx) =>
+    annotateHandoff(tx, ctx.orgId, handoffId, {
+      pending: "No se le pudo avisar que una persona del equipo continuará: escríbele tú.",
+    }),
+  ).catch(() => undefined)
 }
 
 /**
@@ -514,6 +557,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         "El agente no pudo sustentar un dato de su respuesta",
         `Quiso responder: «${text.slice(0, 400)}». Sin sustento en lo consultado: ${missing}.`,
       )
+      // La persona no queda sin respuesta: recibe el aviso fijo de que sigue una persona.
+      await noticeAfterHandoff(ctx)
       return {
         verdict,
         blocked: `${prefix}No enviado: ${missing} no figura en lo consultado. El caso pasa a una persona; no envíes más mensajes.`,
@@ -551,6 +596,47 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       description:
         "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción (queda como propuesta si la política no es directa). Si devuelve outside_window, sigue su indicación.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
+    },
+  )
+
+  /**
+   * Cerrar al terminar (ADR 0024): la despedida sale por el mismo camino que
+   * send_reply (formato del canal y comprobación) y la conversación se cierra
+   * como resuelta. Con algo pendiente no cierra y se lo dice al modelo.
+   */
+  const farewellAndClose = tool(
+    async ({ text: written }: { text: string }) => {
+      if (ctx.sandbox) {
+        if (ctx.sandbox.state.pending.length > 0) {
+          return "[SIMULACIÓN] No se cerraría: hay una propuesta esperando el sí del interlocutor. Responde con send_reply."
+        }
+      }
+      const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
+      if (pending) return `No cerrado. ${pending}`
+      const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
+      const { verdict, blocked } = await checkReply(text)
+      if (blocked) return blocked
+      if (ctx.dryRun) {
+        ctx.replySettled = true
+        ctx.closed = true
+        ctx.simulatedReply = text
+        return `[SIMULACIÓN] Se enviaría la despedida y se cerraría la conversación: ${text}`
+      }
+      const sent: ProposalItem[] = []
+      const outcome = await propose("enviar_mensaje", { kind: "text", text }, "despedirse_y_cerrar", undefined, (proposal) => {
+        sent.push(proposal)
+      })
+      for (const proposal of sent) await traceAnswer(text, traceOutcome(proposal), verdict?.checks ?? [], proposal)
+      if (!sent.some((proposal) => proposal.status === "ejecutada")) return outcome
+      await inOrg((tx) => closeConversationWith(tx, ctx.orgId, ctx.conversationId, { reason: "resuelta", byUserId: null }))
+      ctx.closed = true
+      return "Despedida enviada y conversación cerrada. No envíes más mensajes: si la persona vuelve a escribir, se reabre sola."
+    },
+    {
+      name: "despedirse_y_cerrar",
+      description:
+        "Se despide y cierra la conversación cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo). En text va una sola línea cordial, en el tono de la clínica, que diga que estamos atentos si quiere volver a escribir. Úsala sola en su paso, en lugar de send_reply. Si queda algo pendiente no cierra y te dice qué.",
+      schema: z.object({ text: z.string().min(1).max(600) }),
     },
   )
 
@@ -1357,6 +1443,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const tools = [
     sendReply,
+    farewellAndClose,
     sendTemplate,
     moveToStage,
     createOpportunityTool,

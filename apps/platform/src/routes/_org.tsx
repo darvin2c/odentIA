@@ -133,8 +133,8 @@ const navDefinitions: NavDefinition[] = [
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   // El agente es una sola entrada, junto al trabajo diario; sus secciones
-  // (aprobaciones, aprender, conocimiento) son pestañas de página. El destino se
-  // resuelve por permiso: quien solo decide entra directo a Aprobaciones.
+  // (pendientes, aprender, conocimiento) son pestañas de página. El destino se
+  // resuelve por permiso: quien solo decide entra directo a Pendientes.
   { label: "Agente", to: "/agent", icon: Bot, permissionsAny: ["agent.read", "agent.decide"] },
   {
     label: "Personas",
@@ -236,10 +236,10 @@ function OrgLayout() {
   const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
   // Lo que espera al equipo: los casos que el agente pasó y siguen sin resolver.
   const pendingCases = agentSummary.data?.data.openHandoffs ?? 0
-  // El agente lleva su contador y, para quien solo decide, entra por Aprobaciones.
+  // El agente lleva su contador y, para quien solo decide, entra por Pendientes.
   const withAgentState = <T extends AppShellNavItem>(item: T): T => {
     if (item.to !== "/agent") return item
-    const target = canAccess(role, "agent.read") ? item : { ...item, to: "/agent/approvals" }
+    const target = canAccess(role, "agent.read") ? item : { ...item, to: "/agent/pendientes" }
     return pendingCases > 0 ? { ...target, badge: pendingCases } : target
   }
   // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.

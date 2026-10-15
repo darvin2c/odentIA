@@ -92,6 +92,8 @@ export const AUTOMATION_CAUSES = [
   "sin_permiso",
   /** No tiene WhatsApp ni correo registrados. */
   "sin_destino",
+  /** Su correo ya tiene un hilo con otra persona de la clínica: hay que resolverlo a mano. */
+  "correo_ajeno",
   /** La clínica no tiene un canal conectado por el que llegarle. */
   "sin_conexion",
   /** No escribió hace poco y WhatsApp aún no aprueba el mensaje. */

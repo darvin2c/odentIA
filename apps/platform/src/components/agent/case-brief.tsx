@@ -84,7 +84,7 @@ function Messages({ said }: { said: string[] }) {
 export function CaseBriefDrawer({
   conversationId,
   name,
-  canClaim,
+  canTake,
   inConversation = false,
   onClose,
   onClaimed,
@@ -92,7 +92,8 @@ export function CaseBriefDrawer({
   /** La conversación; null = cerrado. */
   conversationId: string | null
   name: string
-  canClaim: boolean
+  /** Puede tomar la conversación (`conversations.write`). */
+  canTake: boolean
   /** Se abrió desde la propia conversación: «Ver la conversación completa» solo cierra el resumen. */
   inConversation?: boolean
   onClose: () => void
@@ -106,10 +107,14 @@ export function CaseBriefDrawer({
     enabled: conversationId !== null,
     retry: false,
   })
+  // «Tomar» es la misma acción de la Bandeja: la conversación pasa a quien la toma,
+  // el agente deja de responder en el hilo y sus casos derivados quedan tomados.
   const claim = useMutation({
     retry: false,
-    mutationFn: (id: string) => apiFetch(`/api/agent/handoffs/${id}/claim`, { method: "POST" }),
+    mutationFn: (id: string) => apiFetch(`/api/conversations/${id}/take`, { method: "POST" }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
       void queryClient.invalidateQueries({ queryKey: ["agent-case-brief", conversationId] })
       void queryClient.invalidateQueries({ queryKey: ["agent-handoffs"] })
       onClaimed?.()
@@ -155,9 +160,9 @@ export function CaseBriefDrawer({
                 Ver la conversación completa
               </Link>
             )}
-            {handoff?.status === "abierta" && canClaim ? (
-              <SubmitButton pending={claim.isPending} onClick={() => claim.mutate(handoff.id)}>
-                Tomar el caso
+            {handoff?.status === "abierta" && canTake ? (
+              <SubmitButton pending={claim.isPending} onClick={() => claim.mutate(brief.conversationId)}>
+                Tomar
               </SubmitButton>
             ) : null}
           </>

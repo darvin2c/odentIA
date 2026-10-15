@@ -39,6 +39,8 @@ const putInput = z.object({
   activeFromMin: z.number().int().min(0).max(1439).nullable().optional(),
   activeUntilMin: z.number().int().min(1).max(1440).nullable().optional(),
   channels: z.array(z.string().max(40)).max(20).nullable().optional(),
+  /** Horas de silencio tras las que el agente se despide y cierra (ADR 0024). */
+  closeAfterHours: z.number().int().min(6).max(23).optional(),
 })
 
 export interface AgentRouteDeps extends CrmDeps {

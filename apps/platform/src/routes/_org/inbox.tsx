@@ -56,7 +56,9 @@ import {
   FilterBar,
   PageHeader,
   PageShell,
+  RowActions,
   SideDockScopeProvider,
+  SubmitButton,
   useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
@@ -65,11 +67,13 @@ import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react
 import {
   AlertCircle,
   Bot,
-  ClipboardList,
   CheckCheck,
+  CheckCircle2,
+  ClipboardList,
   ChevronLeft,
   Clock,
   Copy,
+  Hand,
   PanelRight,
   UserPlus,
 } from "lucide-react"
@@ -79,21 +83,23 @@ import { API_URL } from "../../lib/auth-client"
 import {
   type ChatMessage,
   type ConversationAttention,
+  type ConversationClosure,
   type ConversationDetail,
   type ConversationListItem,
   type InboxSummary,
+  type ResolvePreview,
   timeAgo,
   usePermission,
   useMyUserId,
 } from "../../lib/crm"
 import {
+  invalidateAgentPanelQueries,
   useAgentPanel,
   useAgentPanelDockBlocker,
   useAgentPanelFitsBesideContext,
 } from "../../components/agent-panel"
 import { AnswerTraceDrawer } from "../../components/agent/answer-trace"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
-import { urgencyLabel } from "../../components/agent/handoff-badges"
 import { LessonDrawer } from "../../components/agent/lesson-drawer"
 import { ReceptionOffNotice } from "../../components/agent/reception-off-notice"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
@@ -105,6 +111,14 @@ import { channelIcon, channelLabel } from "../../lib/channels"
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
 import { activeOrgLocale } from "../../lib/locale"
+import {
+  closeWithoutResolvingWords,
+  closureBand,
+  type ConversationWords,
+  conversationWords,
+  pendingWords,
+  resolveWords,
+} from "../../lib/conversation-state"
 
 export const Route = createFileRoute("/_org/inbox")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -113,7 +127,6 @@ export const Route = createFileRoute("/_org/inbox")({
       ? { prepareRegistration: true as const }
       : {}),
     ...(typeof search.q === "string" ? { q: search.q } : {}),
-    ...(typeof search.status === "string" ? { status: search.status } : {}),
     ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
     ...(typeof search.assigned === "string" ? { assigned: search.assigned } : {}),
     ...(typeof search.view === "string" ? { view: search.view } : {}),
@@ -141,13 +154,15 @@ const CHANNEL_FILTER_OPTIONS = [
 /**
  * Vistas de trabajo de la bandeja (filtrado SQL en el servidor, antes de
  * paginar). Solo valen las que tienen chip: una vista sin control visible
- * dejaría la lista filtrada sin forma de verlo ni de salir.
+ * dejaría la lista filtrada sin forma de verlo ni de salir. «Abiertas» es la
+ * bandeja sin vista; «Cerradas» pide además las cerradas.
  */
 const VIEW_CHIPS = [
-  { value: undefined, label: "Todas", total: "all" },
-  { value: "unanswered", label: "Esperan respuesta", total: "waiting" },
-  { value: "agent", label: "Con el agente", total: "withAgent" },
-  { value: "handoff", label: "Derivadas", total: "handoffs" },
+  { value: undefined, label: "Abiertas", total: "open" },
+  { value: "unanswered", label: "Esperan respuesta", total: "unanswered" },
+  { value: "team", label: "Con el equipo", total: "team" },
+  { value: "awaiting_patient", label: "Esperan al paciente", total: "awaitingPatient" },
+  { value: "closed", label: "Cerradas", total: "closed" },
 ] as const satisfies readonly { value?: string; label: string; total: keyof InboxSummary }[]
 const CHIP_VIEWS: readonly (string | undefined)[] = VIEW_CHIPS.map((chip) => chip.value)
 const DEFAULT_SUBTITLE = "Todas las conversaciones de la clínica"
@@ -155,10 +170,10 @@ const DEFAULT_SUBTITLE = "Todas las conversaciones de la clínica"
 /** Total de la bandeja entera; con filtros activos la cifra la da el chip, no el subtítulo. */
 function waitingSubtitle(summary: InboxSummary | undefined): string {
   if (!summary) return DEFAULT_SUBTITLE
-  if (summary.waiting === 0) return "Ninguna conversación espera respuesta"
-  return summary.waiting === 1
+  if (summary.unanswered === 0) return "Ninguna conversación espera respuesta"
+  return summary.unanswered === 1
     ? "1 conversación espera respuesta"
-    : `${summary.waiting} conversaciones esperan respuesta`
+    : `${summary.unanswered} conversaciones esperan respuesta`
 }
 
 function InboxPage() {
@@ -170,7 +185,6 @@ function InboxPage() {
   const canRegister = usePermission("crm.write")
   const navigate = useNavigate({ from: Route.fullPath })
   const listSearch = useListSearch()
-  const status = listSearch.get("status") ?? "open"
   const channel = listSearch.get("channel")
   const assigned = listSearch.get("assigned")
   const search = listSearch.get("q") ?? ""
@@ -224,21 +238,22 @@ function InboxPage() {
     })
   }
 
-  // Filtros sin la vista: los comparten la lista y los totales de los chips.
+  // Filtros sin la vista ni el estado: los comparten la lista y los totales de los chips.
   const filterParams = useMemo(() => {
     const params = new URLSearchParams()
-    if (status !== "all") params.set("status", status)
     if (channel) params.set("channel", channel)
     if (assigned === "me") params.set("assigned", myUserId)
     else if (assigned === "none") params.set("assigned", "none")
     if (search.trim()) params.set("q", search.trim())
     return params.toString()
-  }, [status, channel, assigned, search, myUserId])
+  }, [channel, assigned, search, myUserId])
   const activeView = view && CHIP_VIEWS.includes(view) ? view : undefined
   // El subtítulo habla de toda la bandeja: con filtros no afirma un total parcial.
-  const narrowed = status !== "open" || Boolean(channel) || Boolean(assigned) || search.trim() !== ""
+  const narrowed = Boolean(channel) || Boolean(assigned) || search.trim() !== ""
   const listParams = useMemo(() => {
     const params = new URLSearchParams(filterParams)
+    // Cada chip es abierta o cerrada: «Cerradas» pide las cerradas; las demás, las abiertas.
+    params.set("status", activeView === "closed" ? "closed" : "open")
     if (activeView) params.set("view", activeView)
     return params.toString()
   }, [filterParams, activeView])
@@ -366,6 +381,7 @@ function InboxPage() {
       }
       contextOpen={mode === "panel" ? contextVisible : true}
       attention={selectedItem?.attention}
+      listClosure={selectedItem?.closure}
       canSeeProposals={canDecideAgent || canReadAgent}
     />
   ) : null
@@ -428,16 +444,6 @@ function InboxPage() {
       {mode === "panel" || !selectedId ? <FilterBar
         filters={[
           {
-            key: "status",
-            label: "Estado",
-            type: "select",
-            options: [
-              { value: "open", label: "Abiertas" },
-              { value: "closed", label: "Cerradas" },
-              { value: "all", label: "Todas" },
-            ],
-          },
-          {
             key: "channel",
             label: "Canal",
             type: "select",
@@ -459,7 +465,7 @@ function InboxPage() {
         sortOptions={[]}
         searchPlaceholder="Buscar contacto"
         searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
-        resetKeys={["status", "channel", "assigned", "q"]}
+        resetKeys={["channel", "assigned", "q"]}
       /> : null}
       {/* Con el agente apagado en toda la clínica, lo dice junto a la lista; en angosto, con un hilo abierto, la pantalla es del hilo. */}
       {mode === "panel" || !selectedId ? <ReceptionOffNotice className="shrink-0" /> : null}
@@ -557,40 +563,42 @@ function InboxPage() {
 }
 
 /**
- * Lo que la conversación espera, en una sola etiqueta y con la misma
- * precedencia que el panel de contexto: una derivación sin resolver, después
- * la cita que espera el sí del interlocutor y, si no, quién la atiende. Ninguna
- * propuesta espera al equipo (ADR 0023). El estado nunca se comunica solo con
- * color: lleva texto y una marca de forma distinta.
+ * En qué está la conversación, en palabras del servidor (`attention`,
+ * `closure`; ver `conversationWords`). Nunca solo con color: el texto lo dice
+ * y la marca solo lo acompaña.
  */
-function needsTeam(item: ConversationListItem): boolean {
-  const attention = item.attention
-  return Boolean(attention && (attention.pendingContact > 0 || attention.handoffPriority))
-}
-
-function AttentionLabel({ item }: { item: ConversationListItem }) {
-  const attention = item.attention
-  if (!attention) return null
-  if (attention.handoffPriority) {
-    const high = attention.handoffPriority === "alta"
+function StateLabel({ words, className = "" }: { words: ConversationWords; className?: string }) {
+  if (words.tone === "agent") {
     return (
-      <span className={`flex min-w-0 items-center gap-1.5 font-semibold ${high ? "text-destructive" : "text-warning"}`}>
-        <span aria-hidden className={high ? "size-2 shrink-0 rounded-full bg-destructive" : "size-2 shrink-0 rounded-[2px] bg-warning"} />
-        <span className="truncate">Derivada · {urgencyLabel(attention.handoffPriority).toLowerCase()}</span>
+      <span className={`flex min-w-0 items-center gap-1 font-semibold text-primary-soft-foreground ${className}`}>
+        <Bot className="size-3.5 shrink-0" aria-hidden /> <span className="truncate">{words.text}</span>
       </span>
     )
   }
-  if (attention.pendingContact > 0) {
-    return <span className="truncate font-semibold">Espera al interlocutor</span>
-  }
-  if (attention.agentAttending) {
-    return (
-      <span className="flex shrink-0 items-center gap-1 font-semibold text-primary-soft-foreground">
-        <Bot className="size-3.5" aria-hidden /> Atiende el agente
-      </span>
-    )
-  }
-  return null
+  const tone =
+    words.tone === "urgent"
+      ? "font-semibold text-destructive"
+      : words.tone === "team"
+        ? "font-semibold text-warning"
+        : words.tone === "waiting"
+          ? "font-semibold text-foreground"
+          : words.tone === "patient"
+            ? "font-semibold"
+            : ""
+  const mark =
+    words.tone === "urgent"
+      ? "size-2 shrink-0 rounded-full bg-destructive"
+      : words.tone === "team"
+        ? "size-2 shrink-0 rounded-[2px] bg-warning"
+        : words.tone === "waiting"
+          ? "size-2 shrink-0 rounded-full bg-primary"
+          : null
+  return (
+    <span className={`flex min-w-0 items-center gap-1.5 ${tone} ${className}`}>
+      {mark ? <span aria-hidden className={mark} /> : null}
+      <span className="truncate">{words.text}</span>
+    </span>
+  )
 }
 
 /**
@@ -682,6 +690,7 @@ function ConversationList({
         const selected = item.id === selectedId
         const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
         const ChannelIcon = channelIcon(item.connection.channel)
+        const words = conversationWords(item)
         return (
         <button
           key={item.id}
@@ -712,9 +721,9 @@ function ConversationList({
             </span>
             <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
               <ChannelIcon className="size-3.5 shrink-0" aria-hidden />
-              {/* Con algo pendiente, el canal queda en su icono: el estado no debe recortarse. */}
-              <span className={needsTeam(item) ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
-              <AttentionLabel item={item} />
+              {/* Con el estado a la vista, el canal queda en su icono: el estado no debe recortarse. */}
+              <span className={words ? "sr-only" : "truncate"}>{channelLabel(item.connection.channel)}</span>
+              {words ? <StateLabel words={words} /> : null}
               {item.unreadCount > 0 && (
                 <span
                   className="ml-auto flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground"
@@ -804,6 +813,7 @@ function ThreadView({
   onToggleContext,
   contextOpen,
   attention,
+  listClosure,
   canSeeProposals,
 }: {
   id: string
@@ -821,6 +831,8 @@ function ThreadView({
   contextOpen?: boolean
   /** Estado de atención del hilo según la lista; ausente si se abrió por enlace y aún no está en la página cargada. */
   attention?: ConversationAttention
+  /** Cierre según la lista, mientras llega el detalle. */
+  listClosure?: ConversationClosure | null
   canSeeProposals: boolean
 }) {
   const queryClient = useQueryClient()
@@ -874,7 +886,8 @@ function ThreadView({
   const [lessonId, setLessonId] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<CorrectionTarget | null>(null)
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
-  const canClaimCase = usePermission("tasks.write")
+  const canTakeCase = usePermission("conversations.write")
+  const myUserId = useMyUserId()
   const canOpenContact = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
 
@@ -890,6 +903,7 @@ function ThreadView({
     setCopied(false)
     setOpenTrace(null)
     setCorrecting(null)
+    setConfirming(null)
   }, [id])
 
   useEffect(() => {
@@ -1003,13 +1017,40 @@ function ThreadView({
     }
   }
 
+  // Tomar, devolver al agente, resolver, cerrar sin resolver, reabrir y asignar:
+  // cada una es una operación del servidor; la pantalla solo refresca lo que la muestra.
   const actionMutation = useMutation({
+    retry: false,
     mutationFn: ({ path, body }: { path: string; body?: unknown }) =>
       apiFetch(`/api/conversations/${id}${path}`, {
         method: "POST",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setConfirming(null)
+      invalidate()
+      // Tomar y resolver también cambian sus casos derivados y las citas propuestas.
+      invalidateAgentPanelQueries(queryClient)
+      for (const key of ["agent-case-brief", "crm-context", "crm-activity"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
+  })
+  const actionError =
+    actionMutation.error instanceof ApiError
+      ? actionMutation.error.shape.message
+      : actionMutation.error
+        ? "No se pudo completar la acción. Inténtalo de nuevo."
+        : null
+  // Resolver y cerrar sin resolver confirman antes con lo que dice el servidor que pasará.
+  const [confirming, setConfirming] = useState<"resolve" | "close" | null>(null)
+  const previewQuery = useQuery({
+    queryKey: ["conversation-resolve-preview", id],
+    queryFn: () => apiFetch<{ data: ResolvePreview }>(`/api/conversations/${id}/resolve-preview`),
+    enabled: confirming !== null,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
   })
 
   async function loadOlder() {
@@ -1062,7 +1103,25 @@ function ThreadView({
   // La atención del propio hilo manda; la de la lista solo adelanta el dato
   // mientras llega el detalle. Sin ninguna, la cabecera calla: no se deduce aquí.
   const threadAttention = detail.attention ?? attention
+  // El estado del detalle manda: reabierta, la lista podría traer todavía el cierre anterior.
+  const closure = closed ? (detail.closure ?? conv.closure ?? listClosure ?? null) : null
+  const words = conversationWords({ status: conv.status, attention: threadAttention, closure })
   const assignee = members.find((m) => m.userId === conv.assignedUserId)
+  // «Tomar» mientras no la tenga quien mira con el agente apagado; «Devolver al
+  // agente» mientras la tenga una persona. Cerrada, escribir la reabre.
+  const takenByMe = conv.assignedUserId === myUserId && conv.agentStatus !== "on"
+  const withPerson = conv.agentStatus !== "on" || conv.assignedUserId !== null
+  const busy = actionMutation.isPending
+  const name = detail.contact.displayName
+  const preview = previewQuery.data?.data
+  const resolveText = preview ? resolveWords(name, preview) : null
+  const closeAlso = preview ? pendingWords(preview.handoffs, preview.pendingContact, "cerrar") : []
+  const previewError =
+    previewQuery.error instanceof ApiError
+      ? previewQuery.error.shape.message
+      : previewQuery.error
+        ? "No se pudo consultar qué pasará al cerrarla."
+        : null
 
   return (
     <div className="elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
@@ -1095,26 +1154,82 @@ function ThreadView({
           ) : (
             <span className="block truncate text-[15px] font-bold">{detail.contact.displayName}</span>
           )}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
             <span>{channelLabel(detail.connection.channel)}</span>
-            <span>·</span>
-            <Badge variant={closed ? "secondary" : "soft"}>
-              {closed ? "Cerrada" : "Abierta"}
-            </Badge>
+            {words ? (
+              <>
+                <span aria-hidden>·</span>
+                <StateLabel words={words} />
+              </>
+            ) : null}
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
-            {assignee && <span>· {assignee.user.name}</span>}
-            {threadAttention?.agentAttending && (
-              <span className="flex items-center gap-1 font-semibold text-primary-soft-foreground">
-                · <Bot className="size-3.5" aria-hidden /> Atiende el agente
-              </span>
-            )}
           </div>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2">
+        {threadAttention?.handoffPriority ? (
+          <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setBriefFor(conv.id)}>
+            <ClipboardList className="size-4" />
+            Resumen del caso
+          </Button>
+        ) : null}
+        {canWrite && !closed && !takenByMe ? (
+          <SubmitButton
+            variant="outline"
+            size="sm"
+            className="min-h-11 sm:min-h-8"
+            pending={busy && actionMutation.variables?.path === "/take"}
+            disabled={busy}
+            onClick={() => actionMutation.mutate({ path: "/take" })}
+          >
+            <Hand className="size-4" aria-hidden />
+            Tomar
+          </SubmitButton>
+        ) : null}
+        {canWrite && !closed && withPerson ? (
+          <SubmitButton
+            variant="outline"
+            size="sm"
+            className="min-h-11 sm:min-h-8"
+            pending={busy && actionMutation.variables?.path === "/release"}
+            disabled={busy}
+            onClick={() => actionMutation.mutate({ path: "/release" })}
+          >
+            <Bot className="size-4" aria-hidden />
+            Devolver al agente
+          </SubmitButton>
+        ) : null}
+        {canWrite && !closed ? (
+          <Button
+            size="sm"
+            className="min-h-11 sm:min-h-8"
+            disabled={busy}
+            onClick={() => {
+              actionMutation.reset()
+              setConfirming("resolve")
+            }}
+          >
+            <CheckCircle2 className="size-4" aria-hidden />
+            Resolver
+          </Button>
+        ) : null}
+        {onToggleContext && (
+          <Button
+            variant={contextOpen ? "secondary" : "outline"}
+            size="sm"
+            className="min-h-11 sm:min-h-8"
+            aria-pressed={contextOpen}
+            onClick={onToggleContext}
+            title="Mostrar el contexto del contacto (persona, oportunidades, agente)"
+          >
+            <PanelRight className="size-4" />
+            Contexto
+          </Button>
+        )}
         {canRegister && (
           <Button
             variant="outline"
             size="sm"
+            className="min-h-11 sm:min-h-8"
             disabled={registrationMutation.isPending}
             onClick={() => registrationMutation.mutate(detail.contact.id)}
             title="Genera un enlace y prepara el mensaje para revisión; no se envía solo"
@@ -1129,7 +1244,7 @@ function ThreadView({
         )}
         {canWrite && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex h-8 items-center rounded-4xl bg-secondary px-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
+            <DropdownMenuTrigger className="inline-flex min-h-11 items-center rounded-4xl bg-secondary px-3 text-sm font-medium transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring sm:h-8 sm:min-h-0">
               {assignee ? assignee.user.name : "Asignar"}
             </DropdownMenuTrigger>
             <DropdownMenuContent>
@@ -1151,48 +1266,95 @@ function ThreadView({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {threadAttention?.handoffPriority ? (
-          <Button variant="outline" size="sm" onClick={() => setBriefFor(conv.id)}>
-            <ClipboardList className="size-4" />
-            Resumen del caso
-          </Button>
-        ) : null}
-        {canWrite && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              actionMutation.mutate({ path: "/agent", body: { enabled: conv.agentStatus !== "on" } })
+        {canWrite ? (
+          <RowActions
+            label="Más acciones de la conversación"
+            items={
+              closed
+                ? [{ key: "reabrir", label: "Reabrir", disabled: busy, onSelect: () => actionMutation.mutate({ path: "/reopen" }) }]
+                : [
+                    {
+                      key: "cerrar",
+                      label: "Cerrar sin resolver",
+                      disabled: busy,
+                      onSelect: () => {
+                        actionMutation.reset()
+                        setConfirming("close")
+                      },
+                    },
+                  ]
             }
-            title={conv.agentStatus === "on" ? "Pausar agente (toma humana)" : "Reactivar agente"}
-          >
-            <Bot className="size-4" />
-            {conv.agentStatus === "on" ? "Tomar atención" : "Reactivar agente"}
-          </Button>
-        )}
-        {canWrite && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => actionMutation.mutate({ path: closed ? "/reopen" : "/close" })}
-          >
-            {closed ? "Reabrir" : "Cerrar"}
-          </Button>
-        )}
-        {onToggleContext && (
-          <Button
-            variant={contextOpen ? "secondary" : "outline"}
-            size="sm"
-            aria-pressed={contextOpen}
-            onClick={onToggleContext}
-            title="Mostrar el contexto del contacto (persona, oportunidades, agente)"
-          >
-            <PanelRight className="size-4" />
-            Contexto
-          </Button>
-        )}
+          />
+        ) : null}
         </div>
+        {actionError && confirming === null ? (
+          <p role="alert" className="w-full text-sm text-destructive">
+            {actionError}
+          </p>
+        ) : null}
       </div>
+      <ConfirmDialog
+        open={confirming === "resolve"}
+        title="¿Resolver la conversación?"
+        description={
+          resolveText?.description ??
+          (previewError ? "No se pudo consultar qué pasará al resolverla." : "Consultando qué pasará al resolverla…")
+        }
+        confirmLabel="Resolver"
+        variant="default"
+        pending={busy}
+        confirmDisabled={!preview}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => actionMutation.mutate({ path: "/resolve" })}
+      >
+        {resolveText && resolveText.also.length > 0 ? (
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
+            {resolveText.also.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+        {preview?.farewell && preview.farewellText ? (
+          <p className="rounded-lg bg-muted/60 p-3 text-sm">
+            <span className="font-semibold">Despedida: </span>«{preview.farewellText}»
+          </p>
+        ) : null}
+        {previewError || (confirming === "resolve" && actionError) ? (
+          <p role="alert" className="text-sm text-destructive">
+            {confirming === "resolve" && actionError ? actionError : previewError}
+          </p>
+        ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={confirming === "close"}
+        title="¿Cerrar sin resolver?"
+        description={closeWithoutResolvingWords(name)}
+        confirmLabel="Cerrar sin resolver"
+        variant="default"
+        pending={busy}
+        // Cerrar no le escribe nada: si no se pudo consultar qué más se cierra, se dice y se deja cerrar.
+        confirmDisabled={!preview && !previewError}
+        onClose={() => setConfirming(null)}
+        onConfirm={() => actionMutation.mutate({ path: "/close" })}
+      >
+        {closeAlso.length > 0 ? (
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
+            {closeAlso.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+        {!preview && !previewError ? (
+          <p className="text-sm text-muted-foreground" role="status">
+            Consultando qué más se cierra…
+          </p>
+        ) : null}
+        {previewError || (confirming === "close" && actionError) ? (
+          <p role="alert" className="text-sm text-destructive">
+            {confirming === "close" && actionError ? actionError : previewError}
+          </p>
+        ) : null}
+      </ConfirmDialog>
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="min-h-0 flex-1">
@@ -1229,6 +1391,13 @@ function ThreadView({
                 </MessageScrollerItem>
               ))}
             </MessageScrollerContent>
+            {closure ? (
+              <div className="mt-3 flex justify-center">
+                <p className="rounded-full border bg-card px-3 py-1 text-center text-xs font-medium text-muted-foreground">
+                  {closureBand(closure)}
+                </p>
+              </div>
+            ) : null}
           </MessageScrollerViewport>
         </MessageScroller>
       </MessageScrollerProvider>
@@ -1236,7 +1405,7 @@ function ThreadView({
       <CaseBriefDrawer
         conversationId={briefFor === conv.id ? conv.id : null}
         name={detail.contact.displayName}
-        canClaim={canClaimCase}
+        canTake={canTakeCase}
         inConversation
         onClose={() => setBriefFor(null)}
         onClaimed={() => void detailQuery.refetch()}
@@ -1304,11 +1473,10 @@ function ThreadView({
             </Button>
           </div>
         )}
-        {closed ? (
-          <p className="text-sm text-muted-foreground">
-            Conversación cerrada. Reábrela para responder.
-          </p>
-        ) : !canWrite ? (
+        {closed && canWrite ? (
+          <p className="mb-2 text-xs text-muted-foreground">Está cerrada: si le escribes, se vuelve a abrir.</p>
+        ) : null}
+        {!canWrite ? (
           <p className="text-sm text-muted-foreground">
             Sin permiso de escritura de conversaciones.
           </p>

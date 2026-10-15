@@ -534,6 +534,8 @@ async function seedConversation(args: {
   lastInboundAt?: Date | null
   lastOutboundAt?: Date | null
   lastMessageAt?: Date | null
+  /** Cerrada: con su motivo y quién (nulo = el agente), como la deja `closeConversationWith`. */
+  closed?: { reason: "resuelta" | "sin_respuesta" | "equipo" | "manual"; at: Date; byUserId: string | null }
 }): Promise<{ id: string }> {
   const [connection] = await db
     .select({ channel: channelConnection.channel })
@@ -559,7 +561,10 @@ async function seedConversation(args: {
       channelConnectionId: args.connectionId,
       externalThreadId:
         connection?.channel === "whatsapp" && identity ? identity.externalUserId : args.thread,
-      status: args.status ?? "open",
+      status: args.closed ? "closed" : (args.status ?? "open"),
+      closedAt: args.closed?.at ?? null,
+      closeReason: args.closed?.reason ?? null,
+      closedByUserId: args.closed?.byUserId ?? null,
       assignedUserId: args.assignedUserId ?? null,
       agentStatus: args.agentStatus ?? "on",
       unreadCount: args.unreadCount ?? 0,
@@ -1004,7 +1009,8 @@ const convElena = await seedConversation({
   contactId: contactIdByName.get("Elena Huamán")!,
   connectionId: connA.id,
   thread: "seed-thread-3",
-  status: "closed",
+  // El agente confirmó y Elena se despidió: cerrada como resuelta.
+  closed: { reason: "resuelta", at: new Date(elenaClosedAt.getTime() + 900_000), byUserId: null },
   lastInboundAt: elenaClosedAt,
   lastOutboundAt: new Date(elenaClosedAt.getTime() + 600_000),
   lastMessageAt: new Date(elenaClosedAt.getTime() + 600_000),
@@ -1050,6 +1056,98 @@ await seedMessage({
   status: "received",
   createdAt: hoursAgo(6),
 })
+
+// Ninguna conversación queda abierta (ADR 0024): una que espera al paciente
+// con el agente a cargo y una cerrada por cada motivo, para ver la Bandeja.
+const convLucia = await seedConversation({
+  orgId: ORG_A,
+  contactId: contactIdByName.get("Lucía Fernández")!,
+  connectionId: connA.id,
+  thread: "seed-thread-5",
+  lastInboundAt: hoursAgo(3),
+  lastOutboundAt: hoursAgo(2),
+  lastMessageAt: hoursAgo(2),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convLucia.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "¿Atienden ortodoncia los sábados?",
+  externalId: "seed-msg-9",
+  status: "read",
+  createdAt: hoursAgo(3),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convLucia.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Sí, Lucía: los sábados atendemos de 9:00 a 13:00. ¿Quieres que te busque un horario para una evaluación?",
+  externalId: "seed-msg-10",
+  status: "delivered",
+  createdAt: hoursAgo(2),
+})
+const CLOSED_SEED: Array<{ name: string; thread: string; reason: "sin_respuesta" | "equipo" | "manual"; by: string | null; said: string; answer: string }> = [
+  {
+    name: "Miguel Torres",
+    thread: "seed-thread-6",
+    reason: "sin_respuesta",
+    by: null,
+    said: "¿Cuánto cuesta un blanqueamiento?",
+    answer: "Miguel, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
+  },
+  {
+    name: "Carmen Rojas",
+    thread: "seed-thread-7",
+    reason: "equipo",
+    by: LUIS_ID,
+    said: "Quiero hablar con alguien por mi factura",
+    answer: "Carmen, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
+  },
+  {
+    name: "Diego Salazar",
+    thread: "seed-thread-8",
+    reason: "manual",
+    by: ANA_ID,
+    said: "Número equivocado, disculpen",
+    answer: "No te preocupes, Diego. ¡Que tengas buen día!",
+  },
+]
+for (const [index, item] of CLOSED_SEED.entries()) {
+  const at = daysAgo(index + 1)
+  const conv = await seedConversation({
+    orgId: ORG_A,
+    contactId: contactIdByName.get(item.name)!,
+    connectionId: connA.id,
+    thread: item.thread,
+    lastInboundAt: at,
+    lastOutboundAt: new Date(at.getTime() + 600_000),
+    lastMessageAt: new Date(at.getTime() + 600_000),
+    closed: { reason: item.reason, at: new Date(at.getTime() + 900_000), byUserId: item.by },
+  })
+  await seedMessage({
+    orgId: ORG_A,
+    conversationId: conv.id,
+    direction: "in",
+    senderKind: "contact",
+    body: item.said,
+    externalId: `seed-msg-closed-${index}-in`,
+    status: "read",
+    createdAt: at,
+  })
+  await seedMessage({
+    orgId: ORG_A,
+    conversationId: conv.id,
+    direction: "out",
+    senderKind: item.by ? "user" : "agent",
+    senderUserId: item.by,
+    body: item.answer,
+    externalId: `seed-msg-closed-${index}-out`,
+    status: "read",
+    createdAt: new Date(at.getTime() + 600_000),
+  })
+}
 
 // --- Tareas A ---
 await createTask(db, ORG_A, {

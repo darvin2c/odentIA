@@ -936,3 +936,77 @@ it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje
     sql`update "conversation" set "last_inbound_at" = now() where "id" = ${conversationId}::uuid`,
   )
 })
+
+it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin resolver (ADR 0024)", async () => {
+  await ownerDb.execute(sql`insert into "user" ("id", "name", "email", "email_verified", "created_at", "updated_at")
+    values ('u-1', 'Dueña', 'u1@example.com', true, now(), now()) on conflict do nothing`)
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+    values ('m-u-1', 'org_a', 'u-1', 'owner', now()) on conflict do nothing`)
+  const app = buildApp("owner")
+  const json = { "content-type": "application/json" }
+  for (const view of ["human", "approval", "handoff"]) {
+    expect((await app.request(`/conversations?view=${view}`)).status).toBe(400)
+  }
+  expect((await app.request("/conversations?status=archivada")).status).toBe(400)
+  expect((await app.request("/conversations?view=awaiting_patient")).status).toBe(200)
+  const summary = (await (await app.request("/conversations/summary")).json()) as { data: Record<string, number> }
+  expect(Object.keys(summary.data).sort()).toEqual(["awaitingPatient", "closed", "open", "team", "unanswered"])
+
+  const ingested = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: waConnId,
+        event: {
+          externalEventId: "wamid.cierre",
+          externalMessageId: "wamid.cierre",
+          externalThreadId: "wa:520",
+          senderExternalId: "wa:520",
+          senderDisplayName: "Marta Salas",
+          content: { type: "text", text: "Muchas gracias" },
+          sentAt: new Date().toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const id = ingested.conversationId
+  expect((await app.request(`/conversations/${id}/take`, { method: "POST" })).status).toBe(200)
+  const taken = (await (await app.request(`/conversations/${id}`)).json()) as { data: { conversation: { agentStatus: string }; attention: { assignedName: string | null; unanswered: boolean }; closure: unknown } }
+  expect(taken.data.conversation.agentStatus).toBe("off")
+  expect(taken.data.attention).toMatchObject({ assignedName: "Dueña", unanswered: true })
+  expect(taken.data.closure).toBeNull()
+  expect((await app.request(`/conversations/${id}/release`, { method: "POST" })).status).toBe(200)
+
+  const preview = (await (await app.request(`/conversations/${id}/resolve-preview`)).json()) as { data: unknown }
+  expect(preview.data).toEqual({
+    farewell: true,
+    farewellText: "Marta, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
+    handoffs: 0,
+    pendingContact: 0,
+  })
+  const resolved = await app.request(`/conversations/${id}/resolve`, { method: "POST" })
+  expect(resolved.status).toBe(200)
+  const after = (await resolved.json()) as { data: { conversation: { status: string }; closure: { reason: string; byName: string | null } } }
+  expect(after.data.conversation.status).toBe("closed")
+  expect(after.data.closure).toMatchObject({ reason: "equipo", byName: "Dueña" })
+
+  // Escribir a una cerrada la reabre (ya no responde CONVERSATION_CLOSED).
+  const written = await app.request(`/conversations/${id}/messages`, { method: "POST", headers: json, body: JSON.stringify({ text: "Una cosa más, Marta" }) })
+  expect(written.status).toBe(201)
+  expect(((await (await app.request(`/conversations/${id}`)).json()) as { data: { conversation: { status: string } } }).data.conversation.status).toBe("open")
+  // Cerrar sin resolver: motivo manual, sin despedida.
+  expect((await app.request(`/conversations/${id}/close`, { method: "POST" })).status).toBe(200)
+  const closed = (await (await app.request(`/conversations?view=closed`)).json()) as { data: Array<{ id: string; closure: { reason: string } | null }> }
+  expect(closed.data.find((item) => item.id === id)?.closure).toMatchObject({ reason: "manual" })
+
+  // Horas para cerrar por silencio: de 6 a 23.
+  const put = (closeAfterHours: number) => app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ closeAfterHours }) })
+  expect((await put(5)).status).toBe(400)
+  expect((await put(24)).status).toBe(400)
+  expect((await put(12)).status).toBe(200)
+  const config = (await (await app.request("/agent/config")).json()) as { data: { closeAfterHours: number } }
+  expect(config.data.closeAfterHours).toBe(12)
+})

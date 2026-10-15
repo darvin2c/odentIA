@@ -51,7 +51,7 @@ beforeAll(async () => {
   }
   await ownerDb.insert(conversation).values({
     organizationId: "org_a", contactId: contactRow!.id,
-    channelConnectionId: connection!.id, externalThreadId: "hilo-cerrado", status: "closed",
+    channelConnectionId: connection!.id, externalThreadId: "hilo-cerrado", status: "closed", closeReason: "manual", closedAt: new Date(),
   })
 
   // Embudo: 2 abiertas en la primera etapa (PEN), 1 en la segunda (USD), 1 ganada (excluida).

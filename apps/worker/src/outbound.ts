@@ -117,10 +117,13 @@ export async function processOutbound(
         .limit(1)
       // Mensaje inexistente o ya procesado: ack.
       if (row?.message.status !== "queued") return
-      if (row.conversation.status !== "open" || row.connection.status !== "active") {
+      // Una conversación cerrada sí entrega lo que ya estaba en cola: la
+      // despedida sale y enseguida se cierra (ADR 0024). Solo una conexión
+      // desactivada lo impide.
+      if (row.connection.status !== "active") {
         await tx
           .update(message)
-          .set({ status: "failed", error: "conversation-closed-or-disabled" })
+          .set({ status: "failed", error: "connection-disabled" })
           .where(eq(message.id, messageId))
         return
       }

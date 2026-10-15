@@ -5,6 +5,7 @@
 export type { QueueMessage } from "@odentia/db"
 export { FAKE_REPLY_TEXT, FakeChatModel } from "./fake-model.js"
 export { compileAgentGraph } from "./graph.js"
+export { formatForChannel } from "./channel-format.js"
 export {
   createConfiguredChatModel,
   describeProviderProblem,

@@ -2339,7 +2339,14 @@ function handoffStillOpen(): SQL {
   return handoffOpenSql(sql.raw('"agent_handoff"'))
 }
 
-export async function claimHandoff(tx: Db, orgId: string, userId: string, handoffId: string): Promise<HandoffItem> {
+export async function claimHandoff(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  handoffId: string,
+  /** «Tomar» la conversación: el caso pasa a quien la toma aunque ya tuviera responsable. */
+  opts: { takeOver?: boolean } = {},
+): Promise<HandoffItem> {
   const [membership] = await tx
     .select({ userId: member.userId })
     .from(member)
@@ -2353,7 +2360,7 @@ export async function claimHandoff(tx: Db, orgId: string, userId: string, handof
       and(
         eq(agentHandoff.id, handoffId),
         eq(agentHandoff.organizationId, orgId),
-        isNull(agentHandoff.assigneeUserId),
+        ...(opts.takeOver ? [] : [isNull(agentHandoff.assigneeUserId)]),
         handoffStillOpen(),
       ),
     )
@@ -2387,6 +2394,13 @@ export async function claimHandoff(tx: Db, orgId: string, userId: string, handof
     } else {
       await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
     }
+  }
+  // Quien toma el caso tiene también la conversación: así lo ven la Bandeja y el ciclo que cierra.
+  if (claimed.conversationId) {
+    await tx
+      .update(conversation)
+      .set({ assignedUserId: userId, updatedAt: new Date() })
+      .where(and(eq(conversation.id, claimed.conversationId), eq(conversation.organizationId, orgId)))
   }
   await tx.insert(auditEvent).values({
     organizationId: orgId,

@@ -379,7 +379,7 @@ export async function issuePortalLink(
   if (conv.contactId !== input.contactId) {
     throw validation("La conversación no pertenece a este contacto")
   }
-  if (conv.status !== "open") throw conflict("CONVERSATION_CLOSED", "La conversación está cerrada")
+  // Cerrada no impide emitir: el envío por la conversación la reabre (ADR 0024).
   // La emisión por canal exige conexión autorizada en la política.
   const [issuanceConnection] = await tx
     .select({ id: channelConnection.id, status: channelConnection.status })

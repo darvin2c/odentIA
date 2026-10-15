@@ -359,9 +359,32 @@ export const conversation = pgTable(
     lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
     lastOutboundAt: timestamp("last_outbound_at", { withTimezone: true }),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    /**
+     * Cierre de la atención (ADR 0024): cuándo, quién (nulo = el agente o el
+     * sistema) y por qué (`CONVERSATION_CLOSE_REASONS`). Solo con `status`
+     * cerrada; reabrir los limpia.
+     */
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closedByUserId: text("closed_by_user_id").references(() => user.id),
+    closeReason: text("close_reason"),
+    /** Inicio de la atención actual: al crear la conversación y al reabrirla. */
+    attentionStartedAt: timestamp("attention_started_at", { withTimezone: true }).notNull().defaultNow(),
+    /** El agente ya insistió una vez en esta atención; se limpia con cada entrante y al reabrir. */
+    nudgedAt: timestamp("nudged_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
+    check("conversation_status_check", sql`${table.status} in ('open','closed')`),
+    check(
+      "conversation_close_reason_check",
+      sql`${table.closeReason} is null or ${table.closeReason} in ('resuelta','sin_respuesta','equipo','manual')`,
+    ),
+    // Abierta: sin cierre. Cerrada: con cuándo y por qué (quién puede faltar: el agente).
+    check(
+      "conversation_closed_coherence_check",
+      sql`(${table.status} = 'open' and ${table.closedAt} is null and ${table.closeReason} is null and ${table.closedByUserId} is null)
+        or (${table.status} = 'closed' and ${table.closedAt} is not null and ${table.closeReason} is not null)`,
+    ),
     uniqueIndex("conversation_org_id_uidx").on(table.organizationId, table.id),
     foreignKey({ columns: [table.organizationId, table.contactIdentityId], foreignColumns: [contactIdentity.organizationId, contactIdentity.id] }),
     uniqueIndex("conversation_connection_thread_uidx").on(
@@ -553,6 +576,12 @@ export const agentConfig = pgTable(
     activeFromMin: integer("active_from_min"),
     activeUntilMin: integer("active_until_min"),
     channels: text("channels").array(),
+    /**
+     * Horas de silencio del paciente tras las que el agente cierra la
+     * conversación con una despedida (ADR 0024). Tope 23: después de 24 horas
+     * WhatsApp ya no deja escribir sin un mensaje aprobado.
+     */
+    closeAfterHours: integer("close_after_hours").notNull().default(22),
     /** Mensajes de prueba enviados desde «Probar»: solo para saber si la clínica ya lo probó. */
     sandboxTurns: integer("sandbox_turns").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -561,6 +590,7 @@ export const agentConfig = pgTable(
   (table) => [
     check("agent_config_llm_check", sql`${table.llm} in ('chatgpt_6','claude_5_5')`),
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
+    check("agent_config_close_after_hours_check", sql`${table.closeAfterHours} between 6 and 23`),
     check(
       "agent_config_decision_provider_check",
       sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,

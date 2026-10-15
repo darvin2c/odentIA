@@ -1,7 +1,7 @@
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { type OutboundMessageJob, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
-import { createConnection, ingestInbound, sendOutbound } from "@odentia/services"
+import { closeConversationWith, createConnection, ingestInbound, sendOutbound } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { processOutbound } from "./outbound.js"
@@ -64,6 +64,13 @@ it("mock envía sin HTTP y marca sent con externalId", async () => {
   const state = await messageState(messageId)
   expect(state?.status).toBe("sent")
   expect(state?.externalId?.startsWith("mock-")).toBe(true)
+})
+
+it("lo que quedó en cola sale aunque la conversación ya se cerró: la despedida no se pierde", async () => {
+  const { conversationId, messageId } = await seedQueuedText()
+  await withOrgContext(appDb, "org_a", (tx) => closeConversationWith(tx, "org_a", conversationId, { reason: "resuelta", byUserId: null }))
+  expect(await processOutbound(appDb, deps, outJob(messageId))).toBe("done")
+  expect((await messageState(messageId))?.status).toBe("sent")
 })
 
 it("mensaje ya enviado hace ack sin reenviar", async () => {

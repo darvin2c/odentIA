@@ -157,9 +157,15 @@ export function formatAgentCaseForPrompt(
       `Estado del caso (lo registra el sistema; es la fuente de verdad sobre lo ya propuesto y hecho en este hilo):\n${facts.join("\n")}`,
     )
   }
-  if (state.notes.length) {
+  // Cómo terminó la atención anterior del hilo (la deja el sistema al cerrar): las notas de entonces no siguen.
+  const previous = state.notes.filter((n) => n.kind === "atencion_anterior")
+  const own = state.notes.filter((n) => n.kind !== "atencion_anterior")
+  for (const note of previous) {
+    sections.push(`${note.text} Esta es una atención nueva: no des por pendiente lo de entonces salvo que la persona lo retome.`)
+  }
+  if (own.length) {
     sections.push(
-      `Notas del caso (las dejaste tú en turnos anteriores con anotar_caso):\n${state.notes.map((n) => `- ${n.text}`).join("\n")}`,
+      `Notas del caso (las dejaste tú en turnos anteriores con anotar_caso):\n${own.map((n) => `- ${n.text}`).join("\n")}`,
     )
   }
   if (state.lookups.length) {
