@@ -532,3 +532,25 @@ export function describeUnsupported(verdict: ReplyVerdict): string {
   const label: Record<FactKind, string> = { precio: "precio", hora: "hora", fecha: "fecha" }
   return verdict.unsupported.map((check) => `${label[check.kind]} «${check.value}»`).join(", ")
 }
+
+/** Palabras que niegan lo que dice la frase: «no aceptamos transferencia», «ni cheque», «sin tarjeta». */
+const NEGATION = /\b(?:no|ni|sin|nunca|tampoco|not|no longer|don't|doesn't)\b/
+
+/**
+ * Medios de pago que la clínica tiene desactivados y la respuesta ofrece como
+ * si se aceptaran: una frase que los nombra sin negarlos. Es por forma, no por
+ * significado: decir «no aceptamos transferencia» pasa; «aceptamos tarjeta y
+ * transferencia», no. Solo mira los nombres que la clínica registró, nunca una
+ * lista propia de medios.
+ */
+export function refusedPaymentMentions(text: string, refused: readonly string[]): string[] {
+  const sentences = plain(text).split(/(?<=[.!?;\n])|(?=[¿¡])/)
+  const found: string[] = []
+  for (const name of refused) {
+    const wanted = plain(name).trim()
+    if (!wanted) continue
+    const pattern = new RegExp(`\\b${wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+    if (sentences.some((sentence) => pattern.test(sentence) && !NEGATION.test(sentence))) found.push(name)
+  }
+  return found
+}
