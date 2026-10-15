@@ -33,16 +33,7 @@ describe("textos de «Te espera»", () => {
     expect(waitingText({ kind: "budgets", total: 4, oldestPresentedAt: "2026-10-03T15:00:00.000Z", items: [] }, context)).toEqual({
       title: "4 presupuestos esperan respuesta", detail: "El más antiguo se presentó hace 9 días", action: "Ver cuáles",
     })
-    expect(waitingText({ kind: "more", of: "proposals", count: 1 }, context).title).toBe("1 cambio más espera tu aprobación")
-  })
-
-  it("lo que propone el agente se nombra como lo que hay que decidir", () => {
-    const proposal = (action: string): WaitingRow => ({
-      kind: "proposal", id: "p", action, summary: "del jueves 15 al viernes 16", createdAt: "", conversationId: null, contactName: "Jorge Mendoza", patientName: "Lucía Paredes",
-    })
-    expect(waitingText(proposal("enviar_mensaje"), context).title).toBe("Mensaje para Jorge Mendoza")
-    expect(waitingText(proposal("reprogramar_cita"), context).title).toBe("Cambiar la cita de Lucía Paredes")
-    expect(waitingText(proposal("reprogramar_cita"), context).detail).toBe("El agente espera tu aprobación · del jueves 15 al viernes 16")
+    expect(waitingText({ kind: "more", of: "cases", count: 1 }, context).title).toBe("1 caso más que pasó el agente")
   })
 })
 

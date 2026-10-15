@@ -17,7 +17,6 @@ import {
   createHandoff,
   createProposal,
   createTask,
-  deriveCommercialFollowUpCoordination,
   findFreeGaps,
   getAgentPatientSummary,
   autonomyModeOf,
@@ -40,7 +39,6 @@ import {
   operationAgentSchema,
   PROPOSAL_ACTION_LABEL,
   recordAnswerTrace,
-  recordCommercialFollowUpProposal,
   recordKnowledgeGap,
   requireContact,
   resolveAgentPatientContext,
@@ -205,15 +203,8 @@ export interface AgentToolCtx {
   casePending?: boolean
   /** El modelo que escribe pidió el resto de herramientas en este turno. */
   widened?: boolean
-  /** Instrucción interna adicional; nunca se representa como mensaje del interlocutor. */
-  runInstruction?: string
-  /** Restringe herramientas para disparadores operativos sin mensaje entrante. */
-  allowedTools?: readonly string[]
   /** Herramientas que en este hilo no pueden servir; su esquema no se envía al modelo. */
   excludedTools?: readonly string[]
-  commercialCoordinationId?: string
-  /** Una coordinación proactiva ya produjo su único resultado terminal. */
-  decisionRecorded: boolean
   /**
    * La respuesta al interlocutor quedó enviada o pendiente de decisión: el
    * grafo termina el turno sin volver a llamar al modelo.
@@ -276,21 +267,10 @@ export async function performHandoff(
   priority: "alta" | "media" | "baja" = "media",
 ): Promise<void> {
   if (ctx.dryRun) {
-    ctx.decisionRecorded = true
     ctx.handedOff = true
     return
   }
   await withOrgContext(ctx.db, ctx.orgId, async (tx) => {
-    if (ctx.commercialCoordinationId) {
-      await deriveCommercialFollowUpCoordination(
-        tx,
-        ctx.orgId,
-        ctx.commercialCoordinationId,
-        reason,
-        summary?.trim() ? summary : reason,
-      )
-      return
-    }
     const handoff = await createHandoff(tx, ctx.orgId, null, {
       conversationId: ctx.conversationId,
       reason,
@@ -300,7 +280,6 @@ export async function performHandoff(
     })
     ctx.handoffId = handoff.id
   })
-  ctx.decisionRecorded = true
   ctx.handedOff = true
 }
 
@@ -327,14 +306,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     "outside_window: fuera de la ventana de 24h del canal. Si dispones de send_template, úsala con una plantilla autorizada; si no, deriva a humano."
   /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
-   * + payload. En modo directo se ejecuta en el mismo acto; si exige
-   * confirmación o aprobación, queda pendiente con su recorrido real. Los
+   * + payload. En modo directo se ejecuta en el mismo acto; si exige la
+   * confirmación del interlocutor, queda pendiente con su recorrido real. Los
    * errores de dominio en ejecución llegan como `fallida` con código estable
    * en `result.errorCode` y motivo prefijado en `error` (HTTP 200): se
    * reportan al modelo, nunca como aprobación. Si el hilo ya espera un «sí»
-   * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación;
-   * si la pendiente es del equipo (PROPOSAL_PENDING_APPROVAL), se guía a
-   * esperar al equipo sin pedir «sí» ni usar confirmar_propuesta.
+   * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación.
    */
   const propose = async (
     action: string,
@@ -361,19 +338,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }),
       )
       onProposal?.(proposal)
-      const coordinationId = ctx.commercialCoordinationId
-      if (coordinationId) {
-        await inOrg((tx) =>
-          recordCommercialFollowUpProposal(tx, ctx.orgId, coordinationId, proposal),
-        )
-        ctx.decisionRecorded = true
-      }
     } catch (e) {
       if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_CONFIRM") {
         return "Ya hay una propuesta esperando la confirmación del interlocutor en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
-      }
-      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_APPROVAL") {
-        return "Ya hay una propuesta pendiente de decisión del equipo en este hilo. Informa al interlocutor de que el equipo la está revisando y espera su decisión; un sí del interlocutor no sustituye esa aprobación."
       }
       throw e
     }
@@ -394,10 +361,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (proposal.status === "expirada") {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
-    if (proposal.mode === "confirmar_usuario") {
-      return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
-    }
-    return `Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al interlocutor que lo contactaremos.`
+    return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
   }
 
   /**
@@ -416,7 +380,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       label: PROPOSAL_ACTION_LABEL[action],
       summary,
       status: mode === "directo" ? "ejecutada" : "propuesta",
-      decider: mode === "confirmar_usuario" ? "contact" : "team",
       detail: null,
       at: now.toISOString(),
       expiresAt: mode === "directo" ? null : new Date(now.getTime() + 48 * 3_600_000).toISOString(),
@@ -497,7 +460,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       await inOrg((tx) =>
         recordAnswerTrace(tx, ctx.orgId, {
           conversationId: ctx.conversationId,
-          triggerMessageId: ctx.commercialCoordinationId ? null : ctx.triggerId,
+          triggerMessageId: ctx.triggerId,
           proposalId: proposal?.id ?? null,
           messageId: typeof messageId === "string" ? messageId : null,
           outcome,
@@ -809,7 +772,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           await inOrg((tx) =>
             recordKnowledgeGap(tx, ctx.orgId, {
               conversationId: ctx.conversationId,
-              triggerMessageId: ctx.commercialCoordinationId ? null : ctx.triggerId,
+              triggerMessageId: ctx.triggerId,
               question: ctx.lastInboundText?.trim() || pregunta,
               query: pregunta,
             }),
@@ -1006,7 +969,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; según la política puede pedir confirmación del interlocutor o aprobación del equipo.",
+        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
       schema: operationAgentSchema("cita.reservar"),
     },
   )
@@ -1030,7 +993,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "reprogramar_cita",
       description:
-        "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Según la política puede pedir confirmación del interlocutor (confirmar_propuesta) o aprobación del equipo; la aprobación del equipo no sustituye la confirmación del interlocutor.",
+        "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Queda esperando la confirmación del interlocutor (confirmar_propuesta).",
       schema: operationAgentSchema("cita.mover"),
     },
   )
@@ -1047,7 +1010,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "cancelar_cita",
       description:
-        "Propone cancelar una cita existente (nunca la borra ni crea otra). Usa el id exacto de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde. Según la política puede pedir confirmación del interlocutor (confirmar_propuesta) o aprobación del equipo; la respuesta indica el estado real: pendiente, ejecutada o fallida.",
+        "Propone cancelar una cita existente (nunca la borra ni crea otra). Usa el id exacto de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde. Queda esperando la confirmación del interlocutor (confirmar_propuesta); la respuesta indica el estado real: pendiente, ejecutada o fallida.",
       schema: z.object({
         appointmentId: z.string().uuid(),
         reason: z.string().max(500).optional(),
@@ -1061,9 +1024,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const state = ctx.sandbox.state
         const pending = state.pending.find((item) => item.id === proposalId)
         if (!pending) return "[SIMULACIÓN] Esa propuesta no está pendiente en esta prueba."
-        if (pending.decider === "team") {
-          return "Esa propuesta exige aprobación del equipo: el sí del interlocutor no la ejecuta. Avísale de que el equipo la está revisando y espera su decisión."
-        }
         state.pending = state.pending.filter((item) => item.id !== proposalId)
         state.recent = [{ ...pending, status: "ejecutada", at: new Date().toISOString(), expiresAt: null }, ...state.recent].slice(0, 5)
         return `[SIMULACIÓN] Confirmado y ejecutado (propuesta ${proposalId}).`
@@ -1075,9 +1035,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey }),
         )
       } catch (e) {
-        if (e instanceof ServiceError && e.code === "PROPOSAL_NEEDS_TEAM_APPROVAL") {
-          return "Esa propuesta exige aprobación del equipo: el sí del interlocutor no la ejecuta. Avísale de que el equipo la está revisando y espera su decisión."
-        }
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
         throw e
       }
@@ -1099,7 +1056,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "confirmar_propuesta",
       description:
-        "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito. Jamás la uses para propuestas que requieren aprobación del equipo: esas las decide el equipo.",
+        "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito.",
       schema: z.object({ proposalId: z.string().uuid() }),
     },
   )
@@ -1354,10 +1311,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }
         return `[SIMULACIÓN] Se derivaría a humano: ${reason}.`
       }
-      if (ctx.commercialCoordinationId) {
-        await performHandoff(ctx, reason, summary)
-        return "Derivado a una persona usando el pendiente existente. No envíes más mensajes."
-      }
       if (ctx.handedOff) {
         // El caso ya pasó a una persona en esta corrida (lo decidió el camino):
         // no se registra otra derivación, solo sale el aviso al interlocutor.
@@ -1433,7 +1386,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   ]
   return tools.filter(
     (candidate) =>
-      (!ctx.allowedTools || ctx.allowedTools.includes(candidate.name)) &&
       !ctx.excludedTools?.includes(candidate.name) &&
       // Sin dirección pública configurada no hay página que abrir.
       (candidate.name !== "enviar_enlace_cita" || Boolean(ctx.publicUrl) || ctx.dryRun),

@@ -234,12 +234,13 @@ function OrgLayout() {
   })
   // Contador ligero para el badge del agente; la misma consulta alimenta el panel.
   const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
-  const pendingDecisions = agentSummary.data?.data.pendingProposals ?? 0
+  // Lo que espera al equipo: los casos que el agente pasó y siguen sin resolver.
+  const pendingCases = agentSummary.data?.data.openHandoffs ?? 0
   // El agente lleva su contador y, para quien solo decide, entra por Aprobaciones.
   const withAgentState = <T extends AppShellNavItem>(item: T): T => {
     if (item.to !== "/agent") return item
     const target = canAccess(role, "agent.read") ? item : { ...item, to: "/agent/approvals" }
-    return pendingDecisions > 0 ? { ...target, badge: pendingDecisions } : target
+    return pendingCases > 0 ? { ...target, badge: pendingCases } : target
   }
   // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {

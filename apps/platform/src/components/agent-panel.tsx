@@ -5,9 +5,6 @@ import {
   DrawerContent,
   DrawerDescription,
   DrawerTitle,
-  Field,
-  FieldLabel,
-  Input,
   ScrollArea,
   Tabs,
   TabsContent,
@@ -17,7 +14,6 @@ import {
 } from "@odentia/ui"
 import {
   AgentMark,
-  ConfirmDialog,
   EmptyState,
   LoadingState,
   SideColumn,
@@ -49,9 +45,6 @@ import {
   type AgentHandoff,
   type AgentPanelSummary,
   type AgentProposal,
-  approvalOutcomeMessage,
-  permissionForAction,
-  proposalErrorMessage,
 } from "../lib/agent"
 import { ApiError, apiFetch } from "../lib/api"
 import { channelLabel } from "../lib/channels"
@@ -59,7 +52,8 @@ import { usePermission } from "../lib/crm"
 import { activeOrgLocale } from "../lib/locale"
 
 /**
- * Panel lateral global del agente: decidir, ver derivadas y actividad desde
+ * Panel lateral global del agente: los casos derivados, las citas que esperan
+ * el sí del paciente y la actividad, desde
  * cualquier pantalla. En pantalla grande es una columna fija a la derecha y la
  * página sigue usable al lado; cuando no cabe se superpone, sin cerrar la
  * página ni sus borradores, con el mismo cajón que los formularios: lateral en
@@ -93,7 +87,7 @@ export function invalidateAgentPanelQueries(queryClient: QueryClient): void {
   for (const key of PANEL_KEYS) void queryClient.invalidateQueries({ queryKey: [key] })
 }
 
-export type AgentPanelTab = "decidir" | "derivadas" | "actividad"
+export type AgentPanelTab = "derivadas" | "paciente" | "actividad"
 
 /**
  * Desde este ancho el panel (384 px) cabe como columna junto a la página con el
@@ -133,7 +127,7 @@ interface AgentPanelState {
   /** Ancho elegido para la columna, en px. */
   dockWidth: number
   setDockWidth: (width: number) => void
-  /** Abre o cierra; al abrir puede elegir la pestaña (por defecto «Por decidir»). */
+  /** Abre o cierra; al abrir puede elegir la pestaña (por defecto «Derivadas»). */
   setOpen: (open: boolean, tab?: AgentPanelTab) => void
   tab: AgentPanelTab
   setTab: (tab: AgentPanelTab) => void
@@ -151,7 +145,7 @@ const AgentPanelContext = createContext<AgentPanelState>({
   dockWidth: DOCK_WIDTH.initial,
   setDockWidth: () => {},
   setOpen: () => {},
-  tab: "decidir",
+  tab: "derivadas",
   setTab: () => {},
   buttonRef: { current: null },
   openerRef: { current: null },
@@ -217,7 +211,7 @@ export function useAgentPanelSummary(enabled: boolean) {
 
 export function AgentPanelProvider({ children }: { children: ReactNode }) {
   const [open, setOpenState] = useState(false)
-  const [tab, setTab] = useState<AgentPanelTab>("decidir")
+  const [tab, setTab] = useState<AgentPanelTab>("derivadas")
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
   const dockBlockers = useRef(0)
@@ -225,8 +219,8 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
   const wideRef = useRef(wide)
   wideRef.current = wide
   // La presentación se decide al abrir y no cambia sola (salvo que la ventana
-  // se estreche): pasar de cajón a columna a mitad de una decisión desmontaría
-  // el motivo de rechazo a medio escribir.
+  // se estreche): pasar de cajón a columna a mitad de una tarea desmontaría lo
+  // que se estaba mirando.
   const [docked, setDocked] = useState(false)
   const dockedRef = useRef(docked)
   dockedRef.current = docked
@@ -244,7 +238,7 @@ export function AgentPanelProvider({ children }: { children: ReactNode }) {
       if (!inPanel) {
         openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null
       }
-      setTab(nextTab ?? "decidir")
+      setTab(nextTab ?? "derivadas")
       setDocked(wideRef.current && dockBlockers.current === 0 && !occupiedRef.current)
     }
     setOpenState(next)
@@ -299,13 +293,13 @@ function useCanSeePanel(): boolean {
   return canRead || canDecide
 }
 
-/** Botón «Agente · N» de la cabecera: abre el panel desde cualquier página. */
+/** Botón «Agente · N» de la cabecera: abre el panel desde cualquier página. N son los casos por atender. */
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
   const { open, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
   const summary = useAgentPanelSummary(canSee)
   if (!canSee) return null
-  const pending = summary.data?.data.pendingProposals ?? 0
+  const pending = summary.data?.data.openHandoffs ?? 0
   return (
     <Button
       ref={buttonRef}
@@ -313,7 +307,7 @@ export function AgentPanelButton() {
       variant={open ? "default" : "outline"}
       className="elevated relative h-11 gap-2 rounded-full px-2 sm:pr-4"
       onClick={() => setOpen(!open)}
-      aria-label={`Agente${pending > 0 ? `, ${pending} por decidir` : ""}`}
+      aria-label={`Agente${pending > 0 ? `, ${pending} por atender` : ""}`}
       aria-expanded={open}
       aria-controls={open && docked ? PANEL_ID : undefined}
     >
@@ -323,7 +317,7 @@ export function AgentPanelButton() {
         <Bot className="size-4" aria-hidden />
       </span>
       <span className="hidden sm:inline">
-        Agente{pending > 0 ? ` · ${pending} por decidir` : ""}
+        Agente{pending > 0 ? ` · ${pending} por atender` : ""}
       </span>
       {pending > 0 ? (
         <span className="sm:hidden absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-background px-1 text-xs font-bold text-primary ring-2 ring-primary">
@@ -501,7 +495,7 @@ function PanelHeader({
 
 function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
   const { tab, setTab } = useContext(AgentPanelContext)
-  const pending = summary?.pendingProposals ?? 0
+  const awaiting = summary?.awaitingContact ?? 0
   const openHandoffs = summary?.openHandoffs ?? 0
   const when = whenFormatter(summary)
   return (
@@ -512,20 +506,20 @@ function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
       className="flex min-h-0 flex-1 flex-col"
     >
       <TabsList className="mx-4 mt-3 grid grid-cols-3 sm:mx-5">
-        <TabsTrigger value="decidir">Por decidir{pending > 0 ? ` · ${pending}` : ""}</TabsTrigger>
         <TabsTrigger value="derivadas">
           Derivadas{openHandoffs > 0 ? ` · ${openHandoffs}` : ""}
         </TabsTrigger>
+        <TabsTrigger value="paciente">Esperan al paciente{awaiting > 0 ? ` · ${awaiting}` : ""}</TabsTrigger>
         <TabsTrigger value="actividad">Actividad</TabsTrigger>
       </TabsList>
-      {/* Pestañas montadas: cambiar de pestaña no pierde un rechazo a medio escribir. */}
+      {/* Pestañas montadas: cambiar de pestaña no pierde lo que se estaba mirando. */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-4 sm:p-5">
-          <TabsContent value="decidir" keepMounted>
-            <ProposalsTab when={when} />
-          </TabsContent>
           <TabsContent value="derivadas" keepMounted>
             <HandoffsTab when={when} />
+          </TabsContent>
+          <TabsContent value="paciente" keepMounted>
+            <AwaitingTab when={when} />
           </TabsContent>
           <TabsContent value="actividad" keepMounted>
             <ActivityTab when={when} />
@@ -549,264 +543,87 @@ const INLINE_LINK = "inline-flex min-h-11 items-center font-semibold text-primar
 /** Botones compactos en escritorio, de 44 px en móvil. */
 const TOUCH_SM = "min-h-11 sm:min-h-8"
 
-function ProposalsTab({ when }: { when: WhenFormatter }) {
-  const queryClient = useQueryClient()
+/**
+ * Lo que espera el sí del paciente: las citas que el agente propuso en un hilo.
+ * El equipo no las aprueba ni las rechaza (ADR 0023); las ve y abre la
+ * conversación. Lo del hilo que hay abierto debajo va primero.
+ */
+function AwaitingTab({ when }: { when: WhenFormatter }) {
   const openConversationId = useOpenConversationId()
-  const canDecide = usePermission("agent.decide")
-  const canConversations = usePermission("conversations.write")
-  const canAgenda = usePermission("appointments.write")
-  const canCrm = usePermission("crm.write")
-  const [approving, setApproving] = useState<AgentProposal | null>(null)
-  const [rejecting, setRejecting] = useState<string | null>(null)
-  const [reason, setReason] = useState("")
-  const [outcome, setOutcome] = useState<string | null>(null)
   const query = useQuery({
     queryKey: ["agent-panel-proposals"],
     queryFn: () =>
       apiFetch<{ data: AgentProposal[] }>("/api/agent/proposals?status=propuesta&limit=50"),
   })
-  const decide = useMutation({
-    mutationFn: (input: { id: string; decision: "aprobada" | "rechazada"; reason?: string }) =>
-      apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${input.id}/decision`, {
-        method: "POST",
-        body: JSON.stringify(input),
-      }),
-    onSuccess: (response) => settle(response),
-  })
-  function settle(response: { data: AgentProposal }) {
-      const proposal = response.data
-      // Un desenlace que ya no figura en la lista se dice, no se silencia.
-      setOutcome(
-        proposal.status === "fallida" || proposal.status === "expirada"
-          ? `La propuesta quedó ${proposal.status}.${proposalErrorMessage(proposal) ? ` ${proposalErrorMessage(proposal)}` : ""} Gestiona la acción desde el caso.`
-          : proposal.status === "rechazada"
-            ? "Propuesta rechazada."
-            : approvalOutcomeMessage(proposal),
-      )
-      setApproving(null)
-      setRejecting(null)
-      setReason("")
-      invalidateAfterAgentDecision(queryClient)
-  }
-  const error =
-    decide.error instanceof ApiError
-      ? decide.error.shape.message
-      : decide.error
-        ? "No pudimos registrar la decisión. No se muestra como ejecutada."
-        : null
-  const authorized = (action: string) => {
-    if (!canDecide) return false
-    const permission = permissionForAction(action)
-    return permission === "conversations.write"
-      ? canConversations
-      : permission === "appointments.write"
-        ? canAgenda
-        : canCrm
-  }
   if (query.isPending) return <LoadingState />
   if (query.isError)
     return (
       <div role="alert" className="flex flex-col gap-2">
-        <p>No pudimos cargar las propuestas.</p>
+        <p>No pudimos cargar lo que espera al paciente.</p>
         <Button variant="outline" onClick={() => void query.refetch()}>
           Volver a intentar
         </Button>
       </div>
     )
-  // El equipo decide todo lo que no exige confirmación del interlocutor; esas
-  // se muestran aparte para que no parezcan decisiones pendientes de nadie.
-  // Lo del hilo que hay abierto debajo va primero: es lo que se está mirando.
-  const proposals = query.data.data
   const ofOpenThread = (p: AgentProposal) => openConversationId !== null && p.conversationId === openConversationId
-  const decidedByTeam = (p: AgentProposal) => p.mode !== "confirmar_usuario"
-  const fromOpenThread = proposals.filter(ofOpenThread)
-  const forTeam = proposals.filter((p) => decidedByTeam(p) && !ofOpenThread(p))
-  const forContact = proposals.filter((p) => !decidedByTeam(p) && !ofOpenThread(p))
-  const nothingForTeam = !proposals.some(decidedByTeam)
-  const renderProposal = (proposal: AgentProposal, decidable: boolean) => {
-    const here = ofOpenThread(proposal)
-    const person = proposal.context.contactName ?? "Interlocutor no disponible"
-    const patient =
-      proposal.context.patientName && proposal.context.patientName !== proposal.context.contactName
-        ? proposal.context.patientName
-        : null
+  const proposals = [...query.data.data.filter(ofOpenThread), ...query.data.data.filter((p) => !ofOpenThread(p))]
+  if (proposals.length === 0)
     return (
-      <li
-        key={proposal.id}
-        className={`flex flex-col gap-3 rounded-2xl border p-4 ${decidable ? "border-primary/30 bg-primary-soft/40" : "bg-card"}`}
-      >
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {here ? <Badge>De esta conversación</Badge> : null}
-          <Badge variant={decidable ? "soft" : "secondary"}>
-            {decidable ? "Espera tu aprobación" : "Espera al interlocutor"}
-          </Badge>
-          <span className="text-muted-foreground">{when(proposal.createdAt)}</span>
-        </div>
-        <h3 className="text-[15px] font-bold tracking-tight">
-          {ACTION_LABEL[proposal.action] ?? proposal.action}
-        </h3>
-        <div className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
-          <p className="font-semibold">
-            {person}
-            {proposal.context.channel ? (
-              <span className="font-normal text-muted-foreground">
-                {" "}
-                · {channelLabel(proposal.context.channel)}
-              </span>
-            ) : null}
-          </p>
-          {patient ? <p>Paciente: {patient}</p> : null}
-          {proposal.context.opportunityTitle ? (
-            <p className="text-muted-foreground">{proposal.context.opportunityTitle}</p>
-          ) : null}
-          {proposal.context.beforeSummary ? (
-            <p className="text-xs text-muted-foreground">
-              Al proponer: {proposal.context.beforeSummary}
-            </p>
-          ) : null}
-          <p>{proposal.context.afterSummary}</p>
-          {proposal.reason ? <p className="text-muted-foreground">Motivo: {proposal.reason}</p> : null}
-          {proposal.context.isStale ? (
-            <p role="alert" className="text-destructive">
-              La situación cambió desde que se propuso; revisa el caso antes de decidir.
-            </p>
-          ) : null}
-        </div>
-        {decidable && authorized(proposal.action) ? (
-          rejecting === proposal.id ? (
-            <div className="flex flex-col gap-2">
-              <Field>
-                <FieldLabel htmlFor={`panel-rechazo-${proposal.id}`}>Motivo del rechazo</FieldLabel>
-                <Input
-                  id={`panel-rechazo-${proposal.id}`}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  maxLength={2000}
-                  autoFocus
-                />
-              </Field>
-              <div className="flex flex-wrap gap-2">
-                <SubmitButton
-                  size="sm"
-                  variant="outline"
-                  className={TOUCH_SM}
-                  pending={decide.isPending}
-                  disabled={!reason.trim()}
-                  onClick={() => decide.mutate({ id: proposal.id, decision: "rechazada", reason })}
-                >
-                  Confirmar rechazo
-                </SubmitButton>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={TOUCH_SM}
-                  onClick={() => {
-                    setRejecting(null)
-                    setReason("")
-                  }}
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                className={`flex-1 rounded-full ${TOUCH_SM}`}
-                disabled={decide.isPending}
-                onClick={() => {
-                  decide.reset()
-                  setApproving(proposal)
-                }}
-              >
-                Revisar y aprobar
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                className={`rounded-full ${TOUCH_SM}`}
-                onClick={() => {
-                  decide.reset()
-                  setRejecting(proposal.id)
-                }}
-              >
-                Rechazar…
-              </Button>
-            </div>
-          )
-        ) : null}
-        {here ? null : proposal.conversationId ? (
-          <Link
-            to="/inbox"
-            search={{ conversation: proposal.conversationId }}
-            className={`text-sm ${INLINE_LINK}`}
-          >
-            {decidable ? "Abrir caso" : "Abrir conversación"}
-          </Link>
-        ) : typeof proposal.payload.opportunityId === "string" ? (
-          // Trabajo proactivo sin hilo: el caso es la oportunidad; el hilo se abre al aprobar.
-          <Link
-            to="/opportunities/$opportunityId"
-            params={{ opportunityId: proposal.payload.opportunityId }}
-            className={`text-sm ${INLINE_LINK}`}
-          >
-            Abrir oportunidad
-          </Link>
-        ) : null}
-      </li>
-    )
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {outcome ? (
-        <p role="status" className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
-          {outcome}{" "}
-          <button type="button" className="underline" onClick={() => setOutcome(null)}>
-            Descartar
-          </button>
-        </p>
-      ) : null}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {nothingForTeam ? (
-        <EmptyState
-          title="Nada por decidir"
-          description="Cuando el agente prepare un cambio que necesite tu aprobación, aparecerá aquí."
-        />
-      ) : null}
-      <ul className="flex flex-col gap-3">
-        {fromOpenThread.map((p) => renderProposal(p, decidedByTeam(p)))}
-        {forTeam.map((p) => renderProposal(p, true))}
-      </ul>
-      {forContact.length > 0 ? (
-        <section aria-label="Esperan al interlocutor" className="flex flex-col gap-3">
-          <h3 className="text-xs font-semibold text-muted-foreground">
-            Esperan al interlocutor · {forContact.length}
-          </h3>
-          <ul className="flex flex-col gap-3">{forContact.map((p) => renderProposal(p, false))}</ul>
-        </section>
-      ) : null}
-      <ConfirmDialog
-        open={approving !== null}
-        title="Aprobar y ejecutar el cambio"
-        description={
-          approving
-            ? `${approving.context.patientName && approving.context.patientName !== approving.context.contactName ? `Paciente: ${approving.context.patientName} · Interlocutor: ` : ""}${approving.context.contactName ?? "Interlocutor"}: ${approving.context.afterSummary}`
-            : ""
-        }
-        confirmLabel="Aprobar y ejecutar"
-        variant="default"
-        pending={decide.isPending}
-        onClose={() => {
-          if (!decide.isPending) setApproving(null)
-        }}
-        onConfirm={() => approving && decide.mutate({ id: approving.id, decision: "aprobada" })}
+      <EmptyState
+        title="Nada espera al paciente"
+        description="Cuando el agente proponga una cita en una conversación, espera aquí el sí del paciente."
       />
-    </div>
+    )
+  return (
+    <ul className="flex flex-col gap-3">
+      {proposals.map((proposal) => {
+        const here = ofOpenThread(proposal)
+        const person = proposal.context.contactName ?? "Interlocutor no disponible"
+        const patient =
+          proposal.context.patientName && proposal.context.patientName !== proposal.context.contactName
+            ? proposal.context.patientName
+            : null
+        return (
+          <li key={proposal.id} className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {here ? <Badge>De esta conversación</Badge> : null}
+              <Badge variant="secondary">Espera al paciente</Badge>
+              <span className="text-muted-foreground">{when(proposal.createdAt)}</span>
+            </div>
+            <h3 className="text-[15px] font-bold tracking-tight">
+              {ACTION_LABEL[proposal.action] ?? proposal.action}
+            </h3>
+            <div className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
+              <p className="font-semibold">
+                {person}
+                {proposal.context.channel ? (
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    · {channelLabel(proposal.context.channel)}
+                  </span>
+                ) : null}
+              </p>
+              {patient ? <p>Paciente: {patient}</p> : null}
+              <p>{proposal.context.afterSummary}</p>
+              {proposal.context.isStale ? (
+                <p role="alert" className="text-destructive">
+                  La situación cambió desde que se propuso; revisa el caso.
+                </p>
+              ) : null}
+            </div>
+            {here ? null : (
+              <Link
+                to="/inbox"
+                search={{ conversation: proposal.conversationId }}
+                className={`text-sm ${INLINE_LINK}`}
+              >
+                Abrir conversación
+              </Link>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -908,7 +725,6 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
 const ACTIVITY_STATUS: Record<string, string> = {
   propuesta: "pendiente",
   aprobada: "aprobada",
-  rechazada: "rechazada",
   ejecutada: "ejecutada",
   fallida: "fallida",
   expirada: "expirada",

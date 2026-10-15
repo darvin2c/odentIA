@@ -94,7 +94,7 @@ function applyChanges(line: AdminLine, state: LineState, changes: AutomationDraf
   return {
     enabled: changes.enabled ?? state.enabled,
     agentPart: line.agent ? (changes.agentPart ?? state.agentPart) : false,
-    teamPart: line.key === "seguimiento_comercial" ? true : (changes.teamPart ?? state.teamPart),
+    teamPart: changes.teamPart ?? state.teamPart,
     days: changes.days ?? state.days,
     timing,
     taskNote: changes.taskNote ?? state.taskNote,
@@ -109,7 +109,7 @@ function effective(line: AdminLine, state: LineState, changes: AdminChanges): Au
   const out: AutomationDraft["changes"] = {}
   if (changes.enabled !== undefined && changes.enabled !== state.enabled) out.enabled = changes.enabled
   if (line.agent && changes.agentPart !== undefined && changes.agentPart !== state.agentPart) out.agentPart = changes.agentPart
-  if (line.key !== "seguimiento_comercial" && changes.teamPart !== undefined && changes.teamPart !== state.teamPart) out.teamPart = changes.teamPart
+  if (changes.teamPart !== undefined && changes.teamPart !== state.teamPart) out.teamPart = changes.teamPart
   if (changes.days !== undefined && changes.days !== state.days) out.days = changes.days
   if (changes.hoursBefore && !same(changes.hoursBefore, state.timing.hoursBefore ?? [24, 3])) out.hoursBefore = changes.hoursBefore
   if (changes.delayHours !== undefined && changes.delayHours !== (state.timing.delayHours ?? line.delayHours)) out.delayHours = changes.delayHours
@@ -246,7 +246,7 @@ export async function setAdminDraftNote(tx: Db, orgId: string, key: string, note
   const changes = { ...draft.changes }
   if (text) {
     changes.taskNote = text
-    if (line.agent && line.key !== "seguimiento_comercial") {
+    if (line.agent) {
       if (rule.teamPart) delete changes.teamPart
       else changes.teamPart = true
     }

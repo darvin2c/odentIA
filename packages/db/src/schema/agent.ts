@@ -13,8 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import { contact, conversation, crmTask, orgFk } from "./crm.js"
-import { opportunity } from "./opportunities.js"
+import { contact, conversation, orgFk } from "./crm.js"
 import { branch } from "./org.js"
 
 /** Tipos de conocimiento que el agente puede citar (FAQs versionadas e info de sede/política). */
@@ -134,7 +133,8 @@ export const AUTONOMY_ACTIONS = [
 ] as const
 export type AutonomyAction = (typeof AUTONOMY_ACTIONS)[number]
 
-export const AUTONOMY_MODES = ["directo", "confirmar_usuario", "aprobar_equipo"] as const
+/** Quién dice que sí: nadie (va directo) o el interlocutor en el hilo. Ningún acto espera al equipo (ADR 0023). */
+export const AUTONOMY_MODES = ["directo", "confirmar_usuario"] as const
 export type AutonomyMode = (typeof AUTONOMY_MODES)[number]
 
 export const PROPOSAL_ACTIONS = [
@@ -149,10 +149,13 @@ export const PROPOSAL_ACTIONS = [
 ] as const
 export type ProposalAction = (typeof PROPOSAL_ACTIONS)[number]
 
+/**
+ * `aprobada` es el paso entre el sí (del interlocutor, o el directo) y la
+ * ejecución. Nadie rechaza una propuesta: la que nadie confirma, expira.
+ */
 export const PROPOSAL_STATUSES = [
   "propuesta",
   "aprobada",
-  "rechazada",
   "ejecutada",
   "fallida",
   "expirada",
@@ -160,7 +163,8 @@ export const PROPOSAL_STATUSES = [
 export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number]
 
 /**
- * Propuestas de actos del agente. La ejecución es idempotente por
+ * Propuestas de actos del agente, siempre en una conversación: el agente no
+ * abre hilos por su cuenta (ADR 0023). La ejecución es idempotente por
  * (organización, idempotencyKey): aprobar dos veces no ejecuta dos veces.
  */
 export const agentProposal = pgTable(
@@ -168,7 +172,9 @@ export const agentProposal = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    conversationId: uuid("conversation_id").references(() => conversation.id),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id),
     contactId: uuid("contact_id").references(() => contact.id),
     /**
      * Paciente sobre el que actúa la propuesta (nulo en actos comerciales sin
@@ -211,7 +217,7 @@ export const agentProposal = pgTable(
     ),
     check(
       "agent_proposal_status_check",
-      sql`${table.status} in ('propuesta','aprobada','rechazada','ejecutada','fallida','expirada')`,
+      sql`${table.status} in ('propuesta','aprobada','ejecutada','fallida','expirada')`,
     ),
   ],
 )
@@ -248,77 +254,6 @@ export const agentHandoff = pgTable(
     index("agent_handoff_org_idx").on(table.organizationId, table.createdAt),
     index("agent_handoff_conversation_idx").on(table.conversationId),
     check("agent_handoff_priority_check", sql`${table.priority} in ('alta','media','baja')`),
-  ],
-)
-
-export const COMMERCIAL_COORDINATION_STATUSES = [
-  "pendiente",
-  "propuesta",
-  "ejecutada",
-  "derivada",
-  "omitida",
-  "incierta",
-] as const
-export type CommercialCoordinationStatus = (typeof COMMERCIAL_COORDINATION_STATUSES)[number]
-
-/**
- * Decisión durable para una próxima acción comercial vencida. Una fecha
- * explícita de la tarea genera como máximo una coordinación; nunca programa
- * por sí sola otra reiteración.
- */
-export const commercialFollowUpCoordination = pgTable(
-  "commercial_follow_up_coordination",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    taskId: uuid("task_id").notNull(),
-    opportunityId: uuid("opportunity_id").notNull(),
-    conversationId: uuid("conversation_id"),
-    triggerDueAt: timestamp("trigger_due_at", { withTimezone: true }).notNull(),
-    status: text("status").notNull().default("pendiente"),
-    reason: text("reason"),
-    result: jsonb("result").$type<Record<string, unknown>>(),
-    nextResponsibleKind: text("next_responsible_kind").notNull().default("agent"),
-    nextResponsibleUserId: text("next_responsible_user_id"),
-    attempts: integer("attempts").notNull().default(0),
-    decidedAt: timestamp("decided_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex("commercial_coordination_org_task_due_uidx").on(
-      table.organizationId,
-      table.taskId,
-      table.triggerDueAt,
-    ),
-    index("commercial_coordination_org_status_idx").on(
-      table.organizationId,
-      table.status,
-      table.createdAt,
-    ),
-    foreignKey({
-      columns: [table.organizationId, table.taskId],
-      foreignColumns: [crmTask.organizationId, crmTask.id],
-      name: "commercial_coordination_task_fk",
-    }),
-    foreignKey({
-      columns: [table.organizationId, table.opportunityId],
-      foreignColumns: [opportunity.organizationId, opportunity.id],
-      name: "commercial_coordination_opportunity_fk",
-    }),
-    foreignKey({
-      columns: [table.organizationId, table.conversationId],
-      foreignColumns: [conversation.organizationId, conversation.id],
-      name: "commercial_coordination_conversation_fk",
-    }),
-    check(
-      "commercial_coordination_status_check",
-      sql`${table.status} in ('pendiente','propuesta','ejecutada','derivada','omitida','incierta')`,
-    ),
-    check(
-      "commercial_coordination_responsible_check",
-      sql`${table.nextResponsibleKind} in ('agent','team','user','contact','none')`,
-    ),
   ],
 )
 
@@ -692,8 +627,8 @@ export interface AgentPatientContext {
  * Quién dice que sí a cada acción del agente. Es fija para todas las clínicas
  * (ADR 0021): el agente siempre responde, la cita la confirma el paciente y lo
  * comercial es interno y se deshace. La clínica elige qué funciones enciende,
- * no niveles. No se guarda por organización: los otros modos solo los usan
- * las propuestas sin hilo, que decide siempre el equipo (`aprobar_equipo`).
+ * no niveles. No se guarda por organización, y ningún acto espera al equipo
+ * (ADR 0023).
  */
 export const DEFAULT_AUTONOMY_MODES: Record<AutonomyAction, AutonomyMode> = {
   reservar_cita: "confirmar_usuario",

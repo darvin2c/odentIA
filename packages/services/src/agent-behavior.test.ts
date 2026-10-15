@@ -9,7 +9,6 @@ import {
   buildAgentProposalKey,
   confirmProposalByContact,
   createProposal,
-  decideProposal,
   executeProposal,
   getProposal,
 } from "./agent-operations.js"
@@ -193,8 +192,8 @@ describe("recorrido comercial directo", () => {
     expect(reread.result).toMatchObject({ errorCode: "VALIDATION" })
   })
 
-  it("una cita la confirma el paciente: el equipo no la aprueba, solo puede rechazarla", async () => {
-    const { conversationId } = await openConversation("comercial-5", "evt-com-5")
+  it("una cita la confirma el paciente: sin su sí no se ejecuta, y nadie del equipo la aprueba por él", async () => {
+    const { conversationId, contactId } = await openConversation("comercial-5", "evt-com-5")
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "reservar_cita",
@@ -204,11 +203,11 @@ describe("recorrido comercial directo", () => {
     )
     expect(proposal.status).toBe("propuesta")
     expect(proposal.mode).toBe("confirmar_usuario")
+    // Registrar la confirmación exige un sí del paciente en el chat posterior a la propuesta.
     await expect(
-      run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "aprobada" })),
-    ).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_CONTACT_CONFIRM", status: 409 })
-    const rejected = await run((tx) => decideProposal(tx, ORG, "owner-1", proposal.id, { decision: "rechazada" }))
-    expect(rejected.status).toBe("rechazada")
+      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { staffUserId: "owner-1" })),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED", status: 409 })
+    expect((await run((tx) => getProposal(tx, ORG, proposal.id))).status).toBe("propuesta")
   })
 })
 
@@ -354,21 +353,6 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     )
     expect(fresh.status).toBe("propuesta")
   })
-
-  it("decidir una propuesta vencida no ejecuta y devuelve expirada", async () => {
-    const { conversationId } = await openConversation("hilo-4", "evt-hilo-4")
-    const old = await run((tx) =>
-      createProposal(tx, ORG, {
-        conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:hilo-7",
-      }),
-    )
-    await run((tx) =>
-      tx.update(agentProposal).set({ createdAt: new Date(Date.now() - 49 * 60 * 60 * 1000) }).where(eq(agentProposal.id, old.id)),
-    )
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", old.id, { decision: "aprobada" }))
-    expect(decided.status).toBe("expirada")
-    expect((await run((tx) => getProposal(tx, ORG, old.id))).status).toBe("expirada")
-  })
 })
 
 describe("obsolescencia y fallo transaccional", () => {
@@ -391,7 +375,8 @@ describe("obsolescencia y fallo transaccional", () => {
     ))
     expect(legacy.status).toBe("propuesta")
     expect(legacy.context.isStale).toBe(true)
-    const decided = await run((tx) => decideProposal(tx, ORG, "owner-1", legacy.id, { decision: "aprobada" }))
+    await run((tx) => tx.update(agentProposal).set({ status: "aprobada" }).where(eq(agentProposal.id, legacy.id)))
+    const decided = await run((tx) => executeProposal(tx, ORG, "owner-1", legacy.id))
     expect(decided.status).toBe("fallida")
     expect(decided.error).toContain("evidencia de estado")
     const kept = await run((tx) => getOpportunity(tx, ORG, opp.id))

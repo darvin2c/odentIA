@@ -1,6 +1,5 @@
-import { Alert, AlertDescription, AlertTitle, Button, buttonVariants } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
@@ -11,8 +10,7 @@ import { type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } fr
 import { WaitingList } from "../../components/home/waiting-list"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
-import { proposalErrorMessage, type AgentProposal } from "../../lib/agent"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
@@ -46,7 +44,6 @@ const HOME_EVENTS = [
   "stream.reconnected",
 ]
 
-type ProposalRow = Extract<WaitingRow, { kind: "proposal" }>
 type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
@@ -56,7 +53,6 @@ function hasWork(access: WorkspaceHome["access"]): boolean {
 
 function HomePage() {
   const queryClient = useQueryClient()
-  const canApprove = usePermission("agent.decide")
   const canClaim = usePermission("tasks.write")
   const sede = useActiveBranch()
   const query = useQuery({
@@ -71,76 +67,14 @@ function HomePage() {
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
   useOrgEvents(HOME_EVENTS, refresh)
 
-  const [approving, setApproving] = useState<ProposalRow | null>(null)
-  // Un 200 con `fallida`/`expirada` saca la propuesta de la lista: el resultado
-  // queda fijo en pantalla junto a la vuelta al caso.
-  const [outcome, setOutcome] = useState<{ status: string; detail: string | null; conversationId: string | null } | null>(null)
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
   const [unreached, setUnreached] = useState(false)
   const [budgets, setBudgets] = useState<BudgetsRow | null>(null)
 
-  function settle(response: { data: AgentProposal }) {
-    setApproving(null)
-    const proposal = response.data
-    setOutcome(
-      proposal.status === "fallida" || proposal.status === "expirada"
-        ? { status: proposal.status, detail: proposalErrorMessage(proposal), conversationId: proposal.conversationId }
-        : null,
-    )
-    refresh()
-  }
-  // Aprobar desde Inicio equivale a «Aprobar y ejecutar» de Aprobaciones.
-  const decideMutation = useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${id}/decision`, {
-        method: "POST",
-        body: JSON.stringify({ decision: "aprobada" }),
-      }),
-    onSuccess: settle,
-  })
-  const decideError =
-    decideMutation.error instanceof ApiError
-      ? (decideMutation.error.shape.message ?? "No pudimos aprobar la propuesta")
-      : decideMutation.error
-        ? "No pudimos aprobar la propuesta"
-        : null
-
   const data = query.data?.data
   const context = data ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks } : null
   const choice = { branches: sede.branches, onChange: (id: string) => sede.choose(id) }
-  const notice = decideError || outcome ? (
-    <div className="flex flex-col gap-2">
-      {decideError ? <p role="alert" className="text-sm text-destructive">{decideError}</p> : null}
-      {outcome ? (
-        <Alert role="alert" className="border-transparent bg-warning-soft">
-          <AlertTitle>La propuesta quedó {outcome.status === "expirada" ? "expirada" : "fallida"}</AlertTitle>
-          <AlertDescription className="text-foreground/80">
-            {outcome.detail ? `${outcome.detail} ` : ""}Gestiona la acción desde el caso.
-          </AlertDescription>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {outcome.conversationId ? (
-              <Link to="/inbox" search={{ conversation: outcome.conversationId }} className={buttonVariants({ size: "sm" })}>
-                Volver al caso
-              </Link>
-            ) : (
-              <Link
-                to="/agent/approvals"
-                search={{ conversationId: undefined, status: undefined }}
-                className={buttonVariants({ size: "sm" })}
-              >
-                Volver al caso
-              </Link>
-            )}
-            <Button type="button" size="sm" variant="ghost" onClick={() => setOutcome(null)}>
-              Descartar
-            </Button>
-          </div>
-        </Alert>
-      ) : null}
-    </div>
-  ) : null
-
   return <PageShell className="flex flex-col gap-4">
     <PageHeader title="Inicio" subtitle={data ? longDay(data.date, data.locale) : "Lo que te toca hoy"} />
     {query.isError && !data ? (
@@ -157,10 +91,7 @@ function HomePage() {
           <WaitingList
             rows={data.waiting}
             context={context}
-            notice={notice}
             handlers={{
-              canApprove,
-              onReview: setApproving,
               onCase: (row) => row.conversationId && setBriefFor({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" }),
               onAdvice: (row) => setAdvice(row.key),
               onUnreached: () => setUnreached(true),
@@ -189,16 +120,6 @@ function HomePage() {
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canClaim={canClaim} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
-    <ConfirmDialog
-      open={approving !== null}
-      title="Aprobar y ejecutar el cambio"
-      description={approving ? `${approving.contactName ?? approving.patientName ?? "Interlocutor"}: ${approving.summary}` : ""}
-      confirmLabel="Aprobar y ejecutar"
-      variant="default"
-      pending={decideMutation.isPending}
-      onClose={() => { if (!decideMutation.isPending) setApproving(null) }}
-      onConfirm={() => approving && decideMutation.mutate(approving.id)}
-    />
     <DetailDrawer
       open={budgets !== null}
       onClose={() => setBudgets(null)}

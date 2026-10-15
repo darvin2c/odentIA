@@ -62,7 +62,7 @@ export type AutomationChannel = (typeof AUTOMATION_CHANNELS)[number]
 
 /**
  * Qué aceptó recibir una persona sin haber escrito primero: `recordatorio`
- * (citas y controles) y `seguimiento` (inasistencias y presupuestos). Es un
+ * (citas y controles) y `seguimiento` (inasistencias, presupuestos y oportunidades). Es un
  * permiso de la persona, no de un canal.
  */
 export const CONSENT_PURPOSES = ["recordatorio", "seguimiento"] as const

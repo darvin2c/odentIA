@@ -626,7 +626,7 @@ export function compileAgentGraph(
           clinicData,
           faqs: informs ? (await listPublishedForPrompt(tx, toolCtx.orgId)).filter((entry) => !hiddenEntries.has(entry.id)) : [],
           // Lo aprendido de las correcciones: reglas del agente y ejemplos parecidos a lo que se pregunta.
-          lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", toolCtx.runInstruction ? "" : (asked ?? ""), {
+          lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", asked ?? "", {
             skipIds: overrides?.skipIds ?? [],
             extra: overrides?.extra ?? [],
           }),
@@ -648,10 +648,9 @@ export function compileAgentGraph(
       : null
     // Con modelo de decisión, el bloque estable de la clínica lleva solo el
     // índice y el texto de los temas llega por turno; sin él, van todas las
-    // respuestas si caben y, si no, el índice. Un disparador operativo (sin
-    // mensaje del interlocutor) no elige nada.
-    // Un botón tocado no pregunta nada: no hay tema que elegir.
-    const selecting = Boolean(toolCtx.decision) && faqs.length > 0 && !toolCtx.runInstruction && !toolCtx.routeHint
+    // respuestas si caben y, si no, el índice. Un botón tocado no pregunta
+    // nada: no hay tema que elegir.
+    const selecting = Boolean(toolCtx.decision) && faqs.length > 0 && !toolCtx.routeHint
     const knowledgeBlock = formatKnowledgeForPrompt(
       snapshot,
       faqs,
@@ -664,10 +663,9 @@ export function compileAgentGraph(
     // organización (instrucciones, política, conocimiento) va primero; luego
     // lo propio del hilo; y al final lo que cambia en cada corrida. Poner la
     // hora delante invalidaba la caché de todo lo que seguía.
-    const runBlock = toolCtx.runInstruction ? `Instrucción operativa de esta corrida:\n${toolCtx.runInstruction}` : null
     // El camino que eligió el modelo de decisión: el código trae antes lo que
     // ese camino necesita y el modelo que escribe lo recibe ya consultado.
-    const route = toolCtx.runInstruction ? null : (toolCtx.route ?? null)
+    const route = toolCtx.route ?? null
     // Para reservar o cambiar una cita lo primero que el modelo pide es quién
     // es el paciente y qué citas tiene: llega ya consultado y se ahorra el paso.
     const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
@@ -676,7 +674,7 @@ export function compileAgentGraph(
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
-    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, runBlock, nowLine]
+    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const said = (who: "contact" | "agent" | "team") =>
@@ -690,7 +688,7 @@ export function compileAgentGraph(
     // Contra esto se comprueba la respuesta antes de salir. Cada fuente lleva
     // el nombre con el que el equipo la verá en «En qué se basó».
     const evidence: AgentEvidence[] = [
-      { kind: "indicaciones", source: "Indicaciones de la clínica", text: [orgPrompt, runBlock].filter(Boolean).join("\n") },
+      { kind: "indicaciones", source: "Indicaciones de la clínica", text: orgPrompt ?? "" },
       { kind: "conocimiento", source: "Conocimiento publicado de la clínica", text: knowledgeBlock },
       { kind: "conocimiento", source: KNOWLEDGE_PICKED_SOURCE, text: [picked?.block, trialBlock].filter(Boolean).join("\n") },
       { kind: "leccion", source: LESSONS_SOURCE, text: [rulesBlock, examplesBlock].filter(Boolean).join("\n") },
@@ -794,7 +792,7 @@ export function compileAgentGraph(
   async function routeAfterTools(state: typeof AgentState.State): Promise<string> {
     // La respuesta ya salió o espera decisión: otra llamada al modelo solo
     // produciría texto que no llega a nadie.
-    if (toolCtx.decisionRecorded || toolCtx.handedOff || toolCtx.replySettled) return END
+    if (toolCtx.handedOff || toolCtx.replySettled) return END
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
       return cfg.maxTurns

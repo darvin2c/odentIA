@@ -17,9 +17,7 @@ export interface ConversationPreview {
 export interface ConversationAttention {
   /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
   agentAttending: boolean
-  /** Propuestas pendientes del hilo que decide el equipo. */
-  pendingTeam: number
-  /** Propuestas pendientes que esperan al interlocutor. */
+  /** Propuestas pendientes que esperan al interlocutor: las únicas que quedan pendientes. */
   pendingContact: number
   /** Prioridad más alta entre sus derivaciones sin resolver. */
   handoffPriority: "alta" | "media" | "baja" | null

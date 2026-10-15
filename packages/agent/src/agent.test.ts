@@ -14,7 +14,6 @@ import {
   createChair,
   createConnection,
   createContact,
-  decideProposal,
   createAppointment,
   moveAppointment,
   approveLesson,
@@ -744,7 +743,7 @@ it("simulación consulta seguimientos reales sin generar respuesta ni cambiar pe
     createTask(tx, "org_a", { contactId: conv!.contactId, conversationId, title: "Confirmar horario de tarde", createdBy: "user" }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const reader = makeAgentTools(ctx).find(t => t.name === "listar_tareas")
@@ -787,7 +786,7 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
   expect(conv).toBeDefined()
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
@@ -842,7 +841,7 @@ it("el prompt incluye el compromiso de otro canal con procedencia y lo pierde al
   const tg = await ingestText("tg:990011", "evt-cross-tg", "Hola, sigo desde otro canal")
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: tg.conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
@@ -906,7 +905,7 @@ it("el prompt avisa cuando hay más historial y ver_otros_canales pagina con cur
   })
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: current.conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
@@ -974,7 +973,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
@@ -1094,7 +1093,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: "trig-reprog-1", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
@@ -1137,7 +1136,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
 
   // Cancelar también lo confirma el paciente; reentregar el mismo trigger no
-  // duplica la propuesta y el equipo no puede aprobarla en su lugar.
+  // duplica la propuesta.
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
@@ -1149,8 +1148,6 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const pendingCancels = await withOrgContext(appDb, "org_a", (tx) =>
     listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect(pendingCancels.filter((p) => p.action === "cancelar_cita")).toHaveLength(1)
-  await expect(withOrgContext(appDb, "org_a", (tx) =>
-    decideProposal(tx, "org_a", actorId, cancelId!, { decision: "aprobada" }))).rejects.toMatchObject({ code: "PROPOSAL_NEEDS_CONTACT_CONFIRM" })
   await ingestText("tg:reprog-ctx", "evt-cancel-si-1", "Sí")
   const confirmCancel = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: cancelId! }))
   expect(confirmCancel).toContain("Confirmado y ejecutado")
@@ -1177,7 +1174,7 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
   expect(conv).toBeDefined()
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
@@ -1206,7 +1203,7 @@ it("create_task no duplica en reentrega y las escrituras directas auditan su ori
   const contactId = conv!.contactId
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: "trig-dw-1", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
@@ -1535,7 +1532,7 @@ it("en un hilo largo el contexto avisa de lo que no ve y la simulación comprueb
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, first.conversationId)))
   const toolCtx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId: first.conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(), draftText: "¿y cuánto cuesta?",
   }
   const model = new ScriptedModel((_messages, call) =>
@@ -1682,7 +1679,7 @@ it("la ficha de Recepción declara exactamente las herramientas que el agente ti
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId: conv!.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
   }
   // Una herramienta nueva sin sitio en la ficha, o una función que nombra una
@@ -1895,7 +1892,7 @@ it("probar: una conversación de prueba reserva en dos turnos sin tocar la base"
   expect(first.reply).toContain("¿Confirmas la cita?")
   expect(first.did).toEqual(["Buscó huecos reales en la agenda.", "Propuso reservar una cita."])
   expect(first.checks).toEqual([{ kind: "hora", value: "9:00 a. m.", ok: true, source: "Agenda: horarios disponibles" }])
-  expect(first.state.pending).toMatchObject([{ action: "reservar_cita", decider: "contact", status: "propuesta" }])
+  expect(first.state.pending).toMatchObject([{ action: "reservar_cita", status: "propuesta" }])
   expect(first.waiting[0]).toContain("espera el sí del paciente")
   // El hilo de la prueba no nombra a nadie real ni trae historial previo.
   const system = systemTextOf(turnOne.seen[0] ?? [])
@@ -2063,7 +2060,7 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   const fx = await bookingFixture(withPatient.conversationId, "enlace")
   const ctxFor = (conversationId: string, contactId: string, publicUrl = true): AgentToolCtx => ({
     db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, decisionRecorded: false, replySettled: false,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
     toolsUsed: [], usage: emptyUsage(),
     ...(publicUrl ? { publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" } } : {}),
   })

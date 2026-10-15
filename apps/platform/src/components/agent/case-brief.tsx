@@ -44,7 +44,6 @@ const PROPOSAL_STATUS: Record<string, string> = {
   propuesta: "pendiente",
   aprobada: "aprobada",
   ejecutada: "hecha",
-  rechazada: "rechazada",
   expirada: "venció",
   fallida: "no se pudo",
 }

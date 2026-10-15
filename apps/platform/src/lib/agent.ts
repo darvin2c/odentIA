@@ -12,10 +12,11 @@ export const ACTION_LABEL: Record<string, string> = {
 
 export interface AgentProposal {
   id: string
-  conversationId: string | null
+  conversationId: string
   contactId: string | null
   action: string
-  mode: "directo" | "confirmar_usuario" | "aprobar_equipo"
+  /** Quién dice que sí: nadie (directo) o el interlocutor en el hilo. Ninguna espera al equipo. */
+  mode: "directo" | "confirmar_usuario"
   status: string
   payload: Record<string, unknown>
   reason: string | null
@@ -78,10 +79,9 @@ export interface AgentHandoff {
 /** Resumen ligero del panel del agente (legible con agent.decide). */
 export interface AgentPanelSummary {
   enabled: boolean
-  /** Pendientes que el equipo puede decidir. */
-  pendingProposals: number
-  /** Pendientes que esperan al interlocutor; se ven, no se deciden. */
+  /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
+  /** Casos que el agente pasó a una persona y siguen sin resolver: lo que espera al equipo. */
   openHandoffs: number
   /** Corridas de hoy que respondieron o derivaron. */
   interventionsToday: number
@@ -102,20 +102,6 @@ export interface AgentActivityItem {
   detail: string | null
   /** Estado de la propuesta/derivación o, en mensajes, de su entrega. */
   status: string | null
-}
-
-/**
- * Desenlace de una aprobación, para no afirmar más de lo ocurrido: ejecutar
- * `enviar_mensaje` solo encola el mensaje; su entrega se ve en el hilo.
- */
-export function approvalOutcomeMessage(proposal: Pick<AgentProposal, "status" | "result">): string {
-  if (proposal.status === "ejecutada") {
-    return typeof proposal.result?.messageId === "string"
-      ? "Aprobado. El mensaje quedó encolado; revisa su entrega en el hilo."
-      : "Cambio aprobado y ejecutado."
-  }
-  if (proposal.status === "aprobada") return "Aprobado; pendiente de ejecutar. Sigue su estado en Aprobaciones."
-  return `La propuesta quedó ${proposal.status}.`
 }
 
 /** Permiso operativo que exige decidir cada acto, además de `agent.decide`. */

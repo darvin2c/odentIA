@@ -217,8 +217,8 @@ function AgentSummaryPage() {
               <NeedTile
                 count={overview.needsYou.approvals}
                 title="Aprobaciones"
-                pending="Esperan tu visto bueno."
-                done="Nada espera tu aprobación."
+                pending="Casos que el agente pasó a tu equipo."
+                done="Ningún caso espera a una persona."
                 to="/agent/approvals"
               />
               <NeedTile

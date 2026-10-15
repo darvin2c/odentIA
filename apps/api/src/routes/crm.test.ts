@@ -167,7 +167,6 @@ afterAll(async () => {
 })
 
 it.each([
-  { endpoint: "decision", body: { decision: "aprobada" } },
   { endpoint: "execute", body: undefined },
   { endpoint: "confirm", body: { contactId: randomUUID() } },
 ])("una propuesta ausente conserva 404 en $endpoint", async ({ endpoint, body }) => {
@@ -180,7 +179,16 @@ it.each([
   expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } })
 })
 
-it("la API no crea propuestas sin conversación: el trabajo proactivo nace solo del tick", async () => {
+it("ninguna propuesta espera al equipo: no hay ruta para aprobarla o rechazarla", async () => {
+  const response = await buildApp("owner").request(`/agent/proposals/${randomUUID()}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision: "aprobada" }),
+  })
+  expect(response.status).toBe(404)
+})
+
+it("la API no crea propuestas sin conversación: el agente no abre hilos por su cuenta", async () => {
   const response = await buildApp("owner").request("/agent/proposals", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -773,7 +781,7 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(wa).toMatchObject({
     webhookVerifiedAt: null,
     health: null,
-    messages: { aprobados: 0, enRevision: 6, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 0 },
+    messages: { aprobados: 0, enRevision: 7, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 0 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -828,6 +836,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["recordatorio_cita", "agente"],
     ["recordatorio_control", "agente"],
     ["seguimiento_presupuesto", "agente"],
+    ["seguimiento_comercial", "agente"],
     ["seguimiento_no_asistencia", "agente"],
     ["cita_cancelada", "agente"],
     ["retomar_conversacion", "bandeja"],
@@ -870,7 +879,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(6)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(7)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {

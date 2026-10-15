@@ -32,21 +32,21 @@ export const SuperficieConPropuesta: Story = {
         <AgentMark />
         <div className="min-w-0">
           <h2 className="flex flex-wrap items-center gap-2 font-semibold">
-            Pendiente de ti <Badge>1 por revisar</Badge>
+            Pendiente de ti <Badge>1 por atender</Badge>
           </h2>
           <p className="text-sm text-muted-foreground">
-            Propuestas del agente y casos que derivó al equipo.
+            Casos que el agente pasó al equipo.
           </p>
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-card p-4">
         <div className="min-w-0">
-          <p className="font-medium">Reprogramar cita</p>
+          <p className="font-medium">Quiere hablar con una persona</p>
           <p className="text-sm text-muted-foreground">
             Carmen Rojas · interlocutora con un nombre largo que debe envolver sin desbordar
           </p>
         </div>
-        <Button size="sm">Revisar y aprobar</Button>
+        <Button size="sm">Ver el caso</Button>
       </div>
     </AgentSurface>
   ),

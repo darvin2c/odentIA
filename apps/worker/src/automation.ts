@@ -84,7 +84,7 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
   })
   console.log(
     `worker: automations despertadores=${pending} orgs=${summary.orgs} ` +
-      `programados=${summary.programados} coordinados=${summary.coordinados} ` +
+      `programados=${summary.programados} ` +
       `entregados=${summary.entregados} fallidos=${summary.fallidos}`,
   )
   // El índice del agente se refresca aparte, sin esperarlo (`refreshSearchInBackground`).

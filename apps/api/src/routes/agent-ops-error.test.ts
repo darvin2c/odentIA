@@ -20,7 +20,6 @@ const unusedStorage: Storage = {
 }
 
 it.each([
-  { endpoint: "decision", body: { decision: "aprobada" } },
   { endpoint: "execute", body: undefined },
   { endpoint: "confirm", body: { contactId: randomUUID() } },
 ])("la pérdida real de conexión en $endpoint llega al manejador global, no a un 404", async ({ endpoint, body }) => {

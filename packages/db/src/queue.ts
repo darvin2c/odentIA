@@ -33,19 +33,13 @@ export interface OutboundMessageJob {
   messageId: string
 }
 
-export type AgentRunJob =
-  | {
-      kind: "inbound_message"
-      orgId: string
-      conversationId: string
-      messageId: string
-    }
-  | {
-      kind: "overdue_opportunity_follow_up"
-      orgId: string
-      conversationId: string
-      coordinationId: string
-    }
+/** Una corrida del agente responde siempre a un mensaje entrante: no conversa por su cuenta (ADR 0023). */
+export interface AgentRunJob {
+  kind: "inbound_message"
+  orgId: string
+  conversationId: string
+  messageId: string
+}
 
 async function sendTo(db: Db, queue: string, payload: unknown, delaySeconds = 0): Promise<string> {
   const delay = Math.max(0, Math.floor(delaySeconds))

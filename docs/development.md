@@ -183,8 +183,8 @@ emergente y avisa a la página que la abrió: una cabecera
 
 - `pnpm --filter @odentia/agent test` recorre herramientas y propuestas con PostgreSQL real: reserva, reprogramación, cancelación, obsolescencia, reentrega idempotente y derivación humana.
 - `pnpm e2e crm.spec.ts --workers=1 --grep "crm derivación"` comprueba en la plataforma la cola con plazo y la toma de un caso.
-- `pnpm --filter @odentia/services test -- commercial-coordination.test.ts` verifica deduplicación del seguimiento vencido, falta de consentimiento y aislamiento; requiere el mismo PostgreSQL efímero.
-- La prueba real de un seguimiento proactivo debe observar vencimiento → decisión → propuesta/derivación y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
+- `pnpm --filter @odentia/services test -- automation-flow.test.ts` recorre las líneas del Administrador, también «Retomar una oportunidad»: caso al vencer, sin duplicar, vía por persona, causa y tarea cuando no se puede, y los botones; requiere el mismo PostgreSQL efímero.
+- La prueba real de un seguimiento debe observar vencimiento → caso → mensaje (o aviso y tarea) y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
 - En Reportes, los controles se cuentan por la fecha en que tocaban y según su estado a hoy; uno marcado como realizado sin atención cerrada que lo respalde no cuenta como venido. `pnpm e2e reports.spec.ts --workers=2` recorre las cuatro preguntas, el cambio de periodo y la lista detrás de una cifra en 1440px/390px.
 - Los modos fake/mock prueban contratos internos, no entrega de proveedor, calidad de un LLM real ni observación con usuarios. El cierre de una validación integral exige proveedor/modelo reales identificados, datos consentidos o sintéticos y observación de recepción, clínico y caja.
 

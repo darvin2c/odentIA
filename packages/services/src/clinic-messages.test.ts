@@ -126,7 +126,7 @@ async function organization(): Promise<{ orgId: string; ownerId: string }> {
   return { orgId, ownerId }
 }
 
-/** Clínica con WhatsApp conectado sin proveedor: sus seis mensajes quedan «en revisión». */
+/** Clínica con WhatsApp conectado sin proveedor: sus siete mensajes quedan «en revisión». */
 async function clinic(): Promise<Clinic> {
   const { orgId, ownerId } = await organization()
   const connection = await withOrgContext(appDb, orgId, (tx) =>
@@ -192,6 +192,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
       ["recordatorio_cita", "agente", "Recordar la cita", "en_revision"],
       ["recordatorio_control", "agente", "Avisar un control", "en_revision"],
       ["seguimiento_presupuesto", "agente", "Retomar un presupuesto", "en_revision"],
+      ["seguimiento_comercial", "agente", "Retomar una oportunidad", "en_revision"],
       ["seguimiento_no_asistencia", "agente", "Reprogramar tras una inasistencia", "en_revision"],
       ["cita_cancelada", "agente", "Ofrecer otra fecha tras una cancelación", "en_revision"],
       ["retomar_conversacion", "bandeja", "Retomar la conversación", "en_revision"],
@@ -226,13 +227,31 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
     ])
     expect(reminder.variables.map((item) => [item.key, item.required])).toEqual([["persona", true], ["lugar", true], ["citas", true]])
     expect(items[2]).toMatchObject({ when: "Cuando un presupuesto lleva 2 días sin respuesta.", line: { enabled: false }, category: "Marketing" })
-    expect(items[5]).toMatchObject({
+    // «Retomar una oportunidad» viene escrito como los demás del agente: su texto, sus datos y la baja.
+    expect(items[3]).toMatchObject({
+      when: "Cuando una oportunidad tiene su próxima acción vencida.",
+      line: { key: "seguimiento_comercial", title: "Retomar una oportunidad", enabled: false },
+      category: "Marketing",
+      editable: true,
+      deletable: false,
+      buttons: [
+        { title: "Sí, continuemos", does: "Recepción sigue la conversación con la persona." },
+        { title: "No enviar más", does: "Deja de recibir estos mensajes; lo demás no cambia." },
+      ],
+    })
+    expect(items[3]!.current.body).toBe("Hola, {{persona}}. Te escribimos de {{clinica}} sobre tu consulta de «{{oportunidad}}». ¿Seguimos conversando?")
+    expect(items[3]!.variables.map((item) => [item.key, item.label, item.required])).toEqual([
+      ["persona", "Nombre de la persona", true],
+      ["clinica", "Nombre de la clínica", true],
+      ["oportunidad", "Título de la oportunidad", true],
+    ])
+    expect(items[6]).toMatchObject({
       when: null,
       line: null,
       meanwhile: "Mientras tanto no se ofrece en la Bandeja.",
       buttons: [{ title: "Sí, continuemos", does: "La persona responde y tu equipo puede escribirle con libertad durante 24 horas." }],
     })
-    expect(items[5]!.current.body).toBe("Hola, {{persona}}. Te escribimos de {{clinica}} para continuar con tu consulta. ¿Seguimos por aquí?")
+    expect(items[6]!.current.body).toBe("Hola, {{persona}}. Te escribimos de {{clinica}} para continuar con tu consulta. ¿Seguimos por aquí?")
   })
 
   it("comprobar un texto: cada regla dice su frase y la vista previa lleva los datos de ejemplo", async () => {
@@ -481,7 +500,7 @@ describe("mensajes creados por la clínica", () => {
         { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Quiero mi cita" }] },
       ],
     })
-    expect((await messages(c)).map((item) => item.id)).toHaveLength(7)
+    expect((await messages(c)).map((item) => item.id)).toHaveLength(8)
     await expect(create(c, { title: "tu trabajo ya está listo", body: "Otro texto." })).rejects.toThrow("Ya hay un mensaje con ese nombre.")
     await expect(create(c, { title: "Con datos de cita", body: "Hola. Tu cita: {{citas}}. Chau." })).rejects.toThrow("«citas» no es un dato de este mensaje")
     // También se le cambia el texto, con la misma regla: el aprobado sigue hasta que aprueben el nuevo.
@@ -512,7 +531,7 @@ describe("mensajes creados por la clínica", () => {
     expect(meta.of("DELETE", "/message_templates").map((call) => call.url)).toEqual([
       `https://graph.facebook.com/v21.0/WABA/message_templates?name=${names[0]}`,
     ])
-    expect((await messages(c)).map((item) => item.origin)).toEqual(["agente", "agente", "agente", "agente", "agente", "bandeja"])
+    expect((await messages(c)).map((item) => item.origin)).toEqual(["agente", "agente", "agente", "agente", "agente", "agente", "bandeja"])
     const [row] = await ownerDb.select().from(clinicMessage).where(eq(clinicMessage.id, created.id))
     expect(row?.archivedAt).not.toBeNull()
     // La plantilla deja de servir, pero la fila se conserva: los mensajes que la usaron siguen diciendo cuál fue.
@@ -685,7 +704,7 @@ describe("la conexión de WhatsApp", () => {
       ),
     )
 
-  it("al conectar dice lo que encontró, guarda la salud del número y pide los seis mensajes de una vez", async () => {
+  it("al conectar dice lo que encontró, guarda la salud del número y pide los siete mensajes de una vez", async () => {
     const { orgId } = await organization()
     const meta = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: `PNID-${orgId}`, display_phone_number: "+51 999 888 777", verified_name: "Clínica Sonríe" } } : undefined))
     const created = await connect(orgId, meta)
@@ -695,7 +714,7 @@ describe("la conexión de WhatsApp", () => {
       externalId: `PNID-${orgId}`,
       status: "active",
       account: { name: "Clínica Sonríe", number: "+51 999 888 777" },
-      templates: { canManage: true, requested: 6, error: null },
+      templates: { canManage: true, requested: 7, error: null },
       health: { quality: "alta", dailyLimit: 2000, unlimited: false, number: "+51 999 888 777", name: "Clínica Sonríe" },
     })
     expect(created.webhookSecret).toBeTruthy()
@@ -704,6 +723,7 @@ describe("la conexión de WhatsApp", () => {
       "odentia_recordatorio_cita_v1",
       "odentia_recordatorio_control_v1",
       "odentia_seguimiento_presupuesto_v1",
+      "odentia_seguimiento_oportunidad_v1",
       "odentia_seguimiento_inasistencia_v1",
       "odentia_cita_cancelada_v1",
       "odentia_retomar_conversacion_v1",
@@ -717,7 +737,7 @@ describe("la conexión de WhatsApp", () => {
       id: created.id,
       webhookVerifiedAt: null,
       health: { quality: "alta", dailyLimit: 2000 },
-      messages: { aprobados: 1, enRevision: 4, rechazados: 1, pausados: 0, retirados: 0, sinPedir: 0 },
+      messages: { aprobados: 1, enRevision: 5, rechazados: 1, pausados: 0, retirados: 0, sinPedir: 0 },
     })
     expect(Date.now() - new Date(overview!.lastInboundAt!).getTime()).toBeLessThan(4 * HOUR)
     expect(JSON.stringify(overview)).not.toContain("clave-1")
@@ -767,12 +787,12 @@ describe("la conexión de WhatsApp", () => {
     expect(created.templates).toEqual({
       canManage: false,
       requested: 0,
-      error: "WhatsApp no aceptó la solicitud de 6 mensajes: WhatsApp no aceptó la solicitud de plantilla: (#200) Permissions error. Dale a la clave el permiso para administrar mensajes (whatsapp_business_management) y vuelve a comprobar.",
+      error: "WhatsApp no aceptó la solicitud de 7 mensajes: WhatsApp no aceptó la solicitud de plantilla: (#200) Permissions error. Dale a la clave el permiso para administrar mensajes (whatsapp_business_management) y vuelve a comprobar.",
     })
     expect(created.templatesError).toBe(created.templates?.error)
     const c: Clinic = { orgId, ownerId: `owner-${orgId}`, whatsappId: created.id }
-    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(6).fill("sin_pedir"))
-    expect((await run(c, (tx) => listConnectionsOverview(tx, orgId)))[0]?.messages).toMatchObject({ sinPedir: 6, enRevision: 0 })
+    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(7).fill("sin_pedir"))
+    expect((await run(c, (tx) => listConnectionsOverview(tx, orgId)))[0]?.messages).toMatchObject({ sinPedir: 7, enRevision: 0 })
 
     // Con la clave corregida se piden los que faltaban, sin crear otra conexión.
     const fixed = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: `PNID-${orgId}`, display_phone_number: "+51 922 333 444", verified_name: "Clínica Sonríe" } } : undefined))
@@ -780,12 +800,12 @@ describe("la conexión de WhatsApp", () => {
     const changed = await run(c, (tx) =>
       changeConnectionCredentials(tx, orgId, created.id, KEY, { config: { accessToken: "clave-2" } }, { fetch: fixed.fetch, webhookBaseUrl: "https://api.clinica.test" }),
     )
-    expect(changed).toMatchObject({ id: created.id, account: { name: "Clínica Sonríe" }, templates: { canManage: true, requested: 6, error: null } })
+    expect(changed).toMatchObject({ id: created.id, account: { name: "Clínica Sonríe" }, templates: { canManage: true, requested: 7, error: null } })
     const after = (await ownerDb.select().from(channelConnection).where(eq(channelConnection.id, created.id)))[0]!
     // Solo cambia la clave: la conexión, su dirección y su clave de verificación siguen siendo las mismas.
     expect(decryptConfig(KEY, after.configEncrypted)).toEqual({ ...WA_CONFIG, accessToken: "clave-2" })
     expect(after).toMatchObject({ id: before.id, webhookSecret: before.webhookSecret, externalId: before.externalId, displayName: before.displayName, status: "active" })
-    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(6).fill("en_revision"))
+    expect((await messages(c)).map((item) => item.current.status)).toEqual(Array(7).fill("en_revision"))
 
     // La clave de otra cuenta no entra aquí.
     const foreign = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: "PNID-otra", display_phone_number: "+51 900 000 000" } } : undefined))

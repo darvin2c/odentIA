@@ -202,7 +202,7 @@ export async function interpretAdminRequest(text: string, decider: AdminDecider)
       changes.teamPart = true
     }
   } else if (yes(result.answers, "sin_respaldo")) {
-    if (found.agent && key !== "seguimiento_comercial") changes.teamPart = false
+    if (found.agent) changes.teamPart = false
     else unsupported.push(`En «${found.name}» la tarea para el equipo es lo único que se hace: para quitarla, apaga la línea.`)
   } else if (yes(result.answers, "respaldo")) {
     changes.teamPart = true

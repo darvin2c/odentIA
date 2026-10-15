@@ -80,7 +80,6 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
   contact: "ventas",
   opportunity: "ventas",
   task: "ventas",
-  commercial_follow_up: "ventas",
   conversation: "conversaciones",
   message: "conversaciones",
   agent: "agente",
@@ -137,7 +136,6 @@ const SUBJECT_WORDS: Record<string, string> = {
   contact: "un contacto",
   opportunity: "una oportunidad",
   task: "una tarea",
-  commercial_follow_up: "un seguimiento de venta",
   conversation: "una conversación",
   message: "un mensaje",
   agent: "el agente",
@@ -341,8 +339,6 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "admin_line.draft_saved": say("Dejó un borrador de cambio para una línea del Administrador"),
   "admin_line.draft_discarded": say("Descartó un borrador de cambio de una línea del Administrador"),
   "agent.proposal_created": say("Propuso una acción", "agente"),
-  "agent.proposal_approved": say("Aprobó una acción que propuso el agente"),
-  "agent.proposal_rejected": say("Rechazó una acción que propuso el agente"),
   "agent.proposal_confirmed": say("Confirmó en la conversación una acción propuesta", "paciente"),
   "agent.proposal_executed": say("Ejecutó una acción propuesta"),
   "agent.proposal_expired": say("Dio por caducada una propuesta sin decisión"),
@@ -446,7 +442,6 @@ const ACTION_WORDS: Record<string, Phrase> = {
 /** Lo que hace por su cuenta el agente o el paciente, aunque el código no tenga frase propia. */
 const AUTHOR_OF_SUBJECT: Record<string, AuditAuthor> = {
   automation_job: "agente",
-  commercial_follow_up: "agente",
   portal: "paciente",
   passkey: "paciente",
   session: "paciente",
