@@ -17,6 +17,10 @@ export interface ServiceCatalogItem {
   durationMin: number | null
   /** Cómo se cobra: 'treatment' una vez, 'session' en cada visita atendida. */
   billingMode: "treatment" | "session"
+  /** Cómo dice el precio el agente; caja y presupuesto usan siempre la tarifa. */
+  priceDisclosure: PriceDisclosure
+  /** La evaluación que ofrece el agente cuando el precio no es exacto. */
+  evaluationServiceId: string | null
   isActive: boolean
 }
 
@@ -192,6 +196,8 @@ export interface CreateServiceBody {
   currency?: string | null
   durationMin?: number | null
   billingMode?: "treatment" | "session" | null
+  priceDisclosure?: PriceDisclosure | null
+  evaluationServiceId?: string | null
   isActive?: boolean
 }
 
@@ -212,6 +218,8 @@ export interface UpdateServiceBody {
   currency?: string | null
   durationMin?: number | null
   billingMode?: "treatment" | "session"
+  priceDisclosure?: PriceDisclosure
+  evaluationServiceId?: string | null
   isActive?: boolean
 }
 
@@ -226,6 +234,23 @@ export function updateServiceApi(
 }
 
 export type BillingMode = "treatment" | "session"
+
+/** Cómo dice el precio el agente (ADR 0021). */
+export type PriceDisclosure = "exacto" | "desde" | "evaluacion"
+
+/** Cada opción con lo que diría el agente, para que se entienda antes de elegirla. */
+export const PRICE_DISCLOSURE_OPTIONS: ReadonlyArray<{ value: PriceDisclosure; label: string; says: string }> = [
+  { value: "exacto", label: "Precio exacto", says: "Dice el precio de la tarifa tal cual." },
+  { value: "desde", label: "Desde", says: "Lo dice como mínimo, con «desde», y aclara que el precio final se define en la evaluación." },
+  { value: "evaluacion", label: "Solo con evaluación", says: "No dice ningún número y ofrece la evaluación." },
+]
+
+/** Etiqueta junto al precio en la lista: solo cuando no es exacto. */
+export const PRICE_DISCLOSURE_TAG: Record<PriceDisclosure, string | null> = {
+  exacto: null,
+  desde: "Desde",
+  evaluacion: "Con evaluación",
+}
 
 /** Cómo se cobra un servicio, con las palabras de la pantalla. */
 export const BILLING_MODE_LABELS: Record<BillingMode, string> = {

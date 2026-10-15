@@ -269,7 +269,7 @@ export function AdminLineOpen({
             const source = partOf(step.id)
             if (!source) return null
             if (source.always) return <span className="text-xs text-muted-foreground">Sin interruptor: nunca termina en blanco.</span>
-            if (!source.part || (source.part === "team" && line.teamFixed)) return null
+            if (!source.part) return null
             // En una línea que solo deja trabajo al equipo, su única parte se apaga con la línea.
             if (source.part === "team" && !line.hasAgent) return null
             const checked = source.part === "agent" ? line.agentPart : line.teamPart
@@ -363,7 +363,7 @@ export function AdminLineOpen({
         </Field>
       ) : null}
 
-      {line.teamPart && !line.teamFixed ? (
+      {line.teamPart ? (
         <Field className="max-w-xl">
           <FieldLabel htmlFor={`${uid}-indicacion`}>Indicación para quien reciba la tarea</FieldLabel>
           <Input

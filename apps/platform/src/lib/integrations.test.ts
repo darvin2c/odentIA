@@ -229,25 +229,19 @@ describe("correo", () => {
 })
 
 describe("modelo del agente", () => {
-  it("incluido o cuenta propia, sin afirmar que funciona", () => {
-    expect(modelRow({ llmBaseUrl: null, hasLlmApiKey: false }, { problem: null, at: null }, since)).toMatchObject({
+  it("dice el modelo elegido por su nombre simple, sin afirmar que funciona", () => {
+    expect(modelRow({ llm: "chatgpt_6" }, { problem: null, at: null }, since)).toMatchObject({
       status: "Conectado",
-      detail: { kind: "account", account: "Incluido con odentIA", activity: null },
+      detail: { kind: "account", account: "ChatGPT 6", activity: null },
     })
-    expect(modelRow({ llmBaseUrl: "https://api.proveedor.test/v1", hasLlmApiKey: true }, undefined, since).detail).toMatchObject({
-      account: "Cuenta propia de la clínica",
-    })
+    expect(modelRow({ llm: "claude_5_5" }, undefined, since).detail).toMatchObject({ account: "Claude 5.5" })
   })
 
-  it("un fallo del proveedor o una cuenta propia sin clave piden atención", () => {
-    expect(modelRow({ llmBaseUrl: null, hasLlmApiKey: false }, { problem: "sin_saldo", at: minutesAgo(3) }, since)).toMatchObject({
+  it("un fallo del proveedor pide atención y dice qué puede hacer la clínica", () => {
+    expect(modelRow({ llm: "chatgpt_6" }, { problem: "sin_saldo", at: minutesAgo(3) }, since)).toMatchObject({
       tone: "attention",
-      problem: "El proveedor del modelo no tiene saldo o cuota.",
+      problem: "La cuenta de odentIA para este modelo se quedó sin saldo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
       detail: { activity: "el último intento falló hace 3 minutos" },
-    })
-    expect(modelRow({ llmBaseUrl: "https://api.proveedor.test/v1", hasLlmApiKey: false }, { problem: null, at: null }, since)).toMatchObject({
-      tone: "attention",
-      problem: "Falta la clave de la cuenta propia.",
     })
   })
 })

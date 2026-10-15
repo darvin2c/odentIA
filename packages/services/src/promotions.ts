@@ -1,5 +1,7 @@
 import type { Db } from "@odentia/db"
 import {
+  PRICE_DISCLOSURES,
+  type PriceDisclosure,
   patientCharge,
   patientPaymentApplication,
   serviceCatalog,
@@ -32,6 +34,17 @@ export interface PromotionItemInput {
   serviceId: string
   mode: PromotionMode
   priceCents: number
+  /** Cómo lo dice el agente; sin indicarlo sigue al modo («fijo» → exacto, «desde» → desde). */
+  priceDisclosure?: PriceDisclosure | null
+}
+
+/** Lo que dice el agente de un precio de promoción cuando la clínica no lo eligió. */
+function disclosureOf(item: PromotionItemInput): PriceDisclosure {
+  if (item.priceDisclosure === undefined || item.priceDisclosure === null) return item.mode === "from" ? "desde" : "exacto"
+  if (!(PRICE_DISCLOSURES as readonly string[]).includes(item.priceDisclosure)) {
+    throw validation("Cómo dice el precio: exacto, desde o evaluacion")
+  }
+  return item.priceDisclosure
 }
 
 export interface CreatePromotionInput {
@@ -171,6 +184,7 @@ function assertItems(items: PromotionItemInput[] | undefined, required: boolean)
     seen.add(item.serviceId)
     assertMode(item.mode)
     assertPriceCents(item.priceCents)
+    disclosureOf(item)
   }
   return items
 }
@@ -205,6 +219,7 @@ export async function createPromotion(
       promotionId: row.id,
       serviceId: service.id,
       mode: item.mode,
+      priceDisclosure: disclosureOf(item),
       priceCents: item.priceCents,
       currency: service.currency,
       createdBy: actorUserId,
@@ -297,6 +312,7 @@ export async function updatePromotion(
           promotionId,
           serviceId: service.id,
           mode: item.mode,
+          priceDisclosure: disclosureOf(item),
           priceCents: item.priceCents,
           currency: service.currency,
           isActive: true,
@@ -306,6 +322,7 @@ export async function updatePromotion(
           target: [promotionServicePrice.promotionId, promotionServicePrice.serviceId],
           set: {
             mode: item.mode,
+            priceDisclosure: disclosureOf(item),
             priceCents: item.priceCents,
             currency: service.currency,
             isActive: true,
@@ -605,6 +622,7 @@ export interface ClinicPromotionSummary {
     serviceId: string
     serviceName: string
     mode: PromotionMode
+    priceDisclosure: PriceDisclosure
     priceCents: number
     currency: string
     tariffCents: number
@@ -627,6 +645,7 @@ export async function listClinicPromotionSummaries(
       serviceId: item.serviceId,
       serviceName: item.serviceName,
       mode: item.mode as PromotionMode,
+      priceDisclosure: item.priceDisclosure as PriceDisclosure,
       priceCents: item.priceCents,
       currency: item.currency,
       tariffCents: item.tariffCents,

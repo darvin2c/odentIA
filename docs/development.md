@@ -49,32 +49,26 @@ datos de cobro reales desde administración; no hay cobro automático con tarjet
 ni emisión fiscal integrada.
 
 
-### Modelo real con API compatible
+### Modelo real
 
-El agente habla un solo protocolo: cualquier endpoint compatible con OpenAI
-(OpenAI, OpenRouter, DeepSeek, Groq, Mistral, Ollama, vLLM, pasarela propia).
-Otros prefijos (`anthropic:`, `google-genai:`…) se rechazan con un error
-explícito; ver `docs/decisions/0016-proveedor-llm-por-organizacion.md`.
+La clínica elige entre dos modelos que odentIA validó y odentIA pone la cuenta
+(`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`):
+«ChatGPT 6» (OpenAI, el de toda clínica) y «Claude 5.5» (Anthropic). El modelo
+exacto y sus opciones viven en `packages/agent/src/llm.ts` (`LLM_CATALOG`).
 
-Proveedor de la plataforma: en `infra/dev/.env`, `LLM_MODEL=<nombre que espera
-el endpoint>` (el prefijo `openai:` es opcional), `LLM_API_KEY` y `LLM_BASE_URL`
-con la URL base publicada por el proveedor (incluido `/v1` o el prefijo que
-indique). `LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada.
+En `infra/dev/.env`: quitar `LLM_MODEL=fake` y poner `LLM_OPENAI_API_KEY` y, para
+probar Claude, `LLM_ANTHROPIC_API_KEY`. `LLM_OPENAI_BASE_URL` y
+`LLM_ANTHROPIC_BASE_URL` solo hacen falta con una pasarela propia; sin ellas va la
+API pública de cada proveedor. Sin la clave del proveedor del modelo elegido el
+agente deriva y avisa con el nombre de la variable que falta.
+`LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada. Las evaluaciones
+(`eval:decisions`, `eval:admin`…) aceptan `--llm=chatgpt_6|claude_5_5`.
 `AGENT_BURST_WINDOW_SECONDS` (worker, 6 por defecto, 0–30) es lo que el agente
 espera tras un mensaje entrante antes de leer el hilo: normalmente agrupa una
 ráfaga en una sola corrida y una sola respuesta (mejor esfuerzo; límites en
 `docs/decisions/0005-uso-del-modelo-rafagas-y-prefijo.md`), a cambio de esa
 demora en cada respuesta; `0` responde sin esperar.
-`LLM_ALLOW_INSECURE_BASE_URL=true` solo en dev: admite http y destinos privados
-para un servidor local de prueba; en producción la URL debe ser https y pública.
 
-Proveedor propio de una organización: en Configuración → Agente, «Usar la
-cuenta propia de la clínica» con URL base, clave y modelo; «Probar conexión»
-hace una petición mínima. La clave se guarda cifrada y no vuelve a mostrarse;
-los cambios quedan auditados. El campo Modelo sin cuenta propia sobrescribe
-`LLM_MODEL` contra el endpoint de la plataforma.
-
-El modelo elegido debe admitir llamadas a herramientas (`tools`/`tool_calls`).
 API y worker leen las mismas variables; reiniciarlos tras cambiarlas. Nunca
 poner la key en una variable `VITE_*`, un campo de conversación ni el repositorio.
 
@@ -86,7 +80,7 @@ Ver `docs/decisions/0007-modelo-de-decision-elige-el-conocimiento.md`. El worker
 sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
 fila con error en Agente › Registro técnico. `pnpm --filter @odentia/agent eval:decisions
 -- --provider=jev` compara un proveedor con los ejemplos propios de
-`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:admin`
+`packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:off-topic` mide si reconoce lo que no es de la clínica sin marcar lo que sí lo es. `eval:admin`
 mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens
 por llamada; `eval:month` corre un mes de una clínica inventada y proyecta los tokens
 del mes (necesita el runtime de contenedores, como las pruebas).
@@ -96,6 +90,22 @@ worker o en `infra/prod/.env`. `CHANNEL_SENDER_MODE=mock` sigue impidiendo enví
 reales aunque el LLM sea real; habilitar `live` y validación externa de conexiones
 solo para una prueba autorizada, con destinatarios consentidos. Una respuesta
 del modelo no demuestra entrega del canal ni sustituye la observación humana.
+
+### Búsqueda por significado del agente
+
+Ver `docs/decisions/0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md`.
+Necesita la extensión `vector` (pgvector) en PostgreSQL: la imagen
+`dentalagent-postgres:18.6` la trae desde el 2026-10-14. Con una imagen anterior,
+reconstruirla (`podman build -t dentalagent-postgres:18.6 infra/dev/postgres`) y
+recrear el contenedor de desarrollo antes de migrar; el volumen de datos se conserva.
+La base de producción debe tenerla instalada.
+
+Worker y API leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`
+(cualquier endpoint compatible con OpenAI). `fake` (el de `.env.example`) vectoriza por
+trozos de letras, sin red: encuentra palabras mal escritas pero no entiende
+significado y no acredita a ningún proveedor. Vacío: el agente busca solo por
+palabras. El índice se concilia y se vectoriza en el ciclo de automatizaciones
+del worker; cambiar de modelo vuelve a vectorizar todo de a poco. `pnpm --filter @odentia/agent eval:search` mide la búsqueda con el banco `packages/agent/eval/busqueda-clinica.json` (por palabras, con `fake` y con el proveedor real; luego con 3 000 servicios de relleno) en una base efímera. Turbo solo pasa a las apps las variables declaradas en `turbo.json`: una variable nueva de entorno se declara ahí.
 
 ### WhatsApp con «Conectar con Facebook» (opcional)
 
@@ -201,8 +211,8 @@ emergente y avisa a la página que la abrió: una cabecera
 
 - `pnpm --filter @odentia/agent test` recorre herramientas y propuestas con PostgreSQL real: reserva, reprogramación, cancelación, obsolescencia, reentrega idempotente y derivación humana.
 - `pnpm e2e crm.spec.ts --workers=1 --grep "crm derivación"` comprueba en la plataforma la cola con plazo y la toma de un caso.
-- `pnpm --filter @odentia/services test -- commercial-coordination.test.ts` verifica deduplicación del seguimiento vencido, falta de consentimiento y aislamiento; requiere el mismo PostgreSQL efímero.
-- La prueba real de un seguimiento proactivo debe observar vencimiento → decisión → propuesta/derivación y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
+- `pnpm --filter @odentia/services test -- automation-flow.test.ts` recorre las líneas del Administrador, también «Retomar una oportunidad»: caso al vencer, sin duplicar, vía por persona, causa y tarea cuando no se puede, y los botones; requiere el mismo PostgreSQL efímero.
+- La prueba real de un seguimiento debe observar vencimiento → caso → mensaje (o aviso y tarea) y reinicio del worker. Un envío `unknown` se concilia en el proveedor y no se reintenta.
 - En Reportes, los controles se cuentan por la fecha en que tocaban y según su estado a hoy; uno marcado como realizado sin atención cerrada que lo respalde no cuenta como venido. `pnpm e2e reports.spec.ts --workers=2` recorre las cuatro preguntas, el cambio de periodo y la lista detrás de una cifra en 1440px/390px.
 - Los modos fake/mock prueban contratos internos, no entrega de proveedor, calidad de un LLM real ni observación con usuarios. El cierre de una validación integral exige proveedor/modelo reales identificados, datos consentidos o sintéticos y observación de recepción, clínico y caja.
 

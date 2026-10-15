@@ -106,8 +106,20 @@ describe("permiso operativo agent.decide", () => {
 
   it("la auditoría, bajo Configuración, la abre quien puede consultarla", () => {
     expect(platformPathPermission("/settings/audit")).toEqual(["audit.read"])
-    expect(platformPathPermission("/settings/fields")).toEqual(["settings.read"])
+    expect(platformPathPermission("/settings/branches")).toEqual(["settings.read"])
     expect(platformPathPermission("/audit")).toBeNull()
+  })
+
+  it("etapas de venta y campos de contacto los abre también quien trabaja con ventas", () => {
+    for (const path of ["/settings/pipelines", "/settings/fields"]) {
+      const rule = platformPathPermission(path) ?? []
+      expect(canAccessAny("reception", rule)).toBe(true)
+      expect(canAccessAny("admin", rule)).toBe(true)
+      expect(canAccessAny("dentist", rule)).toBe(false)
+      expect(canAccessAny("cashier", rule)).toBe(false)
+    }
+    // El resto de Configuración sigue cerrado para recepción.
+    expect(canAccessAny("reception", platformPathPermission("/settings/branches") ?? [])).toBe(false)
   })
 
   it("Sedes, Equipo e Integraciones entran con Configuración; sus direcciones antiguas piden lo mismo", () => {

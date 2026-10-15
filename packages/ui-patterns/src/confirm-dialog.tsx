@@ -37,7 +37,8 @@ export interface ConfirmDialogProps {
 /**
  * Confirmación de acciones terminales (archivar/eliminar/...): reemplaza a
  * `window.confirm` en toda la app. El servidor sigue siendo quien
- * rechaza con 409 si hay dependencias (mesas, cuentas, turnos).
+ * rechaza con 409 si hay dependencias (mesas, cuentas, turnos). También es la
+ * pregunta de cerrar un formulario o detalle con cambios (`useCloseGuard`).
  */
 export function ConfirmDialog({
   open,
@@ -71,7 +72,7 @@ export function ConfirmDialog({
             variant={variant}
             className={
               variant === "destructive"
-                ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                ? "bg-destructive text-destructive-foreground hover:bg-destructive/90 dark:bg-destructive dark:hover:bg-destructive/90"
                 : undefined
             }
             pending={pending}

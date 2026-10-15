@@ -5,7 +5,7 @@ import { user } from "./auth.js"
 /**
  * Administración de organizaciones y cuentas.
  *
- * Tablas globales internas: solo el rol owner las toca (ver migración 0074,
+ * Tablas globales internas: solo el rol owner las toca (ver migración 0084,
  * que revoca el acceso del rol app). Los servicios de admin reciben un tx
  * owner explícito tras el guard de staff; jamás se entrega al cliente.
  *

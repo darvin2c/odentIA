@@ -14,6 +14,7 @@ const MOVED: Record<string, string> = {
   "/settings/mail": "/settings/integrations",
   "/settings/webchat": "/settings/integrations/webchat",
   "/settings/agent": "/settings/integrations/model",
+  "/agent/approvals": "/agent/pendientes",
 }
 
 /** Las pantallas bajo el layout de la clínica, tal como las declara el árbol generado. */
@@ -39,4 +40,10 @@ it("una dirección que cambió de sitio sigue existiendo, igual que su destino",
     expect(screens.has(from), `${from} dejó de existir: los enlaces y avisos guardados quedarían rotos`).toBe(true)
     expect(screens.has(to), `${from} redirige a ${to}, que no es una pantalla`).toBe(true)
   }
+})
+
+it("«Pendientes» la abre quien la abría como «Aprobaciones»: también quien solo decide por el agente", () => {
+  // Recepción decide por el agente (`agent.decide`) sin supervisarlo (`agent.read`):
+  // con la regla genérica de `/agent` se quedaría fuera de sus casos derivados.
+  expect(platformPathPermission("/agent/pendientes")).toEqual(platformPathPermission("/agent/approvals"))
 })

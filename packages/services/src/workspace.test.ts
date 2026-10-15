@@ -41,15 +41,17 @@ beforeAll(async () => {
     displayName: "Canal de prueba", configEncrypted: "x", webhookSecret: "y",
   }).returning({ id: channelConnection.id })
   const [contactRow] = await ownerDb.insert(contact).values({ organizationId: "org_a", displayName: "Contacto pulso" }).returning({ id: contact.id })
+  const openThreads: string[] = []
   for (const thread of ["hilo-abierto-1", "hilo-abierto-2"]) {
-    await ownerDb.insert(conversation).values({
+    const [row] = await ownerDb.insert(conversation).values({
       organizationId: "org_a", contactId: contactRow!.id,
       channelConnectionId: connection!.id, externalThreadId: thread, status: "open",
-    })
+    }).returning({ id: conversation.id })
+    openThreads.push(row!.id)
   }
   await ownerDb.insert(conversation).values({
     organizationId: "org_a", contactId: contactRow!.id,
-    channelConnectionId: connection!.id, externalThreadId: "hilo-cerrado", status: "closed",
+    channelConnectionId: connection!.id, externalThreadId: "hilo-cerrado", status: "closed", closeReason: "manual", closedAt: new Date(),
   })
 
   // Embudo: 2 abiertas en la primera etapa (PEN), 1 en la segunda (USD), 1 ganada (excluida).
@@ -65,22 +67,22 @@ beforeAll(async () => {
     { organizationId: "org_a", contactId: contactRow!.id, pipelineId: pipe!.id, stageId: first!.id, title: "Caso ganado", amountCents: 99999, currency: "PEN", status: "won", closedAt: new Date(), closeReason: "Pagó el tratamiento" },
   ])
 
-  // Agente: 2 propuestas pendientes (la segunda es la más reciente), 1 ejecutada,
+  // Agente: 2 citas que esperan el sí del paciente (no esperan al equipo), 1 ejecutada,
   // 1 derivación reciente y 1 antigua (excluida), corridas de hoy y una de hace 5 días.
   const hour = 3_600_000
   await ownerDb.insert(agentProposal).values([
     {
-      organizationId: "org_a", action: "reservar_cita", status: "propuesta",
+      organizationId: "org_a", conversationId: openThreads[0]!, action: "reservar_cita", status: "propuesta",
       payload: { startsAt: new Date(Date.now() + hour).toISOString() },
       idempotencyKey: "pulso:propuesta:1", createdAt: new Date(Date.now() - hour),
     },
     {
-      organizationId: "org_a", action: "cancelar_cita", status: "propuesta",
+      organizationId: "org_a", conversationId: openThreads[1]!, action: "cancelar_cita", status: "propuesta",
       payload: { appointmentId: "12345678-aaaa-bbbb-cccc-dddddddddddd" },
       idempotencyKey: "pulso:propuesta:2", createdAt: new Date(),
     },
     {
-      organizationId: "org_a", action: "reservar_cita", status: "ejecutada",
+      organizationId: "org_a", conversationId: openThreads[0]!, action: "reservar_cita", status: "ejecutada",
       payload: {}, idempotencyKey: "pulso:propuesta:3", createdAt: new Date(),
     },
   ])
@@ -229,14 +231,13 @@ it("la actividad del equipo se dice con palabras, dice quién fue y se acota por
   await expect(list({ area: "inexistente" as never })).rejects.toMatchObject({ status: 400 })
 })
 
-it("«Te espera» ordena los casos «Ahora», lo que espera aprobación y los casos sin apuro", async () => {
+it("«Te espera» trae los casos que pasó el agente, «Ahora» primero; las citas que esperan al paciente no esperan al equipo", async () => {
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, full))
-  const agentRows = home.waiting.filter(row => row.kind === "case" || row.kind === "proposal")
-  // El caso «Ahora» va primero; las propuestas pendientes, de la más reciente a la más antigua;
-  // el caso sin apuro, aunque sea antiguo, sigue esperando y va después.
-  expect(agentRows.map(row => (row.kind === "case" ? row.reason : row.kind === "proposal" ? row.action : ""))).toEqual([
-    "Reciente", "cancelar_cita", "reservar_cita", "Antigua",
-  ])
+  const agentRows = rowsOf(home.waiting, "case")
+  // El caso «Ahora» va primero; el caso sin apuro, aunque sea antiguo, sigue esperando y va después.
+  expect(agentRows.map(row => row.reason)).toEqual(["Reciente", "Antigua"])
+  // Hay dos citas pendientes del sí del paciente: ninguna es una fila para aprobar.
+  expect(home.waiting.map(row => row.kind as string)).not.toContain("proposal")
   expect(rowsOf(home.waiting, "case").map(row => row.priority)).toEqual(["alta", "baja"])
   // Las cifras de corridas del agente ya no viajan a Inicio.
   expect(home).not.toHaveProperty("agent")
@@ -253,9 +254,9 @@ it("el libro de corridas cuenta las que terminaron sin responder y las llamadas 
   expect(unanswered[0]).toMatchObject({ status: "sin_respuesta", llmCalls: 2, cachedInputTokens: null })
 })
 
-it("sin permiso del agente, «Te espera» no trae casos ni propuestas", async () => {
+it("sin permiso del agente, «Te espera» no trae casos", async () => {
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, { ...full, agent: false }))
-  expect(home.waiting.filter(row => row.kind === "case" || row.kind === "proposal" || row.kind === "more")).toEqual([])
+  expect(home.waiting.filter(row => row.kind === "case" || (row.kind === "more" && row.of === "cases"))).toEqual([])
 })
 
 it("la primera respuesta usa aceptación real y excluye colas, fallos y simulación", async () => {
@@ -293,30 +294,6 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   expect(rowsOf(home.waiting, "conversations")).toEqual([{ kind: "conversations", waiting: 3, oldestAt: inboundAt.toISOString() }])
   const inbox = await withOrgContext(appDb, orgId, tx => countConversationViews(tx, orgId, { status: "open" }, ["unanswered"]))
   expect(inbox.unanswered).toBe(3)
-})
-
-it("el primer inicio excluye caducadas del contador completo, no solo de la muestra", async () => {
-  const orgId = "home-expiry"
-  await insertOrg(ownerDb, orgId, orgId)
-  const expiredId = randomUUID()
-  await ownerDb.insert(agentProposal).values([
-    {
-      id: expiredId, organizationId: orgId, action: "enviar_mensaje", status: "propuesta",
-      payload: { kind: "text", text: "Caducada" }, idempotencyKey: "home:caducada",
-      createdAt: new Date(Date.now() - 49 * 3_600_000),
-    },
-    ...Array.from({ length: 4 }, (_, index) => ({
-      organizationId: orgId, action: "enviar_mensaje", status: "propuesta",
-      payload: { kind: "text", text: `Vigente ${index}` }, idempotencyKey: `home:vigente:${index}`,
-    })),
-  ])
-  const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
-  // Tres filas y una que resume la que no cupo: la caducada no cuenta en ninguna.
-  expect(rowsOf(home.waiting, "proposal")).toHaveLength(3)
-  expect(rowsOf(home.waiting, "proposal").map(row => row.id)).not.toContain(expiredId)
-  expect(rowsOf(home.waiting, "more")).toEqual([{ kind: "more", of: "proposals", count: 1 }])
-  const [expired] = await ownerDb.select({ status: agentProposal.status }).from(agentProposal).where(eq(agentProposal.id, expiredId))
-  expect(expired?.status).toBe("expirada")
 })
 
 it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen del día", async () => {

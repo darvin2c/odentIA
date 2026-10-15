@@ -4,17 +4,12 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { AGENT_ROLES, switchableFunctions } from "./agent-roles.js"
 import { validation } from "./errors.js"
-import { normalizeLlmBaseUrl } from "./llm-endpoint.js"
-import { decryptJson, encryptJson } from "./secrets.js"
 
 export interface AgentConfig {
   organizationId: string
   enabled: boolean
-  model: string | null
-  /** URL base del proveedor propio; null = el de la plataforma. */
-  llmBaseUrl: string | null
-  /** La clave existe; su valor nunca sale del servidor. */
-  hasLlmApiKey: boolean
+  /** Modelo que escribe, uno de `AGENT_LLMS`; la cuenta del proveedor es de odentIA. */
+  llm: AgentLlm
   dailyRunLimit: number
   /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
   decisionProvider: DecisionProvider
@@ -27,10 +22,11 @@ export interface AgentConfig {
   decisionRoutingEnabled: boolean
   /** Asistente clínico: dictado en la atención. */
   clinicalAssistantEnabled: boolean
-  /** La voz de la clínica: nombre con que se presenta, trato, tono y quiénes son. */
+  /** La voz de la clínica: nombre con que se presenta, trato, tono, emojis y quiénes son. */
   personaName: string | null
   treatment: AgentTreatment | null
   tone: AgentTone
+  emojis: AgentEmojis
   about: string
   /** Funciones de Recepción apagadas (ids de su ficha). */
   disabledFunctions: string[]
@@ -41,12 +37,17 @@ export interface AgentConfig {
   activeUntilMin: number | null
   /** Canales donde atiende; nulo = todos los conectados. */
   channels: string[] | null
+  /** Horas de silencio del paciente tras las que el agente se despide y cierra (6 a 23; ADR 0024). */
+  closeAfterHours: number
 }
 
 export const AGENT_TREATMENTS = ["tu", "usted"] as const
 export type AgentTreatment = (typeof AGENT_TREATMENTS)[number]
 export const AGENT_TONES = ["cercano", "neutro", "formal"] as const
 export type AgentTone = (typeof AGENT_TONES)[number]
+/** `no`: se quitan antes de enviar; `pocos`: uno como mucho y nunca en lo delicado. */
+export const AGENT_EMOJIS = ["no", "pocos"] as const
+export type AgentEmojis = (typeof AGENT_EMOJIS)[number]
 const ABOUT_CHARS = 600
 const PERSONA_CHARS = 40
 const FUNCTION_NOTE_CHARS = 300
@@ -54,11 +55,28 @@ const FUNCTION_NOTE_CHARS = 300
 export const DECISION_PROVIDERS = ["none", "baseline", "jev", "openai_decisions"] as const
 export type DecisionProvider = (typeof DECISION_PROVIDERS)[number]
 
+/**
+ * Los modelos que la clínica puede elegir: odentIA los validó y pone la
+ * cuenta (ADR 0022). Aquí solo el id y lo que ve la clínica; proveedor,
+ * modelo exacto y opciones viven en `packages/agent/src/llm.ts`, y odentIA
+ * los cambia sin que la clínica haga nada. El primero es el de toda clínica
+ * y coincide con el valor por defecto de la base.
+ */
+export const AGENT_LLMS = [
+  { id: "chatgpt_6", label: "ChatGPT 6" },
+  { id: "claude_5_5", label: "Claude 5.5" },
+] as const
+export type AgentLlm = (typeof AGENT_LLMS)[number]["id"]
+export const AGENT_LLM_IDS = AGENT_LLMS.map((option) => option.id) as [AgentLlm, ...AgentLlm[]]
+export const DEFAULT_AGENT_LLM: AgentLlm = "chatgpt_6"
+
+export function isAgentLlm(value: unknown): value is AgentLlm {
+  return typeof value === "string" && (AGENT_LLM_IDS as readonly string[]).includes(value)
+}
+
 const DEFAULTS = {
   enabled: false,
-  model: null as string | null,
-  llmBaseUrl: null as string | null,
-  llmApiKeyEncrypted: null as string | null,
+  llm: DEFAULT_AGENT_LLM,
   dailyRunLimit: 500,
   decisionProvider: "none" as DecisionProvider,
   systemPrompt: "",
@@ -70,21 +88,21 @@ const DEFAULTS = {
   personaName: null as string | null,
   treatment: null as AgentTreatment | null,
   tone: "cercano" as AgentTone,
+  emojis: "no" as AgentEmojis,
   about: "",
   disabledFunctions: [] as string[],
   functionNotes: {} as Record<string, string>,
   activeFromMin: null as number | null,
   activeUntilMin: null as number | null,
   channels: null as string[] | null,
+  closeAfterHours: 22,
 }
 
 function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
   return {
     organizationId: row.organizationId,
     enabled: row.enabled,
-    model: row.model,
-    llmBaseUrl: row.llmBaseUrl,
-    hasLlmApiKey: row.llmApiKeyEncrypted !== null,
+    llm: isAgentLlm(row.llm) ? row.llm : DEFAULT_AGENT_LLM,
     dailyRunLimit: row.dailyRunLimit,
     decisionProvider: (DECISION_PROVIDERS as readonly string[]).includes(row.decisionProvider)
       ? (row.decisionProvider as DecisionProvider)
@@ -98,12 +116,14 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     personaName: row.personaName,
     treatment: (AGENT_TREATMENTS as readonly string[]).includes(row.treatment ?? "") ? (row.treatment as AgentTreatment) : null,
     tone: (AGENT_TONES as readonly string[]).includes(row.tone) ? (row.tone as AgentTone) : "cercano",
+    emojis: row.emojis === "pocos" ? "pocos" : "no",
     about: row.about,
     disabledFunctions: row.disabledFunctions,
     functionNotes: row.functionNotes,
     activeFromMin: row.activeFromMin,
     activeUntilMin: row.activeUntilMin,
     channels: row.channels,
+    closeAfterHours: row.closeAfterHours,
   }
 }
 
@@ -113,44 +133,13 @@ export async function getAgentConfig(tx: Db, orgId: string): Promise<AgentConfig
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
-  if (!row) {
-    const { llmApiKeyEncrypted: _sealed, ...defaults } = DEFAULTS
-    return { organizationId: orgId, ...defaults, hasLlmApiKey: false, handoffKeywords: [] }
-  }
+  if (!row) return { organizationId: orgId, ...DEFAULTS, handoffKeywords: [] }
   return toConfig(row)
-}
-
-/** Proveedor propio descifrado: solo worker y API (nunca a la UI). */
-export async function getAgentLlmSecrets(
-  tx: Db,
-  orgId: string,
-  secretsKey: Buffer,
-): Promise<{ baseUrl: string; apiKey: string } | null> {
-  const [row] = await tx
-    .select({ baseUrl: agentConfig.llmBaseUrl, sealed: agentConfig.llmApiKeyEncrypted })
-    .from(agentConfig)
-    .where(eq(agentConfig.organizationId, orgId))
-    .limit(1)
-  if (!row?.baseUrl || !row.sealed) return null
-  const value = decryptJson(secretsKey, row.sealed)
-  if (!value || typeof value !== "object" || typeof (value as { apiKey?: unknown }).apiKey !== "string") {
-    throw new Error("La clave del proveedor LLM tiene un formato inválido")
-  }
-  return { baseUrl: row.baseUrl, apiKey: (value as { apiKey: string }).apiKey }
-}
-
-/** Validación sintáctica de la URL base (sin red); devuelve la forma canónica. */
-export function validateLlmBaseUrl(raw: string, opts: { allowInsecure?: boolean } = {}): string {
-  return normalizeLlmBaseUrl(raw, opts)
 }
 
 export interface UpsertAgentConfigInput {
   enabled?: boolean
-  model?: string | null
-  /** null (o vacío) retira el proveedor propio junto con su clave. */
-  llmBaseUrl?: string | null
-  /** Texto nuevo reemplaza la clave; null retira el proveedor propio; ausente la conserva. */
-  llmApiKey?: string | null
+  llm?: AgentLlm
   dailyRunLimit?: number
   decisionProvider?: DecisionProvider
   systemPrompt?: string
@@ -162,6 +151,7 @@ export interface UpsertAgentConfigInput {
   personaName?: string | null
   treatment?: AgentTreatment | null
   tone?: AgentTone
+  emojis?: AgentEmojis
   about?: string
   disabledFunctions?: string[]
   functionNotes?: Record<string, string>
@@ -169,21 +159,17 @@ export interface UpsertAgentConfigInput {
   activeFromMin?: number | null
   activeUntilMin?: number | null
   channels?: string[] | null
+  /** Entero de 6 a 23: después de 24 horas WhatsApp ya no deja despedirse sin mensaje aprobado. */
+  closeAfterHours?: number
 }
 
 export interface UpsertAgentConfigOpts {
-  /** Obligatoria para guardar una clave de proveedor. */
-  secretsKey?: Buffer
   actorUserId?: string | null
-  allowInsecureBaseUrl?: boolean
 }
 
 /**
- * Guarda la configuración. URL base y clave del proveedor propio van juntas:
- * no se admite una sin la otra, cambiar la URL exige volver a escribir la
- * clave (la anterior nunca viaja a un host nuevo) y el proveedor propio
- * necesita modelo. Los cambios de proveedor o modelo quedan auditados sin
- * el valor de la clave.
+ * Guarda la configuración. El modelo solo puede ser uno de `AGENT_LLMS`; su
+ * cambio, como los demás, queda auditado con quién y cuándo.
  */
 export async function upsertAgentConfig(
   tx: Db,
@@ -209,6 +195,15 @@ export async function upsertAgentConfig(
   ) {
     throw validation("handoffKeywords debe ser lista de texto")
   }
+  if (
+    input.closeAfterHours !== undefined &&
+    (!Number.isInteger(input.closeAfterHours) || input.closeAfterHours < 6 || input.closeAfterHours > 23)
+  ) {
+    throw validation("Las horas para cerrar por silencio van de 6 a 23")
+  }
+  if (input.llm !== undefined && !isAgentLlm(input.llm)) {
+    throw validation(`El modelo del agente debe ser ${AGENT_LLMS.map((option) => option.label).join(" o ")}`)
+  }
   if (input.decisionProvider !== undefined && !(DECISION_PROVIDERS as readonly string[]).includes(input.decisionProvider)) {
     throw validation("decisionProvider inválido")
   }
@@ -217,6 +212,9 @@ export async function upsertAgentConfig(
   }
   if (input.tone !== undefined && !(AGENT_TONES as readonly string[]).includes(input.tone)) {
     throw validation("El tono debe ser cercano, neutro o formal")
+  }
+  if (input.emojis !== undefined && !(AGENT_EMOJIS as readonly string[]).includes(input.emojis)) {
+    throw validation("Los emojis son «No usar» o «Pocos»")
   }
   if (input.about !== undefined && input.about.trim().length > ABOUT_CHARS) {
     throw validation(`«Quiénes somos» admite hasta ${ABOUT_CHARS} caracteres`)
@@ -261,59 +259,18 @@ export async function upsertAgentConfig(
   if (input.channels !== undefined && input.channels !== null && input.channels.some((c) => typeof c !== "string" || !c.trim())) {
     throw validation("channels debe ser una lista de canales")
   }
-  const { llmBaseUrl: baseUrlInput, llmApiKey: apiKeyInput, ...rest } = input
-  const patch: Partial<typeof agentConfig.$inferInsert> = { ...rest }
-  if (rest.model !== undefined) patch.model = rest.model?.trim() || null
-  if (rest.personaName !== undefined) patch.personaName = rest.personaName?.trim() || null
-  if (rest.about !== undefined) patch.about = rest.about.trim()
-  if (rest.disabledFunctions !== undefined) patch.disabledFunctions = [...new Set(rest.disabledFunctions)]
-  if (rest.functionNotes !== undefined) {
+  const patch: Partial<typeof agentConfig.$inferInsert> = { ...input }
+  if (input.personaName !== undefined) patch.personaName = input.personaName?.trim() || null
+  if (input.about !== undefined) patch.about = input.about.trim()
+  if (input.disabledFunctions !== undefined) patch.disabledFunctions = [...new Set(input.disabledFunctions)]
+  if (input.functionNotes !== undefined) {
     patch.functionNotes = Object.fromEntries(
-      Object.entries(rest.functionNotes)
+      Object.entries(input.functionNotes)
         .map(([id, note]) => [id, note.trim()] as const)
         .filter(([, note]) => note !== ""),
     )
   }
-  if (rest.channels !== undefined) patch.channels = rest.channels && rest.channels.length > 0 ? [...new Set(rest.channels)] : null
-
-  const touchesProvider = baseUrlInput !== undefined || apiKeyInput !== undefined
-  if (touchesProvider) {
-    const previousUrl = current?.llmBaseUrl ?? null
-    const removing = baseUrlInput === null || baseUrlInput === "" || apiKeyInput === null
-    let baseUrl: string | null
-    let sealed: string | null
-    if (removing) {
-      baseUrl = null
-      sealed = null
-      if (apiKeyInput?.trim()) throw validation("Para usar una clave propia indica también la URL base del proveedor")
-      // El modelo se eligió para ese proveedor: al volver al incluido con
-      // odentIA no viaja a otro que quizá no lo tiene. Quien quiera conservarlo
-      // lo indica en la misma petición.
-      if (previousUrl !== null && rest.model === undefined) patch.model = null
-    } else {
-      baseUrl =
-        baseUrlInput === undefined
-          ? previousUrl
-          : validateLlmBaseUrl(baseUrlInput, { allowInsecure: opts.allowInsecureBaseUrl })
-      if (apiKeyInput === undefined) {
-        sealed = current?.llmApiKeyEncrypted ?? null
-        if (baseUrl !== null && baseUrl !== previousUrl && sealed !== null) {
-          throw validation("Al cambiar la URL del proveedor vuelve a indicar su clave de API")
-        }
-      } else if (!apiKeyInput.trim()) {
-        sealed = current?.llmApiKeyEncrypted ?? null
-      } else {
-        if (!opts.secretsKey) throw new Error("Falta la clave de cifrado para guardar la clave del proveedor")
-        sealed = encryptJson(opts.secretsKey, { apiKey: apiKeyInput.trim() })
-      }
-      if (baseUrl === null) throw validation("Para usar una clave propia indica también la URL base del proveedor")
-      if (sealed === null) throw validation("Para usar un proveedor propio indica también su clave de API")
-      const model = patch.model !== undefined ? patch.model : (current?.model ?? null)
-      if (!model) throw validation("Con proveedor propio indica el modelo que espera ese endpoint")
-    }
-    patch.llmBaseUrl = baseUrl
-    patch.llmApiKeyEncrypted = sealed
-  }
+  if (input.channels !== undefined) patch.channels = input.channels && input.channels.length > 0 ? [...new Set(input.channels)] : null
 
   const [row] = await tx
     .insert(agentConfig)
@@ -325,14 +282,9 @@ export async function upsertAgentConfig(
     .returning()
   if (!row) throw new Error("No se pudo guardar la configuración del agente")
 
-  // El destino de los datos de pacientes cambia: quién, cuándo y qué campo,
-  // nunca el valor de la clave.
+  // Con el modelo cambia adónde viajan los datos de pacientes: quién, cuándo y qué campo.
   const changed: string[] = []
-  if (patch.model !== undefined && patch.model !== (current?.model ?? null)) changed.push("model")
-  if (patch.llmBaseUrl !== undefined && patch.llmBaseUrl !== (current?.llmBaseUrl ?? null)) changed.push("llmBaseUrl")
-  if (patch.llmApiKeyEncrypted !== undefined && patch.llmApiKeyEncrypted !== (current?.llmApiKeyEncrypted ?? null)) {
-    changed.push("llmApiKey")
-  }
+  if (patch.llm !== undefined && patch.llm !== (current?.llm ?? DEFAULTS.llm)) changed.push("llm")
   if (patch.dailyRunLimit !== undefined && patch.dailyRunLimit !== (current?.dailyRunLimit ?? DEFAULTS.dailyRunLimit)) {
     changed.push("dailyRunLimit")
   }
@@ -363,12 +315,14 @@ export async function upsertAgentConfig(
     "personaName",
     "treatment",
     "tone",
+    "emojis",
     "about",
     "disabledFunctions",
     "functionNotes",
     "activeFromMin",
     "activeUntilMin",
     "channels",
+    "closeAfterHours",
   ] as const) {
     if (patch[field] !== undefined && JSON.stringify(patch[field]) !== JSON.stringify(current?.[field] ?? DEFAULTS[field])) {
       changed.push(field)
@@ -381,7 +335,7 @@ export async function upsertAgentConfig(
       action: "agent.config_updated",
       entity: "agent_config",
       entityId: orgId,
-      metadata: { changed, llmBaseUrl: row.llmBaseUrl, model: row.model, dailyRunLimit: row.dailyRunLimit, decisionProvider: row.decisionProvider, replyCheckEnabled: row.replyCheckEnabled },
+      metadata: { changed, llm: row.llm, dailyRunLimit: row.dailyRunLimit, decisionProvider: row.decisionProvider, replyCheckEnabled: row.replyCheckEnabled },
     })
   }
   return toConfig(row)

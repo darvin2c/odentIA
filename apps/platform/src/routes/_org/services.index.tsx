@@ -45,6 +45,7 @@ import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -53,6 +54,9 @@ import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
+  PRICE_DISCLOSURE_OPTIONS,
+  PRICE_DISCLOSURE_TAG,
+  type PriceDisclosure,
   createServiceApi,
   fetchServices,
   fetchTreatmentTemplate,
@@ -262,7 +266,12 @@ function TarifarioPage() {
           profileLocale === undefined ? (
             <Skeleton className="h-4 w-16" />
           ) : (
-            formatMoney(row.original.priceCents, row.original.currency, profileLocale)
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              {formatMoney(row.original.priceCents, row.original.currency, profileLocale)}
+              {PRICE_DISCLOSURE_TAG[row.original.priceDisclosure] ? (
+                <Badge variant="secondary">{PRICE_DISCLOSURE_TAG[row.original.priceDisclosure]}</Badge>
+              ) : null}
+            </span>
           ),
       },
       {
@@ -541,6 +550,9 @@ const offerSchema = z.object({
   specialty: z.string().min(1, "Elige la especialidad"),
   scope: z.string().min(1, "Elige el ámbito"),
   billingMode: z.enum(["treatment", "session"]),
+  priceDisclosure: z.enum(["exacto", "desde", "evaluacion"]),
+  /** Vacío: sin una evaluación propia. */
+  evaluationServiceId: z.string(),
 })
 
 type OfferFormValues = z.infer<typeof offerSchema>
@@ -553,6 +565,9 @@ const emptyOfferValues: OfferFormValues = {
   specialty: "",
   scope: "",
   billingMode: "treatment",
+  // Un servicio nuevo nace «solo con evaluación»: la clínica habilita el precio donde quiera.
+  priceDisclosure: "evaluacion",
+  evaluationServiceId: "",
 }
 
 /** Valores del formulario para una oferta; `null` = alta de una prestación propia. */
@@ -566,6 +581,8 @@ function offerValues(offer: ServiceCatalogItem | null, locale: string): OfferFor
     specialty: offer.specialty ?? "",
     scope: offer.scope ?? "",
     billingMode: offer.billingMode ?? "treatment",
+    priceDisclosure: offer.priceDisclosure ?? "exacto",
+    evaluationServiceId: offer.evaluationServiceId ?? "",
   }
 }
 
@@ -674,6 +691,8 @@ function OfferEditor({
         priceCents: parseMoney(values.price, currency, orgLocale),
         durationMin: values.durationMin.trim() === "" ? null : Number(values.durationMin),
         billingMode: values.billingMode,
+        priceDisclosure: values.priceDisclosure,
+        evaluationServiceId: values.evaluationServiceId === "" ? null : values.evaluationServiceId,
       }
       if (!offer) {
         return createServiceApi({ ...body, specialty: values.specialty, scope: values.scope })
@@ -864,6 +883,9 @@ function OfferReadOnly({
           {formatMoney(offer.priceCents, offer.currency, locale)}
         </DetailField>
         <DetailField label="Se cobra">{BILLING_MODE_LABELS[offer.billingMode]}</DetailField>
+        <DetailField label="Cómo dice el precio el agente">
+          {PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === offer.priceDisclosure)?.label}
+        </DetailField>
         <DetailField label="Duración">
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
         </DetailField>
@@ -1064,6 +1086,7 @@ function OfferFields({
           </Field>
         )}
       </form.Field>
+      <PriceDisclosureFields form={form} idPrefix={idPrefix} offerId={offer?.id ?? null} />
       <form.Field name="code" validators={{ onChange: offerSchema.shape.code }}>
         {(field) => (
           <Field>
@@ -1242,5 +1265,66 @@ function LegacyTemplateLink({
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * «Cómo dice el precio el agente» (ADR 0021): solo cambia lo que se le dice a
+ * una persona; caja y presupuesto usan siempre la tarifa. Con «Desde» o «Solo
+ * con evaluación» se elige qué evaluación ofrece.
+ */
+function PriceDisclosureFields({ form, idPrefix, offerId }: { form: OfferForm; idPrefix: string; offerId: string | null }) {
+  const disclosure = useStore(form.store, (state) => state.values.priceDisclosure)
+  const evaluationsQuery = useQuery({
+    queryKey: ["services", "evaluation-options"],
+    queryFn: () => fetchServices({ state: "active", limit: 100 }),
+    enabled: disclosure !== "exacto",
+    staleTime: 60_000,
+  })
+  const evaluations = (evaluationsQuery.data?.data ?? []).filter((item) => item.id !== offerId)
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-xl border p-3">
+      <legend id={`${idPrefix}-precio-agente`} className="px-1 text-sm font-semibold">
+        Cómo dice el precio el agente
+      </legend>
+      <form.Field name="priceDisclosure">
+        {(field) => (
+          <Field>
+            <RadioChips
+              labelledBy={`${idPrefix}-precio-agente`}
+              value={field.state.value}
+              options={PRICE_DISCLOSURE_OPTIONS}
+              onChange={(next) => field.handleChange(next as PriceDisclosure)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === field.state.value)?.says} Caja y presupuesto usan
+              siempre la tarifa.
+            </p>
+          </Field>
+        )}
+      </form.Field>
+      {disclosure === "exacto" ? null : (
+        <form.Field name="evaluationServiceId">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor={`${idPrefix}-evaluacion`}>Evaluación que ofrece</FieldLabel>
+              <ChoiceSelect
+                id={`${idPrefix}-evaluacion`}
+                value={field.state.value}
+                onChange={(event) => field.handleChange(event.target.value)}
+                disabled={evaluationsQuery.isPending}
+              >
+                <option value="">Ninguna en particular: ofrece agendar una evaluación</option>
+                {evaluations.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </ChoiceSelect>
+            </Field>
+          )}
+        </form.Field>
+      )}
+    </fieldset>
   )
 }

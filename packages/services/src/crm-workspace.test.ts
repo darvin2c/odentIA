@@ -15,7 +15,8 @@ import { expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { addContactIdentity, createContact, getContact } from "./contacts.js"
 import { createConnection } from "./connections.js"
-import { closeConversation, startContactConversation } from "./conversations.js"
+import { closeConversation } from "./conversation-close.js"
+import { startContactConversation } from "./conversations.js"
 import {
   createContactNote,
   getContactWorkspace,

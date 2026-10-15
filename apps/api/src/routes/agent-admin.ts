@@ -4,7 +4,6 @@ import {
   ADMIN_MODEL_DOWN,
   adminLineOf,
   applyAdminDraft,
-  decidePendingApprovals,
   deleteAdminLine,
   discardAdminDraft,
   type AdminInterpretation,
@@ -20,7 +19,6 @@ import {
   getAdminUnreached,
   getMessagePermissions,
   listAdminLinePeople,
-  listPendingApprovals,
   runAdminLineOnce,
   setConsent,
   updateAdminLine,
@@ -243,28 +241,6 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listAdminLinePeople(tx, orgId, canOf(memberRole), c.req.param("key"), parsed.data),
-      ),
-    )
-  })
-
-  // Con Recepción en «Supervisado», lo que encargó el administrador espera aquí, junto por línea.
-  app.get("/approvals", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.decide")) return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para decidir por el agente"), 403)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listPendingApprovals(tx, orgId)))
-  })
-
-  app.post("/approvals/:key", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    // Aprobar es dejar salir un mensaje: exige decidir por el agente y poder escribir conversaciones.
-    if (!canAccess(memberRole, "agent.decide") || !canAccess(memberRole, "conversations.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "Sin permiso para aprobar mensajes"), 403)
-    }
-    const parsed = z.object({ decision: z.enum(["aprobar", "rechazar"]) }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        decidePendingApprovals(tx, orgId, userId, c.req.param("key"), parsed.data.decision),
       ),
     )
   })

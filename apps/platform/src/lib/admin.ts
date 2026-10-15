@@ -15,8 +15,6 @@ export interface AdminLineView {
   hasAgent: boolean
   agentPart: boolean
   teamPart: boolean
-  /** La tarea para el equipo no se apaga por separado. */
-  teamFixed: boolean
   /** «el equipo de recepción». */
   team: string
   days: number | null
@@ -108,7 +106,6 @@ export interface AdminFlow {
 
 export type AdminOutcome =
   | "programado"
-  | "por_aprobar"
   | "enviando"
   | "entregado"
   | "confirmo"
@@ -183,14 +180,6 @@ export interface AdminUnreached {
   people: Array<AdminPersonRow & { lineKey: string; lineName: string }>
 }
 
-export interface AdminApproval {
-  key: string
-  name: string
-  total: number
-  people: string[]
-  since: string
-}
-
 /** Lo suyo en «Resumen» del agente. */
 export interface AdminOverview {
   enabled: boolean
@@ -205,7 +194,7 @@ export const adminLineKey = (key: string) => ["agent-admin-line", key] as const
 
 /** Todo lo que cambia cuando se prende, apaga o atiende algo del Administrador. */
 export function refreshAdmin(queryClient: QueryClient): void {
-  for (const key of ["agent-admin", "agent-admin-line", "agent-admin-advice", "agent-admin-unreached", "agent-admin-approvals", "agent-overview", "tasks", "workspace-home", "report"]) {
+  for (const key of ["agent-admin", "agent-admin-line", "agent-admin-advice", "agent-admin-unreached", "agent-overview", "tasks", "workspace-home", "report"]) {
     void queryClient.invalidateQueries({ queryKey: [key] })
   }
 }

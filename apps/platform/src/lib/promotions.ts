@@ -6,6 +6,8 @@ export interface PromotionServiceItem {
   id: string
   serviceId: string
   mode: PromotionMode
+  /** Cómo lo dice el agente; caja y presupuesto no lo leen. */
+  priceDisclosure: "exacto" | "desde" | "evaluacion"
   priceCents: number
   currency: string
   serviceName: string
@@ -62,6 +64,7 @@ export interface PromotionItemBody {
   serviceId: string
   mode: PromotionMode
   priceCents: number
+  priceDisclosure?: "exacto" | "desde" | "evaluacion"
 }
 
 export interface CreatePromotionBody {

@@ -13,6 +13,7 @@ interface VoiceDraft {
   personaName: string
   treatment: "tu" | "usted"
   tone: "cercano" | "neutro" | "formal"
+  emojis: "no" | "pocos"
   about: string
 }
 
@@ -25,23 +26,37 @@ const TONES: Array<{ value: VoiceDraft["tone"]; label: string }> = [
   { value: "neutro", label: "Neutro" },
   { value: "formal", label: "Formal" },
 ]
+/** Qué quiere decir cada tono, en una línea bajo las opciones. */
+const TONE_HINT: Record<VoiceDraft["tone"], string> = {
+  cercano: "Amable y con confianza, como habla tu recepción.",
+  neutro: "Amable y directo, sin confianzas ni formalidades.",
+  formal: "Respetuoso y cuidado, sin confianzas.",
+}
+const EMOJIS: Array<{ value: VoiceDraft["emojis"]; label: string }> = [
+  { value: "no", label: "No usar" },
+  { value: "pocos", label: "Pocos" },
+]
 
 function toDraft(config: AgentConfig): VoiceDraft {
   return {
     personaName: config.personaName ?? "",
     treatment: config.treatment ?? "tu",
     tone: config.tone,
+    emojis: config.emojis,
     about: config.about,
   }
 }
 
 function Choice<T extends string>({
   label,
+  hint,
   options,
   value,
   onChange,
 }: {
   label: string
+  /** Una línea bajo las opciones que explica lo elegido. */
+  hint?: string
   options: Array<{ value: T; label: string }>
   value: T
   onChange: (value: T) => void
@@ -51,7 +66,11 @@ function Choice<T extends string>({
       <span className="text-sm font-medium" id={`voz-${label}`}>
         {label}
       </span>
-      <fieldset className="m-0 min-w-0 border-0 p-0 flex flex-wrap gap-1.5" aria-labelledby={`voz-${label}`}>
+      <fieldset
+        className="m-0 min-w-0 border-0 p-0 flex flex-wrap gap-1.5"
+        aria-labelledby={`voz-${label}`}
+        aria-describedby={hint ? `voz-${label}-ayuda` : undefined}
+      >
         {options.map((option) => (
           <Button
             key={option.value}
@@ -66,6 +85,11 @@ function Choice<T extends string>({
           </Button>
         ))}
       </fieldset>
+      {hint ? (
+        <p id={`voz-${label}-ayuda`} className="text-sm text-muted-foreground">
+          {hint}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -112,6 +136,7 @@ export function AgentBaseDrawer({
           personaName: draft.personaName.trim() || null,
           treatment: draft.treatment,
           tone: draft.tone,
+          emojis: draft.emojis,
           about: draft.about,
         }),
       }),
@@ -189,7 +214,20 @@ export function AgentBaseDrawer({
           value={draft.treatment}
           onChange={(treatment) => canWrite && setDraft({ ...draft, treatment })}
         />
-        <Choice label="Tono" options={TONES} value={draft.tone} onChange={(tone) => canWrite && setDraft({ ...draft, tone })} />
+        <Choice
+          label="Tono"
+          hint={TONE_HINT[draft.tone]}
+          options={TONES}
+          value={draft.tone}
+          onChange={(tone) => canWrite && setDraft({ ...draft, tone })}
+        />
+        <Choice
+          label="Emojis"
+          hint="Uno de vez en cuando hace el mensaje más cálido. Nunca en urgencias, dolor ni pagos."
+          options={EMOJIS}
+          value={draft.emojis}
+          onChange={(emojis) => canWrite && setDraft({ ...draft, emojis })}
+        />
         <Field>
           <FieldLabel htmlFor="base-quienes">Quiénes somos, en pocas líneas</FieldLabel>
           <Textarea
@@ -206,7 +244,7 @@ export function AgentBaseDrawer({
         <div className="flex flex-col gap-1 rounded-xl border border-agent-border bg-agent-soft p-3">
           <span className="text-xs font-semibold text-primary-soft-foreground">Así sonaría</span>
           <p className="text-sm">
-            «{voicePreview({ personaName: draft.personaName, treatment: draft.treatment, tone: draft.tone, clinicName })}»
+            «{voicePreview({ personaName: draft.personaName, treatment: draft.treatment, tone: draft.tone, emojis: draft.emojis, clinicName })}»
           </p>
           <span className="text-xs text-muted-foreground">Es una muestra del estilo. La respuesta real la redacta el agente.</span>
         </div>

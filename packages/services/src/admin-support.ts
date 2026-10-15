@@ -114,7 +114,7 @@ export interface SupportDiagnostic {
   }[]
   agent: {
     enabled: boolean
-    model: string | null
+    llm: string | null
     decisionProvider: string
     decisionRoutingEnabled: boolean
     clinicalAssistantEnabled: boolean
@@ -1130,7 +1130,7 @@ export async function readSupportDiagnostic(
     const [agent] = await tx
       .select({
         enabled: agentConfig.enabled,
-        model: agentConfig.model,
+        llm: agentConfig.llm,
         decisionProvider: agentConfig.decisionProvider,
         decisionRoutingEnabled: agentConfig.decisionRoutingEnabled,
         clinicalAssistantEnabled: agentConfig.clinicalAssistantEnabled,

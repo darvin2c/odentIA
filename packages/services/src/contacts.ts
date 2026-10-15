@@ -311,6 +311,8 @@ export interface ContactConversationItem {
   connectionName: string
   contactIdentityId: string | null
   lastMessageAt: string | null
+  /** Cómo se cerró (mismo formato que la Bandeja); null si está abierta. */
+  closure: { reason: "resuelta" | "sin_respuesta" | "equipo" | "manual"; at: string; byName: string | null } | null
 }
 
 export interface ContactFull {
@@ -336,7 +338,11 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       )
       .orderBy(asc(crmTask.createdAt)),
     tx
-      .select({ conversation, connection: channelConnection })
+      .select({
+        conversation,
+        connection: channelConnection,
+        closedByName: sql<string | null>`(select u.name from "user" u where u.id = "conversation"."closed_by_user_id")`,
+      })
       .from(conversation)
       .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
       .where(and(eq(conversation.organizationId, orgId), eq(conversation.contactId, id)))
@@ -388,7 +394,7 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       dueAt: iso(t.dueAt),
       assigneeUserId: t.assigneeUserId,
     })),
-    conversations: conversations.map(({ conversation: c, connection }) => ({
+    conversations: conversations.map(({ conversation: c, connection, closedByName }) => ({
       id: c.id,
       status: c.status,
       channel: connection.channel,
@@ -396,6 +402,14 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       connectionName: connection.displayName,
       contactIdentityId: c.contactIdentityId,
       lastMessageAt: iso(c.lastMessageAt),
+      closure:
+        c.status === "closed" && c.closeReason && c.closedAt
+          ? {
+              reason: c.closeReason as "resuelta" | "sin_respuesta" | "equipo" | "manual",
+              at: c.closedAt.toISOString(),
+              byName: closedByName,
+            }
+          : null,
     })),
   }
 }

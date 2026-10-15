@@ -63,6 +63,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, it } from "vitest"
 import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState } from "./admin.js"
 import { createJevDecisionModel, type DecisionModel } from "./decision/index.js"
+import { LLM_CATALOG, platformLlmFromEnv } from "./llm.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -265,9 +266,8 @@ beforeAll(async () => {
   }
   runtime = {
     checkpointer,
-    platform: REAL
-      ? { modelName: env.LLM_MODEL!, apiKey: env.LLM_API_KEY || undefined, baseUrl: env.LLM_BASE_URL, timeoutMs: 120_000, maxRetries: 2 }
-      : { modelName: "fake", allowInsecureBaseUrl: true },
+    // La clínica inventada usa el modelo de toda clínica (`chatgpt_6`) con las cuentas del entorno.
+    platform: REAL ? { ...platformLlmFromEnv(env), timeoutMs: 120_000, maxRetries: 2 } : { fake: true },
     decisions,
     secretsKey: KEY,
     callbacks: [recorder],
@@ -460,7 +460,8 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   events.sort((a, b) => a.at - b.at)
 
   // Las líneas, prendidas al empezar el mes: actúan sobre lo que pase desde entonces.
-  const lines = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.key !== "seguimiento_comercial")
+  // La clínica inventada no tiene oportunidades: «Retomar una oportunidad» queda prendida y sin casos.
+  const lines = [...ADMIN_LINES, ...CUSTOM_LINES]
   await inOrg(async (tx) => {
     for (const line of lines) await setLine(tx, ORG, owner, line.key, { enabled: true })
   })
@@ -542,7 +543,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   }
 
   console.log("\n=== Prueba real de consumo · un mes de una clínica de prueba ===")
-  console.log(REAL ? `Modelo que escribe: ${env.LLM_MODEL} · modelo de decisión: ${decider ? `Jev (${env.JEV_MODEL ?? "por defecto"})` : "ninguno"}` : "ENSAYO con el modelo de demostración: no mide nada.")
+  console.log(REAL ? `Modelo que escribe: ${LLM_CATALOG.chatgpt_6.modelName} · modelo de decisión: ${decider ? `Jev (${env.JEV_MODEL ?? "por defecto"})` : "ninguno"}` : "ENSAYO con el modelo de demostración: no mide nada.")
   console.log(`Clínica: ${CLINIC.patients} pacientes, ${plan.length} citas (${outcomes.filter((item) => item.outcome === "no_asistio").length} inasistencias, ${outcomes.filter((item) => item.outcome === "cancelada").length} cancelaciones), ${CLINIC.budgets} presupuestos, ${CLINIC.controls} controles.`)
   console.log("\n1. Lo que hizo el Administrador en el mes (lo cuenta el motor; ningún mensaje salió de la cola)")
   for (const line of lines) {

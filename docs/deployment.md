@@ -59,6 +59,15 @@ su DNS y enrutarlo al servicio `admin` antes de habilitar personal. Aplicar las
 migraciones antes de API/worker; no hay fallback de seguridad para tablas
 administrativas ausentes. El bootstrap nominal y TOTP se describen en
 `development.md`.
+### Modelo del agente
+
+La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta
+(`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`). API y
+worker leen `LLM_OPENAI_API_KEY` y `LLM_ANTHROPIC_API_KEY`; sin la del proveedor
+del modelo elegido, el agente deriva cada caso y avisa a quien lo administra
+nombrando la variable que falta. `LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL`
+solo hacen falta con una pasarela propia. `LLM_MODEL=fake` es solo para previews
+y pruebas.
 
 ### SMTP
 

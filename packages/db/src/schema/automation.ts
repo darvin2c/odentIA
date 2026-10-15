@@ -62,7 +62,7 @@ export type AutomationChannel = (typeof AUTOMATION_CHANNELS)[number]
 
 /**
  * Qué aceptó recibir una persona sin haber escrito primero: `recordatorio`
- * (citas y controles) y `seguimiento` (inasistencias y presupuestos). Es un
+ * (citas y controles) y `seguimiento` (inasistencias, presupuestos y oportunidades). Es un
  * permiso de la persona, no de un canal.
  */
 export const CONSENT_PURPOSES = ["recordatorio", "seguimiento"] as const
@@ -74,8 +74,6 @@ export type AutomationVia = (typeof AUTOMATION_VIAS)[number]
 
 export const AUTOMATION_JOB_STATUSES = [
   "pendiente",
-  /** Espera que una persona del equipo lo apruebe (Recepción en «Supervisado»). */
-  "por_aprobar",
   "enviado",
   /** Quedó como tarea para una persona, sin mensaje. */
   "tarea",
@@ -94,6 +92,8 @@ export const AUTOMATION_CAUSES = [
   "sin_permiso",
   /** No tiene WhatsApp ni correo registrados. */
   "sin_destino",
+  /** Su correo ya tiene un hilo con otra persona de la clínica: hay que resolverlo a mano. */
+  "correo_ajeno",
   /** La clínica no tiene un canal conectado por el que llegarle. */
   "sin_conexion",
   /** No escribió hace poco y WhatsApp aún no aprueba el mensaje. */

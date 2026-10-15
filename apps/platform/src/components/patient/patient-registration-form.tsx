@@ -40,6 +40,7 @@ import {
   AlertDescription,
   AlertTitle,
   Button,
+  buttonVariants,
   Checkbox,
   Field,
   FieldError,
@@ -724,15 +725,13 @@ export function PatientRegistrationForm({
                             de registrarla de nuevo.
                           </span>
                           <span className="mt-1 flex flex-wrap items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              nativeButton={false}
-                              render={<a href={`/patients/${selfPatient.id}`} />}
+                            {/* Enlace con aspecto de botón: lleva a la ficha, no es una acción. */}
+                            <a
+                              href={`/patients/${selfPatient.id}`}
+                              className={buttonVariants({ variant: "outline", size: "sm" })}
                             >
                               Ver paciente
-                            </Button>
+                            </a>
                           </span>
                         </AlertDescription>
                       </Alert>
@@ -1292,7 +1291,7 @@ export function PatientRegistrationForm({
                     <form.Field name="registeredBranchId">
                       {(field) => (
                         <SelectRow
-                          label="Sucursal de registro"
+                          label="Sede de registro"
                           value={field.state.value}
                           options={[
                             { value: "", label: "—" },
@@ -1701,7 +1700,7 @@ function ReviewSummary({
   }
   if (mode === "internal" && values.registeredBranchId) {
     rows.push([
-      "Sucursal",
+      "Sede",
       branches?.find((branch) => branch.id === values.registeredBranchId)?.name ??
         values.registeredBranchId,
     ])

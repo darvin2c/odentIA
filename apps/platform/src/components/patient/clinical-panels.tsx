@@ -12,7 +12,7 @@ import {
   DENTAL_MEDICATIONS,
   DOSAGE_FORMS,
 } from "@odentia/clinical"
-import { Badge, Button, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
+import { Badge, Button, buttonVariants, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -625,21 +625,14 @@ function PrescriptionEntry({
         ) : null}
         {prescription.status === "emitida" ? (
           <div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              nativeButton={false}
-              render={
-                <Link
-                  to="/patients/$patientId/prescriptions/$prescriptionId/print"
-                  params={{ patientId, prescriptionId: prescription.id }}
-                  target="_blank"
-                />
-              }
+            <Link
+              to="/patients/$patientId/prescriptions/$prescriptionId/print"
+              params={{ patientId, prescriptionId: prescription.id }}
+              target="_blank"
+              className={buttonVariants({ size: "sm", variant: "outline" })}
             >
               Imprimir
-            </Button>
+            </Link>
           </div>
         ) : null}
         {canWrite && prescription.status === "emitida" ? (

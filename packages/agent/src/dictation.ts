@@ -12,8 +12,8 @@ import {
   ServiceError,
 } from "@odentia/services"
 import { z } from "zod"
-import { createConfiguredChatModel } from "./llm.js"
-import { type AgentRuntime, resolveOrgLlm } from "./run.js"
+import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
+import type { AgentRuntime } from "./run.js"
 
 /**
  * Asistente clínico: convierte lo que el odontólogo dicta en sugerencias para
@@ -245,7 +245,7 @@ export function demoSegment(transcript: string, services: string[], now: Date, p
 /**
  * Ordena un dictado en sugerencias. Lee la configuración y el tarifario de la
  * clínica; no escribe nada. El texto del dictado viaja al proveedor del modelo
- * que la clínica tenga configurado.
+ * que la clínica eligió, con la cuenta de odentIA.
  */
 export async function extractDictation(
   db: Db,
@@ -267,14 +267,14 @@ export async function extractDictation(
   const { spec, services, zone } = await withOrgContext(db, input.orgId, async (tx) => {
     const cfg = await getAgentConfig(tx, input.orgId)
     return {
-      spec: await resolveOrgLlm(tx, input.orgId, cfg, deps),
+      spec: resolveLlmSpec(cfg, deps.platform),
       services: (await getDictationCatalog(tx, input.orgId)).services.map((service) => service.name),
       zone: await getOrgLocale(tx, input.orgId),
     }
   })
   const now = new Date()
   const pending = (input.pending ?? []).slice(0, 40)
-  if (spec.modelName === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending), model: spec.modelName }
+  if (spec.provider === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending), model: spec.modelName }
   // Con dictado en curso, lo nuevo va al final y separado de lo que solo da contexto.
   const context = (input.context ?? "").trim().slice(-600)
   const human =

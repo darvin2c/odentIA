@@ -13,7 +13,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
-import { notFound, validation } from "./errors.js"
+import { branchNotFound, notFound, validation } from "./errors.js"
 import { formatOrgMoney, getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { listServices } from "./service-catalog.js"
@@ -199,7 +199,7 @@ async function requireBranchOfOrg(tx: Db, orgId: string, branchId: string): Prom
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.id, branchId)))
     .limit(1)
-  if (!row) throw notFound("Sede")
+  if (!row) throw branchNotFound()
   return row.name
 }
 
@@ -527,13 +527,26 @@ export function scoreKnowledgeMatch(
   return score
 }
 
-/** Búsqueda sobre lo vigente (lo único que el agente puede citar). */
-export async function searchPublishedKnowledge(tx: Db, orgId: string, q: string, limit = 5): Promise<KnowledgeEntryItem[]> {
+/**
+ * Búsqueda sobre lo vigente (lo único que el agente puede citar). `rankedIds`
+ * pone delante lo que la búsqueda por significado ya encontró, en su orden.
+ */
+export async function searchPublishedKnowledge(
+  tx: Db,
+  orgId: string,
+  q: string,
+  limit = 5,
+  rankedIds: string[] = [],
+): Promise<KnowledgeEntryItem[]> {
   const query = q.trim()
   if (!query) return []
   const active = await listActiveKnowledge(tx, orgId)
+  const ranked = new Map(rankedIds.map((id, index) => [id, index]))
   return active
-    .map((entry) => ({ entry, score: scoreKnowledgeMatch(query, entry) }))
+    .map((entry) => {
+      const position = ranked.get(entry.id)
+      return { entry, score: scoreKnowledgeMatch(query, entry) + (position === undefined ? 0 : 1000 - position) }
+    })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title) || a.entry.id.localeCompare(b.entry.id))
     .slice(0, Math.min(Math.max(limit, 1), 10))
@@ -548,6 +561,8 @@ export interface ClinicInfoSnapshot {
   branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
   services: Array<{ id: string; name: string; code: string | null; specialty: string | null; priceCents: number; currency: string; durationMin: number | null }>
   paymentMethods: Array<{ id: string; name: string; typeCode: string }>
+  /** Medios que la clínica desactivó: se dicen como no aceptados para que el agente no los ofrezca. */
+  refusedPaymentMethods: string[]
   /** Promociones vigentes: el agente las nombra sin inventar precios finales. */
   promotions: Array<{ id: string; name: string; endsAt: string | null }>
 }
@@ -583,7 +598,8 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     .orderBy(asc(branch.name), asc(branch.id))
     .limit(20)
   const { data } = await listServices(tx, orgId, { state: "active", limit: 50 })
-  const methods = await listPaymentMethods(tx, orgId, { activeOnly: true })
+  const allMethods = await listPaymentMethods(tx, orgId, { activeOnly: false })
+  const methods = allMethods.filter((m) => m.isActive)
   const promos = await listClinicPromotionSummaries(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
@@ -600,6 +616,7 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       durationMin: s.durationMin,
     })),
     paymentMethods: methods.map((m) => ({ id: m.id, name: m.name, typeCode: m.typeCode })),
+    refusedPaymentMethods: allMethods.filter((m) => !m.isActive).map((m) => m.name),
     promotions: promos.map((p) => ({ id: p.id, name: p.name, endsAt: p.endsAt ? p.endsAt.toISOString() : null })),
   }
 }
@@ -691,6 +708,8 @@ export function formatKnowledgeForPrompt(
   snapshot: ClinicInfoSnapshot,
   entries: KnowledgeEntryItem[],
   mode?: KnowledgePromptMode,
+  /** Lo que sabe «Informar» (`formatAgentClinicData`): reemplaza la lista simple de servicios. */
+  clinicLines?: string[],
 ): string {
   const lines = [`Clínica: ${snapshot.clinicName}.`]
   if (snapshot.branches.length) {
@@ -702,7 +721,9 @@ export function formatKnowledgeForPrompt(
       lines.push(parts)
     }
   }
-  if (snapshot.services.length) {
+  if (clinicLines) {
+    lines.push(...clinicLines)
+  } else if (snapshot.services.length) {
     lines.push("Servicios y tarifas vigentes (cada importe con su moneda):")
     for (const s of snapshot.services) {
       const price = formatOrgMoney(s.priceCents, s.currency, snapshot)
@@ -717,6 +738,13 @@ export function formatKnowledgeForPrompt(
     lines.push(
       `Medios de pago que acepta la clínica (lista completa; ningún otro): ${snapshot.paymentMethods.map((m) => m.name).join(", ")}.`,
     )
+    if (snapshot.refusedPaymentMethods.length) {
+      lines.push(`La clínica NO acepta: ${snapshot.refusedPaymentMethods.join(", ")}.`)
+    }
+    lines.push("Si preguntan por un medio que no está en esa lista, di que no figura entre los que acepta la clínica.")
+  } else {
+    // Sin medios registrados no se afirma ninguno: ni los habituales ni los que pregunten.
+    lines.push("La clínica no registró sus medios de pago: no digas cuáles acepta; ofrece confirmarlo con el equipo.")
   }
   const active = entries.filter((entry) => entry.state === "vigente")
   if (active.length) {

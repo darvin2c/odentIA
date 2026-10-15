@@ -203,19 +203,18 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     actor: "agente",
     agent: {
       purpose: "seguimiento",
-      does: "retoma la conversación; si no hay conversación, propone abrirla y espera tu aprobación",
-      would: "retomaría la conversación; si no hay conversación, propondría abrirla y esperaría tu aprobación",
-      step: "Retoma la conversación",
-      fallback: "Pasa a una persona",
+      does: "le escribe para retomar la conversación",
+      would: "le escribiría para retomar la conversación",
+      step: "Le escribe",
+      fallback: "Tarea de llamada",
     },
-    // El seguimiento comercial ya deriva a una persona cuando el agente no puede:
-    // esa parte no se apaga por separado.
+    // La tarea va a quien lleva la oportunidad; sin responsable, a recepción.
     team: {
       area: "recepcion",
-      step: "Pasa a una persona",
-      does: "Si no puede, el seguimiento pasa a quien lo lleva",
-      would: "Si no pudiera, el seguimiento pasaría a quien lo lleva",
-      taskTitle: (name) => `Retomar el seguimiento de ${name}`,
+      step: "Tarea de llamada",
+      does: "Queda una tarea de llamada para quien lleva la oportunidad",
+      would: "Quedaría una tarea de llamada para quien lleva la oportunidad",
+      taskTitle: (name) => `Llamar a ${name} para retomar su consulta`,
       toOwner: true,
     },
     permission: "crm.read",
@@ -377,10 +376,10 @@ export function describeLine(
   const { agent, team } = line
   if (!agent || !state.agentPart) return `${state.enabled ? team.does : team.would}.`
   const writes = `El agente Recepción ${say(state.enabled ? agent.does : agent.would, timing)}.`
-  if (line.key === "seguimiento_comercial") return writes
   const notice = "Si no puede, avisa por qué y cómo habilitarlo"
   if (!state.teamPart) return `${writes} ${notice}.`
-  const fallback = `${state.enabled ? "queda" : "quedaría"} una tarea para ${TASK_AREA_LABELS[team.area].team}`
+  const whom = team.toOwner ? "quien lo lleva" : TASK_AREA_LABELS[team.area].team
+  const fallback = `${state.enabled ? "queda" : "quedaría"} una tarea para ${whom}`
   return `${writes} ${notice}, y ${fallback}.`
 }
 

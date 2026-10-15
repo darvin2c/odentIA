@@ -65,8 +65,8 @@ export interface ReviewItem {
   createdAt: string
 }
 
-/** De dónde sale una lección: una corrección, un borrador cambiado al aprobar o una respuesta que se dio por buena. */
-export type LessonOrigin = "correccion" | "borrador_editado" | "respuesta_buena"
+/** De dónde sale una lección: una corrección o una respuesta que se dio por buena. */
+export type LessonOrigin = "correccion" | "respuesta_buena"
 
 export interface LessonItem {
   id: string
@@ -386,11 +386,11 @@ async function toLessonItems(tx: Db, orgId: string, rows: Array<typeof agentLess
         .where(and(eq(agentKnowledgeEntry.organizationId, orgId), inArray(agentKnowledgeEntry.id, entryIds)))
     : []
   const entryById = new Map(entries.map((entry) => [entry.id, { title: entry.title, body: entry.body }]))
-  // De dónde sale: la respuesta revisada dice de qué agente era y si fue un borrador cambiado al aprobar.
+  // De dónde sale: la respuesta revisada dice de qué agente era.
   const reviewIds = rows.map((row) => row.reviewItemId).filter((id): id is string => id !== null)
   const reviews = reviewIds.length
     ? await tx
-        .select({ id: agentReviewItem.id, agent: agentReviewItem.agent, reason: agentReviewItem.reason })
+        .select({ id: agentReviewItem.id, agent: agentReviewItem.agent })
         .from(agentReviewItem)
         .where(and(eq(agentReviewItem.organizationId, orgId), inArray(agentReviewItem.id, reviewIds)))
     : []
@@ -411,7 +411,7 @@ async function toLessonItems(tx: Db, orgId: string, rows: Array<typeof agentLess
       kind: row.kind,
       scope: row.scope,
       agent: row.scope !== "clinica" ? row.scope : (review?.agent ?? "recepcion"),
-      origin: (review?.reason === "editada" ? "borrador_editado" : row.failure === null ? "respuesta_buena" : "correccion") as LessonOrigin,
+      origin: (row.failure === null ? "respuesta_buena" : "correccion") as LessonOrigin,
       contactName: row.conversationId ? (contactByConversation.get(row.conversationId) ?? null) : null,
       title: row.title,
       question: row.question,
@@ -581,64 +581,6 @@ export async function correctAnswer(tx: Db, orgId: string, actorUserId: string, 
     originalReply: item.reply,
     reviewItemId: item.id,
     conversationId: item.conversationId,
-  })
-}
-
-/**
- * El equipo cambió el borrador de un mensaje antes de aprobarlo: el mensaje ya
- * salió con su texto, y aquí queda propuesto guardarlo para la próxima vez.
- */
-export async function proposeLessonFromEditedApproval(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  input: { proposalId: string; conversationId: string | null; originalText: string; editedText: string },
-): Promise<LessonItem | null> {
-  if (normalizeForSearch(input.originalText) === normalizeForSearch(input.editedText)) return null
-  const [trace] = await tx
-    .select()
-    .from(agentAnswerTrace)
-    .where(and(eq(agentAnswerTrace.organizationId, orgId), eq(agentAnswerTrace.proposalId, input.proposalId)))
-    .orderBy(desc(agentAnswerTrace.createdAt))
-    .limit(1)
-  let question = ""
-  let reviewItemId: string | null = null
-  if (trace) {
-    if (trace.triggerMessageId) {
-      const [asked] = await tx
-        .select({ body: message.body })
-        .from(message)
-        .where(and(eq(message.organizationId, orgId), eq(message.id, trace.triggerMessageId)))
-        .limit(1)
-      question = asked?.body ?? ""
-    }
-    const [item] = await tx
-      .insert(agentReviewItem)
-      .values({
-        organizationId: orgId,
-        agent: trace.agent,
-        conversationId: trace.conversationId,
-        traceId: trace.id,
-        reason: "editada",
-        question: question.slice(0, 2000),
-        reply: input.originalText.slice(0, 4000),
-        teamReply: input.editedText.slice(0, 4000),
-        status: "corregida",
-        decidedBy: actorUserId,
-        decidedAt: new Date(),
-      })
-      .onConflictDoNothing({ target: [agentReviewItem.organizationId, agentReviewItem.traceId] })
-      .returning({ id: agentReviewItem.id })
-    reviewItemId = item?.id ?? null
-  }
-  return insertLesson(tx, orgId, actorUserId, {
-    agent: trace?.agent ?? "recepcion",
-    failure: "falto_dato",
-    question,
-    corrected: input.editedText.slice(0, LESSON_BODY_CHARS),
-    originalReply: input.originalText,
-    reviewItemId,
-    conversationId: input.conversationId,
   })
 }
 

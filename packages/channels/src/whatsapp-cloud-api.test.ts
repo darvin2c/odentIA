@@ -251,6 +251,41 @@ it("una solicitud que Meta rechaza dice el motivo de Meta", async () => {
   ).rejects.toThrow("(#200) Permissions error")
 })
 
+const SIN_FORMA_DE_PAGO =
+  "WhatsApp no envió el mensaje porque la cuenta de WhatsApp de la clínica no tiene una forma de pago. Agrégala en Meta (Configuración de pagos de WhatsApp Business) y vuelve a intentarlo."
+
+it("un envío rechazado porque la cuenta no tiene forma de pago lo dice en palabras", async () => {
+  const { fetch } = fakeFetch({
+    status: 400,
+    json: {
+      error: {
+        message: "(#131042) Business eligibility payment issue",
+        type: "OAuthException",
+        code: 131042,
+        error_data: { messaging_product: "whatsapp", details: "There was an error related to your payment method." },
+      },
+    },
+  })
+  const sent = whatsappCloudApiAdapter.sendMessage(fx.config, { to: "wa:1", kind: { type: "text", text: "Hola" } }, { fetch })
+  await expect(sent).rejects.toThrow(SIN_FORMA_DE_PAGO)
+  await expect(sent).rejects.not.toThrow(/payment/i)
+})
+
+it("el aviso de un envío fallido trae el motivo: en palabras si se conoce, con su código si no", () => {
+  const failed = (id: string, error: unknown) => ({ id, status: "failed", timestamp: "1760000000", errors: [error] })
+  const result = parse({
+    metadata: { phone_number_id: "PNID" },
+    statuses: [
+      failed("wamid.PAGO", { code: 131042, title: "Business eligibility payment issue" }),
+      failed("wamid.OTRO", { code: 131026, title: "Message undeliverable" }),
+    ],
+  })
+  expect(result.statuses).toEqual([
+    { externalMessageId: "wamid.PAGO", status: "failed", error: SIN_FORMA_DE_PAGO },
+    { externalMessageId: "wamid.OTRO", status: "failed", error: "131026: Message undeliverable" },
+  ])
+})
+
 it("un aviso de cambio de estado de plantilla no se confunde con un mensaje", () => {
   const result = parse(
     { event: "REJECTED", message_template_id: 950, message_template_name: "odentia_seguimiento_presupuesto_v1", message_template_language: "es", reason: "ABUSIVE_CONTENT" },

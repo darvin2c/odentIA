@@ -420,6 +420,26 @@ it("applyStatus actualiza por externalId", async () => {
   expect(await withOrgContext(appDb, "org_a", (tx) => applyStatus(tx, "org_a", []))).toBe(0)
 })
 
+it("applyStatus guarda el motivo de un envío fallido tal como lo dice el adaptador", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  const { conversationId } = await ingest(
+    "org_a",
+    connId,
+    textEvent({ externalEventId: "evt-fail", externalMessageId: "ext-fail", externalThreadId: "tg:998" }),
+  )
+  const out = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "hola" } }),
+  )
+  await ownerDb.execute(sql`update "message" set "external_id" = 'wamid.fail' where "id" = ${out.id}::uuid`)
+  const reason =
+    "WhatsApp no envió el mensaje porque la cuenta de WhatsApp de la clínica no tiene una forma de pago. Agrégala en Meta (Configuración de pagos de WhatsApp Business) y vuelve a intentarlo."
+  await withOrgContext(appDb, "org_a", (tx) =>
+    applyStatus(tx, "org_a", [{ externalMessageId: "wamid.fail", status: "failed", error: reason }]),
+  )
+  const messages = await withOrgContext(appDb, "org_a", (tx) => listMessages(tx, "org_a", conversationId, {}))
+  expect(messages.items.find((m) => m.id === out.id)).toMatchObject({ status: "failed", error: reason })
+})
+
 it("ingesta con conexión inexistente falla", async () => {
   await expect(
     ingest(

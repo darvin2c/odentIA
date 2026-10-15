@@ -20,7 +20,6 @@ const unusedStorage: Storage = {
 }
 
 it.each([
-  { endpoint: "decision", body: { decision: "aprobada" } },
   { endpoint: "execute", body: undefined },
   { endpoint: "confirm", body: { contactId: randomUUID() } },
 ])("la pérdida real de conexión en $endpoint llega al manejador global, no a un 404", async ({ endpoint, body }) => {
@@ -46,7 +45,7 @@ it.each([
   })
   app.route("/agent", createAgentOpsRoute({
     db: drizzle(client, { schema }), storage: unusedStorage, secretsKey: secretsKeyFromEnv("ee".repeat(32)),
-    validateExternal: false, webhookBaseUrl: "https://api.example.test", llm: { modelName: "fake" },
+    validateExternal: false, webhookBaseUrl: "https://api.example.test", llm: { fake: true },
   }))
   try {
     const response = await app.request(`/agent/proposals/${randomUUID()}/${endpoint}`, {

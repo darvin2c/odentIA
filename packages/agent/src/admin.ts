@@ -1,8 +1,7 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import { type AdminDecider, getAgentConfig, type TickDeps } from "@odentia/services"
 import { createDecisionModel, DecisionError, type DecisionModel, type DecisionQuestion, type PlatformDecisions } from "./decision/index.js"
-import type { PlatformLlm } from "./llm.js"
-import { resolveOrgLlm } from "./run.js"
+import { type PlatformLlm, resolveLlmSpec } from "./llm.js"
 
 /**
  * El modelo del Administrador. Solo decide entre opciones cerradas: de qué
@@ -25,9 +24,9 @@ export interface AdminModelDeps {
 export async function createAdminDecisionModel(db: Db, deps: AdminModelDeps, orgId: string): Promise<DecisionModel | null> {
   const { provider, spec } = await withOrgContext(db, orgId, async (tx) => {
     const cfg = await getAgentConfig(tx, orgId)
-    return { provider: cfg.decisionProvider, spec: await resolveOrgLlm(tx, orgId, cfg, deps) }
+    return { provider: cfg.decisionProvider, spec: resolveLlmSpec(cfg, deps.platform) }
   })
-  if (spec.source === "fake") return null
+  if (spec.provider === "fake") return null
   const platform = deps.decisions ?? {}
   if (provider === "none" || provider === "baseline") return createDecisionModel("baseline", platform, spec)
   try {

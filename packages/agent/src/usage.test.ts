@@ -126,7 +126,7 @@ beforeAll(async () => {
   const checkpointer = PostgresSaver.fromConnString(ownerUri)
   await checkpointer.setup()
   await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { modelName: "fake", allowInsecureBaseUrl: true }, secretsKey: KEY }
+  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY }
   connectionId = (
     await withOrgContext(appDb, ORG, (tx) =>
       createConnection(tx, ORG, KEY, { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } }, { fetch, validateExternal: false }))
@@ -249,7 +249,8 @@ it("una palabra de derivación en medio de la ráfaga deriva sin llamar al model
     expect(await run(model, first.conversationId, first.messageId)).toBe("done")
     expect(model.calls).toHaveLength(0)
     expect(await ledgerOf(first.conversationId)).toEqual(["handoff"])
-    expect(await repliesOf(first.conversationId)).toHaveLength(0)
+    // Sin modelo, pero la persona recibe el aviso fijo de que sigue una persona (ADR 0024).
+    expect(await repliesOf(first.conversationId)).toHaveLength(1)
   } finally {
     await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { handoffKeywords: [] }))
   }

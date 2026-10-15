@@ -8,7 +8,7 @@ import { type ReactNode, useState } from "react"
 import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
-import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, LEVEL_LABEL, PROVIDER_PROBLEM } from "../../lib/agent"
+import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, PROVIDER_PROBLEM } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
@@ -140,7 +140,7 @@ function AgentSummaryPage() {
 
   if (!canRead) {
     // No es un error: la sección existe y esta persona no la administra. Quien
-    // decide por el agente conserva sus aprobaciones, y aquí tiene cómo llegar.
+    // decide por el agente conserva sus pendientes, y aquí tiene cómo llegar.
     return (
       <PageShell className="flex flex-col gap-6">
         <PageHeader title="Agente" />
@@ -148,8 +148,8 @@ function AgentSummaryPage() {
         <EmptyState
           icon={Lock}
           title="No tienes acceso a esta sección"
-          description={`Pídelo a quien administra la clínica.${canDecide ? " Tus aprobaciones siguen en su pestaña." : ""}`}
-          {...(canDecide ? { actionLabel: "Ir a Aprobaciones", onAction: () => void navigate({ to: "/agent/approvals" }) } : {})}
+          description={`Pídelo a quien administra la clínica.${canDecide ? " Tus pendientes siguen en su pestaña." : ""}`}
+          {...(canDecide ? { actionLabel: "Ir a Pendientes", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
         />
       </PageShell>
     )
@@ -177,12 +177,12 @@ function AgentSummaryPage() {
               action={
                 canWrite ? (
                   <Link to="/settings/integrations/model" className={outlineLink}>
-                    Revisar el proveedor
+                    Cambiar de modelo
                   </Link>
                 ) : null
               }
             >
-              {PROVIDER_PROBLEM[overview.provider.problem]} Los mensajes nuevos están pasando a tu equipo.
+              {PROVIDER_PROBLEM[overview.provider.problem]}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
               {canWrite ? "" : " Avisa a quien administra la clínica."}
             </SummaryNotice>
@@ -216,10 +216,10 @@ function AgentSummaryPage() {
             <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
               <NeedTile
                 count={overview.needsYou.approvals}
-                title="Aprobaciones"
-                pending="Esperan tu visto bueno."
-                done="Nada espera tu aprobación."
-                to="/agent/approvals"
+                title="Pendientes"
+                pending="Casos que el agente pasó a tu equipo."
+                done="Ningún caso espera a una persona."
+                to="/agent/pendientes"
               />
               <NeedTile
                 count={overview.needsYou.review}
@@ -293,7 +293,7 @@ function AgentSummaryPage() {
                           <span className="font-semibold">{role.name}</span>
                           <span className={cn("text-sm", on ? "font-bold text-success" : "text-muted-foreground")}>
                             {on
-                              ? `Encendido${isReception ? ` · nivel ${LEVEL_LABEL[overview.level]}` : ""}`
+                              ? "Encendido"
                               : canWrite
                                 ? "Apagado · ver y encender"
                                 : "Apagado · ver"}
@@ -318,8 +318,8 @@ function AgentSummaryPage() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {isReception && on
-                            ? `Nivel ${LEVEL_LABEL[overview.level]} · ${
-                                channels.length ? channels.map((channel) => channelLabel(channel)).join(", ") : "sin canal conectado"
+                            ? `Responde por ${
+                                channels.length ? channels.map((channel) => channelLabel(channel)).join(", ") : "ningún canal: falta conectar uno"
                               }`
                             : role.id === "administrador" && on && admin
                               ? adminSummary(admin)

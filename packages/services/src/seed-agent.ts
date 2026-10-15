@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agentKnowledgeEntry, agentKnowledgeGap, agentKnowledgeRevision, agentLesson, agentPersonFact, agentPolicy, agentProposal, agentReviewItem, agentRunLedger, agentTestCase } from "@odentia/db/schema/agent"
+import { agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agentKnowledgeEntry, agentKnowledgeGap, agentKnowledgeRevision, agentLesson, agentPersonFact, agentProposal, agentReviewItem, agentRunLedger, agentTestCase } from "@odentia/db/schema/agent"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
@@ -16,8 +16,8 @@ const lima = (dayOffset: number, hhmm: string): string => {
 }
 
 /**
- * Seed del dominio IA: FAQs publicadas deterministas, una en borrador y la
- * política de autonomía por defecto. Idempotente por ids fijos.
+ * Seed del dominio IA: FAQs publicadas deterministas y una en borrador.
+ * Idempotente por ids fijos.
  */
 export async function seedAgent(
   tx: Db,
@@ -101,14 +101,7 @@ export async function seedAgent(
       })
       .onConflictDoNothing({ target: [agentKnowledgeRevision.entryId, agentKnowledgeRevision.version] })
   }
-  await tx
-    .insert(agentPolicy)
-    .values({ organizationId: orgId, modes: {
-      enviar_mensaje: "aprobar_equipo", mover_oportunidad: "aprobar_equipo",
-      crear_oportunidad: "aprobar_equipo", actualizar_seguimiento: "aprobar_equipo",
-      cerrar_oportunidad: "aprobar_equipo",
-    }, updatedBy: ownerUserId })
-    .onConflictDoNothing({ target: agentPolicy.organizationId })
+  // Sin política propia: rige la fija (ADR 0021).
 
   // Propuestas pendientes, derivación y corridas para el home y el pulso en
   // dev. Idempotente por ids fijos; sin conversación semilla no hay nada que

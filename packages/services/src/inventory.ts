@@ -28,7 +28,13 @@ import {
 import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNotNull, lte, or, sql } from "drizzle-orm"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  branchNotFound,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
@@ -134,7 +140,7 @@ async function requireBranch(tx: Db, orgId: string, id: string) {
       and(eq(branch.organizationId, orgId), eq(branch.id, id), eq(branch.isActive, true)),
     )
     .limit(1)
-  if (!row) throw notFound("Sucursal")
+  if (!row) throw branchNotFound()
   return row
 }
 

@@ -8,7 +8,7 @@
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
 import { formatMoney } from "@odentia/clinical"
-import { Badge, Button, Field, FieldLabel, Skeleton, Textarea } from "@odentia/ui"
+import { Badge, Button, buttonVariants, cn, Field, FieldLabel, Skeleton, Textarea } from "@odentia/ui"
 import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -421,20 +421,14 @@ export function TicketView({
       {!inAccount || (!voided && canVoid) ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
           {!inAccount ? (
-            <Button
-              variant="link"
-              className="h-auto min-w-0 whitespace-normal px-0 text-left"
-              nativeButton={false}
-              render={
-                <Link
-                  to="/patients/$patientId"
-                  params={{ patientId: ticket.patientId }}
-                  search={{ tab: "cuenta" }}
-                />
-              }
+            <Link
+              to="/patients/$patientId"
+              params={{ patientId: ticket.patientId }}
+              search={{ tab: "cuenta" }}
+              className={cn(buttonVariants({ variant: "link" }), "h-auto min-w-0 whitespace-normal px-0 text-left")}
             >
               Abrir la cuenta de {person}
-            </Button>
+            </Link>
           ) : (
             <span />
           )}

@@ -90,15 +90,15 @@ export function createCrmNote(
 export function agentStateLabel(state: CrmAgentState): string {
   switch (state) {
     case "agent":
-      return "Atiende el agente"
+      return "La atiende el agente"
     case "human":
-      return "Atiende recepción"
+      return "Con el equipo"
     case "approval":
-      return "Requiere aprobación"
+      return "Espera al paciente"
     case "handoff":
-      return "Necesita al equipo"
+      return "Con el equipo · caso derivado"
     case "closed":
-      return "Conversación cerrada"
+      return "Cerrada"
   }
 }
 
@@ -110,14 +110,14 @@ export function agentStateDescription(agent: CrmAgentStatus): string {
       return "El agente responde los mensajes entrantes."
     case "human":
       return agent.enabled
-        ? "El agente está activo, pero este hilo lo atiende una persona."
-        : "El agente está pausado para este hilo."
+        ? "La atiende una persona: el agente no responde en este hilo."
+        : "El agente está apagado para este hilo."
     case "approval":
-      return `Hay ${agent.pendingProposalIds.length} propuesta(s) del agente esperando decisión.`
+      return `Hay ${agent.pendingProposalIds.length} propuesta(s) del agente esperando la confirmación del interlocutor.`
     case "handoff":
       return "El agente derivó el caso al equipo."
     case "closed":
-      return "El hilo está cerrado; reábrelo para continuar."
+      return "Si le escribes, la conversación se vuelve a abrir."
   }
 }
 
@@ -128,17 +128,15 @@ export function agentStateDescription(agent: CrmAgentStatus): string {
 export function agentNextSteps(agent: CrmAgentStatus): string[] {
   switch (agent.state) {
     case "approval":
-      return ["Revisa la propuesta del agente", "Aprueba o rechaza con motivo"]
+      return ["Revisa lo que propuso el agente", "Si confirmó en el chat, registra su confirmación"]
     case "handoff":
-      return ["Lee el motivo de la derivación", "Toma la atención y responde"]
+      return ["Lee el motivo de la derivación", "Tómala y responde"]
     case "human":
-      return agent.enabled
-        ? ["Responde el mensaje pendiente", "Devuelve al agente cuando termines"]
-        : ["Responde el mensaje pendiente", "Reactiva al agente cuando termines"]
+      return ["Responde el mensaje pendiente", "Al terminar, resuélvela o devuélvela al agente"]
     case "agent":
       return ["Supervisa; interviene solo si el caso lo pide"]
     case "closed":
-      return ["Reabre la conversación para continuar"]
+      return ["Si escribe de nuevo, la atiende el agente"]
   }
 }
 

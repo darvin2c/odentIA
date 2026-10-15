@@ -218,8 +218,22 @@ function readAmount(raw: string): number[] {
 }
 
 interface Mention<T> {
+  /** Dónde empieza en el texto. */
+  index?: number
   raw: string
   value: T
+}
+
+/**
+ * Un importe anunciado como mínimo («desde S/ 2 500», «a partir de…»): el
+ * precio final sale de la evaluación y nunca se dice como si fuera el precio.
+ */
+const MINIMUM_CUE = /(?:desde|a partir de|minimo de|como minimo)\s*[^\d\s]{0,4}\s*$/
+const CUE_WINDOW = 24
+
+/** ¿Lo que precede a la posición anuncia un mínimo? */
+function cuedAsMinimum(text: string, index: number): boolean {
+  return MINIMUM_CUE.test(plain(text.slice(Math.max(0, index - CUE_WINDOW), index)))
 }
 
 function blank(text: string, start: number, length: number): string {
@@ -233,7 +247,7 @@ function extractAmounts(text: string, pattern: RegExp): { mentions: Mention<numb
   for (const match of text.matchAll(pattern)) {
     const number = match[1] ?? match[2]
     if (!number) continue
-    mentions.push({ raw: match[0].trim(), value: readAmount(number) })
+    mentions.push({ raw: match[0].trim(), value: readAmount(number), index: match.index })
     rest = blank(rest, match.index, match[0].length)
   }
   return { mentions, rest }
@@ -350,6 +364,8 @@ function zonedParts(date: Date, timeZone: string): { day: number; month: number;
 interface SourceFacts {
   source: string
   amounts: Set<number>
+  /** Importes que la fuente da como precio y no solo como mínimo. */
+  exact: Set<number>
   times: Set<number>
   /** Claves `día-mes` y, para fechas sin mes, `día-*`. */
   dates: Set<string>
@@ -365,6 +381,7 @@ const INTERNAL_ID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 function factsOf(item: Evidence, timeZone: string): SourceFacts {
   const text = normalize(item.text).replace(INTERNAL_ID, (id) => " ".repeat(id.length))
   const amounts = new Set<number>()
+  const exact = new Set<number>()
   const times = new Set<number>()
   const dates = new Set<string>()
   const zones = new Set<string>([timeZone, ...(text.match(ZONE_NAME) ?? [])])
@@ -392,8 +409,14 @@ function factsOf(item: Evidence, timeZone: string): SourceFacts {
     }
   }
   for (const mention of extractTimes(rest).mentions) for (const value of mention.value) times.add(value)
-  for (const match of rest.matchAll(ANY_NUMBER)) for (const reading of readAmount(match[0])) amounts.add(reading)
-  return { source: item.source, amounts, times, dates }
+  for (const match of rest.matchAll(ANY_NUMBER)) {
+    const minimum = cuedAsMinimum(rest, match.index)
+    for (const reading of readAmount(match[0])) {
+      amounts.add(reading)
+      if (!minimum) exact.add(reading)
+    }
+  }
+  return { source: item.source, amounts, exact, times, dates }
 }
 
 /** ¿Algún subconjunto de dos o más importes suma exactamente el objetivo? */
@@ -435,7 +458,12 @@ export function verifyReply(
   zone: { timezone: string; currency?: string | null; locale?: string | null },
   now: Date = new Date(),
 ): ReplyVerdict {
-  const sources = evidence.filter((item) => item.text.trim()).map((item) => factsOf(item, zone.timezone))
+  // Lo consultado en el turno llega después de lo fijo del prompt y es lo más
+  // específico (un hueco de agenda antes que el horario de la sede): se mira primero.
+  const sources = evidence
+    .filter((item) => item.text.trim())
+    .map((item) => factsOf(item, zone.timezone))
+    .reverse()
   const checks: FactCheck[] = []
   const text = normalize(reply)
 
@@ -445,7 +473,16 @@ export function verifyReply(
   for (const mention of amounts.mentions) {
     const found = sources.find((source) => mention.value.some((reading) => source.amounts.has(reading)))
     if (found) {
-      supportedAmounts.push(mention.value.find((reading) => found.amounts.has(reading)) ?? 0)
+      const reading = mention.value.find((value) => found.amounts.has(value)) ?? 0
+      // Un mínimo («desde») dicho como precio final no sale: el precio lo define la evaluación.
+      // Basta con que una fuente lo dé como mínimo: que el mismo número aparezca suelto en
+      // otra (lo que escribió la persona, una hora, una duración) no lo vuelve precio final.
+      const minimum = sources.some((source) => source.amounts.has(reading) && !source.exact.has(reading))
+      if (minimum && !cuedAsMinimum(text, mention.index ?? 0)) {
+        checks.push({ kind: "precio", value: `${mention.raw} (es un mínimo: dilo con «desde»)`, ok: false, source: found.source })
+        continue
+      }
+      supportedAmounts.push(reading)
       checks.push({ kind: "precio", value: mention.raw, ok: true, source: found.source })
     } else {
       pendingAmounts.push(mention)
@@ -494,4 +531,26 @@ export function verifyReply(
 export function describeUnsupported(verdict: ReplyVerdict): string {
   const label: Record<FactKind, string> = { precio: "precio", hora: "hora", fecha: "fecha" }
   return verdict.unsupported.map((check) => `${label[check.kind]} «${check.value}»`).join(", ")
+}
+
+/** Palabras que niegan lo que dice la frase: «no aceptamos transferencia», «ni cheque», «sin tarjeta». */
+const NEGATION = /\b(?:no|ni|sin|nunca|tampoco|not|no longer|don't|doesn't)\b/
+
+/**
+ * Medios de pago que la clínica tiene desactivados y la respuesta ofrece como
+ * si se aceptaran: una frase que los nombra sin negarlos. Es por forma, no por
+ * significado: decir «no aceptamos transferencia» pasa; «aceptamos tarjeta y
+ * transferencia», no. Solo mira los nombres que la clínica registró, nunca una
+ * lista propia de medios.
+ */
+export function refusedPaymentMentions(text: string, refused: readonly string[]): string[] {
+  const sentences = plain(text).split(/(?<=[.!?;\n])|(?=[¿¡])/)
+  const found: string[] = []
+  for (const name of refused) {
+    const wanted = plain(name).trim()
+    if (!wanted) continue
+    const pattern = new RegExp(`\\b${wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+    if (sentences.some((sentence) => pattern.test(sentence) && !NEGATION.test(sentence))) found.push(name)
+  }
+  return found
 }

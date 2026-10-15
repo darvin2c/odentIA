@@ -1,4 +1,4 @@
-import { toast } from "@odentia/ui"
+import { Button, toast } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
 import { useState } from "react"
 import { DemoFields, demoSubmit, useDemoWizard } from "../story-fixtures.js"
@@ -83,6 +83,40 @@ export const Wizard: Story = {
       >
         {wizard.body}
       </FormDrawer>
+    )
+  },
+}
+
+/**
+ * Con cambios sin guardar, Cancelar, Esc o el clic fuera preguntan con la
+ * confirmación propia: «Continuar editando» deja el cajón como estaba y
+ * «Descartar y salir» lo cierra. Sin cambios, cierra directo.
+ */
+export const CambiosSinGuardar: Story = {
+  render: function UnsavedStory() {
+    const [open, setOpen] = useState(true)
+    const [dirty, setDirty] = useState(false)
+    return (
+      <div className="p-6">
+        <Button type="button" onClick={() => setOpen(true)}>
+          Abrir formulario
+        </Button>
+        <FormDrawer
+          open={open}
+          title="Editar sucursal"
+          description="Escribe en un campo y luego intenta cerrar."
+          isDirty={dirty}
+          onClose={() => {
+            setOpen(false)
+            setDirty(false)
+          }}
+          onSubmit={demoSubmit}
+        >
+          <div onInput={() => setDirty(true)}>
+            <DemoFields />
+          </div>
+        </FormDrawer>
+      </div>
     )
   },
 }

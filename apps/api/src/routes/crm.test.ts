@@ -78,7 +78,7 @@ function buildApp(role: string): Hono {
   app.route("/contacts", createContactsRoute(deps))
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
-  const llm = { modelName: "fake", allowInsecureBaseUrl: true }
+  const llm = { fake: true }
   app.route("/agent/learning", createAgentLearningRoute({ ...deps, llm }))
   app.route("/agent", createAgentRoute({ ...deps, llm }))
   app.route("/agent", createAgentOpsRoute({ ...deps, llm }))
@@ -167,7 +167,6 @@ afterAll(async () => {
 })
 
 it.each([
-  { endpoint: "decision", body: { decision: "aprobada" } },
   { endpoint: "execute", body: undefined },
   { endpoint: "confirm", body: { contactId: randomUUID() } },
 ])("una propuesta ausente conserva 404 en $endpoint", async ({ endpoint, body }) => {
@@ -180,7 +179,16 @@ it.each([
   expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } })
 })
 
-it("la API no crea propuestas sin conversación: el trabajo proactivo nace solo del tick", async () => {
+it("ninguna propuesta espera al equipo: no hay ruta para aprobarla o rechazarla", async () => {
+  const response = await buildApp("owner").request(`/agent/proposals/${randomUUID()}/decision`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision: "aprobada" }),
+  })
+  expect(response.status).toBe(404)
+})
+
+it("la API no crea propuestas sin conversación: el agente no abre hilos por su cuenta", async () => {
   const response = await buildApp("owner").request("/agent/proposals", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -328,6 +336,24 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
     body: JSON.stringify({ enabled: true }),
   })
   expect(put.status).toBe(200)
+  // El modelo es uno de los dos de odentIA; la clínica ya no trae proveedor ni lo prueba.
+  const chosen = await app.request("/agent/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ llm: "claude_5_5" }),
+  })
+  expect(chosen.status).toBe(200)
+  const chosenBody = (await chosen.json()) as { data: Record<string, unknown> }
+  expect(chosenBody.data.llm).toBe("claude_5_5")
+  expect(Object.keys(chosenBody.data).filter((key) => /model|baseurl|apikey/i.test(key))).toEqual([])
+  const unknown = await app.request("/agent/config", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ llm: "gpt-4o" }),
+  })
+  expect(unknown.status).toBe(400)
+  const probe = await app.request("/agent/config/llm/test", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+  expect(probe.status).toBe(404)
   const member = buildApp("member")
   const forbidden = await member.request("/agent/config", {
     method: "PUT",
@@ -358,20 +384,22 @@ it("tareas y campos van de punta a punta", async () => {
   expect(((await fields.json()) as { data: unknown[] }).data).toHaveLength(1)
 })
 
-it("etapas y campos: los lee quien trabaja con ventas, los define quien configura la clínica", async () => {
+it("etapas y campos: los lee y los define quien trabaja con ventas; quien atiende, no", async () => {
   const json = { "content-type": "application/json" }
   const reception = buildApp("reception")
-  // Recepción los necesita en el tablero y en la ficha del contacto…
+  const dentist = buildApp("dentist")
+  // Recepción los usa en el tablero y en la ficha del contacto, y también los define: es trabajo diario de ventas.
   expect((await reception.request("/pipelines")).status).toBe(200)
   expect((await reception.request("/fields")).status).toBe(200)
-  // …pero definirlos es configurar: la misma regla que abre su apartado en Configuración.
   for (const [path, body] of [
     ["/pipelines", { name: "Otro" }],
     ["/fields", { label: "Origen", type: "text" }],
   ] as const) {
-    const denied = await reception.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
+    const denied = await dentist.request(path, { method: "POST", headers: json, body: JSON.stringify(body) })
     expect(denied.status, path).toBe(403)
   }
+  const byReception = await reception.request("/fields", { method: "POST", headers: json, body: JSON.stringify({ label: "Canal preferido", type: "text" }) })
+  expect(byReception.status).toBe(201)
 
   const owner = buildApp("owner")
   // Solo se escribe el nombre: la clave la genera el servidor.
@@ -392,7 +420,7 @@ it("etapas y campos: los lee quien trabaja con ventas, los define quien configur
 
   // Un campo se edita: nombre y opciones; la clave no cambia.
   const edit = { label: "Origen", options: ["Redes", "Recomendación"] }
-  const refused = await reception.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
+  const refused = await dentist.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
   expect(refused.status).toBe(403)
   const edited = await owner.request(`/fields/${field.id}`, { method: "PATCH", headers: json, body: JSON.stringify(edit) })
   expect(edited.status).toBe(200)
@@ -401,10 +429,10 @@ it("etapas y campos: los lee quien trabaja con ventas, los define quien configur
   const pipelines = ((await (await owner.request("/pipelines")).json()) as { data: { id: string; stages: { id: string }[] }[] }).data
   const stageId = pipelines[0]?.stages[0]?.id ?? ""
   const rename = { method: "PATCH", headers: json, body: JSON.stringify({ name: "Recién llegado" }) }
-  expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
-  expect((await owner.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
+  expect((await dentist.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(403)
+  expect((await reception.request(`/pipelines/stages/${stageId}`, rename)).status).toBe(200)
 
-  expect((await reception.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
+  expect((await dentist.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(403)
   expect((await owner.request(`/fields/${field.id}`, { method: "DELETE" })).status).toBe(200)
 })
 
@@ -659,7 +687,7 @@ it("conversaciones: identidad manual y directa con restricciones de canal", asyn
   expect(((await waReuse.json()) as { data: { created: boolean } }).data.created).toBe(false)
 })
 
-it("fichas, resumen, nivel y prueba del agente", async () => {
+it("fichas, resumen y prueba del agente", async () => {
   const app = buildApp("owner")
   const member = buildApp("member")
   const json = { "content-type": "application/json" }
@@ -667,29 +695,25 @@ it("fichas, resumen, nivel y prueba del agente", async () => {
   const roles = await app.request("/agent/roles")
   expect(roles.status).toBe(200)
   const fichas = (await roles.json()) as {
-    data: { principles: string[]; roles: { id: string; available: boolean }[]; levels: { id: string }[] }
+    data: { principles: string[]; roles: { id: string; available: boolean }[]; levels?: unknown }
   }
   expect(fichas.data.roles.map((role) => role.id)).toEqual(["recepcion", "asistente_clinico", "administrador", "ayuda"])
-  expect(fichas.data.levels.map((level) => level.id)).toEqual(["supervisado", "equilibrado", "autonomo"])
+  // Sin niveles (ADR 0021): quién confirma cada acción es fijo.
+  expect(fichas.data.levels).toBeUndefined()
   expect(fichas.data.principles.length).toBeGreaterThan(0)
   expect((await member.request("/agent/roles")).status).toBe(403)
 
-  // El nivel es una política completa: fijarlo cambia lo que dice el resumen.
-  const level = await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "supervisado" }) })
-  expect(level.status).toBe(200)
-  const unknown = await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "total" }) })
-  expect(unknown.status).toBe(400)
-  const denied = await member.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "autonomo" }) })
-  expect(denied.status).toBe(403)
+  // Ni nivel ni política se cambian por la API.
+  expect((await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "supervisado" }) })).status).toBe(404)
+  expect((await app.request("/agent/policy", { method: "PUT", headers: json, body: JSON.stringify({ enviar_mensaje: "aprobar_equipo" }) })).status).toBe(404)
 
   // El resumen cuenta «hoy» en la zona de la clínica: necesita su perfil.
   await ownerDb.execute(
     sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
   )
   const before = (await (await app.request("/agent/overview")).json()) as {
-    data: { level: string; readiness: { channels: string[]; sandboxTurns: number } }
+    data: { readiness: { channels: string[]; sandboxTurns: number } }
   }
-  expect(before.data.level).toBe("supervisado")
   expect(before.data.readiness.channels).toContain("whatsapp")
   expect((await member.request("/agent/overview")).status).toBe(403)
 
@@ -746,10 +770,6 @@ it("aprender: lectura, corrección y aprobación piden permisos distintos y vali
   }
   expect((await post(app, `/agent/learning/lessons/${trace}/approve`)).status).toBe(404)
   expect((await post(app, `/agent/learning/lessons/${trace}/preview`)).status).toBe(404)
-
-  // Editar el texto solo vale al aprobar un mensaje.
-  const rejected = await post(app, `/agent/proposals/${randomUUID()}/decision`, { decision: "aprobada", editedText: "" })
-  expect(rejected.status).toBe(400)
 })
 
 it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y la prueba piden administrar", async () => {
@@ -761,7 +781,7 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(wa).toMatchObject({
     webhookVerifiedAt: null,
     health: null,
-    messages: { aprobados: 0, enRevision: 6, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 0 },
+    messages: { aprobados: 0, enRevision: 7, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 0 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -816,6 +836,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["recordatorio_cita", "agente"],
     ["recordatorio_control", "agente"],
     ["seguimiento_presupuesto", "agente"],
+    ["seguimiento_comercial", "agente"],
     ["seguimiento_no_asistencia", "agente"],
     ["cita_cancelada", "agente"],
     ["retomar_conversacion", "bandeja"],
@@ -858,7 +879,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(6)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(7)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {
@@ -914,4 +935,78 @@ it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje
   await ownerDb.execute(
     sql`update "conversation" set "last_inbound_at" = now() where "id" = ${conversationId}::uuid`,
   )
+})
+
+it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin resolver (ADR 0024)", async () => {
+  await ownerDb.execute(sql`insert into "user" ("id", "name", "email", "email_verified", "created_at", "updated_at")
+    values ('u-1', 'Dueña', 'u1@example.com', true, now(), now()) on conflict do nothing`)
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+    values ('m-u-1', 'org_a', 'u-1', 'owner', now()) on conflict do nothing`)
+  const app = buildApp("owner")
+  const json = { "content-type": "application/json" }
+  for (const view of ["human", "approval", "handoff"]) {
+    expect((await app.request(`/conversations?view=${view}`)).status).toBe(400)
+  }
+  expect((await app.request("/conversations?status=archivada")).status).toBe(400)
+  expect((await app.request("/conversations?view=awaiting_patient")).status).toBe(200)
+  const summary = (await (await app.request("/conversations/summary")).json()) as { data: Record<string, number> }
+  expect(Object.keys(summary.data).sort()).toEqual(["awaitingPatient", "closed", "open", "team", "unanswered"])
+
+  const ingested = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: waConnId,
+        event: {
+          externalEventId: "wamid.cierre",
+          externalMessageId: "wamid.cierre",
+          externalThreadId: "wa:520",
+          senderExternalId: "wa:520",
+          senderDisplayName: "Marta Salas",
+          content: { type: "text", text: "Muchas gracias" },
+          sentAt: new Date().toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const id = ingested.conversationId
+  expect((await app.request(`/conversations/${id}/take`, { method: "POST" })).status).toBe(200)
+  const taken = (await (await app.request(`/conversations/${id}`)).json()) as { data: { conversation: { agentStatus: string }; attention: { assignedName: string | null; unanswered: boolean }; closure: unknown } }
+  expect(taken.data.conversation.agentStatus).toBe("off")
+  expect(taken.data.attention).toMatchObject({ assignedName: "Dueña", unanswered: true })
+  expect(taken.data.closure).toBeNull()
+  expect((await app.request(`/conversations/${id}/release`, { method: "POST" })).status).toBe(200)
+
+  const preview = (await (await app.request(`/conversations/${id}/resolve-preview`)).json()) as { data: unknown }
+  expect(preview.data).toEqual({
+    farewell: true,
+    farewellText: "Marta, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
+    handoffs: 0,
+    pendingContact: 0,
+  })
+  const resolved = await app.request(`/conversations/${id}/resolve`, { method: "POST" })
+  expect(resolved.status).toBe(200)
+  const after = (await resolved.json()) as { data: { conversation: { status: string }; closure: { reason: string; byName: string | null } } }
+  expect(after.data.conversation.status).toBe("closed")
+  expect(after.data.closure).toMatchObject({ reason: "equipo", byName: "Dueña" })
+
+  // Escribir a una cerrada la reabre (ya no responde CONVERSATION_CLOSED).
+  const written = await app.request(`/conversations/${id}/messages`, { method: "POST", headers: json, body: JSON.stringify({ text: "Una cosa más, Marta" }) })
+  expect(written.status).toBe(201)
+  expect(((await (await app.request(`/conversations/${id}`)).json()) as { data: { conversation: { status: string } } }).data.conversation.status).toBe("open")
+  // Cerrar sin resolver: motivo manual, sin despedida.
+  expect((await app.request(`/conversations/${id}/close`, { method: "POST" })).status).toBe(200)
+  const closed = (await (await app.request(`/conversations?view=closed`)).json()) as { data: Array<{ id: string; closure: { reason: string } | null }> }
+  expect(closed.data.find((item) => item.id === id)?.closure).toMatchObject({ reason: "manual" })
+
+  // Horas para cerrar por silencio: de 6 a 23.
+  const put = (closeAfterHours: number) => app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ closeAfterHours }) })
+  expect((await put(5)).status).toBe(400)
+  expect((await put(24)).status).toBe(400)
+  expect((await put(12)).status).toBe(200)
+  const config = (await (await app.request("/agent/config")).json()) as { data: { closeAfterHours: number } }
+  expect(config.data.closeAfterHours).toBe(12)
 })

@@ -1,0 +1,2 @@
+ALTER TABLE "agent_config" ADD COLUMN "emojis" text DEFAULT 'no' NOT NULL;--> statement-breakpoint
+ALTER TABLE "agent_config" ADD CONSTRAINT "agent_config_emojis_check" CHECK ("agent_config"."emojis" in ('no','pocos'));

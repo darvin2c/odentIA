@@ -1,6 +1,7 @@
 import {
   describeProviderProblem,
   isProviderConfigError,
+  type PlatformDecisions,
   type PlatformLlm,
   simulateAgentSandbox,
   simulateAgentTurn,
@@ -11,7 +12,6 @@ import {
   createHandoff,
   operationBodySchema,
   createProposal,
-  decideProposal,
   executeProposal,
   getAgentPanelSummary,
   getAgentRunStats,
@@ -26,6 +26,7 @@ import {
   getCaseBrief,
   listProposals,
   requiredPermissionForAction,
+  type SearchEmbedder,
   ServiceError,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
@@ -37,6 +38,9 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 export interface AgentOpsDeps extends CrmDeps {
   /** Proveedor de la plataforma; la configuración de la organización prevalece. */
   llm: PlatformLlm
+  /** Credenciales del modelo de decisión: «Probar» elige el camino igual que una conversación real. */
+  decisions?: PlatformDecisions
+  embedder?: SearchEmbedder
 }
 
 export function createAgentOpsRoute(deps: AgentOpsDeps) {
@@ -58,13 +62,6 @@ const proposalInput = z.object({
   idempotencyKey: z.string().min(1).max(120),
 })
 
-const decideInput = z.object({
-  decision: z.enum(["aprobada", "rechazada"]),
-  reason: z.string().max(2000).optional(),
-  /** Aprobar con edición: el texto que sale en lugar del borrador del agente. */
-  editedText: z.string().min(1).max(4000).optional(),
-})
-
 // Los campos de una derivación se declaran una vez, para la pantalla y para el agente.
 const handoffInput = operationBodySchema("derivacion.crear")
 
@@ -84,7 +81,6 @@ const sandboxProposal = z.object({
   label: z.string().max(80),
   summary: z.string().max(300),
   status: z.string().max(20),
-  decider: z.enum(["contact", "team"]),
   detail: z.string().max(300).nullable(),
   at: z.string().max(40),
   expiresAt: z.string().max(40).nullable(),
@@ -118,7 +114,7 @@ const sandboxInput = z.object({
 
   /**
    * Puerta operativa de propuestas: lectura con `agent.read` o `agent.decide`;
-   * decidir/confirmar/ejecutar con `agent.decide` más el permiso del dominio
+   * registrar la confirmación o ejecutar con `agent.decide` más el permiso del dominio
    * del acto (ver `actionGate`). La administración del agente sigue pidiendo
    * `agent.write` en sus rutas propias.
    */
@@ -182,20 +178,6 @@ const sandboxInput = z.object({
     if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return forbidden(c, "agent.decide")
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getProposal(tx, orgId, c.req.param("id"))),
-    )
-  })
-
-  app.post("/proposals/:id/decision", async (c) => {
-    const { orgId, memberRole, userId } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.decide")) return forbidden(c, "agent.decide")
-    const parsed = decideInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const blocked = await actionGate(c, memberRole, orgId, c.req.param("id"))
-    if (blocked) return blocked
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        decideProposal(tx, orgId, userId, c.req.param("id"), parsed.data, { secretsKey: deps.secretsKey }),
-      ),
     )
   })
 
@@ -373,7 +355,7 @@ const sandboxInput = z.object({
       return await runService(c, 200, async () => {
         const result = await simulateAgentSandbox(
           deps.db,
-          { secretsKey: deps.secretsKey, platform: deps.llm },
+          { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions, embedder: deps.embedder },
           { orgId, ...parsed.data },
         )
         await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))

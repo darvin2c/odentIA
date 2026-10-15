@@ -115,7 +115,7 @@ export function validateIdentity(values: DemographicsValues): StepErrors {
   return errs
 }
 
-/** Paso 2: datos complementarios, seguro y sucursal. */
+/** Paso 2: datos complementarios, seguro y sede. */
 export function validateComplementary(values: DemographicsValues): StepErrors {
   const { registeredBranchId, ...demographics } = values
   const errs = Object.fromEntries(
@@ -124,7 +124,7 @@ export function validateComplementary(values: DemographicsValues): StepErrors {
     ),
   )
   if (registeredBranchId && !UUID_RE.test(registeredBranchId))
-    errs.registeredBranchId = "Sucursal inválida"
+    errs.registeredBranchId = "Sede inválida"
   // Los teléfonos de este paso emiten E.164 igual que el de contacto.
   const emergency = values.emergencyContactPhone.trim()
   if (emergency !== "" && !isValidE164(emergency)) errs.emergencyContactPhone = "Teléfono inválido"

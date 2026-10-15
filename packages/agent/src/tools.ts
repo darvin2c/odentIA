@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { eq } from "drizzle-orm"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
+import { and, eq } from "drizzle-orm"
 import type { AgentCaseNote, AnswerBasisItem, AnswerCheck, AnswerTraceOutcome, ProposalAction } from "@odentia/db/schema/agent"
 import {
   addAgentCaseNote,
@@ -13,41 +14,49 @@ import {
   BOOKING_LINK_TTL_HOURS,
   createBookingLink,
   annotateHandoff,
+  closeConversationWith,
+  closurePendingReason,
   createHandoff,
   createProposal,
   createTask,
-  deriveCommercialFollowUpCoordination,
   findFreeGaps,
   getAgentPatientSummary,
-  getAutonomyPolicy,
+  autonomyModeOf,
   getContact,
   getClinicInfoSnapshot,
   getOpportunity,
   getOrgLocale,
+  formatAgentClinicData,
+  formatClinicSearch,
   formatOrgMoney,
   formatZoned,
+  getAgentClinicData,
+  getAgentConfig,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
   listOpportunities,
+  listPaymentMethods,
   listTasks,
   noteLessonUse,
   operationAgentSchema,
   PROPOSAL_ACTION_LABEL,
   recordAnswerTrace,
-  recordCommercialFollowUpProposal,
   recordKnowledgeGap,
   requireContact,
   resolveAgentPatientContext,
+  rankByMeaning,
+  searchClinic,
   searchPublishedKnowledge,
   ServiceError,
   updateContact,
 } from "@odentia/services"
-import type { OpportunityDetail, OrgLocale, ProposalItem } from "@odentia/services"
+import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
-import type { AgentRoute } from "./decision/route.js"
-import { describeUnsupported, type Evidence, type ReplyVerdict, verifyReply } from "./verify.js"
+import { type AgentRoute, handoffFallbackNotice } from "./decision/route.js"
+import { formatForChannel } from "./channel-format.js"
+import { describeUnsupported, type Evidence, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -55,8 +64,31 @@ export interface AgentEvidence extends Evidence {
 }
 
 /** Cómo ve el equipo cada herramienta de lectura cuando una respuesta se apoya en ella. */
+/** El canal de la conversación, leído una vez por corrida. Una prueba se ve como WhatsApp, el canal principal. */
+export async function conversationChannel(ctx: AgentToolCtx): Promise<string | null> {
+  if (ctx.channel !== undefined) return ctx.channel
+  if (ctx.sandbox || ctx.dryRun) {
+    ctx.channel = "whatsapp"
+    return ctx.channel
+  }
+  const [row] = await withOrgContext(ctx.db, ctx.orgId, (tx) =>
+    tx
+      .select({ channel: channelConnection.channel })
+      .from(conversation)
+      .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+      .where(and(eq(conversation.id, ctx.conversationId), eq(conversation.organizationId, ctx.orgId)))
+      .limit(1),
+  )
+  ctx.channel = row?.channel ?? null
+  return ctx.channel
+}
+
+/** Lo máximo que espera una búsqueda en la conversación al proveedor de vectores. */
+const QUERY_EMBED_MS = 3_000
+
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },
+  buscar_en_la_clinica: { kind: "servicios", label: "Búsqueda en servicios, promociones y profesionales" },
   consultar_conocimiento: { kind: "conocimiento", label: "Respuestas oficiales de la clínica" },
   buscar_huecos: { kind: "agenda", label: "Agenda: horarios disponibles" },
   ver_contexto_paciente: { kind: "persona", label: "Vínculo con el paciente" },
@@ -92,6 +124,7 @@ export const SANDBOX_PERSON = "Paciente de prueba"
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
   ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
+  buscar_en_la_clinica: "Buscó en los servicios, promociones y profesionales de la clínica.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
   buscar_huecos: "Buscó huecos reales en la agenda.",
   ver_contexto_paciente: "Verificó para quién es la atención.",
@@ -111,6 +144,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   anotar_caso: "Anotó un dato del caso para después.",
   recordar_dato: "Guardó un dato de la persona para próximas conversaciones.",
   request_human_handoff: "Pasó el caso a una persona.",
+  despedirse_y_cerrar: "Se despidió y cerró la conversación.",
 }
 
 /** Respuestas seguidas sin sustento que el agente puede intentar antes de pasar el caso a una persona. */
@@ -159,19 +193,22 @@ export interface AgentToolCtx {
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
    */
   publicUrl?: { webURL: string; cookieDomain: string }
+  /**
+   * Quien vectoriza para buscar por significado. Sin él, la búsqueda es solo por
+   * palabras. Solo ordena: los datos se leen de la base al responder.
+   */
+  embedder?: SearchEmbedder
+  /**
+   * Canal de la conversación (`whatsapp`, `telegram`…), para el formato del
+   * texto. Lo resuelve `conversationChannel`; en una prueba se usa WhatsApp.
+   */
+  channel?: string | null
   /** Hay una propuesta esperando el sí del interlocutor: el turno recibe todas las herramientas, sea cual sea el camino. */
   casePending?: boolean
   /** El modelo que escribe pidió el resto de herramientas en este turno. */
   widened?: boolean
-  /** Instrucción interna adicional; nunca se representa como mensaje del interlocutor. */
-  runInstruction?: string
-  /** Restringe herramientas para disparadores operativos sin mensaje entrante. */
-  allowedTools?: readonly string[]
   /** Herramientas que en este hilo no pueden servir; su esquema no se envía al modelo. */
   excludedTools?: readonly string[]
-  commercialCoordinationId?: string
-  /** Una coordinación proactiva ya produjo su único resultado terminal. */
-  decisionRecorded: boolean
   /**
    * La respuesta al interlocutor quedó enviada o pendiente de decisión: el
    * grafo termina el turno sin volver a llamar al modelo.
@@ -203,6 +240,10 @@ export interface AgentToolCtx {
   basis?: AnswerBasisItem[]
   /** `false` desactiva la comprobación previa al envío (configuración de la organización). */
   verifyReplies?: boolean
+  /** Medios de pago que la clínica desactivó (se leen una vez por corrida). */
+  refusedPayments?: string[]
+  /** Emojis de la voz de la clínica: con `no` se quitan antes de enviar. Ausente = se dejan. */
+  emojis?: "no" | "pocos"
   /** Respuestas del turno que no salieron por un dato sin sustento. */
   checkFailures?: number
   /** Comprobaciones de la última respuesta (también en simulación). */
@@ -216,6 +257,10 @@ export interface AgentToolCtx {
    * oficiales viajan completas en el turno. Nunca decide un acto.
    */
   decision?: DecisionModel | null
+  /** Trato de la clínica, para el aviso fijo al derivar; si falta se lee de la configuración. */
+  treatment?: "tu" | "usted" | null
+  /** El agente se despidió y cerró la conversación en esta corrida. */
+  closed?: boolean
 }
 
 /**
@@ -230,21 +275,10 @@ export async function performHandoff(
   priority: "alta" | "media" | "baja" = "media",
 ): Promise<void> {
   if (ctx.dryRun) {
-    ctx.decisionRecorded = true
     ctx.handedOff = true
     return
   }
   await withOrgContext(ctx.db, ctx.orgId, async (tx) => {
-    if (ctx.commercialCoordinationId) {
-      await deriveCommercialFollowUpCoordination(
-        tx,
-        ctx.orgId,
-        ctx.commercialCoordinationId,
-        reason,
-        summary?.trim() ? summary : reason,
-      )
-      return
-    }
     const handoff = await createHandoff(tx, ctx.orgId, null, {
       conversationId: ctx.conversationId,
       reason,
@@ -254,8 +288,42 @@ export async function performHandoff(
     })
     ctx.handoffId = handoff.id
   })
-  ctx.decisionRecorded = true
   ctx.handedOff = true
+}
+
+/**
+ * Derivar siempre avisa (ADR 0024): si el caso pasó a una persona y la persona
+ * aún no recibió nada en esta corrida, sale el aviso fijo, sin modelo, por el
+ * mismo camino que cualquier respuesta. Si el canal no deja escribir, queda
+ * dicho en la derivación para quien la tome.
+ */
+export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
+  if (!ctx.handedOff || ctx.replySettled || ctx.dryRun) return
+  const treatment =
+    ctx.treatment !== undefined
+      ? ctx.treatment
+      : await withOrgContext(ctx.db, ctx.orgId, async (tx) => (await getAgentConfig(tx, ctx.orgId)).treatment).catch(() => null)
+  const notify = makeAgentTools(ctx).find((item) => item.name === "request_human_handoff")
+  let outcome = ""
+  try {
+    const result: unknown = await notify?.invoke({
+      reason: "Aviso al interlocutor",
+      summary: "Aviso al interlocutor",
+      message: handoffFallbackNotice(treatment ?? null),
+    })
+    outcome = typeof result === "string" ? result : ""
+  } catch (error) {
+    outcome = error instanceof Error ? error.message : String(error)
+  }
+  if (ctx.replySettled) return
+  console.error(`agent: el aviso fijo de derivación no salió (${outcome.slice(0, 200)})`)
+  const handoffId = ctx.handoffId
+  if (!handoffId) return
+  await withOrgContext(ctx.db, ctx.orgId, (tx) =>
+    annotateHandoff(tx, ctx.orgId, handoffId, {
+      pending: "No se le pudo avisar que una persona del equipo continuará: escríbele tú.",
+    }),
+  ).catch(() => undefined)
 }
 
 /**
@@ -281,14 +349,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     "outside_window: fuera de la ventana de 24h del canal. Si dispones de send_template, úsala con una plantilla autorizada; si no, deriva a humano."
   /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
-   * + payload. En modo directo se ejecuta en el mismo acto; si exige
-   * confirmación o aprobación, queda pendiente con su recorrido real. Los
+   * + payload. En modo directo se ejecuta en el mismo acto; si exige la
+   * confirmación del interlocutor, queda pendiente con su recorrido real. Los
    * errores de dominio en ejecución llegan como `fallida` con código estable
    * en `result.errorCode` y motivo prefijado en `error` (HTTP 200): se
    * reportan al modelo, nunca como aprobación. Si el hilo ya espera un «sí»
-   * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación;
-   * si la pendiente es del equipo (PROPOSAL_PENDING_APPROVAL), se guía a
-   * esperar al equipo sin pedir «sí» ni usar confirmar_propuesta.
+   * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación.
    */
   const propose = async (
     action: string,
@@ -315,19 +381,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         }),
       )
       onProposal?.(proposal)
-      const coordinationId = ctx.commercialCoordinationId
-      if (coordinationId) {
-        await inOrg((tx) =>
-          recordCommercialFollowUpProposal(tx, ctx.orgId, coordinationId, proposal),
-        )
-        ctx.decisionRecorded = true
-      }
     } catch (e) {
       if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_CONFIRM") {
         return "Ya hay una propuesta esperando la confirmación del interlocutor en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
-      }
-      if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_APPROVAL") {
-        return "Ya hay una propuesta pendiente de decisión del equipo en este hilo. Informa al interlocutor de que el equipo la está revisando y espera su decisión; un sí del interlocutor no sustituye esa aprobación."
       }
       throw e
     }
@@ -348,21 +404,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (proposal.status === "expirada") {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
-    if (proposal.mode === "confirmar_usuario") {
-      return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
-    }
-    return `Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al interlocutor que lo contactaremos.`
+    return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
   }
 
   /**
    * En una conversación de prueba el acto no se crea: queda en el estado de la
-   * prueba con el mismo recorrido que tendría (ejecutado, esperando el sí del
-   * interlocutor o la decisión del equipo) para que el turno siguiente lo vea.
+   * prueba con el mismo recorrido que tendría (ejecutado o esperando el sí del
+   * interlocutor) para que el turno siguiente lo vea.
    */
   const sandboxPropose = async (action: ProposalAction, summary: string): Promise<string> => {
     const sandbox = ctx.sandbox
     if (!sandbox) return ""
-    const mode = (await inOrg((tx) => getAutonomyPolicy(tx, ctx.orgId)))[action]
+    const mode = autonomyModeOf(action)
     const now = new Date()
     const proposal: AgentCaseProposal = {
       id: randomUUID(),
@@ -370,7 +423,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       label: PROPOSAL_ACTION_LABEL[action],
       summary,
       status: mode === "directo" ? "ejecutada" : "propuesta",
-      decider: mode === "confirmar_usuario" ? "contact" : "team",
       detail: null,
       at: now.toISOString(),
       expiresAt: mode === "directo" ? null : new Date(now.getTime() + 48 * 3_600_000).toISOString(),
@@ -380,9 +432,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return `[SIMULACIÓN] Ejecutado en modo directo (propuesta ${proposal.id}).`
     }
     sandbox.state.pending = [...sandbox.state.pending, proposal]
-    return mode === "confirmar_usuario"
-      ? `[SIMULACIÓN] Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
-      : `[SIMULACIÓN] Propuesta ${proposal.id} enviada a aprobación del equipo: avisa al interlocutor que lo contactaremos.`
+    return `[SIMULACIÓN] Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
   }
 
   const sandboxWhen = async (iso: string): Promise<string> => {
@@ -453,7 +503,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       await inOrg((tx) =>
         recordAnswerTrace(tx, ctx.orgId, {
           conversationId: ctx.conversationId,
-          triggerMessageId: ctx.commercialCoordinationId ? null : ctx.triggerId,
+          triggerMessageId: ctx.triggerId,
           proposalId: proposal?.id ?? null,
           messageId: typeof messageId === "string" ? messageId : null,
           outcome,
@@ -484,6 +534,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
     const verdict = verifyReply(text, ctx.evidence ?? [], await orgZone())
     ctx.lastChecks = verdict.checks
+    // Un medio de pago que la clínica desactivó no se ofrece: la lista del prompt no bastó (ADR 0022).
+    ctx.refusedPayments ??= await inOrg(async (tx) =>
+      (await listPaymentMethods(tx, ctx.orgId, { activeOnly: false })).filter((m) => !m.isActive).map((m) => m.name),
+    )
+    const refused = refusedPaymentMentions(text, ctx.refusedPayments)
+    if (verdict.ok && refused.length > 0) {
+      await traceAnswer(text, "bloqueada", verdict.checks, null)
+      return {
+        verdict,
+        blocked: `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la clínica no acepta ${refused.join(", ")}. Di solo los medios de pago de la lista (o que ese no se acepta) y vuelve a enviar la respuesta sola en su paso.`,
+      }
+    }
     if (verdict.ok) return { verdict, blocked: null }
     ctx.checkFailures = (ctx.checkFailures ?? 0) + 1
     const missing = describeUnsupported(verdict)
@@ -495,6 +557,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         "El agente no pudo sustentar un dato de su respuesta",
         `Quiso responder: «${text.slice(0, 400)}». Sin sustento en lo consultado: ${missing}.`,
       )
+      // La persona no queda sin respuesta: recibe el aviso fijo de que sigue una persona.
+      await noticeAfterHandoff(ctx)
       return {
         verdict,
         blocked: `${prefix}No enviado: ${missing} no figura en lo consultado. El caso pasa a una persona; no envíes más mensajes.`,
@@ -507,7 +571,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   }
 
   const sendReply = tool(
-    async ({ text }: { text: string }) => {
+    async ({ text: written }: { text: string }) => {
+      // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
+      const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -530,6 +596,47 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       description:
         "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción (queda como propuesta si la política no es directa). Si devuelve outside_window, sigue su indicación.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
+    },
+  )
+
+  /**
+   * Cerrar al terminar (ADR 0024): la despedida sale por el mismo camino que
+   * send_reply (formato del canal y comprobación) y la conversación se cierra
+   * como resuelta. Con algo pendiente no cierra y se lo dice al modelo.
+   */
+  const farewellAndClose = tool(
+    async ({ text: written }: { text: string }) => {
+      if (ctx.sandbox) {
+        if (ctx.sandbox.state.pending.length > 0) {
+          return "[SIMULACIÓN] No se cerraría: hay una propuesta esperando el sí del interlocutor. Responde con send_reply."
+        }
+      }
+      const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
+      if (pending) return `No cerrado. ${pending}`
+      const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
+      const { verdict, blocked } = await checkReply(text)
+      if (blocked) return blocked
+      if (ctx.dryRun) {
+        ctx.replySettled = true
+        ctx.closed = true
+        ctx.simulatedReply = text
+        return `[SIMULACIÓN] Se enviaría la despedida y se cerraría la conversación: ${text}`
+      }
+      const sent: ProposalItem[] = []
+      const outcome = await propose("enviar_mensaje", { kind: "text", text }, "despedirse_y_cerrar", undefined, (proposal) => {
+        sent.push(proposal)
+      })
+      for (const proposal of sent) await traceAnswer(text, traceOutcome(proposal), verdict?.checks ?? [], proposal)
+      if (!sent.some((proposal) => proposal.status === "ejecutada")) return outcome
+      await inOrg((tx) => closeConversationWith(tx, ctx.orgId, ctx.conversationId, { reason: "resuelta", byUserId: null }))
+      ctx.closed = true
+      return "Despedida enviada y conversación cerrada. No envíes más mensajes: si la persona vuelve a escribir, se reabre sola."
+    },
+    {
+      name: "despedirse_y_cerrar",
+      description:
+        "Se despide y cierra la conversación cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo). En text va una sola línea cordial, en el tono de la clínica, que diga que estamos atentos si quiere volver a escribir. Úsala sola en su paso, en lugar de send_reply. Si queda algo pendiente no cierra y te dice qué.",
+      schema: z.object({ text: z.string().min(1).max(600) }),
     },
   )
 
@@ -656,39 +763,86 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const clinicInfo = tool(
     async () => {
-      const snapshot = await inOrg((tx) => getClinicInfoSnapshot(tx, ctx.orgId))
+      // Con «Informar» apagado esta herramienta sigue para Agendar, pero solo con sedes y horarios:
+      // ni precios, ni promociones, ni profesionales, ni medios de pago.
+      const informs = !(ctx.excludedTools ?? []).includes("buscar_en_la_clinica")
+      const { snapshot, data, zone } = await inOrg(async (tx) => ({
+        snapshot: await getClinicInfoSnapshot(tx, ctx.orgId),
+        data: await getAgentClinicData(tx, ctx.orgId, informs),
+        zone: await getOrgLocale(tx, ctx.orgId),
+      }))
       const lines = [`Clínica: ${snapshot.clinicName}.`]
       for (const b of snapshot.branches) {
         lines.push(
           `- Sede ${b.name} (id ${b.id}): ${[b.address, b.phone, b.mapsUrl].filter(Boolean).join(" · ") || "sin datos"}`,
         )
       }
-      if (!snapshot.services.length) lines.push("Sin servicios publicados: no des precios.")
-      for (const s of snapshot.services.slice(0, 50)) {
-        lines.push(`- Servicio ${s.name} (id ${s.id}): ${formatOrgMoney(s.priceCents, s.currency, snapshot)}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
-      }
-      if (snapshot.paymentMethods.length) {
+      lines.push(...formatAgentClinicData(data, zone))
+      if (informs && snapshot.paymentMethods.length) {
         lines.push("Medios de pago aceptados por la clínica (los mismos que ofrece caja):")
         for (const m of snapshot.paymentMethods) lines.push(`- ${m.name}`)
-      }
-      if (snapshot.promotions.length) {
-        lines.push("Promociones vigentes (el precio «desde» es un mínimo: el final sale del presupuesto):")
-        for (const p of snapshot.promotions) lines.push(`- ${p.name}`)
+        if (snapshot.refusedPaymentMethods.length) lines.push(`La clínica NO acepta: ${snapshot.refusedPaymentMethods.join(", ")}.`)
       }
       return lines.join("\n")
     },
     {
       name: "ver_sedes_y_servicios",
       description:
-        "Sedes (con id), servicios con tarifas oficiales, medios de pago aceptados y promociones vigentes. Úsalo antes de hablar de precios, sedes, medios, promociones o disponibilidad.",
+        "Sedes (con id) y su horario de atención, servicios con cómo decir su precio, promociones vigentes con sus condiciones, profesionales y medios de pago. Úsalo antes de hablar de precios, sedes, horarios, profesionales, medios, promociones o disponibilidad. Si la clínica tiene muchos servicios, búscalos con buscar_en_la_clinica.",
       schema: z.object({}),
+    },
+  )
+
+  /**
+   * Lo más parecido por significado. La frase se vectoriza fuera de la
+   * transacción; si el proveedor falla, se busca solo por palabras.
+   */
+  async function meaningOf(text: string): Promise<MeaningRank | undefined> {
+    const embedder = ctx.embedder
+    if (!embedder) return undefined
+    try {
+      // En una conversación se espera poco: pasado el plazo se busca por palabras.
+      const [embedding] = await Promise.race([
+        embedder.embed([text]),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("vectores: sin respuesta a tiempo")), QUERY_EMBED_MS)),
+      ])
+      if (!embedding?.length) return undefined
+      return await inOrg((tx) => rankByMeaning(tx, ctx.orgId, { model: embedder.model, embedding }))
+    } catch {
+      return undefined
+    }
+  }
+
+  const clinicSearch = tool(
+    async ({ texto }: { texto: string }) => {
+      const ranked = await meaningOf(texto)
+      const result = await inOrg(async (tx) => {
+        return {
+          found: await searchClinic(tx, ctx.orgId, texto, {
+            rankedServiceIds: ranked?.services,
+            rankedPromotionIds: ranked?.promotions,
+            rankedProfessionalIds: ranked?.professionals,
+          }),
+          zone: await getOrgLocale(tx, ctx.orgId),
+        }
+      })
+      return formatClinicSearch(result.found, result.zone)
+    },
+    {
+      name: "buscar_en_la_clinica",
+      description:
+        "Busca en lo que ofrece la clínica: servicios (con cómo decir su precio), promociones vigentes (precio, condiciones y fecha de fin) y profesionales por nombre o especialidad. Escribe lo que pide la persona con sus palabras («dientes amarillos», «frenillos», «ortodoncista»). Devuelve solo lo que coincide, leído en este momento.",
+      schema: z.object({ texto: z.string().trim().min(2).max(200) }),
     },
   )
 
   const knowledgeSearch = tool(
     async ({ pregunta }: { pregunta: string }) => {
       const hidden = new Set(ctx.lessonOverrides?.skipEntryIds ?? [])
-      const found = (await inOrg((tx) => searchPublishedKnowledge(tx, ctx.orgId, pregunta, 5))).filter((hit) => !hidden.has(hit.id))
+      const ranked = await meaningOf(pregunta)
+      const found = (await inOrg((tx) => searchPublishedKnowledge(tx, ctx.orgId, pregunta, 5, ranked?.answers))).filter(
+        (hit) => !hidden.has(hit.id),
+      )
       // En una prueba, la respuesta oficial de una lección aún sin aprobar cuenta como publicada.
       const trial = (ctx.lessonOverrides?.extra ?? [])
         .filter((lesson) => lesson.kind === "respuesta_oficial")
@@ -704,7 +858,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           await inOrg((tx) =>
             recordKnowledgeGap(tx, ctx.orgId, {
               conversationId: ctx.conversationId,
-              triggerMessageId: ctx.commercialCoordinationId ? null : ctx.triggerId,
+              triggerMessageId: ctx.triggerId,
               question: ctx.lastInboundText?.trim() || pregunta,
               query: pregunta,
             }),
@@ -800,23 +954,30 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       const { gaps, truncated, timeZone } = await inOrg((tx) => findFreeGaps(tx, ctx.orgId, input))
       if (!gaps.length) return "Sin huecos en ese rango (quizá sin horario configurado): ofrece otro rango o deriva."
-      const lines = gaps.map((g) => {
-        const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
-        return (
-          `- ${g.startsAt} → ${g.endsAt} (${Math.round((Date.parse(g.endsAt) - Date.parse(g.startsAt)) / 60_000)} min, zona ${timeZone})` +
-          ` · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}`
-        )
-      })
-      lines.push(
-        "Usa los IDs exactos del hueco elegido en proponer_cita (sede, sillón y profesional): nunca inventes IDs.",
-      )
-      if (truncated) lines.push(`Hay más huecos (${timeZone}): acota el rango por días.`)
+      const { locale } = await orgZone()
+      // La hora ya va en la de la sede: el modelo la dice tal cual y nunca convierte zonas.
+      const day = new Intl.DateTimeFormat(locale, { timeZone, weekday: "long", day: "numeric", month: "long" })
+      const clock = new Intl.DateTimeFormat(locale, { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      const lines = [
+        "Huecos libres, en hora local de la sede (dilos así, sin convertir horas). El dato entre corchetes es solo para proponer_cita: no lo escribas a la persona.",
+        ...gaps.map((g) => {
+          const start = new Date(g.startsAt)
+          const end = new Date(g.endsAt)
+          const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
+          return (
+            `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.dentistName ? ` con ${g.dentistName}` : ""}` +
+            ` [startsAt ${g.startsAt} · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}]`
+          )
+        }),
+        "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, sillón y profesional): nunca inventes IDs ni horas.",
+      ]
+      if (truncated) lines.push("Hay más huecos: acota el rango por días.")
       return lines.join("\n")
     },
     {
       name: "buscar_huecos",
       description:
-        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId) y from/to en ISO. No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
+        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Cada hueco devuelve sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -831,15 +992,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const bookingLink = tool(
     async (input: { patientId?: string; serviceId?: string; branchId?: string }) => {
-      if (ctx.dryRun) return "[SIMULACIÓN] Se crearía un enlace para que la persona elija su cita. Dile que lo recibirá y ofrece también seguir por aquí."
+      // En una prueba no se crea ningún enlace: la marca deja ver dónde iría en el mensaje.
+      if (ctx.dryRun) return "[SIMULACIÓN] Enlace para que la persona elija su cita: [enlace de reserva]. Inclúyelo tal cual en tu respuesta con send_reply y ofrece también seguir por aquí."
       const publicUrl = ctx.publicUrl
-      if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos."
+      if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
       try {
         const { link, slug } = await inOrg(async (tx) => {
           const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, ctx.orgId)).limit(1)
           return { link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }), slug: org?.slug ?? null }
         })
-        if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos."
+        if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
         const url = new URL(publicUrl.webURL)
         url.hostname = `${slug}.${publicUrl.cookieDomain.replace(/^\./, "")}`
         url.pathname = "/reserva"
@@ -856,7 +1018,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         if (error instanceof ServiceError && error.code === "BOOKING_PATIENT_AMBIGUOUS") {
           return "La persona tiene varios pacientes vinculados: pregunta para quién es la cita y vuelve a llamar con su patientId (de ver_contexto_paciente)."
         }
-        if (error instanceof ServiceError) return `No se pudo crear el enlace: ${error.message}. Propón horarios por aquí.`
+        if (error instanceof ServiceError) return `No se pudo crear el enlace: ${error.message}. Propón horarios por aquí. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace.`
         throw error
       }
     },
@@ -893,7 +1055,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; según la política puede pedir confirmación del interlocutor o aprobación del equipo.",
+        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
       schema: operationAgentSchema("cita.reservar"),
     },
   )
@@ -917,7 +1079,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "reprogramar_cita",
       description:
-        "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Según la política puede pedir confirmación del interlocutor (confirmar_propuesta) o aprobación del equipo; la aprobación del equipo no sustituye la confirmación del interlocutor.",
+        "Propone mover una cita existente a un nuevo inicio: nunca crea una reserva duplicada. Usa el id y la versión exactos de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde y nunca actúes sobre pacientes no autorizados. Queda esperando la confirmación del interlocutor (confirmar_propuesta).",
       schema: operationAgentSchema("cita.mover"),
     },
   )
@@ -934,7 +1096,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "cancelar_cita",
       description:
-        "Propone cancelar una cita existente (nunca la borra ni crea otra). Usa el id exacto de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde. Según la política puede pedir confirmación del interlocutor (confirmar_propuesta) o aprobación del equipo; la respuesta indica el estado real: pendiente, ejecutada o fallida.",
+        "Propone cancelar una cita existente (nunca la borra ni crea otra). Usa el id exacto de ver_resumen_paciente; con varias citas pregunta primero cuál corresponde. Queda esperando la confirmación del interlocutor (confirmar_propuesta); la respuesta indica el estado real: pendiente, ejecutada o fallida.",
       schema: z.object({
         appointmentId: z.string().uuid(),
         reason: z.string().max(500).optional(),
@@ -948,9 +1110,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const state = ctx.sandbox.state
         const pending = state.pending.find((item) => item.id === proposalId)
         if (!pending) return "[SIMULACIÓN] Esa propuesta no está pendiente en esta prueba."
-        if (pending.decider === "team") {
-          return "Esa propuesta exige aprobación del equipo: el sí del interlocutor no la ejecuta. Avísale de que el equipo la está revisando y espera su decisión."
-        }
         state.pending = state.pending.filter((item) => item.id !== proposalId)
         state.recent = [{ ...pending, status: "ejecutada", at: new Date().toISOString(), expiresAt: null }, ...state.recent].slice(0, 5)
         return `[SIMULACIÓN] Confirmado y ejecutado (propuesta ${proposalId}).`
@@ -962,9 +1121,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey }),
         )
       } catch (e) {
-        if (e instanceof ServiceError && e.code === "PROPOSAL_NEEDS_TEAM_APPROVAL") {
-          return "Esa propuesta exige aprobación del equipo: el sí del interlocutor no la ejecuta. Avísale de que el equipo la está revisando y espera su decisión."
-        }
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
         throw e
       }
@@ -986,7 +1142,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "confirmar_propuesta",
       description:
-        "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito. Jamás la uses para propuestas que requieren aprobación del equipo: esas las decide el equipo.",
+        "Confirma un acto en modo confirmar_usuario cuando el interlocutor lo aprobó con un sí explícito.",
       schema: z.object({ proposalId: z.string().uuid() }),
     },
   )
@@ -1108,7 +1264,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "close_opportunity",
       description:
-        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con motivo obligatorio (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con motivo obligatorio. Como perdida, solo si la persona lo dijo claro en esta conversación (ya se atendió en otro lado, ya no le interesa); nunca porque dejó de responder. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
       schema: operationAgentSchema("oportunidad.cerrar"),
     },
   )
@@ -1224,7 +1380,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string }) => {
-      const notice = message?.trim()
+      // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
+      const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {
@@ -1239,10 +1396,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ctx.simulatedReply = notice
         }
         return `[SIMULACIÓN] Se derivaría a humano: ${reason}.`
-      }
-      if (ctx.commercialCoordinationId) {
-        await performHandoff(ctx, reason, summary)
-        return "Derivado a una persona usando el pendiente existente. No envíes más mensajes."
       }
       if (ctx.handedOff) {
         // El caso ya pasó a una persona en esta corrida (lo decidió el camino):
@@ -1290,6 +1443,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const tools = [
     sendReply,
+    farewellAndClose,
     sendTemplate,
     moveToStage,
     createOpportunityTool,
@@ -1303,6 +1457,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     updateContactTool,
     createTaskTool,
     clinicInfo,
+    clinicSearch,
     knowledgeSearch,
     patientContext,
     patientSummary,
@@ -1318,7 +1473,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   ]
   return tools.filter(
     (candidate) =>
-      (!ctx.allowedTools || ctx.allowedTools.includes(candidate.name)) &&
       !ctx.excludedTools?.includes(candidate.name) &&
       // Sin dirección pública configurada no hay página que abrir.
       (candidate.name !== "enviar_enlace_cita" || Boolean(ctx.publicUrl) || ctx.dryRun),

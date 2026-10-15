@@ -9,27 +9,28 @@ import { channelConnection, conversation, message } from "@odentia/db/schema/crm
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   type AgentConfig,
-  beginCommercialFollowUpCoordination,
   countAgentModelRunsToday,
-  deriveCommercialFollowUpCoordination,
   automationReplyOf,
   getAgentConfig,
   getLesson,
   lessonImpact,
   ServiceError,
   isSaasSendBlocked,
-  getAgentLlmSecrets,
+  DEFAULT_AGENT_LLM,
   getOrgLocale,
+  nextAgentOpening,
   notifyAgentProviderProblem,
   type RecordRunInput,
   recordAgentRun,
+  type SearchEmbedder,
   reportAgentNoReply,
   toolsDisabledBy,
 } from "@odentia/services"
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
+import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { handoffFallbackNotice, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { compileAgentGraph } from "./graph.js"
 import {
@@ -37,15 +38,24 @@ import {
   describeProviderProblem,
   isProviderConfigError,
   LlmConfigError,
+  llmModelName,
   type LlmSpec,
-  type OrgLlmSecrets,
   type PlatformLlm,
   resolveLlmSpec,
 } from "./llm.js"
-import { type AgentSandboxState, type AgentToolCtx, type LessonOverrides, makeAgentTools, performHandoff, SANDBOX_NIL_ID, TOOL_ACTION_LABEL } from "./tools.js"
+import {
+  type AgentSandboxState,
+  type AgentToolCtx,
+  type LessonOverrides,
+  makeAgentTools,
+  noticeAfterHandoff,
+  performHandoff,
+  SANDBOX_NIL_ID,
+  TOOL_ACTION_LABEL,
+} from "./tools.js"
 export interface AgentRuntime {
   checkpointer: PostgresSaver
-  /** Proveedor de la plataforma; la organización puede traer el suyo. */
+  /** Cuentas de odentIA en los proveedores; la organización solo elige el modelo. */
   platform: PlatformLlm
   /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
   createModel?: (spec: LlmSpec) => Promise<Runnable<BaseMessage[], AIMessage>>
@@ -61,31 +71,12 @@ export interface AgentRuntime {
   burst?: { quietMs: number; maxWaitMs: number }
   /** Dirección pública de la plataforma, para los enlaces que el agente entrega (reservar una cita). */
   publicUrl?: { webURL: string; cookieDomain: string }
+  /** Quien vectoriza para buscar por significado; sin él, se busca por palabras. */
+  embedder?: SearchEmbedder
   secretsKey: Buffer
   callbacks?: Callbacks
-}
-
-/**
- * Modelo efectivo de la organización: proveedor propio descifrado o el de la
- * plataforma. Lanza LlmConfigError si la configuración no sirve.
- */
-export async function resolveOrgLlm(
-  tx: Db,
-  orgId: string,
-  cfg: AgentConfig,
-  runtime: Pick<AgentRuntime, "platform" | "secretsKey">,
-  override?: string | null,
-): Promise<LlmSpec> {
-  let secrets: OrgLlmSecrets | null = null
-  if (cfg.hasLlmApiKey) {
-    try {
-      secrets = await getAgentLlmSecrets(tx, orgId, runtime.secretsKey)
-    } catch {
-      // Clave de cifrado rotada o fila corrupta: es configuración, no un fallo transitorio.
-      throw new LlmConfigError("API_KEY_UNREADABLE", "No se pudo leer la clave guardada del proveedor: vuelve a guardarla")
-    }
-  }
-  return resolveLlmSpec(cfg, secrets, runtime.platform, override)
+  /** Reloj de la corrida (pruebas); sin él, la hora real. */
+  now?: () => Date
 }
 
 /** Problema del proveedor que no se arregla reintentando. */
@@ -134,6 +125,17 @@ async function orgToolExclusions(tx: Db, orgId: string, cfg: AgentConfig): Promi
   return [...(templates ? [] : ["send_template"]), ...toolsDisabledBy("recepcion", cfg.disabledFunctions)]
 }
 
+/**
+ * El nombre con que la clínica se muestra al público (el de la organización),
+ * no su razón social: así se presenta también el agente.
+ */
+async function publicClinicName(db: Db, orgId: string): Promise<string> {
+  const [row] = await withOrgContext(db, orgId, (tx) =>
+    tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1),
+  )
+  return row?.name ?? "la clínica"
+}
+
 /** Motivos en el libro de una corrida que el sistema no deja empezar por un límite de la clínica. */
 const OUT_OF_CHANNEL = "canal-no-atendido"
 const OUT_OF_HOURS = "fuera-de-horario"
@@ -144,7 +146,7 @@ const OUT_OF_HOURS = "fuera-de-horario"
  * una franja puede cruzar la medianoche). Fuera de ellos el hilo queda para
  * el equipo, como cuando el agente está apagado.
  */
-async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId: string): Promise<string | null> {
+async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId: string, at: Date): Promise<string | null> {
   if (cfg.channels) {
     const [connection] = await tx
       .select({ channel: channelConnection.channel })
@@ -160,7 +162,7 @@ async function agentLimit(tx: Db, orgId: string, cfg: AgentConfig, connectionId:
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
-    }).formatToParts(new Date())
+    }).formatToParts(at)
     const pick = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0)
     const now = pick("hour") * 60 + pick("minute")
     const from = cfg.activeFromMin
@@ -179,10 +181,7 @@ function baseToolCtx(
   secretsKey: Buffer,
   options: {
     triggerId?: string | null
-    runInstruction?: string
-    allowedTools?: readonly string[]
     excludedTools?: readonly string[]
-    commercialCoordinationId?: string
   } = {},
 ): AgentToolCtx {
   return {
@@ -193,15 +192,9 @@ function baseToolCtx(
     triggerId: options.triggerId ?? null,
     secretsKey,
     handedOff: false,
-    decisionRecorded: false,
     replySettled: false,
     dryRun: false,
-    ...(options.runInstruction ? { runInstruction: options.runInstruction } : {}),
-    ...(options.allowedTools ? { allowedTools: options.allowedTools } : {}),
     ...(options.excludedTools?.length ? { excludedTools: options.excludedTools } : {}),
-    ...(options.commercialCoordinationId
-      ? { commercialCoordinationId: options.commercialCoordinationId }
-      : {}),
     toolsUsed: [],
     usage: {
       inputTokens: 0,
@@ -249,195 +242,162 @@ export async function processAgentRun(
     ).catch(() => {})
     return "done"
   }
+  const clock = runtime.now ?? (() => new Date())
+  // Mensaje que la corrida atiende; con una ráfaga pasa a ser el último leído,
   // y el resto de la ráfaga se anota al terminar para que sus corridas no repitan.
-  let inboundMessageId = msg.message.kind === "inbound_message" ? msg.message.messageId : null
+  let inboundMessageId: string | null = msg.message.messageId
   let coveredMessageIds: string[] = []
   // Lo que la persona escribió seguido, del más antiguo al más reciente: es lo que recibe quien toma el caso.
   let burstTexts: string[] = []
-  const coordinationId =
-    msg.message.kind === "overdue_opportunity_follow_up" ? msg.message.coordinationId : null
   const startedAt = new Date()
   // Uso de la corrida en curso, para registrarlo también si termina en error.
   let runUsage: AgentToolCtx["usage"] | null = null
   // Modelo resuelto, para registrarlo aunque falle antes o después.
-  let effectiveModel = runtime.platform.modelName
+  let effectiveModel = llmModelName(DEFAULT_AGENT_LLM, runtime.platform)
   let configProblem: ProviderProblem | null = null
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
-      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig }
+      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig; attention: number }
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
-    const resolveLlm = async (tx: Db, cfg: AgentConfig): Promise<LlmSpec | null> => {
+    const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
       try {
-        return await resolveOrgLlm(tx, orgId, cfg, runtime)
+        return resolveLlmSpec(cfg, runtime.platform)
       } catch (error) {
         if (!(error instanceof LlmConfigError)) throw error
         configProblem = describeProviderProblem(error)
         return null
       }
     }
-    if (msg.message.kind === "inbound_message") {
-      const inboundJob = msg.message
-      prepared = await withOrgContext(db, orgId, async (tx) => {
-        const [conv] = await tx
-          .select()
-          .from(conversation)
-          .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
-          .limit(1)
-        if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
-        if (conv.agentStatus !== "on") {
-          return { skip: { reason: "agent-off", model: effectiveModel } }
-        }
-        const cfg = await getAgentConfig(tx, orgId)
-        if (cfg.model?.trim()) effectiveModel = cfg.model.trim()
-        if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
-        const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId)
-        if (limit) return { skip: { reason: limit, model: effectiveModel } }
-        const [trigger] = await tx
-          .select()
-          .from(message)
-          .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
-          .limit(1)
-        if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
-        // ¿Este mensaje ya quedó atendido? Lo está si una corrida respondió o
-        // derivó con él como disparador, o si lo dejó anotado entre los que
-        // leyó (resto de una ráfaga). También cubre la reentrega de la cola.
-        // Es constancia explícita por mensaje: no se deduce de fechas, así que
-        // un mensaje que ninguna corrida leyó nunca se da por atendido.
-        const [attended] = await tx
-          .select({ id: agentRunLedger.id })
-          .from(agentRunLedger)
-          .where(
-            and(
-              eq(agentRunLedger.organizationId, orgId),
-              eq(agentRunLedger.conversationId, conversationId),
-              eq(agentRunLedger.triggerMessageId, trigger.id),
-              or(
-                inArray(agentRunLedger.status, ["ok", "handoff"]),
-                and(eq(agentRunLedger.status, "omitida"), eq(agentRunLedger.error, BURST_COVERED)),
-              ),
+    const inboundJob = msg.message
+    prepared = await withOrgContext(db, orgId, async (tx) => {
+      const [conv] = await tx
+        .select()
+        .from(conversation)
+        .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+        .limit(1)
+      if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
+      // El agente nunca responde en una conversación cerrada (ADR 0024): un entrante la reabre antes.
+      if (conv.status !== "open") return { skip: { reason: "conversation-closed", model: effectiveModel } }
+      if (conv.agentStatus !== "on") {
+        return { skip: { reason: "agent-off", model: effectiveModel } }
+      }
+      const cfg = await getAgentConfig(tx, orgId)
+      effectiveModel = llmModelName(cfg.llm, runtime.platform)
+      if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
+      const now = clock()
+      const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId, now)
+      if (limit === OUT_OF_HOURS && cfg.activeFromMin !== null && cfg.activeUntilMin !== null) {
+        // Fuera del horario del agente lo que escribió no se pierde: la misma
+        // corrida vuelve a la cola para cuando abra y entonces atiende todo lo
+        // que quedó sin responder (ADR 0024).
+        const zone = await getOrgLocale(tx, orgId)
+        const opensAt = nextAgentOpening(now, zone.timezone, { fromMin: cfg.activeFromMin, untilMin: cfg.activeUntilMin })
+        const delaySeconds = Math.max(1, Math.ceil((opensAt.getTime() - now.getTime()) / 1000))
+        await sendAgentRun(tx, { ...inboundJob, deferred: true }, { delaySeconds })
+        return { skip: { reason: OUT_OF_HOURS, model: effectiveModel, silent: true } }
+      }
+      if (limit) return { skip: { reason: limit, model: effectiveModel } }
+      const [trigger] = await tx
+        .select()
+        .from(message)
+        .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
+        .limit(1)
+      if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
+      // ¿Este mensaje ya quedó atendido? Lo está si una corrida respondió o
+      // derivó con él como disparador, o si lo dejó anotado entre los que
+      // leyó (resto de una ráfaga). También cubre la reentrega de la cola.
+      // Es constancia explícita por mensaje: no se deduce de fechas, así que
+      // un mensaje que ninguna corrida leyó nunca se da por atendido.
+      const [attended] = await tx
+        .select({ id: agentRunLedger.id })
+        .from(agentRunLedger)
+        .where(
+          and(
+            eq(agentRunLedger.organizationId, orgId),
+            eq(agentRunLedger.conversationId, conversationId),
+            eq(agentRunLedger.triggerMessageId, trigger.id),
+            or(
+              inArray(agentRunLedger.status, ["ok", "handoff"]),
+              and(eq(agentRunLedger.status, "omitida"), eq(agentRunLedger.error, BURST_COVERED)),
             ),
-          )
-          .limit(1)
-        if (attended) return { skip: { reason: BURST_COVERED, model: effectiveModel, silent: true } }
-        // Ráfaga: los entrantes recientes sin responder al final del hilo,
-        // dentro de la misma ventana que lee el contexto. La corrida los
-        // atiende todos y su disparador efectivo es el más reciente. Lo
-        // antiguo sin responder (un hilo donde el agente estuvo apagado) lo
-        // lee el modelo como historial, pero no es ráfaga: ni se anota ni
-        // dispara una palabra de derivación de hace días. Acotar solo puede
-        // hacer que una corrida se ejecute de más, nunca de menos.
-        const recent = await tx
-          .select({
-            id: message.id,
-            direction: message.direction,
-            body: message.body,
-            createdAt: message.createdAt,
-          })
-          .from(message)
-          .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
-          .orderBy(desc(message.createdAt), desc(message.id))
-          .limit(20)
-        const horizon = Date.now() - BURST_HORIZON_MS
-        const pendingTail: { id: string; body: string | null; createdAt: Date }[] = []
-        for (const item of recent) {
-          if (item.direction !== "in" || item.createdAt.getTime() < horizon) break
-          pendingTail.push(item)
-        }
-        // La persona sigue escribiendo: responder ahora daría una respuesta a
-        // medias y otra corrida enseguida. Se vuelve a encolar esta misma
-        // corrida para cuando lleve un rato en silencio, sin pasar del tope
-        // desde su primer mensaje. Reencolar (y no descartar) garantiza que
-        // alguna corrida atienda la ráfaga aunque no llegue nada más.
-        const newest = pendingTail[0]
-        const oldest = pendingTail[pendingTail.length - 1]
-        if (runtime.burst && newest && oldest) {
-          const sinceLast = Date.now() - newest.createdAt.getTime()
-          const waited = Date.now() - oldest.createdAt.getTime()
-          const remaining = Math.min(runtime.burst.quietMs - sinceLast, runtime.burst.maxWaitMs - waited)
-          if (remaining > 0) {
-            await sendAgentRun(tx, msg.message, { delaySeconds: Math.max(1, Math.ceil(remaining / 1000)) })
-            return { skip: { reason: BURST_WAITING, model: effectiveModel, silent: true } }
-          }
-        }
-        const burst = pendingTail.some((item) => item.id === trigger.id)
-          ? pendingTail
-          : [...pendingTail, { id: trigger.id, body: trigger.body }]
-        const latestId = burst[0]?.id ?? trigger.id
-        inboundMessageId = latestId
-        coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
-        burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
-        const keyword = burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
-        if (keyword) {
-          const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
-            triggerId: latestId,
-          })
-          await performHandoff(toolCtx, `palabra clave en: ${(keyword.body ?? "").slice(0, 120)}`)
-          return { skip: { reason: "handoff", model: effectiveModel } }
-        }
-        const spec = await resolveLlm(tx, cfg)
-        if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
-        return {
-          toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
-            triggerId: latestId,
-            excludedTools: await orgToolExclusions(tx, orgId, cfg),
-          }),
-          spec,
-          cfg,
-        }
-      })
-    } else {
-      const coordinationJob = msg.message
-      prepared = await withOrgContext(db, orgId, async (tx) => {
-        const coordination = await beginCommercialFollowUpCoordination(
-          tx,
-          orgId,
-          coordinationJob.coordinationId,
-          new Date(),
-        )
-        const cfg = await getAgentConfig(tx, orgId)
-        if (cfg.model?.trim()) effectiveModel = cfg.model.trim()
-        if (!coordination.run) {
-          return {
-            skip: {
-              reason: `commercial-follow-up:${coordination.status}:${coordination.reason ?? "sin motivo"}`,
-              model: effectiveModel,
-            },
-          }
-        }
-        const spec = await resolveLlm(tx, cfg)
-        if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
-        return {
-          spec,
-          cfg,
-          toolCtx: baseToolCtx(
-            db,
-            orgId,
-            coordination.conversationId,
-            coordination.contactId,
-            runtime.secretsKey,
-            {
-              triggerId: coordination.triggerId,
-              runInstruction: coordination.instruction,
-              allowedTools: [
-                "send_reply",
-                "send_template",
-                // El conocimiento del prompt va recortado: sin esta lectura no
-                // habría forma de citar entera una respuesta oficial.
-                "consultar_conocimiento",
-                "leer_contexto_comercial",
-                "ver_otros_canales",
-                "listar_oportunidades",
-                "listar_tareas",
-                "request_human_handoff",
-              ],
-              commercialCoordinationId: coordination.coordinationId,
-            },
           ),
+        )
+        .limit(1)
+      if (attended) return { skip: { reason: BURST_COVERED, model: effectiveModel, silent: true } }
+      // Ráfaga: los entrantes recientes sin responder al final del hilo,
+      // dentro de la misma ventana que lee el contexto. La corrida los
+      // atiende todos y su disparador efectivo es el más reciente. Lo
+      // antiguo sin responder (un hilo donde el agente estuvo apagado) lo
+      // lee el modelo como historial, pero no es ráfaga: ni se anota ni
+      // dispara una palabra de derivación de hace días. Acotar solo puede
+      // hacer que una corrida se ejecute de más, nunca de menos.
+      const recent = await tx
+        .select({
+          id: message.id,
+          direction: message.direction,
+          body: message.body,
+          createdAt: message.createdAt,
+        })
+        .from(message)
+        .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
+        .orderBy(desc(message.createdAt), desc(message.id))
+        .limit(20)
+      // Una corrida pospuesta hasta la apertura del horario atiende todo lo que
+      // quedó sin responder, aunque pase de la ventana de ráfaga.
+      const horizon = inboundJob.deferred ? Number.NEGATIVE_INFINITY : now.getTime() - BURST_HORIZON_MS
+      const pendingTail: { id: string; body: string | null; createdAt: Date }[] = []
+      for (const item of recent) {
+        if (item.direction !== "in" || item.createdAt.getTime() < horizon) break
+        pendingTail.push(item)
+      }
+      // La persona sigue escribiendo: responder ahora daría una respuesta a
+      // medias y otra corrida enseguida. Se vuelve a encolar esta misma
+      // corrida para cuando lleve un rato en silencio, sin pasar del tope
+      // desde su primer mensaje. Reencolar (y no descartar) garantiza que
+      // alguna corrida atienda la ráfaga aunque no llegue nada más.
+      const newest = pendingTail[0]
+      const oldest = pendingTail[pendingTail.length - 1]
+      if (runtime.burst && newest && oldest) {
+        const sinceLast = now.getTime() - newest.createdAt.getTime()
+        const waited = now.getTime() - oldest.createdAt.getTime()
+        const remaining = Math.min(runtime.burst.quietMs - sinceLast, runtime.burst.maxWaitMs - waited)
+        if (remaining > 0) {
+          await sendAgentRun(tx, msg.message, { delaySeconds: Math.max(1, Math.ceil(remaining / 1000)) })
+          return { skip: { reason: BURST_WAITING, model: effectiveModel, silent: true } }
         }
-      })
-    }
+      }
+      const burst = pendingTail.some((item) => item.id === trigger.id)
+        ? pendingTail
+        : [...pendingTail, { id: trigger.id, body: trigger.body }]
+      const latestId = burst[0]?.id ?? trigger.id
+      inboundMessageId = latestId
+      coveredMessageIds = burst.map((item) => item.id).filter((id) => id !== latestId)
+      burstTexts = [...burst].reverse().map((item) => (item.body ?? "").trim()).filter(Boolean)
+      const keyword = burst.find((item) => matchesHandoff(item.body, cfg.handoffKeywords))
+      if (keyword) {
+        const toolCtx = baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
+          triggerId: latestId,
+        })
+        await performHandoff(toolCtx, `palabra clave en: ${(keyword.body ?? "").slice(0, 120)}`)
+        // Derivar siempre avisa: la persona recibe el aviso fijo, sin modelo.
+        toolCtx.treatment = cfg.treatment
+        await noticeAfterHandoff(toolCtx)
+        return { skip: { reason: "handoff", model: effectiveModel } }
+      }
+      const spec = resolveLlm(cfg)
+      if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
+      return {
+        toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
+          triggerId: latestId,
+          excludedTools: await orgToolExclusions(tx, orgId, cfg),
+        }),
+        spec,
+        cfg,
+        attention: conv.attentionStartedAt.getTime(),
+      }
+    })
     if ("skip" in prepared && configProblem) {
       // Sin modelo utilizable: el interlocutor pasa a una persona y quien
       // administra el agente recibe un único aviso por problema y día.
@@ -452,9 +412,7 @@ export async function processAgentRun(
         conversationId,
         triggerMessageId: inboundMessageId,
         model: prepared.skip.model,
-        status: prepared.skip.reason === "handoff" || prepared.skip.reason.includes(":derivada:")
-          ? "handoff"
-          : "omitida",
+        status: prepared.skip.reason === "handoff" ? "handoff" : "omitida",
         startedAt,
         endedAt: new Date(),
         llmCalls: 0,
@@ -462,11 +420,14 @@ export async function processAgentRun(
       })
       return "done"
     }
-    const { toolCtx, spec, cfg } = prepared
+    const { toolCtx, spec, cfg, attention } = prepared
     effectiveModel = spec.modelName
+    toolCtx.treatment = cfg.treatment
     toolCtx.modelName = spec.modelName
     toolCtx.verifyReplies = cfg.replyCheckEnabled
+    toolCtx.emojis = cfg.emojis
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
+    if (runtime.embedder) toolCtx.embedder = runtime.embedder
     runUsage = toolCtx.usage
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
@@ -518,7 +479,8 @@ export async function processAgentRun(
       await graph.invoke(
         { messages: [], turnCount: 0 },
         {
-          configurable: { thread_id: `${orgId}:${conversationId}` },
+          // Cada atención (desde que se abrió o reabrió) es un hilo propio del grafo.
+          configurable: { thread_id: `${orgId}:${conversationId}:${attention}` },
           ...(runtime.callbacks ? { callbacks: runtime.callbacks } : {}),
         },
       )
@@ -536,28 +498,16 @@ export async function processAgentRun(
       } catch (error) {
         console.error(`agent: el aviso de derivación no se pudo redactar (${error instanceof Error ? error.message : String(error)})`)
       }
-      if (!toolCtx.replySettled) {
-        const notify = makeAgentTools(toolCtx).find((item) => item.name === "request_human_handoff")
-        await notify
-          ?.invoke({ reason, summary: reason, message: handoffFallbackNotice(cfg.treatment) })
-          .catch((error: unknown) =>
-            console.error(`agent: el aviso fijo de derivación no salió (${error instanceof Error ? error.message : String(error)})`),
-          )
-      }
+      if (!toolCtx.replySettled) await noticeAfterHandoff(toolCtx)
+    } else if (toolCtx.route?.path === "fuera_de_tema") {
+      // Nada que ver con la clínica y el modelo de decisión muy seguro: un
+      // texto fijo, sin llamar al modelo que escribe. Sale por send_reply,
+      // con el mismo formato del canal y la misma comprobación.
+      const clinic = await publicClinicName(db, orgId)
+      const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
+      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
     } else {
       await invokeGraph()
-    }
-    if (coordinationId && !toolCtx.decisionRecorded) {
-      await withOrgContext(db, orgId, (tx) =>
-        deriveCommercialFollowUpCoordination(
-          tx,
-          orgId,
-          coordinationId,
-          "El agente no registró una decisión operativa",
-          "Revisa manualmente la próxima acción vencida.",
-        ),
-      )
-      toolCtx.handedOff = true
     }
     // Sin envío ni derivación en esta corrida: se avisa al equipo salvo que
     // el hilo ya tenga una respuesta posterior al disparador (reentrega o
@@ -631,10 +581,10 @@ export async function processAgentRun(
         }),
       ).catch(() => {})
       const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, {
-        triggerId: inboundMessageId ?? coordinationId,
-        ...(coordinationId ? { commercialCoordinationId: coordinationId } : {}),
+        triggerId: inboundMessageId,
       })
       await performHandoff(toolCtx, "error del agente").catch(() => {})
+      await noticeAfterHandoff(toolCtx).catch(() => {})
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId: inboundMessageId,
@@ -662,10 +612,11 @@ export async function processAgentRun(
   async function finishWithProviderProblem(problem: ProviderProblem): Promise<"done"> {
     await withOrgContext(db, orgId, (tx) => notifyAgentProviderProblem(tx, orgId, problem)).catch(() => {})
     const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, {
-      triggerId: inboundMessageId ?? coordinationId,
-      ...(coordinationId ? { commercialCoordinationId: coordinationId } : {}),
+      triggerId: inboundMessageId,
     })
     await performHandoff(toolCtx, handoffReasonFor(problem)).catch(() => {})
+    // Sin modelo la persona igual sabe que sigue una persona: el aviso es fijo.
+    await noticeAfterHandoff(toolCtx).catch(() => {})
     await ledger(db, orgId, {
       conversationId,
       triggerMessageId: inboundMessageId,
@@ -738,32 +689,34 @@ function messageText(msg: BaseMessage): string {
 export async function simulateAgentTurn(
   db: Db,
   deps: Pick<AgentRuntime, "platform" | "secretsKey">,
-  input: { orgId: string; conversationId: string; text: string; model?: string },
+  input: { orgId: string; conversationId: string; text: string },
 ): Promise<SimulationResult> {
   const { orgId, conversationId } = input
   const text = input.text.trim()
   if (!text) throw new Error("El mensaje a simular es obligatorio")
   const startedAt = new Date()
-  const { contactId, spec, excludedTools, verifyReplies } = await withOrgContext(db, orgId, async (tx) => {
+  const { contactId, spec, excludedTools, verifyReplies, emojis } = await withOrgContext(db, orgId, async (tx) => {
     const [conv] = await tx
       .select({ contactId: conversation.contactId })
       .from(conversation)
       .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
       .limit(1)
     if (!conv) throw new Error("Conversación no encontrada")
-    // Mismo resolvedor y mismas herramientas que la corrida real; el parámetro solo cambia el nombre.
+    // Mismo resolvedor y mismas herramientas que la corrida real.
     const cfg = await getAgentConfig(tx, orgId)
     return {
       contactId: conv.contactId,
-      spec: await resolveOrgLlm(tx, orgId, cfg, deps, input.model),
+      spec: resolveLlmSpec(cfg, deps.platform),
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
       verifyReplies: cfg.replyCheckEnabled,
+      emojis: cfg.emojis,
     }
   })
   const modelName = spec.modelName
   const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey, { excludedTools })
   toolCtx.dryRun = true
   toolCtx.verifyReplies = verifyReplies
+  toolCtx.emojis = emojis
   toolCtx.draftText = text.slice(0, 4000)
   const model = await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
@@ -815,13 +768,12 @@ export const EMPTY_SANDBOX_STATE: AgentSandboxState = { pending: [], recent: [],
  */
 export async function simulateAgentSandbox(
   db: Db,
-  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel">,
+  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel" | "embedder">,
   input: {
     orgId: string
     transcript: SandboxTurn[]
     message: string
     state?: AgentSandboxState
-    model?: string
     /** Probar con una lección aún sin aprobar, o sin una activa. */
     lessonOverrides?: LessonOverrides
   },
@@ -834,15 +786,17 @@ export async function simulateAgentSandbox(
     const cfg = await getAgentConfig(tx, orgId)
     return {
       cfg,
-      spec: await resolveOrgLlm(tx, orgId, cfg, deps, input.model),
+      spec: resolveLlmSpec(cfg, deps.platform),
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
     }
   })
   const toolCtx = baseToolCtx(db, orgId, SANDBOX_NIL_ID, SANDBOX_NIL_ID, deps.secretsKey, { excludedTools })
   toolCtx.dryRun = true
   toolCtx.verifyReplies = cfg.replyCheckEnabled
+  toolCtx.emojis = cfg.emojis
   toolCtx.modelName = spec.modelName
   toolCtx.draftText = text.slice(0, 4000)
+  if (deps.embedder) toolCtx.embedder = deps.embedder
   const state = structuredClone(input.state ?? EMPTY_SANDBOX_STATE)
   toolCtx.sandbox = { transcript: input.transcript.slice(-40), state }
   if (input.lessonOverrides) toolCtx.lessonOverrides = input.lessonOverrides
@@ -870,6 +824,24 @@ export async function simulateAgentSandbox(
       toolCtx.route = null
     }
   }
+  if (toolCtx.route?.path === "fuera_de_tema") {
+    const clinic = await publicClinicName(db, orgId)
+    return {
+      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic),
+      replied: true,
+      toolsUsed: [],
+      handedOff: false,
+      basis: [],
+      checks: [],
+      did: ["Respondió con el texto fijo para lo que no es de la clínica, sin llamar al modelo que escribe."],
+      waiting: [],
+      state,
+      inputTokens: null,
+      outputTokens: null,
+      model: spec.modelName,
+      latencyMs: Date.now() - startedAt,
+    }
+  }
   if (toolCtx.route?.path === "derivar") {
     return {
       reply: "(No respondería: pasa el caso a una persona de tu equipo.)",
@@ -895,11 +867,8 @@ export async function simulateAgentSandbox(
   )) as { messages: BaseMessage[] }
   const replies = result.messages.filter((m) => m instanceof AIMessage)
   const last = replies[replies.length - 1]
-  const waiting = state.pending.map((item) =>
-    item.decider === "contact"
-      ? `${item.label} (${item.summary}): espera el sí del paciente.`
-      : `${item.label} (${item.summary}): quedaría en Aprobaciones para tu equipo.`,
-  )
+  // Lo único que queda pendiente es lo que confirma el paciente (ADR 0023).
+  const waiting = state.pending.map((item) => `${item.label} (${item.summary}): espera el sí del paciente.`)
   return {
     reply: toolCtx.simulatedReply ?? ((last ? messageText(last) : "") || "(sin respuesta)"),
     replied: toolCtx.replySettled,

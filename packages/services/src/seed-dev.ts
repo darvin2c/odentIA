@@ -18,7 +18,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { commercialFollowUpCoordination } from "@odentia/db/schema/agent"
+import { agentSearchItem } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -64,7 +64,6 @@ import {
   contact,
   contactIdentity,
   conversation,
-  crmTask,
   customFieldDef,
   message,
   pipeline,
@@ -126,7 +125,6 @@ import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
-import { seedCrmAgent } from "./seed-crm-agent.js"
 import { seedFinance } from "./seed-finance.js"
 import { seedInventory } from "./seed-inventory.js"
 import { seedMailbox } from "./seed-mailbox.js"
@@ -140,7 +138,7 @@ import { seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { seedSaasBillingDemo } from "./seed-saas-billing.js"
-import { createService } from "./service-catalog.js"
+import { createService, updateService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask } from "./tasks.js"
 
@@ -354,14 +352,12 @@ async function wipeSeed(): Promise<void> {
     "automation_job",
     "automation_consent",
     "automation_rule",
-    "commercial_follow_up_coordination",
     "agent_decision_log",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
     "agent_knowledge_revision",
     "agent_knowledge_entry",
-    "agent_policy",
     "crm_note",
     "task",
     "workspace_notification",
@@ -509,6 +505,8 @@ async function wipeSeed(): Promise<void> {
   // Los mensajes de WhatsApp son de la organización, no de la conexión; sus versiones se van en cascada.
   await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, SEED_ORGS))
   await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, SEED_ORGS))
+  // El índice de búsqueda del agente apunta a la organización: se borra antes.
+  await db.delete(agentSearchItem).where(inArray(agentSearchItem.organizationId, SEED_ORGS))
   await db.delete(agentConfig).where(inArray(agentConfig.organizationId, SEED_ORGS))
   await db.delete(orgCounter).where(inArray(orgCounter.organizationId, SEED_ORGS))
   await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS))
@@ -548,6 +546,8 @@ async function seedConversation(args: {
   lastInboundAt?: Date | null
   lastOutboundAt?: Date | null
   lastMessageAt?: Date | null
+  /** Cerrada: con su motivo y quién (nulo = el agente), como la deja `closeConversationWith`. */
+  closed?: { reason: "resuelta" | "sin_respuesta" | "equipo" | "manual"; at: Date; byUserId: string | null }
 }): Promise<{ id: string }> {
   const [connection] = await db
     .select({ channel: channelConnection.channel })
@@ -573,7 +573,10 @@ async function seedConversation(args: {
       channelConnectionId: args.connectionId,
       externalThreadId:
         connection?.channel === "whatsapp" && identity ? identity.externalUserId : args.thread,
-      status: args.status ?? "open",
+      status: args.closed ? "closed" : (args.status ?? "open"),
+      closedAt: args.closed?.at ?? null,
+      closeReason: args.closed?.reason ?? null,
+      closedByUserId: args.closed?.byUserId ?? null,
       assignedUserId: args.assignedUserId ?? null,
       agentStatus: args.agentStatus ?? "on",
       unreadCount: args.unreadCount ?? 0,
@@ -749,7 +752,7 @@ const [miraflores] = await db
     },
   ])
   .returning({ id: branch.id })
-if (!miraflores) throw new Error("No se pudo crear la sucursal Sede Miraflores")
+if (!miraflores) throw new Error("No se pudo crear la Sede Miraflores")
 await db.insert(branch).values([{ organizationId: ORG_B, name: "Sede Lima" }])
 
 // --- CRM con servicios ---
@@ -802,7 +805,7 @@ await db
     },
   })
   .where(eq(channelConnection.id, connA.id))
-// Sus mensajes: los seis con los que viene, en estados variados, y uno propio.
+// Sus mensajes: los siete con los que viene, en estados variados, y uno propio.
 await seedChannelTemplates(db, { orgId: ORG_A, connectionId: connA.id })
 const connB = await createConnection(
   db,
@@ -1021,7 +1024,8 @@ const convElena = await seedConversation({
   contactId: contactIdByName.get("Elena Huamán")!,
   connectionId: connA.id,
   thread: "seed-thread-3",
-  status: "closed",
+  // El agente confirmó y Elena se despidió: cerrada como resuelta.
+  closed: { reason: "resuelta", at: new Date(elenaClosedAt.getTime() + 900_000), byUserId: null },
   lastInboundAt: elenaClosedAt,
   lastOutboundAt: new Date(elenaClosedAt.getTime() + 600_000),
   lastMessageAt: new Date(elenaClosedAt.getTime() + 600_000),
@@ -1068,6 +1072,98 @@ await seedMessage({
   createdAt: hoursAgo(6),
 })
 
+// Ninguna conversación queda abierta (ADR 0024): una que espera al paciente
+// con el agente a cargo y una cerrada por cada motivo, para ver la Bandeja.
+const convLucia = await seedConversation({
+  orgId: ORG_A,
+  contactId: contactIdByName.get("Lucía Fernández")!,
+  connectionId: connA.id,
+  thread: "seed-thread-5",
+  lastInboundAt: hoursAgo(3),
+  lastOutboundAt: hoursAgo(2),
+  lastMessageAt: hoursAgo(2),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convLucia.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "¿Atienden ortodoncia los sábados?",
+  externalId: "seed-msg-9",
+  status: "read",
+  createdAt: hoursAgo(3),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convLucia.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Sí, Lucía: los sábados atendemos de 9:00 a 13:00. ¿Quieres que te busque un horario para una evaluación?",
+  externalId: "seed-msg-10",
+  status: "delivered",
+  createdAt: hoursAgo(2),
+})
+const CLOSED_SEED: Array<{ name: string; thread: string; reason: "sin_respuesta" | "equipo" | "manual"; by: string | null; said: string; answer: string }> = [
+  {
+    name: "Miguel Torres",
+    thread: "seed-thread-6",
+    reason: "sin_respuesta",
+    by: null,
+    said: "¿Cuánto cuesta un blanqueamiento?",
+    answer: "Miguel, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
+  },
+  {
+    name: "Carmen Rojas",
+    thread: "seed-thread-7",
+    reason: "equipo",
+    by: LUIS_ID,
+    said: "Quiero hablar con alguien por mi factura",
+    answer: "Carmen, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.",
+  },
+  {
+    name: "Diego Salazar",
+    thread: "seed-thread-8",
+    reason: "manual",
+    by: ANA_ID,
+    said: "Número equivocado, disculpen",
+    answer: "No te preocupes, Diego. ¡Que tengas buen día!",
+  },
+]
+for (const [index, item] of CLOSED_SEED.entries()) {
+  const at = daysAgo(index + 1)
+  const conv = await seedConversation({
+    orgId: ORG_A,
+    contactId: contactIdByName.get(item.name)!,
+    connectionId: connA.id,
+    thread: item.thread,
+    lastInboundAt: at,
+    lastOutboundAt: new Date(at.getTime() + 600_000),
+    lastMessageAt: new Date(at.getTime() + 600_000),
+    closed: { reason: item.reason, at: new Date(at.getTime() + 900_000), byUserId: item.by },
+  })
+  await seedMessage({
+    orgId: ORG_A,
+    conversationId: conv.id,
+    direction: "in",
+    senderKind: "contact",
+    body: item.said,
+    externalId: `seed-msg-closed-${index}-in`,
+    status: "read",
+    createdAt: at,
+  })
+  await seedMessage({
+    orgId: ORG_A,
+    conversationId: conv.id,
+    direction: "out",
+    senderKind: item.by ? "user" : "agent",
+    senderUserId: item.by,
+    body: item.answer,
+    externalId: `seed-msg-closed-${index}-out`,
+    status: "read",
+    createdAt: new Date(at.getTime() + 600_000),
+  })
+}
+
 // --- Tareas A ---
 await createTask(db, ORG_A, {
   title: "Llamar a Rosa para confirmar cita",
@@ -1090,7 +1186,7 @@ await createTask(db, ORG_A, {
 // --- Agente A (B sin fila: ejercita el default deshabilitado) ---
 await upsertAgentConfig(db, ORG_A, {
   enabled: true,
-  model: null,
+  llm: "chatgpt_6",
   systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
@@ -1301,7 +1397,18 @@ const seedOffers: Array<{
   priceCents: number
   durationMin: number
   billingMode?: "treatment" | "session"
+  /** Cómo dice el precio el agente: la semilla muestra las tres formas (ADR 0021). */
+  priceDisclosure: "exacto" | "desde" | "evaluacion"
 }> = [
+  {
+    code: "EVALUACION",
+    name: "Evaluación odontológica",
+    specialty: "diagnostico",
+    scope: "general",
+    priceCents: 5000,
+    durationMin: 30,
+    priceDisclosure: "exacto",
+  },
   {
     code: "OBTURACION",
     name: "Obturación con resina",
@@ -1309,6 +1416,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 18000,
     durationMin: 45,
+    priceDisclosure: "exacto",
   },
   {
     code: "ENDODONCIA",
@@ -1317,6 +1425,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 45000,
     durationMin: 90,
+    priceDisclosure: "desde",
   },
   {
     code: "CORONA",
@@ -1325,6 +1434,7 @@ const seedOffers: Array<{
     scope: "tooth",
     priceCents: 90000,
     durationMin: 60,
+    priceDisclosure: "evaluacion",
   },
   {
     code: "BLANQUEAMIENTO",
@@ -1333,6 +1443,7 @@ const seedOffers: Array<{
     scope: "arch",
     priceCents: 60000,
     durationMin: 60,
+    priceDisclosure: "exacto",
   },
   {
     code: "LIMPIEZA",
@@ -1341,6 +1452,7 @@ const seedOffers: Array<{
     scope: "general",
     priceCents: 12000,
     durationMin: 45,
+    priceDisclosure: "exacto",
   },
   {
     code: "ORTODONCIA_CTRL",
@@ -1350,6 +1462,7 @@ const seedOffers: Array<{
     priceCents: 10000,
     durationMin: 30,
     billingMode: "session",
+    priceDisclosure: "exacto",
   },
 ]
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
@@ -1361,6 +1474,10 @@ const serviceIdA = (code: string): string => {
   const found = catalogA.find((s) => s.code === code)
   if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
   return found.id
+}
+// Lo que no se dice con precio exacto ofrece la evaluación de la clínica.
+for (const code of ["ENDODONCIA", "CORONA"]) {
+  await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { evaluationServiceId: serviceIdA("EVALUACION") })
 }
 await db.transaction(async (tx) => {
   await createPromotion(tx, ORG_A, ANA_ID, {
@@ -2236,7 +2353,7 @@ await db.transaction((tx) =>
 const surco = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede Surco")),
 })
-if (!surco) throw new Error("Falta la sucursal Sede Surco")
+if (!surco) throw new Error("Falta la Sede Surco")
 const chairsMiraflores = await Promise.all(
   ["Sillón 1", "Sillón 2", "Sillón 3"].map((name) =>
     createChair(db, ORG_A, { branchId: miraflores.id, name }),
@@ -2473,42 +2590,7 @@ await db.transaction(async (tx) => {
   })
   const commercial = items[0]
   if (!commercial) throw new Error("Falta la oportunidad de demostración conectada")
-  const openStages = pipeA.stages.filter((stage) => stage.kind === "open")
   await seedCrmActivity(tx, { ...domainSeed, opportunityId: commercial.id })
-  await seedCrmAgent(tx, {
-    ...domainSeed,
-    opportunityId: commercial.id,
-    stageId: (openStages[1] ?? openStages[0])!.id,
-  })
-  const [followUpTask] = await tx
-    .select()
-    .from(crmTask)
-    .where(
-      and(
-        eq(crmTask.organizationId, ORG_A),
-        eq(crmTask.opportunityId, commercial.id),
-        eq(crmTask.kind, "opportunity_follow_up"),
-      ),
-    )
-    .limit(1)
-  if (!followUpTask?.dueAt) throw new Error("Falta el pendiente comercial de demostración")
-  await tx
-    .insert(commercialFollowUpCoordination)
-    .values({
-      organizationId: ORG_A,
-      taskId: followUpTask.id,
-      opportunityId: commercial.id,
-      conversationId: followUpTask.conversationId,
-      triggerDueAt: followUpTask.dueAt,
-      status: "omitida",
-      reason: "Escenario histórico revisado manualmente",
-      result: { code: "NO_LONGER_APPLICABLE" },
-      nextResponsibleKind: "none",
-      decidedAt: new Date("2026-10-06T15:00:00.000Z"),
-      createdAt: new Date("2026-10-06T15:00:00.000Z"),
-      updatedAt: new Date("2026-10-06T15:00:00.000Z"),
-    })
-    .onConflictDoNothing()
 })
 await db.transaction((tx) => seedChannels(tx, domainSeed, secretsKey, { fetch }))
 await db.transaction((tx) => seedWebchat(tx, domainSeed, { secretsKey, fetch }))

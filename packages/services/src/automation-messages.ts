@@ -64,6 +64,7 @@ export const MESSAGE_VARIABLES = {
   cita_pasada: { label: "Fecha de la cita que no se dio", example: "lunes 12 de octubre" },
   control: { label: "Control pendiente", example: "Control de ortodoncia" },
   presupuesto: { label: "Título del presupuesto", example: "Ortodoncia" },
+  oportunidad: { label: "Título de la oportunidad", example: "Ortodoncia" },
 } as const
 export type MessageVariable = keyof typeof MESSAGE_VARIABLES
 
@@ -74,6 +75,7 @@ export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
   "recordatorio_control",
   "seguimiento_presupuesto",
+  "seguimiento_comercial",
   "seguimiento_no_asistencia",
   "cita_cancelada",
 ] as const
@@ -113,6 +115,19 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     variables: ["persona", "presupuesto", "clinica"],
     buttons: [{ action: "responder", title: "Quiero retomarlo", asks: "reservar" }, OPT_OUT],
     subject: "Tu presupuesto sigue pendiente",
+  },
+  // Retoma una consulta que quedó con su próxima acción vencida. El botón no fija
+  // camino: la persona sigue la conversación con Recepción, que sabe de qué
+  // oportunidad viene por su contacto.
+  seguimiento_comercial: {
+    key: "seguimiento_comercial",
+    purpose: "seguimiento",
+    category: "marketing",
+    template: "odentia_seguimiento_oportunidad_v1",
+    body: "Hola, {{1}}. Te escribimos de {{2}} sobre tu consulta de «{{3}}». ¿Seguimos conversando?",
+    variables: ["persona", "clinica", "oportunidad"],
+    buttons: [{ action: "responder", title: "Sí, continuemos" }, OPT_OUT],
+    subject: "¿Seguimos conversando?",
   },
   seguimiento_no_asistencia: {
     key: "seguimiento_no_asistencia",

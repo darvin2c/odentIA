@@ -18,6 +18,7 @@ import {
   AlertTitle,
   Badge,
   Button,
+  buttonVariants,
   Checkbox,
   cn,
   Collapsible,
@@ -820,14 +821,14 @@ function DebtLine({
           ) : null}
         </div>
         {onMessage && row.conversationId ? (
-          <Button
-            variant="ghost"
-            nativeButton={false}
+          <Link
+            to="/inbox"
+            search={{ conversation: row.conversationId }}
             aria-label={`Escribirle a ${name}`}
-            render={<Link to="/inbox" search={{ conversation: row.conversationId }} />}
+            className={buttonVariants({ variant: "ghost" })}
           >
             Escribirle
-          </Button>
+          </Link>
         ) : onMessage && row.contactId ? (
           <Button variant="ghost" aria-label={`Escribirle a ${name}`} onClick={() => onMessage(row)}>
             Escribirle

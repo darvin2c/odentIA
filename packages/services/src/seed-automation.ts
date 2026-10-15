@@ -19,7 +19,7 @@ type TemplateSeed = Omit<typeof channelTemplate.$inferInsert, "organizationId" |
 /**
  * Los mensajes de WhatsApp de la clínica de demostración, en los estados que
  * puede dar el proveedor, para ver Configuración › Integraciones › WhatsApp, la
- * Bandeja pasadas las 24 horas y cada vía de envío: los seis con los que viene
+ * Bandeja pasadas las 24 horas y cada vía de envío: los siete con los que viene
  * (uno con un cambio de texto en revisión), uno creado por la clínica y dos
  * plantillas que ya estaban en la cuenta. Son datos de la semilla: ninguno pasó
  * por WhatsApp.
@@ -42,11 +42,12 @@ export async function seedChannelTemplates(
       })
   }
 
-  // Los seis con los que viene la clínica, cada uno en un estado distinto.
+  // Los siete con los que viene la clínica, en estados distintos.
   const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date }> = {
     recordatorio_cita: { status: "aprobada", since: lastWeek },
     recordatorio_control: { status: "aprobada", since: lastWeek },
     seguimiento_presupuesto: { status: "en_revision" },
+    seguimiento_comercial: { status: "aprobada", since: lastWeek },
     seguimiento_no_asistencia: { status: "rechazada", reason: "INVALID_FORMAT" },
     cita_cancelada: { status: "aprobada", since: lastWeek },
     retomar_conversacion: { status: "aprobada", since: lastWeek },

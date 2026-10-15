@@ -7,6 +7,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
   Button,
+  buttonVariants,
+  cn,
   Field,
   FieldLabel,
   Input,
@@ -34,6 +36,7 @@ import { CreatePatientDrawer } from "../../components/patient/create-patient-dra
 import { TagsInput } from "../../components/patient/tags-input"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelIcon, channelLabel } from "../../lib/channels"
+import { conversationStatusLabel } from "../../lib/glossary"
 import {
   type ContactFull,
   type ContactListItem,
@@ -99,7 +102,8 @@ function ContactDetailPage() {
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const canWrite = usePermission("crm.write")
-  const canConfigure = usePermission("settings.read")
+  // Definir campos lo hace quien configura y también quien trabaja con contactos.
+  const canConfigure = usePermission("settings.read") || canWrite
   const { contactId } = Route.useParams()
   const [editOpen, setEditOpen] = useState(false)
   const [draftName, setDraftName] = useState("")
@@ -442,13 +446,13 @@ function ContactDetailPage() {
             )}
             {selfLink ? (
               <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  render={<Link to="/patients/$patientId" params={{ patientId: selfLink.id }} />}
+                <Link
+                  to="/patients/$patientId"
+                  params={{ patientId: selfLink.id }}
+                  className={buttonVariants({ variant: "outline" })}
                 >
                   Ver paciente
-                </Button>
+                </Link>
                 <Button type="button" onClick={() => setPatientDrawer(true)}>
                   Registrar a otra persona
                 </Button>
@@ -524,14 +528,13 @@ function ContactDetailPage() {
                 {p.isPreferred && <Badge>Preferente</Badge>}
                 {!p.isActive && <Badge variant="secondary">Paciente archivado</Badge>}
               </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                render={<Link to="/patients/$patientId" params={{ patientId: p.id }} />}
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId: p.id }}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 Abrir
-              </Button>
+              </Link>
             </div>
           ))
         )}
@@ -753,7 +756,7 @@ function ContactDetailPage() {
           {fieldDefs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Sin campos definidos.{" "}
-              {/* El enlace solo para quien puede abrir Configuración: a los demás los devolvería a Inicio. */}
+              {/* El enlace solo para quien puede abrir Campos de contacto: a los demás los devolvería a Inicio. */}
               {canConfigure ? (
                 <Link to="/settings/fields" className="font-semibold text-primary hover:underline">
                   Definir campos
@@ -895,20 +898,13 @@ function ContactDetailPage() {
           </>
         )}
         {detail.conversations.length > 0 && (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="self-start"
-            render={
-              <Link
-                to="/inbox"
-                search={{ conversation: detail.conversations[0].id }}
-              />
-            }
+          <Link
+            to="/inbox"
+            search={{ conversation: detail.conversations[0].id }}
+            className={cn(buttonVariants({ variant: "link", size: "sm" }), "self-start")}
           >
             Ver bitácora en la bandeja
-          </Button>
+          </Link>
         )}
       </div>
       <div className="flex flex-col gap-2 rounded-sm bg-card p-4">
@@ -933,7 +929,7 @@ function ContactDetailPage() {
                       : undefined
                   }
                 >
-                  {conv.status}
+                  {conversationStatusLabel(conv.status, conv.closure)}
                 </Badge>
                 <span className="font-medium">{channelLabel(conv.channel)}</span>
                 {conv.connectionName && (
@@ -945,14 +941,13 @@ function ContactDetailPage() {
                     : "Sin identidad asignada"}
                 </span>
                 <span className="text-muted-foreground">{timeAgo(conv.lastMessageAt)}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  render={<Link to="/inbox" search={{ conversation: conv.id }} />}
+                <Link
+                  to="/inbox"
+                  search={{ conversation: conv.id }}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
                 >
                   Abrir
-                </Button>
+                </Link>
               </span>
               {canWrite && !linked && sameChannel.length > 0 && (
                 <span>
@@ -990,15 +985,9 @@ function ContactDetailPage() {
             </p>
           ))}
           <span className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              nativeButton={false}
-              render={<Link to="/tasks" />}
-            >
+            <Link to="/tasks" className={buttonVariants({ variant: "link", size: "sm" })}>
               Ir a tareas
-            </Button>
+            </Link>
             <Button
               type="button"
               variant="outline"

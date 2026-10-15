@@ -49,11 +49,11 @@ const STEPS = [
   { id: "persona", label: "Tu perfil" },
   { id: "org", label: "Organización" },
   { id: "profile", label: "Perfil legal" },
-  { id: "branch", label: "Sucursal" },
+  { id: "branch", label: "Sede" },
 ] as const
 
 /** Tema de cada paso para el subtítulo "Paso N de M: …". */
-const STEP_TOPICS = ["tus datos", "organización", "perfil legal", "primera sucursal"] as const
+const STEP_TOPICS = ["tus datos", "organización", "perfil legal", "primera sede"] as const
 
 /** Campos validados al avanzar desde cada paso. */
 const STEP_FIELDS = [
@@ -85,7 +85,7 @@ const onboardingSchema = personaSchema.extend({
   countryCode: z.string().length(2, "Elige el país"),
   // ISO 4217: se propone según el país y se puede cambiar.
   currency: z.string().regex(/^[A-Z]{3}$/, "Elige la moneda con la que cobra la clínica"),
-  branchName: z.string().min(2, "Nombre de la sucursal"),
+  branchName: z.string().min(2, "Nombre de la sede"),
   branchAddress: z.string(),
   // Vacío = sin teléfono; si hay valor, tiene que ser un número real (E.164).
   branchPhone: z
@@ -564,7 +564,7 @@ function OnboardingPage() {
               <form.Field name="branchName" validators={stepValidator("branchName")}>
                 {(field) => (
                   <Field>
-                    <FieldLabel htmlFor="branchName">Nombre de la sucursal</FieldLabel>
+                    <FieldLabel htmlFor="branchName">Nombre de la sede</FieldLabel>
                     <Input
                       id="branchName"
                       aria-invalid={field.state.meta.errors.length > 0 || undefined}

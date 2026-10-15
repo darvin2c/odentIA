@@ -6,7 +6,7 @@ import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
  * proveedores) con el estado en español; versionadas para que un cambio
  * de redacción u orden de opciones invalide los umbrales calibrados.
  */
-export const TRIAGE_VERSION = "triage.v2"
+export const TRIAGE_VERSION = "triage.v3"
 
 export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
   {
@@ -43,6 +43,12 @@ export const TRIAGE_QUESTIONS: DecisionQuestion[] = [
       { value: "complaint", description: "Complains about the service or the clinic." },
       { value: "unsubscribe", description: "Asks to stop receiving messages." },
       { value: "greeting_or_thanks", description: "Greeting, thanks or closing with no request." },
+      // Medido con eval:off-topic (fuera-de-tema.json): con 0.9 atrapa todo lo ajeno sin marcar nada de la clínica.
+      {
+        value: "off_topic",
+        description:
+          "Unrelated to dental care, the mouth or the clinic: cooking, homework, programming, sports, politics, general knowledge, translations, writing texts or jokes. Never use it for anything about teeth, the mouth, eating or care after a dental procedure, the clinic's services, prices, payment, insurance, paperwork, access or appointments.",
+      },
       { value: "other", description: "None of the above or unclear." },
     ],
   },

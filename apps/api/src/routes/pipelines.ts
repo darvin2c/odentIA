@@ -25,15 +25,16 @@ const stagePatch = z.object({
 })
 const reorderInput = z.object({ stageIds: z.array(z.string().uuid()).min(1) })
 
-/** Quien no configura la clínica recibe siempre el mismo mensaje. */
+/** Quien no trabaja con ventas recibe siempre el mismo mensaje. */
 function notForYou(c: Context) {
-  return c.json(errorBody(c, "FORBIDDEN", "Las etapas de venta las configura quien administra la clínica"), 403)
+  return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar las etapas de venta"), 403)
 }
 
 /**
  * Etapas de venta. Leerlas es de quien trabaja con oportunidades (las ve en el
  * tablero) y de quien configura; definirlas —crear, editar, ordenar, eliminar—
- * es configurar la clínica, la misma regla que abre su apartado en Configuración.
+ * también es de quien trabaja con oportunidades (`crm.write`), la misma regla
+ * que abre su apartado en Configuración.
  */
 export function createPipelinesRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -51,7 +52,7 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.post("/", async (c) => {
     const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "settings.write")) return notForYou(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     const parsed = nameInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
@@ -61,7 +62,7 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.patch("/:id", async (c) => {
     const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "settings.write")) return notForYou(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     const parsed = nameInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -75,7 +76,7 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.post("/:id/stages", async (c) => {
     const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "settings.write")) return notForYou(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     const parsed = stageInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
@@ -87,7 +88,7 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.post("/:id/reorder", async (c) => {
     const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "settings.write")) return notForYou(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     const parsed = reorderInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -99,7 +100,7 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.patch("/stages/:id", async (c) => {
     const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "settings.write")) return notForYou(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     const parsed = stagePatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -111,7 +112,7 @@ export function createPipelinesRoute(deps: CrmDeps) {
 
   app.delete("/stages/:id", async (c) => {
     const { orgId } = orgContextOf(c)
-    if (!canAccess(orgContextOf(c).memberRole, "settings.write")) return notForYou(c)
+    if (!canAccess(orgContextOf(c).memberRole, "crm.write")) return notForYou(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => deleteStage(tx, orgId, c.req.param("id"))).then(
         () => ({ ok: true }),

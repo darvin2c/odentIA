@@ -2,21 +2,26 @@ import { withOrgContext } from "@odentia/db"
 import {
   assignConversation,
   attachmentUrl,
+  CONVERSATION_STATUSES,
   CONVERSATION_VIEWS,
   closeConversation,
   getInboxConversationDetail,
+  getResolvePreview,
   listApprovedMessages,
   listInboxConversations,
   listMessages,
   markRead,
   OUTBOUND_MEDIA_MAX_BYTES,
   OUTBOUND_MEDIA_MIME_EXT,
+  releaseConversation,
   reopenConversation,
+  resolveConversationByTeam,
   resolveConversationIdentity,
   sendApprovedMessage,
   sendOutbound,
   setAgentStatus,
   summarizeInbox,
+  takeConversation,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -25,7 +30,7 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const filtersQuery = z.object({
-  status: z.string().optional(),
+  status: z.enum(CONVERSATION_STATUSES).optional(),
   channel: z.string().optional(),
   assigned: z.string().optional(),
   q: z.string().optional(),
@@ -235,6 +240,43 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
+  /** «Tomar»: la conversación pasa a quien la toma, el agente se apaga en el hilo y sus casos derivados quedan a su nombre. */
+  app.post("/:id/take", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => takeConversation(tx, orgId, c.req.param("id"), userId)).then(() => ({ ok: true })),
+    )
+  })
+
+  /** «Devolver al agente»: sin asignación y con el agente encendido; con un caso derivado abierto, 409 `HANDOFF_OPEN`. */
+  app.post("/:id/release", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => releaseConversation(tx, orgId, c.req.param("id"), userId)).then(() => ({ ok: true })),
+    )
+  })
+
+  /** Lo que pasará al pulsar «Resolver»: si sale la despedida (y cuál), cuántos casos y propuestas se cierran. */
+  app.get("/:id/resolve-preview", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getResolvePreview(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  /** «Resolver»: despedida si se puede escribir, casos derivados resueltos, propuestas vencidas y cierre por el equipo. */
+  app.post("/:id/resolve", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const id = c.req.param("id")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await resolveConversationByTeam(tx, orgId, id, userId)
+        return getInboxConversationDetail(tx, orgId, id)
+      }),
+    )
+  })
+
+  /** Cerrar sin resolver un caso: sin despedida; los casos derivados quedan «cerrados sin resolver». */
   app.post("/:id/close", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     return runService(c, 200, () =>

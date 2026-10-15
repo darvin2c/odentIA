@@ -7,6 +7,8 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  PRICE_DISCLOSURES,
+  type PriceDisclosure,
   procedureCode,
   serviceCatalog,
   treatmentTemplate,
@@ -103,6 +105,34 @@ export function assertBillingMode(mode: string | null | undefined): BillingMode 
     throw validation("billingMode inválido: treatment|session")
   }
   return value
+}
+
+/** Cómo dice el precio el agente; sin indicarlo, un servicio nuevo nace «solo con evaluación». */
+export function assertPriceDisclosure(value: string | null | undefined): PriceDisclosure {
+  const v = (value ?? "evaluacion").trim()
+  if (!(PRICE_DISCLOSURES as readonly string[]).includes(v)) {
+    throw validation("Cómo dice el precio: exacto, desde o evaluacion")
+  }
+  return v as PriceDisclosure
+}
+
+/**
+ * La evaluación que ofrece el agente: un servicio activo de la misma clínica y
+ * distinto del propio. `null` = sin una evaluación propia.
+ */
+async function assertEvaluationService(
+  tx: Db,
+  orgId: string,
+  evaluationServiceId: string | null | undefined,
+  selfId: string | null,
+): Promise<string | null> {
+  if (!evaluationServiceId) return null
+  if (evaluationServiceId === selfId) throw validation("Un servicio no puede ser su propia evaluación")
+  const evaluation = await requireService(tx, orgId, evaluationServiceId)
+  if (!evaluation.isActive || evaluation.source === "legacy") {
+    throw validation("La evaluación debe ser un servicio activo")
+  }
+  return evaluation.id
 }
 
 function assertScope(scope: string | null | undefined): TreatmentScope {
@@ -461,6 +491,9 @@ export interface CreateServiceInput {
   currency?: string | null
   durationMin?: number | null
   billingMode?: string | null
+  /** Cómo dice el precio el agente; por defecto «evaluacion». */
+  priceDisclosure?: string | null
+  evaluationServiceId?: string | null
   isActive?: boolean
 }
 
@@ -500,6 +533,8 @@ export async function createService(
       currency,
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
+      priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
+      evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
       isActive: input.isActive ?? true,
     }
   } else {
@@ -515,6 +550,8 @@ export async function createService(
       currency,
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
+      priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
+      evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
       isActive: input.isActive ?? true,
     }
   }
@@ -547,6 +584,8 @@ export interface UpdateServicePatch {
   currency?: string
   durationMin?: number | null
   billingMode?: string
+  priceDisclosure?: string
+  evaluationServiceId?: string | null
   isActive?: boolean
 }
 
@@ -629,6 +668,14 @@ export async function updateService(
   if (patch.billingMode !== undefined) {
     set.billingMode = assertBillingMode(patch.billingMode)
     fields.push("billingMode")
+  }
+  if (patch.priceDisclosure !== undefined) {
+    set.priceDisclosure = assertPriceDisclosure(patch.priceDisclosure)
+    fields.push("priceDisclosure")
+  }
+  if (patch.evaluationServiceId !== undefined) {
+    set.evaluationServiceId = await assertEvaluationService(tx, orgId, patch.evaluationServiceId, serviceId)
+    fields.push("evaluationServiceId")
   }
   if (patch.isActive !== undefined) {
     set.isActive = patch.isActive

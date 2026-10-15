@@ -195,7 +195,7 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
     org.slug,
   )
   expect(decisions).toEqual([
-    expect.objectContaining({ point: "route.v2", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
+    expect.objectContaining({ point: "route.v3", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
   ])
   const shadow = page.getByRole("region", { name: "Decisiones del modelo de decisión" })
   await expect(shadow).toBeVisible()
@@ -287,7 +287,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(brief).toContainText("Prefiere citas por la tarde")
   await expect(brief).toContainText("Le dijo: «Ya avisé al equipo como urgencia; una persona te escribe en los próximos minutos.»")
   await expect(brief).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(brief.getByRole("button", { name: "Tomar el caso" })).toBeVisible()
+  await expect(brief.getByRole("button", { name: "Tomar", exact: true })).toBeVisible()
   await expect(brief.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
   await info.attach("resumen-del-caso", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 390, height: 844 })
@@ -298,7 +298,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1280, height: 720 })
 
-  await gotoHydrated(page, tenant(org.slug, "/agent/approvals"))
+  await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
   const queueItem = page.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
   await expect(queueItem).toContainText("En cola por recoger")
   await expect(queueItem).toContainText("vence")
@@ -312,12 +312,13 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await queueItem.getByRole("button", { name: "Ver el caso" }).click()
   const fromNotice = surface(page, { name: "Resumen del caso" })
   await expect(fromNotice).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(fromNotice.getByRole("button", { name: "Ver la conversación completa" })).toBeVisible()
+  await expect(fromNotice.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(fromNotice).toBeHidden()
-  await queueItem.getByRole("button", { name: "Tomar caso" }).click()
+  // «Tomar» toma la conversación del caso: queda a su nombre y el caso, con responsable.
+  await queueItem.getByRole("button", { name: "Tomar", exact: true }).click()
   await expect(queueItem).toContainText("Responsable asignado")
-  await expect(queueItem.getByRole("button", { name: "Tomar caso" })).toHaveCount(0)
+  await expect(queueItem.getByRole("button", { name: "Tomar", exact: true })).toHaveCount(0)
 
   const persisted = await call<Array<{ id: string; assigneeUserId: string | null }>>(
     page,

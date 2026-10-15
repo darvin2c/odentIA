@@ -65,7 +65,7 @@ export function FormDrawer({
   dock = true,
 }: FormDrawerProps) {
   const isMobile = useIsMobile()
-  const handleClose = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
   const dockBounds = useDockDecision(open, { className, disabled: !dock })
@@ -109,6 +109,7 @@ export function FormDrawer({
           >
             {children}
           </FormSurface>
+          {confirmDialog}
         </SideDockScopeProvider>
       </DrawerContent>
     </Drawer>

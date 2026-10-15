@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -92,16 +92,13 @@ export function CoordinacionPanel({ patientId }: { patientId: string }) {
                       {live ? "Con cita" : "Por reservar"}
                     </Badge>
                     {live && control.appointment ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        nativeButton={false}
-                        render={
-                          <Link to="/agenda" search={{ appointmentId: control.appointment.id }} />
-                        }
+                      <Link
+                        to="/agenda"
+                        search={{ appointmentId: control.appointment.id }}
+                        className={buttonVariants({ size: "sm", variant: "outline" })}
                       >
                         Ver en agenda
-                      </Button>
+                      </Link>
                     ) : canBook && control.status === "pendiente" ? (
                       <Button size="sm" onClick={() => setScheduling(control)}>
                         Reservar control

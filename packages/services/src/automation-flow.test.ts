@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto"
+import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { agentPolicy } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
@@ -13,18 +14,16 @@ import { describe, expect, it } from "vitest"
 import { applyAdminDraft, deleteAdminLine, discardAdminDraft, saveAdminDraft, setAdminDraftNote, testAdminLine } from "./admin-drafts.js"
 import { adminLineOf } from "./admin-lines.js"
 import { type AdminDecider, interpretAdminRequest, keywordAdminDecider, readNumbers } from "./admin-request.js"
-import { getAdminLine, getAdminPage, listAdminLinePeople } from "./agent-admin.js"
+import { getAdminLine, getAdminPage, getAdminRecommendation, listAdminLinePeople, runAdminLineOnce } from "./agent-admin.js"
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
   automationReplyOf,
   cancelAppointmentByToken,
   confirmAppointmentByToken,
-  decidePendingApprovals,
   deliverDueJobs,
   getMessagePermissions,
   handleAutomationReply,
-  listPendingApprovals,
   reconcileDeliveries,
   requestNeededTemplates,
   setConsent,
@@ -34,12 +33,16 @@ import {
   syncBudgetFollowUps,
   syncCancelledAppointments,
   syncCheckupReminders,
+  syncOpportunityFollowUps,
   syncVisitFollowUps,
   unsubscribeByToken,
 } from "./automation.js"
 import { assertTemplateSendable, listChannelTemplates, syncConnectionTemplates } from "./channel-templates.js"
 import { saveMessageText } from "./clinic-messages.js"
 import { createConnection } from "./connections.js"
+import { closeConversationWith } from "./conversation-close.js"
+import { ingestInbound } from "./conversations.js"
+import { closeOpportunity, createOpportunity, updateOpportunity } from "./opportunities.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -596,6 +599,45 @@ describe("los botones que resuelve el sistema, sin modelo", () => {
     expect(again.at(-1)?.body).toBe("Tu cita ya estaba confirmada. ¡Te esperamos!")
   })
 
+  it("«Confirmar» en una conversación cerrada: el toque la reabre, confirma la cita y el mensaje no se pierde", async () => {
+    const { c, p, appointmentId, job } = await remindedByWhatsApp()
+    await run(c, (tx) => closeConversationWith(tx, c.orgId, p.conversationId!, { reason: "sin_respuesta", byUserId: null }))
+    const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, p.conversationId!))
+    const tapped = await run(c, (tx) =>
+      ingestInbound(
+        tx,
+        {
+          orgId: c.orgId,
+          connectionId: c.whatsappId!,
+          event: {
+            externalEventId: `evt-${randomUUID()}`,
+            externalMessageId: `wamid-${randomUUID()}`,
+            externalThreadId: thread!.externalThreadId,
+            senderExternalId: thread!.externalThreadId,
+            content: { type: "text", text: "Confirmar", replyId: replyId("confirmar", job.id) },
+            sentAt: new Date().toISOString(),
+          },
+        },
+        channelAdapters.whatsapp_cloud_api!,
+        { storage: {} as never, fetch, secretsKey: KEY },
+      ),
+    )
+    expect(tapped.conversationId).toBe(p.conversationId)
+    const handled = await run(c, (tx) =>
+      handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("confirmar", job.id) }),
+    )
+    expect(handled).toBe(true)
+    const [reopened] = await ownerDb.select().from(conversation).where(eq(conversation.id, p.conversationId!))
+    expect(reopened).toMatchObject({ status: "open", closeReason: null, closedAt: null, agentStatus: "on", nudgedAt: null })
+    const [row] = await ownerDb.select().from(appointment).where(eq(appointment.id, appointmentId))
+    expect(row?.status).toBe("confirmada")
+    const messages = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
+    expect(messages.some((item) => item.id === tapped.messageId && item.body === "Confirmar")).toBe(true)
+    expect(messages.at(-1)).toMatchObject({ direction: "out", body: "¡Listo! Tu cita quedó confirmada. Te esperamos." })
+    const reopenedBy = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.entityId, p.conversationId!), eq(auditEvent.action, "conversation.reopened_by_message")))
+    expect(reopenedBy).toHaveLength(1)
+  })
+
   it("«No podré ir» y un texto cualquiera siguen la conversación; un botón ajeno no hace nada", async () => {
     const { c, p, appointmentId, job } = await remindedByWhatsApp()
     const reply = (conversationId: string, value: string | null) =>
@@ -703,33 +745,6 @@ describe("quién lo hace: el agente, una persona o los dos", () => {
     expect(await tasksOf(c)).toHaveLength(0)
     expect(await noticesOf(c)).toHaveLength(0)
   })
-
-  it("con Recepción en «Supervisado», lo que no es un recordatorio espera una sola aprobación por línea", async () => {
-    const c = await clinic()
-    await ownerDb.insert(agentPolicy).values({ organizationId: c.orgId, modes: { enviar_mensaje: "aprobar_equipo" } })
-    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
-    const one = await person(c, "Uno", { consent: ["seguimiento"], openWindow: true })
-    const two = await person(c, "Dos", { consent: ["seguimiento"], openWindow: true })
-    const reminded = await person(c, "Con cita", { consent: ["recordatorio"], openWindow: true })
-    await dueBudget(c, one.patientId)
-    await dueBudget(c, two.patientId)
-    await appointmentFor(c, reminded.patientId, new Date(NOW.getTime() + 24 * HOUR))
-    await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
-    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
-    // El recordatorio sale: prenderlo ya fue aprobarlo. Los otros dos esperan.
-    expect((await deliver(c)).map((result) => result.outcome).sort()).toEqual(["enviado", "por_aprobar", "por_aprobar"])
-    const [waiting, ...rest] = await run(c, (tx) => listPendingApprovals(tx, c.orgId))
-    expect(rest).toEqual([])
-    expect(waiting).toMatchObject({ key: "seguimiento_presupuesto", name: "Retomar un presupuesto", total: 2 })
-    expect([...waiting!.people].sort()).toEqual(["Dos", "Uno"])
-    // Mientras esperan, el ciclo no los vuelve a tocar.
-    expect(await deliver(c)).toEqual([])
-    expect(await run(c, (tx) => decidePendingApprovals(tx, c.orgId, c.ownerId, "seguimiento_presupuesto", "aprobar"))).toEqual({ total: 2 })
-    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado", "enviado"])
-    expect(await run(c, (tx) => listPendingApprovals(tx, c.orgId))).toEqual([])
-    await expect(run(c, (tx) => decidePendingApprovals(tx, c.orgId, c.ownerId, "seguimiento_presupuesto", "rechazar"))).rejects.toMatchObject({ code: "NOT_FOUND" })
-  })
 })
 
 describe("retirar un permiso", () => {
@@ -776,7 +791,7 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los seis, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los siete, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
@@ -784,6 +799,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_recordatorio_control_v1", "en_revision", "recordatorio_control"],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion"],
       ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia"],
+      ["odentia_seguimiento_oportunidad_v1", "en_revision", "seguimiento_comercial"],
       ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto"],
     ])
     // Ya están pedidos: el ciclo no vuelve a llamar a WhatsApp.
@@ -914,6 +930,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       ["odentia_recordatorio_control_v1", "deshabilitada", "recordatorio_control", 0],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion", 2],
       ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia", 3],
+      ["odentia_seguimiento_oportunidad_v1", "en_revision", "seguimiento_comercial", 3],
       ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto", 3],
     ])
     expect(synced.find((item) => item.status === "rechazada")?.reason).toBe("INVALID_FORMAT")
@@ -922,7 +939,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0 })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(7)
+    expect(rows).toHaveLength(8)
   })
 })
 
@@ -1337,5 +1354,196 @@ describe("el texto de un mensaje es de cada clínica", () => {
     const byMail = await sentTo(mail.contactId)
     expect(byMail.job).toMatchObject({ status: "enviado", via: "correo" })
     expect(byMail.sent.body).toContain("Estimada Rosa: su cita es ")
+  })
+})
+
+describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
+  /** Oportunidad del contacto con su próxima acción (y su seguimiento abierto), por la operación de siempre. */
+  async function opportunityFor(c: Clinic, contactId: string, nextActionAt: Date, options: { title?: string; owner?: string } = {}) {
+    const created = await run(c, (tx) =>
+      createOpportunity(tx, c.orgId, {
+        contactId, title: options.title ?? "Ortodoncia", nextActionAt: nextActionAt.toISOString(),
+        ...(options.owner ? { assignedUserId: options.owner } : {}),
+      }, { userId: c.ownerId }),
+    )
+    return created.id
+  }
+  const sync = (c: Clinic, now = NOW) => run(c, (tx) => syncOpportunityFollowUps(tx, c.orgId, now))
+  const opportunityRow = async (id: string) => (await ownerDb.select().from(opportunity).where(eq(opportunity.id, id)))[0]!
+  const followUpTask = async (opportunityId: string) =>
+    (await ownerDb.select().from(crmTask).where(and(eq(crmTask.opportunityId, opportunityId), eq(crmTask.kind, "opportunity_follow_up"))))[0]!
+
+  it("anota el caso cuando la próxima acción vence con la línea prendida, una vez por vencimiento", async () => {
+    const c = await clinic()
+    const enabledAt = new Date(NOW.getTime() - DAY)
+    const old = await person(c, "Venció antes")
+    const due = await person(c, "Venció hoy")
+    const later = await person(c, "Vence mañana")
+    await opportunityFor(c, old.contactId, new Date(enabledAt.getTime() - HOUR))
+    const dueAt = new Date(NOW.getTime() - 2 * HOUR)
+    const dueId = await opportunityFor(c, due.contactId, dueAt, { owner: c.dentistId })
+    await opportunityFor(c, later.contactId, new Date(NOW.getTime() + DAY))
+    // Apagada no anota nada.
+    expect(await sync(c)).toEqual({ programados: 0, omitidos: 0 })
+    await ruleOn(c, "seguimiento_comercial", enabledAt)
+    expect(await sync(c)).toEqual({ programados: 1, omitidos: 0 })
+    const [job] = await jobsOf(c)
+    expect(job).toMatchObject({
+      kind: "seguimiento_comercial", status: "pendiente", opportunityId: dueId, contactId: due.contactId, patientId: null,
+      payload: { dueAt: dueAt.toISOString(), ownerUserId: c.dentistId },
+    })
+    // Repetir el ciclo no lo duplica.
+    expect((await sync(c)).programados).toBe(0)
+    // Reprogramada y vencida otra vez es otro caso.
+    await run(c, (tx) => updateOpportunity(tx, c.orgId, dueId, { nextActionAt: new Date(NOW.getTime() - HOUR).toISOString() }, { userId: c.ownerId }))
+    expect((await sync(c)).programados).toBe(1)
+    expect(await jobsOf(c)).toHaveLength(2)
+  })
+
+  it("escribió hace poco: le escribe por WhatsApp con el título de la oportunidad, y el hilo queda en la oportunidad", async () => {
+    const c = await clinic()
+    await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento"], openWindow: true })
+    const oppId = await opportunityFor(c, p.contactId, new Date(NOW.getTime() - HOUR), { title: "Ortodoncia" })
+    expect((await opportunityRow(oppId)).conversationId).toBeNull()
+    await sync(c)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [job] = await jobsOf(c)
+    expect(job).toMatchObject({ status: "enviado", via: "respuesta", channel: "whatsapp", cause: null })
+    expect(await messageOf(job!.sentMessageId)).toMatchObject({
+      contentType: "text",
+      senderKind: "agent",
+      conversationId: p.conversationId,
+      body: "Hola, Lucía. Te escribimos de Clínica Sonríe sobre tu consulta de «Ortodoncia». ¿Seguimos conversando?",
+      replyButtons: [
+        { id: replyId("responder", job!.id), title: "Sí, continuemos" },
+        { id: replyId("baja", job!.id), title: "No enviar más" },
+      ],
+    })
+    // Recepción sigue la conversación con la oportunidad a la vista: el hilo queda en ella y en su seguimiento.
+    expect((await opportunityRow(oppId)).conversationId).toBe(p.conversationId)
+    expect((await followUpTask(oppId)).conversationId).toBe(p.conversationId)
+  })
+
+  it("no escribió hace poco: sale el mensaje aprobado, con cada dato en su variable", async () => {
+    const c = await clinic({ approved: ["seguimiento_comercial"] })
+    await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento"] })
+    const oppId = await opportunityFor(c, p.contactId, new Date(NOW.getTime() - HOUR), { title: "Implantes" })
+    await sync(c)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [job] = await jobsOf(c)
+    expect(job).toMatchObject({ status: "enviado", via: "plantilla", channel: "whatsapp" })
+    const sent = await messageOf(job!.sentMessageId)
+    expect(sent).toMatchObject({
+      contentType: "template", templateName: "odentia_seguimiento_oportunidad_v1", templateLanguage: "es",
+      templateParams: ["Lucía", "Clínica Sonríe", "Implantes"],
+      body: "Hola, Lucía. Te escribimos de Clínica Sonríe sobre tu consulta de «Implantes». ¿Seguimos conversando?",
+    })
+    expect((await opportunityRow(oppId)).conversationId).toBe(sent.conversationId)
+  })
+
+  it("sin WhatsApp: sale por el correo de la clínica, con el enlace de baja", async () => {
+    const c = await clinic({ whatsapp: false, email: true })
+    await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
+    const p = await person(c, "Jorge Salas", { whatsapp: false, email: "jorge@example.com", consent: ["seguimiento"] })
+    await opportunityFor(c, p.contactId, new Date(NOW.getTime() - HOUR), { title: "Blanqueamiento" })
+    await sync(c)
+    await deliver(c)
+    const [job] = await jobsOf(c)
+    expect(job).toMatchObject({ status: "enviado", via: "correo", channel: "email" })
+    const body = (await messageOf(job!.sentMessageId)).body ?? ""
+    expect(body.split("\n")[0]).toBe("¿Seguimos conversando? · Clínica Sonríe")
+    expect(body).toContain("Hola, Jorge. Te escribimos de Clínica Sonríe sobre tu consulta de «Blanqueamiento». ¿Seguimos conversando?")
+    expect(body).toMatch(/Si no quieres recibir más estos mensajes: https:\/\/clinica\.test\/baja\/\S+$/)
+  })
+
+  it("sin permiso: cierra el caso con su causa y deja la tarea a quien lleva la oportunidad", async () => {
+    const c = await clinic()
+    await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
+    const owned = await person(c, "Con responsable")
+    const loose = await person(c, "Sin responsable")
+    const ownedId = await opportunityFor(c, owned.contactId, new Date(NOW.getTime() - HOUR), { owner: c.dentistId })
+    const looseId = await opportunityFor(c, loose.contactId, new Date(NOW.getTime() - HOUR))
+    await sync(c)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido"])
+    const jobs = await jobsOf(c)
+    expect(jobs.every((job) => job.status === "omitido" && job.cause === "sin_permiso")).toBe(true)
+    const tasks = (await tasksOf(c)).filter((task) => task.createdBy === "admin")
+    const taskOf = (opportunityId: string) => tasks.find((task) => task.opportunityId === opportunityId)
+    expect(taskOf(ownedId)).toMatchObject({
+      title: "Llamar a Con responsable para retomar su consulta", assigneeUserId: c.dentistId, area: "recepcion",
+      contactId: owned.contactId, status: "open",
+      reason: "El agente no pudo escribirle: no aceptó mensajes de la clínica. Pídele el permiso la próxima vez que venga o escriba.",
+    })
+    // Sin responsable, la tarea va al equipo de recepción.
+    expect(taskOf(looseId)).toMatchObject({ assigneeUserId: null, area: "recepcion" })
+    const adminNotices = (await noticesOf(c)).filter((notice) => notice.href.startsWith("/agent/administrador"))
+    expect(adminNotices.map((notice) => [notice.title, notice.href])).toEqual([
+      ["«Retomar una oportunidad»: no pude escribirle a 2 personas", "/agent/administrador?linea=seguimiento_comercial&ver=no-pudo"],
+    ])
+  })
+
+  it("si la oportunidad se cerró o su próxima acción se reprogramó antes de escribir, no se escribe", async () => {
+    const c = await clinic()
+    await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
+    const closed = await person(c, "Ya decidió", { consent: ["seguimiento"], openWindow: true })
+    const moved = await person(c, "Ya la llamaron", { consent: ["seguimiento"], openWindow: true })
+    const closedId = await opportunityFor(c, closed.contactId, new Date(NOW.getTime() - HOUR))
+    const movedId = await opportunityFor(c, moved.contactId, new Date(NOW.getTime() - HOUR))
+    await sync(c)
+    await run(c, (tx) => closeOpportunity(tx, c.orgId, closedId, { outcome: "won", reason: "Aceptó el tratamiento" }, { userId: c.ownerId }))
+    await run(c, (tx) => updateOpportunity(tx, c.orgId, movedId, { nextActionAt: new Date(NOW.getTime() + 3 * DAY).toISOString() }, { userId: c.ownerId }))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["cancelado", "cancelado"])
+    const jobs = await jobsOf(c)
+    expect(jobs.find((job) => job.opportunityId === closedId)).toMatchObject({ status: "cancelado", lastError: "La oportunidad ya se cerró", sentMessageId: null })
+    expect(jobs.find((job) => job.opportunityId === movedId)).toMatchObject({ status: "cancelado", lastError: "La próxima acción ya se atendió o se reprogramó", sentMessageId: null })
+    expect((await noticesOf(c)).filter((notice) => notice.href.startsWith("/agent/administrador"))).toHaveLength(0)
+  })
+
+  it("«Sí, continuemos» sigue la conversación sin fijar camino; «No enviar más» apaga el seguimiento y no los recordatorios", async () => {
+    const c = await clinic({ anyHour: true })
+    const now = new Date()
+    await ruleOn(c, "seguimiento_comercial", new Date(now.getTime() - DAY))
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento", "recordatorio"], openWindow: true })
+    await opportunityFor(c, p.contactId, new Date(now.getTime() - HOUR))
+    await sync(c, now)
+    expect((await deliver(c, now)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [job] = await jobsOf(c)
+    const [tap] = await ownerDb.insert(message)
+      .values({ organizationId: c.orgId, conversationId: p.conversationId!, direction: "in", senderKind: "contact", body: "Sí, continuemos", createdAt: new Date(Date.now() + 1000) })
+      .returning({ id: message.id })
+    expect(await run(c, (tx) => automationReplyOf(tx, c.orgId, { conversationId: p.conversationId!, messageId: tap!.id }))).toMatchObject({
+      kind: "seguimiento_comercial", button: "Sí, continuemos", asks: null, hint: expect.stringContaining("Sigue la conversación"),
+    })
+    expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("responder", job!.id) }))).toBe(false)
+    expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("baja", job!.id) }))).toBe(true)
+    expect(await run(c, (tx) => getMessagePermissions(tx, c.orgId, p.contactId))).toMatchObject([
+      { purpose: "recordatorio", granted: true },
+      { purpose: "seguimiento", granted: false, source: "baja" },
+    ])
+    const thread = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
+    expect(thread.filter((item) => item.direction === "out").at(-1)?.body).toBe("Listo: no te enviaremos más estos mensajes. Si cambias de opinión, dínoslo por aquí.")
+  })
+
+  it("se ve como las demás: sus dos partes se apagan por separado, avisa cuando no puede y tiene «Solo esta vez»", async () => {
+    const c = await clinic()
+    const detail = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "seguimiento_comercial"))
+    expect(detail).toMatchObject({
+      actor: "agente",
+      description: "El agente Recepción le escribiría para retomar la conversación. Si no puede, avisa por qué y cómo habilitarlo, y quedaría una tarea para quien lo lleva.",
+      message: { text: "Hola, Lucía. Te escribimos de Clínica Sonríe sobre tu consulta de «Ortodoncia». ¿Seguimos conversando?", buttons: ["Sí, continuemos", "No enviar más"] },
+    })
+    expect(detail.noticeExample).toContain("No pude escribirle a Tomás Rivas")
+    expect(detail).not.toHaveProperty("teamFixed")
+    expect(await run(c, (tx) => setLine(tx, c.orgId, c.ownerId, "seguimiento_comercial", { enabled: true, teamPart: false }))).toMatchObject({ enabled: true, agentPart: true, teamPart: false })
+    await run(c, (tx) => setLine(tx, c.orgId, c.ownerId, "seguimiento_comercial", { enabled: false, teamPart: true }))
+    // «Solo esta vez» escribe a quienes tienen hoy la próxima acción vencida, sin prender la línea.
+    const p = await person(c, "Hoy vencida", { consent: ["seguimiento"] })
+    const oppId = await opportunityFor(c, p.contactId, new Date(Date.now() - 2 * HOUR))
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "seguimiento_comercial"))
+    expect(advice).toMatchObject({ total: 1, actor: "agente", once: { label: "Escribirles esta vez" } })
+    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_comercial", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true })
+    expect(await jobsOf(c)).toMatchObject([{ kind: "seguimiento_comercial", status: "pendiente", opportunityId: oppId, payload: { once: true } }])
   })
 })

@@ -718,17 +718,18 @@ it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de pag
   expect(unIds).toContain(convUn)
   expect(unIds).toContain(convQueued)
   expect(unIds).not.toContain(convOk)
-  // Humano: agente off y abierta.
+  // Con el equipo: agente apagado en una abierta.
   await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convUn, false))
   const human = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", { view: "human", q: `${prefix} Un`, limit: 100 }),
+    listConversations(tx, "org_a", { view: "team", q: `${prefix} Un`, limit: 100 }),
   )
   expect(human.items.map((c) => c.id)).toContain(convUn)
   const agentOn = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", { view: "human", q: `${prefix} Ok`, limit: 100 }),
+    listConversations(tx, "org_a", { view: "team", q: `${prefix} Ok`, limit: 100 }),
   )
   expect(agentOn.items.map((c) => c.id)).not.toContain(convOk)
-  // Aprobación: solo propuesta pendiente.
+  // Esperan al paciente: una propuesta espera su sí, o se le respondió y no contesta;
+  // un saliente que sigue en cola todavía no es respuesta.
   await ownerDb.insert(agentProposal).values({
     organizationId: "org_a",
     conversationId: convUn,
@@ -740,10 +741,11 @@ it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de pag
     idempotencyKey: `vista-${TAG}-1`,
   })
   const approval = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", { view: "approval", q: prefix, limit: 100 }),
+    listConversations(tx, "org_a", { view: "awaiting_patient", q: prefix, limit: 100 }),
   )
   expect(approval.items.map((c) => c.id)).toContain(convUn)
-  expect(approval.items.map((c) => c.id)).not.toContain(convOk)
+  expect(approval.items.map((c) => c.id)).toContain(convOk)
+  expect(approval.items.map((c) => c.id)).not.toContain(convQueued)
   // Paginación recorre la vista sin duplicar ni colar otras.
   const paged: string[] = []
   let cursor: string | undefined

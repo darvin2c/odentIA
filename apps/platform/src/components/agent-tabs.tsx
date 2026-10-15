@@ -7,7 +7,7 @@ import { usePermission } from "../lib/crm"
 
 const TABS = [
   { label: "Resumen", to: "/agent", permission: "read" },
-  { label: "Aprobaciones", to: "/agent/approvals", permission: "decide", phoneLast: true },
+  { label: "Pendientes", to: "/agent/pendientes", permission: "decide", phoneLast: true },
   { label: "Aprender", to: "/agent/learn", permission: "read" },
   { label: "Conocimiento", to: "/agent/knowledge", permission: "write" },
 ] as const
@@ -20,7 +20,7 @@ const TABS = [
  * Cada pestaña dice cuánto espera a una persona. Los números salen del mismo
  * resumen que «Necesita de ti» (`/api/agent/overview`, consulta compartida con
  * esa pantalla): no hay otra cuenta. En teléfono se dibujan como píldoras y
- * «Aprobaciones» pasa al final de la fila (`phoneLast`): ahí el recorrido es
+ * «Pendientes» pasa al final de la fila (`phoneLast`): ahí el recorrido es
  * Resumen, Aprender, Conocimiento. El orden del documento, y con él el del
  * teclado, es el mismo en todos los anchos.
  *
@@ -44,7 +44,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   })
   const needs = overview.data?.data.needsYou
   const pending: Record<string, number> = needs
-    ? { "/agent/approvals": needs.approvals, "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
+    ? { "/agent/pendientes": needs.approvals, "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
     : {}
   if (learnPending !== undefined) pending["/agent/learn"] = learnPending
   const visible = TABS.filter((tab) =>

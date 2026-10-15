@@ -37,8 +37,6 @@ export interface AgentCaseProposal {
   label: string
   summary: string
   status: string
-  /** Quién resuelve hoy la pendiente, con la política vigente. */
-  decider: "contact" | "team"
   detail: string | null
   at: string
   expiresAt: string | null
@@ -88,7 +86,6 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
       label: PROPOSAL_ACTION_LABEL[p.action] ?? p.action,
       summary: p.context.afterSummary,
       status: p.status,
-      decider: p.mode === "confirmar_usuario" ? ("contact" as const) : ("team" as const),
     }
     if (p.status === "propuesta") {
       pending.push({
@@ -106,7 +103,7 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     if (now - Date.parse(at) > CASE_RECENT_MS || recent.length >= CASE_RECENT_LIMIT) continue
     recent.push({
       ...base,
-      detail: p.status === "fallida" ? p.error : p.status === "rechazada" ? p.reason : null,
+      detail: p.status === "fallida" ? p.error : null,
       at,
       expiresAt: null,
     })
@@ -141,11 +138,10 @@ export function formatAgentCaseForPrompt(
   const when = (iso: string) => formatZoned(new Date(iso), zone)
   const sections: string[] = []
   const facts: string[] = []
+  // Lo único que queda pendiente en un hilo es lo que confirma el interlocutor (ADR 0023).
   for (const p of state.pending) {
     facts.push(
-      p.decider === "contact"
-        ? `- Propuesta pendiente de que el interlocutor confirme: ${p.label} — ${p.summary} (id ${p.id}; creada ${when(p.at)}${p.expiresAt ? `; vence ${when(p.expiresAt)}` : ""}). Si su último mensaje es un sí claro, ejecútala con confirmar_propuesta y ese id; no la propongas de nuevo ni vuelvas a buscar.`
-        : `- Propuesta pendiente de decisión del equipo: ${p.label} — ${p.summary} (id ${p.id}; creada ${when(p.at)}). No pidas un sí ni uses confirmar_propuesta: avisa de que el equipo la está revisando.`,
+      `- Propuesta pendiente de que el interlocutor confirme: ${p.label} — ${p.summary} (id ${p.id}; creada ${when(p.at)}${p.expiresAt ? `; vence ${when(p.expiresAt)}` : ""}). Si su último mensaje es un sí claro, ejecútala con confirmar_propuesta y ese id; no la propongas de nuevo ni vuelvas a buscar.`,
     )
   }
   for (const p of state.recent) {
@@ -161,9 +157,15 @@ export function formatAgentCaseForPrompt(
       `Estado del caso (lo registra el sistema; es la fuente de verdad sobre lo ya propuesto y hecho en este hilo):\n${facts.join("\n")}`,
     )
   }
-  if (state.notes.length) {
+  // Cómo terminó la atención anterior del hilo (la deja el sistema al cerrar): las notas de entonces no siguen.
+  const previous = state.notes.filter((n) => n.kind === "atencion_anterior")
+  const own = state.notes.filter((n) => n.kind !== "atencion_anterior")
+  for (const note of previous) {
+    sections.push(`${note.text} Esta es una atención nueva: no des por pendiente lo de entonces salvo que la persona lo retome.`)
+  }
+  if (own.length) {
     sections.push(
-      `Notas del caso (las dejaste tú en turnos anteriores con anotar_caso):\n${state.notes.map((n) => `- ${n.text}`).join("\n")}`,
+      `Notas del caso (las dejaste tú en turnos anteriores con anotar_caso):\n${own.map((n) => `- ${n.text}`).join("\n")}`,
     )
   }
   if (state.lookups.length) {

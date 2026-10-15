@@ -1,4 +1,4 @@
-import { Badge, Button, Input, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
+import { Badge, Button, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
 import { ConfirmDialog, EmptyState } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
@@ -56,7 +56,7 @@ const RELATIONSHIP_LABEL: Record<string, string> = {
 }
 
 const ACTIVITY_STATUS_LABEL: Record<string, string> = {
-  propuesta: "Pendiente", aprobada: "Aprobada", rechazada: "Rechazada",
+  propuesta: "Pendiente", aprobada: "Aprobada",
   ejecutada: "Ejecutada", fallida: "Fallida", expirada: "Expirada",
   open: "Abierta", done: "Completada", cancelled: "Cancelada",
   received: "Recibido", queued: "En cola", sent: "Enviado",
@@ -111,10 +111,9 @@ export function ContactWorkspace({
   const [memoryOpen, setMemoryOpen] = useState(false)
   const [note, setNote] = useState("")
   const [noteOk, setNoteOk] = useState(false)
-  const [rejectReason, setRejectReason] = useState<Record<string, string>>({})
-  // Resultado persistente de la última decisión/confirmación: la lista solo
+  // Resultado persistente de la última confirmación registrada: la lista solo
   // trae propuestas pendientes, así que un outcome fallido/expirado se muestra
-  // aquí, fuera del gate de approval, hasta cambiar de contacto o decidir otra.
+  // aquí, hasta cambiar de contacto o registrar otra.
   const [outcome, setOutcome] = useState<AgentProposal | null>(null)
   const [oppDrawer, setOppDrawer] = useState<{ open: boolean; opportunityId?: string }>({
     open: false,
@@ -124,7 +123,6 @@ export function ContactWorkspace({
   })
   const [regLink, setRegLink] = useState<{ url: string; expiresAt: string } | null>(null)
   const [copied, setCopied] = useState(false)
-  const [approval, setApproval] = useState<AgentProposal | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const idsRef = useRef({ contactId, conversationId: conversationId ?? null })
   idsRef.current = { contactId, conversationId: conversationId ?? null }
@@ -174,7 +172,6 @@ export function ContactWorkspace({
     setNoteOk(false)
     setRegLink(null)
     setCopied(false)
-    setRejectReason({})
     setOutcome(null)
     headingRef.current?.focus()
   }, [contactId])
@@ -273,12 +270,12 @@ export function ContactWorkspace({
     onRefreshRef.current?.()
   }, [queryClient, contactId])
 
+  // «Tomar» y «Devolver al agente»: las mismas acciones que la cabecera del hilo.
+  // Devolver con un caso derivado abierto responde 409 con su motivo, que se muestra.
   const agentMutation = useMutation({
-    mutationFn: (enabled: boolean) =>
-      apiFetch(`/api/conversations/${conversationId}/agent`, {
-        method: "POST",
-        body: JSON.stringify({ enabled }),
-      }),
+    retry: false,
+    mutationFn: (action: "take" | "release") =>
+      apiFetch(`/api/conversations/${conversationId}/${action}`, { method: "POST" }),
     onSuccess: () => {
       invalidateWorkspace()
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
@@ -288,24 +285,9 @@ export function ContactWorkspace({
     },
   })
 
-  // Solo aprobar_equipo se decide por /decision (aprobar ejecuta en la misma
-  // llamada); confirmar_usuario registra evidencia real por /confirm. Un
-  // stale al decidir llega como 200 fallida: se guarda el outcome tipado y se
-  // muestra fuera del gate, porque la lista solo trae pendientes.
-  const decideMutation = useMutation({
-    mutationFn: (input: { id: string; decision: "aprobada" | "rechazada"; reason?: string }) =>
-      apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${input.id}/decision`, {
-        method: "POST",
-        body: JSON.stringify({ decision: input.decision, ...(input.reason ? { reason: input.reason } : {}) }),
-      }),
-    onSuccess: (result) => {
-      setApproval(null)
-      setRejectReason({})
-      setOutcome(result.data)
-      invalidateWorkspace()
-    },
-  })
-
+  // La confirmación del interlocutor registra evidencia real por /confirm. Un
+  // stale llega como 200 fallida: se guarda el outcome tipado y se muestra
+  // fuera de la lista, porque la lista solo trae pendientes.
   const confirmMutation = useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${id}/confirm`, {
@@ -396,9 +378,7 @@ export function ContactWorkspace({
   const mutationError =
     agentMutation.error instanceof ApiError
       ? (agentMutation.error.shape.message ?? "No se pudo cambiar la atención")
-      : decideMutation.error instanceof ApiError
-        ? (decideMutation.error.shape.message ?? "No se pudo decidir la propuesta")
-        : confirmMutation.error instanceof ApiError
+      : confirmMutation.error instanceof ApiError
           ? (confirmMutation.error.shape.message ?? "No se pudo registrar la confirmación")
           : taskMutation.error instanceof ApiError
             ? (taskMutation.error.shape.message ?? "No se pudo actualizar la tarea")
@@ -514,30 +494,33 @@ export function ContactWorkspace({
                   <Button
                     variant="outline"
                     size="sm"
+                    className="min-h-11 sm:min-h-8"
                     disabled={agentMutation.isPending}
-                    onClick={() => agentMutation.mutate(false)}
+                    onClick={() => agentMutation.mutate("take")}
                   >
-                    {agentMutation.isPending ? "Guardando…" : "Tomar atención"}
+                    {agentMutation.isPending ? "Guardando…" : "Tomar"}
                   </Button>
                 ) : (
                   <Button
                     variant="outline"
                     size="sm"
+                    className="min-h-11 sm:min-h-8"
                     disabled={agentMutation.isPending}
-                    onClick={() => agentMutation.mutate(true)}
+                    onClick={() => agentMutation.mutate("release")}
                   >
                     {agentMutation.isPending ? "Guardando…" : "Devolver al agente"}
                   </Button>
                 )}
               </div>
             )}
-            {/* Aprobación contextual con el contrato real: puerta agent.decide más
-                dominio por acción; sin decide solo se ve el estado mínimo. */}
+            {/* Lo que espera el sí del interlocutor: el equipo solo registra una
+                confirmación que ya dio en el chat (agent.decide más el dominio del
+                acto); sin decide solo se ve el estado mínimo. */}
             {agent.state === "approval" && (
               <div className="flex flex-col gap-2 border-t pt-2">
                 {!canDecide ? (
                   <p className="text-xs text-muted-foreground">
-                    Hay propuestas esperando decisión del equipo.
+                    Hay una propuesta que espera la confirmación del interlocutor.
                   </p>
                 ) : proposalsQuery.isLoading && proposals.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Cargando propuestas…</p>
@@ -581,7 +564,6 @@ export function ContactWorkspace({
                           .filter(Boolean)
                           .join(" · ")
                       : ""
-                    const motive = rejectReason[p.id] ?? ""
                     const cardError = proposalErrorMessage(p)
                     return (
                       <div key={p.id} className="flex flex-col gap-1 rounded-md bg-muted/40 p-2">
@@ -643,42 +625,6 @@ export function ContactWorkspace({
                           ) : (
                             <p className="text-xs text-muted-foreground">
                               Tu rol no puede registrar esta confirmación. Consulta con un administrador.
-                            </p>
-                          )
-                        )}
-                        {p.mode === "aprobar_equipo" && p.status === "propuesta" && !cardError && (
-                          allowed ? (
-                            <div className="flex flex-col gap-1.5">
-                              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                                Motivo para rechazar
-                                <Input
-                                  value={motive}
-                                  maxLength={2000}
-                                  onChange={(e) => setRejectReason((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                                  placeholder="Explica por qué no procede"
-                                />
-                              </label>
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  disabled={decideMutation.isPending || confirmMutation.isPending}
-                                  onClick={() => setApproval(p)}
-                                >
-                                  Revisar y aprobar
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={decideMutation.isPending || confirmMutation.isPending || motive.trim().length === 0}
-                                  onClick={() => decideMutation.mutate({ id: p.id, decision: "rechazada", reason: motive.trim() })}
-                                >
-                                  Rechazar
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">
-                              Tu rol no puede decidir esta acción. Consulta con un administrador.
                             </p>
                           )
                         )}
@@ -1076,16 +1022,6 @@ export function ContactWorkspace({
         name={contact.displayName}
         canWrite={canWriteNote || canWriteConv}
         onClose={() => setMemoryOpen(false)}
-      />
-      <ConfirmDialog
-        open={approval !== null}
-        title="Aprobar y ejecutar el cambio"
-        description={approval ? `${approval.context.contactName ?? contact.displayName}: ${approval.context.afterSummary}` : ""}
-        confirmLabel="Aprobar y ejecutar"
-        variant="default"
-        pending={decideMutation.isPending}
-        onClose={() => { if (!decideMutation.isPending) setApproval(null) }}
-        onConfirm={() => { if (approval) decideMutation.mutate({ id: approval.id, decision: "aprobada" }) }}
       />
       <ConfirmDialog
         open={navBlocked}

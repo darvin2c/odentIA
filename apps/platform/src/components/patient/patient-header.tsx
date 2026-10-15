@@ -8,6 +8,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
   Button,
+  buttonVariants,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -261,13 +262,13 @@ export function PatientHeader({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {canBook ? (
-              <Button
-                variant={primary === "book" ? "default" : "outline"}
-                nativeButton={false}
-                render={<Link to="/agenda" search={{ patientId: patient.id }} />}
+              <Link
+                to="/agenda"
+                search={{ patientId: patient.id }}
+                className={buttonVariants({ variant: primary === "book" ? "default" : "outline" })}
               >
                 Agendar cita
-              </Button>
+              </Link>
             ) : null}
             {primary === "charge" ? (
               <Button onClick={() => onSection("cuenta")}>Cobrar</Button>

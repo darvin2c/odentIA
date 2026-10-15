@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type * as React from "react"
 import { afterEach, beforeAll, describe, expect, it, type Mock, vi } from "vitest"
 
 import { common } from "../common.js"
 import { DetailPanel } from "./detail-panel.js"
+
+const unsaved = common.confirm.unsaved
 
 // Base UI ScrollArea en jsdom necesita estos polyfills mínimos.
 beforeAll(() => {
@@ -62,17 +64,31 @@ describe("DetailPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("Esc con isDirty y confirm=false no cierra; con confirm=true sí", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
+  it("con cambios, Esc pregunta; «Continuar editando» no cierra y «Descartar y salir» sí", async () => {
+    const nativeConfirm = vi.spyOn(window, "confirm")
     const { onClose } = renderPanel({ isDirty: true })
 
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
-    expect(confirmSpy).toHaveBeenCalledWith(common.confirm.unsavedMessage)
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    expect(dialog.textContent).toContain(unsaved.description)
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: unsaved.keepEditing }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(onClose).not.toHaveBeenCalled()
 
-    confirmSpy.mockReturnValue(true)
-    fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
+    fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+    await screen.findByRole("alertdialog", { name: unsaved.title })
+    fireEvent.click(screen.getByRole("button", { name: unsaved.discard }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("sin cambios, Cerrar cierra directo sin preguntar", () => {
+    const { onClose } = renderPanel()
+
+    fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 
   it("Esc no cierra con un diálogo abierto encima", () => {

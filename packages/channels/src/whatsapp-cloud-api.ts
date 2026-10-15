@@ -102,10 +102,19 @@ interface WaMessage {
   interactive?: { type?: string; button_reply?: { id?: string; title?: string } }
 }
 
+/** Error de un envío, en la respuesta o en el aviso de estado `failed`. */
+interface WaError {
+  code?: number
+  title?: string
+  message?: string
+  error_data?: { details?: string }
+}
+
 interface WaStatus {
   id: string
   status: string
   timestamp: string
+  errors?: WaError[]
 }
 
 interface WaValue {
@@ -181,7 +190,38 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
   const status = map[s.status]
   // 'sent' y otros no tienen equivalente local.
   if (!status) return null
-  return { externalMessageId: s.id, status }
+  const error = status === "failed" ? sendFailureText(s.errors?.[0]) : null
+  return { externalMessageId: s.id, status, ...(error ? { error } : {}) }
+}
+
+/**
+ * Envíos que Meta rechaza por algo que la clínica resuelve en su cuenta, dichos
+ * en palabras: el motivo de Meta llega en inglés y no dice qué hacer. Un código
+ * que no está aquí se entrega tal como lo dice Meta, con su número.
+ * El error llega en la respuesta del envío o después, en el aviso de estado.
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
+ */
+const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
+  // «Business eligibility payment issue»: la cuenta de WhatsApp Business no
+  // tiene una forma de pago válida (o su línea de crédito no está activa).
+  131042:
+    "WhatsApp no envió el mensaje porque la cuenta de WhatsApp de la clínica no tiene una forma de pago. Agrégala en Meta (Configuración de pagos de WhatsApp Business) y vuelve a intentarlo.",
+}
+
+/** Por qué no salió un envío: en palabras si es un caso conocido; si no, `código: motivo de Meta`. */
+function sendFailureText(error: WaError | undefined): string | null {
+  if (!error) return null
+  const code = typeof error.code === "number" ? error.code : null
+  if (code !== null && WHATSAPP_SEND_ERROR_WORDS[code]) return WHATSAPP_SEND_ERROR_WORDS[code]
+  const said = text(error.error_data?.details) ?? text(error.title) ?? text(error.message)
+  if (!said) return code !== null ? String(code) : null
+  return code !== null ? `${code}: ${said}` : said
+}
+
+/** El `error` de una respuesta del Graph API, si lo trae. */
+function graphErrorOf(json: unknown): WaError | undefined {
+  if (!json || typeof json !== "object" || !("error" in json)) return undefined
+  return json.error && typeof json.error === "object" ? (json.error as WaError) : undefined
 }
 
 async function graphFetch(
@@ -605,7 +645,9 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     )
     const id = sentMessageId(json)
     if (status >= 400 || !id) {
-      throw new Error(`WhatsApp send falló: ${status} ${graphError(status, json)}`)
+      const code = graphErrorOf(json)?.code
+      const words = typeof code === "number" ? WHATSAPP_SEND_ERROR_WORDS[code] : undefined
+      throw new Error(words ?? `WhatsApp send falló: ${status} ${graphError(status, json)}`)
     }
     return { externalId: id }
   },

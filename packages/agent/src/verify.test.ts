@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { describeUnsupported, SOURCE_CALENDAR, SOURCE_SUM, verifyReply } from "./verify.js"
+import { describeUnsupported, refusedPaymentMentions, SOURCE_CALENDAR, SOURCE_SUM, verifyReply } from "./verify.js"
 
 // Lo que recibe la comprobación en una corrida: la zona, la moneda y el formato de la clínica.
 const LIMA = { timezone: "America/Lima", currency: "PEN", locale: "es-PE" }
@@ -131,4 +131,33 @@ it("lo que dijo el interlocutor sirve para repetirlo, y «24/7» no es una fecha
 it("una respuesta sin precios, fechas ni horas no tiene nada que comprobar", () => {
   const verdict = check("¡Hola! Con gusto te ayudo. ¿Para qué servicio deseas tu cita?", [])
   expect(verdict).toEqual({ ok: true, checks: [], unsupported: [] })
+})
+
+it("un mínimo («desde») solo sale dicho como mínimo", () => {
+  const desde = {
+    source: "Sedes y servicios",
+    text: "- Ortodoncia (id x): desde S/ 2,500.00 (es un mínimo: el precio final se define en la evaluación).",
+  }
+  expect(check("La ortodoncia es desde S/ 2,500; el final se define en la evaluación.", [desde]).ok).toBe(true)
+  expect(check("La ortodoncia es a partir de S/ 2,500.", [desde]).ok).toBe(true)
+  // En WhatsApp va en negrita junto al precio: la marca no esconde el «desde».
+  expect(check("La ortodoncia es *desde S/ 2,500*; el final se define en la evaluación.", [desde]).ok).toBe(true)
+  expect(check("La ortodoncia en promoción: *S/ 2,500*.", [desde]).ok).toBe(false)
+  const asFinal = check("La ortodoncia cuesta S/ 2,500.", [desde])
+  expect(asFinal.ok).toBe(false)
+  expect(describeUnsupported(asFinal)).toContain("es un mínimo")
+  // Que el mismo número aparezca suelto en otra fuente (lo escribió la persona) no lo vuelve precio final.
+  const said = { source: "Lo dijo el interlocutor", text: "¿la ortodoncia cuesta 2,500, no?" }
+  expect(check("Sí, la ortodoncia cuesta S/ 2,500.", [desde, said]).ok).toBe(false)
+})
+
+it("un medio de pago desactivado no se ofrece; decir que no se acepta sí pasa", () => {
+  const refused = ["Transferencia", "Cheque"]
+  expect(refusedPaymentMentions("Aceptamos efectivo, tarjeta, transferencia, Yape y Plin.", refused)).toEqual(["Transferencia"])
+  expect(refusedPaymentMentions("Sí, aceptamos tarjeta. La transferencia no está entre nuestros medios de pago.", refused)).toEqual([])
+  expect(refusedPaymentMentions("No aceptamos cheque ni transferencia; sí efectivo y tarjeta.", refused)).toEqual([])
+  expect(refusedPaymentMentions("We take cash and bank TRANSFERENCIA.", refused)).toEqual(["Transferencia"])
+  // Una palabra que solo contiene el nombre no cuenta.
+  expect(refusedPaymentMentions("Chequeamos tu cita.", refused)).toEqual([])
+  expect(refusedPaymentMentions("Aceptamos tarjeta.", [])).toEqual([])
 })

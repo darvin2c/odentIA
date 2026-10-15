@@ -1,6 +1,6 @@
 # 0016 · Proveedor LLM por organización sobre un único protocolo
 
-Fecha: 2026-10-08 · Estado: aceptada
+Fecha: 2026-10-08 · Estado: sustituida por [0022](0022-la-clinica-elige-entre-dos-modelos-de-odentia.md), que retira el proveedor propio de la clínica y conserva que un fallo de configuración del proveedor derive con motivo fijo y avise una vez por día
 
 ## Problema
 

@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type * as React from "react"
 import { afterEach, beforeAll, describe, expect, it, type Mock, vi } from "vitest"
 
+import { common } from "../common.js"
 import { FormPanel } from "./form-panel.js"
+
+const unsaved = common.confirm.unsaved
 
 // Base UI ScrollArea y jsdom necesitan polyfills mínimos
 beforeAll(() => {
@@ -61,15 +64,59 @@ describe("FormPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("Esc con isDirty y confirm=false no cierra; con confirm=true sí", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
+  it("con cambios, Esc pregunta con el diálogo propio y no con el del navegador", async () => {
+    const nativeConfirm = vi.spyOn(window, "confirm")
     const { onClose } = renderPanel({ isDirty: true })
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
-    expect(confirmSpy).toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    expect(dialog.textContent).toContain(unsaved.description)
+    expect(nativeConfirm).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
-    confirmSpy.mockReturnValue(true)
+    // El foco entra en la pregunta.
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+  })
+
+  it("«Continuar editando» no cierra y devuelve el foco al campo", async () => {
+    const { onClose } = renderPanel({ isDirty: true, children: <input aria-label="Nombre" /> })
+    const field = screen.getByLabelText("Nombre")
+    field.focus()
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
+    await screen.findByRole("alertdialog", { name: unsaved.title })
+    fireEvent.click(screen.getByRole("button", { name: unsaved.keepEditing }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() => expect(document.activeElement).toBe(field))
+  })
+
+  it("Esc con la pregunta abierta solo cierra la pregunta", async () => {
+    const { onClose } = renderPanel({ isDirty: true })
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("«Descartar y salir» cierra", async () => {
+    const { onClose } = renderPanel({ isDirty: true })
+    fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
+    await screen.findByRole("alertdialog", { name: unsaved.title })
+    fireEvent.click(screen.getByRole("button", { name: unsaved.discard }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("sin cambios, Cancelar cierra directo sin preguntar", () => {
+    const { onClose } = renderPanel()
+    fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("mientras se envía no cierra ni pregunta", () => {
+    const { onClose } = renderPanel({ isDirty: true, isSubmitting: true })
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 
   it("Esc no cierra con un diálogo abierto encima", () => {

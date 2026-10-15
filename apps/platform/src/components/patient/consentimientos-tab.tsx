@@ -2,6 +2,7 @@ import { CONSENT_DECLARATION } from "@odentia/clinical"
 import {
   Badge,
   Button,
+  buttonVariants,
   Checkbox,
   Field,
   FieldLabel,
@@ -410,19 +411,13 @@ function ConsentDetail({
     <div className="flex flex-col gap-4 border-t p-3">
       <ConsentSheet document={document} />
       <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          nativeButton={false}
-          render={
-            <Link
-              to="/patients/$patientId/consents/$consentId/print"
-              params={{ patientId: document.patientId, consentId: document.id }}
-            />
-          }
+        <Link
+          to="/patients/$patientId/consents/$consentId/print"
+          params={{ patientId: document.patientId, consentId: document.id }}
+          className={buttonVariants({ size: "sm", variant: "outline" })}
         >
           {document.status === "pendiente" ? "Imprimir para firma en papel" : "Imprimir"}
-        </Button>
+        </Link>
         {signed ? (
           <Button size="sm" variant="outline" disabled={pdf.isPending} onClick={() => pdf.mutate()}>
             {document.pdfDocumentId ? "Ver PDF" : pdf.isPending ? "Generando PDF…" : "Generar PDF"}

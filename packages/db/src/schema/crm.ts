@@ -359,9 +359,32 @@ export const conversation = pgTable(
     lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
     lastOutboundAt: timestamp("last_outbound_at", { withTimezone: true }),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    /**
+     * Cierre de la atención (ADR 0024): cuándo, quién (nulo = el agente o el
+     * sistema) y por qué (`CONVERSATION_CLOSE_REASONS`). Solo con `status`
+     * cerrada; reabrir los limpia.
+     */
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closedByUserId: text("closed_by_user_id").references(() => user.id),
+    closeReason: text("close_reason"),
+    /** Inicio de la atención actual: al crear la conversación y al reabrirla. */
+    attentionStartedAt: timestamp("attention_started_at", { withTimezone: true }).notNull().defaultNow(),
+    /** El agente ya insistió una vez en esta atención; se limpia con cada entrante y al reabrir. */
+    nudgedAt: timestamp("nudged_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
+    check("conversation_status_check", sql`${table.status} in ('open','closed')`),
+    check(
+      "conversation_close_reason_check",
+      sql`${table.closeReason} is null or ${table.closeReason} in ('resuelta','sin_respuesta','equipo','manual')`,
+    ),
+    // Abierta: sin cierre. Cerrada: con cuándo y por qué (quién puede faltar: el agente).
+    check(
+      "conversation_closed_coherence_check",
+      sql`(${table.status} = 'open' and ${table.closedAt} is null and ${table.closeReason} is null and ${table.closedByUserId} is null)
+        or (${table.status} = 'closed' and ${table.closedAt} is not null and ${table.closeReason} is not null)`,
+    ),
     uniqueIndex("conversation_org_id_uidx").on(table.organizationId, table.id),
     foreignKey({ columns: [table.organizationId, table.contactIdentityId], foreignColumns: [contactIdentity.organizationId, contactIdentity.id] }),
     uniqueIndex("conversation_connection_thread_uidx").on(
@@ -503,11 +526,11 @@ export const agentConfig = pgTable(
       .primaryKey()
       .references(() => organization.id),
     enabled: boolean("enabled").notNull().default(false),
-    model: text("model"),
-    /** URL base de un endpoint compatible con OpenAI propio de la organización. */
-    llmBaseUrl: text("llm_base_url"),
-    /** Clave del proveedor propio, cifrada con AES-256-GCM (nunca sale a la UI). */
-    llmApiKeyEncrypted: text("llm_api_key_encrypted"),
+    /**
+     * Modelo que escribe, uno de los que odentIA validó (`AGENT_LLMS` de los
+     * servicios). La cuenta del proveedor es de odentIA, nunca de la clínica.
+     */
+    llm: text("llm").notNull().default("chatgpt_6"),
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
     /** Modelo de decisión (none | baseline | jev | openai_decisions). */
@@ -539,6 +562,8 @@ export const agentConfig = pgTable(
     treatment: text("treatment"),
     tone: text("tone").notNull().default("cercano"),
     about: text("about").notNull().default(""),
+    /** Emojis en lo que escribe: `no` (se quitan antes de enviar) o `pocos` (uno como mucho, nunca en lo delicado). */
+    emojis: text("emojis").notNull().default("no"),
     /** Funciones de Recepción que la clínica apagó (ver la ficha del agente). */
     disabledFunctions: text("disabled_functions").array().notNull().default(sql`'{}'`),
     /** Indicación de la clínica para una función concreta, por id de función. */
@@ -551,23 +576,28 @@ export const agentConfig = pgTable(
     activeFromMin: integer("active_from_min"),
     activeUntilMin: integer("active_until_min"),
     channels: text("channels").array(),
+    /**
+     * Horas de silencio del paciente tras las que el agente cierra la
+     * conversación con una despedida (ADR 0024). Tope 23: después de 24 horas
+     * WhatsApp ya no deja escribir sin un mensaje aprobado.
+     */
+    closeAfterHours: integer("close_after_hours").notNull().default(22),
     /** Mensajes de prueba enviados desde «Probar»: solo para saber si la clínica ya lo probó. */
     sandboxTurns: integer("sandbox_turns").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check(
-      "agent_config_llm_pair_check",
-      sql`(${table.llmBaseUrl} is null) = (${table.llmApiKeyEncrypted} is null)`,
-    ),
+    check("agent_config_llm_check", sql`${table.llm} in ('chatgpt_6','claude_5_5')`),
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
+    check("agent_config_close_after_hours_check", sql`${table.closeAfterHours} between 6 and 23`),
     check(
       "agent_config_decision_provider_check",
       sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,
     ),
     check("agent_config_treatment_check", sql`${table.treatment} is null or ${table.treatment} in ('tu','usted')`),
     check("agent_config_tone_check", sql`${table.tone} in ('cercano','neutro','formal')`),
+    check("agent_config_emojis_check", sql`${table.emojis} in ('no','pocos')`),
     check(
       "agent_config_active_hours_check",
       sql`(${table.activeFromMin} is null) = (${table.activeUntilMin} is null) and (${table.activeFromMin} is null or (${table.activeFromMin} between 0 and 1439 and ${table.activeUntilMin} between 1 and 1440 and ${table.activeFromMin} <> ${table.activeUntilMin}))`,

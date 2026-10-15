@@ -1,5 +1,5 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { type AgentRuntime, consumeAgentRun, createAlreadyTold } from "@odentia/agent"
+import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createMailer } from "@odentia/mail"
@@ -42,9 +42,11 @@ const transcribe = createTranscriber(env)
 const checkpointer = PostgresSaver.fromConnString(env.DATABASE_URL)
 await checkpointer.setup()
 await setupAgentMemory(ownerDb)
+const embedder = embedderFromEnv(env)
 const agentRuntime: AgentRuntime = {
   checkpointer,
   publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+  ...(embedder ? { embedder } : {}),
   ...(env.AGENT_BURST_WINDOW_SECONDS > 0
     ? {
         burst: {
@@ -53,14 +55,7 @@ const agentRuntime: AgentRuntime = {
         },
       }
     : {}),
-  platform: {
-    modelName: env.LLM_MODEL,
-    apiKey: env.LLM_API_KEY || undefined,
-    baseUrl: env.LLM_BASE_URL,
-    timeoutMs: env.LLM_TIMEOUT_MS,
-    maxRetries: env.LLM_MAX_RETRIES,
-    allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
-  },
+  platform: platformLlmFromEnv(env),
   decisions: {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
     ...(env.OPENAI_DECISIONS_API_KEY
@@ -165,6 +160,7 @@ const queues: QueueDef[] = [
         publicBaseUrl: env.WEB_URL,
         senderMode: env.CHANNEL_SENDER_MODE,
         alreadyTold: createAlreadyTold(db, { secretsKey, platform: agentRuntime.platform, decisions: agentRuntime.decisions }),
+        embedder,
       }),
   },
 ]

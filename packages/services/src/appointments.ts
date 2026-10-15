@@ -24,7 +24,13 @@ import {
   cancelPendingForAppointment,
   invalidateAppointmentTokens,
 } from "./automation.js"
-import { isExclusionViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  branchNotFound,
+  isExclusionViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPatients } from "./patients.js"
 
@@ -68,7 +74,7 @@ export interface ScheduleResources {
   chairs: Array<{ id: string; label: string }>
 }
 
-/** Sucursal explícita o la primera activa; la zona es branch ?? organización. */
+/** Sede explícita o la primera activa; la zona es branch ?? organización. */
 async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
   const conditions = [eq(branch.organizationId, orgId), eq(branch.isActive, true)]
   if (branchId) conditions.push(eq(branch.id, branchId))
@@ -85,7 +91,10 @@ async function resolveBranch(tx: Db, orgId: string, branchId?: string) {
     .where(and(...conditions))
     .orderBy(asc(branch.createdAt))
     .limit(1)
-  if (!row) throw notFound(branchId ? "Sucursal" : "Sucursal activa")
+  if (!row) {
+    if (branchId) throw branchNotFound()
+    throw new ServiceError("NOT_FOUND", 404, "No hay ninguna sede activa")
+  }
   return { ...row, timeZone: row.timezone ?? row.orgTimezone ?? NEUTRAL_TIMEZONE }
 }
 
@@ -237,7 +246,7 @@ function toItem(row: {
 
 export interface ListAppointmentsInput {
   branchId?: string
-  /** Rango UTC explícito (ISO con zona); el cliente lo calcula con la zona de la sucursal. */
+  /** Rango UTC explícito (ISO con zona); el cliente lo calcula con la zona de la sede. */
   from: string
   to: string
   professionals?: string[]
@@ -343,7 +352,7 @@ export async function searchAgendaPatients(
   }))
 }
 
-/** Profesionales = miembros de la org; sillones = activos de la sucursal. */
+/** Profesionales = miembros de la org; sillones = activos de la sede. */
 export async function listScheduleResources(
   tx: Db,
   orgId: string,
@@ -397,7 +406,7 @@ export async function setBranchDefaultDuration(
     .set({ appointmentDefaultMinutes: input.minutes, updatedAt: new Date() })
     .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId)))
     .returning({ id: branch.id })
-  if (!updated) throw notFound("Sucursal")
+  if (!updated) throw branchNotFound()
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
@@ -512,7 +521,7 @@ export async function createAppointment(
   const chair = input.chairId ? await requireChair(tx, orgId, input.chairId) : null
   const resolved = await resolveBranch(tx, orgId, input.branchId ?? chair?.branchId)
   if (chair && chair.branchId !== resolved.id) {
-    throw validation("El sillón no pertenece a la sucursal de la cita")
+    throw validation("El sillón no pertenece a la sede de la cita")
   }
 
   const duration =
@@ -646,7 +655,7 @@ export async function moveAppointment(
   if (chairId !== current.chairId) {
     const chair = await requireChair(tx, orgId, chairId)
     if (chair.branchId !== current.branchId) {
-      throw validation("El sillón no pertenece a la sucursal de la cita")
+      throw validation("El sillón no pertenece a la sede de la cita")
     }
   }
   if (active) {
@@ -742,7 +751,7 @@ export async function updateAppointment(
   if (input.chairId !== undefined && input.chairId !== current.chairId) {
     const chair = await requireChair(tx, orgId, input.chairId)
     if (chair.branchId !== current.branchId) {
-      throw validation("El sillón no pertenece a la sucursal de la cita")
+      throw validation("El sillón no pertenece a la sede de la cita")
     }
     set.chairId = input.chairId
   }

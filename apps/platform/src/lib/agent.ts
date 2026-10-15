@@ -1,3 +1,13 @@
+/**
+ * La urgencia de un caso que pasó al equipo, en una palabra. La insignia
+ * (`HandoffUrgency`) le suma icono y color; donde no cabe, va la palabra sola.
+ */
+export const URGENCY_WORDS = { alta: "Ahora", media: "Hoy", baja: "Sin apuro" } as const
+
+export function urgencyWord(priority: string): string {
+  return URGENCY_WORDS[priority as keyof typeof URGENCY_WORDS] ?? URGENCY_WORDS.media
+}
+
 /** Etiquetas en español para las acciones del agente autónomo. */
 export const ACTION_LABEL: Record<string, string> = {
   reservar_cita: "Reservar cita",
@@ -12,14 +22,13 @@ export const ACTION_LABEL: Record<string, string> = {
 
 export interface AgentProposal {
   id: string
-  conversationId: string | null
+  conversationId: string
   contactId: string | null
   action: string
-  mode: "directo" | "confirmar_usuario" | "aprobar_equipo"
+  /** Quién dice que sí: nadie (directo) o el interlocutor en el hilo. Ninguna espera al equipo. */
+  mode: "directo" | "confirmar_usuario"
   status: string
   payload: Record<string, unknown>
-  /** Texto que el equipo aprobó cuando cambió el borrador de un mensaje. */
-  editedText?: string | null
   reason: string | null
   result: Record<string, unknown> | null
   error: string | null
@@ -80,10 +89,9 @@ export interface AgentHandoff {
 /** Resumen ligero del panel del agente (legible con agent.decide). */
 export interface AgentPanelSummary {
   enabled: boolean
-  /** Pendientes que el equipo puede decidir. */
-  pendingProposals: number
-  /** Pendientes que esperan al interlocutor; se ven, no se deciden. */
+  /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
+  /** Casos que el agente pasó a una persona y siguen sin resolver: lo que espera al equipo. */
   openHandoffs: number
   /** Corridas de hoy que respondieron o derivaron. */
   interventionsToday: number
@@ -104,20 +112,6 @@ export interface AgentActivityItem {
   detail: string | null
   /** Estado de la propuesta/derivación o, en mensajes, de su entrega. */
   status: string | null
-}
-
-/**
- * Desenlace de una aprobación, para no afirmar más de lo ocurrido: ejecutar
- * `enviar_mensaje` solo encola el mensaje; su entrega se ve en el hilo.
- */
-export function approvalOutcomeMessage(proposal: Pick<AgentProposal, "status" | "result">): string {
-  if (proposal.status === "ejecutada") {
-    return typeof proposal.result?.messageId === "string"
-      ? "Aprobado. El mensaje quedó encolado; revisa su entrega en el hilo."
-      : "Cambio aprobado y ejecutado."
-  }
-  if (proposal.status === "aprobada") return "Aprobado; pendiente de ejecutar. Sigue su estado en Aprobaciones."
-  return `La propuesta quedó ${proposal.status}.`
 }
 
 /** Permiso operativo que exige decidir cada acto, además de `agent.decide`. */
@@ -207,18 +201,9 @@ export interface AgentRole {
   learnsLater?: string
 }
 
-export type AgentLevelId = "supervisado" | "equilibrado" | "autonomo"
-
-export interface AgentLevel {
-  id: AgentLevelId
-  label: string
-  summary: string
-}
-
 export interface AgentRoles {
   principles: string[]
   roles: AgentRole[]
-  levels: AgentLevel[]
 }
 
 export interface AgentOutcomes {
@@ -242,15 +227,18 @@ export interface AgentLearned {
 export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
 /** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
+/**
+ * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede arreglarla,
+ * así que se dice qué pasa con los mensajes y qué sí puede hacer.
+ */
 export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
-  rechazado: "El proveedor del modelo rechazó la conexión.",
-  sin_saldo: "El proveedor del modelo no tiene saldo o cuota.",
-  sin_configurar: "Falta configurar el proveedor del modelo.",
+  rechazado: "El modelo no está respondiendo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
+  sin_saldo: "La cuenta de odentIA para este modelo se quedó sin saldo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
+  sin_configurar: "Este modelo no está disponible por ahora. Elige el otro en Modelo del agente.",
 }
 
 export interface AgentOverview {
   enabled: boolean
-  level: AgentLevelId | "personalizado"
   needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
@@ -260,13 +248,6 @@ export interface AgentOverview {
   knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
   readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
   usage: { runsToday: number; dailyRunLimit: number }
-}
-
-export const LEVEL_LABEL: Record<AgentOverview["level"], string> = {
-  supervisado: "Supervisado",
-  equilibrado: "Equilibrado",
-  autonomo: "Autónomo",
-  personalizado: "Personalizado",
 }
 
 /** Estado de una conversación de prueba; el servidor lo devuelve y vuelve tal cual en el turno siguiente. */
@@ -291,15 +272,17 @@ export function voicePreview(input: {
   personaName: string | null
   treatment: "tu" | "usted" | null
   tone: "cercano" | "neutro" | "formal"
+  emojis?: "no" | "pocos"
   clinicName: string
 }): string {
   const who = input.personaName?.trim()
     ? `Soy ${input.personaName.trim()}, asistente virtual de ${input.clinicName}.`
     : `Soy el asistente virtual de ${input.clinicName}.`
   const formal = input.treatment === "usted"
-  if (input.tone === "formal") return `Buenos días. ${who} ¿En qué ${formal ? "puedo ayudarle" : "puedo ayudarte"}?`
-  if (input.tone === "neutro") return `Hola. ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
-  return `¡Hola! ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
+  const emoji = input.emojis === "pocos" ? " 😊" : ""
+  if (input.tone === "formal") return `Buenos días.${emoji} ${who} ¿En qué ${formal ? "puedo ayudarle" : "puedo ayudarte"}?`
+  if (input.tone === "neutro") return `Hola.${emoji} ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
+  return `¡Hola!${emoji} ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
 }
 
 /** Minutos del día ↔ «HH:MM», para el horario en que responde el agente. */
@@ -317,7 +300,7 @@ export function clockToMinutes(clock: string): number | null {
 
 /* ---------- Aprender: por revisar, lecciones y casos de prueba ---------- */
 
-export type ReviewReason = "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada" | "editada"
+export type ReviewReason = "equipo_tomo" | "repitio_pregunta" | "muestra" | "marcada"
 
 export interface ReviewItem {
   id: string
@@ -341,7 +324,6 @@ export const REVIEW_REASON_LABEL: Record<ReviewReason, string> = {
   repitio_pregunta: "El paciente repitió la pregunta",
   muestra: "Muestra al azar",
   marcada: "La marcó alguien de tu equipo",
-  editada: "El equipo cambió el borrador",
 }
 
 export type CorrectionFailure = "dato_equivocado" | "falto_dato" | "tono" | "no_debio_responder" | "otra_cosa"
@@ -371,8 +353,8 @@ export function lessonScopeLabel(scope: string): string {
   return scope
 }
 
-/** De dónde sale una lección: una corrección, un borrador cambiado al aprobar o una respuesta que se dio por buena. */
-export type LessonOrigin = "correccion" | "borrador_editado" | "respuesta_buena"
+/** De dónde sale una lección: una corrección o una respuesta que se dio por buena. */
+export type LessonOrigin = "correccion" | "respuesta_buena"
 
 export interface LessonItem {
   id: string

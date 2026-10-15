@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { agentProposal } from "@odentia/db/schema/agent"
+import { agentHandoff } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientCharge } from "@odentia/db/schema/clinical"
 import { contact, crmTask } from "@odentia/db/schema/crm"
@@ -27,7 +27,7 @@ async function prepareSchedule(owner: OwnerFixture) {
 /**
  * Una jornada con datos reales aislados y ningún envío externo: una cita de
  * quien inicia sesión y otra de otro profesional, una tarea, algo por cobrar
- * anotado hoy y un cambio del agente que decide el equipo.
+ * anotado hoy y un caso que el agente pasó al equipo.
  */
 async function activeDay(db: Db, owner: OwnerFixture) {
   const organizationId = owner.org.id
@@ -54,8 +54,8 @@ async function activeDay(db: Db, owner: OwnerFixture) {
   await db.insert(crmTask).values({ organizationId, title: "Confirmar seguimiento pendiente", assigneeUserId: owner.user.id, createdBy: "user" })
   await db.insert(patientCharge).values({ organizationId, patientId, description: "Cuenta pendiente", amountCents: 12000, currency: "PEN" })
   await db.insert(contact).values({ id: contactId, organizationId, displayName: "Interlocutor pendiente" })
-  // Sin conversación, la propuesta la decide siempre el equipo.
-  await db.insert(agentProposal).values({ organizationId, contactId, action: "enviar_mensaje", payload: { text: "Confirmación pendiente" }, afterSummary: "Revisar respuesta antes de enviar", idempotencyKey: randomUUID() })
+  // Lo que espera a una persona del agente es un caso derivado: ninguna propuesta espera al equipo (ADR 0023).
+  await db.insert(agentHandoff).values({ organizationId, contactId, reason: "Pide hablar con una persona", summary: "Prefiere atención humana.", priority: "alta" })
 }
 
 const setRole = (db: Db, owner: OwnerFixture, role: string) =>
@@ -74,7 +74,7 @@ for (const width of [1440, 390]) {
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const start = page.getByRole("region", { name: "Siguiente paso" })
       await expect(start.getByRole("heading", { name: "Prepara tu primera atención", exact: true })).toBeVisible()
-      const primary = start.getByRole("button", { name: "Definir horarios", exact: true })
+      const primary = start.getByRole("link", { name: "Definir horarios", exact: true })
       await expect(primary).toBeInViewport()
       await expect(start.getByRole("list", { name: "Puesta en marcha" }).getByRole("listitem")).toHaveCount(3)
       await expect(page.getByRole("region", { name: "Te espera" })).toHaveCount(0)
@@ -92,11 +92,11 @@ for (const width of [1440, 390]) {
       await prepareSchedule(owner)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const start = page.getByRole("region", { name: "Siguiente paso" })
-      await expect(start.getByRole("button", { name: "Preparar un sillón", exact: true })).toBeInViewport()
+      await expect(start.getByRole("link", { name: "Preparar un sillón", exact: true })).toBeInViewport()
       await observe(page, info, "parcial")
       await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Sillón inicial" }, 201)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(start.getByRole("button", { name: "Registrar un paciente", exact: true })).toBeInViewport()
+      await expect(start.getByRole("link", { name: "Registrar un paciente", exact: true })).toBeInViewport()
       await call(page, "POST", "/api/patients", owner.org.slug, {
         submissionId: randomUUID(), answers: { demographics: { displayName: "Primera paciente", docType: "DNI", docNumber: "76543210" }, respondent: "staff", privacyAccepted: false },
       }, 201)
@@ -125,12 +125,13 @@ for (const width of [1440, 390]) {
       const waiting = page.getByRole("region", { name: "Te espera" })
       await expect(waiting.getByRole("heading", { name: "Te espera", exact: true })).toBeInViewport()
       await expect(page.getByRole("region", { name: "Siguiente paso" })).toHaveCount(0)
-      // Lo que espera aprobación va antes que la tarea: el orden lo entrega el servidor.
+      // El caso «Ahora» va antes que la tarea: el orden lo entrega el servidor. Nada espera tu aprobación.
       const rows = waiting.getByRole("listitem")
       await expect(rows).toHaveCount(2)
-      await expect(rows.nth(0)).toContainText("Mensaje para Interlocutor pendiente")
-      await expect(rows.nth(0)).toContainText("El agente espera tu aprobación")
-      await expect(rows.nth(0).getByRole("button", { name: /Revisar$/ })).toBeVisible()
+      await expect(rows.nth(0)).toContainText("Interlocutor pendiente: Pide hablar con una persona")
+      await expect(rows.nth(0)).toContainText("Caso que pasó el agente")
+      await expect(rows.nth(0).getByRole("link", { name: /Revisar$/ })).toBeVisible()
+      await expect(waiting).not.toContainText("espera tu aprobación")
       await expect(rows.nth(1)).toContainText("Confirmar seguimiento pendiente")
       await expect(rows.nth(1)).toContainText("Tarea tuya · sin fecha")
 
@@ -141,7 +142,7 @@ for (const width of [1440, 390]) {
       await expect(agenda.getByText(new RegExp(`^Profilaxis · ${owner.user.name}`))).toBeVisible()
       await expect(agenda.getByRole("link", { name: "Ver las 2 en la Agenda", exact: true })).toBeVisible()
       // La caja del día, en una línea que lleva a Finanzas.
-      const cash = page.getByRole("button", { name: /^Caja de hoy/ })
+      const cash = page.getByRole("link", { name: /^Caja de hoy/ })
       await expect(cash).toContainText("1 persona por cobrar")
 
       // Lo que se retiró no vuelve con otro nombre.
@@ -154,7 +155,7 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("link", { name: /^(Citas de hoy|Tareas abiertas|Cuentas con saldo)/ })).toHaveCount(0)
 
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
-      expect(home.waiting.map(row => row.kind)).toEqual(["proposal", "task"])
+      expect(home.waiting.map(row => row.kind)).toEqual(["case", "task"])
       expect(home.today).toMatchObject({ scope: "branch", branch: { id: owner.branchId }, summary: { total: 2, attended: 0, upcoming: 2, unconfirmed: 1 } })
       expect(home.cash?.toCollect.map(row => row.displayName)).toEqual(["Paciente con cita"])
       // Una sede que no existe no rompe Inicio ni mezcla sedes: vale la primera activa.
@@ -162,7 +163,7 @@ for (const width of [1440, 390]) {
       expect(fallback.today?.branch?.id).toBe(owner.branchId)
       expect((await api(page, "GET", "/api/workspace/home?branch=no-es-una-sede", owner.org.slug)).status).toBe(400)
 
-      const task = rows.nth(1).getByRole("button", { name: /Confirmar seguimiento pendiente/ })
+      const task = rows.nth(1).getByRole("link", { name: /Confirmar seguimiento pendiente/ })
       expect((await task.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
       await observe(page, info, "direccion")
       // Toda la fila es el enlace, también con teclado.
@@ -181,16 +182,16 @@ for (const width of [1440, 390]) {
       expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: 1, unconfirmed: 1 } })
       expect(home.today?.appointments.map(row => row.patientName)).toEqual(["Paciente con cita"])
       expect(home.cash).toBeNull()
-      expect(home.waiting.some(row => row.kind === "proposal" || row.kind === "case")).toBe(false)
+      expect(home.waiting.some(row => row.kind === "case")).toBe(false)
 
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const mine = page.getByRole("region", { name: "Mis pacientes de hoy" })
       await expect(mine).toContainText("1 paciente · 0 atendidos · 1 por venir")
       await expect(mine).not.toContainText("Paciente de otra profesional")
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
-      await expect(page.getByRole("button", { name: /^Caja de hoy/ })).toHaveCount(0)
+      await expect(page.getByRole("link", { name: /^Caja de hoy/ })).toHaveCount(0)
       await observe(page, info, "odontologo")
-      await mine.getByRole("button", { name: /Paciente con cita/ }).click()
+      await mine.getByRole("link", { name: /Paciente con cita/ }).click()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/patients/"))
     })
 
@@ -230,7 +231,7 @@ for (const width of [1440, 390]) {
       await observe(page, info, "nada-espera")
       await call(page, "PATCH", `/api/tasks/${task.id}`, owner.org.slug, { status: "open" })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(waiting.getByRole("button", { name: /Revisar caso/ })).toBeVisible()
+      await expect(waiting.getByRole("link", { name: /Revisar caso/ })).toBeVisible()
       await expect(waiting.getByText("Nada te espera por ahora", { exact: true })).toHaveCount(0)
     })
 
@@ -251,7 +252,7 @@ for (const width of [1440, 390]) {
       await observe(page, info, "error-recuperable")
       failing = false
       await retry.click()
-      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("button", { name: "Definir horarios", exact: true })).toBeInViewport()
+      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link", { name: "Definir horarios", exact: true })).toBeInViewport()
     })
 
     for (const role of ["reception", "dentist", "cashier"] as const) {
@@ -262,7 +263,7 @@ for (const width of [1440, 390]) {
         await gotoHydrated(page, tenant(owner.org.slug, "/home"))
         // Sin permiso para configurar no hay puesta en marcha: se dice que nada espera.
         await expect(page.getByRole("region", { name: "Siguiente paso" })).toHaveCount(0)
-        await expect(page.getByRole("button", { name: "Definir horarios", exact: true })).toHaveCount(0)
+        await expect(page.getByRole("link", { name: "Definir horarios", exact: true })).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Te espera" }).getByText("Nada te espera por ahora", { exact: true })).toBeVisible()
         const block = role === "reception" ? "Agenda de hoy" : role === "dentist" ? "Mis pacientes de hoy" : "Caja de hoy"
         const action = role === "reception" ? "Abrir la Agenda" : role === "dentist" ? "Ver mi agenda" : "Ir a Caja"

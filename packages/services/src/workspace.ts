@@ -3,15 +3,9 @@ import { member } from "@odentia/db/schema/auth"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
-import { listPendingApprovals } from "./automation.js"
-import {
-  countPendingProposals,
-  getAutonomyPolicy,
-  listHandoffs,
-  listProposals,
-  pendingProposalDecider,
-} from "./agent-operations.js"
+import { listHandoffs } from "./agent-operations.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
+import { unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -20,7 +14,6 @@ import {
   WAITING_LIMITS,
   type WaitingBudgets,
   type WaitingCase,
-  type WaitingProposal,
   type WaitingTask,
 } from "./workspace-home.js"
 
@@ -255,34 +248,15 @@ async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean)
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 }
 
-/** Propuestas pendientes que decide el equipo; las que esperan al interlocutor no esperan a nadie de aquí. */
-async function waitingProposals(tx: Db, orgId: string): Promise<{ items: WaitingProposal[]; total: number }> {
-  const rows = await listProposals(tx, orgId, { status: "propuesta", limit: 50 })
-  const policy = await getAutonomyPolicy(tx, orgId)
-  const items = rows
-    .filter(row => pendingProposalDecider(policy, row.action, row.conversationId !== null) === "team")
-    .slice(0, WAITING_LIMITS.proposals)
-    .map(row => ({
-      id: row.id, action: row.action, summary: row.context.afterSummary, createdAt: row.createdAt,
-      conversationId: row.conversationId, contactName: row.context.contactName, patientName: row.context.patientName,
-    }))
-  return { items, total: (await countPendingProposals(tx, orgId)).team }
-}
-
 /**
- * Conversaciones abiertas con un entrante posterior al último saliente
- * aceptado (la vista «Sin responder» de la Bandeja) y desde cuándo espera la
- * que más lleva.
+ * Conversaciones que esperan respuesta (la vista «Esperan respuesta» de la
+ * Bandeja, con su misma definición: también las cerradas que un mensaje
+ * reabrió) y desde cuándo espera la que más lleva.
  */
 async function waitingConversations(tx: Db, orgId: string) {
   const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
     with pending as (
-      select (select min(i.created_at) from message i
-        where i.organization_id=${orgId} and i.conversation_id=c.id and i.direction='in'
-          and i.created_at > coalesce((select max(o.created_at) from message o
-            where o.organization_id=${orgId} and o.conversation_id=c.id and o.direction='out'
-              and o.status in ('sent','delivered','read') and coalesce(o.external_id,'') not like 'mock-%'), '-infinity'::timestamptz)
-      ) as since from conversation c where c.organization_id=${orgId} and c.status='open'
+      select ${unansweredSinceSql(sql.raw("c"))} as since from conversation c where c.organization_id=${orgId} and c.status='open'
     ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
   return row ?? { waiting: 0, oldestAt: null }
 }
@@ -346,26 +320,20 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const today = access.appointments ? await workspaceToday(tx, orgId, userId, access.ownAppointments, branch, timezone) : null
   const cash = access.finance && branch ? await getCashToday(tx, orgId, { branchId: branch.id }) : null
 
-  const proposals = access.agent ? await waitingProposals(tx, orgId) : { items: [], total: 0 }
   const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
   // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador.
   const admin = options.can ? await getAdminRecommendations(tx, orgId, options.can) : { enabled: false, recommendations: [] }
   const advice = admin.recommendations
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
-  // Lo que el administrador encargó y espera aprobación, para quien decide por el agente.
-  const batches = access.agent ? await listPendingApprovals(tx, orgId) : []
   const waiting = composeWaiting({
     cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
-    proposals: proposals.items,
-    proposalsTotal: proposals.total,
     conversations: access.conversations ? await waitingConversations(tx, orgId) : null,
     overdueTasks: tasks.overdue,
     nextTask: tasks.next,
     openTasks: tasks.open,
     advice: advice.map(({ key, title, detail, actor }) => ({ key, title, detail, actor })),
     unreached: unreached && unreached.total > 0 ? { total: unreached.total, byCause: unreached.byCause.map(({ total, reason }) => ({ total, reason })) } : null,
-    batches: batches.map(({ key, name, total }) => ({ key, name, total })),
     // Con el administrador encendido, los presupuestos sin respuesta son una de sus líneas: no se repiten aquí.
     budgets: (access.finance || access.clinical) && !admin.enabled ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
   })

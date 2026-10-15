@@ -5,6 +5,7 @@ import { contact, conversation, crmTask, TASK_AREAS, type TaskArea } from "@oden
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, or, sql } from "drizzle-orm"
+import { resolveAfterHandoffTask } from "./conversation-close.js"
 import { notFound, validation } from "./errors.js"
 
 /** Aviso en vivo para el stream (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -544,6 +545,11 @@ export async function updateTask(
     },
   })
   await notify(tx, { orgId, kind: "task.updated", at: new Date().toISOString() })
+  // Completar la tarea de una derivación resuelve la conversación si no le
+  // queda otro caso abierto (ADR 0024): despedida y cierre con `equipo`.
+  if (previousStatus === "open" && updated.status === "done" && updated.conversationId) {
+    await resolveAfterHandoffTask(tx, orgId, updated.id, input.actorUserId ?? null)
+  }
   return withNames(tx, orgId, updated)
 }
 

@@ -17,7 +17,7 @@ import { and, asc, desc, eq, inArray, or, sql, type SQL, type SQLWrapper } from 
 import { getAgentConfig } from "./agentConfig.js"
 import { getContact, requireContact, type ContactFull } from "./contacts.js"
 import { notFound, validation } from "./errors.js"
-import { handoffOpenSql } from "./handoff-state.js"
+import { agentAttendingSql, handoffOpenExistsSql, proposalPendingExistsSql } from "./conversation-state.js"
 import { listOpportunities, type OpportunityListItem } from "./opportunities.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import type { TaskItem } from "./tasks.js"
@@ -213,45 +213,51 @@ async function resolveAgentState(
       pendingProposalIds: [],
     }
   }
-  // Estado operativo mínimo: la existencia de pendientes se informa aunque
-  // el rol no tenga agent.read; los ids solo con permiso.
-  const pending = await tx
-    .select({ id: agentProposal.id })
-    .from(agentProposal)
-    .where(
-      and(
-        eq(agentProposal.organizationId, orgId),
-        eq(agentProposal.conversationId, convRow.id),
-        // Misma vigencia que la bandeja: una vencida sin marcar ya no espera a nadie.
-        proposalPendingSql(sql.raw('"agent_proposal"')),
-      ),
-    )
-    .limit(10)
-  if (pending.length > 0) {
+  // Lo que espera el hilo, con las mismas reglas que la Bandeja (`conversation-state.ts`).
+  const conv = sql.raw('"conversation"')
+  const [shared] = await tx
+    .select({
+      pending: sql<boolean>`${proposalPendingExistsSql(conv)}`,
+      handoff: sql<boolean>`${handoffOpenExistsSql(conv)}`,
+      attending: sql<boolean>`${agentAttendingSql(conv)}`,
+    })
+    .from(conversation)
+    .where(and(eq(conversation.id, convRow.id), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (shared?.pending) {
+    // Estado operativo mínimo: la existencia de pendientes se informa aunque
+    // el rol no tenga agent.read; los ids solo con permiso.
+    const pending = caps.agent
+      ? await tx
+          .select({ id: agentProposal.id })
+          .from(agentProposal)
+          .where(
+            and(
+              eq(agentProposal.organizationId, orgId),
+              eq(agentProposal.conversationId, convRow.id),
+              proposalPendingSql(sql.raw('"agent_proposal"')),
+            ),
+          )
+          .limit(10)
+      : []
     return {
       state: "approval",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: "Propuesta del agente pendiente de aprobación",
-      pendingProposalIds: caps.agent ? pending.map((p) => p.id) : [],
+      reason: "Propuesta del agente que espera la confirmación del interlocutor",
+      pendingProposalIds: pending.map((p) => p.id),
     }
   }
-  // «Derivación sin resolver» con la definición única que usan la bandeja, el
-  // panel y los contadores: sin tarea, o con su tarea aún abierta.
-  const [handoffs] = await tx.execute<{ open: boolean; with_task: boolean }>(sql`
-    select count(*) > 0 as open, coalesce(bool_or(h.task_id is not null), false) as with_task
-    from agent_handoff h
-    where h.organization_id = ${orgId} and h.conversation_id = ${convRow.id} and ${handoffOpenSql(sql.raw("h"))}`)
-  if (handoffs?.open) {
+  if (shared?.handoff) {
     return {
       state: "handoff",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: handoffs.with_task ? "Derivado al equipo; seguimiento pendiente" : "Derivado al equipo",
+      reason: "Derivado al equipo; seguimiento pendiente",
       pendingProposalIds: [],
     }
   }
-  if (convRow.agentStatus === "off") {
+  if (convRow.agentStatus === "off" || convRow.assignedUserId !== null) {
     return {
       state: "human",
       enabled: cfg.enabled,
@@ -260,12 +266,12 @@ async function resolveAgentState(
       pendingProposalIds: [],
     }
   }
-  if (!cfg.enabled) {
+  if (!shared?.attending) {
     return {
       state: "human",
-      enabled: false,
+      enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: "Agente desactivado para la organización",
+      reason: cfg.enabled ? "El agente no atiende este canal" : "Agente desactivado para la organización",
       pendingProposalIds: [],
     }
   }

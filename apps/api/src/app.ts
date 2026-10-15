@@ -4,7 +4,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { assertSaasBranchAvailable, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, ServiceError, setBranchActive, startSaasTrial, type Storage, updateOrgRegion } from "@odentia/services"
+import { assertSaasBranchAvailable, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -87,10 +87,12 @@ export interface AppDeps {
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
-  /** Proveedor LLM de la plataforma (LLM_*); la organización puede traer el suyo. */
+  /** Cuentas de odentIA en los proveedores del modelo (LLM_*); la organización solo elige el modelo. */
   llm?: PlatformLlm
   /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
   decisions?: PlatformDecisions
+  /** Quien vectoriza para la búsqueda por significado (EMBEDDINGS_*); sin él, por palabras. */
+  embedder?: SearchEmbedder
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
@@ -171,7 +173,8 @@ async function toReplayPayload(
     if (!conversationId) return null
     return { orgId, kind: event.action, conversationId, messageId: event.entityId, at }
   }
-  if (event.action === "conversation.updated") {
+  // Cerrar, reabrir, tomar o devolver también cambian la conversación: se avisan igual.
+  if ((CONVERSATION_STATE_ACTIONS as readonly string[]).includes(event.action)) {
     if (!event.entityId) return null
     return { orgId, kind: "conversation.updated", conversationId: event.entityId, at }
   }
@@ -575,11 +578,7 @@ export function createApp(deps: AppDeps) {
             .where(
               and(
                 eq(auditEvent.organizationId, orgId),
-                inArray(auditEvent.action, [
-                  "message.created",
-                  "message.updated",
-                  "conversation.updated",
-                ]),
+                inArray(auditEvent.action, ["message.created", "message.updated", ...CONVERSATION_STATE_ACTIONS]),
                 gt(auditEvent.createdAt, new Date(lastEventId)),
               ),
             )
@@ -647,7 +646,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))
   guarded.route("/patients", createFinancialDocumentsRoute(crmDeps))
-  const llm: PlatformLlm = deps.llm ?? { modelName: "fake" }
+  const llm: PlatformLlm = deps.llm ?? { fake: true }
   guarded.route("/patients", createPatientsRoute({ ...crmDeps, llm }))
   guarded.route("/services", createServicesRoute(crmDeps))
   guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))
@@ -671,7 +670,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
   guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm }))
-  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm }))
+  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, decisions: deps.decisions, embedder: deps.embedder }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(

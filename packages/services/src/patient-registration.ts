@@ -444,7 +444,7 @@ export async function registerPatient(
   const isPublic = context.kind === "public"
   if (Object.keys(input).some(key => !["submissionId", "formVersion", "answers", "contacts", "registeredBranchId"].includes(key))) throw validation("Campos de registro desconocidos")
 
-  // Defensa estricta de forma: lo público nunca acepta vínculos ni sucursal.
+  // Defensa estricta de forma: lo público nunca acepta vínculos ni sede.
   if (isPublic && (input.contacts !== undefined || input.registeredBranchId !== undefined)) {
     throw validation("Envío público inválido")
   }

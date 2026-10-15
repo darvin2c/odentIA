@@ -8,11 +8,11 @@ import type { Env } from "./env.js"
 export function createTranscriber(env: Env): TranscribeFn | null {
   const model = env.TRANSCRIBE_MODEL
   const baseUrl = env.TRANSCRIBE_BASE_URL ?? "https://api.openai.com/v1"
-  // La clave del chat solo se reutiliza si su endpoint es el mismo que el de
-  // transcripción: nunca se envía la clave de otro proveedor a api.openai.com.
-  const chatHost = env.LLM_BASE_URL ? new URL(env.LLM_BASE_URL).host : "api.openai.com"
+  // La clave de OpenAI del chat solo se reutiliza si su endpoint es el mismo
+  // que el de transcripción: nunca se envía a otro host.
+  const chatHost = env.LLM_OPENAI_BASE_URL ? new URL(env.LLM_OPENAI_BASE_URL).host : "api.openai.com"
   const sameProvider = new URL(baseUrl).host === chatHost
-  const apiKey = env.TRANSCRIBE_API_KEY || (sameProvider ? env.LLM_API_KEY : "")
+  const apiKey = env.TRANSCRIBE_API_KEY || (sameProvider ? env.LLM_OPENAI_API_KEY : "")
   if (!model || !apiKey) return null
   return async ({ bytes, mimeType, filename }) => {
     const form = new FormData()

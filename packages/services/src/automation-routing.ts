@@ -5,12 +5,13 @@ import { user } from "@odentia/db/schema/auth"
 import type { AutomationCause, AutomationVia, automationJob } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { type AutomationMessage, type MessageVariable, placePhrase, renderMessage, replyId } from "./automation-messages.js"
 import { findTemplateByName, type TemplateItem } from "./channel-templates.js"
 import { isDirectThread } from "./contacts.js"
-import { reopenConversation, startContactConversation, WA_FREE_TEXT_WINDOW_MS } from "./conversations.js"
+import { startContactConversation, WA_FREE_TEXT_WINDOW_MS } from "./conversations.js"
 import { ServiceError } from "./errors.js"
 import { openEmailThread } from "./financial-documents.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
@@ -105,7 +106,8 @@ async function patientName(tx: Db, orgId: string, patientId: string): Promise<st
 /**
  * Arma el mensaje de uno o varios trabajos del mismo tipo para una persona
  * (varios recordatorios de cita del mismo día salen juntos). Los datos se leen
- * ahora de la agenda, el presupuesto o el control: no se guarda un texto viejo.
+ * ahora de la agenda, el presupuesto, el control o la oportunidad: no se guarda
+ * un texto viejo.
  * `spec` trae el texto vigente de la clínica (`currentAutomationMessage`).
  * Devuelve null si el trabajo ya no tiene de dónde sacar sus datos.
  */
@@ -191,6 +193,17 @@ export async function composeJobMessage(
       .limit(1)
     if (!budget) return null
     values.presupuesto = budget.title
+  }
+
+  if (spec.key === "seguimiento_comercial") {
+    if (!lead.opportunityId) return null
+    const [opp] = await tx
+      .select({ title: opportunity.title })
+      .from(opportunity)
+      .where(and(eq(opportunity.id, lead.opportunityId), eq(opportunity.organizationId, orgId)))
+      .limit(1)
+    if (!opp) return null
+    values.oportunidad = opp.title
   }
 
   const { params, text } = renderMessage(spec, values)
@@ -283,11 +296,10 @@ export async function routeMessage(
         ),
       )
     const thread = threads.find((row) => isDirectThread("whatsapp", row.externalThreadId, identity.externalUserId))
-    // Una conversación cerrada no se reabre con una respuesta: su ventana ya no
-    // cuenta. Con plantilla sí se le puede volver a escribir.
+    // Escribir reabre una conversación cerrada (ADR 0024): lo que cuenta es la
+    // ventana de 24 horas desde que la persona escribió, no si está abierta.
     if (
-      thread?.status === "open" &&
-      thread.lastInboundAt &&
+      thread?.lastInboundAt &&
       Date.now() - thread.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS
     ) {
       return { via: "respuesta", channel: "whatsapp", conversationId: thread.id }
@@ -299,7 +311,6 @@ export async function routeMessage(
           identityId: identity.id,
           connectionId: whatsapp.id,
         })
-        if (started.status !== "open") await reopenConversation(tx, orgId, started.id)
         return {
           via: "plantilla",
           channel: "whatsapp",
@@ -315,15 +326,18 @@ export async function routeMessage(
   }
 
   const email = person?.email?.trim().toLowerCase()
+  // Por qué no se pudo abrir el hilo de correo, si la clínica sí tiene buzón:
+  // no es «sin conexión», y decirlo así manda a conectar lo que ya está.
+  let mailboxProblem: string | null = null
   if (spec && mailbox && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     try {
       const thread = await openEmailThread(tx, orgId, null, { contactId, email }, mailbox)
       return { via: "correo", channel: "email", conversationId: thread.id }
     } catch (error) {
       if (!(error instanceof ServiceError)) throw error
+      mailboxProblem = error.message
     }
   }
-
   if (!identity && !email) {
     return { cause: "sin_destino", detail: "La persona no tiene WhatsApp ni correo registrados" }
   }
@@ -335,6 +349,9 @@ export async function routeMessage(
           ? `WhatsApp tiene el mensaje ${template.status}${template.reason ? ` (${template.reason})` : ""}`
           : "Aún no hay un mensaje aprobado por WhatsApp"
     return { cause: "sin_plantilla", detail: `${state} y la persona no escribió en las últimas 24 horas` }
+  }
+  if (mailboxProblem) {
+    return { cause: "correo_ajeno", detail: `No se pudo usar su correo: ${mailboxProblem}` }
   }
   return {
     cause: "sin_conexion",

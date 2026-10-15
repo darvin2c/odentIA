@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -157,14 +157,14 @@ export function EncounterHandoff({
     (canFinance && account.isPending)
 
   const linkTo = (section: PatientSectionId, label: string): ReactNode => (
-    <Button
-      size="sm"
-      variant="outline"
-      nativeButton={false}
-      render={<Link to="/patients/$patientId" params={{ patientId }} search={{ tab: section }} />}
+    <Link
+      to="/patients/$patientId"
+      params={{ patientId }}
+      search={{ tab: section }}
+      className={buttonVariants({ size: "sm", variant: "outline" })}
     >
       {label}
-    </Button>
+    </Link>
   )
 
   return (

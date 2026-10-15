@@ -2,7 +2,7 @@
  * Prueba de lo que el modelo hace para el Administrador, sobre pedidos y
  * mensajes de ejemplo propios (nunca de pacientes reales). Uso:
  *
- *   pnpm --filter @odentia/agent eval:admin -- --provider=baseline|jev|openai_decisions [--file=eval/administrador-pedidos.json]
+ *   pnpm --filter @odentia/agent eval:admin -- --provider=baseline|jev|openai_decisions [--llm=chatgpt_6|claude_5_5] [--file=eval/administrador-pedidos.json]
  *
  * Mide las dos cosas que decide un modelo: entender un pedido con palabras
  * (línea e intención, entre opciones cerradas) y «¿ya avisó algo?» antes de un
@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { type AdminInterpretation, interpretAdminRequest } from "@odentia/services"
 import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState, asAdminDecider } from "../admin.js"
-import { resolveLlmSpec } from "../llm.js"
+import { evalLlmSpec, platformLlmFromEnv } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 
 interface RequestExample {
@@ -52,13 +52,8 @@ const bank = JSON.parse(readFileSync(resolve(arg("file", "eval/administrador-ped
 }
 
 const env = process.env
-const spec = resolveLlmSpec({ model: null }, null, {
-  modelName: env.LLM_MODEL ?? "fake",
-  apiKey: env.LLM_API_KEY || undefined,
-  baseUrl: env.LLM_BASE_URL,
-  allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
-})
-if (provider === "baseline" && spec.source === "fake") throw new Error("Esta prueba es con un modelo real: define LLM_MODEL y su clave, o usa --provider=jev")
+const spec = evalLlmSpec(arg("llm", "chatgpt_6"), platformLlmFromEnv(env))
+if (provider === "baseline" && spec.provider === "fake") throw new Error("Esta prueba es con un modelo real: quita LLM_MODEL=fake y define la clave del proveedor, o usa --provider=jev")
 const model = await createDecisionModel(
   provider,
   {

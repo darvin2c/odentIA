@@ -11,7 +11,7 @@ import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { createProposal } from "./agent-operations.js"
 import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listAvailableSlots } from "./availability.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
@@ -83,7 +83,7 @@ export async function createBookingLink(
       .from(branch)
       .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId), eq(branch.isActive, true)))
       .limit(1)
-    if (!site) throw notFound("Sede")
+    if (!site) throw branchNotFound()
   }
   // Un solo enlace vivo por conversación: el nuevo deja sin efecto el anterior.
   await tx
@@ -323,7 +323,7 @@ export async function listBookingLinkSlots(
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId)))
     .limit(1)
-  if (!site) throw notFound("Sede")
+  if (!site) throw branchNotFound()
   const service = link.serviceId
     ? (
         await tx

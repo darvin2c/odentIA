@@ -166,7 +166,7 @@ test("whatsapp: se conecta con los datos de la app de Meta en tres pasos que se 
   const connected = page.getByRole("region", { name: "WhatsApp quedó conectado" })
   await expect(connected).toBeVisible({ timeout: 30_000 })
   await expect(connected).toContainText("Ya recibe mensajes.")
-  await expect(connected).toContainText("6 mensajes están en revisión de WhatsApp.")
+  await expect(connected).toContainText("7 mensajes están en revisión de WhatsApp.")
   await expect(connected).toContainText("WhatsApp pide una forma de pago en tu cuenta para enviar mensajes aprobados")
   await expect(connected.getByRole("link", { name: /Abrir mi cuenta de Meta/ })).toHaveAttribute("href", /^https:\/\/business\.facebook\.com\//)
   await expect(finishing).toHaveCount(0)
@@ -210,9 +210,11 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   const messages = page.getByRole("region", { name: "Mensajes", exact: true })
   const byAgent = messages.getByRole("group", { name: "Los envía el agente" })
   const byTeam = messages.getByRole("group", { name: "Los envía tu equipo desde la Bandeja" })
-  await expect(byAgent.getByRole("listitem")).toHaveCount(5)
+  await expect(byAgent.getByRole("listitem")).toHaveCount(6)
+  // «Retomar una oportunidad» viene escrito como los demás del agente.
+  await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("En revisión")
   await expect(byTeam.getByRole("listitem")).toHaveCount(1)
-  await expect(messages).toContainText("2 aprobados · 4 en revisión")
+  await expect(messages).toContainText("2 aprobados · 5 en revisión")
   // Nadie lee ni escribe nombres técnicos.
   await expect(messages).not.toContainText(/odentia_|plantilla|template/i)
   const reminder = byAgent.getByRole("listitem").filter({ hasText: "Recordar la cita" })
@@ -257,8 +259,10 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await expect(text).toBeFocused()
   await expect(text).toHaveValue(/\[Clínica y sede\]/)
   // Cancelar con cambios pregunta antes y, si se desiste, el borrador sigue ahí.
-  page.once("dialog", (dialog) => void dialog.dismiss())
   await editor.getByRole("button", { name: "Cancelar", exact: true }).click()
+  const leave = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
+  await leave.getByRole("button", { name: "Continuar editando", exact: true }).click()
+  await expect(leave).toBeHidden()
   await expect(text).toHaveValue(/\[Clínica y sede\]/)
 
   const changed = original.replace("Te recordamos", "Le recordamos")
@@ -382,7 +386,7 @@ test("bandeja: pasadas las 24 horas lo dice antes de escribir, ofrece el mensaje
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja-ventana-cerrada", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // Los cinco que envía el agente no se ofrecen aquí.
+  // Los seis que envía el agente no se ofrecen aquí.
   expect((await approved()).data.map((item) => item.id)).toEqual(["retomar_conversacion"])
 
   await page.getByRole("button", { name: "Enviar mensaje", exact: true }).click()
@@ -438,7 +442,7 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
   await info.attach("bandeja-sin-mensaje-aprobado", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await none.getByRole("link", { name: "Ver los mensajes", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/whatsapp"))
-  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("6 en revisión")
+  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("7 en revisión")
 
   // Recepción atiende conversaciones pero no abre Configuración: lee a quién avisar, sin enlace.
   await fixtureDb
