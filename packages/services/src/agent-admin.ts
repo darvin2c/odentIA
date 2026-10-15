@@ -52,6 +52,7 @@ import {
   syncVisitFollowUps,
 } from "./automation.js"
 import type { TemplateDeps } from "./channel-templates.js"
+import { shouldSkipSaasOrg } from "./saas-billing.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -1344,6 +1345,9 @@ export async function tickAutomations(
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
   const summary: TickSummary = { orgs: 0, programados: 0, coordinados: 0, entregados: 0, fallidos: 0 }
   for (const { orgId } of orgRows) {
+    // Restricción/pausa comercial: no se programa, coordina ni entrega nada;
+    // lo encolado se conserva para la reanudación. La ingesta no pasa por aquí.
+    if (await shouldSkipSaasOrg(ownerDb, orgId)) continue
     // Los mensajes de la clínica se piden a WhatsApp aunque el Administrador
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
     if (deps.templates) {

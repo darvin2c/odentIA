@@ -6,6 +6,7 @@
     "BETTER_AUTH_SECRET",
     "BETTER_AUTH_URL",
     "WEB_URL",
+    "ADMIN_URL",
     "COOKIE_DOMAIN",
     "TRUSTED_ORIGINS",
     "SMTP_HOST",

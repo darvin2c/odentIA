@@ -6,6 +6,7 @@ const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.string().url(),
   WEB_URL: z.string().url(),
+  ADMIN_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
   TRUSTED_ORIGINS: z.string().min(1),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),

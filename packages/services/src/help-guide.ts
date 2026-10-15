@@ -182,8 +182,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Datos de la clínica",
     parent: SETTINGS,
     purpose: "Los datos de tu clínica: razón social, documento fiscal, país, moneda, zona horaria e idioma. Con ellos se leen las fechas, los importes y los documentos.",
-    terms: ["organización", "nombre de la clínica", "ruc", "moneda", "zona horaria", "empresa", "razón social"],
+    terms: ["organización", "nombre de la clínica", "ruc", "moneda", "zona horaria", "empresa", "razón social", "suscripción", "plan y pagos", "pagar odentia"],
     writePermission: "settings.write",
+    faqs: [{ q: "¿Dónde pago la suscripción de odentIA?", a: "Quien es propietario o administrador abre Plan y pagos de odentIA desde Configuración o desde Mis organizaciones en su cuenta. Ahí consulta el plan y aporta un comprobante; subirlo no confirma el pago. Esta pantalla y Soporte siguen disponibles aunque la operación de la clínica esté restringida." }],
   },
   {
     id: "sucursales",
@@ -193,7 +194,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     purpose: "Las sedes de tu clínica, con su dirección, teléfono y zona horaria. Puedes tener más de una.",
     terms: ["sede", "sucursal", "sucursales", "local", "locales", "dirección", "otra sede", "más de una sede"],
     writePermission: "settings.write",
-    faqs: [{ q: "¿Puedo tener más de una sede?", a: "Sí. Cada sede se agrega en Configuración › Sedes, con su dirección y su zona horaria." }],
+    faqs: [{ q: "¿Puedo tener más de una sede?", a: "Sí, dentro del límite del plan de tu clínica. Cada sede se agrega en Configuración › Sedes, con su dirección y su zona horaria." }],
   },
   {
     id: "equipo",

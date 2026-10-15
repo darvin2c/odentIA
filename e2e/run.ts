@@ -89,7 +89,7 @@ interface RunState {
   fixtureClose: (() => Promise<void>) | null
   proxyStarted: boolean
   proxyPid: number | null
-  outDirs: { panel: string; platform: string }
+  outDirs: { panel: string; platform: string; admin: string }
   timings: Array<{ label: string; ms: number }>
   closePromise: Promise<string[]> | null
 }
@@ -543,7 +543,7 @@ function resolveViteCli(appDir: string): string {
 
 async function runBuild(
   state: RunState,
-  app: "panel" | "platform",
+  app: "panel" | "platform" | "admin",
   viteCli: string,
   outDir: string,
   env: Record<string, string>,
@@ -710,6 +710,7 @@ async function probeSmtp(host: string, port: number): Promise<void> {
 interface ReadinessTargets {
   apiOrigin: string
   panelOrigin: string
+  adminOrigin: string
   apexOrigin: string
   tenantOrigin: string
   mailpitUrl: string
@@ -732,6 +733,12 @@ async function probeAll(targets: ReadinessTargets, dispatcher: Agent): Promise<v
       const res = await fetchVia(`${targets.panelOrigin}/login`, dispatcher, "panel /login")
       if (res.status !== 200) throw new Error(`panel /login devolvió ${res.status}`)
       if (!res.text.includes("<html")) throw new Error("panel /login no devolvió HTML")
+    })(),
+    (async () => {
+      const res = await fetchVia(`${targets.adminOrigin}/login`, dispatcher, "admin /login")
+      if (res.status < 300 || res.status >= 400 || !res.location || new URL(res.location, targets.adminOrigin).origin !== targets.panelOrigin) {
+        throw new Error(`admin /login no redirigió al acceso de cuenta (${res.status})`)
+      }
     })(),
     (async () => {
       // El apex redirige al panel por diseño; exigir el HTML final y no un banner.
@@ -980,7 +987,7 @@ async function doClose(state: RunState): Promise<string[]> {
     state.stack = null
   }
   if (errors.length === 0) {
-    for (const path of [state.stateDir, state.outDirs.panel, state.outDirs.platform]) {
+    for (const path of [state.stateDir, ...Object.values(state.outDirs)]) {
       try { await rm(path, { recursive: true, force: true }) } catch (err) {
         errors.push(`Directorio ${path}: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -1011,6 +1018,7 @@ export async function main(args: string[]): Promise<number> {
   const outDirs = {
     panel: join(ROOT, "apps", "panel", ".cache", "e2e", runId),
     platform: join(ROOT, "apps", "platform", ".cache", "e2e", runId),
+    admin: join(ROOT, "apps", "admin", ".cache", "e2e", runId),
   }
   const logsDir = join(dirname(metaPath), "logs")
   const state: RunState = {
@@ -1062,13 +1070,13 @@ export async function main(args: string[]): Promise<number> {
       )
     }
     const tPorts = performance.now()
-    leases.push(...(await reservePorts(4)))
-    const [proxyLease, apiLease, panelLease, platformLease] = leases
-    if (!proxyLease || !apiLease || !panelLease || !platformLease) {
-      throw new Error("No se pudieron reservar los 4 puertos del run.")
+    leases.push(...(await reservePorts(5)))
+    const [proxyLease, apiLease, panelLease, platformLease, adminLease] = leases
+    if (!proxyLease || !apiLease || !panelLease || !platformLease || !adminLease) {
+      throw new Error("No se pudieron reservar los 5 puertos del run.")
     }
     state.proxyPort = proxyLease.port
-    const appPorts = { api: apiLease.port, panel: panelLease.port, platform: platformLease.port }
+    const appPorts = { api: apiLease.port, panel: panelLease.port, platform: platformLease.port, admin: adminLease.port }
     initRuntimeMeta(metaPath, {
       runId,
       stateDir,
@@ -1115,14 +1123,16 @@ export async function main(args: string[]): Promise<number> {
     const tBuilds = performance.now()
     const vitePanel = resolveViteCli(join(ROOT, "apps", "panel"))
     const vitePlatform = resolveViteCli(join(ROOT, "apps", "platform"))
+    const viteAdmin = resolveViteCli(join(ROOT, "apps", "admin"))
     const builds = await Promise.allSettled([
       runBuild(state, "panel", vitePanel, outDirs.panel, childEnv),
       runBuild(state, "platform", vitePlatform, outDirs.platform, childEnv),
+      runBuild(state, "admin", viteAdmin, outDirs.admin, childEnv),
     ])
     for (const build of builds) {
       if (build.status === "rejected") throw build.reason
     }
-    mark("Builds (panel+platform en paralelo)", tBuilds)
+    mark("Builds (panel+platform+admin en paralelo)", tBuilds)
 
     const tApps = performance.now()
     const tsxLoader = pathToFileURL(require.resolve("tsx")).href
@@ -1205,16 +1215,26 @@ export async function main(args: string[]): Promise<number> {
       join(ROOT, "apps", "platform"),
       { ...childEnv, NODE_ENV: "production" },
     )
+    await spawnListening(
+      "admin",
+      adminLease,
+      appPorts.admin,
+      ["--import", bootstrapUrl, viteAdmin, "preview", "--outDir", outDirs.admin, "--host", "127.0.0.1", "--port", String(appPorts.admin), "--strictPort"],
+      join(ROOT, "apps", "admin"),
+      { ...childEnv, NODE_ENV: "production" },
+    )
     await registerAlias(state, "api.odentia", appPorts.api)
     await registerAlias(state, "app.odentia", appPorts.panel)
+    await registerAlias(state, "admin.odentia", appPorts.admin)
     await registerAlias(state, "odentia", appPorts.platform)
     mark("Apps y rutas del proxy", tApps)
 
     const tReady = performance.now()
     const apiOrigin = childEnv["BETTER_AUTH_URL"]
     const panelOrigin = childEnv["WEB_URL"]
-    if (!apiOrigin || !panelOrigin) {
-      throw new Error("Faltan BETTER_AUTH_URL/WEB_URL en el entorno generado.")
+    const adminOrigin = childEnv["ADMIN_URL"]
+    if (!apiOrigin || !panelOrigin || !adminOrigin) {
+      throw new Error("Faltan BETTER_AUTH_URL/WEB_URL/ADMIN_URL en el entorno generado.")
     }
     const minio = runtime.minio
     const mailpit = runtime.mailpit
@@ -1225,6 +1245,7 @@ export async function main(args: string[]): Promise<number> {
     await waitForApps(state, {
       apiOrigin,
       panelOrigin,
+      adminOrigin,
       apexOrigin: `https://${baseDomain}:${state.proxyPort}`,
       tenantOrigin: `https://${readinessSlug}.${baseDomain}:${state.proxyPort}`,
       mailpitUrl: `http://${mailpit.host}:${mailpit.httpPort}/api/v1/messages`,

@@ -10,17 +10,23 @@ import { BASE_DOMAIN } from "../lib/host"
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...(typeof search.next === "string" ? { next: search.next } : {}),
+    ...(search.oauth2fa === "1" ? { oauth2fa: "1" as const } : {}),
   }),
   component: LoginPage,
 })
 
-/** Solo redirige a URLs https del dominio base (panel o tenants). */
+/** Solo redirige a URLs https del dominio base (panel, tenants, admin) o loopback en dev. */
 function safeNext(next: string | undefined): string | null {
   if (!next) return null
   try {
     const url = new URL(next)
+    const host = url.hostname
+    if (host === "localhost" || host === "127.0.0.1") {
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null
+      return url.href
+    }
     if (url.protocol !== "https:") return null
-    if (url.hostname !== BASE_DOMAIN && !url.hostname.endsWith(`.${BASE_DOMAIN}`)) return null
+    if (host !== BASE_DOMAIN && !host.endsWith(`.${BASE_DOMAIN}`)) return null
     return url.href
   } catch {
     return null
@@ -32,19 +38,25 @@ const credentials = z.object({
   password: z.string().min(1, "Ingresa tu contraseña"),
 })
 
+const twoFactorRedirect = z.looseObject({ twoFactorRedirect: z.boolean().optional() })
+
 function LoginPage() {
   const navigate = useNavigate()
-  const { next } = useSearch({ from: "/login" })
+  const { next, oauth2fa } = useSearch({ from: "/login" })
   const form = useForm({
     defaultValues: { email: "", password: "" },
     validators: { onSubmit: credentials },
     onSubmit: async ({ value }) => {
       let signInError: { code?: string } | null
+      let needsTwoFactor = false
       try {
-        ;({ error: signInError } = await authClient.signIn.email({
+        const result = await authClient.signIn.email({
           email: value.email,
           password: value.password,
-        }))
+        })
+        signInError = result.error
+        const redirect = twoFactorRedirect.safeParse(result.data)
+        needsTwoFactor = redirect.success && redirect.data.twoFactorRedirect === true
       } catch {
         toast.error("No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.")
         return
@@ -55,6 +67,10 @@ function LoginPage() {
             ? "Tu correo aún no está verificado. Revisa tu bandeja y abre el enlace."
             : "Credenciales inválidas. Revisa tu correo y contraseña.",
         )
+        return
+      }
+      if (needsTwoFactor) {
+        await navigate({ to: "/two-factor", search: next ? { next } : {} })
         return
       }
       const { data: orgs } = await authClient.organization.list()
@@ -84,6 +100,11 @@ function LoginPage() {
         </>
       }
     >
+      {oauth2fa === "1" ? (
+        <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Tu cuenta exige segundo factor: Google no lo completa. Ingresa con correo y contraseña y luego tu código.
+        </p>
+      ) : null}
       <div className="flex flex-col gap-4">
         <GoogleAuthButton label="Continuar con Google" callbackURL={safeNext(next) ?? "/"} />
         <div className="flex items-center gap-3" role="separator">

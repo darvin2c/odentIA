@@ -6,7 +6,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
-import { and, count, desc, eq, gte, isNull, sql } from "drizzle-orm"
+import { and, count, eq, gte } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
   type HelpTopic,
@@ -239,7 +239,9 @@ export interface HelpRequestItem {
   createdAt: string
 }
 
-const dedupeKeyOf = (question: string) => createHash("sha256").update(normalizeForSearch(question)).digest("hex").slice(0, 32)
+/** Clave de agrupación de una pregunta: la reutiliza el caso de soporte vinculado al envío. */
+export const helpDedupeKeyOf = (question: string): string =>
+  createHash("sha256").update(normalizeForSearch(question)).digest("hex").slice(0, 32)
 
 function toRequest(row: typeof helpRequest.$inferSelect): HelpRequestItem {
   return {
@@ -269,7 +271,7 @@ export async function sendHelpRequest(
   if (typeof input.question !== "string" || input.question.trim().length < 3) throw validation("Escribe lo que quieres preguntar")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   const kind = input.kind === "problema" ? "problema" : "pregunta"
-  const dedupeKey = dedupeKeyOf(question)
+  const dedupeKey = helpDedupeKeyOf(question)
   const [open] = await tx
     .select()
     .from(helpRequest)
@@ -294,77 +296,4 @@ export async function sendHelpRequest(
   return toRequest(row)
 }
 
-/** Lo que esta persona envió a odentIA, con la respuesta cuando llega. */
-export async function listMyHelpRequests(tx: Db, orgId: string, userId: string): Promise<HelpRequestItem[]> {
-  const rows = await tx
-    .select()
-    .from(helpRequest)
-    .where(and(eq(helpRequest.organizationId, orgId), eq(helpRequest.userId, userId)))
-    .orderBy(desc(helpRequest.createdAt))
-    .limit(30)
-  return rows.map(toRequest)
-}
 
-/** Marca como vistas las respuestas que la persona ya leyó: la que abrió con «Ver» o, sin `requestId`, todas. */
-export async function markHelpRequestsSeen(tx: Db, orgId: string, userId: string, requestId?: string): Promise<void> {
-  await tx
-    .update(helpRequest)
-    .set({ seenAt: new Date() })
-    .where(
-      and(
-        eq(helpRequest.organizationId, orgId),
-        eq(helpRequest.userId, userId),
-        eq(helpRequest.status, "respondida"),
-        isNull(helpRequest.seenAt),
-        requestId ? eq(helpRequest.id, requestId) : undefined,
-      ),
-    )
-}
-
-/* ---------- Del lado de odentIA: los casos, juntando las preguntas iguales ---------- */
-
-export interface HelpCase {
-  dedupeKey: string
-  question: string
-  kind: string
-  /** Cuántas veces se envió, entre todas las clínicas. */
-  count: number
-  organizations: number
-  screens: string[]
-  firstAt: string
-}
-
-/**
- * Casos abiertos para el equipo de odentIA: las preguntas iguales de distintas
- * clínicas son un solo caso con contador. Lee entre organizaciones: `db` debe
- * ser la conexión propietaria de la plataforma, nunca la de una clínica.
- */
-export async function listHelpCases(db: Db): Promise<HelpCase[]> {
-  const rows = await db.execute<{ dedupe_key: string; question: string; kind: string; total: number; organizations: number; screens: string[]; first_at: Date | string }>(sql`
-    select dedupe_key, min(question) as question, min(kind) as kind, count(*)::int as total,
-           count(distinct organization_id)::int as organizations,
-           array_agg(distinct screen) as screens, min(created_at) as first_at
-    from help_request where status = 'abierta'
-    group by dedupe_key order by count(*) desc, min(created_at) asc limit 200`)
-  return rows.map((row) => ({
-    dedupeKey: row.dedupe_key,
-    question: row.question,
-    kind: row.kind,
-    count: Number(row.total),
-    organizations: Number(row.organizations),
-    screens: row.screens,
-    firstAt: new Date(row.first_at).toISOString(),
-  }))
-}
-
-/** Responde un caso: la respuesta llega a todas las personas que enviaron esa pregunta. */
-export async function answerHelpCase(db: Db, dedupeKey: string, answer: string): Promise<number> {
-  const text = answer.trim()
-  if (!text) throw validation("Escribe la respuesta")
-  const rows = await db
-    .update(helpRequest)
-    .set({ status: "respondida", answer: text.slice(0, 4000), answeredAt: new Date() })
-    .where(and(eq(helpRequest.dedupeKey, dedupeKey), eq(helpRequest.status, "abierta")))
-    .returning({ id: helpRequest.id })
-  return rows.length
-}

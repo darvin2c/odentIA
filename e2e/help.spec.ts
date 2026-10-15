@@ -1,5 +1,6 @@
 import { member } from "@odentia/db/schema/auth"
 import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
+import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant, tenantPattern } from "./env"
@@ -53,7 +54,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await ask(UNKNOWN)
   const unknown = help.getByRole("listitem").filter({ hasText: UNKNOWN })
   await expect(unknown).toContainText("Esto no está en la guía, y no quiero inventarlo.")
-  expect(await call<unknown[]>(page, "GET", "/api/help/requests", org.slug)).toEqual([])
+  expect(await call<unknown[]>(page, "GET", "/api/help/cases", org.slug)).toEqual([])
   // Sin paso intermedio: la pregunta, lo que se envía con sus valores y los dos botones, a la vez.
   await expect(unknown).toContainText("¿Lo envío a odentIA para que te respondan?")
   const sending = unknown.getByRole("region", { name: "Lo que se envía" })
@@ -63,9 +64,9 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(unknown.getByRole("button", { name: "No, gracias" })).toBeVisible()
   await info.attach("ayuda-no-sabe", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await unknown.getByRole("button", { name: "Enviar a odentIA" }).click()
-  await expect(unknown.getByRole("status")).toContainText("Enviado a odentIA.")
-  const sent = await call<Array<{ question: string; status: string }>>(page, "GET", "/api/help/requests", org.slug)
-  expect(sent).toEqual([expect.objectContaining({ question: UNKNOWN, status: "abierta" })])
+  await expect.poll(async () => await call<Array<{ question: string; status: string }>>(page, "GET", "/api/help/cases", org.slug))
+    .toEqual([expect.objectContaining({ question: UNKNOWN, status: "abierto" })])
+  const sent = await call<Array<{ id: string; question: string; status: string }>>(page, "GET", "/api/help/cases", org.slug)
   // La Ayuda no guarda lo que se le pregunta: solo la pantalla, el tema y si sirvió.
   const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id))
   expect(logged.map((row) => [row.screen, row.topicId, row.helpful])).toEqual([
@@ -77,21 +78,23 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/availability"))
 
   // --- odentIA responde el caso: el aviso llega al mismo botón ---
-  await fixtureDb.update(helpRequest)
-    .set({ status: "respondida", answer: "Todavía no se puede exportar a Excel. Lo anotamos para una próxima versión.", answeredAt: new Date() })
-    .where(eq(helpRequest.organizationId, org.id))
+  const answeredAt = new Date()
+  const caseId = sent[0]!.id
+  const answer = "La exportación todavía no está disponible. Podemos ayudarte con los datos que necesitas."
+  await fixtureDb.transaction(async (tx) => {
+    await tx.insert(supportMessage).values({ caseId, organizationId: org.id, authorKind: "staff", authorUserId: owner.user.id, body: answer })
+    await tx.update(supportCase).set({ status: "esperando_clinica", lastPublicMessageAt: answeredAt }).where(eq(supportCase.id, caseId))
+  })
   await gotoHydrated(page, tenant(org.slug, "/patients"))
   const button = page.getByRole("button", { name: "Ayuda, 1 respuesta nueva" })
   await button.click()
-  const answered = help.getByRole("region", { name: "Respuestas de odentIA" })
-  await expect(answered).toContainText("odentIA respondió tu pregunta")
-  await expect(answered).toContainText(`«${UNKNOWN}»`)
-  // La respuesta se abre con «Ver»; hasta entonces no cuenta como leída.
-  await expect(answered).not.toContainText("Todavía no se puede exportar a Excel.")
-  await answered.getByRole("button", { name: "Ver" }).click()
-  await expect(answered).toContainText("Todavía no se puede exportar a Excel.")
+  const answered = help.getByRole("region", { name: "Tus casos con soporte" })
+  await expect(answered.getByRole("button").filter({ hasText: UNKNOWN })).toBeVisible()
+  await expect(answered).not.toContainText(answer)
+  await answered.getByRole("button").filter({ hasText: UNKNOWN }).click()
+  await expect(answered).toContainText(answer)
   await expect(page.getByRole("button", { name: "Ayuda", exact: true })).toBeVisible()
-  await expect.poll(async () => (await call<Array<{ seen: boolean }>>(page, "GET", "/api/help/requests", org.slug)).map((item) => item.seen)).toEqual([true])
+  await expect.poll(async () => (await call<Array<{ unread: boolean }>>(page, "GET", "/api/help/cases", org.slug)).map((item) => item.unread)).toEqual([false])
 
   // --- Al pie: escribir a soporte y reportar un problema abren el mismo envío, en blanco ---
   await help.getByRole("button", { name: "Escribir a soporte de odentIA" }).click()
@@ -104,7 +107,8 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const problem = help.getByRole("region", { name: "Reportar un problema" })
   await problem.getByLabel("Qué pasó").fill("La lista de pacientes se queda cargando")
   await problem.getByRole("button", { name: "Enviar a odentIA" }).click()
-  await expect(help.getByRole("status").filter({ hasText: "Enviado a odentIA." })).toBeVisible()
+  await expect.poll(async () => await fixtureDb.select({ question: helpRequest.question }).from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema"))))
+    .toEqual([{ question: "La lista de pacientes se queda cargando" }])
   const reported = await fixtureDb.select().from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema")))
   expect(reported.map((row) => [row.question, row.screen, row.role, row.detail])).toEqual([["La lista de pacientes se queda cargando", "/patients", "Propietario", null]])
 

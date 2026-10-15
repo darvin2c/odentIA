@@ -7,6 +7,8 @@ export const user = pgTable("user", {
   lastName: text("last_name").notNull().default(""),
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
+  /** Bandera del plugin twoFactor de Better Auth (la gestiona Auth, migración 0071). */
+  twoFactorEnabled: boolean("two_factor_enabled").default(false).notNull(),
   image: text("image"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")

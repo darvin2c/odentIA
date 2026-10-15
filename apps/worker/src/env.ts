@@ -8,6 +8,11 @@ const envSchema = z.object({
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
+  SMTP_HOST: z.string().min(1),
+  SMTP_PORT: z.coerce.number().int(),
+  SMTP_USER: z.string().default(""),
+  SMTP_PASS: z.string().default(""),
+  SMTP_FROM: z.string().min(1),
   GMAIL_CLIENT_ID: z.string().default(""),
   GMAIL_CLIENT_SECRET: z.string().default(""),
   GMAIL_REDIRECT_URI: z.string().default(""),

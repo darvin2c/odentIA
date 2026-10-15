@@ -13,7 +13,10 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router"
-import { Building2, KeyRound, UserRound } from "lucide-react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { adminAccessQuery } from "../lib/admin-access"
+import { adminUrl } from "../lib/host"
+import { Building2, CircleHelp, KeyRound, ShieldCheck, UserRound } from "lucide-react"
 import { authClient } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
 import { requireVerifiedSession } from "../lib/guards"
@@ -23,7 +26,10 @@ export const Route = createFileRoute("/_app")({
   component: AppLayout,
 })
 
-const navItems: AppShellNavEntry[] = [{ label: "Organizaciones", to: "/", icon: Building2 }]
+const navItems: AppShellNavEntry[] = [
+  { label: "Organizaciones", to: "/", icon: Building2 },
+  { label: "Soporte", to: "/support", icon: CircleHelp },
+]
 
 function RouterLink({
   to,
@@ -53,6 +59,8 @@ const appRouteApi = getRouteApi("/_app")
 function AppLayout() {
   const { session } = appRouteApi.useRouteContext()
   const navigate = useNavigate()
+  const staff = useQuery(adminAccessQuery)
+  const queryClient = useQueryClient()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const live = authClient.useSession().data?.user
   const user = live
@@ -61,7 +69,7 @@ function AppLayout() {
 
   return (
     <AppShell
-      items={navItems}
+      items={staff.data?.staff ? [...navItems, { label: "Administración de odentIA", to: adminUrl(), icon: ShieldCheck, external: true }] : navItems}
       LinkComponent={RouterLink}
       pathname={pathname}
       user={user}
@@ -78,6 +86,7 @@ function AppLayout() {
       brandIcon={<Brand compact />}
       onSignOut={async () => {
         await authClient.signOut()
+        queryClient.clear()
         await navigate({ to: "/login" })
       }}
     >

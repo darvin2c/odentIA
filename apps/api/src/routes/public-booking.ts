@@ -5,6 +5,7 @@ import { organization } from "@odentia/db/schema/auth"
 import {
   cancelBookingLinkAppointment,
   changeBookingLinkAppointment,
+  decideSaasPublicAccess,
   getBookingLinkView,
   listBookingLinkSlots,
   reserveBookingLink,
@@ -143,15 +144,25 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     const org = c.get("bookingOrganization")
     const { token: linkToken, ...choice } = body.data
     return answer(c, 201, () =>
-      withOrgContext(deps.db, org.id, (tx) =>
-        reserveBookingLink(
+      withOrgContext(deps.db, org.id, async (tx) => {
+        // Reservar nuevo se deniega en restricción/pausa (el paciente conserva
+        // cambiar o cancelar lo ya reservado). Sin fila comercial: pasa.
+        const access = await decideSaasPublicAccess(tx, org.id, "reservar")
+        if (!access.allowed) {
+          throw new ServiceError(
+            "SAAS_RESTRICTED",
+            403,
+            "La clínica pausó las reservas en línea: escribinos por otro canal",
+          )
+        }
+        return reserveBookingLink(
           tx,
           org.id,
           linkToken,
           { branchId: choice.branchId, startsAt: choice.startsAt, dentistUserId: choice.dentistUserId, ...(choice.chairId ? { chairId: choice.chairId } : {}) },
           { secretsKey: deps.secretsKey },
-        ),
-      ),
+        )
+      }),
     )
   })
 

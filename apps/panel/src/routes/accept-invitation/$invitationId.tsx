@@ -2,6 +2,8 @@ import { Button } from "@odentia/ui"
 import { AuthCard, ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
 import { tenantUrl } from "../../lib/host"
 
@@ -13,6 +15,18 @@ type PageState =
   | { kind: "loading" }
   | { kind: "needs-auth"; email?: string }
   | { kind: "error"; message: string }
+
+const acceptSchema = z.object({
+  member: z.object({ organizationId: z.string() }).nullish(),
+})
+
+const myOrgsSchema = z.object({
+  data: z.array(
+    z.object({ organizationId: z.string(), slug: z.string(), role: z.string() }),
+  ),
+})
+
+const profileSchema = z.object({ data: z.unknown().nullable() })
 
 function AcceptInvitationPage() {
   const navigate = useNavigate()
@@ -38,8 +52,25 @@ function AcceptInvitationPage() {
         setState({ kind: "error", message: "La invitación expiró o fue revocada." })
         return
       }
-      const organizationId = (data as { member?: { organizationId?: string } } | null)?.member
-        ?.organizationId
+      const accepted = acceptSchema.safeParse(data)
+      const organizationId = accepted.success ? accepted.data.member?.organizationId : undefined
+      // Alta asistida: si la clínica aún no tiene perfil y quien entra puede
+      // terminarla (owner/admin), reanuda el alta sin crear otra clínica.
+      if (organizationId) {
+        try {
+          const orgs = myOrgsSchema.parse(await apiFetch<unknown>("/api/account/organizations"))
+          const mine = orgs.data.find((org) => org.organizationId === organizationId)
+          if (mine && (mine.role === "owner" || mine.role === "admin")) {
+            const profile = profileSchema.parse(await apiFetch<unknown>("/api/org-profile"))
+            if (profile.data === null) {
+              await navigate({ to: "/onboarding", search: { continue: organizationId } })
+              return
+            }
+          }
+        } catch {
+          // Sin lectura: se sigue al flujo normal de entrada.
+        }
+      }
       const { data: orgs } = await authClient.organization.list()
       const slug = organizationId ? orgs?.find((org) => org.id === organizationId)?.slug : undefined
       if (slug) {

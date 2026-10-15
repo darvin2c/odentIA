@@ -8,3 +8,5 @@ const BASE_PORT = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE
 
 export const tenantUrl = (slug: string, path = "/") =>
   `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
+
+export const adminUrl = (path = "/") => `https://admin.${BASE_DOMAIN}${BASE_PORT}${path}`

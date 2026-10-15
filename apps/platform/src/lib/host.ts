@@ -16,13 +16,13 @@ export const requestHostname = createIsomorphicFn()
 
 /**
  * Slug de tenant desde el hostname (`<slug>.<base>`).
- * `null` en el apex y en hosts fuera del dominio base.
+ * `null` en el apex, en hosts reservados y fuera del dominio base.
  */
 export function orgSlugFromHostname(hostname: string): string | null {
   const suffix = `.${BASE_DOMAIN}`
   if (!hostname.endsWith(suffix)) return null
   const slug = hostname.slice(0, -suffix.length)
-  return slug && !slug.includes(".") ? slug : null
+  return slug && !slug.includes(".") && !["app", "admin", "api", "www", "storage"].includes(slug) ? slug : null
 }
 
 export const tenantUrl = (slug: string, path = "/") =>

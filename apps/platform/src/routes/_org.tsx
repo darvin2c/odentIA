@@ -53,6 +53,8 @@ import {
 } from "../components/agent-panel"
 import { HelpButton } from "../components/help-panel"
 import { WorkspaceNotifications } from "../components/workspace-notifications"
+import { SaasStatusBanner } from "../components/saas-status-banner"
+import { SupportGrantBanner } from "../components/support-grant-banner"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient } from "../lib/auth-client"
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
@@ -283,6 +285,7 @@ function OrgLayout() {
       switcher={<OrgSwitcher />}
       onSignOut={async () => {
         await authClient.signOut()
+        queryClient.clear()
         window.location.assign(panelUrl("/login"))
       }}
     >
@@ -297,6 +300,8 @@ function OrgLayout() {
               </>
             }
           >
+            <SaasStatusBanner organizationId={org.id} role={role} />
+            <SupportGrantBanner canRevoke={role === "owner" || role === "admin"} />
             <Outlet />
           </HeaderUtilitiesProvider>
         </AgentPanelProvider>
