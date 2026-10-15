@@ -135,12 +135,7 @@ async function learnedSince(tx: Db, orgId: string, since: Date): Promise<AgentLe
 const PROVIDER_PROBLEM_OF: Record<string, AgentProviderProblem> = {
   PROVIDER_REJECTED: "rechazado",
   PROVIDER_QUOTA: "sin_saldo",
-  MODEL_REQUIRED: "sin_configurar",
   API_KEY_REQUIRED: "sin_configurar",
-  API_KEY_UNREADABLE: "sin_configurar",
-  PROTOCOL_UNSUPPORTED: "sin_configurar",
-  BASE_URL_INVALID: "sin_configurar",
-  BASE_URL_UNSAFE: "sin_configurar",
 }
 
 /**

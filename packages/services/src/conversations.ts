@@ -417,7 +417,11 @@ export async function ingestInbound(
   return { conversationId, messageId, created: true }
 }
 
-/** Aplica estados del proveedor por externalId. Registra el primer sent/delivered/read en sent_at si sigue nulo. */
+/**
+ * Aplica estados del proveedor por externalId. Registra el primer
+ * sent/delivered/read en sent_at si sigue nulo; un fallo guarda el motivo que
+ * entrega el adaptador (de ahí lo lee `reconcileDeliveries`).
+ */
 export async function applyStatus(
   tx: Db,
   orgId: string,
@@ -435,7 +439,7 @@ export async function applyStatus(
           .returning({ id: message.id, conversationId: message.conversationId })
       : await tx
           .update(message)
-          .set({ status: s.status })
+          .set({ status: s.status, ...(s.error ? { error: s.error.slice(0, 500) } : {}) })
           .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
           .returning({ id: message.id, conversationId: message.conversationId })
     if (updated) {

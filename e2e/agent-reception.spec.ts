@@ -17,6 +17,7 @@ interface Config {
   disabledFunctions: string[]
   functionNotes: Record<string, string>
   personaName: string | null
+  emojis: "no" | "pocos"
   activeFromMin: number | null
   activeUntilMin: number | null
   handoffKeywords: string[]
@@ -207,12 +208,17 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await base.getByLabel("Se presenta como").fill("Sofi")
   await base.getByRole("button", { name: "De usted" }).click()
   await expect(base).toContainText(`«¡Hola! Soy Sofi, asistente virtual de ${org.name}. ¿En qué le ayudo?»`)
+  // Cada tono se explica con una línea; los emojis empiezan en «No usar».
+  await expect(base.getByRole("group", { name: "Tono" })).toHaveAccessibleDescription("Amable y con confianza, como habla tu recepción.")
+  await expect(base.getByRole("button", { name: "No usar" })).toHaveAttribute("aria-pressed", "true")
+  await base.getByRole("button", { name: "Pocos" }).click()
+  await expect(base).toContainText(`«¡Hola! 😊 Soy Sofi, asistente virtual de ${org.name}. ¿En qué le ayudo?»`)
   await info.attach("la-base", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await base.getByRole("button", { name: "Guardar" }).click()
   await expect(base).toBeHidden()
-  await expect(behaves).toContainText("Se presenta como Sofi · trata de usted · tono cercano")
-  await expect(behaves).toContainText(`«¡Hola! Soy Sofi, asistente virtual de ${org.name}. ¿En qué le ayudo?»`)
-  expect((await config()).personaName).toBe("Sofi")
+  await expect(behaves).toContainText("Se presenta como Sofi · trata de usted · tono cercano · pocos emojis")
+  await expect(behaves).toContainText(`«¡Hola! 😊 Soy Sofi, asistente virtual de ${org.name}. ¿En qué le ayudo?»`)
+  expect(await config()).toMatchObject({ personaName: "Sofi", emojis: "pocos" })
   // Lo único técnico que decide la clínica, con el nombre de su pantalla.
   await expect(page.getByRole("link", { name: /^Modelo del agente/ })).toHaveAttribute("href", "/settings/integrations/model")
   await expect(page.getByRole("link", { name: /^Ajustes técnicos/ })).toHaveCount(0)
@@ -283,7 +289,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knows.getByRole("link", { name: /^Qué sabe/ })).toContainText("lo que recuerda de cada persona")
   await expect(knows.getByRole("link", { name: /^Respuestas oficiales/ })).toBeHidden()
   const behaveRow = behaves.getByRole("button", { name: /^Cómo se comporta/ })
-  await expect(behaveRow).toContainText("Sofi · de usted · tono cercano · 2 indicaciones")
+  await expect(behaveRow).toContainText("Sofi · de usted · tono cercano · pocos emojis · 2 indicaciones")
   await expect(behaveRow).toHaveAttribute("aria-expanded", "false")
   await expect(behaves.getByRole("button", { name: "Editar la base" })).toBeHidden()
   await behaveRow.click()

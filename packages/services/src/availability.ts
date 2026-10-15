@@ -17,7 +17,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 
 // Sin zona en la sede ni en la organización: UTC, nunca la de un país.
@@ -63,7 +63,7 @@ function assertTimeZone(value: string, field: string): string {
  * del perfil solo ante ausencia heredada (igual que el resto del repo).
  */
 function branchTimeZone(branchZone: string | null, orgZone: string | null): string {
-  if (branchZone) return assertTimeZone(branchZone, "La zona horaria de la sucursal")
+  if (branchZone) return assertTimeZone(branchZone, "La zona horaria de la sede")
   if (orgZone) return assertTimeZone(orgZone, "La zona horaria de la organización")
   return FALLBACK_TZ
 }
@@ -146,7 +146,7 @@ async function requireBranch(tx: Db, orgId: string, branchId: string) {
     .leftJoin(orgProfile, eq(orgProfile.organizationId, branch.organizationId))
     .where(and(eq(branch.organizationId, orgId), eq(branch.id, branchId), eq(branch.isActive, true)))
     .limit(1)
-  if (!row) throw notFound("Sucursal")
+  if (!row) throw branchNotFound()
   return { ...row, timeZone: branchTimeZone(row.timezone, row.orgTimezone) }
 }
 
@@ -569,7 +569,7 @@ export interface AvailableSlotsResult {
 }
 
 /**
- * Huecos reservables en la zona IANA de la sucursal (o la pedida si es
+ * Huecos reservables en la zona IANA de la sede (o la pedida si es
  * válida). Solo profesionales con horario explícito; descuenta citas
  * ocupantes, bloqueos y ausencias. Máximo 200 huecos y 62 días por consulta:
  * `truncated` avisa del recorte para acotar el rango o paginar por días.
@@ -690,7 +690,7 @@ export async function listAvailableSlots(
 
   const slots: AvailableSlot[] = []
 
-  // Itera días locales de la sucursal dentro del rango pedido.
+  // Itera días locales de la sede dentro del rango pedido.
   const startParts = zonedPartsOf(from, resolved.timeZone)
   let dayLabel = toISODate(startParts.year, startParts.month, startParts.day)
   for (let dayIndex = 0; dayIndex < MAX_RANGE_DAYS + 1; dayIndex++) {

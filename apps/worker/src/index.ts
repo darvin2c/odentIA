@@ -1,5 +1,5 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv } from "@odentia/agent"
+import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
@@ -45,15 +45,7 @@ const agentRuntime: AgentRuntime = {
         },
       }
     : {}),
-  platform: {
-    modelName: env.LLM_MODEL,
-    apiKey: env.LLM_API_KEY || undefined,
-    baseUrl: env.LLM_BASE_URL,
-    timeoutMs: env.LLM_TIMEOUT_MS,
-    maxRetries: env.LLM_MAX_RETRIES,
-    ...(env.LLM_REASONING_EFFORT ? { reasoningEffort: env.LLM_REASONING_EFFORT } : {}),
-    allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
-  },
+  platform: platformLlmFromEnv(env),
   decisions: {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
     ...(env.OPENAI_DECISIONS_API_KEY

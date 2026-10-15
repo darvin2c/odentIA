@@ -244,6 +244,8 @@ export interface AgentToolCtx {
   basis?: AnswerBasisItem[]
   /** `false` desactiva la comprobación previa al envío (configuración de la organización). */
   verifyReplies?: boolean
+  /** Emojis de la voz de la clínica: con `no` se quitan antes de enviar. Ausente = se dejan. */
+  emojis?: "no" | "pocos"
   /** Respuestas del turno que no salieron por un dato sin sustento. */
   checkFailures?: number
   /** Comprobaciones de la última respuesta (también en simulación). */
@@ -550,7 +552,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const sendReply = tool(
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
-      const text = formatForChannel(written, await conversationChannel(ctx))
+      const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -1322,7 +1324,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
-      const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx)) : undefined
+      const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {

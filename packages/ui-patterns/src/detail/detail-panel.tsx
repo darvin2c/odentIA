@@ -35,7 +35,7 @@ export function DetailPanel({
   className,
   ...surface
 }: DetailPanelProps) {
-  const handleClose = useCloseGuard({ isSubmitting, isDirty, onClose })
+  const { handleClose, confirmDialog } = useCloseGuard({ isSubmitting, isDirty, onClose })
   const titleId = React.useId()
   const descriptionId = React.useId()
 
@@ -48,6 +48,7 @@ export function DetailPanel({
       className={cn("flex h-full min-h-0 flex-col overflow-hidden rounded-sm bg-card", className)}
     >
       <DetailSurface {...surface} titleId={titleId} descriptionId={descriptionId} onClose={handleClose} />
+      {confirmDialog}
     </section>
   )
 }

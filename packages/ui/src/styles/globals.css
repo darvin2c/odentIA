@@ -25,6 +25,7 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -127,6 +128,8 @@
 
     /* Estados: significan lo mismo en cualquier tema de color. */
     --destructive: #b42323;
+    /* Texto sobre el rojo lleno (botón que confirma algo irreversible): 6,4:1. */
+    --destructive-foreground: #ffffff;
     --danger: var(--destructive);
     --danger-soft: #fdeaea;
     --success: #0b6b39;
@@ -180,6 +183,7 @@
     --brand-650: color-mix(in oklab, var(--primary) 70%, black);
 
     --destructive: #f87171;
+    --destructive-foreground: #1c0a0a;
     --danger-soft: #3b1518;
     --success: #6ee7a8;
     --success-soft: #0f3323;

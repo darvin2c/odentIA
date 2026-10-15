@@ -17,15 +17,19 @@ const envSchema = z.object({
   MICROSOFT_MAIL_TENANT: z.string().default("common"),
   MAILBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
   CHANNEL_SENDER_MODE: z.enum(["mock", "live"]).default("mock"),
-  /** Modelo del endpoint compatible con OpenAI (prefijo openai: opcional); fake = determinista. */
-  LLM_MODEL: z.string().min(1).default("fake"),
-  LLM_API_KEY: z.string().optional().default(""),
-  LLM_BASE_URL: z.string().url().optional(),
+  /**
+   * Cuentas de odentIA para los modelos que elige la clínica (ADR 0022). Sin
+   * la clave del proveedor del modelo elegido, el agente deriva y lo avisa.
+   * `LLM_MODEL=fake`: modelo determinista de desarrollo y pruebas (otro valor no tiene efecto).
+   */
+  LLM_MODEL: z.string().optional(),
+  LLM_OPENAI_API_KEY: z.string().optional().default(""),
+  LLM_OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
+  LLM_ANTHROPIC_API_KEY: z.string().optional().default(""),
+  LLM_ANTHROPIC_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
   /** Tiempo límite por intento y reintentos del cliente del modelo. */
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
   LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-  /** Esfuerzo de razonamiento del modelo de la plataforma (`none`, `low`…). Vacío: no se envía. */
-  LLM_REASONING_EFFORT: z.string().optional(),
   // Segundos que el agente espera tras un mensaje entrante antes de leer el
   // hilo: agrupa ráfagas en una sola corrida. 0 responde sin esperar.
   // Vacío en el .env cuenta como no definido (no como 0, que la desactivaría).
@@ -39,8 +43,6 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.coerce.number().int().min(0).max(120).default(30),
   ),
-  /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
-  LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
   /** Modelos de decisión (plataforma); vacíos = ese proveedor no está disponible. */
   JEV_API_KEY: z.string().optional().default(""),
   JEV_BASE_URL: z.string().url().optional(),
@@ -61,7 +63,7 @@ const envSchema = z.object({
   EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),
   /** Transcripción de notas de voz inbound (endpoint OpenAI-compatible); vacío = desactivada. */
   TRANSCRIBE_MODEL: z.string().optional().default(""),
-  /** Cae a LLM_API_KEY solo si TRANSCRIBE_BASE_URL apunta al mismo host que LLM_BASE_URL. */
+  /** Cae a LLM_OPENAI_API_KEY solo si TRANSCRIBE_BASE_URL apunta al mismo host que LLM_OPENAI_BASE_URL. */
   TRANSCRIBE_API_KEY: z.string().optional(),
   TRANSCRIBE_BASE_URL: z.string().url().optional(),
   S3_ENDPOINT: z.string().url(),

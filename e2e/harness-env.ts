@@ -55,8 +55,10 @@ export const E2E_SCRUB_ENV_KEYS: readonly string[] = [
   "GEMINI_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
-  "LLM_API_KEY",
-  "LLM_BASE_URL",
+  "LLM_OPENAI_API_KEY",
+  "LLM_OPENAI_BASE_URL",
+  "LLM_ANTHROPIC_API_KEY",
+  "LLM_ANTHROPIC_BASE_URL",
   "JEV_API_KEY",
   "JEV_BASE_URL",
   "OPENAI_DECISIONS_API_KEY",
@@ -147,8 +149,6 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     CHANNEL_VALIDATE_EXTERNAL: "false",
     CHANNEL_SENDER_MODE: "mock",
     LLM_MODEL: "fake",
-    // El recorrido de configuración prueba la conexión contra un servidor local.
-    LLM_ALLOW_INSECURE_BASE_URL: "true",
     // Ventana mínima: ejercita la cola con retardo sin alargar los recorridos.
     AGENT_BURST_WINDOW_SECONDS: "1",
     VITE_API_URL: api,

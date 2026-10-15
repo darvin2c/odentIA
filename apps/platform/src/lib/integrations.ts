@@ -1,5 +1,5 @@
 import { type AgentProviderProblem, PROVIDER_PROBLEM } from "./agent"
-import type { AgentConfig, ConnectionItem } from "./crm"
+import { type AgentConfig, agentLlmLabel, type ConnectionItem } from "./crm"
 
 /**
  * Integraciones (Configuración): lo que se conecta una vez. Aquí vive lo que la
@@ -588,12 +588,11 @@ export function mailRows(
 /* ---------- Modelo del agente ---------- */
 
 export function modelRow(
-  config: Pick<AgentConfig, "llmBaseUrl" | "hasLlmApiKey">,
+  config: Pick<AgentConfig, "llm">,
   provider: { problem: AgentProviderProblem | null; at: string | null } | undefined,
   since: Since,
 ): IntegrationRowModel {
-  const own = config.llmBaseUrl !== null
-  const account = own ? "Cuenta propia de la clínica" : "Incluido con odentIA"
+  const account = agentLlmLabel(config.llm)
   const common = { ...base("model", "model"), review: [] }
   if (provider?.problem) {
     const when = provider.at ? since(provider.at) : ""
@@ -603,15 +602,6 @@ export function modelRow(
       status: "Necesita atención",
       detail: { kind: "account", account, activity: when ? `el último intento falló ${when}` : null },
       problem: PROVIDER_PROBLEM[provider.problem],
-    }
-  }
-  if (own && !config.hasLlmApiKey) {
-    return {
-      ...common,
-      tone: "attention",
-      status: "Necesita atención",
-      detail: { kind: "account", account, activity: null },
-      problem: "Falta la clave de la cuenta propia.",
     }
   }
   // «Conectado», no «Funcionando»: que no haya un fallo registrado no prueba

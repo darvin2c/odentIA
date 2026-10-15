@@ -1,4 +1,4 @@
-import { Badge, Button, cn } from "@odentia/ui"
+import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
 import { CheckCircle2, FileText, Lightbulb, type LucideIcon, MessageCircle, SquareCheckBig, UserRound } from "lucide-react"
@@ -56,19 +56,22 @@ function badgeOf(row: WaitingRow): ReactNode {
   return null
 }
 
-/** A dónde lleva la fila cuando se resuelve navegando; null si abre algo en esta pantalla. */
-function linkOf(row: WaitingRow, handlers: WaitingHandlers): ReactElement | null {
+/**
+ * A dónde lleva la fila cuando se resuelve navegando; null si abre algo en esta pantalla.
+ * Lo que navega es un enlace con aspecto de fila, no un botón: así lo anuncia el lector de pantalla.
+ */
+function linkOf(row: WaitingRow, handlers: WaitingHandlers, props: { className: string; children: ReactNode }): ReactElement | null {
   switch (row.kind) {
     case "case":
-      return row.conversationId ? null : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />
+      return row.conversationId ? null : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} {...props} />
     case "proposal":
-      return handlers.canApprove ? null : <Link to="/agent/approvals" search={{ conversationId: row.conversationId ?? undefined, status: undefined }} />
+      return handlers.canApprove ? null : <Link to="/agent/approvals" search={{ conversationId: row.conversationId ?? undefined, status: undefined }} {...props} />
     case "conversations":
-      return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} />
+      return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
     case "task":
-      return row.more > 0 ? <Link to="/tasks" search={{ task: undefined }} /> : <Link to={row.href} />
+      return row.more > 0 ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to={row.href} {...props} />
     case "more":
-      return row.of === "tasks" ? <Link to="/tasks" search={{ task: undefined }} /> : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />
+      return row.of === "tasks" ? <Link to="/tasks" search={{ task: undefined }} {...props} /> : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} {...props} />
     default:
       return null
   }
@@ -85,7 +88,6 @@ function open(row: WaitingRow, handlers: WaitingHandlers) {
 function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow; context: HomeTextContext; handlers: WaitingHandlers; className?: string }) {
   const text = waitingText(row, context)
   const badge = badgeOf(row)
-  const link = linkOf(row, handlers)
   const content = (
     <>
       {iconOf(row)}
@@ -104,13 +106,10 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
       <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
     </>
   )
+  const link = linkOf(row, handlers, { className: cn(buttonVariants({ variant: "ghost" }), ROW), children: content })
   return (
     <li className={className}>
-      {link ? (
-        <Button variant="ghost" nativeButton={false} render={link} className={ROW}>
-          {content}
-        </Button>
-      ) : (
+      {link ?? (
         <Button type="button" variant="ghost" className={ROW} onClick={() => open(row, handlers)}>
           {content}
         </Button>

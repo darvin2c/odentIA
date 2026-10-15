@@ -147,6 +147,13 @@ const TONE_TEXT: Record<AgentConfig["tone"], string> = {
   formal: "formal y respetuoso",
 }
 
+/** Emojis según la voz de la clínica. Con «No usar», además, `formatForChannel` los quita antes de enviar. */
+const EMOJI_TEXT: Record<AgentConfig["emojis"], string> = {
+  no: "No uses emojis.",
+  pocos:
+    "Puedes poner un emoji en algunos mensajes, como mucho uno por mensaje y no en todos; nunca en urgencias, dolor, malas noticias, pagos ni reclamos.",
+}
+
 /**
  * Prompt de Recepción: la base fija de odentIA, la voz de la clínica y el
  * manual de funciones según lo que la clínica tiene encendido. Sale de la
@@ -182,6 +189,7 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     `Te comunicas en el idioma configurado por la organización (${zone.locale}), tono ${TONE_TEXT[cfg.tone]}.`,
     cfg.personaName ? `Te presentas como ${cfg.personaName}, asistente virtual de la clínica.` : null,
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
+    EMOJI_TEXT[cfg.emojis],
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
     `La zona horaria de la clínica es ${zone.timezone}. Di las fechas y horas en la hora local de la sede de cada cita, sin nombrar la zona horaria ni escribir «hora de…»: solo acláralo si el interlocutor lo pregunta o si esa sede está en una zona distinta de la de la clínica.`,
     "Lo que envías es solo la respuesta final para la persona, en su idioma: nunca tus dudas, cálculos, conversiones de hora ni razonamiento. Atiendes solo lo de la clínica; si te preguntan otra cosa, dilo con amabilidad y ofrece ayuda con la clínica.",

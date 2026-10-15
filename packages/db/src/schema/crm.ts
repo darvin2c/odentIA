@@ -503,11 +503,11 @@ export const agentConfig = pgTable(
       .primaryKey()
       .references(() => organization.id),
     enabled: boolean("enabled").notNull().default(false),
-    model: text("model"),
-    /** URL base de un endpoint compatible con OpenAI propio de la organización. */
-    llmBaseUrl: text("llm_base_url"),
-    /** Clave del proveedor propio, cifrada con AES-256-GCM (nunca sale a la UI). */
-    llmApiKeyEncrypted: text("llm_api_key_encrypted"),
+    /**
+     * Modelo que escribe, uno de los que odentIA validó (`AGENT_LLMS` de los
+     * servicios). La cuenta del proveedor es de odentIA, nunca de la clínica.
+     */
+    llm: text("llm").notNull().default("chatgpt_6"),
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
     /** Modelo de decisión (none | baseline | jev | openai_decisions). */
@@ -539,6 +539,8 @@ export const agentConfig = pgTable(
     treatment: text("treatment"),
     tone: text("tone").notNull().default("cercano"),
     about: text("about").notNull().default(""),
+    /** Emojis en lo que escribe: `no` (se quitan antes de enviar) o `pocos` (uno como mucho, nunca en lo delicado). */
+    emojis: text("emojis").notNull().default("no"),
     /** Funciones de Recepción que la clínica apagó (ver la ficha del agente). */
     disabledFunctions: text("disabled_functions").array().notNull().default(sql`'{}'`),
     /** Indicación de la clínica para una función concreta, por id de función. */
@@ -557,10 +559,7 @@ export const agentConfig = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check(
-      "agent_config_llm_pair_check",
-      sql`(${table.llmBaseUrl} is null) = (${table.llmApiKeyEncrypted} is null)`,
-    ),
+    check("agent_config_llm_check", sql`${table.llm} in ('chatgpt_6','claude_5_5')`),
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
     check(
       "agent_config_decision_provider_check",
@@ -568,6 +567,7 @@ export const agentConfig = pgTable(
     ),
     check("agent_config_treatment_check", sql`${table.treatment} is null or ${table.treatment} in ('tu','usted')`),
     check("agent_config_tone_check", sql`${table.tone} in ('cercano','neutro','formal')`),
+    check("agent_config_emojis_check", sql`${table.emojis} in ('no','pocos')`),
     check(
       "agent_config_active_hours_check",
       sql`(${table.activeFromMin} is null) = (${table.activeUntilMin} is null) and (${table.activeFromMin} is null or (${table.activeFromMin} between 0 and 1439 and ${table.activeUntilMin} between 1 and 1440 and ${table.activeFromMin} <> ${table.activeUntilMin}))`,

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { channelFormatRule, formatForChannel } from "./channel-format.js"
+import { channelFormatRule, formatForChannel, stripEmojis } from "./channel-format.js"
 
 it("en WhatsApp la negrita va con un asterisco; el doble se convierte", () => {
   expect(formatForChannel("Promoción **S/ 79.00** hasta el *12 de noviembre*", "whatsapp")).toBe(
@@ -26,4 +26,15 @@ it("encabezados y enlaces de Markdown no llegan como símbolos a ningún canal",
       "Promociones\nReserva aquí: tu cita: https://clinica.example/reserva?token=ab12",
     )
   }
+})
+
+it("sin emojis: se quitan con sus añadidos y sin dejar espacios de más", () => {
+  expect(stripEmojis("¡Hola! 😊 Soy Sofi.")).toBe("¡Hola! Soy Sofi.")
+  expect(stripEmojis("Listo 👍🏽✨\n🦷 Tu cita es el *martes*.")).toBe("Listo\nTu cita es el *martes*.")
+  expect(stripEmojis("Familia 👨‍👩‍👧 y bandera 🇨🇱 fuera ❤️")).toBe("Familia y bandera fuera")
+  // Lo que no se dibuja como emoji se queda: marcas, números y signos.
+  expect(stripEmojis("Dental® 2 × 3 = 6 #1 © ™")).toBe("Dental® 2 × 3 = 6 #1 © ™")
+  expect(formatForChannel("Hola 😊", "whatsapp", { emojis: "no" })).toBe("Hola")
+  expect(formatForChannel("Hola 😊", "whatsapp", { emojis: "pocos" })).toBe("Hola 😊")
+  expect(formatForChannel("Hola 😊", "whatsapp")).toBe("Hola 😊")
 })

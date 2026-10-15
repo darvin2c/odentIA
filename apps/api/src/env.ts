@@ -46,16 +46,18 @@ const envSchema = z.object({
     .string()
     .regex(/^v\d+\.\d+$/, "Se espera la forma v25.0")
     .default("v25.0"),
-  /** Modelo del endpoint compatible con OpenAI (prefijo openai: opcional); fake = determinista. */
-  LLM_MODEL: z.string().min(1).default("fake"),
-  LLM_API_KEY: z.string().optional(),
-  LLM_BASE_URL: z.string().url().optional(),
+  /**
+   * Cuentas de odentIA para los modelos que elige la clínica (ADR 0022). Sin
+   * la clave del proveedor del modelo elegido, el agente deriva y lo avisa.
+   * `LLM_MODEL=fake`: modelo determinista de desarrollo y pruebas (otro valor no tiene efecto).
+   */
+  LLM_MODEL: z.string().optional(),
+  LLM_OPENAI_API_KEY: z.string().optional(),
+  LLM_OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
+  LLM_ANTHROPIC_API_KEY: z.string().optional(),
+  LLM_ANTHROPIC_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
   LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-  /** Esfuerzo de razonamiento del modelo de la plataforma (`none`, `low`…). Vacío: no se envía. */
-  LLM_REASONING_EFFORT: z.string().optional(),
-  /** dev/e2e: admite http y destinos privados para servidores locales de prueba. */
-  LLM_ALLOW_INSECURE_BASE_URL: z.enum(["true", "false"]).default("false"),
   /** Modelos de decisión de la plataforma: entienden lo que se le pide al Administrador con palabras. */
   JEV_API_KEY: z.string().optional().default(""),
   JEV_BASE_URL: z.string().url().optional(),

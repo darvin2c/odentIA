@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, buttonVariants, cn } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import { ArrowRight, CheckCircle2 } from "lucide-react"
 import type { WorkspaceHome } from "../lib/workspace"
@@ -32,9 +32,9 @@ export function HomeStart({ setup }: { setup: NonNullable<WorkspaceHome["setup"]
     <Badge variant="secondary" className="mb-3">{steps.some(step => step.done) ? "Configuración parcial" : "Sin configurar"}</Badge>
     <h2 className="text-lg font-semibold">Prepara tu primera atención</h2>
     <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Completa estos pasos para empezar a reservar y atender.</p>
-    <Button nativeButton={false} render={<Link to={next.href} />} className="mt-4 min-h-11">
+    <Link to={next.href} className={cn(buttonVariants(), "mt-4 min-h-11")}>
       {next.title}<ArrowRight className="size-4 shrink-0" aria-hidden />
-    </Button>
+    </Link>
     <ol aria-label="Puesta en marcha" className="mt-5 grid gap-4 sm:grid-cols-3">
       {steps.map((step, index) => <li key={step.href} className="flex gap-3 text-sm">
         {step.done ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Preparado" /> : <span className="text-muted-foreground" aria-hidden>{index + 1}.</span>}

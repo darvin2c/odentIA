@@ -26,7 +26,13 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from 
 import { setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import {
+  branchNotFound,
+  isUniqueViolation,
+  notFound,
+  ServiceError,
+  validation,
+} from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { createCharge } from "./payments.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -337,7 +343,7 @@ export async function createEncounter(
       .from(branch)
       .where(and(eq(branch.id, input.branchId), eq(branch.organizationId, orgId)))
       .limit(1)
-    if (!found) throw notFound("Sucursal")
+    if (!found) throw branchNotFound()
     branchId = found.id
   }
   // Sin cita ni sede indicada, una clínica de una sola sede no tiene nada que
@@ -780,7 +786,7 @@ export async function updateEncounterDraft(
         .from(branch)
         .where(and(eq(branch.id, patch.branchId), eq(branch.organizationId, orgId)))
         .limit(1)
-      if (!found) throw notFound("Sucursal")
+      if (!found) throw branchNotFound()
     }
     set.branchId = patch.branchId
   }

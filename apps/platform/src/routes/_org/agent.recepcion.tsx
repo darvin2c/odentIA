@@ -51,6 +51,7 @@ const ROW =
   "flex min-h-13 w-full items-center gap-3 px-4 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 const TREATMENT_LABEL = { tu: "de tú", usted: "de usted" } as const
 const TONE_LABEL = { cercano: "cercano", neutro: "neutro", formal: "formal" } as const
+const EMOJIS_LABEL = { no: "sin emojis", pocos: "pocos emojis" } as const
 /** El mismo corte que `sm` de los estilos: por debajo, «Probar» es una pantalla propia. */
 const PHONE = "(max-width: 639.98px)"
 
@@ -354,6 +355,7 @@ function ReceptionPage() {
     config.personaName ? `Se presenta como ${config.personaName}` : "Sin nombre propio",
     `trata ${TREATMENT_LABEL[config.treatment ?? "tu"]}`,
     `tono ${TONE_LABEL[config.tone]}`,
+    EMOJIS_LABEL[config.emojis],
   ].join(" · ")
   const instructions = splitInstructions(config.systemPrompt)
   const lessons = learningQuery.data?.data.learned.filter((lesson) => lesson.agent === "recepcion").length
@@ -596,7 +598,7 @@ function ReceptionPage() {
             title="Cómo se comporta"
             hint="La voz es la de tu clínica. Aquí va solo lo propio de Recepción."
             phone={{
-              summary: `${config.personaName ?? "Sin nombre propio"} · ${TREATMENT_LABEL[config.treatment ?? "tu"]} · tono ${TONE_LABEL[config.tone]} · ${count(instructions.length, "indicación", "indicaciones")}`,
+              summary: `${config.personaName ?? "Sin nombre propio"} · ${TREATMENT_LABEL[config.treatment ?? "tu"]} · tono ${TONE_LABEL[config.tone]} · ${EMOJIS_LABEL[config.emojis]} · ${count(instructions.length, "indicación", "indicaciones")}`,
               expanded: behaviorOpen,
               onToggle: () => setBehaviorOpen((open) => !open),
             }}
@@ -615,7 +617,7 @@ function ReceptionPage() {
             <div className="flex flex-col gap-1 rounded-xl border border-agent-border bg-agent-soft p-4">
               <span className="text-xs font-semibold text-primary-soft-foreground">Así sonaría</span>
               <p className="text-sm">
-                «{voicePreview({ personaName: config.personaName, treatment: config.treatment, tone: config.tone, clinicName: org.name })}»
+                «{voicePreview({ personaName: config.personaName, treatment: config.treatment, tone: config.tone, emojis: config.emojis, clinicName: org.name })}»
               </p>
             </div>
             <div className="flex flex-col gap-2">

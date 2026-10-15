@@ -74,7 +74,7 @@ for (const width of [1440, 390]) {
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const start = page.getByRole("region", { name: "Siguiente paso" })
       await expect(start.getByRole("heading", { name: "Prepara tu primera atención", exact: true })).toBeVisible()
-      const primary = start.getByRole("button", { name: "Definir horarios", exact: true })
+      const primary = start.getByRole("link", { name: "Definir horarios", exact: true })
       await expect(primary).toBeInViewport()
       await expect(start.getByRole("list", { name: "Puesta en marcha" }).getByRole("listitem")).toHaveCount(3)
       await expect(page.getByRole("region", { name: "Te espera" })).toHaveCount(0)
@@ -92,11 +92,11 @@ for (const width of [1440, 390]) {
       await prepareSchedule(owner)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const start = page.getByRole("region", { name: "Siguiente paso" })
-      await expect(start.getByRole("button", { name: "Preparar un sillón", exact: true })).toBeInViewport()
+      await expect(start.getByRole("link", { name: "Preparar un sillón", exact: true })).toBeInViewport()
       await observe(page, info, "parcial")
       await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Sillón inicial" }, 201)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(start.getByRole("button", { name: "Registrar un paciente", exact: true })).toBeInViewport()
+      await expect(start.getByRole("link", { name: "Registrar un paciente", exact: true })).toBeInViewport()
       await call(page, "POST", "/api/patients", owner.org.slug, {
         submissionId: randomUUID(), answers: { demographics: { displayName: "Primera paciente", docType: "DNI", docNumber: "76543210" }, respondent: "staff", privacyAccepted: false },
       }, 201)
@@ -141,7 +141,7 @@ for (const width of [1440, 390]) {
       await expect(agenda.getByText(new RegExp(`^Profilaxis · ${owner.user.name}`))).toBeVisible()
       await expect(agenda.getByRole("link", { name: "Ver las 2 en la Agenda", exact: true })).toBeVisible()
       // La caja del día, en una línea que lleva a Finanzas.
-      const cash = page.getByRole("button", { name: /^Caja de hoy/ })
+      const cash = page.getByRole("link", { name: /^Caja de hoy/ })
       await expect(cash).toContainText("1 persona por cobrar")
 
       // Lo que se retiró no vuelve con otro nombre.
@@ -162,7 +162,7 @@ for (const width of [1440, 390]) {
       expect(fallback.today?.branch?.id).toBe(owner.branchId)
       expect((await api(page, "GET", "/api/workspace/home?branch=no-es-una-sede", owner.org.slug)).status).toBe(400)
 
-      const task = rows.nth(1).getByRole("button", { name: /Confirmar seguimiento pendiente/ })
+      const task = rows.nth(1).getByRole("link", { name: /Confirmar seguimiento pendiente/ })
       expect((await task.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
       await observe(page, info, "direccion")
       // Toda la fila es el enlace, también con teclado.
@@ -188,9 +188,9 @@ for (const width of [1440, 390]) {
       await expect(mine).toContainText("1 paciente · 0 atendidos · 1 por venir")
       await expect(mine).not.toContainText("Paciente de otra profesional")
       await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
-      await expect(page.getByRole("button", { name: /^Caja de hoy/ })).toHaveCount(0)
+      await expect(page.getByRole("link", { name: /^Caja de hoy/ })).toHaveCount(0)
       await observe(page, info, "odontologo")
-      await mine.getByRole("button", { name: /Paciente con cita/ }).click()
+      await mine.getByRole("link", { name: /Paciente con cita/ }).click()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/patients/"))
     })
 
@@ -230,7 +230,7 @@ for (const width of [1440, 390]) {
       await observe(page, info, "nada-espera")
       await call(page, "PATCH", `/api/tasks/${task.id}`, owner.org.slug, { status: "open" })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      await expect(waiting.getByRole("button", { name: /Revisar caso/ })).toBeVisible()
+      await expect(waiting.getByRole("link", { name: /Revisar caso/ })).toBeVisible()
       await expect(waiting.getByText("Nada te espera por ahora", { exact: true })).toHaveCount(0)
     })
 
@@ -251,7 +251,7 @@ for (const width of [1440, 390]) {
       await observe(page, info, "error-recuperable")
       failing = false
       await retry.click()
-      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("button", { name: "Definir horarios", exact: true })).toBeInViewport()
+      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link", { name: "Definir horarios", exact: true })).toBeInViewport()
     })
 
     for (const role of ["reception", "dentist", "cashier"] as const) {
@@ -262,7 +262,7 @@ for (const width of [1440, 390]) {
         await gotoHydrated(page, tenant(owner.org.slug, "/home"))
         // Sin permiso para configurar no hay puesta en marcha: se dice que nada espera.
         await expect(page.getByRole("region", { name: "Siguiente paso" })).toHaveCount(0)
-        await expect(page.getByRole("button", { name: "Definir horarios", exact: true })).toHaveCount(0)
+        await expect(page.getByRole("link", { name: "Definir horarios", exact: true })).toHaveCount(0)
         await expect(page.getByRole("region", { name: "Te espera" }).getByText("Nada te espera por ahora", { exact: true })).toBeVisible()
         const block = role === "reception" ? "Agenda de hoy" : role === "dentist" ? "Mis pacientes de hoy" : "Caja de hoy"
         const action = role === "reception" ? "Abrir la Agenda" : role === "dentist" ? "Ver mi agenda" : "Ir a Caja"

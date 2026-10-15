@@ -126,7 +126,7 @@ beforeAll(async () => {
   const checkpointer = PostgresSaver.fromConnString(ownerUri)
   await checkpointer.setup()
   await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { modelName: "fake", allowInsecureBaseUrl: true }, secretsKey: KEY }
+  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY }
   connectionId = (
     await withOrgContext(appDb, ORG, (tx) =>
       createConnection(tx, ORG, KEY, { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } }, { fetch, validateExternal: false }))

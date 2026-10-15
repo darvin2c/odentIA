@@ -143,8 +143,8 @@ for (const viewport of [
       const page = owner.page
       await page.setViewportSize(viewport)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      // El siguiente paso es un botón que navega (`Button` con `render={<Link />}`): se localiza por su rol real.
-      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("button").first()).toBeVisible()
+      // El siguiente paso navega: es un enlace con aspecto de botón y se localiza por su rol real.
+      await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()
       await theme(page, dark)
       await audit(page, info, "inicio")
       if (viewport.width < 768) {
@@ -234,9 +234,13 @@ for (const viewport of [
         await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
         await audit(page, info, `alta-paciente-${surface}`)
       }
-      // El guard usa confirmación nativa; aceptar permite comprobar el retorno.
-      page.once("dialog", (confirmation) => confirmation.accept())
+      // Con cambios, cerrar pregunta con la confirmación propia; descartar
+      // permite comprobar el retorno del foco.
       await page.keyboard.press("Escape")
+      const confirmation = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
+      await expect(confirmation).toBeVisible()
+      await audit(page, info, "alta-paciente-salir-sin-guardar")
+      await confirmation.getByRole("button", { name: "Descartar y salir", exact: true }).click()
       await expect(dialog).not.toBeVisible()
       await expect(create).toBeFocused()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/patients"))

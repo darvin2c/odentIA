@@ -15,9 +15,11 @@
     "eval:admin": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-admin.ts",
     "eval:off-topic": "tsx --env-file-if-exists=../../infra/dev/.env src/decision/eval-fuera-de-tema.ts",
     "eval:month": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts",
+    "eval:compare": "tsx --env-file-if-exists=../../infra/dev/.env src/eval-comparar-modelos.ts",
     "eval:search": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts src/busqueda.eval.ts"
   },
   "dependencies": {
+    "@langchain/anthropic": "1.5.10",
     "@langchain/core": "1.2.11",
     "@langchain/langgraph": "1.4.15",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",

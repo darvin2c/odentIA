@@ -1,6 +1,7 @@
 import {
   Badge,
   Button,
+  buttonVariants,
   Combobox,
   ComboboxContent,
   ComboboxEmpty,
@@ -163,15 +164,14 @@ export function ServicePicker({
               <div className="flex flex-col gap-2 p-2">
                 <p className="text-sm text-muted-foreground">Sin tratamientos con ese criterio.</p>
                 {canAdmin ? (
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    nativeButton={false}
-                    render={<Link to="/services" target="_blank" rel="noreferrer" />}
+                  <Link
+                    to="/services"
+                    target="_blank"
+                    rel="noreferrer"
+                    className={buttonVariants({ variant: "link", size: "sm" })}
                   >
                     Ir a Servicios y precios
-                  </Button>
+                  </Link>
                 ) : null}
               </div>
             ) : (

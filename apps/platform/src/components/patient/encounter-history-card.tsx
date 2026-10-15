@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -84,24 +84,18 @@ export function EncounterHistoryCard({
               ))}
             </ul>
             <div>
-              <Button
-                variant="link"
-                size="sm"
-                nativeButton={false}
-                render={
-                  <Link
-                    to="/patients/$patientId"
-                    params={{ patientId }}
-                    search={
-                      { tab: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) } as {
-                        tab: "plan"
-                      }
-                    }
-                  />
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId }}
+                search={
+                  { tab: "plan", ...(planBudgetId ? { budgetId: planBudgetId } : {}) } as {
+                    tab: "plan"
+                  }
                 }
+                className={buttonVariants({ variant: "link", size: "sm" })}
               >
                 Ver presupuesto
-              </Button>
+              </Link>
             </div>
           </div>
         ) : null}
@@ -145,19 +139,13 @@ export function EncounterHistoryCard({
           )}
         </p>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            nativeButton={false}
-            render={
-              <Link
-                to="/patients/$patientId/encounters/$encounterId"
-                params={{ patientId, encounterId: item.refId }}
-              />
-            }
+          <Link
+            to="/patients/$patientId/encounters/$encounterId"
+            params={{ patientId, encounterId: item.refId }}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             Abrir atención
-          </Button>
+          </Link>
           <Button
             variant="ghost"
             size="sm"

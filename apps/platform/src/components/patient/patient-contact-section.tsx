@@ -3,6 +3,7 @@ import { CONTACT_RELATIONSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
+  buttonVariants,
   Checkbox,
   Dialog,
   DialogContent,
@@ -297,17 +298,13 @@ export function PatientContactSection({ detail }: { detail: PatientFull }) {
               </p>
               {registration.conversationId ? (
                 <div>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    nativeButton={false}
-                    render={
-                      <Link to="/inbox" search={{ conversation: registration.conversationId }} />
-                    }
+                  <Link
+                    to="/inbox"
+                    search={{ conversation: registration.conversationId }}
+                    className={buttonVariants({ variant: "link", size: "sm" })}
                   >
                     Ver conversación de origen
-                  </Button>
+                  </Link>
                 </div>
               ) : null}
             </>
@@ -431,14 +428,13 @@ function PatientConversationsDialog({
                             ? ` · ${timeAgo(conversation.lastMessageAt)}`
                             : ""}
                         </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          render={<Link to="/inbox" search={{ conversation: conversation.id }} />}
+                        <Link
+                          to="/inbox"
+                          search={{ conversation: conversation.id }}
+                          className={buttonVariants({ variant: "outline", size: "sm" })}
                         >
                           Abrir en bandeja
-                        </Button>
+                        </Link>
                       </li>
                     ))}
                   </ul>

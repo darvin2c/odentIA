@@ -1,4 +1,4 @@
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { AgentMark, EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -172,21 +172,16 @@ export function ResumenTab({
       title: `El agente propone: ${ACTION_LABEL[proposal.action] ?? proposal.action}`,
       detail: proposal.context.afterSummary || proposal.reason || "Requiere aprobación del equipo.",
       action: (
-        <Button
-          size="sm"
-          nativeButton={false}
-          render={
-            <Link
-              to="/agent/approvals"
-              search={{
-                status: undefined,
-                conversationId: proposal.conversationId ?? undefined,
-              }}
-            />
-          }
+        <Link
+          to="/agent/approvals"
+          search={{
+            status: undefined,
+            conversationId: proposal.conversationId ?? undefined,
+          }}
+          className={buttonVariants({ size: "sm" })}
         >
           Revisar
-        </Button>
+        </Link>
       ),
     })
   const health = healthQuery.data?.data ?? null
@@ -213,18 +208,13 @@ export function ResumenTab({
       title: "Atención en borrador",
       detail: "Hay una atención iniciada sin finalizar.",
       action: (
-        <Button
-          size="sm"
-          nativeButton={false}
-          render={
-            <Link
-              to="/patients/$patientId/encounters/$encounterId"
-              params={{ patientId, encounterId: resolved.openEncounterId }}
-            />
-          }
+        <Link
+          to="/patients/$patientId/encounters/$encounterId"
+          params={{ patientId, encounterId: resolved.openEncounterId }}
+          className={buttonVariants({ size: "sm" })}
         >
           Continuar
-        </Button>
+        </Link>
       ),
     })
   for (const consent of resolved?.pendingConsents ?? [])
@@ -351,9 +341,9 @@ export function ResumenTab({
       title: `Tarea: ${task.title}`,
       detail: task.dueAt ? `Vence el ${formatDate(task.dueAt)}.` : "Sin fecha límite.",
       action: (
-        <Button size="sm" variant="outline" nativeButton={false} render={<Link to="/tasks" />}>
+        <Link to="/tasks" className={buttonVariants({ size: "sm", variant: "outline" })}>
           Ver tareas
-        </Button>
+        </Link>
       ),
     })
 
@@ -476,13 +466,9 @@ export function ResumenTab({
                 <div className="flex flex-col items-start gap-2">
                   <p className="text-sm text-muted-foreground">Sin cita reservada.</p>
                   {canBook ? (
-                    <Button
-                      size="sm"
-                      nativeButton={false}
-                      render={<Link to="/agenda" search={{ patientId }} />}
-                    >
+                    <Link to="/agenda" search={{ patientId }} className={buttonVariants({ size: "sm" })}>
                       Agendar cita
-                    </Button>
+                    </Link>
                   ) : null}
                 </div>
               )}
@@ -515,20 +501,13 @@ export function ResumenTab({
                     </p>
                   ) : null}
                   <div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      nativeButton={false}
-                      render={
-                        <Link
-                          to="/patients/$patientId/encounters/$encounterId"
-                          params={{ patientId, encounterId: lastVisit.encounterId }}
-                        />
-                      }
+                    <Link
+                      to="/patients/$patientId/encounters/$encounterId"
+                      params={{ patientId, encounterId: lastVisit.encounterId }}
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
                     >
                       Abrir esta atención
-                    </Button>
+                    </Link>
                   </div>
                 </div>
               ) : (

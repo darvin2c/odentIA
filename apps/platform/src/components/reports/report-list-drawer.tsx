@@ -3,7 +3,7 @@
  * resolverlo. Tiene tantas filas como dice la cifra (hasta 200 a la vista).
  */
 import { formatMoney } from "@odentia/clinical"
-import { Badge, Button } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { DetailDrawer, EmptyState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -110,9 +110,9 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
       onClose={onClose}
       isLoading={report.isPending}
       actions={
-        <Button nativeButton={false} render={<Link to={copy.where.to} />}>
+        <Link to={copy.where.to} className={buttonVariants()}>
           {copy.where.label}
-        </Button>
+        </Link>
       }
     >
       {report.isError ? (

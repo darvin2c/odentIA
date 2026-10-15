@@ -125,11 +125,12 @@ describe("quién dice que sí: fijo para todas las clínicas", () => {
 describe("voz, funciones y límites de la clínica", () => {
   it("guarda la voz y devuelve los valores por defecto donde no se dijo nada", async () => {
     const before = await run((tx) => getAgentConfig(tx, ORG))
-    expect(before).toMatchObject({ personaName: null, tone: "cercano", disabledFunctions: [], channels: null })
+    expect(before).toMatchObject({ personaName: null, tone: "cercano", emojis: "no", disabledFunctions: [], channels: null })
     const saved = await run((tx) =>
-      upsertAgentConfig(tx, ORG, { personaName: "  Sofi ", treatment: "usted", tone: "formal", about: "Clínica familiar." }, { actorUserId: OWNER }),
+      upsertAgentConfig(tx, ORG, { personaName: "  Sofi ", treatment: "usted", tone: "formal", emojis: "pocos", about: "Clínica familiar." }, { actorUserId: OWNER }),
     )
-    expect(saved).toMatchObject({ personaName: "Sofi", treatment: "usted", tone: "formal", about: "Clínica familiar." })
+    expect(saved).toMatchObject({ personaName: "Sofi", treatment: "usted", tone: "formal", emojis: "pocos", about: "Clínica familiar." })
+    await expect(run((tx) => upsertAgentConfig(tx, ORG, { emojis: "muchos" as never }))).rejects.toThrow("«No usar» o «Pocos»")
   })
 
   it("solo se apagan funciones apagables", async () => {

@@ -46,6 +46,11 @@ export interface NormalizedInbound {
 export interface NormalizedStatus {
   externalMessageId: string
   status: "delivered" | "read" | "failed"
+  /**
+   * Por qué falló, si el proveedor lo dice: en palabras cuando el adaptador
+   * conoce el caso; si no, `código: lo que dijo el proveedor`.
+   */
+  error?: string
 }
 
 /** Estado de una plantilla en el proveedor, en palabras del sistema. */

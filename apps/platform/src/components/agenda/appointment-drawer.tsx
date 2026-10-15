@@ -1,5 +1,6 @@
 import {
   Button,
+  buttonVariants,
   cn,
   FieldLabel,
   Input,
@@ -405,15 +406,13 @@ export function AppointmentDrawer({
                 </Button>
               ) : null}
               {/* De la cita a la persona: la ficha conserva el contexto de quien se atiende. */}
-              <Button
-                variant="outline"
-                className="h-11"
-                render={
-                  <Link to="/patients/$patientId" params={{ patientId: appointment.patientId }} />
-                }
+              <Link
+                to="/patients/$patientId"
+                params={{ patientId: appointment.patientId }}
+                className={cn(buttonVariants({ variant: "outline" }), "h-11")}
               >
                 Abrir la ficha de {appointment.patientName.split(/\s+/)[0]}
-              </Button>
+              </Link>
               {active ? (
                 <NewEncounterButton
                   patientId={appointment.patientId}

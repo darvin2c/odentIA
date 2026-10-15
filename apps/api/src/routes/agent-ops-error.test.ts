@@ -46,7 +46,7 @@ it.each([
   })
   app.route("/agent", createAgentOpsRoute({
     db: drizzle(client, { schema }), storage: unusedStorage, secretsKey: secretsKeyFromEnv("ee".repeat(32)),
-    validateExternal: false, webhookBaseUrl: "https://api.example.test", llm: { modelName: "fake" },
+    validateExternal: false, webhookBaseUrl: "https://api.example.test", llm: { fake: true },
   }))
   try {
     const response = await app.request(`/agent/proposals/${randomUUID()}/${endpoint}`, {

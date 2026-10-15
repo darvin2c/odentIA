@@ -13,7 +13,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
-import { notFound, validation } from "./errors.js"
+import { branchNotFound, notFound, validation } from "./errors.js"
 import { formatOrgMoney, getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { listServices } from "./service-catalog.js"
@@ -199,7 +199,7 @@ async function requireBranchOfOrg(tx: Db, orgId: string, branchId: string): Prom
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.id, branchId)))
     .limit(1)
-  if (!row) throw notFound("Sede")
+  if (!row) throw branchNotFound()
   return row.name
 }
 

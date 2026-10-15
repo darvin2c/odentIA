@@ -2,8 +2,8 @@ import type { SearchEmbedder } from "@odentia/services"
 
 /**
  * Quien vectoriza para la búsqueda por significado (ADR 0021). Es de la
- * plataforma, igual para todas las clínicas: no usa el modelo propio de cada
- * una, porque no todos ofrecen vectores. Un solo protocolo, el endpoint
+ * plataforma, igual para todas las clínicas: no usa el modelo que eligió
+ * cada una, porque no todos ofrecen vectores. Un solo protocolo, el endpoint
  * `/embeddings` compatible con OpenAI; la URL la fija el operador.
  */
 export interface EmbeddingsEnv {

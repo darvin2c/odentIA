@@ -7,6 +7,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { common } from "../common.js"
 import { FormDrawer } from "./form-drawer.js"
 
+const unsaved = common.confirm.unsaved
+
 // Base UI Drawer y jsdom necesitan polyfills mínimos
 beforeAll(() => {
   if (typeof window !== "undefined" && !window.matchMedia) {
@@ -115,28 +117,44 @@ describe("FormDrawer", () => {
     expect(spinner).not.toBeNull()
   })
 
-  it("isDirty=true + Cancelar con confirm false no llama onClose; confirm true sí", async () => {
+  it("con cambios, Cancelar pregunta; «Continuar editando» no cierra y devuelve el foco", async () => {
     const onClose = vi.fn()
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
+    const nativeConfirm = vi.spyOn(window, "confirm")
     renderDrawer({ isDirty: true, onClose })
     await screen.findByText("Editar mesa")
     const cancelar = screen.getByRole("button", { name: common.actions.cancel })
+    cancelar.focus()
     fireEvent.click(cancelar)
-    expect(confirmSpy).toHaveBeenCalledWith(common.confirm.unsavedMessage)
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    expect(dialog.textContent).toContain(unsaved.description)
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+
+    fireEvent.click(screen.getByRole("button", { name: unsaved.keepEditing }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(onClose).not.toHaveBeenCalled()
-    confirmSpy.mockReturnValue(true)
-    fireEvent.click(cancelar)
+    // El cajón sigue abierto y el foco vuelve a quien pidió cerrar.
+    expect(screen.getByText("Editar mesa")).not.toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(cancelar))
+  })
+
+  it("con cambios, «Descartar y salir» cierra", async () => {
+    const onClose = vi.fn()
+    renderDrawer({ isDirty: true, onClose })
+    await screen.findByText("Editar mesa")
+    fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
+    await screen.findByRole("alertdialog", { name: unsaved.title })
+    fireEvent.click(screen.getByRole("button", { name: unsaved.discard }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("isDirty=false + Cancelar llama onClose sin confirm", async () => {
+  it("sin cambios, Cancelar cierra directo sin preguntar", async () => {
     const onClose = vi.fn()
-    const confirmSpy = vi.spyOn(window, "confirm")
     renderDrawer({ isDirty: false, onClose })
     await screen.findByText("Editar mesa")
     fireEvent.click(screen.getByRole("button", { name: common.actions.cancel }))
-    expect(confirmSpy).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 
   it("click en Guardar (type=submit) llama onSubmit sin submit nativo", async () => {
@@ -150,36 +168,53 @@ describe("FormDrawer", () => {
     expect(event).toBeDefined()
   })
 
-  it("Esc con isDirty=true y confirm false no cierra; confirm true sí", async () => {
+  it("Esc con cambios pregunta; el Esc siguiente cierra solo la pregunta", async () => {
     const onClose = vi.fn()
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false)
     renderDrawer({ isDirty: true, onClose })
     await screen.findByText("Editar mesa")
 
-    fireEvent.keyDown(document, { key: "Escape", code: "Escape", keyCode: 27 })
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalled(), { timeout: 1000 }).catch(() => {})
-    if (confirmSpy.mock.calls.length === 0) {
-      fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
-      {
-        const { promise, resolve } = Promise.withResolvers<void>()
-        setTimeout(resolve, 50)
-        await promise
-      }
-    }
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape", code: "Escape" })
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
     expect(onClose).not.toHaveBeenCalled()
 
-    confirmSpy.mockReturnValue(true)
-    fireEvent.keyDown(document, { key: "Escape", code: "Escape" })
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 1000 }).catch(
-      async () => {
-        fireEvent.keyDown(window, { key: "Escape", code: "Escape" })
-        {
-          const { promise, resolve } = Promise.withResolvers<void>()
-          setTimeout(resolve, 50)
-          await promise
-        }
-        expect(onClose).toHaveBeenCalledTimes(1)
-      },
-    )
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText("Editar mesa")).not.toBeNull()
+  })
+
+  it("clic fuera con cambios pregunta y clic dentro de la pregunta no cierra el cajón", async () => {
+    const onClose = vi.fn()
+    renderDrawer({ isDirty: true, onClose })
+    await screen.findByText("Editar mesa")
+
+    fireEvent.pointerDown(document.body)
+    fireEvent.mouseDown(document.body)
+    fireEvent.click(document.body)
+    const dialog = await screen.findByRole("alertdialog", { name: unsaved.title })
+    expect(onClose).not.toHaveBeenCalled()
+
+    // La pregunta es un diálogo anidado: tocarla no cuenta como «fuera» del cajón.
+    fireEvent.pointerDown(dialog)
+    fireEvent.mouseDown(dialog)
+    fireEvent.click(dialog)
+    fireEvent.click(screen.getByRole("button", { name: unsaved.keepEditing }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText("Editar mesa")).not.toBeNull()
+  })
+
+  it("mientras se envía, Esc no cierra ni pregunta", async () => {
+    const onClose = vi.fn()
+    renderDrawer({ isDirty: true, isSubmitting: true, onClose })
+    await screen.findByText("Editar mesa")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape", code: "Escape" })
+    {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, 50)
+      await promise
+    }
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 })

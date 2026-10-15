@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   ButtonGroup,
+  buttonVariants,
   Field,
   FieldLabel,
   Select,
@@ -391,21 +392,14 @@ function JourneyCard({
       </div>
       {link ? (
         <div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            nativeButton={false}
-            render={
-              <Link
-                to="/patients/$patientId"
-                params={{ patientId }}
-                search={link.search as { tab: "resumen" }}
-              />
-            }
+          <Link
+            to="/patients/$patientId"
+            params={{ patientId }}
+            search={link.search as { tab: "resumen" }}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             {link.label}
-          </Button>
+          </Link>
         </div>
       ) : null}
     </div>

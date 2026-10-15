@@ -42,7 +42,7 @@ export async function createDecisionModel(
     case "none":
       return null
     case "baseline": {
-      if (chat.source === "fake") return createFakeDecisionModel()
+      if (chat.provider === "fake") return createFakeDecisionModel()
       const model = await createConfiguredChatModel({ ...chat, maxRetries: 0, timeoutMs })
       return createBaselineDecisionModel(model, chat.modelName, timeoutMs)
     }

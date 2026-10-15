@@ -156,7 +156,7 @@ test("integraciones: fallo de carga con reintento, conectar un canal con sus dat
   }
   await expect(messaging).toContainText("Instagram, Messenger y Telegram solo responden a quien escribió primero.")
   await expect(page.getByRole("region", { name: "Tu sitio web" }).getByRole("listitem")).toHaveCount(1)
-  await expect(page.getByRole("region", { name: "Inteligencia artificial" })).toContainText("Incluido con odentIA")
+  await expect(page.getByRole("region", { name: "Inteligencia artificial" })).toContainText("ChatGPT 6")
   await info.attach("integraciones", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
   // Conectar Telegram: un dato, con su nombre en palabras; al conectar dice qué pasó.

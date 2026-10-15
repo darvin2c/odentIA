@@ -233,10 +233,14 @@ export interface AgentLearned {
 export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
 /** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
+/**
+ * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede arreglarla,
+ * así que se dice qué pasa con los mensajes y qué sí puede hacer.
+ */
 export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
-  rechazado: "El proveedor del modelo rechazó la conexión.",
-  sin_saldo: "El proveedor del modelo no tiene saldo o cuota.",
-  sin_configurar: "Falta configurar el proveedor del modelo.",
+  rechazado: "El modelo no está respondiendo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
+  sin_saldo: "La cuenta de odentIA para este modelo se quedó sin saldo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
+  sin_configurar: "Este modelo no está disponible por ahora. Elige el otro en Modelo del agente.",
 }
 
 export interface AgentOverview {
@@ -274,15 +278,17 @@ export function voicePreview(input: {
   personaName: string | null
   treatment: "tu" | "usted" | null
   tone: "cercano" | "neutro" | "formal"
+  emojis?: "no" | "pocos"
   clinicName: string
 }): string {
   const who = input.personaName?.trim()
     ? `Soy ${input.personaName.trim()}, asistente virtual de ${input.clinicName}.`
     : `Soy el asistente virtual de ${input.clinicName}.`
   const formal = input.treatment === "usted"
-  if (input.tone === "formal") return `Buenos días. ${who} ¿En qué ${formal ? "puedo ayudarle" : "puedo ayudarte"}?`
-  if (input.tone === "neutro") return `Hola. ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
-  return `¡Hola! ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
+  const emoji = input.emojis === "pocos" ? " 😊" : ""
+  if (input.tone === "formal") return `Buenos días.${emoji} ${who} ¿En qué ${formal ? "puedo ayudarle" : "puedo ayudarte"}?`
+  if (input.tone === "neutro") return `Hola.${emoji} ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
+  return `¡Hola!${emoji} ${who} ¿En qué ${formal ? "le ayudo" : "te ayudo"}?`
 }
 
 /** Minutos del día ↔ «HH:MM», para el horario en que responde el agente. */

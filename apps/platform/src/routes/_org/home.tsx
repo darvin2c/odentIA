@@ -1,4 +1,4 @@
-import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
+import { Alert, AlertDescription, AlertTitle, Button, buttonVariants } from "@odentia/ui"
 import { ConfirmDialog, DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
@@ -138,15 +138,19 @@ function HomePage() {
             {outcome.detail ? `${outcome.detail} ` : ""}Gestiona la acción desde el caso.
           </AlertDescription>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              nativeButton={false}
-              render={outcome.conversationId
-                ? <Link to="/inbox" search={{ conversation: outcome.conversationId }} />
-                : <Link to="/agent/approvals" search={{ conversationId: undefined, status: undefined }} />}
-            >
-              Volver al caso
-            </Button>
+            {outcome.conversationId ? (
+              <Link to="/inbox" search={{ conversation: outcome.conversationId }} className={buttonVariants({ size: "sm" })}>
+                Volver al caso
+              </Link>
+            ) : (
+              <Link
+                to="/agent/approvals"
+                search={{ conversationId: undefined, status: undefined }}
+                className={buttonVariants({ size: "sm" })}
+              >
+                Volver al caso
+              </Link>
+            )}
             <Button type="button" size="sm" variant="ghost" onClick={() => setOutcome(null)}>
               Descartar
             </Button>

@@ -38,7 +38,18 @@ export const common = {
     resize: "Redimensionar panel",
   },
   confirm: {
+    /** Pregunta para un `window.confirm` (Aceptar/Cancelar); las superficies usan `unsaved`. */
     unsavedMessage: "Tienes cambios sin guardar. ¿Deseas descartarlos?",
+    /**
+     * Cerrar un formulario o detalle con cambios sin guardar. Los botones dicen
+     * lo mismo que el aviso de salir de la página con borrador.
+     */
+    unsaved: {
+      title: "¿Salir sin guardar?",
+      description: "Se pierden los cambios que hiciste en este formulario.",
+      keepEditing: "Continuar editando",
+      discard: "Descartar y salir",
+    },
   },
   filters: {
     today: "Hoy",

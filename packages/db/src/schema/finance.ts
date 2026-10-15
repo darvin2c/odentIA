@@ -17,7 +17,6 @@ import { sql } from "drizzle-orm"
 import {
   char,
   check,
-  date,
   index,
   integer,
   jsonb,
@@ -46,7 +45,6 @@ export const cashShift = pgTable(
     status: text("status").notNull().default("abierta"),
     openedBy: text("opened_by").references(() => user.id),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
-    openNotes: text("open_notes"),
     closedBy: text("closed_by").references(() => user.id),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     /** Esperado en efectivo al cierre: solo apertura e ingresos en efectivo menos egresos. */
@@ -243,11 +241,8 @@ export const commissionRule = pgTable(
 )
 
 /**
- * Liquidación de comisiones de un profesional en una moneda. Fase 8 liquida
- * por mes (`periodYear`/`periodMonth` siempre informados en lo nuevo).
- * `periodFrom`/`periodTo` se conservan como rango histórico: la migración
- * solo informa año/mes cuando el rango cae dentro de un mismo mes civil, sin
- * inventar mes para rangos multimes. `base` conserva 'cobrado'/'produccion'
+ * Liquidación de comisiones de un profesional en una moneda. Se liquida por
+ * mes (`periodYear`/`periodMonth`). `base` conserva 'cobrado'/'produccion'
  * previos; `rateBps` null = histórico multirregla. `expenseId` enlaza el pago
  * registrado como gasto de Personal (exactamente uno por liquidación).
  * 'borrador' se conserva para filas históricas sin acción real (no se borra
@@ -261,9 +256,6 @@ export const commissionSettlement = pgTable(
     professionalUserId: text("professional_user_id")
       .notNull()
       .references(() => user.id),
-    /** Rango histórico (nullable; lo nuevo usa año/mes y lo deja nulo). */
-    periodFrom: date("period_from"),
-    periodTo: date("period_to"),
     /** Mes liquidado (nulo en histórico multimes que no encaja). */
     periodYear: integer("period_year"),
     periodMonth: integer("period_month"),

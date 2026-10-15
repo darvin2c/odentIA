@@ -1,5 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import { contact } from "@odentia/db/schema/crm"
+import { auditEvent } from "@odentia/db/schema/org"
+import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { sanitizeCustomFields } from "./contacts.js"
@@ -199,26 +201,26 @@ it("agent config: defaults y upsert", async () => {
   ).rejects.toMatchObject({ status: 400 })
 })
 
-it("agent config: volver al modelo incluido retira también el modelo de la cuenta propia", async () => {
-  const key = Buffer.alloc(32, 7)
-  const own = await withOrgContext(appDb, "org_b", (tx) =>
-    upsertAgentConfig(
-      tx,
-      "org_b",
-      { llmBaseUrl: "https://proveedor.example/v1", llmApiKey: "sk-prueba", model: "modelo-propio", maxTurns: 7 },
-      { secretsKey: key },
-    ),
+it("agent config: la clínica elige uno de los dos modelos de odentIA y el cambio se audita", async () => {
+  const defaults = await withOrgContext(appDb, "org_b", (tx) => getAgentConfig(tx, "org_b"))
+  expect(defaults.llm).toBe("chatgpt_6")
+  await expect(
+    withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { llm: "gpt-4o" as never })),
+  ).rejects.toThrow("ChatGPT 6 o Claude 5.5")
+  const chosen = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { llm: "claude_5_5", maxTurns: 7 }))
+  expect(chosen).toMatchObject({ llm: "claude_5_5", maxTurns: 7 })
+  expect(chosen).not.toHaveProperty("model")
+  expect(chosen).not.toHaveProperty("llmBaseUrl")
+  expect(chosen).not.toHaveProperty("hasLlmApiKey")
+  // Guardar otra cosa no toca el modelo elegido.
+  const kept = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { maxTurns: 8 }))
+  expect(kept.llm).toBe("claude_5_5")
+  const audits = await withOrgContext(appDb, "org_b", (tx) =>
+    tx
+      .select({ metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(and(eq(auditEvent.organizationId, "org_b"), eq(auditEvent.action, "agent.config_updated"))),
   )
-  expect(own).toMatchObject({ llmBaseUrl: "https://proveedor.example/v1", hasLlmApiKey: true, model: "modelo-propio" })
-  // Ese modelo se eligió para ese proveedor: no viaja al de odentIA. Lo demás queda como estaba.
-  const included = await withOrgContext(appDb, "org_b", (tx) =>
-    upsertAgentConfig(tx, "org_b", { llmBaseUrl: null, llmApiKey: null }, { secretsKey: key }),
-  )
-  expect(included).toMatchObject({ llmBaseUrl: null, hasLlmApiKey: false, model: null, maxTurns: 7 })
-  // Sin cuenta propia, un modelo ya guardado no se toca al guardar otra cosa.
-  await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { model: "otro-modelo" }))
-  const kept = await withOrgContext(appDb, "org_b", (tx) =>
-    upsertAgentConfig(tx, "org_b", { llmBaseUrl: null, llmApiKey: null }, { secretsKey: key }),
-  )
-  expect(kept.model).toBe("otro-modelo")
+  // maxTurns no se audita; el modelo sí, con su valor.
+  expect(audits.map((a) => a.metadata)).toEqual([expect.objectContaining({ changed: ["llm"], llm: "claude_5_5" })])
 })

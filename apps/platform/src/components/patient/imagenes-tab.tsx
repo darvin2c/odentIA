@@ -9,6 +9,7 @@ import {
   AttachmentTitle,
   Badge,
   Button,
+  buttonVariants,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -71,6 +72,8 @@ import { activeOrgLocale } from "../../lib/locale"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
+/** Los vínculos del detalle llevan a otra pantalla: enlaces con aspecto de botón, no botones. */
+const linkButton = buttonVariants({ size: "sm", variant: "outline" })
 type SortKey = "recientes" | "antiguos" | "titulo"
 
 /** Alias local: el listado ya trae el contexto vigente fusionado (tipos comunes de Main). */
@@ -932,21 +935,15 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Atención</dt>
               <dd>
                 {doc.encounterId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    nativeButton={false}
-                    render={
-                      <Link
-                        to="/patients/$patientId/encounters/$encounterId"
-                        params={{ patientId, encounterId: doc.encounterId }}
-                      />
-                    }
+                  <Link
+                    to="/patients/$patientId/encounters/$encounterId"
+                    params={{ patientId, encounterId: doc.encounterId }}
+                    className={linkButton}
                   >
                     {encounter
                       ? `Abrir atención (${timeAgo(encounter.createdAt)})`
                       : "Abrir atención"}
-                  </Button>
+                  </Link>
                 ) : (
                   "Archivo general (sin atención)"
                 )}
@@ -956,14 +953,9 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Tratamiento</dt>
               <dd>
                 {doc.planItemId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    nativeButton={false}
-                    render={<Link to="/patients/$patientId" params={{ patientId }} search={planSearch} />}
-                  >
+                  <Link to="/patients/$patientId" params={{ patientId }} search={planSearch} className={linkButton}>
                     {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
-                  </Button>
+                  </Link>
                 ) : (
                   "Sin tratamiento vinculado"
                 )}
@@ -984,20 +976,14 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Presupuesto</dt>
               <dd>
                 {doc.budgetId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    nativeButton={false}
-                    render={
-                      <Link
-                        to="/patients/$patientId"
-                        params={{ patientId }}
-                        search={{ tab: "plan", budgetId: doc.budgetId }}
-                      />
-                    }
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={{ tab: "plan", budgetId: doc.budgetId }}
+                    className={linkButton}
                   >
                     Ver la propuesta
-                  </Button>
+                  </Link>
                 ) : (
                   "Sin presupuesto vinculado"
                 )}
@@ -1015,16 +1001,9 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Control</dt>
               <dd>
                 {doc.followUpId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    nativeButton={false}
-                    render={
-                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "controles" }} />
-                    }
-                  >
+                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "controles" }} className={linkButton}>
                     Ver controles
-                  </Button>
+                  </Link>
                 ) : (
                   "Sin control vinculado"
                 )}
@@ -1034,16 +1013,9 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Receta</dt>
               <dd>
                 {doc.prescriptionId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    nativeButton={false}
-                    render={
-                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "recetas" }} />
-                    }
-                  >
+                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "recetas" }} className={linkButton}>
                     Ver recetas
-                  </Button>
+                  </Link>
                 ) : (
                   "Sin receta vinculada"
                 )}
@@ -1053,16 +1025,9 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Pago</dt>
               <dd>
                 {doc.paymentId ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    nativeButton={false}
-                    render={
-                      <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "cuenta" }} />
-                    }
-                  >
+                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "cuenta" }} className={linkButton}>
                     Ver cuenta
-                  </Button>
+                  </Link>
                 ) : (
                   "Sin pago vinculado"
                 )}

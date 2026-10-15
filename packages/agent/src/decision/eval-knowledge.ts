@@ -4,14 +4,14 @@
  * cuántas se equivoca diciendo estar seguro. Ejemplos escritos por el equipo
  * (nunca mensajes reales de pacientes sin autorización). Uso:
  *
- *   pnpm --filter @odentia/agent eval:knowledge -- --provider=fake|baseline|jev|openai_decisions [--file=eval/conocimiento-banco.json]
+ *   pnpm --filter @odentia/agent eval:knowledge -- --provider=fake|baseline|jev|openai_decisions [--llm=chatgpt_6|claude_5_5] [--file=eval/conocimiento-banco.json]
  *
  * El resultado es evidencia de este banco, no un benchmark del proveedor.
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import type { KnowledgeEntryItem } from "@odentia/services"
-import { resolveLlmSpec } from "../llm.js"
+import { evalLlmSpec, platformLlmFromEnv } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 import { knowledgeCandidates, knowledgeQuestion, readKnowledgeSelection } from "./knowledge.js"
 
@@ -54,12 +54,8 @@ const entries: KnowledgeEntryItem[] = bank.entries.map((entry, index) => ({
 }))
 
 const env = process.env
-const spec = resolveLlmSpec({ model: null }, null, {
-  modelName: env.LLM_MODEL ?? "fake",
-  apiKey: env.LLM_API_KEY || undefined,
-  baseUrl: env.LLM_BASE_URL,
-  allowInsecureBaseUrl: env.LLM_ALLOW_INSECURE_BASE_URL === "true",
-})
+// Con --provider=fake la línea base es el modelo de decisión falso, sin proveedor.
+const spec = evalLlmSpec(arg("llm", "chatgpt_6"), requested === "fake" ? { fake: true } : platformLlmFromEnv(env))
 const decision = await createDecisionModel(
   provider,
   {

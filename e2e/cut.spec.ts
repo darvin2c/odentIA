@@ -38,7 +38,7 @@ async function onboard(page: Page, org: UiOrg): Promise<void> {
   await page.getByRole("button", { name: "Continuar" }).click()
   await page.getByLabel("Razón social").fill(`${org.name} S.A.C.`)
   await page.getByRole("button", { name: "Continuar" }).click()
-  await page.getByLabel("Nombre de la sucursal").fill(org.branch)
+  await page.getByLabel("Nombre de la sede").fill(org.branch)
   await page.getByRole("button", { name: "Crear organización" }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/home"))
   const branches = await call<{ name: string }[]>(page, "GET", "/api/branches", org.slug)

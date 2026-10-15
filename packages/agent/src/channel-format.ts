@@ -29,9 +29,32 @@ const SINGLE = /(^|[\s(¡¿«"])\*(\S(?:[^*\n]*?\S)?)\*(?=[\s.,;:!?)»"]|$)/g
 const HEADING = /^#{1,6}\s+/gm
 const LINK = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g
 
-/** Convierte las marcas al formato del canal, o las quita si el canal no tiene formato. */
-export function formatForChannel(raw: string, channel: string | null | undefined): string {
-  const text = raw.replace(HEADING, "").replace(LINK, "$1: $2")
+/**
+ * Un emoji con sus añadidos (tono de piel, variante, unión con otro) o una
+ * bandera. Solo los que se dibujan como emoji: ©, ® o ™ sin variante quedan.
+ */
+const EMOJI =
+  "(?:(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F)(?:\\p{Emoji_Modifier}|\\uFE0F|\\u200D(?:\\p{Emoji_Presentation}|\\p{Extended_Pictographic}\\uFE0F?))*|\\p{Regional_Indicator}{2})"
+const EMOJI_AT_LINE_START = new RegExp(`(^|\\n)[ \\t]*(?:${EMOJI})+[ \\t]*`, "gu")
+const EMOJI_INLINE = new RegExp(`[ \\t]*(?:${EMOJI})+`, "gu")
+
+/** Quita los emojis sin dejar espacios de más donde estaban. */
+export function stripEmojis(text: string): string {
+  return text.replace(EMOJI_AT_LINE_START, "$1").replace(EMOJI_INLINE, "")
+}
+
+/**
+ * Convierte las marcas al formato del canal, o las quita si el canal no tiene
+ * formato. Con `emojis: "no"` (la voz de la clínica) también quita los emojis:
+ * la regla del prompt no basta para garantizarlo.
+ */
+export function formatForChannel(
+  raw: string,
+  channel: string | null | undefined,
+  opts: { emojis?: "no" | "pocos" } = {},
+): string {
+  const plain = raw.replace(HEADING, "").replace(LINK, "$1: $2")
+  const text = opts.emojis === "no" ? stripEmojis(plain) : plain
   if (supportsBold(channel)) {
     return text.replace(DOUBLE, "*$1*").replace(DOUBLE_UNDERSCORE, "*$1*")
   }

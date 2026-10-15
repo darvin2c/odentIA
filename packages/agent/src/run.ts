@@ -17,7 +17,7 @@ import {
   getLesson,
   lessonImpact,
   ServiceError,
-  getAgentLlmSecrets,
+  DEFAULT_AGENT_LLM,
   getOrgLocale,
   notifyAgentProviderProblem,
   type RecordRunInput,
@@ -38,15 +38,15 @@ import {
   describeProviderProblem,
   isProviderConfigError,
   LlmConfigError,
+  llmModelName,
   type LlmSpec,
-  type OrgLlmSecrets,
   type PlatformLlm,
   resolveLlmSpec,
 } from "./llm.js"
 import { type AgentSandboxState, type AgentToolCtx, type LessonOverrides, makeAgentTools, performHandoff, SANDBOX_NIL_ID, TOOL_ACTION_LABEL } from "./tools.js"
 export interface AgentRuntime {
   checkpointer: PostgresSaver
-  /** Proveedor de la plataforma; la organización puede traer el suyo. */
+  /** Cuentas de odentIA en los proveedores; la organización solo elige el modelo. */
   platform: PlatformLlm
   /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
   createModel?: (spec: LlmSpec) => Promise<Runnable<BaseMessage[], AIMessage>>
@@ -66,29 +66,6 @@ export interface AgentRuntime {
   embedder?: SearchEmbedder
   secretsKey: Buffer
   callbacks?: Callbacks
-}
-
-/**
- * Modelo efectivo de la organización: proveedor propio descifrado o el de la
- * plataforma. Lanza LlmConfigError si la configuración no sirve.
- */
-export async function resolveOrgLlm(
-  tx: Db,
-  orgId: string,
-  cfg: AgentConfig,
-  runtime: Pick<AgentRuntime, "platform" | "secretsKey">,
-  override?: string | null,
-): Promise<LlmSpec> {
-  let secrets: OrgLlmSecrets | null = null
-  if (cfg.hasLlmApiKey) {
-    try {
-      secrets = await getAgentLlmSecrets(tx, orgId, runtime.secretsKey)
-    } catch {
-      // Clave de cifrado rotada o fila corrupta: es configuración, no un fallo transitorio.
-      throw new LlmConfigError("API_KEY_UNREADABLE", "No se pudo leer la clave guardada del proveedor: vuelve a guardarla")
-    }
-  }
-  return resolveLlmSpec(cfg, secrets, runtime.platform, override)
 }
 
 /** Problema del proveedor que no se arregla reintentando. */
@@ -260,7 +237,7 @@ export async function processAgentRun(
   // Uso de la corrida en curso, para registrarlo también si termina en error.
   let runUsage: AgentToolCtx["usage"] | null = null
   // Modelo resuelto, para registrarlo aunque falle antes o después.
-  let effectiveModel = runtime.platform.modelName
+  let effectiveModel = llmModelName(DEFAULT_AGENT_LLM, runtime.platform)
   let configProblem: ProviderProblem | null = null
   try {
     let prepared:
@@ -268,9 +245,9 @@ export async function processAgentRun(
       | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig }
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
-    const resolveLlm = async (tx: Db, cfg: AgentConfig): Promise<LlmSpec | null> => {
+    const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
       try {
-        return await resolveOrgLlm(tx, orgId, cfg, runtime)
+        return resolveLlmSpec(cfg, runtime.platform)
       } catch (error) {
         if (!(error instanceof LlmConfigError)) throw error
         configProblem = describeProviderProblem(error)
@@ -290,7 +267,7 @@ export async function processAgentRun(
           return { skip: { reason: "agent-off", model: effectiveModel } }
         }
         const cfg = await getAgentConfig(tx, orgId)
-        if (cfg.model?.trim()) effectiveModel = cfg.model.trim()
+        effectiveModel = llmModelName(cfg.llm, runtime.platform)
         if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
         const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId)
         if (limit) return { skip: { reason: limit, model: effectiveModel } }
@@ -376,7 +353,7 @@ export async function processAgentRun(
           await performHandoff(toolCtx, `palabra clave en: ${(keyword.body ?? "").slice(0, 120)}`)
           return { skip: { reason: "handoff", model: effectiveModel } }
         }
-        const spec = await resolveLlm(tx, cfg)
+        const spec = resolveLlm(cfg)
         if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
         return {
           toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
@@ -397,7 +374,7 @@ export async function processAgentRun(
           new Date(),
         )
         const cfg = await getAgentConfig(tx, orgId)
-        if (cfg.model?.trim()) effectiveModel = cfg.model.trim()
+        effectiveModel = llmModelName(cfg.llm, runtime.platform)
         if (!coordination.run) {
           return {
             skip: {
@@ -406,7 +383,7 @@ export async function processAgentRun(
             },
           }
         }
-        const spec = await resolveLlm(tx, cfg)
+        const spec = resolveLlm(cfg)
         if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
         return {
           spec,
@@ -466,6 +443,7 @@ export async function processAgentRun(
     effectiveModel = spec.modelName
     toolCtx.modelName = spec.modelName
     toolCtx.verifyReplies = cfg.replyCheckEnabled
+    toolCtx.emojis = cfg.emojis
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
     runUsage = toolCtx.usage
@@ -746,32 +724,34 @@ function messageText(msg: BaseMessage): string {
 export async function simulateAgentTurn(
   db: Db,
   deps: Pick<AgentRuntime, "platform" | "secretsKey">,
-  input: { orgId: string; conversationId: string; text: string; model?: string },
+  input: { orgId: string; conversationId: string; text: string },
 ): Promise<SimulationResult> {
   const { orgId, conversationId } = input
   const text = input.text.trim()
   if (!text) throw new Error("El mensaje a simular es obligatorio")
   const startedAt = new Date()
-  const { contactId, spec, excludedTools, verifyReplies } = await withOrgContext(db, orgId, async (tx) => {
+  const { contactId, spec, excludedTools, verifyReplies, emojis } = await withOrgContext(db, orgId, async (tx) => {
     const [conv] = await tx
       .select({ contactId: conversation.contactId })
       .from(conversation)
       .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
       .limit(1)
     if (!conv) throw new Error("Conversación no encontrada")
-    // Mismo resolvedor y mismas herramientas que la corrida real; el parámetro solo cambia el nombre.
+    // Mismo resolvedor y mismas herramientas que la corrida real.
     const cfg = await getAgentConfig(tx, orgId)
     return {
       contactId: conv.contactId,
-      spec: await resolveOrgLlm(tx, orgId, cfg, deps, input.model),
+      spec: resolveLlmSpec(cfg, deps.platform),
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
       verifyReplies: cfg.replyCheckEnabled,
+      emojis: cfg.emojis,
     }
   })
   const modelName = spec.modelName
   const toolCtx = baseToolCtx(db, orgId, conversationId, contactId, deps.secretsKey, { excludedTools })
   toolCtx.dryRun = true
   toolCtx.verifyReplies = verifyReplies
+  toolCtx.emojis = emojis
   toolCtx.draftText = text.slice(0, 4000)
   const model = await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
@@ -829,7 +809,6 @@ export async function simulateAgentSandbox(
     transcript: SandboxTurn[]
     message: string
     state?: AgentSandboxState
-    model?: string
     /** Probar con una lección aún sin aprobar, o sin una activa. */
     lessonOverrides?: LessonOverrides
   },
@@ -842,13 +821,14 @@ export async function simulateAgentSandbox(
     const cfg = await getAgentConfig(tx, orgId)
     return {
       cfg,
-      spec: await resolveOrgLlm(tx, orgId, cfg, deps, input.model),
+      spec: resolveLlmSpec(cfg, deps.platform),
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
     }
   })
   const toolCtx = baseToolCtx(db, orgId, SANDBOX_NIL_ID, SANDBOX_NIL_ID, deps.secretsKey, { excludedTools })
   toolCtx.dryRun = true
   toolCtx.verifyReplies = cfg.replyCheckEnabled
+  toolCtx.emojis = cfg.emojis
   toolCtx.modelName = spec.modelName
   toolCtx.draftText = text.slice(0, 4000)
   if (deps.embedder) toolCtx.embedder = deps.embedder
