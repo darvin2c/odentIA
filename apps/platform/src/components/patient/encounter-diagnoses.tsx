@@ -37,6 +37,7 @@ export function EncounterDiagnoses({
   beforeWrite,
   onChanged,
   onPendingChange,
+  autoOpen = false,
 }: {
   patientId: string
   detail: EncounterDetail
@@ -44,11 +45,13 @@ export function EncounterDiagnoses({
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
   onPendingChange: (pending: boolean) => void
+  /** Recién agregado el bloque: el formulario de agregar ya viene abierto. */
+  autoOpen?: boolean
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const typeGroupId = useId()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen && !disabled)
   const [code, setCode] = useState("")
   const [description, setDescription] = useState("")
   // Sin valor por defecto: afirmar la certeza es una decisión explícita del clínico.

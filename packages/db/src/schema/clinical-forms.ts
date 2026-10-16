@@ -12,7 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
-import { encounter, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
+import { cie10Code, encounter, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
 import { orgFk, timestamps } from "./crm.js"
 
 /**
@@ -285,8 +285,46 @@ export const consentTemplate = pgTable(
   ],
 )
 
+/**
+ * Servicios para los que se pide una plantilla de consentimiento («Se pide
+ * para»). El vínculo es por la clave de la plantilla, no por una versión:
+ * publicar otra versión no lo pierde. Al registrar o indicar uno de esos
+ * servicios, la atención propone preparar el consentimiento.
+ */
+export const consentTemplateService = pgTable(
+  "consent_template_service",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    templateKey: text("template_key").notNull(),
+    /** FK compuesta por organización (service_catalog) en la migración. */
+    serviceId: uuid("service_id").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("consent_template_service_uidx").on(
+      table.organizationId,
+      table.templateKey,
+      table.serviceId,
+    ),
+    index("consent_template_service_service_idx").on(table.organizationId, table.serviceId),
+    check(
+      "consent_template_service_key_check",
+      sql`char_length(${table.templateKey}) BETWEEN 2 AND 40`,
+    ),
+  ],
+)
+
 export const CONSENT_STATUSES = ["pendiente", "firmado", "revocado", "anulado"] as const
 export const CONSENT_SIGNER_KINDS = ["paciente", "representante"] as const
+/**
+ * Cómo se firmó: en la clínica (trazo en la pantalla), en papel (foto de la
+ * hoja firmada) o por enlace antes de llegar (paso 6 de la fase 3).
+ */
+export const CONSENT_SIGNATURE_METHODS = ["clinica", "papel", "enlace"] as const
+/** Nivel real de la firma: simple mientras no exista la avanzada con certificado. */
+export const CONSENT_SIGNATURE_LEVELS = ["simple"] as const
 
 /**
  * Documento de consentimiento por procedimiento/plan. El documento aceptado
@@ -356,6 +394,14 @@ export const consentDocument = pgTable(
     /** PDF del documento firmado guardado como documento clínico y su huella. */
     pdfDocumentId: uuid("pdf_document_id"),
     pdfSha256: text("pdf_sha256"),
+    /**
+     * Cómo se firmó (`CONSENT_SIGNATURE_METHODS`) y con qué nivel; nulos en un
+     * pendiente y en lo firmado antes de existir (se lee como «en la clínica»).
+     */
+    signatureMethod: text("signature_method"),
+    signatureLevel: text("signature_level"),
+    /** Foto o escaneo de la hoja firmada en papel (FK compuesta en la migración). */
+    paperDocumentId: uuid("paper_document_id"),
     ...timestamps,
   },
   (table) => [
@@ -369,6 +415,18 @@ export const consentDocument = pgTable(
     check(
       "consent_document_signer_check",
       sql`${table.signerKind} in ('paciente','representante')`,
+    ),
+    check(
+      "consent_document_signature_method_check",
+      sql`${table.signatureMethod} IS NULL OR ${table.signatureMethod} IN ('clinica','papel','enlace')`,
+    ),
+    check(
+      "consent_document_signature_level_check",
+      sql`${table.signatureLevel} IS NULL OR ${table.signatureLevel} IN ('simple')`,
+    ),
+    check(
+      "consent_document_paper_check",
+      sql`CASE WHEN ${table.signatureMethod} = 'papel' THEN ${table.paperDocumentId} IS NOT NULL ELSE ${table.paperDocumentId} IS NULL END`,
     ),
   ],
 )
@@ -391,7 +449,8 @@ export const consentEvent = pgTable(
   (table) => [index("consent_event_document_idx").on(table.documentId)],
 )
 
-export const CLINICAL_ORDER_KINDS = ["laboratorio", "interconsulta"] as const
+/** `interconsulta` se dice «Derivación» en pantalla. */
+export const CLINICAL_ORDER_KINDS = ["imagen", "laboratorio", "interconsulta"] as const
 export const CLINICAL_ORDER_STATUSES = [
   "solicitado",
   "en_proceso",
@@ -426,16 +485,32 @@ export const clinicalOrder = pgTable(
     resultText: text("result_text"),
     resultAt: timestamp("result_at", { withTimezone: true }),
     completedBy: text("completed_by").references(() => user.id),
+    /** CIE-10 de la atención que motiva la orden. */
+    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    /** Resultado subido a la propia orden (FK compuesta en la migración). */
+    resultDocumentId: uuid("result_document_id"),
+    /** Derivación a un colega de la clínica: recibe la tarea. */
+    recipientUserId: text("recipient_user_id").references(() => user.id),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: text("cancelled_by").references(() => user.id),
+    cancelReason: text("cancel_reason"),
     ...timestamps,
   },
   (table) => [
     index("clinical_order_org_patient_idx").on(table.organizationId, table.patientId),
     index("clinical_order_org_status_idx").on(table.organizationId, table.status),
     index("clinical_order_org_specialty_idx").on(table.organizationId, table.specialtyId),
-    check("clinical_order_kind_check", sql`${table.kind} in ('laboratorio','interconsulta')`),
+    check(
+      "clinical_order_kind_check",
+      sql`${table.kind} in ('imagen','laboratorio','interconsulta')`,
+    ),
     check(
       "clinical_order_status_check",
       sql`${table.status} in ('solicitado','en_proceso','completado','cancelado')`,
+    ),
+    check(
+      "clinical_order_cancel_check",
+      sql`(${table.cancelledAt} IS NULL) = (${table.cancelReason} IS NULL) AND (${table.cancelledAt} IS NULL OR ${table.status} = 'cancelado') AND (${table.cancelReason} IS NULL OR char_length(${table.cancelReason}) BETWEEN 1 AND 2000)`,
     ),
   ],
 )
@@ -445,6 +520,7 @@ export type ClinicalFormTemplateRow = typeof clinicalFormTemplate.$inferSelect
 export type ClinicalFormResponseRow = typeof clinicalFormResponse.$inferSelect
 export type ConsentTemplateRow = typeof consentTemplate.$inferSelect
 export type ConsentDocumentRow = typeof consentDocument.$inferSelect
+export type ConsentTemplateServiceRow = typeof consentTemplateService.$inferSelect
 export type ClinicalOrderRow = typeof clinicalOrder.$inferSelect
 
 // Referencia para que el barrel del padre no rompa si aún no re-exporta este archivo.
@@ -456,6 +532,7 @@ export const CLINICAL_FORMS_TABLES = [
   "clinical_form_response",
   "clinical_form_addendum",
   "consent_template",
+  "consent_template_service",
   "consent_document",
   "consent_event",
   "clinical_order",

@@ -1,4 +1,5 @@
 import { currencyFractionDigits } from "@odentia/clinical"
+import type { AppointmentVisit } from "./agenda"
 import type { DebtRow } from "./finance-debt"
 
 /** Lo que devuelve `/api/workspace/home`: «Te espera» ya ordenado y lo de hoy según el rol. */
@@ -6,7 +7,7 @@ export interface WorkspaceHome {
   date: string
   timezone: string
   locale: string
-  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure" | "ownAppointments", boolean>
+  access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure" | "ownAppointments", boolean> & { attends?: boolean }
   /** Hay más de una sede activa: solo entonces se ofrece elegirla. */
   multiBranch: boolean
   /** `agent`: Recepción y el Administrador encendidos; solo viaja a quien puede encenderlos. */
@@ -16,6 +17,8 @@ export interface WorkspaceHome {
   waiting: WaitingRow[]
   /** La agenda de la sede o las citas de quien atiende; null sin permiso de agenda. */
   today: WorkspaceToday | null
+  /** La agenda de la sede en una línea, para quien hoy atiende y además ve la sede. */
+  agendaLine: { branch: { id: string; name: string }; summary: WorkspaceTodaySummary } | null
   /** La caja del día de la sede; null sin permiso de caja. */
   cash: WorkspaceCash | null
 }
@@ -36,6 +39,16 @@ export interface WaitingBudgets {
   items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
 }
 export type WaitingRow =
+  /** Una atención de otro día que quedó en borrador y lleva quien mira: «Continuar» o «Anular con motivo». */
+  | {
+      kind: "staleEncounter"
+      id: string
+      patientId: string
+      patientName: string
+      startedAt: string
+      /** Lo que falta para cerrarla (`reason`, `diagnosis`, `evolution`, `signature`). */
+      missing: string[]
+    }
   | {
       kind: "case"
       id: string
@@ -67,6 +80,8 @@ export type WaitingRow =
   /** Personas a las que el agente no pudo escribir hoy, por motivo. */
   | { kind: "unreached"; total: number; byCause: Array<{ total: number; reason: string }> }
   | ({ kind: "budgets" } & WaitingBudgets)
+  /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
+  | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
   | { kind: "more"; of: "cases" | "tasks" | "unconfirmed"; count: number }
 export interface WorkspaceAppointment {
   id: string
@@ -75,17 +90,34 @@ export interface WorkspaceAppointment {
   startsAt: string
   status: string
   serviceName: string | null
+  dentistUserId: string
   dentistName: string
   chairName: string
   branchName: string
+  /** Cuándo llegó; null si nadie lo marcó. */
+  arrivedAt: string | null
+  /** El momento de la cita: de ahí salen la sala, «Ahora» y «Más tarde». */
+  visit: AppointmentVisit
+  /** La atención abierta unida a la cita: con quién y desde cuándo. */
+  encounter: { id: string; startedAt: string; dentistUserId: string; dentistName: string } | null
+  /** La siguiente que aún no llega. */
   next: boolean
+}
+/** Cuántas citas hay hoy: en sala, en atención, atendidas y por venir (las que aún no llegan). */
+export interface WorkspaceTodaySummary {
+  total: number
+  waiting: number
+  attending: number
+  attended: number
+  upcoming: number
+  unconfirmed: number
 }
 export interface WorkspaceToday {
   scope: "branch" | "mine"
   branch: { id: string; name: string } | null
   /** Zona en que se leen las horas: la de la sede o la de la clínica. */
   timezone: string
-  summary: { total: number; attended: number; upcoming: number; unconfirmed: number }
+  summary: WorkspaceTodaySummary
   appointments: WorkspaceAppointment[]
 }
 export interface WorkspaceCash {

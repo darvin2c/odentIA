@@ -56,7 +56,10 @@ export {
 export { ScheduleResourceChips, type ScheduleResourceChipsProps } from "./resource-chips.js"
 export { ResourceSelect, type ResourceSelectOption } from "./resource-select.js"
 export {
+  entryState,
+  entryStateLabel,
   SCHEDULE_AGENDA_LABELS,
+  SCHEDULE_STATE_LABELS,
   SCHEDULE_STATUS_LABELS,
   SCHEDULE_STATUS_ORDER,
   StatusDot,
@@ -87,6 +90,8 @@ export type {
   SchedulePreview,
   ScheduleResize,
   ScheduleResizeHandler,
+  ScheduleStage,
+  ScheduleState,
   ScheduleStatus,
   ScheduleTone,
   ScheduleWindow,

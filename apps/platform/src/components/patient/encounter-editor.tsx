@@ -1,8 +1,6 @@
 import { formatVitals, parseVitals, VITAL_SIGNS, type Vitals } from "@odentia/clinical"
 import {
-  Badge,
   Button,
-  ButtonGroup,
   cn,
   Field,
   FieldLabel,
@@ -28,6 +26,7 @@ import {
   FormPanel,
   MasterDetail,
   useDetailMode,
+  useHeaderUtilities,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
@@ -39,7 +38,6 @@ import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-sugg
 import {
   clinicDateTimeValue,
   fetchFollowUps,
-  fetchPrescriptions,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
@@ -49,14 +47,12 @@ import {
   type ClosingRequirement,
   fetchEncounterClosing,
   fetchMyProfessionalProfile,
-  registrationLabel,
   takeOverEncounterApi,
   voidEncounterApi,
 } from "../../lib/encounters"
 import {
   type Encounter,
   type EncounterDetail,
-  encounterStatusLabel,
   hcLabel,
   type OdontogramState,
   type PatientFull,
@@ -66,12 +62,20 @@ import { useOrgProfile } from "../../lib/org"
 import { OdontogramStudio } from "../odontogram-studio"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
-import { ControlesPanel, RecetasPanel } from "./clinical-panels"
+import { useAgentPanelDockBlocker } from "../agent-panel"
+import { AttendingForNotice } from "../agenda/attending-for-notice"
+import { prepareConsents, type ConsentNeed } from "../../lib/encounter-documents"
+import { fetchConsents, type ConsentDocument } from "../../lib/clinical-forms"
+import { ageFrom } from "../../lib/patients"
+import { ControlesPanel } from "./clinical-panels"
+import { ConsentSigningScreen, useSignAs } from "./consent-signing"
+import { EncounterClosingDialog } from "./encounter-closing"
+import { DeclaredQuestionnaireNotice, EncounterContextBody } from "./encounter-context"
+import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
-import { ImagenesTab } from "./imagenes-tab"
 import { PatientClinicalStrip } from "./patient-header"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
@@ -83,8 +87,6 @@ export interface EncounterEditorProps {
   onChanged: () => Promise<void>
   /** Invalida resumen/plan/timeline y navega (cuenta si hubo cargos, historia si no). */
   onFinalized: (hasCharges: boolean) => Promise<void>
-  /** Solo navega: el editor hace flush antes de llamarla. */
-  onBack: () => void | Promise<void>
 }
 type DraftKey =
   | NoteKey
@@ -97,7 +99,8 @@ type DraftKey =
   | "teeth"
   | "examination"
 
-type SaveState = "saved" | "pending" | "saving" | "error"
+/** Solo guardado automático: «Guardado HH:MM», «Guardando…» o «Sin conexión». */
+type SaveState = "saved" | "pending" | "saving" | "error" | "offline"
 
 /** Campos de texto de la nota normativa que se guardan tal cual (vacío = null). */
 type NoteKey = "presentIllness" | "illnessDuration" | "prognosis" | "auxiliaryExams"
@@ -115,7 +118,6 @@ type SectionKey =
   | "odontograma"
   | "procedimientos"
   | "plan"
-  | "recetas"
   | "controles"
   | "documentos"
   | "evolucion"
@@ -182,11 +184,9 @@ const MAX_INDICATIONS = 4000
 const MAX_NEXT_STEP = 2000
 const APPT_INCOMPLETE = "Completa fecha y hora de la revisión sugerida, o limpia ambas."
 
-const SAVE_LABEL: Record<SaveState, string> = {
-  saved: "Guardado",
-  pending: "Cambios pendientes…",
-  saving: "Guardando…",
-  error: "Error al guardar",
+/** Sin red: el navegador lo dice o la petición ni siquiera llegó. */
+function isOffline(err: unknown): boolean {
+  return (typeof navigator !== "undefined" && navigator.onLine === false) || err instanceof TypeError
 }
 
 // Fecha y hora de la revisión sugerida, en la zona de la clínica (no la del navegador).
@@ -271,6 +271,11 @@ function toExaminationDraft(examination: Encounter["examination"]): ExaminationD
   return empty ? null : draft
 }
 
+/** Primer nombre de la persona, como lo dice la pantalla: «falta 1 firma de Lucía». */
+function firstNameOf(patient: PatientFull): string {
+  return (patient.patient.givenNames ?? patient.patient.displayName).trim().split(/\s+/)[0] ?? ""
+}
+
 function saveMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.shape.message) return err.shape.message
   return err instanceof Error ? err.message : fallback
@@ -336,7 +341,6 @@ export function EncounterEditor({
   patient,
   onChanged,
   onFinalized,
-  onBack,
 }: EncounterEditorProps): React.JSX.Element {
   const encounter = detail.encounter
   const encounterId = encounter.id
@@ -388,7 +392,6 @@ export function EncounterEditor({
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
   const [transcriptOpen, setTranscriptOpen] = useState(false)
-  const [backing, setBacking] = useState(false)
   // Hora de fin declarada al cerrar (HH:MM local); vacía = ahora.
   const [endTime, setEndTime] = useState("")
   const [voidOpen, setVoidOpen] = useState(false)
@@ -396,7 +399,21 @@ export function EncounterEditor({
   const [voiding, setVoiding] = useState(false)
   const [takingOver, setTakingOver] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  // Hora del último guardado, para «Guardado HH:MM».
+  const [savedAt, setSavedAt] = useState<string>(encounter.updatedAt)
+  // Antecedentes y última atención, al lado y sin salir.
+  const [contextOpen, setContextOpen] = useState(false)
+  // Bloque recién agregado: abre su formulario sin un clic de más.
+  const [justAdded, setJustAdded] = useState<SectionKey | null>(null)
+  // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
+  const [skipReason, setSkipReason] = useState("")
+  // Consentimientos que se firman en la silla desde el cierre.
+  const [signingDocs, setSigningDocs] = useState<ConsentDocument[] | null>(null)
   const myUserId = useMyUserId()
+  // El borrador ocupa la página: el agente se abre como cajón, sin desmontarlo.
+  useAgentPanelDockBlocker(true)
+  const utilities = useHeaderUtilities()
+  const signAs = useSignAs()
   // Quien lleva la atención es quien la edita y la firma; otro profesional la
   // lee y, para continuarla, toma el relevo.
   const attending = encounter.dentistUserId === myUserId
@@ -445,11 +462,20 @@ export function EncounterEditor({
   const childCountRef = useRef(0)
   const latestWriteAtRef = useRef(new Date(encounter.updatedAt).getTime())
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se monta una vez; `drain` solo lee refs
   useEffect(() => {
     mountedRef.current = true
+    // Al volver la conexión, lo escrito se guarda solo.
+    const retry = () => {
+      if (dirtyRef.current.size > 0) void drain().catch(() => {})
+    }
+    window.addEventListener("online", retry)
     return () => {
       mountedRef.current = false
+      window.removeEventListener("online", retry)
       window.clearTimeout(timerRef.current)
+      // Salir por la miga o el menú no pierde lo último escrito.
+      if (dirtyRef.current.size > 0) void drain().catch(() => {})
     }
   }, [])
 
@@ -463,13 +489,18 @@ export function EncounterEditor({
     queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
     enabled: canRead,
   })
-  // Recetas y controles no vienen en el detalle: se cuentan por atención para
-  // saber si el bloque ya tiene contenido y debe seguir visible.
-  const prescriptionsQuery = useQuery({
-    queryKey: ["prescriptions", patientId],
-    queryFn: () => fetchPrescriptions(patientId),
+  // Los documentos de la atención (consentimientos, órdenes, recetas,
+  // formularios, imágenes) y lo que pide en consentimientos: una sola lectura
+  // para el bloque, su resumen y el cierre.
+  const docs = useEncounterDocuments(patientId, encounterId, detail)
+  // Las atenciones de la persona, para subir un archivo unido a esta.
+  const encountersQuery = useQuery({
+    queryKey: ["encounters", patientId, "lista"],
+    queryFn: () => apiFetch<{ data: Encounter[] }>(`/api/patients/${patientId}/encounters?limit=50`),
     enabled: canRead,
   })
+  // Los controles no vienen en el detalle: se cuentan por atención para saber
+  // si el bloque ya tiene contenido y debe seguir visible.
   const followUpsQuery = useQuery({
     queryKey: ["follow-ups", patientId],
     queryFn: () => fetchFollowUps(patientId),
@@ -606,11 +637,18 @@ export function EncounterEditor({
         if (mountedRef.current) {
           setSaveError(null)
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
+          setSavedAt(new Date().toISOString())
         }
       } catch (err) {
         if (mountedRef.current) {
-          setSaveError(saveMessage(err, "No se pudo guardar el borrador."))
-          setSaveState("error")
+          // Sin conexión lo escrito se queda en la pantalla y se guarda al volver.
+          if (isOffline(err)) {
+            setSaveError(null)
+            setSaveState("offline")
+          } else {
+            setSaveError(saveMessage(err, "No se pudo guardar el borrador."))
+            setSaveState("error")
+          }
         }
         throw err
       }
@@ -784,7 +822,7 @@ export function EncounterEditor({
 
   /** Control de página: guarda el borrador (flush + refresh) sin formulario. */
   const handleSaveDraft = async () => {
-    if (explicitSaving || finalizing || backing || childCountRef.current > 0) return
+    if (explicitSaving || finalizing || childCountRef.current > 0) return
     if (apptBlocked()) {
       setApptError(APPT_INCOMPLETE)
       setOpenSection("evolucion")
@@ -860,6 +898,24 @@ export function EncounterEditor({
     void onFinalized(hadCharges)
   }
 
+  /**
+   * Lo que quedó sugerido sin confirmar no entra a la historia: se descarta y
+   * se sigue al cierre, con lo que falta y la hora de fin.
+   */
+  const discardDictationAndContinue = async () => {
+    try {
+      await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
+      await dictation.refresh()
+      // Sin consentimientos por firmar, «Descartarla y firmar» firma; si falta
+      // alguno, sigue al cierre para firmarlo o decir por qué se sigue sin él.
+      if ((closingQuery.data?.data.consents ?? []).length === 0) await handleConfirmFinalize()
+      else setConfirmWithDictation(false)
+    } catch (err) {
+      setSaveError(saveMessage(err, "No se pudieron descartar las sugerencias."))
+      setConfirmOpen(false)
+    }
+  }
+
   const handleConfirmFinalize = async () => {
     if (finalizing || childCountRef.current > 0) return
     if (apptBlocked()) {
@@ -871,14 +927,10 @@ export function EncounterEditor({
     setApptError(null)
     setFinalizing(true)
     try {
-      // Lo que quedó sugerido sin confirmar no entra a la historia: se descarta antes de firmar.
-      if (dictationPending > 0) {
-        await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
-        await dictation.refresh()
-      }
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
       const endedAt = endedAtIso()
+      const unsigned = closingQuery.data?.data.consents ?? []
       const result = await apiFetch<{
         data: {
           charges: Array<{ id: string }>
@@ -887,36 +939,24 @@ export function EncounterEditor({
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
-        body: JSON.stringify(endedAt ? { endedAt } : {}),
+        body: JSON.stringify({
+          ...(endedAt ? { endedAt } : {}),
+          // «Seguir sin él»: solo si falta algún consentimiento.
+          ...(unsigned.length > 0 ? { consentSkipReason: skipReason.trim() } : {}),
+        }),
       })
       setConfirmOpen(false)
       setFinalizedBilling(result.data.billing)
     } catch (err) {
-      // Falla: se conserva el borrador intacto y se muestra el error real.
+      // Falla: se conserva el borrador intacto y se muestra el error real. El
+      // estado del guardado lo deja `drain` si lo que falló fue guardar.
       if (mountedRef.current) {
         setSaveError(saveMessage(err, "No se pudo finalizar la atención."))
-        setSaveState("error")
         setConfirmOpen(false)
         void refreshClosing()
       }
     } finally {
       if (mountedRef.current) setFinalizing(false)
-    }
-  }
-
-  const handleBack = async () => {
-    if (backing || finalizing || childCountRef.current > 0) return
-    setBacking(true)
-    try {
-      await flush()
-      await onBack()
-    } catch (err) {
-      if (mountedRef.current) {
-        setSaveError(saveMessage(err, "No se pudo guardar el borrador."))
-        setSaveState("error")
-      }
-    } finally {
-      if (mountedRef.current) setBacking(false)
     }
   }
 
@@ -930,6 +970,8 @@ export function EncounterEditor({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] }),
       queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
+      // Registrar o indicar un servicio puede pedir un consentimiento.
+      queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
       refreshClosing(),
     ])
   }
@@ -954,11 +996,8 @@ export function EncounterEditor({
 
   const mode = useDetailMode()
 
-  const locked = !canWrite || !attending || childCount > 0 || finalizing || backing || voiding
+  const locked = !canWrite || !attending || childCount > 0 || finalizing || voiding
 
-  const prescriptions = (prescriptionsQuery.data?.data ?? []).filter(
-    (row) => row.encounterId === encounterId,
-  )
   const followUps = (followUpsQuery.data?.data ?? []).filter(
     (row) => row.originEncounterId === encounterId,
   )
@@ -1043,13 +1082,6 @@ export function EncounterEditor({
       empty: detail.indicatedItems.length === 0 && detail.plannedItems.length === 0,
     },
     {
-      key: "recetas",
-      title: "Recetas",
-      description: "Prescripciones emitidas en esta atención.",
-      summary: prescriptions.length === 0 ? "Sin recetas" : `${prescriptions.length} receta(s)`,
-      empty: prescriptions.length === 0,
-    },
-    {
       key: "controles",
       title: "Controles",
       description: "Controles y mantenimientos indicados desde esta atención.",
@@ -1059,18 +1091,24 @@ export function EncounterEditor({
     {
       key: "documentos",
       title: "Documentos",
-      description: "Radiografías, imágenes y documentos de la atención.",
+      description: "Receta, consentimiento, orden, formulario, imagen o archivo de esta atención.",
       summary:
-        detail.documents.length === 0
-          ? "Sin documentos"
-          : `${detail.documents.length} documento(s)`,
-      empty: detail.documents.length === 0,
+        [
+          docs.total === 0 ? "Sin documentos" : `${docs.total} documento(s)`,
+          docs.pendingSignatures.length > 0
+            ? `${docs.pendingSignatures.length} sin firmar`
+            : "",
+          docs.toPrepare.length > 0 ? "necesita consentimiento" : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      // Lo que la atención pide en consentimientos también deja el bloque a la vista.
+      empty: docs.total === 0 && docs.needs.length === 0,
     },
     {
       key: "evolucion",
       title: "Evolución, pronóstico e indicaciones",
-      description:
-        "Exámenes auxiliares, pronóstico, evolución (obligatoria para cerrar), indicaciones y seguimiento.",
+      description: "Pronóstico, evolución (obligatoria para cerrar), indicaciones y seguimiento.",
       summary:
         evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === ""
           ? "Sin evolución registrada"
@@ -1114,6 +1152,9 @@ export function EncounterEditor({
       next.add(key)
       return next
     })
+    // Un bloque nuevo abre su formulario al agregarlo, sin un clic de más.
+    setJustAdded(key)
+    setContextOpen(false)
     setOpenSection(key)
   }
 
@@ -1129,6 +1170,7 @@ export function EncounterEditor({
 
   const closeSection = () => {
     setOpenSection(null)
+    setJustAdded(null)
     // Los campos escalares son del editor: cerrar no descarta nada y el
     // autosave sigue vivo. El flush evita dejar un cambio a medias.
     void flush().catch(() => {})
@@ -1152,6 +1194,12 @@ export function EncounterEditor({
     if (mode === "panel" && openSection) closeSection()
     setTranscriptOpen(true)
   }
+  const contextSurface = {
+    title: "Antecedentes y última atención",
+    description: "Solo lectura: se editan en Clínica.",
+    onClose: () => setContextOpen(false),
+    children: <EncounterContextBody patientId={patientId} encounterId={encounterId} />,
+  }
   const transcriptSurface = {
     title: "Lo dictado",
     description: "Tu respaldo: lo resaltado generó una sugerencia.",
@@ -1159,11 +1207,61 @@ export function EncounterEditor({
     children: <DictationTranscript session={dictation} />,
   }
   const closingId = `${uid}-cierre`
-  const canSign = !(locked || explicitSaving || backing || !closingReady || dictation.busy)
+  // No se firma lo que no se guardó: sin conexión o con cambios por guardar, espera.
+  const unsaved = saveState !== "saved"
+  const canSign = !(locked || explicitSaving || !closingReady || dictation.busy || unsaved)
+  const signBlockedReason =
+    saveState === "offline"
+      ? "Sin conexión: lo escrito se guarda al volver y recién entonces se puede firmar."
+      : saveState === "pending" || saveState === "saving"
+        ? "Guardando lo último que escribiste…"
+        : saveState === "error"
+          ? "No se pudo guardar lo último: revisa el aviso y vuelve a intentarlo."
+          : null
   const openSign = () => {
     setEndTime("")
+    setSkipReason("")
     setConfirmWithDictation(dictationPending > 0)
     setConfirmOpen(true)
+  }
+  const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
+  const [preparing, setPreparing] = useState(false)
+  /** «Preparar» desde la fila del bloque: genera los consentimientos que pide la atención. */
+  const prepareFromRow = async () => {
+    if (preparing) return
+    setPreparing(true)
+    try {
+      await flush()
+      await prepareConsents(patientId, encounterId)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["consent-needs", patientId, encounterId] }),
+        queryClient.invalidateQueries({ queryKey: ["consents", patientId] }),
+        refreshClosing(),
+      ])
+    } catch (err) {
+      setSaveError(saveMessage(err, "No se pudo preparar el consentimiento."))
+    } finally {
+      if (mountedRef.current) setPreparing(false)
+    }
+  }
+  const signer = firstNameOf(patient)
+  /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la silla. */
+  const signConsentsNow = async (need: ConsentNeed) => {
+    try {
+      if (need.status === "sin_preparar") {
+        await flush()
+        await prepareConsents(patientId, encounterId, [need.templateKey])
+      }
+      const list = await queryClient.fetchQuery({
+        queryKey: ["consents", patientId],
+        queryFn: () => fetchConsents({ patientId }),
+        staleTime: 0,
+      })
+      const pending = list.data.filter((doc) => doc.encounterId === encounterId && doc.status === "pendiente")
+      if (pending.length > 0) setSigningDocs(pending)
+    } catch (err) {
+      setSaveError(saveMessage(err, "No se pudo preparar el consentimiento."))
+    }
   }
   /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
   const signFromBar = () => {
@@ -1208,7 +1306,7 @@ export function EncounterEditor({
         {branchesQuery.isError && <p role="alert">No se pudieron cargar las sedes.</p>}
       </Field>
       <Field>
-        <FieldLabel htmlFor={`${uid}-reason`}>Motivo (máx. {MAX_REASON})</FieldLabel>
+        <FieldLabel htmlFor={`${uid}-reason`}>Motivo</FieldLabel>
         <Textarea
           id={`${uid}-reason`}
           rows={2}
@@ -1406,18 +1504,14 @@ export function EncounterEditor({
   const evolucionBody = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-aux-exams`}>Exámenes auxiliares</FieldLabel>
-          <Textarea
-            id={`${uid}-aux-exams`}
-            rows={2}
-            value={notes.auxiliaryExams}
-            disabled={locked}
-            maxLength={4000}
-            placeholder="Solicitados o con resultado (radiografías, laboratorio…)"
-            onChange={(event) => editNote("auxiliaryExams", event.target.value)}
-          />
-        </Field>
+        {/* Los exámenes auxiliares se piden como orden (bloque Documentos); lo
+            que se escribió antes en texto libre se sigue leyendo. */}
+        {notes.auxiliaryExams.trim() ? (
+          <div className="flex flex-col gap-1 text-sm">
+            <p className="text-xs font-medium text-muted-foreground">Exámenes auxiliares (escritos antes)</p>
+            <p className="whitespace-pre-wrap">{notes.auxiliaryExams}</p>
+          </div>
+        ) : null}
         <Field>
           <FieldLabel htmlFor={`${uid}-prognosis`}>Pronóstico</FieldLabel>
           <Textarea
@@ -1430,7 +1524,7 @@ export function EncounterEditor({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor={`${uid}-evolution`}>Evolución (máx. {MAX_EVOLUTION})</FieldLabel>
+          <FieldLabel htmlFor={`${uid}-evolution`}>Evolución</FieldLabel>
           <Textarea
             id={`${uid}-evolution`}
             rows={3}
@@ -1442,9 +1536,7 @@ export function EncounterEditor({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor={`${uid}-indications`}>
-            Indicaciones (máx. {MAX_INDICATIONS})
-          </FieldLabel>
+          <FieldLabel htmlFor={`${uid}-indications`}>Indicaciones</FieldLabel>
           <Textarea
             id={`${uid}-indications`}
             rows={2}
@@ -1456,9 +1548,7 @@ export function EncounterEditor({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor={`${uid}-next-step`}>
-            Paso siguiente (máx. {MAX_NEXT_STEP})
-          </FieldLabel>
+          <FieldLabel htmlFor={`${uid}-next-step`}>Paso siguiente</FieldLabel>
           <Textarea
             id={`${uid}-next-step`}
             rows={2}
@@ -1513,6 +1603,7 @@ export function EncounterEditor({
         beforeWrite={flush}
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
+        autoOpen={justAdded === "hallazgos"}
       />
     ),
     examen: examenBody,
@@ -1553,6 +1644,7 @@ export function EncounterEditor({
           beforeWrite={flush}
           onChanged={handleChildChanged}
           onPendingChange={handlePendingChange}
+          autoOpen={justAdded === "procedimientos"}
         />
         <EncounterTreatments
           patientId={patientId}
@@ -1574,14 +1666,6 @@ export function EncounterEditor({
         onPendingChange={handlePendingChange}
       />
     ),
-    recetas: (
-      <RecetasPanel
-        patientId={patientId}
-        encounterId={encounterId}
-        encounterOnly
-        items={attentionItems}
-      />
-    ),
     controles: (
       <ControlesPanel
         patientId={patientId}
@@ -1591,14 +1675,18 @@ export function EncounterEditor({
       />
     ),
     documentos: (
-      <ImagenesTab
+      <EncounterDocumentsBlock
         patientId={patientId}
         encounterId={encounterId}
-        beforeWrite={flush}
-        onPendingChange={handlePendingChange}
+        patient={patient}
+        detail={detail}
+        encounters={encountersQuery.data?.data ?? []}
+        attentionItems={attentionItems}
         disabled={locked}
-        readOnly={!canWrite}
-        onUploaded={handleChildChanged}
+        beforeWrite={flush}
+        onChanged={handleChildChanged}
+        onPendingChange={handlePendingChange}
+        openMenu={justAdded === "documentos"}
       />
     ),
     evolucion: evolucionBody,
@@ -1620,13 +1708,14 @@ export function EncounterEditor({
     }
     const body = sectionBody[openSection]
     if (FORM_SECTIONS.includes(openSection)) {
+      // Solo guardado automático: el bloque no lleva botón de guardar.
       const form = {
         ...surface,
         children: body,
         onSubmit: submitSection,
         isSubmitting: explicitSaving,
         error: saveError,
-        submitLabel: "Guardar",
+        hideSubmit: true,
       }
       return target === "panel" ? <FormPanel {...form} /> : <FormDrawer open {...form} />
     }
@@ -1638,47 +1727,87 @@ export function EncounterEditor({
     )
   }
 
-  // Con quién se firma y a qué hora termina: igual con o sin sugerencias pendientes.
+  // Con quién se firma: lo mismo con o sin sugerencias pendientes (la hora de fin va en el cierre).
   const signFields = (
-    <>
-      <p className="text-sm">
-        Firmarás como{" "}
-        <strong>
-          {profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? "—"}
-        </strong>
-        {profileQuery.data?.data.professionalTitle ? ` · ${profileQuery.data.data.professionalTitle}` : ""}
-        {profileQuery.data && registrationLabel(profileQuery.data.data)
-          ? ` · ${registrationLabel(profileQuery.data.data)}`
-          : ""}
-      </p>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-ended`}>Hora de fin</FieldLabel>
-        <Input
-          id={`${uid}-ended`}
-          type="time"
-          className="w-36"
-          value={endTime}
-          onChange={(event) => setEndTime(event.target.value)}
-        />
-        <p className="text-xs text-muted-foreground">Vacía: se registra la hora actual.</p>
-      </Field>
-    </>
+    <p className="text-sm">
+      Firmarás como <strong>{signAs.text ?? "—"}</strong>
+    </p>
   )
+  const age = ageFrom(patient.patient.birthDate)
+  // «Guardado 10:21» / «Guardando…» / «Sin conexión»: siempre a la vista.
+  const saveChip =
+    saveState === "offline"
+      ? { text: "Sin conexión", tone: "border-warning/40 bg-warning-soft text-warning" }
+      : saveState === "saving" || saveState === "pending"
+        ? { text: "Guardando…", tone: "" }
+        : saveState === "error"
+          ? { text: "No se guardó", tone: "border-destructive/40 text-destructive" }
+          : { text: `Guardado ${formatClock(savedAt)}`, tone: "border-success/40 bg-success-soft text-success" }
+  // Pie fijo: lo que falta y «Finalizar y firmar», también en la tablet y el teléfono.
+  const footerText = dictation.busy
+    ? "Termina el dictado para poder firmar"
+    : !closingQuery.isSuccess
+      ? "Comprobando lo que falta…"
+      : !closingReady
+        ? `Falta ${missing.map((m) => CLOSING_REQUIREMENT_LABELS[m].toLowerCase()).join(", ")}`
+        : unsignedConsents.length > 0
+          ? `Listo para firmar · falta${unsignedConsents.length === 1 ? "" : "n"} ${unsignedConsents.length} firma${unsignedConsents.length === 1 ? "" : "s"} de ${signer}`
+          : "Listo para firmar"
 
   return (
-    <div className={cn("flex flex-col gap-4", dictationMobileBarVisible(dictation) && "max-sm:pb-20")}>
-      <PatientClinicalStrip detail={patient} />
+    <div
+      className={cn(
+        "flex flex-col gap-4 pb-20",
+        dictationMobileBarVisible(dictation) && "max-sm:pb-20",
+      )}
+    >
+      <PatientClinicalStrip detail={patient} onAntecedentes={() => setContextOpen(true)} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">{patient.patient.displayName}</h1>
           <p className="text-sm text-muted-foreground">
-            {hcLabel(patient.patient.patientNumber)} · Atiende {memberName(encounter.dentistUserId)}
-            {encounter.startedAt ? ` · Inicio ${formatClock(encounter.startedAt)}` : ""}
-            {encounter.appointmentId ? " · Desde la cita de agenda" : ""}
+            {[
+              age !== "" ? `${age} años` : null,
+              hcLabel(patient.patient.patientNumber),
+              // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
+              encounter.appointmentId ? "desde su cita" : null,
+              encounter.startedAt ? `inicio ${formatClock(encounter.startedAt)}` : null,
+              memberName(encounter.dentistUserId),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
-        <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            role="status"
+            aria-live="polite"
+            className={cn("rounded-full border px-3 py-1 text-xs font-medium", saveChip.tone)}
+          >
+            {saveChip.text}
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={() => {
+            if (mode === "panel" && openSection) closeSection()
+            setContextOpen(true)
+          }}>
+            Antecedentes y última atención
+          </Button>
+          {utilities}
+        </div>
       </div>
+      {saveState === "offline" ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Sin conexión: lo escrito se queda en la pantalla y se guarda al volver. Mientras tanto no se puede firmar.
+        </p>
+      ) : null}
+
+      {/* Quien cubre a otro lo lee en la atención: «Atiendes la cita de la Dra. Ana Torres». */}
+      <AttendingForNotice
+        appointmentId={encounter.appointmentId ?? null}
+        encounterDentistUserId={encounter.dentistUserId}
+      />
+
+      <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
 
       {canWrite && !attending ? (
         <div
@@ -1695,20 +1824,20 @@ export function EncounterEditor({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-          Borrador: {SAVE_LABEL[saveState]}
+      {childCount > 0 && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Registrando dato vinculado…
         </p>
-        {childCount > 0 && (
-          <p role="status" className="text-sm text-muted-foreground">
-            Registrando dato vinculado…
-          </p>
-        )}
-      </div>
+      )}
       {saveError && (
-        <p role="alert" className="text-sm text-destructive">
-          {saveError}
-        </p>
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+          <span>{saveError}</span>
+          {saveState === "error" ? (
+            <Button type="button" size="sm" variant="outline" onClick={() => void drain().catch(() => {})}>
+              Reintentar
+            </Button>
+          ) : null}
+        </div>
       )}
       {!canWrite && (
         <p className="text-sm text-muted-foreground">
@@ -1728,6 +1857,7 @@ export function EncounterEditor({
         panel={
           mode === "panel"
             ? (sectionDetail("panel") ??
+              (contextOpen ? <DetailPanel {...contextSurface} /> : null) ??
               (transcriptOpen && dictation.enabled ? <DetailPanel {...transcriptSurface} /> : null))
             : null
         }
@@ -1773,6 +1903,22 @@ export function EncounterEditor({
                   session={dictation}
                   kind={SECTION_DICTATION[section.key]?.kind ?? "nota"}
                 />
+              ) : null}
+              {/* Al registrar o indicar un servicio que lo pide, se propone sin abrir el bloque. */}
+              {section.key === "documentos" && docs.toPrepare.length > 0 ? (
+                <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2">
+                  <span className="text-sm">
+                    Necesita consentimiento · {docs.toPrepare.map((need) => need.title).join(" y ")}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={locked || preparing}
+                    onClick={() => void prepareFromRow()}
+                  >
+                    {preparing ? "Preparando…" : "Preparar"}
+                  </Button>
+                </div>
               ) : null}
             </section>
           ))}
@@ -1870,6 +2016,38 @@ export function EncounterEditor({
               },
             )}
           </ul>
+          {unsignedConsents.length > 0 ? (
+            <ul className="flex flex-col gap-1.5 text-sm" aria-label="Consentimientos sin firmar">
+              {unsignedConsents.map((need) => (
+                <li key={`${need.templateKey}-${need.documentId ?? ""}`} className="flex flex-wrap items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="inline-flex size-5 items-center justify-center rounded-full bg-warning-soft text-xs font-bold text-warning"
+                  >
+                    !
+                  </span>
+                  <span>
+                    {need.status === "sin_publicar"
+                      ? `Esta clínica aún no publicó el consentimiento de «${need.title}»`
+                      : `Consentimiento sin firmar: «${need.title}»`}
+                    <span className="sr-only">: no impide cerrar; el cierre pide el motivo</span>
+                  </span>
+                  {need.status !== "sin_publicar" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="link"
+                      className="h-auto p-0"
+                      disabled={!attending || locked}
+                      onClick={() => void signConsentsNow(need)}
+                    >
+                      Firmar ahora
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {closingQuery.isError ? (
             <p role="alert" className="text-sm text-destructive">
               No se pudo comprobar lo que falta para cerrar.
@@ -1915,27 +2093,9 @@ export function EncounterEditor({
             >
               Anular borrador…
             </Button>
-            <ButtonGroup aria-label="Acciones de la atención">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={locked || explicitSaving}
-                onClick={() => void handleSaveDraft()}
-              >
-                {explicitSaving ? "Guardando…" : "Guardar borrador"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={backing || finalizing || explicitSaving || childCount > 0}
-                onClick={() => void handleBack()}
-              >
-                {backing ? "Guardando…" : "Volver"}
-              </Button>
-              <Button type="button" disabled={!canSign} onClick={openSign}>
-                Finalizar y firmar
-              </Button>
-            </ButtonGroup>
+            <p className="text-xs text-muted-foreground">
+              Se guarda solo. «Finalizar y firmar» queda fijo al pie.
+            </p>
           </div>
           {dictation.busy ? (
             <p className="text-xs text-muted-foreground">
@@ -1953,7 +2113,24 @@ export function EncounterEditor({
         </section>
       </MasterDetail>
 
+      {/* Pie fijo: lo que falta y «Finalizar y firmar», en escritorio, tablet y teléfono. */}
+      {canWrite && attending ? (
+        <div
+          className={cn(
+            "sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-xl sm:border",
+            // En el teléfono, mientras se dicta, el pie es la barra del dictado (que también firma).
+            dictationMobileBarVisible(dictation) && "max-sm:hidden",
+          )}
+        >
+          <span className="text-sm text-muted-foreground">{footerText}</span>
+          <Button type="button" disabled={!canSign} onClick={openSign}>
+            Finalizar y firmar
+          </Button>
+        </div>
+      ) : null}
+
       {mode === "drawer" ? sectionDetail("drawer") : null}
+      {mode === "drawer" ? <DetailDrawer open={contextOpen} {...contextSurface} /> : null}
 
       {mode === "drawer" && dictation.enabled ? (
         <DetailDrawer open={transcriptOpen} {...transcriptSurface} />
@@ -1966,20 +2143,37 @@ export function EncounterEditor({
         onSign={signFromBar}
       />
 
-      <ConfirmDialog
-        open={confirmOpen && !confirmWithDictation}
-        title="Finalizar y firmar la atención"
-        description={finalizeDescription}
-        confirmLabel="Finalizar y firmar"
-        variant="default"
+      <EncounterClosingDialog
+        open={confirmOpen && !confirmWithDictation && signingDocs === null}
+        signAs={signAs.text}
+        who={signer}
+        consents={unsignedConsents}
+        startedAt={encounter.startedAt}
+        endTime={endTime}
+        onEndTime={setEndTime}
+        skipReason={skipReason}
+        onSkipReason={setSkipReason}
         pending={finalizing}
+        canSign={canSign}
+        blockedReason={signBlockedReason}
+        onSignNow={(need) => void signConsentsNow(need)}
         onConfirm={() => void handleConfirmFinalize()}
         onClose={() => {
           if (!finalizing) setConfirmOpen(false)
         }}
       >
-        {signFields}
-      </ConfirmDialog>
+        <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
+      </EncounterClosingDialog>
+      <ConsentSigningScreen
+        open={signingDocs !== null}
+        documents={signingDocs ?? []}
+        patientId={patientId}
+        onClose={() => setSigningDocs(null)}
+        onSigned={async () => {
+          await refreshClosing()
+          await onChanged()
+        }}
+      />
       <DictationSignDialog
         open={confirmOpen && confirmWithDictation}
         session={dictation}
@@ -1991,7 +2185,7 @@ export function EncounterEditor({
           const first = dictation.suggestions.find((item) => item.status === "por_revisar")
           if (first) dictation.openEdit(first)
         }}
-        onDiscardAndSign={() => void handleConfirmFinalize()}
+        onDiscardAndSign={() => void discardDictationAndContinue()}
       >
         {signFields}
       </DictationSignDialog>
@@ -2046,6 +2240,7 @@ export function EncounterEditor({
               ))}
             </ul>
           ) : null}
+          {/* Paso 3 de la fase 3: «¿Enviarle el presupuesto?» va aquí, después de lo que quedó por cobrar. */}
           <DialogFooter>
             <Button type="button" onClick={closeFinalized}>
               Listo

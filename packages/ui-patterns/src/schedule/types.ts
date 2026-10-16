@@ -5,8 +5,17 @@
  * (`packages/services`), nunca del componente.
  */
 
-/** Estados de la cita tal como los entiende recepción. */
+/** Estados de la cita tal como los guarda el servicio. */
 export type ScheduleStatus = "programada" | "confirmada" | "atendida" | "no_asistio" | "cancelada"
+
+/**
+ * Lo que pasa con la persona en una cita en pie, que no es un estado guardado:
+ * llegó y espera, o ya la están atendiendo (ADR 0032). El servicio lo calcula.
+ */
+export type ScheduleStage = "llego" | "en_atencion"
+
+/** El estado que se dice en pantalla: el guardado o, si lo hay, el momento de la persona. */
+export type ScheduleState = ScheduleStatus | ScheduleStage
 
 export interface ScheduleEntry {
   id: string
@@ -16,6 +25,10 @@ export interface ScheduleEntry {
   start: string
   end: string
   status: ScheduleStatus
+  /** Llegó o está en atención: manda sobre `status` al decir el estado y al ordenar la lista. */
+  stage?: ScheduleStage
+  /** El estado con su hora, ya en palabras («Llegó 10:00 · espera 6 min»); sin él, el nombre del estado. */
+  stateLabel?: string
   /** Lo que se lee primero: la persona. */
   title: string
   /** Lo segundo: el motivo («Limpieza»). */

@@ -82,7 +82,9 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
     (await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id)))[0].scheduledAt?.toISOString(),
   ).toBe(`${f.date}T16:00:00.000Z`)
   for (const status of ["cancelada", "no_asistio", "atendida"]) {
-    await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
+    // «Atendida» solo la pone el cierre de su atención (ADR 0032): aquí basta el estado en la base.
+    if (status === "atendida") await ownerDb.update(appointment).set({ status }).where(eq(appointment.id, id))
+    else await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, status))
     const [row] = await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id))
     expect(row).toMatchObject({
       status: "pendiente",
@@ -124,7 +126,12 @@ it("reserva, mueve y libera el control sin confundir asistencia con cierre clín
       }),
     ),
   ).toMatchObject({ status: "realizado", completedEncounterId: f.encounter.id })
-  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, "cancelada"))
+  // Una cita atendida ya no cambia por el servicio (ADR 0032); la base sigue
+  // protegiendo el control realizado si su cita cambiara.
+  await expect(f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, id, "cancelada"))).rejects.toMatchObject({
+    code: "APPOINTMENT_ATTENDED",
+  })
+  await ownerDb.update(appointment).set({ status: "cancelada" }).where(eq(appointment.id, id))
   expect((await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id)))[0].status).toBe(
     "realizado",
   )

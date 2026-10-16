@@ -24,8 +24,9 @@ import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAccess } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
-import { setAppointmentStatus } from "./appointments.js"
+import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import {
   branchNotFound,
@@ -58,8 +59,12 @@ export type EncounterDocumentRow = PatientDocumentWithContext
 export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect
 
 export interface CreateEncounterInput {
-  /** Motivo de la visita: obligatorio al abrir (1–2000 caracteres). */
-  reason: string
+  /**
+   * Motivo de la visita (hasta 2000 caracteres). Sin cita es obligatorio al
+   * abrir; desde una cita («Atender», sin formulario) toma el motivo escrito en
+   * la cita o queda vacío, y se exige al cerrar (ADR 0032).
+   */
+  reason?: string | null
   /**
    * Cita que motiva la atención (mismo paciente). Hereda la sede; al cerrar la
    * atención la cita pasa a «atendida». Sin ella, la atención se une a la cita
@@ -324,8 +329,8 @@ function localDateIn(at: Date, timeZone: string): string {
 
 /**
  * La cita de hoy del paciente que sigue en pie (programada o confirmada) y aún
- * no tiene atención; si hay varias, la más cercana a la hora. «Hoy» es el día
- * en la zona de la sede de la cita.
+ * no tiene atención; si hay varias, la que llegó y, si ninguna, la más cercana
+ * a la hora (ADR 0032). «Hoy» es el día en la zona de la sede de la cita.
  */
 async function todaysAppointment(
   tx: Db,
@@ -359,6 +364,7 @@ async function todaysAppointment(
       ),
     )
     .orderBy(
+      sql`${appointment.arrivedAt} is null`,
       sql`abs(extract(epoch from (${appointment.startsAt} - ${at}::timestamptz)))`,
       asc(appointment.startsAt),
     )
@@ -476,7 +482,12 @@ export async function createEncounter(
     }
     fromAppointment = row
     const continued = await joinOpenDraft(tx, orgId, actorUserId, patientId, row)
-    if (continued) return continued
+    if (continued) {
+      // Atender a quien nadie marcó: la llegada queda anotada a esta hora.
+      await markArrivedOnAttend(tx, orgId, actorUserId, row.id)
+      await notifyAppointmentChanged(tx, orgId)
+      return continued
+    }
   }
   // Sin cita indicada, la atención se une a la cita de hoy que sigue en pie:
   // así, al cerrarla, la cita queda atendida y sus controles hechos.
@@ -503,8 +514,18 @@ export async function createEncounter(
       .limit(2)
     if (active.length === 1) branchId = active[0]!.id
   }
-  const reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
-  if (!reason) throw validation("El motivo de la atención es obligatorio")
+  // Desde una cita no se pide el motivo al abrir: vale el que se escribió al
+  // reservar o queda vacío, y el cierre lo exige (ADR 0032).
+  let reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
+  if (!reason && fromAppointment) {
+    const [booked] = await tx
+      .select({ reason: appointment.reason })
+      .from(appointment)
+      .where(and(eq(appointment.id, fromAppointment.id), eq(appointment.organizationId, orgId)))
+      .limit(1)
+    reason = cleanText(booked?.reason, "reason", TEXT_LIMITS.reason)
+  }
+  if (!reason && !fromAppointment) throw validation("El motivo de la atención es obligatorio")
   // Profesional que atiende: por defecto quien abre (también desde la cita de
   // otro profesional: quien cubre a otro es quien escribe). Otro elegido debe
   // ser miembro con escritura clínica, nunca caja ni recepción.
@@ -577,6 +598,11 @@ export async function createEncounter(
       planItemIds,
       appointmentId: fromAppointment?.id ?? null,
     })
+    if (fromAppointment) {
+      // La cita pasa a «En atención»; si nadie marcó la llegada, queda anotada ahora.
+      await markArrivedOnAttend(tx, orgId, actorUserId, fromAppointment.id)
+      await notifyAppointmentChanged(tx, orgId)
+    }
     return row
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
@@ -1410,6 +1436,12 @@ export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signatu
 export interface ClosingCheck {
   ready: boolean
   missing: ClosingRequirement[]
+  /**
+   * Consentimientos que pide la atención y no están firmados (pendientes, sin
+   * preparar o sin publicar). No bloquean (decisión 3): cerrar sin ellos pide
+   * decir por qué.
+   */
+  consents: ConsentNeed[]
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1454,7 +1486,10 @@ export async function checkEncounterClosing(
       throw e
     missing.push("signature")
   }
-  return { ready: missing.length === 0, missing }
+  const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
+    (need) => need.status !== "firmado",
+  )
+  return { ready: missing.length === 0, missing, consents }
 }
 
 export async function getEncounterClosing(
@@ -1471,6 +1506,11 @@ export async function getEncounterClosing(
 export interface FinalizeEncounterInput {
   /** Hora de fin declarada (ISO); por defecto, ahora. */
   endedAt?: string | null
+  /**
+   * «Seguir sin él»: por qué se cierra con un consentimiento sin firmar. Se
+   * pide solo si falta alguno; queda en la atención como el resto.
+   */
+  consentSkipReason?: string | null
 }
 
 export async function finalizeEncounter(
@@ -1501,6 +1541,20 @@ export async function finalizeEncounter(
       409,
       `Para cerrar la atención registra ${closing.missing.map((m) => CLOSING_MESSAGES[m]).join(", ")}`,
     )
+  }
+  // Un consentimiento sin firmar avisa sin bloquear: se sigue diciendo por qué.
+  let consentSkipReason: string | null = null
+  if (closing.consents.length > 0) {
+    const reason = input.consentSkipReason?.trim() ?? ""
+    if (!reason) {
+      throw new ServiceError(
+        "CONSENT_UNSIGNED",
+        409,
+        `Falta el consentimiento de ${closing.consents.map((need) => `«${need.title}»`).join(", ")}: fírmalo ahora o sigue sin él diciendo por qué`,
+      )
+    }
+    if (reason.length > 2000) throw validation("El motivo admite hasta 2000 caracteres")
+    consentSkipReason = reason
   }
   const signature = await requireProfessionalSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -1533,6 +1587,7 @@ export async function finalizeEncounter(
       signerName: signature.name,
       signerTitle: signature.title,
       signerRegistration: signature.registration,
+      consentSkipReason,
       updatedAt: now,
     })
     .where(eq(encounter.id, encounterId))
@@ -1727,6 +1782,8 @@ export async function finalizeEncounter(
     patientId,
     charges: charges.length,
     skippedCharges: skippedCharges.length,
+    // Cuántos consentimientos quedaron sin firmar; el motivo vive en la atención.
+    consentsUnsigned: closing.consents.length,
   })
   await notifyClose(tx, orgId, "encounter.finalized")
   await notifyClose(tx, orgId, "patient.account.updated")
@@ -2145,6 +2202,9 @@ export async function voidEncounter(
     reason,
     procedures: procedures.length,
   })
+  // La Agenda deja de decir «En atención»: la cita vuelve a poder atenderse y
+  // su llegada se conserva (ADR 0032).
+  if (row.appointmentId) await notifyAppointmentChanged(tx, orgId)
   return row
 }
 

@@ -1226,6 +1226,44 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
   expect(discarded.status).toBe(200)
 })
 
+it("órdenes: imagen con diagnóstico y hoja para imprimir; cancelar pide motivo; recepción no lee lo que pide la atención", async () => {
+  const patientId = await createPatient()
+  const created = await post(app, "/clinical-forms/orders", {
+    kind: "imagen",
+    patientId,
+    recipient: "Centro de imágenes",
+    title: "Radiografía panorámica",
+    diagnosisCode: "K02.1",
+  })
+  expect(created.status).toBe(201)
+  const orderId = (await json<{ data: { id: string; kind: string } }>(created)).data.id
+  const sheet = await app.request(`/clinical-forms/orders/${orderId}/print`)
+  expect(sheet.status).toBe(200)
+  expect(
+    (await json<{ data: { order: { kind: string }; diagnosisDescription: string | null } }>(sheet)).data,
+  ).toMatchObject({ order: { kind: "imagen" }, diagnosisDescription: "Caries de la dentina" })
+  // Sin para quién no hay orden; sin motivo no se cancela.
+  const noRecipient = await post(app, "/clinical-forms/orders", { kind: "laboratorio", patientId, title: "Hemograma" })
+  expect(noRecipient.status).toBe(400)
+  expect((await post(app, `/clinical-forms/orders/${orderId}/status`, { toStatus: "cancelado" })).status).toBe(400)
+  const cancelled = await post(app, `/clinical-forms/orders/${orderId}/status`, {
+    toStatus: "cancelado",
+    reason: "Ya trajo la radiografía",
+  })
+  expect(cancelled.status).toBe(200)
+  expect((await json<{ data: { cancelReason: string } }>(cancelled)).data.cancelReason).toBe("Ya trajo la radiografía")
+  // Lo que pide la atención en consentimientos es clínico: recepción no lo lee ni lo prepara.
+  const reception = buildApp("reception")
+  const needs = await reception.request(
+    `/clinical-forms/consent-needs?patientId=${patientId}&encounterId=${crypto.randomUUID()}`,
+  )
+  expect(needs.status).toBe(403)
+  expect(
+    (await post(reception, "/clinical-forms/consent-needs/prepare", { patientId, encounterId: crypto.randomUUID() }))
+      .status,
+  ).toBe(403)
+})
+
 it("imágenes: la subida genera miniatura WebP y la URL la sirve con ?variant=thumb", async () => {
   const patientId = await createPatient()
   const png = await sharp({

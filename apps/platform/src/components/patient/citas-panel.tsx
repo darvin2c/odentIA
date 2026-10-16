@@ -2,10 +2,9 @@ import { Badge, Button, buttonVariants } from "@odentia/ui"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { CalendarDays } from "lucide-react"
-import type { AgendaAppointment } from "../../lib/agenda"
+import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
 import {
-  APPOINTMENT_STATUS_LABELS,
   appointmentWhen,
   isUpcoming,
   usePatientAppointments,
@@ -30,9 +29,8 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={statusVariant(appointment)}>
-          {APPOINTMENT_STATUS_LABELS[appointment.status]}
-        </Badge>
+        {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención». */}
+        <Badge variant={statusVariant(appointment)}>{visitName(appointment.visit)}</Badge>
         <Link
           to="/agenda"
           search={{ appointmentId: appointment.id }}

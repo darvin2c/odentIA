@@ -1,6 +1,6 @@
 # 0003 · La nota de la atención sigue la estructura de la historia clínica peruana
 
-Fecha: 2026-10-08 · **Estado:** aceptada (implementación en la fase 2 de la propuesta UX)
+Fecha: 2026-10-08 · **Estado:** aceptada (implementación en la fase 2 de la propuesta UX) · Ajustada por [0033](0033-documentos-de-la-atencion-en-un-solo-lugar.md): los exámenes auxiliares se piden como órdenes y la receta vive en el bloque Documentos.
 
 ## Problema
 

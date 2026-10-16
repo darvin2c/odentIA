@@ -327,7 +327,7 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale)
     })),
     title: `${total} ${plural(total, "persona faltó", "personas faltaron")} a su cita en los últimos ${days} días y no ${plural(total, "tiene", "tienen")} otra`,
     detail: "Ordenadas de la inasistencia más reciente a la más antigua.",
-    how: `Citas de los últimos ${days} días que quedaron como «No asistió», de pacientes activos que no tienen una cita programada o confirmada desde ahora. Cada persona cuenta una vez.`,
+    how: `Citas de los últimos ${days} días que quedaron como «No vino», de pacientes activos que no tienen una cita programada o confirmada desde ahora. Cada persona cuenta una vez.`,
   }
 }
 

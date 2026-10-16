@@ -28,8 +28,11 @@ function accessFor(role: string): WorkspaceAccess {
     // Las tareas sin responsable de un área llegan a quien trabaja en ella (la misma regla que Tareas).
     taskAreas: taskAreasOfRole(role),
     configure: canAccess(role, "settings.write"),
-    // Quien atiende ve su propio día, no la agenda de la sede.
+    // El odontólogo ve solo su propio día, no la agenda de la sede.
     ownAppointments: role === "dentist",
+    // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
+    // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
+    attends: canAccess(role, "clinical.write"),
   }
 }
 /**

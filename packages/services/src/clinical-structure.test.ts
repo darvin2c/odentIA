@@ -233,12 +233,13 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     }),
   )
   await expect(sign(first.id, aunt.id, "representante")).rejects.toMatchObject({ status: 409 })
-  // Sin comprensión confirmada o sin firma del profesional no hay firma.
+  // Sin comprensión confirmada, o sin el trazo de quien firma en la clínica, no hay firma.
+  // El del profesional es opcional: firma con su perfil (fase 3, decisión 3).
   await expect(
     sign(first.id, mother.id, "representante", { comprehensionConfirmed: false }),
   ).rejects.toMatchObject({ status: 400 })
   await expect(
-    sign(first.id, mother.id, "representante", { professionalSignature: null }),
+    sign(first.id, mother.id, "representante", { signatureData: null }),
   ).rejects.toMatchObject({ status: 400 })
   // Con facultad vigente firma; el nombre sale de su registro, y queda quien informó.
   const signed = await sign(first.id, mother.id, "representante", {

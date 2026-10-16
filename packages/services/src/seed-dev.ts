@@ -56,7 +56,7 @@ import {
   treatmentPlanItem,
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
-import { consentDocument, professionalProfile } from "@odentia/db/schema/clinical-forms"
+import { consentDocument, consentTemplate, professionalProfile } from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
   channelConnection,
@@ -74,7 +74,7 @@ import { hashPassword } from "better-auth/crypto"
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
-import { createAppointment, createChair } from "./appointments.js"
+import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
 import { createScheduleBlock } from "./availability.js"
 import { adjustBudgetLines, createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
 import {
@@ -125,6 +125,7 @@ import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
+import { signConsentDocument } from "./clinical-forms.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
@@ -1518,6 +1519,16 @@ const seedOffers: Array<{
     billingMode: "session",
     priceDisclosure: "exacto",
   },
+  // La exodoncia pide sus consentimientos («Se pide para», fase 3 paso 2B).
+  {
+    code: "EXODONCIA",
+    name: "Exodoncia simple",
+    specialty: "cirugia",
+    scope: "tooth",
+    priceCents: 15000,
+    durationMin: 45,
+    priceDisclosure: "desde",
+  },
 ]
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
 for (const offer of seedOffers) {
@@ -1530,7 +1541,7 @@ const serviceIdA = (code: string): string => {
   return found.id
 }
 // Lo que no se dice con precio exacto ofrece la evaluación de la clínica.
-for (const code of ["ENDODONCIA", "CORONA"]) {
+for (const code of ["ENDODONCIA", "CORONA", "EXODONCIA"]) {
   await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { evaluationServiceId: serviceIdA("EVALUACION") })
 }
 await db.transaction(async (tx) => {
@@ -2622,6 +2633,8 @@ const agendaSeed: Array<{
     status: "cancelada",
   },
 ]
+/** Las citas reservadas, por persona, día y hora: para marcar después quién llegó hoy. */
+const reservedAt = new Map<string, string>()
 for (const item of agendaSeed) {
   const seedPatientId = patientIdByName.get(item.patient)
   if (!seedPatientId) throw new Error(`Falta el paciente semilla ${item.patient}`)
@@ -2635,6 +2648,7 @@ for (const item of agendaSeed) {
     endsAt: lima(item.day, item.end),
     status: item.status ?? "programada",
   })
+  reservedAt.set(`${item.patient}|${item.day}|${item.start}`, reserved.id)
   if (item.patient === "Rosa Quispe" && item.day === 1) {
     await db.transaction(async (tx) => {
       const control = await createFollowUp(tx, ORG_A, ANA_ID, rosaPatientId, {
@@ -2649,6 +2663,15 @@ for (const item of agendaSeed) {
     })
   }
 }
+// La sala de espera de la Dra. Ana hoy (tablero 7): Lucía llegó y espera, y
+// Rosa ya está en atención (su evaluación en borrador de hoy se une a su cita
+// y la llegada queda marcada a esa hora). Ana es propietaria y atiende: su
+// Inicio le muestra «Mis pacientes de hoy».
+const luciaToday = reservedAt.get("Lucía Fernández|0|11:00")
+const rosaToday = reservedAt.get("Rosa Quispe|0|09:00")
+if (!luciaToday || !rosaToday) throw new Error("Faltan las citas de hoy de la semilla")
+await setAppointmentArrival(db, ORG_A, ANA_ID, luciaToday, true)
+await createEncounter(db, ORG_A, ANA_ID, rosaPatientId, { appointmentId: rosaToday })
 for (const seed of [
   seedAgent,
   seedAutomation,
@@ -2662,6 +2685,41 @@ for (const seed of [
   seedRoles,
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
+}
+// Firmado en papel (fase 3, paso 2B): la anestesia local de la exodoncia, con
+// la foto de la hoja firmada; el pendiente se cierra con método «papel».
+{
+  const [paperPending] = await db
+    .select({ id: consentDocument.id })
+    .from(consentDocument)
+    .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
+    .where(
+      and(
+        eq(consentDocument.organizationId, ORG_A),
+        eq(consentDocument.patientId, domainSeed.patientId),
+        eq(consentDocument.status, "pendiente"),
+        eq(consentTemplate.key, "anestesia-local"),
+      ),
+    )
+    .limit(1)
+  if (paperPending) {
+    const photo = await putDemoImage(domainSeed.patientId, "foto", 2)
+    const sheet = await registerPatientDocument(db, ORG_A, ANA_ID, domainSeed.patientId, {
+      category: "consentimiento",
+      label: "[DEMO] Hoja firmada: Anestesia local odontológica",
+      storageKey: photo.objectKey,
+      contentType: "image/png",
+      sizeBytes: photo.size,
+      thumbnailKey: photo.thumbnailKey,
+    })
+    await signConsentDocument(db, ORG_A, ANA_ID, paperPending.id, {
+      signerKind: "paciente",
+      signerContactId: domainSeed.contactId,
+      comprehensionConfirmed: true,
+      method: "papel",
+      paperDocumentId: sheet.id,
+    })
+  }
 }
 // Consentimientos firmados en la semilla: su PDF con huella, como al firmar
 // desde la API (mismo generador).

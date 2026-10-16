@@ -180,7 +180,7 @@ const APPOINTMENT_STATUS_WORDS: Record<string, string> = {
   programada: "Dejó una cita como programada",
   confirmada: "Confirmó una cita",
   cancelada: "Canceló una cita",
-  atendida: "Marcó una cita como atendida",
+  atendida: "Cerró una cita con su atención",
   en_atencion: "Marcó que una cita está en atención",
   en_sala: "Marcó la llegada de un paciente a su cita",
   inasistencia: "Marcó una inasistencia",
@@ -221,6 +221,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "appointment.created": say("Reservó una cita"),
   "appointment.moved": say("Movió una cita"),
   "appointment.updated": say("Cambió una cita"),
+  "appointment.arrived": say("Marcó que un paciente llegó a su cita"),
+  "appointment.arrival_undone": say("Deshizo la llegada de un paciente a su cita"),
   "branch.appointment_default_minutes": say("Cambió lo que dura una cita regular en una sede"),
   // Atención clínica
   "encounter.created": say("Abrió una atención"),
@@ -269,6 +271,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "form_response.portal_submitted": say("Envió un cuestionario desde el portal", "paciente"),
   "order.create": say("Emitió una orden"),
   "order.status": say("Cambió el estado de una orden"),
+  "order.cancel": say("Canceló una orden"),
   "note.created": say("Dejó una nota"),
   // Caja y cobros
   "cash.shift_opened": say("Abrió la caja"),
@@ -307,6 +310,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "promotion.updated": say("Cambió una promoción"),
   "promotion.ended": say("Terminó una promoción"),
   "financial_document.sent": say("Envió un documento de cobro"),
+  "health_document.sent": say("Envió una receta, una orden o un consentimiento a la persona"),
   // Contactos y ventas
   "contact.created": say("Creó un contacto"),
   "contact.updated": say("Cambió los datos de un contacto"),
@@ -440,6 +444,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "consent_template.update": say("Editó el borrador de una plantilla de consentimiento"),
   "consent_template.publish": say("Publicó una versión de una plantilla de consentimiento"),
   "consent_template.archive": say("Archivó una plantilla de consentimiento"),
+  "consent_template.services": say("Cambió para qué servicios se pide un consentimiento"),
   "professional_profile.updated": say("Cambió el perfil profesional de alguien del equipo"),
   "catalog.service_created": say("Creó un servicio"),
   "catalog.service_updated": say("Cambió un servicio"),

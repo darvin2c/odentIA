@@ -154,6 +154,11 @@ export interface ConsentDocument {
   revokeSignature: { strokes?: number[][][] } | null
   pdfDocumentId: string | null
   pdfSha256: string | null
+  /** Cómo se firmó; nulo en un pendiente y en lo firmado antes (se lee «en la clínica»). */
+  signatureMethod: "clinica" | "papel" | "enlace" | null
+  signatureLevel: "simple" | null
+  /** Foto de la hoja firmada en papel. */
+  paperDocumentId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -168,10 +173,13 @@ export interface ConsentEvent {
   createdAt: string
 }
 
+/** `interconsulta` se dice «Derivación». */
+export type ClinicalOrderKind = "imagen" | "laboratorio" | "interconsulta"
+
 export interface ClinicalOrder {
   id: string
   organizationId: string
-  kind: "laboratorio" | "interconsulta"
+  kind: ClinicalOrderKind
   specialtyId: string | null
   patientId: string
   encounterId: string | null
@@ -182,6 +190,14 @@ export interface ClinicalOrder {
   status: "solicitado" | "en_proceso" | "completado" | "cancelado"
   resultText: string | null
   resultAt: string | null
+  /** CIE-10 de la atención que la motiva. */
+  diagnosisCode: string | null
+  /** Resultado subido a la propia orden. */
+  resultDocumentId: string | null
+  /** Derivación a un colega de la clínica. */
+  recipientUserId: string | null
+  cancelledAt: string | null
+  cancelReason: string | null
   createdAt: string
   updatedAt: string
 }
@@ -262,7 +278,15 @@ export function saveServiceSpecialties(serviceId: string, specialtyIds: string[]
 
 // --- Plantillas de formulario ---
 
-export function fetchFormTemplates(query: { specialtyId?: string; status?: string; q?: string } = {}) {
+export function fetchFormTemplates(
+  query: {
+    specialtyId?: string
+    status?: string
+    q?: string
+    /** «me»: primero los de las especialidades de quien atiende. */
+    forUser?: string
+  } = {},
+) {
   return apiFetch<{ data: FormTemplate[] }>(`${BASE}/form-templates${toSearch(query)}`)
 }
 
@@ -395,10 +419,15 @@ export function signConsent(
     signerContactId: string
     signerDoc?: string | null
     representativeRelation?: string | null
-    signatureData: { strokes: number[][][] }
+    /** En la clínica: el trazo de la persona. En papel no va. */
+    signatureData?: { strokes: number[][][] }
     comprehensionConfirmed: true
-    professionalSignature: { strokes: number[][][] }
+    /** Opcional: el profesional confirma con su perfil, sin dibujar. */
+    professionalSignature?: { strokes: number[][][] }
     witness?: { name: string; doc?: string | null } | null
+    method?: "clinica" | "papel"
+    /** En papel: la foto de la hoja firmada, ya en Documentos. */
+    paperDocumentId?: string | null
   },
 ) {
   return post<ConsentDocument>(`${BASE}/consents/${id}/sign`, body)
@@ -454,27 +483,76 @@ export function fetchOrders(query: {
   status?: string
   kind?: string
   specialtyId?: string
+  /** Solo las de esta atención. */
+  encounterId?: string
 } = {}) {
   return apiFetch<{ data: ClinicalOrder[] }>(`${BASE}/orders${toSearch(query)}`)
 }
 
 export function createOrder(body: {
-  kind: "laboratorio" | "interconsulta"
+  kind: ClinicalOrderKind
   specialtyId?: string | null
   patientId: string
   encounterId?: string | null
-  recipient: string
+  recipient?: string | null
+  recipientUserId?: string | null
   title: string
   detail?: string | null
+  diagnosisCode?: string | null
 }) {
   return post<ClinicalOrder>(`${BASE}/orders`, body)
 }
 
 export function advanceOrder(
   id: string,
-  body: { toStatus: "en_proceso" | "completado" | "cancelado"; resultText?: string | null },
+  body: {
+    toStatus: "en_proceso" | "completado" | "cancelado"
+    resultText?: string | null
+    /** El resultado subido a la propia orden. */
+    resultDocumentId?: string | null
+    /** Cancelar pide el motivo. */
+    reason?: string | null
+  },
 ) {
   return post<ClinicalOrder>(`${BASE}/orders/${id}/status`, body)
+}
+
+export interface OrderPrint {
+  order: ClinicalOrder
+  diagnosisDescription: string | null
+  patient: {
+    displayName: string
+    patientNumber: number
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+  }
+  establishment: {
+    legalName: string | null
+    tradeName: string | null
+    fiscalDocType: string | null
+    fiscalDocNumber: string | null
+    address: string | null
+  } | null
+  requestedBy: { name: string; title: string | null; registration: string | null } | null
+}
+
+export function fetchOrderPrint(id: string) {
+  return apiFetch<{ data: OrderPrint }>(`${BASE}/orders/${id}/print`)
+}
+
+/** Nombre de cada tipo de orden en pantalla. */
+export const ORDER_KIND_LABELS: Record<ClinicalOrderKind, string> = {
+  imagen: "Imagen",
+  laboratorio: "Laboratorio",
+  interconsulta: "Derivación",
+}
+
+/** Cómo se titula la orden en su fila: «Orden de imagen · Radiografía panorámica». */
+export const ORDER_KIND_TITLES: Record<ClinicalOrderKind, string> = {
+  imagen: "Orden de imagen",
+  laboratorio: "Orden de laboratorio",
+  interconsulta: "Derivación",
 }
 
 export const FIELD_TYPE_LABELS: Record<FormFieldType, string> = {
@@ -498,10 +576,22 @@ export const FORM_RESPONSE_STATUS_LABELS: Record<FormResponse["status"], string>
 }
 
 export const ORDER_STATUS_LABELS: Record<ClinicalOrder["status"], string> = {
-  solicitado: "Solicitado",
+  solicitado: "Pedida",
   en_proceso: "En proceso",
-  completado: "Completado",
-  cancelado: "Cancelado",
+  completado: "Con resultado",
+  cancelado: "Cancelada",
+}
+
+/** Nivel real de la firma, siempre a la vista. */
+export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", string> = {
+  clinica: "Firma simple · en la clínica",
+  papel: "Firma simple · en papel",
+  enlace: "Firma simple · por enlace",
+}
+
+export function consentSignatureWords(document: Pick<ConsentDocument, "status" | "signatureMethod">): string | null {
+  if (document.status !== "firmado" && document.status !== "revocado") return null
+  return CONSENT_SIGNATURE_WORDS[document.signatureMethod ?? "clinica"]
 }
 
 export const CONSENT_STATUS_LABELS: Record<ConsentDocument["status"], string> = {

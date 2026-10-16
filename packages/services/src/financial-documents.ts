@@ -266,7 +266,7 @@ async function loadDocumentMeta(
   }
 }
 
-interface UsableConnection {
+export interface UsableConnection {
   id: string
   channel: string
   provider: string
@@ -327,6 +327,39 @@ export async function getDocumentSendOptions(
     recipients.find((r) => r.isDefault) ||
     recipients[0]
   if (!recipient) throw notFound("Destinatario del documento")
+  const { channels, preferredChannel, lastChannel } = await documentChannelsFor(tx, orgId, recipient)
+  const proposed = proposeChannel(channels, {
+    email: recipient.email,
+    preferredChannel,
+    lastChannel,
+  })
+  if (proposed) proposed.isProposed = true
+  const patientRow = await requirePatient(tx, orgId, patientId)
+  const [profile] = await tx
+    .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const message = proposeMessage(
+    documentType,
+    recipient,
+    patientRow.displayName,
+    profile?.tradeName || profile?.legalName || "",
+  )
+  return { recipients, recipient, channels, proposed, document: meta, message }
+}
+
+/**
+ * Por dónde puede llegarle un documento a una persona: una opción por cada
+ * conexión activa que admite adjuntos, con si sirve y por qué no. La comparten
+ * los documentos de cobro y los papeles de salud (`health-documents.ts`); cada
+ * uno propone su canal.
+ */
+export async function documentChannelsFor(
+  tx: Db,
+  orgId: string,
+  recipient: Pick<DocumentRecipient, "contactId" | "email">,
+): Promise<{ channels: DocumentChannelOption[]; preferredChannel: string | null; lastChannel: string | null }> {
   const [recipientRow] = await tx
     .select({ preferredChannel: contact.preferredChannel })
     .from(contact)
@@ -431,25 +464,11 @@ export async function getDocumentSendOptions(
       isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
     }
   })
-  const proposed = proposeChannel(channels, {
-    email: recipient.email,
+  return {
+    channels,
     preferredChannel: recipientRow?.preferredChannel ?? null,
     lastChannel: threads[0]?.connection.channel ?? null,
-  })
-  if (proposed) proposed.isProposed = true
-  const patientRow = await requirePatient(tx, orgId, patientId)
-  const [profile] = await tx
-    .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })
-    .from(orgProfile)
-    .where(eq(orgProfile.organizationId, orgId))
-    .limit(1)
-  const message = proposeMessage(
-    documentType,
-    recipient,
-    patientRow.displayName,
-    profile?.tradeName || profile?.legalName || "",
-  )
-  return { recipients, recipient, channels, proposed, document: meta, message }
+  }
 }
 
 // --- Entrega de borrador --------------------------------------------------------
@@ -717,7 +736,7 @@ async function resolveConversation(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  recipient: DocumentRecipient,
+  recipient: Pick<DocumentRecipient, "contactId" | "email" | "phone">,
   conn: UsableConnection,
   /** Con otro correo el hilo es el de esa dirección, no el último abierto de la persona. */
   exactAddress = false,
@@ -762,6 +781,78 @@ async function resolveConversation(
     )
   }
   return { id: thread.id }
+}
+
+/** Conexión por la que puede salir un documento: activa, registrada y con adjuntos. */
+export async function requireDocumentConnection(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+): Promise<UsableConnection> {
+  const [conn] = await tx
+    .select()
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+    .limit(1)
+  if (!conn) throw notFound("Conexión")
+  if (conn.status !== "active") {
+    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada: elige otra o conéctala de nuevo")
+  }
+  const adapter = channelAdapters[conn.provider as keyof typeof channelAdapters]
+  if (!adapter) throw new ServiceError("PROVIDER_NOT_REGISTERED", 409, `Proveedor no registrado: ${conn.provider}`)
+  if (!adapter.capabilities.media) {
+    throw validation("Esa conexión no admite adjuntos: elige otro canal")
+  }
+  return { id: conn.id, channel: conn.channel, provider: conn.provider, displayName: conn.displayName }
+}
+
+/**
+ * Deja un PDF en la conversación de la persona por esa conexión (la abre o la
+ * reabre: escribir reabre, ADR 0024) y vuelve encolado; el worker lo entrega.
+ * La única forma de enviar un documento: la usan cobros y papeles de salud.
+ */
+export async function deliverDocumentPdf(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: {
+    recipient: Pick<DocumentRecipient, "contactId" | "email" | "phone">
+    conn: UsableConnection
+    pdf: Uint8Array
+    filename: string
+    caption: string
+    /** Con otro correo el hilo es el de esa dirección. */
+    exactAddress?: boolean
+  },
+  deps: SendDeps,
+): Promise<{ conversationId: string; messageId: string }> {
+  if (input.pdf.byteLength > 20 * 1024 * 1024) throw validation("El documento supera 20 MB: no se puede adjuntar")
+  const { id: conversationId } = await resolveConversation(
+    tx,
+    orgId,
+    actorUserId,
+    input.recipient,
+    input.conn,
+    input.exactAddress ?? false,
+  )
+  const ref = await deps.storage.putAttachment({
+    orgId,
+    conversationId,
+    bytes: input.pdf,
+    contentType: "application/pdf",
+    ext: "pdf",
+  })
+  const created = await sendOutbound(tx, orgId, {
+    conversationId,
+    senderKind: "user",
+    senderUserId: actorUserId,
+    content: {
+      type: "media",
+      attachment: { ...ref, filename: asciiFilename(input.filename) },
+      caption: input.caption,
+    },
+  })
+  return { conversationId, messageId: created.id }
 }
 
 export async function sendFinancialDocument(
@@ -818,21 +909,7 @@ export async function sendFinancialDocument(
   if (otherEmail && !input.confirmOtherEmail)
     throw validation("Confirma que la persona pidió recibirlo en ese correo")
   const recipient: DocumentRecipient = otherEmail ? { ...registered, email: otherEmail } : registered
-  const [conn] = await tx
-    .select()
-    .from(channelConnection)
-    .where(and(eq(channelConnection.id, input.connectionId), eq(channelConnection.organizationId, orgId)))
-    .limit(1)
-  if (!conn) throw notFound("Conexión")
-  if (conn.status !== "active") {
-    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada: elige otra o conéctala de nuevo")
-  }
-  const adapter = channelAdapters[conn.provider as keyof typeof channelAdapters]
-  if (!adapter) throw new ServiceError("PROVIDER_NOT_REGISTERED", 409, `Proveedor no registrado: ${conn.provider}`)
-  if (!adapter.capabilities.media) {
-    throw validation("Esa conexión no admite adjuntos: elige otro canal")
-  }
-  const usable: UsableConnection = { id: conn.id, channel: conn.channel, provider: conn.provider, displayName: conn.displayName }
+  const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (otherEmail && conn.channel !== "email")
     throw validation("Otro correo solo se puede usar enviando por correo")
 
@@ -861,27 +938,22 @@ export async function sendFinancialDocument(
     subject = `Presupuesto ${snap.numberLabel} · ${snap.org.tradeName}`
     defaultBody = "Te enviamos tu presupuesto en PDF."
   }
-  if (pdf.byteLength > 20 * 1024 * 1024) throw validation("El documento supera 20 MB: no se puede adjuntar")
-
-  const { id: conversationId } = await resolveConversation(tx, orgId, actorUserId, recipient, usable, !!otherEmail)
-  const ref = await deps.storage.putAttachment({
-    orgId,
-    conversationId,
-    bytes: pdf,
-    contentType: "application/pdf",
-    ext: "pdf",
-  })
   const body = cleanMessage(input.message) ?? defaultBody
-  const created = await sendOutbound(tx, orgId, {
-    conversationId,
-    senderKind: "user",
-    senderUserId: actorUserId,
-    content: {
-      type: "media",
-      attachment: { ...ref, filename },
+  const { conversationId, messageId } = await deliverDocumentPdf(
+    tx,
+    orgId,
+    actorUserId,
+    {
+      recipient,
+      conn,
+      pdf,
+      filename,
       caption: captionWithSubject(subject, `${body}\n${meta.label}`),
+      exactAddress: !!otherEmail,
     },
-  })
+    deps,
+  )
+  const created = { id: messageId }
   if (input.savePreferredChannel) {
     await tx
       .update(contact)

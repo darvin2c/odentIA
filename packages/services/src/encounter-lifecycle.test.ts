@@ -235,6 +235,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
   expect(await f.run((tx) => getEncounterClosing(tx, ...f.args, encounterId))).toEqual({
     ready: false,
     missing: ["diagnosis", "evolution"],
+    // Sin servicios que pidan consentimiento, no falta ninguno.
+    consents: [],
   })
   await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
     code: "CLOSING_INCOMPLETE",

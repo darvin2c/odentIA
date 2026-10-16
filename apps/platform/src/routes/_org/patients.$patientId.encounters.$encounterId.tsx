@@ -9,9 +9,10 @@ import {
 } from "@odentia/ui"
 import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
-import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
+import { ControlesPanel } from "../../components/patient/clinical-panels"
+import { EncounterDocumentsBlock } from "../../components/patient/encounter-documents"
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
@@ -66,7 +67,6 @@ function EncounterBreadcrumb({
 
 function EncounterPage() {
   const { patientId, encounterId } = Route.useParams()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
   const canWrite = usePermission("clinical.write")
@@ -82,8 +82,6 @@ function EncounterPage() {
       apiFetch<{ data: EncounterDetail }>(`/api/patients/${patientId}/encounters/${encounterId}`),
     enabled: canRead,
   })
-  const back = () =>
-    navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "historia" } })
   const changed = () =>
     queryClient.invalidateQueries({ queryKey: ["encounter", patientId, encounterId] })
   const finalized = async (_hasCharges: boolean) => {
@@ -145,7 +143,6 @@ function EncounterPage() {
           detail={detail}
           onChanged={changed}
           onFinalized={finalized}
-          onBack={back}
         />
       </PageShell>
     )
@@ -162,13 +159,22 @@ function EncounterPage() {
         <EncounterHandoff patientId={patientId} detail={detail} />
       ) : null}
       <EncounterDetailView patientId={patientId} detail={detail} />
-      <RecetasPanel
-        patientId={patientId}
-        encounterId={detail.encounter.id}
-        encounterOnly
-        allowCreate={false}
-        items={detail.plannedItems}
-      />
+      {/* Los documentos de la atención en un solo lugar: ya no se crean aquí, pero se envían e imprimen. */}
+      <section aria-label="Documentos" className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
+        <h2 className="font-heading text-base font-medium">Documentos</h2>
+        <EncounterDocumentsBlock
+          patientId={patientId}
+          encounterId={detail.encounter.id}
+          patient={patient}
+          detail={detail}
+          encounters={[]}
+          attentionItems={detail.plannedItems}
+          disabled
+          beforeWrite={async () => {}}
+          onChanged={changed}
+          onPendingChange={() => {}}
+        />
+      </section>
       <ControlesPanel
         patientId={patientId}
         encounterId={detail.encounter.id}

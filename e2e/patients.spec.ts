@@ -286,11 +286,13 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
     ),
   ).toBeVisible()
   if ((await agregarServicios.count()) > 0) {
+    // Un bloque nuevo abre su formulario al agregarlo, sin un clic de más (fase 3, paso 2B).
     await agregarServicios.click()
+  } else {
+    const registrar = page.getByRole("button", { name: "Registrar procedimiento", exact: true }).first()
+    await expect(registrar).toBeEnabled()
+    await registrar.click()
   }
-  const registrar = page.getByRole("button", { name: "Registrar procedimiento", exact: true }).first()
-  await expect(registrar).toBeEnabled()
-  await registrar.click()
   const procedureDrawer = surface(page, { name: "Registrar procedimiento" })
   await expect(procedureDrawer).toBeVisible()
   await procedureDrawer.getByLabel("Tratamiento del presupuesto").click()
@@ -318,7 +320,8 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   })
   await page.reload()
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
-  const firma = page.getByRole("alertdialog")
+  // Un solo cierre: con quién se firma, lo que falta y la hora de fin (fase 3, paso 2B).
+  const firma = page.getByRole("dialog", { name: "Finalizar y firmar" })
   await expect(firma.getByText(/COP 12345/)).toBeVisible()
   await firma.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   // El diálogo dice qué quedó por cobrar; al confirmarlo llega el relevo.
@@ -447,6 +450,8 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       expect(notes.status).toBe(200)
       await expect(page.locator("a", { hasText: "Reservar cita" }).first()).toBeVisible()
       await expect(page.getByRole("button", { name: "Nueva atención" })).toHaveCount(0)
+      // Recepción marca «Llegó»; «Atender» es de quien escribe en la historia.
+      await expect(page.getByRole("button", { name: "Atender", exact: true })).toHaveCount(0)
       await openSection(page, "Citas")
       await expect(page.getByText("Sin citas", { exact: true })).toBeVisible()
       await openSection(page, "Datos")
@@ -554,7 +559,8 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
   await page.screenshot({ path: test.info().outputPath("coordinacion-recepcion.png"), fullPage: true })
   await openSection(page, "Sus citas")
   await expect(page.getByRole("heading", { name: "Próximas citas" })).toBeVisible()
-  await expect(page.getByText("Programada", { exact: true })).toBeVisible()
+  // Un nombre por estado en toda la aplicación (ADR 0032): el de la Agenda.
+  await expect(page.getByText("Por confirmar", { exact: true }).first()).toBeVisible()
 })
 
 test("documentos: un solo índice cronológico que abre la gestión de cada tipo", async ({ owner }) => {

@@ -62,7 +62,7 @@ function lastTimeLines(last: PersonLastTime): string[] {
     const time = at.toLocaleTimeString(last.locale, { timeZone: last.timezone, hour: "2-digit", minute: "2-digit" })
     const where = `en la sede ${visit.branchName}${visit.dentistName ? ` con ${visit.dentistName}` : ""}`
     if (visit.upcoming) lines.push(`Su próxima cita es el ${date} a las ${time}, ${where}.`)
-    else if (visit.status === "no_asistio") lines.push(`No asistió a su cita del ${date} a las ${time}, ${where}.`)
+    else if (visit.status === "no_asistio") lines.push(`No vino a su cita del ${date} a las ${time}, ${where}.`)
     else if (visit.status === "atendida") lines.push(`Su última cita fue el ${date} a las ${time}, ${where}.`)
     else lines.push(`Tenía cita el ${date} a las ${time}, ${where}.`)
   }

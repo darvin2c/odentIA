@@ -1,9 +1,7 @@
-import { CONSENT_DECLARATION } from "@odentia/clinical"
 import {
   Badge,
   Button,
   buttonVariants,
-  Checkbox,
   Field,
   FieldLabel,
   Input,
@@ -30,19 +28,18 @@ import {
   CONSENT_STATUS_LABELS,
   type ConsentDocument,
   cancelConsent,
+  consentSignatureWords,
   createConsent,
   fetchConsentHistory,
   fetchConsents,
   fetchConsentTemplates,
   generateConsentPdf,
   revokeConsent,
-  signConsent,
 } from "../../lib/clinical-forms"
-import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { ageFrom, type PatientFull } from "../../lib/patients"
 import { Cie10Search } from "./cie10-search"
 import { ConsentSheet } from "./consent-sheet"
+import { ConsentSigningScreen, PaperSignDrawer, useSignerChoices } from "./consent-signing"
 import { FirmaPad } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
 
@@ -187,12 +184,14 @@ export function ConsentimientosTab({
   )
 }
 
-function NewConsentDrawer({
+export function NewConsentDrawer({
   open,
   onClose,
   patientId,
   encounterId,
   planItemId,
+  defaultProcedureRef,
+  defaultDiagnosisCode,
   onCreated,
 }: {
   open: boolean
@@ -200,12 +199,15 @@ function NewConsentDrawer({
   patientId: string
   encounterId?: string
   planItemId?: string
+  /** Desde la atención: lo que se registró (procedimiento y pieza) y su diagnóstico. */
+  defaultProcedureRef?: string
+  defaultDiagnosisCode?: string
   onCreated: (id: string) => Promise<void>
 }) {
   const ids = useId()
   const [templateId, setTemplateId] = useState("")
-  const [procedureRef, setProcedureRef] = useState("")
-  const [diagnosisCode, setDiagnosisCode] = useState("")
+  const [procedureRef, setProcedureRef] = useState(defaultProcedureRef ?? "")
+  const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
   const [error, setError] = useState<string | null>(null)
   const templatesQuery = useQuery({
     queryKey: ["consent-templates-published"],
@@ -307,60 +309,6 @@ function NewConsentDrawer({
   )
 }
 
-interface SignerChoice {
-  kind: "paciente" | "representante"
-  contactId: string
-  name: string
-  label: string
-}
-
-/** Quién puede firmar o revocar: la propia persona (mayor de edad) o su representante legal vigente. */
-function useSignerChoices(patientId: string) {
-  const canPatients = usePermission("patients.read")
-  const patientQuery = useQuery({
-    queryKey: ["patient", patientId],
-    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
-    enabled: canPatients,
-  })
-  const responsibilitiesQuery = useQuery({
-    queryKey: ["responsibilities", patientId],
-    queryFn: () => fetchResponsibilities(patientId),
-    enabled: canPatients,
-  })
-  const detail = patientQuery.data?.data
-  const own = detail?.contacts.find((link) => link.relationship === "self")
-  const age = Number(ageFrom(detail?.patient.birthDate))
-  const isMinor = detail?.patient.birthDate != null && Number.isFinite(age) && age < 18
-  const representatives = (responsibilitiesQuery.data?.data ?? []).filter(
-    (row) => row.isCurrent && row.kind === "representante_legal",
-  )
-  const choices: SignerChoice[] = [
-    ...(own && !isMinor
-      ? [
-          {
-            kind: "paciente" as const,
-            contactId: own.contactId,
-            name: own.displayName,
-            label: `${own.displayName} · paciente`,
-          },
-        ]
-      : []),
-    ...representatives.map(
-      (row): SignerChoice => ({
-        kind: "representante",
-        contactId: row.contact.id,
-        name: row.contact.displayName,
-        label: `${row.contact.displayName} · representante legal`,
-      }),
-    ),
-  ]
-  return {
-    choices,
-    isMinor,
-    loading: patientQuery.isPending || responsibilitiesQuery.isPending,
-  }
-}
-
 function ConsentDetail({
   document,
   canWrite,
@@ -377,8 +325,11 @@ function ConsentDetail({
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState("")
   const [revokeOpen, setRevokeOpen] = useState(false)
+  const [signing, setSigning] = useState(false)
+  const [paperOpen, setPaperOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const cancelId = useId()
+  const signatureWords = consentSignatureWords(document)
   const cancel = useMutation({
     mutationFn: () => cancelConsent(document.id, cancelReason.trim()),
     onSuccess: async () => {
@@ -453,8 +404,37 @@ function ConsentDetail({
         </p>
       ) : null}
       {canWrite && document.status === "pendiente" ? (
-        <SignForm document={document} onChanged={onChanged} />
+        <div className="flex flex-col gap-2 rounded-md border p-3">
+          <p className="text-sm">
+            Falta la firma. En la silla, la persona firma con el dedo en pantalla completa y tú
+            confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => setSigning(true)}>
+              Firmar ahora
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setPaperOpen(true)}>
+              Firmado en papel
+            </Button>
+          </div>
+        </div>
       ) : null}
+      {signatureWords ? <p className="text-xs text-muted-foreground">{signatureWords}</p> : null}
+      <ConsentSigningScreen
+        open={signing}
+        documents={[document]}
+        patientId={document.patientId}
+        onClose={() => setSigning(false)}
+        onSigned={onChanged}
+      />
+      <PaperSignDrawer
+        open={paperOpen}
+        document={document}
+        patientId={document.patientId}
+        encounterId={document.encounterId}
+        onClose={() => setPaperOpen(false)}
+        onSigned={onChanged}
+      />
       {canWrite && document.status === "firmado" && revokeOpen ? (
         <RevokeForm
           document={document}
@@ -500,207 +480,6 @@ function ConsentDetail({
         </Field>
       </ConfirmDialog>
     </div>
-  )
-}
-
-function SignForm({
-  document,
-  onChanged,
-}: {
-  document: ConsentDocument
-  onChanged: () => Promise<void>
-}) {
-  const ids = useId()
-  const { choices, isMinor, loading } = useSignerChoices(document.patientId)
-  const [choiceId, setChoiceId] = useState<string>("")
-  const selected = choices.find((c) => c.contactId === choiceId) ?? choices[0] ?? null
-  const [signerDoc, setSignerDoc] = useState("")
-  const [relation, setRelation] = useState("")
-  const [understood, setUnderstood] = useState(false)
-  const [strokes, setStrokes] = useState<number[][][]>([])
-  const [professionalStrokes, setProfessionalStrokes] = useState<number[][][]>([])
-  const [withWitness, setWithWitness] = useState(false)
-  const [witnessName, setWitnessName] = useState("")
-  const [witnessDoc, setWitnessDoc] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const sign = useMutation({
-    mutationFn: () =>
-      signConsent(document.id, {
-        signerKind: selected!.kind,
-        signerContactId: selected!.contactId,
-        signerDoc: signerDoc.trim() || null,
-        representativeRelation:
-          selected!.kind === "representante" ? relation.trim() || "Representante legal" : null,
-        signatureData: { strokes },
-        comprehensionConfirmed: true,
-        professionalSignature: { strokes: professionalStrokes },
-        witness:
-          withWitness && witnessName.trim()
-            ? { name: witnessName.trim(), doc: witnessDoc.trim() || null }
-            : null,
-      }),
-    onSuccess: async () => {
-      toast.success("Firmas registradas; el PDF quedó en Documentos")
-      await onChanged()
-    },
-    onError: (e) => setError(errorMessage(e)),
-  })
-
-  if (loading) return <LoadingState message="Buscando quién puede firmar…" />
-  if (!selected)
-    return (
-      <p role="alert" className="rounded-md bg-warning-soft p-3 text-sm">
-        {isMinor
-          ? "El paciente es menor de edad y no tiene representante legal vigente. Regístralo en Datos → Responsables para que pueda firmar por él."
-          : "No hay una persona habilitada para firmar. Revisa los vínculos y responsables en Datos."}
-      </p>
-    )
-  return (
-    <form
-      aria-labelledby={`${ids}-title`}
-      className="flex flex-col gap-4 rounded-md border p-3"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!understood) {
-          setError("La persona que firma debe confirmar que comprendió la información")
-          return
-        }
-        if (strokes.length === 0) {
-          setError(`Falta la firma de ${selected.name}`)
-          return
-        }
-        if (professionalStrokes.length === 0) {
-          setError("Falta la firma del profesional que informa")
-          return
-        }
-        if (withWitness && !witnessName.trim()) {
-          setError("Ingresa el nombre del testigo o quítalo")
-          return
-        }
-        setError(null)
-        sign.mutate()
-      }}
-    >
-      <h4 id={`${ids}-title`} className="text-sm font-semibold">
-        Registrar firmas
-      </h4>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-signer`}>Quién firma</FieldLabel>
-        <Select
-          items={Object.fromEntries(choices.map((c) => [c.contactId, c.label]))}
-          value={selected.contactId}
-          onValueChange={(v) => setChoiceId(v ?? "")}
-        >
-          <SelectTrigger id={`${ids}-signer`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {choices.map((c) => (
-              <SelectItem key={c.contactId} value={c.contactId}>
-                {c.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          {isMinor
-            ? "Paciente menor de edad: solo firma su representante legal vigente."
-            : "Firma la propia persona o su representante legal vigente; el nombre y documento salen de su ficha."}
-        </p>
-      </Field>
-      {selected.kind === "representante" ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor={`${ids}-relation`}>Parentesco o relación</FieldLabel>
-            <Input
-              id={`${ids}-relation`}
-              value={relation}
-              onChange={(event) => setRelation(event.target.value)}
-              maxLength={120}
-              placeholder="p. ej. Madre"
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-doc`}>Documento (si su ficha no lo tiene)</FieldLabel>
-            <Input
-              id={`${ids}-doc`}
-              value={signerDoc}
-              onChange={(event) => setSignerDoc(event.target.value)}
-              maxLength={40}
-            />
-          </Field>
-        </div>
-      ) : null}
-      <label className="flex items-start gap-2 text-sm">
-        <Checkbox checked={understood} onCheckedChange={(value) => {
-            setUnderstood(value === true)
-            setError(null)
-          }} />
-        <span>{CONSENT_DECLARATION}</span>
-      </label>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1">
-          <p id={`${ids}-sig1`} className="text-sm font-medium">
-            Firma de {selected.name}
-          </p>
-          <FirmaPad label={`Firma de ${selected.name}`} onChange={setStrokes} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">Firma del profesional que informa</p>
-          <FirmaPad label="Firma del profesional que informa" onChange={setProfessionalStrokes} />
-          <p className="text-xs text-muted-foreground">
-            Tu nombre y colegiatura se toman de tu perfil profesional.
-          </p>
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Firma manuscrita capturada, no certificada. Alternativa: «Imprimir para firma en papel» y
-        adjunta el escaneo en Documentos.
-      </p>
-      {withWitness ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor={`${ids}-witness`}>Nombre del testigo</FieldLabel>
-            <Input
-              id={`${ids}-witness`}
-              value={witnessName}
-              maxLength={200}
-              onChange={(event) => setWitnessName(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-witness-doc`}>Documento del testigo</FieldLabel>
-            <Input
-              id={`${ids}-witness-doc`}
-              value={witnessDoc}
-              maxLength={40}
-              onChange={(event) => setWitnessDoc(event.target.value)}
-            />
-          </Field>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setWithWitness(false)}>
-            Quitar testigo
-          </Button>
-        </div>
-      ) : (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="self-start"
-          onClick={() => setWithWitness(true)}
-        >
-          Añadir testigo (nombre y documento)
-        </Button>
-      )}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <Button type="submit" className="self-end" disabled={sign.isPending}>
-        {sign.isPending ? "Registrando…" : "Registrar firmas"}
-      </Button>
-    </form>
   )
 }
 

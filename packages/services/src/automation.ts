@@ -1390,12 +1390,17 @@ async function stillValid(
   }
   if (job.kind === "seguimiento_no_asistencia" && job.appointmentId) {
     const [appt] = await tx
-      .select({ status: appointment.status })
+      .select({ status: appointment.status, startsAt: appointment.startsAt })
       .from(appointment)
       .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
       .limit(1)
     if (!appt) return { valid: false, reason: "La cita ya no existe" }
+    // Llegó tarde y se recuperó la cita: ya no está «no vino».
     if (appt.status !== "no_asistio") return { valid: false, reason: `La cita ya está ${APPOINTMENT_STATUS_WORDS[appt.status] ?? appt.status}` }
+    // Vino a la clínica por otra cita ese día o después: no se le escribe que no la vimos (ADR 0032).
+    if (job.patientId && (await arrivedSince(tx, orgId, job.patientId, new Date(appt.startsAt.getTime() - ARRIVAL_SAME_VISIT_MS)))) {
+      return { valid: false, reason: "Vino a la clínica por otra cita" }
+    }
     if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
       return { valid: false, reason: "Ya tiene otra cita reservada" }
     }
@@ -1510,6 +1515,25 @@ async function stillValid(
     if (!c.isActive) return { valid: false, reason: "El contacto está archivado" }
   }
   return { valid: true }
+}
+
+/** Una llegada hasta 12 horas antes de la cita perdida es de la misma jornada. */
+const ARRIVAL_SAME_VISIT_MS = 12 * 3_600_000
+
+/** La persona llegó a alguna cita desde ese momento («Llegó», ADR 0032). */
+async function arrivedSince(tx: Db, orgId: string, patientId: string, since: Date): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        gte(appointment.arrivedAt, since),
+      ),
+    )
+    .limit(1)
+  return !!row
 }
 
 async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, now: Date): Promise<boolean> {

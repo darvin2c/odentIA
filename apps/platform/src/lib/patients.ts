@@ -367,6 +367,8 @@ export interface Encounter {
   vitals?: Record<string, number> | null
   prognosis?: string | null
   auxiliaryExams?: string | null
+  /** Por qué se cerró con un consentimiento sin firmar («Seguir sin él»). */
+  consentSkipReason?: string | null
   evolution: string | null
   indications: string | null
   nextStep: string | null

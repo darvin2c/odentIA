@@ -68,29 +68,47 @@ const AGENDA_ENTRIES: ScheduleEntry[] = ROWS.map(
   },
 )
 
+/** A las 10:20 Mariana llegó y Elena está en atención: lo dice su estado, no el reloj. */
+const STAGES: Record<string, Pick<ScheduleEntry, "stage" | "stateLabel">> = {
+  "Mariana Soto": { stage: "llego", stateLabel: "Llegó 9:58 · espera 22 min" },
+  "Elena Huamán": { stage: "en_atencion", stateLabel: "En atención · con la Dra. Ana desde 10:16" },
+}
+
 const TODAY_ITEMS: ScheduleAgendaItem[] = AGENDA_ENTRIES.filter(
   (entry) => zonedDateOf(entry.start, TZ) === AGENDA_TODAY,
 ).map((entry) => ({
-  entry,
+  entry: { ...entry, ...STAGES[entry.title] },
   resourceLabel: AGENDA_PROFESSIONALS.find((item) => item.id === entry.columnId)?.label ?? "",
 }))
 
 describe("ScheduleAgendaList", () => {
-  it("pone delante lo que está en curso y lo que viene, y pliega lo que ya pasó", () => {
+  it("pone delante a quien está en la clínica y lo que viene, y pliega lo que ya pasó", () => {
     render(<ScheduleAgendaList items={TODAY_ITEMS} timeZone={TZ} now={AGENDA_NOW} />)
     expect(screen.getByText("Ahora · 10:20")).toBeTruthy()
-    const current = within(screen.getByRole("list", { name: "En curso" }))
+    const current = within(screen.getByRole("list", { name: "En la clínica" }))
     expect(current.getAllByRole("listitem")).toHaveLength(2)
-    expect(current.getByText("Mariana Soto")).toBeTruthy()
+    expect(current.getByText("Llegó 9:58 · espera 22 min")).toBeTruthy()
+    expect(current.getByText("En atención · con la Dra. Ana desde 10:16")).toBeTruthy()
     expect(screen.getByText("Lo que viene · 11")).toBeTruthy()
     // Lo pasado no estorba: una fila con su balance.
     expect(screen.queryByText("Jorge Salas")).toBeNull()
     const past = screen.getByRole("button", { name: /Ya pasaron · 5 citas/ })
     expect(past.getAttribute("aria-expanded")).toBe("false")
-    expect(past.textContent).toContain("4 atendidas · 1 no asistió")
+    expect(past.textContent).toContain("4 atendidas · 1 no vino")
     fireEvent.click(past)
     expect(screen.getByText("Jorge Salas")).toBeTruthy()
     expect(within(screen.getByRole("list", { name: "Ya pasaron" })).getAllByRole("listitem")).toHaveLength(5)
+  })
+
+  it("la hora no pone a nadie en curso: lo que pasó sin llegar ni cerrarse queda a la vista", () => {
+    // Sin llegadas marcadas, a las 10:20 nadie está «en curso» por la hora.
+    const plain = TODAY_ITEMS.map((item) => ({ ...item, entry: { ...item.entry, stage: undefined, stateLabel: undefined } }))
+    render(<ScheduleAgendaList items={plain} timeZone={TZ} now={minutesToInstant(AGENDA_TODAY, 11 * 60 + 5, TZ)} />)
+    expect(screen.queryByRole("list", { name: "En la clínica" })).toBeNull()
+    // A las 11:05, Mariana (10:00), Elena (10:15) y Thiago (10:30) ya pasaron sin llegar ni cerrarse.
+    const unclosed = within(screen.getByRole("list", { name: "Ya pasaron sin cerrar" }))
+    expect(unclosed.getAllByRole("listitem").map((item) => item.dataset.entry)).toEqual(["cita-7", "cita-3", "cita-16"])
+    expect(screen.getByText("Ya pasaron · sin cerrar · 3")).toBeTruthy()
   })
 
   it("cada fila ofrece su paso siguiente y la fila abre el detalle", () => {
@@ -154,8 +172,8 @@ describe("ScheduleStatusSummary", () => {
     const all = screen.getByRole("button", { name: /Todas/ })
     expect(all.getAttribute("aria-pressed")).toBe("true")
     expect(all.textContent).toContain("18")
-    // «No asistió» solo tiene ficha porque hay una; «Canceladas», ninguna.
-    expect(screen.getByRole("button", { name: /No asistió/ })).toBeTruthy()
+    // «No vino» solo tiene ficha porque hay una; «Canceladas», ninguna.
+    expect(screen.getByRole("button", { name: /No vino/ })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Cancelad/ })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: /Por confirmar/ }))
     expect(onChange).toHaveBeenCalledWith("programada")

@@ -2,7 +2,7 @@ import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clin
 import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
-import { eq } from "drizzle-orm"
+import { and, eq, ilike } from "drizzle-orm"
 import {
   advanceClinicalOrder,
   archiveSpecialty,
@@ -21,6 +21,7 @@ import {
   listSpecialties,
   publishConsentTemplate,
   publishFormTemplate,
+  setConsentTemplateServices,
   setProfessionalSpecialties,
   setServiceSpecialties,
   signConsentDocument,
@@ -270,7 +271,48 @@ export async function seedClinicalForms(
     })
   }
 
+  // «Se pide para» (fase 3, paso 2B): la exodoncia pide su consentimiento y el
+  // de anestesia local; al registrarla, la atención propone prepararlos.
+  const extractions = await tx
+    .select({ id: serviceCatalog.id })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), ilike(serviceCatalog.name, "%exodoncia%")))
+  if (extractions.length > 0) {
+    for (const key of ["exodoncia", "anestesia-local"]) {
+      const consentTemplate = consentTemplates.get(key)
+      if (consentTemplate)
+        await setConsentTemplateServices(
+          tx,
+          orgId,
+          ownerUserId,
+          consentTemplate.id,
+          extractions.map((row) => row.id),
+        )
+    }
+  }
+  // La anestesia de la exodoncia: pendiente aquí; seed-dev la deja firmada en
+  // papel con la foto de la hoja.
+  const anestesia = consentTemplates.get("anestesia-local")
+  if (anestesia && !(await listConsentDocuments(tx, orgId, { patientId })).some((doc) => doc.templateId === anestesia.id)) {
+    await createConsentDocument(tx, orgId, ownerUserId, {
+      templateId: anestesia.id,
+      patientId,
+      procedureRef: "Anestesia local para la exodoncia de la pieza 38",
+    })
+  }
+
   const orders = await listClinicalOrders(tx, orgId, { patientId })
+  // Una orden de imagen con su diagnóstico, para «Imprimir» y «Enviar».
+  if (!orders.some((order) => order.kind === "imagen")) {
+    await createClinicalOrder(tx, orgId, ownerUserId, {
+      kind: "imagen",
+      patientId,
+      recipient: "Centro de imágenes Miraflores",
+      title: "Radiografía panorámica",
+      detail: "Evaluar tercer molar inferior izquierdo (pieza 38).",
+      diagnosisCode: "K01.1",
+    })
+  }
   if (orders.length === 0) {
     const order = await createClinicalOrder(tx, orgId, ownerUserId, {
       kind: "interconsulta",

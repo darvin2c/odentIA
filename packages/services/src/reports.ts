@@ -139,6 +139,45 @@ async function controlTotals(tx: Db, orgId: string, span: ReportSpan): Promise<C
   return { ...totals, unknown: totals.due - totals.came - totals.pending - totals.cancelled }
 }
 
+/**
+ * «Espera en sala» (ADR 0032): minutos entre «Llegó» y el inicio de la
+ * atención de la cita. Solo cuenta lo medido: la llegada marcada antes de
+ * empezar; la que marcó «Atender» al abrir es la misma hora y queda sin dato.
+ * La mediana no se deja arrastrar por un día raro. Por profesional, el que
+ * atendió.
+ */
+export type WaitInRoom = {
+  /** Mediana del tramo, en minutos enteros; null sin datos. */
+  medianMinutes: number | null
+  /** Citas con la espera medida. */
+  measured: number
+  byProfessional: Array<{ userId: string; name: string; medianMinutes: number; measured: number }>
+}
+
+async function waitInRoom(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<WaitInRoom> {
+  const rows = await tx.execute<{ userId: string | null; name: string | null; median: number | string | null; measured: number }>(sql`
+    select e.dentist_user_id as "userId", u.name,
+      percentile_cont(0.5) within group (order by extract(epoch from (e.started_at - a.arrived_at)) / 60) as median,
+      count(*)::int as measured
+    from appointment a
+    join encounter e on e.organization_id=a.organization_id and e.appointment_id=a.id and e.status<>'anulada'
+    join "user" u on u.id=e.dentist_user_id
+    where a.organization_id=${orgId} and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
+      and a.arrived_at is not null and a.arrived_at < e.started_at
+      ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
+    group by grouping sets ((e.dentist_user_id, u.name), ())`)
+  const minutes = (value: number | string | null) => (value === null ? null : Math.round(Number(value)))
+  const whole = rows.find((row) => row.userId === null)
+  return {
+    medianMinutes: whole && whole.measured > 0 ? minutes(whole.median) : null,
+    measured: whole?.measured ?? 0,
+    byProfessional: rows
+      .filter((row): row is typeof row & { userId: string; name: string } => row.userId !== null && row.name !== null)
+      .map((row) => ({ userId: row.userId, name: row.name, medianMinutes: minutes(row.median) ?? 0, measured: row.measured }))
+      .sort((a, b) => b.medianMinutes - a.medianMinutes || a.name.localeCompare(b.name)),
+  }
+}
+
 export async function getReportAgenda(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
   const { window } = scope
@@ -163,6 +202,8 @@ export async function getReportAgenda(tx: Db, orgId: string, query: ReportQuery,
     bySource: [...bySource],
     controls: await controlTotals(tx, orgId, window),
     previousControls: await controlTotals(tx, orgId, window.previous),
+    waitInRoom: await waitInRoom(tx, orgId, scope, window),
+    previousWaitInRoom: (await waitInRoom(tx, orgId, scope, window.previous)).medianMinutes,
     /** Los controles son de la persona, no de una sede. */
     wholeClinic: scope.branch ? (["controls"] as const) : ([] as const),
     series: await monthlySeries(scope, (span) => appointmentTotals(tx, orgId, scope, span)),

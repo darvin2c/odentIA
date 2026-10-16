@@ -208,6 +208,14 @@ export function EncounterDetailView({
             <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
           </div>
+          {encounter.consentSkipReason ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">
+                Se cerró sin un consentimiento firmado
+              </dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.consentSkipReason}</dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Indicaciones</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.indications ?? "—"}</dd>

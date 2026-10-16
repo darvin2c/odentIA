@@ -1,5 +1,5 @@
 import { CONSENT_DECLARATION, CONSENT_SECTION_LABELS } from "@odentia/clinical"
-import type { ConsentDocument } from "../../lib/clinical-forms"
+import { type ConsentDocument, consentSignatureWords } from "../../lib/clinical-forms"
 import { FirmaView } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
 
@@ -29,6 +29,8 @@ export function ConsentSheet({
 }): React.JSX.Element {
   const sections = document.sectionsSnapshot
   const pending = document.status === "pendiente"
+  // Nivel real de la firma, siempre a la vista.
+  const signatureWords = consentSignatureWords(document)
   return (
     <article className="flex flex-col gap-4 rounded-md border bg-white p-5 text-sm text-black">
       <header className="flex flex-col gap-1">
@@ -89,6 +91,8 @@ export function ConsentSheet({
               strokes={document.signatureData.strokes}
               label={`Firma de ${document.signerName}`}
             />
+          ) : document.signatureMethod === "papel" ? (
+            <p className="text-xs">Firmó la hoja en papel; su foto queda en Documentos.</p>
           ) : paper ? (
             <div className="aspect-[22/7] w-full rounded-md border" aria-hidden="true" />
           ) : null}
@@ -107,6 +111,8 @@ export function ConsentSheet({
               strokes={document.professionalSignature.strokes}
               label={`Firma de ${document.informerName ?? "el profesional"}`}
             />
+          ) : document.informerName ? (
+            <p className="text-xs">Informó y resolvió sus dudas · firma con su perfil profesional.</p>
           ) : paper ? (
             <div className="aspect-[22/7] w-full rounded-md border" aria-hidden="true" />
           ) : null}
@@ -144,6 +150,7 @@ export function ConsentSheet({
           Anulado {when(document.cancelledAt)} · {document.cancelReason}
         </p>
       ) : null}
+      {signatureWords ? <p className="text-xs font-medium">{signatureWords}</p> : null}
       <p className="text-[11px] text-neutral-600">
         Firmas manuscritas capturadas como evidencia; no constituyen firma digital certificada.
         {document.pdfSha256 ? ` Huella SHA-256 del PDF: ${document.pdfSha256}` : ""}

@@ -118,13 +118,13 @@ for (const width of [1440, 390]) {
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
       expect(home.setup).toEqual({ availability: true, chairs: true, patients: true, agent: true })
       expect(home.waiting).toEqual([])
-      expect(home.today?.summary).toEqual({ total: 0, attended: 0, upcoming: 0, unconfirmed: 0 })
+      expect(home.today?.summary).toEqual({ total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0 })
       await observe(page, info, "configurada-sin-pendientes")
       await agenda.getByRole("button", { name: "Abrir la Agenda", exact: true }).click()
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/agenda"))
     })
 
-    test("quien dirige: una lista «Te espera», la agenda de la sede y la caja en una línea", async ({ owner, fixtureDb }, info) => {
+    test("quien dirige y atiende: una lista «Te espera», sus pacientes, la agenda de la sede y la caja en una línea", async ({ owner, fixtureDb }, info) => {
       await activeDay(fixtureDb, owner)
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
@@ -145,12 +145,14 @@ for (const width of [1440, 390]) {
       // La tarea se marca hecha desde la propia fila.
       await expect(rows.nth(1).getByRole("button", { name: /^Hecha/ })).toBeVisible()
 
-      // La agenda de la sede, con su resumen igual al de la Agenda de ese día.
-      const agenda = page.getByRole("region", { name: "Agenda de hoy" })
-      await expect(agenda).toContainText("2 citas · 0 atendidas · 2 por venir, 1 sin confirmar")
-      await expect(agenda).toContainText("Paciente con cita")
-      await expect(agenda.getByText(new RegExp(`^Profilaxis · ${owner.user.name}`))).toBeVisible()
-      await expect(agenda.getByRole("link", { name: "Ver las 2 en la Agenda", exact: true })).toBeVisible()
+      // Hoy atiende: «Mis pacientes de hoy», también siendo la dueña (tablero 7); su cita va en «Más tarde».
+      const mine = page.getByRole("region", { name: "Mis pacientes de hoy" })
+      await expect(mine.getByRole("list", { name: "Más tarde" })).toContainText("Paciente con cita")
+      await expect(mine).not.toContainText("Paciente de otra profesional")
+      await expect(page.getByRole("region", { name: "Agenda de hoy" })).toHaveCount(0)
+      // La agenda de la sede, en una línea con su resumen, igual al de la Agenda de ese día.
+      const agendaLine = page.getByRole("link", { name: /^Agenda de / })
+      await expect(agendaLine).toContainText("2 citas · 0 en sala · 0 atendidas · 2 por venir")
       // La caja del día, en una línea que lleva a Finanzas.
       const cash = page.getByRole("link", { name: /^Caja de hoy/ })
       await expect(cash).toContainText("1 persona por cobrar")
@@ -166,11 +168,12 @@ for (const width of [1440, 390]) {
 
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
       expect(home.waiting.map(row => row.kind)).toEqual(["case", "task"])
-      expect(home.today).toMatchObject({ scope: "branch", branch: { id: owner.branchId }, summary: { total: 2, attended: 0, upcoming: 2, unconfirmed: 1 } })
+      expect(home.today).toMatchObject({ scope: "mine", summary: { total: 1, attended: 0, upcoming: 1, unconfirmed: 1 } })
+      expect(home.agendaLine).toMatchObject({ branch: { id: owner.branchId }, summary: { total: 2, waiting: 0, attended: 0, upcoming: 2, unconfirmed: 1 } })
       expect(home.cash?.toCollect.map(row => row.displayName)).toEqual(["Paciente con cita"])
       // Una sede que no existe no rompe Inicio ni mezcla sedes: vale la primera activa.
       const fallback = await call<WorkspaceHome>(page, "GET", `/api/workspace/home?branch=${randomUUID()}`, owner.org.slug)
-      expect(fallback.today?.branch?.id).toBe(owner.branchId)
+      expect(fallback.agendaLine?.branch.id).toBe(owner.branchId)
       expect((await api(page, "GET", "/api/workspace/home?branch=no-es-una-sede", owner.org.slug)).status).toBe(400)
 
       const task = rows.nth(1).getByRole("link", { name: /Confirmar seguimiento pendiente/ })
@@ -204,6 +207,35 @@ for (const width of [1440, 390]) {
       await mine.getByRole("link", { name: /Paciente con cita/ }).click()
       // La ficha lleva a la página de su persona (ADR 0029).
       await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/people/"))
+    })
+
+    test("recepción marca «Llegó» en Inicio y quien atiende la ve en su sala de espera", async ({ owner, fixtureDb }, info) => {
+      await activeDay(fixtureDb, owner)
+      await setRole(fixtureDb, owner, "reception")
+      const page = owner.page
+      await page.setViewportSize({ width, height: 844 })
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      const agenda = page.getByRole("region", { name: "Agenda de hoy" })
+      // Cada fila abre la cita y lleva su paso al lado: «Llegó».
+      await agenda.getByRole("button", { name: "Llegó: Paciente con cita" }).click()
+      await expect(agenda.getByRole("button", { name: "Deshacer: Paciente con cita" })).toBeVisible()
+      await expect(agenda).toContainText("1 en sala")
+      await expect(agenda.getByRole("link", { name: /Paciente con cita.*Llegó \d/ })).toBeVisible()
+      await observe(page, info, "recepcion-llego")
+      // Quien atiende la ve en «Sala de espera», con «Atender» en su botón.
+      await setRole(fixtureDb, owner, "dentist")
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      const sala = page.getByRole("region", { name: "Mis pacientes de hoy" }).getByRole("list", { name: "Sala de espera" })
+      await expect(sala).toContainText("Paciente con cita")
+      await expect(sala).toContainText(/espera \d+ min/)
+      await expect(sala.getByRole("button", { name: "Atender: Paciente con cita" })).toBeVisible()
+      await observe(page, info, "sala-de-espera")
+      // «No vino» ya no procede: la persona está en la clínica.
+      const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
+      const waiting = home.today?.appointments.find(row => row.patientName === "Paciente con cita")
+      expect(waiting).toMatchObject({ visit: "llego" })
+      const noShow = await api(page, "POST", `/api/appointments/${waiting?.id}/status`, owner.org.slug, { status: "no_asistio" })
+      expect(noShow.status).toBe(409)
     })
 
     test("caja: «Por cobrar» con la persona atendida hoy y «Cobrar» abre el cobro", async ({ owner, fixtureDb }, info) => {

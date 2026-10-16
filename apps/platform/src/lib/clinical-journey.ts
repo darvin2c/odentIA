@@ -141,7 +141,7 @@ export function followUpAppointmentLabel(control: FollowUp): string {
       : "Cita atendida"
   }
   if (appointment.status === "cancelada") return "Cita cancelada · sin reserva vigente"
-  if (appointment.status === "no_asistio") return "No asistió · sin reserva vigente"
+  if (appointment.status === "no_asistio") return "No vino · sin reserva vigente"
   return `Cita ${appointment.status === "confirmada" ? "confirmada" : "reservada"} · ${formatDateTime(appointment.startsAt)}`
 }
 

@@ -72,6 +72,7 @@ import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_or
 import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
 import { Route as OrgPatientsPatientIdConsentsConsentIdPrintRouteImport } from './routes/_org/patients.$patientId.consents.$consentId.print'
+import { Route as OrgPatientsPatientIdOrdersOrderIdPrintRouteImport } from './routes/_org/patients.$patientId.orders.$orderId.print'
 import { Route as OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport } from './routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
 
 const IndexRoute = IndexRouteImport.update({
@@ -399,6 +400,12 @@ const OrgPatientsPatientIdConsentsConsentIdPrintRoute =
     path: '/consents/$consentId/print',
     getParentRoute: () => OrgPatientsPatientIdRoute,
   } as any)
+const OrgPatientsPatientIdOrdersOrderIdPrintRoute =
+  OrgPatientsPatientIdOrdersOrderIdPrintRouteImport.update({
+    id: '/orders/$orderId/print',
+    path: '/orders/$orderId/print',
+    getParentRoute: () => OrgPatientsPatientIdRoute,
+  } as any)
 const OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute =
   OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport.update({
     id: '/prescriptions/$prescriptionId/print',
@@ -469,6 +476,7 @@ export interface FileRoutesByFullPath {
   '/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 export interface FileRoutesByTo {
@@ -532,6 +540,7 @@ export interface FileRoutesByTo {
   '/settings/integrations': typeof OrgSettingsIntegrationsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 export interface FileRoutesById {
@@ -599,6 +608,7 @@ export interface FileRoutesById {
   '/_org/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   '/_org/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/_org/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 export interface FileRouteTypes {
@@ -666,6 +676,7 @@ export interface FileRouteTypes {
     | '/settings/integrations/'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -729,6 +740,7 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/patients/$patientId/encounters/$encounterId'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
   id:
     | '__root__'
@@ -795,6 +807,7 @@ export interface FileRouteTypes {
     | '/_org/settings/integrations/'
     | '/_org/patients/$patientId/encounters/$encounterId'
     | '/_org/patients/$patientId/consents/$consentId/print'
+    | '/_org/patients/$patientId/orders/$orderId/print'
     | '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesById: FileRoutesById
 }
@@ -1252,6 +1265,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRouteImport
       parentRoute: typeof OrgPatientsPatientIdRoute
     }
+    '/_org/patients/$patientId/orders/$orderId/print': {
+      id: '/_org/patients/$patientId/orders/$orderId/print'
+      path: '/orders/$orderId/print'
+      fullPath: '/patients/$patientId/orders/$orderId/print'
+      preLoaderRoute: typeof OrgPatientsPatientIdOrdersOrderIdPrintRouteImport
+      parentRoute: typeof OrgPatientsPatientIdRoute
+    }
     '/_org/patients/$patientId/prescriptions/$prescriptionId/print': {
       id: '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
       path: '/prescriptions/$prescriptionId/print'
@@ -1343,6 +1363,7 @@ const OrgSettingsRouteWithChildren = OrgSettingsRoute._addFileChildren(
 interface OrgPatientsPatientIdRouteChildren {
   OrgPatientsPatientIdEncountersEncounterIdRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRoute
   OrgPatientsPatientIdConsentsConsentIdPrintRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  OrgPatientsPatientIdOrdersOrderIdPrintRoute: typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute: typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
 
@@ -1351,6 +1372,8 @@ const OrgPatientsPatientIdRouteChildren: OrgPatientsPatientIdRouteChildren = {
     OrgPatientsPatientIdEncountersEncounterIdRoute,
   OrgPatientsPatientIdConsentsConsentIdPrintRoute:
     OrgPatientsPatientIdConsentsConsentIdPrintRoute,
+  OrgPatientsPatientIdOrdersOrderIdPrintRoute:
+    OrgPatientsPatientIdOrdersOrderIdPrintRoute,
   OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute:
     OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute,
 }

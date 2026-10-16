@@ -637,6 +637,11 @@ export const encounter = pgTable(
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidedBy: text("voided_by").references(() => user.id),
     voidReason: text("void_reason"),
+    /**
+     * Por qué se cerró con un consentimiento sin firmar (avisa sin bloquear,
+     * decisión 3 de la fase 3). Historia como el resto: no cambia al cerrar.
+     */
+    consentSkipReason: text("consent_skip_reason"),
     ...timestamps,
   },
   (table) => [
@@ -658,6 +663,10 @@ export const encounter = pgTable(
     check(
       "encounter_end_check",
       sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
+    ),
+    check(
+      "encounter_consent_skip_reason_check",
+      sql`${table.consentSkipReason} IS NULL OR char_length(${table.consentSkipReason}) BETWEEN 1 AND 2000`,
     ),
   ],
 )

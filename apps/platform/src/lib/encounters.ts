@@ -4,6 +4,7 @@
  * y perfil profesional con el que se firma.
  */
 import { apiFetch } from "./api"
+import type { ConsentNeed } from "./encounter-documents"
 import type { Encounter, ProcedureItem } from "./patients"
 
 export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signature"
@@ -11,6 +12,11 @@ export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signatu
 export interface ClosingCheck {
   ready: boolean
   missing: ClosingRequirement[]
+  /**
+   * Consentimientos que pide la atención y no están firmados. No bloquean:
+   * cerrar sin ellos pide decir por qué (`consentSkipReason`).
+   */
+  consents: ConsentNeed[]
 }
 
 /** Texto de cada requisito pendiente, en el orden de la historia clínica. */

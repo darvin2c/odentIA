@@ -293,6 +293,9 @@ export async function getPrescriptionPrint(tx: Db, orgId: string, patientId: str
       fiscalDocType: orgProfile.fiscalDocType,
       fiscalDocNumber: orgProfile.fiscalDocNumber,
       address: orgProfile.fiscalAddress,
+      // Con qué formato y en qué zona se escriben las fechas del PDF que se envía.
+      locale: orgProfile.locale,
+      timezone: orgProfile.timezone,
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))

@@ -92,6 +92,7 @@ export function EncounterProcedures({
   beforeWrite,
   onChanged,
   onPendingChange,
+  autoOpen = false,
 }: {
   patientId: string
   detail: EncounterDetail
@@ -99,13 +100,15 @@ export function EncounterProcedures({
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
   onPendingChange: (pending: boolean) => void
+  /** Recién agregado el bloque: el formulario de agregar ya viene abierto. */
+  autoOpen?: boolean
 }): React.JSX.Element {
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const orgLocale = useOrgProfile().data?.locale
   const queryClient = useQueryClient()
   const uid = useId()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(autoOpen && !disabled)
   const [service, setService] = useState<ServiceCatalogItem | null>(null)
   const serviceId = service?.id ?? ""
   const [freeMode, setFreeMode] = useState(false)

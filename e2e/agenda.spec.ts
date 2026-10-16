@@ -107,10 +107,38 @@ test("agenda: alta de sillón, paciente y cita visibles en el tenant", async ({ 
   // La rejilla del día pone un carril por profesional; el menú cambia a sillones.
   const grid = owner.page.getByRole("region", { name: /^Agenda del/ })
   await expect(grid.getByRole("group", { name: owner.user.name })).toBeVisible()
-  await owner.page.getByRole("button", { name: "Profesionales: todos" }).click()
+  // Quien atiende abre la Agenda en su columna (tablero 7): el menú dice de quién es.
+  await owner.page.getByRole("button", { name: owner.user.name, exact: true }).click()
   await owner.page.getByRole("menuitem", { name: "Ver por sillón" }).click()
   await expect(grid.getByRole("group", { name: "Sillón 1" })).toBeVisible()
   await expect(grid.getByRole("button", { name: /^Cita de Micaela Ríos/ })).toBeVisible()
+})
+
+test("agenda: «Llegó» con un clic, «Deshacer» y «Atender» sin formulario", async ({ createOwner }, info) => {
+  const owner = await createOwner("agenda-llego")
+  const { appointment, date } = await prepareAppointment(owner)
+  const { page } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, `/agenda?date=${date}&appointmentId=${appointment.id}`))
+  // Antes de llegar: «Llegó»; «Atendida» ya no se pone a mano.
+  await expect(page.getByRole("button", { name: "Llegó", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Atendida", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Llegó", exact: true }).click()
+  // Llegó: la hora y la espera en palabras, «Atender» y «Deshacer»; ya no se cancela.
+  await expect(page.getByText(/^Llegó a las \d\d:\d\d · espera \d+ min$/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Cancelar cita" })).toHaveCount(0)
+  await info.attach("llego", { body: await page.screenshot(), contentType: "image/png" })
+  await page.getByRole("button", { name: "Deshacer", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Llegó", exact: true })).toBeVisible()
+  expect((await call<{ visit: string }>(page, "GET", `/api/appointments/${appointment.id}`, owner.org.slug)).visit).toBe("por_confirmar")
+  // «Atender» en un clic: sin formulario de motivo, la atención se abre unida a la cita y la llegada queda marcada.
+  await page.getByRole("button", { name: "Llegó", exact: true }).click()
+  await page.getByRole("button", { name: "Atender", exact: true }).click()
+  await expect(page).toHaveURL(/\/patients\/[^/]+\/encounters\//)
+  await expect(page.getByRole("dialog", { name: "Atender la cita" })).toHaveCount(0)
+  const attending = await call<{ visit: string; arrivedAt: string | null }>(page, "GET", `/api/appointments/${appointment.id}`, owner.org.slug)
+  expect(attending.visit).toBe("en_atencion")
+  expect(attending.arrivedAt).not.toBeNull()
 })
 
 test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", async ({

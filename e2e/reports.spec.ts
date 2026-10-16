@@ -104,7 +104,7 @@ for (const width of [1440, 390]) {
       const seeWho = page.getByRole("button", { name: "Ver quiénes" })
       await seeWho.click()
       await expect(page).toHaveURL(/lista=no_show/)
-      const list = page.getByRole(width === 390 ? "dialog" : "region", { name: "No asistieron" }).or(page.getByRole("dialog", { name: "No asistieron" })).first()
+      const list = page.getByRole(width === 390 ? "dialog" : "region", { name: "No vinieron" }).or(page.getByRole("dialog", { name: "No vinieron" })).first()
       await expect(list.getByRole("link", { name: "Diego Ruiz" })).toBeVisible()
       await expect(list.getByText("Ya tiene otra cita")).toBeVisible()
       await expect(list.getByText("Cómo se calcula")).toBeVisible()

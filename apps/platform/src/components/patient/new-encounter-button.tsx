@@ -1,4 +1,3 @@
-import { canAccess } from "@odentia/auth/permissions"
 import {
   Button,
   Field,
@@ -9,22 +8,26 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  toast,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { addDays, FormDrawer, minutesToInstant, SubmitButton, zonedDateOf } from "@odentia/ui-patterns"
+import { canAccess } from "@odentia/auth/permissions"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
+import { type AgendaAppointment, invalidateAppointmentQueries, professionalSaid } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
+import { activeOrgTimeZone } from "../../lib/locale"
 import type { Encounter, PatientFull } from "../../lib/patients"
 
-/** Cita de agenda desde la que se atiende: fija la sede. */
+/** Cita de agenda desde la que se atiende: fija la sede y dice de quién es. */
 export interface AttendedAppointment {
   id: string
   dentistUserId: string
-  reason: string | null
-  serviceName: string | null
+  /** Para decir «Atiendes la cita de la Dra. Ana Torres» cuando atiende otro. */
+  dentistName: string
 }
 
 /** La atención en curso de un paciente, sin nada de su historia: cuál es y quién la lleva. */
@@ -34,13 +37,87 @@ interface OpenEncounterRef {
 }
 
 /**
+ * «Atender» una cita en un clic (ADR 0032): abre su atención sin formulario, a
+ * nombre de quien pulsa; el servidor marca la llegada si nadie lo hizo y el
+ * motivo se escribe dentro (lo exige el cierre). Si la persona ya tiene una
+ * atención en curso, se continúa esa. Cuando quien pulsa no es el profesional
+ * de la cita, se le dice de quién es.
+ */
+export function useAttendAppointment() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const myUserId = useMyUserId()
+  return useMutation({
+    mutationFn: async (input: { patientId: string; appointment: AttendedAppointment }) => {
+      try {
+        const result = await apiFetch<{ data: Encounter }>(`/api/patients/${input.patientId}/encounters`, {
+          method: "POST",
+          body: JSON.stringify({ appointmentId: input.appointment.id }),
+        })
+        return result.data.id
+      } catch (err) {
+        // Ya hay una atención abierta (de la persona o de esta cita): se retoma.
+        if (err instanceof ApiError && (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")) {
+          const current = await apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${input.patientId}/open-encounter`)
+          if (current.data) return current.data.id
+        }
+        throw err
+      }
+    },
+    onSuccess: async (encounterId, input) => {
+      if (input.appointment.dentistUserId !== myUserId) {
+        toast.info(`Atiendes la cita de ${professionalSaid(input.appointment.dentistName, { full: true })}`)
+      }
+      await Promise.all([
+        invalidateAppointmentQueries(queryClient),
+        queryClient.invalidateQueries({ queryKey: ["open-encounter", input.patientId] }),
+      ])
+      void navigate({
+        to: "/patients/$patientId/encounters/$encounterId",
+        params: { patientId: input.patientId, encounterId },
+      })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? (err.shape.message ?? "No se pudo abrir la atención.") : "No se pudo abrir la atención.")
+    },
+  })
+}
+
+/** La cita de hoy que se puede atender (sigue en pie), de la que llegó primero o la más cercana a la hora. */
+function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppointment | null {
+  const timeZone = activeOrgTimeZone()
+  const today = zonedDateOf(new Date().toISOString(), timeZone)
+  const query = useQuery({
+    queryKey: ["patient-appointments", patientId, "hoy", today],
+    enabled,
+    queryFn: () => {
+      const params = new URLSearchParams({
+        patientId,
+        from: minutesToInstant(today, 0, timeZone),
+        to: minutesToInstant(addDays(today, 1), 0, timeZone),
+      })
+      return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
+    },
+    retry: false,
+  })
+  const now = Date.now()
+  const attendable = (query.data?.data ?? []).filter(
+    (item) => item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "llego",
+  )
+  return (
+    attendable.find((item) => item.visit === "llego") ??
+    [...attendable].sort((a, b) => Math.abs(Date.parse(a.startsAt) - now) - Math.abs(Date.parse(b.startsAt) - now))[0] ??
+    null
+  )
+}
+
+/**
  * Nueva y en curso abren el mismo espacio clínico. Con una atención en curso
  * el botón la continúa («Continuar la atención»), así lo escrito no se pierde.
- * La apertura exige el motivo de la visita y el profesional que atiende: por
- * defecto quien pulsa, y solo se ofrece a quien escribe en la historia clínica.
- * Sin cita, el servidor la une a la cita de hoy que siga en pie; desde la
- * agenda («Atender») queda unida a esa cita, y un borrador del mismo día sin
- * cita se une a ella. La cita se marca atendida al cerrar.
+ * Con una cita hoy (o desde la cita) es «Atender»: un clic, sin formulario.
+ * Sin cita, «Nueva atención» pide el motivo de la visita y el profesional que
+ * atiende (por defecto quien pulsa). Solo se ofrece a quien escribe en la
+ * historia clínica. La cita se marca atendida al cerrar.
  */
 export function NewEncounterButton({
   patientId,
@@ -55,26 +132,22 @@ export function NewEncounterButton({
   appointment?: AttendedAppointment
 }) {
   const canWrite = usePermission("clinical.write")
+  const canSeeAgenda = usePermission("appointments.read")
   const myUserId = useMyUserId()
   const members = useOrgMembers()
   const sede = useActiveBranch()
   const queryClient = useQueryClient()
+  const attend = useAttendAppointment()
   // Solo profesionales clínicos: nunca caja ni recepción (el servidor lo exige igual).
   const professionals = members.filter((m) => canAccess(m.role, "clinical.write"))
   const eligible = (userId: string | undefined) =>
     Boolean(userId) && professionals.some((m) => m.userId === userId)
-  const defaultDentist = eligible(myUserId)
-    ? myUserId
-    : eligible(appointment?.dentistUserId)
-      ? (appointment?.dentistUserId ?? "")
-      : ""
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [reason, setReason] = useState(appointment?.reason ?? "")
-  const [dentistUserId, setDentistUserId] = useState(defaultDentist)
+  const [reason, setReason] = useState("")
+  const [dentistUserId, setDentistUserId] = useState(eligible(myUserId) ? myUserId : "")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
-  // Desde la agenda, el servidor continúa el borrador si es de esta visita.
   const openQuery = useQuery({
     queryKey: ["open-encounter", patientId],
     queryFn: () =>
@@ -82,6 +155,10 @@ export function NewEncounterButton({
     enabled: canWrite && !appointment && !openEncounterId,
   })
   const inProgressId = openEncounterId ?? openQuery.data?.data?.id ?? null
+  // En la página de la persona: si hoy tiene cita, atender es un clic y se une a ella.
+  const todayVisit = useTodayAppointment(patientId, canWrite && canSeeAgenda && !appointment && !inProgressId)
+  const visit: AttendedAppointment | null =
+    appointment ?? (todayVisit ? { id: todayVisit.id, dentistUserId: todayVisit.dentistUserId, dentistName: todayVisit.dentistName } : null)
   const open = (id: string) =>
     void navigate({
       to: "/patients/$patientId/encounters/$encounterId",
@@ -97,13 +174,9 @@ export function NewEncounterButton({
         body: JSON.stringify({
           reason: reason.trim(),
           dentistUserId,
-          // Con cita manda su sede; sin cita, la sede en la que se trabaja:
-          // así lo que quede por cobrar aparece en la caja de esa sede.
-          ...(appointment
-            ? { appointmentId: appointment.id }
-            : sede.branchId
-              ? { branchId: sede.branchId }
-              : {}),
+          // Sin cita, la sede en la que se trabaja: así lo que quede por cobrar
+          // aparece en la caja de esa sede.
+          ...(sede.branchId ? { branchId: sede.branchId } : {}),
           planItemIds: [...new Set(initialPlanItemIds ?? [])],
         }),
       })
@@ -111,11 +184,8 @@ export function NewEncounterButton({
       await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
       open(result.data.id)
     } catch (err) {
-      // Ya hay una atención abierta (del paciente o de esta cita): se retoma.
-      if (
-        err instanceof ApiError &&
-        (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")
-      ) {
+      // Ya hay una atención abierta: se retoma.
+      if (err instanceof ApiError && err.shape.code === "DRAFT_OPEN") {
         try {
           const current = await apiFetch<{ data: OpenEncounterRef | null }>(
             `/api/patients/${patientId}/open-encounter`,
@@ -140,6 +210,13 @@ export function NewEncounterButton({
   if (!appointment && inProgressId) {
     return <Button onClick={() => open(inProgressId)}>Continuar la atención</Button>
   }
+  if (visit) {
+    return (
+      <SubmitButton pending={attend.isPending} onClick={() => attend.mutate({ patientId, appointment: visit })}>
+        Atender
+      </SubmitButton>
+    )
+  }
   return (
     <>
       <Button
@@ -148,17 +225,13 @@ export function NewEncounterButton({
           setDrawerOpen(true)
         }}
       >
-        {appointment ? "Atender" : "Nueva atención"}
+        Nueva atención
       </Button>
       <FormDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title={appointment ? "Atender la cita" : "Nueva atención"}
-        description={
-          appointment
-            ? `Confirma el motivo con el paciente${appointment.serviceName ? ` (cita para ${appointment.serviceName})` : ""}. La atención se abre en curso y la cita se marca atendida al cerrarla.`
-            : "Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso; si tiene una cita hoy, se une a ella y la cita se marca atendida al cerrarla."
-        }
+        title="Nueva atención"
+        description="Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso."
         onSubmit={(event) => {
           event.preventDefault()
           void start()

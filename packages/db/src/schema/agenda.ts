@@ -84,6 +84,13 @@ export const appointment = pgTable(
     reason: text("reason"),
     source: text("source").notNull().default("recepcion"),
     conversationId: uuid("conversation_id").references(() => conversation.id),
+    /**
+     * «Llegó» (ADR 0032): cuándo llegó la persona y quién lo marcó. Es un hecho
+     * con hora, no un estado: solo lo tiene una cita confirmada o atendida, y no
+     * cambia lo que ocupa (la exclusión de solapamientos no lo mira).
+     */
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    arrivedBy: text("arrived_by").references(() => user.id),
     /** Bloqueo optimista en mover/editar. */
     version: integer("version").notNull().default(1),
     createdBy: text("created_by").references(() => user.id),
@@ -110,6 +117,14 @@ export const appointment = pgTable(
     check(
       "appointment_status_check",
       sql`${table.status} in ('programada','confirmada','atendida','no_asistio','cancelada')`,
+    ),
+    check(
+      "appointment_arrival_check",
+      sql`${table.arrivedAt} IS NULL OR ${table.status} IN ('confirmada','atendida')`,
+    ),
+    check(
+      "appointment_arrival_pair_check",
+      sql`(${table.arrivedAt} IS NULL) = (${table.arrivedBy} IS NULL)`,
     ),
     check("appointment_range_check", sql`${table.endsAt} > ${table.startsAt}`),
     check("appointment_duration_check", sql`${table.durationMin} > 0`),

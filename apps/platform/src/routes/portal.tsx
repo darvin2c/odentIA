@@ -1,6 +1,6 @@
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell, SCHEDULE_AGENDA_LABELS, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
@@ -63,13 +63,8 @@ function defaultOrgSlug(override?: string): string {
   }
 }
 
-const APPOINTMENT_STATUS_LABEL: Record<string, string> = {
-  programada: "Programada",
-  confirmada: "Confirmada",
-  atendida: "Atendida",
-  no_asistio: "No asistió",
-  cancelada: "Cancelada",
-}
+/** Un nombre por estado en toda la aplicación (ADR 0032): los mismos de la Agenda. */
+const APPOINTMENT_STATUS_LABEL: Record<string, string> = SCHEDULE_AGENDA_LABELS
 
 /** Estado del presupuesto con las palabras de quien lo recibe, nunca el código. */
 const BUDGET_STATUS_LABEL: Record<string, string> = {

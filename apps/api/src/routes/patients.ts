@@ -292,8 +292,9 @@ const timelineQuery = listQuery.extend({
   order: z.enum(["desc", "asc"]).optional(),
 })
 const encounterCreateInput = z.object({
-  // El motivo es obligatorio al abrir la atención (decisión de diseño).
-  reason: z.string().trim().min(1).max(2000),
+  // Sin cita, el motivo es obligatorio al abrir; desde una cita («Atender») se
+  // abre sin él y el cierre lo exige (ADR 0032). La regla vive en el servicio.
+  reason: z.string().trim().max(2000).nullish(),
   /** Cita que motiva la atención; sin ella se une a la cita de hoy que siga en pie. */
   appointmentId: z.uuid().nullish(),
   branchId: z.uuid().nullish(),
@@ -411,7 +412,13 @@ const planBatchInput = z
   })
   .strict()
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
-const finalizeInput = z.object({ endedAt: z.iso.datetime({ offset: true }).nullish() }).strict()
+const finalizeInput = z
+  .object({
+    endedAt: z.iso.datetime({ offset: true }).nullish(),
+    // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
+    consentSkipReason: z.string().trim().max(2000).nullish(),
+  })
+  .strict()
 // El diagnóstico se declara una vez, para la pantalla y para el dictado.
 const diagnosisInput = operationBodySchema("atencion.diagnostico")
 const diagnosisStatusInput = z.object({ status: z.enum(["activo", "resuelto"]) }).strict()

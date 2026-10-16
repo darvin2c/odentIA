@@ -12,7 +12,7 @@ import {
   DENTAL_MEDICATIONS,
   DOSAGE_FORMS,
 } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
+import { Badge, Button, buttonVariants, Checkbox, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -45,6 +45,7 @@ import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/pat
 import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
+import { HealthDocumentSendDrawer } from "./health-document-send"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -564,6 +565,7 @@ function PrescriptionEntry({
     enabled: canRead,
   })
   const [cancelling, setCancelling] = useState(false)
+  const [sending, setSending] = useState(false)
   const [reason, setReason] = useState("")
   const [error, setError] = useState<string | null>(null)
   const cancelMutation = useMutation({
@@ -624,7 +626,7 @@ function PrescriptionEntry({
           </p>
         ) : null}
         {prescription.status === "emitida" ? (
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Link
               to="/patients/$patientId/prescriptions/$prescriptionId/print"
               params={{ patientId, prescriptionId: prescription.id }}
@@ -633,7 +635,21 @@ function PrescriptionEntry({
             >
               Imprimir
             </Link>
+            {canWrite ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => setSending(true)}>
+                Enviar a la persona
+              </Button>
+            ) : null}
           </div>
+        ) : null}
+        {sending ? (
+          <HealthDocumentSendDrawer
+            open
+            patientId={patientId}
+            documentType="prescription"
+            documentId={prescription.id}
+            onClose={() => setSending(false)}
+          />
         ) : null}
         {canWrite && prescription.status === "emitida" ? (
           <div>
@@ -723,6 +739,10 @@ export function RecetasPanel({
   encounterOnly = false,
   allowCreate = true,
   items,
+  drawerOnly = false,
+  createOpen: createOpenProp,
+  onCreateOpenChange,
+  defaultDiagnosisCode,
 }: {
   patientId: string
   itemId?: string
@@ -732,6 +752,15 @@ export function RecetasPanel({
   /** La atención cerrada es inmutable: allí no se emite una receta nueva. */
   allowCreate?: boolean
   items?: PlanItem[]
+  /**
+   * Desde el bloque Documentos de la atención: solo el formulario de emitir,
+   * abierto desde fuera (`createOpen`) y sin la lista, que el bloque ya muestra.
+   */
+  drawerOnly?: boolean
+  createOpen?: boolean
+  onCreateOpenChange?: (open: boolean) => void
+  /** El diagnóstico de la atención, ya puesto. */
+  defaultDiagnosisCode?: string
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("clinical.write")
@@ -747,10 +776,15 @@ export function RecetasPanel({
   // recorrido abierto y no una selección previa de otra pantalla.
   const planItemId = itemId ?? planItemIdState
   const [notes, setNotes] = useState("")
-  const [diagnosisCode, setDiagnosisCode] = useState("")
+  const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
   const [validUntil, setValidUntil] = useState("")
   const [acknowledged, setAcknowledged] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpenState, setCreateOpenState] = useState(false)
+  const createOpen = createOpenProp ?? createOpenState
+  const setCreateOpen = (open: boolean) => {
+    setCreateOpenState(open)
+    onCreateOpenChange?.(open)
+  }
   const [medications, setMedications] = useState<MedicationDraft[]>([emptyMedication()])
   // Alergias activas, también las declaradas sin confirmar: el aviso aparece al
   // escribir la DCI, antes de emitir, con la misma regla que el servidor.
@@ -815,69 +849,7 @@ export function RecetasPanel({
       ),
     )
 
-  return (
-    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Recetas</div>
-          <p className="text-sm text-muted-foreground">
-            La receta queda ligada al tratamiento y a la atención donde se emitió; se corrige
-            anulándola con motivo.
-          </p>
-        </div>
-        {canWrite && allowCreate ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              setError(null)
-              setCreateOpen(true)
-            }}
-          >
-            Emitir receta
-          </Button>
-        ) : null}
-      </div>
-
-      {list.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando recetas…</p>
-      ) : list.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          No se pudieron cargar las recetas.{" "}
-          <Button type="button" size="sm" variant="outline" onClick={() => void list.refetch()}>
-            Reintentar
-          </Button>
-        </p>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="Sin recetas"
-          description="Emite una receta cuando el tratamiento lo requiera; quedará enlazada a esta historia."
-        />
-      ) : (
-        <div className="flex flex-col gap-2">
-          {rows.map((prescription) => (
-            <PrescriptionEntry
-              key={prescription.id}
-              patientId={patientId}
-              prescription={prescription}
-              items={items}
-            />
-          ))}
-        </div>
-      )}
-
-      <FormDrawer
-        open={createOpen}
-        title="Emitir receta"
-        description="La receta queda inmutable: para corregirla se anula con motivo."
-        error={createOpen ? error : null}
-        isSubmitting={createMutation.isPending}
-        submitLabel="Emitir receta"
-        className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
-        onClose={() => {
-          if (!createMutation.isPending) setCreateOpen(false)
-        }}
-        onSubmit={(event) => {
+  const submitCreate = (event: React.FormEvent) => {
           event.preventDefault()
           const incomplete = medications.some(
             (medication) =>
@@ -899,8 +871,8 @@ export function RecetasPanel({
             return
           }
           createMutation.mutate()
-        }}
-      >
+  }
+  const createBody = (
         <div className="flex flex-col gap-4">
           {itemId ? (
             <p className="text-sm text-muted-foreground">
@@ -1090,11 +1062,7 @@ export function RecetasPanel({
                 ))}
               </ul>
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
-                />
+                <Checkbox checked={acknowledged} onCheckedChange={(value) => setAcknowledged(value === true)} />
                 Lo revisé y prescribo igualmente (queda registrado).
               </label>
             </div>
@@ -1125,7 +1093,78 @@ export function RecetasPanel({
             />
           </Field>
         </div>
+  )
+  const createDrawer = (
+      <FormDrawer
+        open={createOpen}
+        title="Emitir receta"
+        description="La receta queda inmutable: para corregirla se anula con motivo."
+        error={createOpen ? error : null}
+        isSubmitting={createMutation.isPending}
+        submitLabel="Emitir receta"
+        className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
+        onClose={() => {
+          if (!createMutation.isPending) setCreateOpen(false)
+        }}
+        onSubmit={submitCreate}
+      >
+        {createBody}
       </FormDrawer>
+  )
+  if (drawerOnly) return createDrawer
+
+  return (
+    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Recetas</div>
+          <p className="text-sm text-muted-foreground">
+            La receta queda ligada al tratamiento y a la atención donde se emitió; se corrige
+            anulándola con motivo.
+          </p>
+        </div>
+        {canWrite && allowCreate ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setError(null)
+              setCreateOpen(true)
+            }}
+          >
+            Emitir receta
+          </Button>
+        ) : null}
+      </div>
+
+      {list.isPending ? (
+        <p className="text-sm text-muted-foreground">Cargando recetas…</p>
+      ) : list.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudieron cargar las recetas.{" "}
+          <Button type="button" size="sm" variant="outline" onClick={() => void list.refetch()}>
+            Reintentar
+          </Button>
+        </p>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="Sin recetas"
+          description="Emite una receta cuando el tratamiento lo requiera; quedará enlazada a esta historia."
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {rows.map((prescription) => (
+            <PrescriptionEntry
+              key={prescription.id}
+              patientId={patientId}
+              prescription={prescription}
+              items={items}
+            />
+          ))}
+        </div>
+      )}
+
+      {createDrawer}
     </div>
   )
 }

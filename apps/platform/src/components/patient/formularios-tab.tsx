@@ -95,9 +95,10 @@ export function FormulariosTab({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const memberName = useMemberName()
 
+  // Desde la atención, primero los de las especialidades de quien atiende.
   const templatesQuery = useQuery({
-    queryKey: ["form-templates-published"],
-    queryFn: () => fetchFormTemplates({ status: "publicado" }),
+    queryKey: ["form-templates-published", encounterId ? "mine-first" : "all"],
+    queryFn: () => fetchFormTemplates({ status: "publicado", ...(encounterId ? { forUser: "me" } : {}) }),
     enabled: canRead,
   })
   const specialtiesQuery = useQuery({
@@ -283,25 +284,29 @@ export function FormulariosTab({
   )
 }
 
-function NewResponseDrawer({
+export function NewResponseDrawer({
   open,
   onClose,
   templates,
   patientId,
   encounterId,
+  defaultProfessionalUserId,
   onCreated,
 }: {
   open: boolean
   onClose: () => void
+  /** En el orden en que se ofrecen: desde la atención, primero los de su especialidad. */
   templates: FormTemplate[]
   patientId: string
   encounterId?: string
+  /** Desde la atención, el responsable por defecto es quien atiende. */
+  defaultProfessionalUserId?: string
   onCreated: (id: string) => Promise<void>
 }) {
   const ids = useId()
   const members = useOrgMembers()
   const [templateId, setTemplateId] = useState("")
-  const [professionalUserId, setProfessionalUserId] = useState("")
+  const [professionalUserId, setProfessionalUserId] = useState(defaultProfessionalUserId ?? "")
   const [error, setError] = useState<string | null>(null)
   const create = useMutation({
     mutationFn: () =>
@@ -390,7 +395,7 @@ function NewResponseDrawer({
 
 type SaveState = "guardado" | "pendiente" | "guardando" | "error"
 
-function ResponseDetail({
+export function ResponseDetail({
   response,
   canWrite,
   onChanged,

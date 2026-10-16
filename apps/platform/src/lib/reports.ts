@@ -235,6 +235,9 @@ export interface ReportAgenda extends ReportHead {
   bySource: Array<{ source: string; count: number }>
   controls: ControlTotals
   previousControls: ControlTotals
+  /** «Espera en sala»: mediana de minutos entre «Llegó» y el inicio de la atención; null sin datos. */
+  waitInRoom: { medianMinutes: number | null; measured: number; byProfessional: Array<{ userId: string; name: string; medianMinutes: number; measured: number }> }
+  previousWaitInRoom: number | null
   wholeClinic: string[]
   series: Array<YearMonth & { partial: boolean } & AppointmentTotals>
 }

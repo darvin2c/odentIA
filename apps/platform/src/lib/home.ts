@@ -8,7 +8,7 @@ import { AGENT_CASE_ROW, urgencyWord } from "./agent"
 import { channelLabel } from "./channels"
 import { timeAgo } from "./crm"
 import { dayKeyOf, daysBetween, formatClock, formatWeekdayDay } from "./finance-cash"
-import type { WaitingRow, WorkspaceToday } from "./workspace"
+import type { WaitingRow, WorkspaceTodaySummary } from "./workspace"
 
 /** Filas de «Te espera» a la vista en teléfono; el resto se abre con «Ver las otras N». */
 export const PHONE_ROWS = 5
@@ -55,9 +55,34 @@ export function appointmentWhen(iso: string, context: Pick<HomeTextContext, "tod
   return `${formatWeekdayDay(iso, context.locale, context.timezone)}, ${time}`
 }
 
+/** Lo que le falta a una atención para cerrarse, con las palabras del cierre. */
+const CLOSING_WORDS: Record<string, string> = {
+  reason: "el motivo",
+  diagnosis: "el diagnóstico",
+  evolution: "la evolución",
+  signature: "tu colegiatura",
+}
+
+/** «el diagnóstico y la evolución». */
+function listed(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? ""
+  return `${parts.slice(0, -1).join(", ")} y ${parts[parts.length - 1]}`
+}
+
 /** Título, detalle y acción de una fila de «Te espera». */
 export function waitingText(row: WaitingRow, context: HomeTextContext): { title: string; detail: string; action: string } {
   switch (row.kind) {
+    case "staleEncounter": {
+      const missing = row.missing.map((key) => CLOSING_WORDS[key] ?? key)
+      return {
+        title: `La atención de ${row.patientName} quedó sin cerrar`,
+        detail: joined([
+          `${daysAgo(row.startedAt, context)} ${formatClock(row.startedAt, context.locale, context.timezone)}`,
+          missing.length > 0 ? `le falta ${listed(missing)}` : "lista para firmar",
+        ]),
+        action: "Continuar",
+      }
+    }
     case "case":
       return {
         title: row.contactName ? `${row.contactName} · ${row.reason}` : row.reason,
@@ -120,6 +145,12 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           : "Aún sin fecha de presentación",
         action: "Ver cuáles",
       }
+    case "consentToPublish":
+      return {
+        title: `Publicar el consentimiento de «${row.title}»`,
+        detail: row.requestedByName ? `Lo pidió ${row.requestedByName}` : "Lo pidió una atención",
+        action: "Abrir los consentimientos",
+      }
     case "more":
       if (row.of === "cases") {
         return {
@@ -156,32 +187,37 @@ export function waitingOpenText(row: WaitingRow, context: HomeTextContext): stri
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
+  if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind
 }
 
-/** «24 citas · 6 atendidas · 18 por venir, 2 sin confirmar». */
-export function agendaSummary(summary: WorkspaceToday["summary"]): string {
-  const upcoming = `${summary.upcoming} por venir${summary.unconfirmed > 0 ? `, ${summary.unconfirmed} sin confirmar` : ""}`
-  return joined([plural(summary.total, "cita", "citas"), plural(summary.attended, "atendida", "atendidas"), upcoming])
+/** «12 citas · 2 en sala · 4 atendidas · 6 por venir»; «en atención» solo si hay alguien. */
+export function agendaSummary(summary: WorkspaceTodaySummary): string {
+  return joined([
+    plural(summary.total, "cita", "citas"),
+    `${summary.waiting} en sala`,
+    summary.attending > 0 ? `${summary.attending} en atención` : null,
+    plural(summary.attended, "atendida", "atendidas"),
+    `${summary.upcoming} por venir`,
+  ])
 }
 
-/** «8 pacientes · 2 atendidos · 6 por venir». */
-export function patientsSummary(summary: WorkspaceToday["summary"]): string {
-  return joined([plural(summary.total, "paciente", "pacientes"), plural(summary.attended, "atendido", "atendidos"), `${summary.upcoming} por venir`])
+/** «8 pacientes · 1 en sala · 2 atendidos · 5 por venir». */
+export function patientsSummary(summary: WorkspaceTodaySummary): string {
+  return joined([
+    plural(summary.total, "paciente", "pacientes"),
+    summary.waiting > 0 ? `${summary.waiting} en sala` : null,
+    plural(summary.attended, "atendido", "atendidos"),
+    `${summary.upcoming} por venir`,
+  ])
 }
 
 /** Parte del día ya atendida, para la barra decorativa (0 a 100). */
-export function attendedPercent(summary: WorkspaceToday["summary"]): number {
+export function attendedPercent(summary: Pick<WorkspaceTodaySummary, "total" | "attended">): number {
   return summary.total > 0 ? Math.round((summary.attended / summary.total) * 100) : 0
-}
-
-/** El estado de una cita en pie, con palabras: nunca solo con color. */
-export function appointmentState(status: string): string {
-  if (status === "atendida") return "Atendida"
-  return status === "confirmada" ? "Confirmada" : "Sin confirmar"
 }
 
 /** «Lunes 12 de octubre» a partir del día de la clínica, sin desplazarlo por zona. */
