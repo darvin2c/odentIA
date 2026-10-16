@@ -70,7 +70,8 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
   ).toHaveText(["Antecedentes", "Odontograma", "Historia", "Documentos"])
   await openSection(page, "Odontograma")
   await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
+  // El plan vive en Plan: aquí solo queda «Ver en Plan».
+  await expect(page.getByRole("button", { name: "Ver en Plan" })).toBeVisible()
   // En el arco la pieza va girada: mesial debe quedar del lado del vecino mesial
   // también en la arcada superior (16 → hacia 15), no del distal (17).
   const center = async (selector: string) => {
@@ -91,10 +92,9 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
     ).toBeLessThan(distance(zone, await center(`[data-tooth="${distalNeighbor}"]`)))
   }
 
-  // La indicación abierta señala su pieza y la selecciona en el odontograma.
-  await page.getByRole("button", { name: "Ver pieza 36" }).click()
-  await expect(page.locator('[data-tooth="36"][aria-pressed="true"]')).toBeVisible()
-  await page.screenshot({ path: test.info().outputPath("pieza-seleccionada.png"), fullPage: true })
+  // Debajo del odontograma solo queda cuánto falta y el camino al Plan.
+  await expect(page.getByText(/por hacer · /)).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("odontograma-ver-en-plan.png"), fullPage: true })
 
   // Un solo Plan (ADR 0034): los tratamientos por fases; «Ver» abre qué se
   // observó, qué se propuso y qué se decidió.
@@ -512,7 +512,7 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       // El odontograma, en la dentición de su edad.
       await openSection(page, "Clínica", "Odontograma")
       await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
-      await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Ver en Plan" })).toBeVisible()
       await expect(page.getByRole("button", { name: "Mixta", exact: true })).toHaveAttribute(
         "aria-pressed",
         "true",

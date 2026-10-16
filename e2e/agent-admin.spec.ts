@@ -326,13 +326,13 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   }, 201)
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // --- WhatsApp (Integraciones): los diez mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
+  // --- WhatsApp (Integraciones): los trece mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(10)
+  await expect(approved.getByRole("listitem")).toHaveCount(13)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
-  await expect(approved).toContainText("1 aprobado · 9 en revisión")
+  await expect(approved).toContainText("1 aprobado · 12 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v1")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)

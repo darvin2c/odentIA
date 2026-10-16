@@ -267,6 +267,7 @@ function AccessDrawer({
     mode.kind === "give" ? { appointments: summary.allowedScope.appointments, budgets: summary.allowedScope.budgets && summary.rights.canShareBudgets, documentIds: [] } : draftOf(mode.row.scope),
   )
   const [checked, setChecked] = useState(false)
+  const navigate = useNavigate()
   const candidate = summary.candidates.find((item) => item.contactId === contactId)
   const [delivery, setDelivery] = useState<"qr" | "whatsapp">("qr")
   const [given, setGiven] = useState<PortalAccessGiven | null>(null)
@@ -338,7 +339,21 @@ function AccessDrawer({
               Comprobé su identidad: vi su {candidate.document}
             </label>
           ) : candidate ? (
-            <p className="text-sm text-destructive">Primero completa su documento.</p>
+            // Sin documento no se comprueba en persona: «Completar» lleva a sus datos.
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm">
+              <span>Primero completa su documento.</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  onClose()
+                  void navigate({ to: "/people/$personId", params: { personId: candidate.contactId }, search: { tab: "filiacion" } as never })
+                }}
+              >
+                Completar
+              </Button>
+            </div>
           ) : null
         ) : null}
         {mode.kind !== "change" ? (

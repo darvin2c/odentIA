@@ -573,7 +573,9 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${token}`))
   await expect(page.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
-  await expect(page.getByRole("region", { name: "Para qué es la cita" })).toContainText("para Eva")
+  // Es para ella misma: «para Eva» solo se dice cuando la cita es de otra persona (su hijo, por ejemplo).
+  await expect(page.getByRole("region", { name: "Para qué es la cita" })).toContainText("Consulta")
+  await expect(page.getByRole("region", { name: "Para qué es la cita" })).not.toContainText("para Eva")
   // En teléfono el contexto va en una tarjeta compacta; «Cambiar» abre con quién: cualquier profesional o uno en concreto.
   await expect(page.getByText(/paso 1 de 2/)).toBeVisible()
   // La semana siguiente siempre tiene horarios: la de hoy depende del día y la hora en que corre la prueba.

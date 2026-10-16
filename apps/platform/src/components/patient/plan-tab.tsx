@@ -9,10 +9,21 @@
  * - caja: el presupuesto y lo aceptado.
  * La autorización real la hace el servidor bloque por bloque.
  */
-import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger } from "@odentia/ui"
+import {
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@odentia/ui"
 import { DetailDrawer, EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, ClipboardList } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, type PlanNextStep } from "../../lib/budgets"
@@ -22,6 +33,7 @@ import type { PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { ControlesPanel } from "./clinical-panels"
 import { FollowUpScheduler } from "./follow-up-scheduler"
+import { NewEncounterButton } from "./new-encounter-button"
 import { PlanBudgets, useScheduleAccepted } from "./plan/plan-budgets"
 import { CoordinationControls, CoordinationTreatments } from "./plan/plan-coordination"
 import { PlanNextCard, usePlanNextStep } from "./plan/plan-next"
@@ -135,10 +147,21 @@ export function PlanTab({
           ) : itemsQuery.isError ? (
             <QueryErrorState error={itemsQuery.error} onRetry={() => void itemsQuery.refetch()} />
           ) : openItems.length === 0 ? (
-            <EmptyState
-              title="Todavía no tiene tratamientos indicados"
-              description="Se indican dentro de una atención, en «Plan y controles»: el plan se abre solo con el primero."
-            />
+            // Vacío con su acción: los tratamientos se indican dentro de una atención («Atender»).
+            <Empty className="rounded-lg border border-dashed border-border bg-surface p-8">
+              <EmptyHeader>
+                <EmptyMedia variant="icon" aria-hidden>
+                  <ClipboardList />
+                </EmptyMedia>
+                <EmptyTitle>Todavía no tiene tratamientos indicados</EmptyTitle>
+                <EmptyDescription>
+                  Se indican dentro de una atención, en «Plan y controles»: el plan se abre solo con el primero.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <NewEncounterButton patientId={patientId} variant="outline" />
+              </EmptyContent>
+            </Empty>
           ) : (
             <PlanPhases
               patientId={patientId}

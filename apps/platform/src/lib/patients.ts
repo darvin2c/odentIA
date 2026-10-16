@@ -533,6 +533,7 @@ export type TimelineType =
   | "consent"
   | "order"
   | "form"
+  | "odontogram_signed"
 
 /** Evento de la historia clínica unificada. Fechas como ISO string. */
 export interface TimelineItem {
@@ -857,6 +858,8 @@ export function timelineTypeLabel(type: string): string {
       return "Orden"
     case "form":
       return "Formulario"
+    case "odontogram_signed":
+      return "Odontograma firmado"
     default:
       return type
   }

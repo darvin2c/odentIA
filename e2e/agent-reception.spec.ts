@@ -103,7 +103,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Las dos funciones fijas se ven, sin interruptor.
   await expect(does.getByRole("listitem").filter({ hasText: "Ordenar el caso" })).toContainText("Siempre")
   await expect(does.getByRole("listitem").filter({ hasText: "Pasar a una persona" })).toContainText("Siempre")
-  await expect(does.getByRole("switch")).toHaveCount(3)
+  // Informar, agendar, oportunidades y presupuestos (fase 3, decisiones 4 y 5) se apagan.
+  await expect(does.getByRole("switch")).toHaveCount(4)
 
   // Apagar una función: queda dicho qué hará cuando se la pidan.
   await does.getByRole("switch", { name: "Oportunidades" }).click()

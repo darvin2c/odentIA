@@ -36,6 +36,7 @@ import { documentCategoryLabel as docCategoryLabel } from "../../lib/patient-ove
 import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/patients"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
+import { SignedOdontogramFact } from "../odontogram-assessments"
 import { EncounterHistoryCard } from "./encounter-history-card"
 import { NewEncounterButton } from "./new-encounter-button"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -730,6 +731,10 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
                 locale={locale}
                 onOdontogramSelect={onOdontogramSelect}
               />
+            ) : item.type === "odontogram_signed" ? (
+              <div key={item.id} className="flex flex-col gap-2 elevated rounded-xl border bg-card p-6">
+                <SignedOdontogramFact patientId={patientId} assessmentId={item.refId} />
+              </div>
             ) : item.type === "document" ? (
               <DocumentCard key={item.id} patientId={patientId} item={item} />
             ) : item.type === "anamnesis" ? (

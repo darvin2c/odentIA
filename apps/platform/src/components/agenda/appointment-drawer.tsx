@@ -42,7 +42,8 @@ import {
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
-import { filiationGapsText } from "../../lib/patients"
+import { filiationGapsText, type PatientFull } from "../../lib/patients"
+import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
 import { useAppointmentArrival } from "./arrival"
@@ -70,7 +71,7 @@ const STATUS_DONE: Record<AppointmentStatus, string> = {
   programada: "Cita por confirmar",
   confirmada: "Cita confirmada",
   atendida: "Cita atendida",
-  no_asistio: "Inasistencia registrada",
+  no_asistio: "Marcada como «No vino»",
   cancelada: "Cita cancelada",
 }
 
@@ -115,7 +116,14 @@ export function AppointmentDrawer({
   const canReadChats = usePermission("conversations.read")
   const canAttend = usePermission("clinical.write")
   const canReadClinical = usePermission("clinical.read")
-  const arrival = useAppointmentArrival({ onRebook })
+  // El cajón ya muestra «Deshacer» junto a la llegada: el aviso no lo repite.
+  const arrival = useAppointmentArrival({ onRebook, undoInToast: false })
+  const [completing, setCompleting] = React.useState(false)
+  const patientQuery = useQuery({
+    queryKey: ["patient", appointment.patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${appointment.patientId}`),
+    enabled: completing,
+  })
   const attend = useAttendAppointment()
   // A quién se le escribe, de dónde salió y cuándo pedirá el agente confirmar.
   const contextQuery = useQuery({
@@ -509,14 +517,10 @@ export function AppointmentDrawer({
                   {/* La misma regla y frase que su página: lo calcula el servidor. */}
                   <span className="flex flex-wrap items-center gap-x-2">
                     Faltan datos para atenderla: {filiationGapsText(context.missingData).toLowerCase()}
-                    <Link
-                      to="/patients/$patientId"
-                      params={{ patientId: appointment.patientId }}
-                      search={{ tab: "filiacion" }}
-                      className="font-semibold text-primary hover:underline"
-                    >
+                    {/* Lo mismo que «Completar» en su Resumen: solo lo que falta, con «Enviarle su enlace». */}
+                    <Button type="button" variant="link" size="sm" className="h-auto p-0 font-semibold" onClick={() => setCompleting(true)}>
                       Completar
-                    </Link>
+                    </Button>
                   </span>
                 </DetailField>
               ) : null}
@@ -579,6 +583,19 @@ export function AppointmentDrawer({
           </div>
         )}
       </DetailDrawer>
+
+      {completing && patientQuery.data ? (
+        <FiliacionSectionDrawer
+          patient={patientQuery.data.data.patient}
+          section="completar"
+          missing={patientQuery.data.data.missingData ?? []}
+          open
+          onClose={() => {
+            setCompleting(false)
+            void contextQuery.refetch()
+          }}
+        />
+      ) : null}
 
       <WriteToPersonDialog
         open={writing}

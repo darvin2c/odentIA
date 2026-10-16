@@ -95,7 +95,6 @@ export function SignedOdontograms({
   const [profileOpen, setProfileOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const viewTitleRef = useRef<HTMLHeadingElement>(null)
   const query = useQuery({
     queryKey: ["odontogram-assessments", patientId],
     queryFn: () => fetchSignedOdontograms(patientId),
@@ -306,50 +305,114 @@ export function SignedOdontograms({
           onClose={() => setProfileOpen(false)}
         />
       ) : null}
-      <Dialog open={viewing !== null} onOpenChange={(value) => (!value ? setViewing(null) : undefined)}>
-        <DialogContent initialFocus={viewTitleRef} className="max-h-[90vh] w-full overflow-y-auto sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle ref={viewTitleRef} tabIndex={-1}>
-              Odontograma firmado
-            </DialogTitle>
-            <DialogDescription>
-              {viewing
-                ? `${SIGNED_ODONTOGRAM_PURPOSE_LABELS[viewing.purpose]} · ${rowLabel(viewing)}. Copia inalterable de sus hallazgos.`
-                : null}
-            </DialogDescription>
-          </DialogHeader>
-          {viewing ? (
-            <div className="min-w-0 rounded-lg bg-white p-3 text-black">
-              <OdontogramDocument
-                entries={viewing.entries}
-                standard={viewing.standard}
-                date={viewing.createdAt}
-                specifications={viewing.specifications}
-                observations={viewing.observations}
-                examinerName={viewing.examinerName}
-                examinerTitle={viewing.examinerTitle}
-                registrationNumber={viewing.registrationNumber}
-                patientName={`${viewing.patientName} · HC-${String(viewing.patientNumber).padStart(6, "0")}`}
-              />
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setViewing(null)}>
-              Cerrar
-            </Button>
-            {viewing ? (
-              <Link
-                to="/patients/$patientId/odontogram/$assessmentId/print"
-                params={{ patientId, assessmentId: viewing.id }}
-                target="_blank"
-                className={buttonVariants({})}
-              >
-                Imprimir
-              </Link>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SignedOdontogramDialog patientId={patientId} viewing={viewing} onClose={() => setViewing(null)} />
     </section>
+  )
+}
+
+/** «Ver»: el odontograma firmado con el gráfico de la norma, y «Imprimir». */
+function SignedOdontogramDialog({
+  patientId,
+  viewing,
+  onClose,
+}: {
+  patientId: string
+  viewing: OdontogramAssessment | null
+  onClose: () => void
+}) {
+  const viewTitleRef = useRef<HTMLHeadingElement>(null)
+  return (
+    <Dialog open={viewing !== null} onOpenChange={(value) => (!value ? onClose() : undefined)}>
+      <DialogContent initialFocus={viewTitleRef} className="max-h-[90vh] w-full overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle ref={viewTitleRef} tabIndex={-1}>
+            Odontograma firmado
+          </DialogTitle>
+          <DialogDescription>
+            {viewing
+              ? `${SIGNED_ODONTOGRAM_PURPOSE_LABELS[viewing.purpose]} · ${rowLabel(viewing)}. Copia inalterable de sus hallazgos.`
+              : null}
+          </DialogDescription>
+        </DialogHeader>
+        {viewing ? (
+          <div className="min-w-0 rounded-lg bg-white p-3 text-black">
+            <OdontogramDocument
+              entries={viewing.entries}
+              standard={viewing.standard}
+              date={viewing.createdAt}
+              specifications={viewing.specifications}
+              observations={viewing.observations}
+              examinerName={viewing.examinerName}
+              examinerTitle={viewing.examinerTitle}
+              registrationNumber={viewing.registrationNumber}
+              patientName={`${viewing.patientName} · HC-${String(viewing.patientNumber).padStart(6, "0")}`}
+            />
+          </div>
+        ) : null}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cerrar
+          </Button>
+          {viewing ? (
+            <Link
+              to="/patients/$patientId/odontogram/$assessmentId/print"
+              params={{ patientId, assessmentId: viewing.id }}
+              target="_blank"
+              className={buttonVariants({})}
+            >
+              Imprimir
+            </Link>
+          ) : null}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * El odontograma firmado como hecho de la historia, con «Ver · Imprimir»: en
+ * Historia (el del botón, por su id) y en la atención cerrada que lo firmó
+ * (por la atención). Sin odontograma firmado no muestra nada.
+ */
+export function SignedOdontogramFact({
+  patientId,
+  assessmentId,
+  encounterId,
+}: {
+  patientId: string
+  assessmentId?: string
+  encounterId?: string
+}) {
+  const official = useOdontogramNotation()
+  const [viewing, setViewing] = useState<OdontogramAssessment | null>(null)
+  const query = useQuery({
+    queryKey: ["odontogram-assessments", patientId],
+    queryFn: () => fetchSignedOdontograms(patientId),
+    enabled: official?.signedOdontogram === true || assessmentId !== undefined,
+  })
+  const item = (query.data?.data ?? []).find((row) =>
+    assessmentId ? row.id === assessmentId : encounterId ? row.encounterId === encounterId : false,
+  )
+  if (!item) return null
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+      <span className="min-w-0 break-words">
+        <span className="font-medium">Odontograma firmado</span> · {rowLabel(item)}
+      </span>
+      <span className="flex gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => setViewing(item)}>
+          Ver
+        </Button>
+        <Link
+          to="/patients/$patientId/odontogram/$assessmentId/print"
+          params={{ patientId, assessmentId: item.id }}
+          target="_blank"
+          className={buttonVariants({ size: "sm", variant: "outline" })}
+        >
+          Imprimir
+        </Link>
+      </span>
+      <SignedOdontogramDialog patientId={patientId} viewing={viewing} onClose={() => setViewing(null)} />
+    </div>
   )
 }

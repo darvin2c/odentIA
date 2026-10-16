@@ -8,7 +8,6 @@ import {
   isMinor,
   isRealDate,
   type RegistrationAnswers,
-  splitSurnames,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import {
@@ -48,7 +47,9 @@ const RELATIONSHIPS: readonly Relationship[] = ["guardian", "family", "other"]
 /** Nombre y documento de una persona, tal como se escriben en la pantalla. */
 interface PersonDraft {
   givenNames: string
-  surnames: string
+  /** Primer y segundo apellido por separado (decisión 10 de la fase 3). */
+  paternalSurname: string
+  maternalSurname: string
   /** Vacío mientras no se elija: vale el primero de los que se usan en el país de la clínica. */
   docType: IdentityDocType | ""
   docNumber: string
@@ -75,7 +76,7 @@ export interface BookingDataDraft {
 
 export function emptyBookingDataDraft(): BookingDataDraft {
   // El primer tipo de documento del país de la clínica, no uno fijo de esta pantalla.
-  const person = (): PersonDraft => ({ givenNames: "", surnames: "", docType: "", docNumber: "", docCountry: "" })
+  const person = (): PersonDraft => ({ givenNames: "", paternalSurname: "", maternalSurname: "", docType: "", docNumber: "", docCountry: "" })
   return {
     me: person(),
     phone: null,
@@ -89,17 +90,17 @@ export function emptyBookingDataDraft(): BookingDataDraft {
   }
 }
 
-type PersonField = "givenNames" | "surnames" | "docNumber" | "docCountry"
+type PersonField = "givenNames" | "paternalSurname" | "maternalSurname" | "docNumber" | "docCountry"
 type FieldKey = `me.${PersonField}` | `other.${PersonField}` | "phone" | "otherBirthDate" | "relationship" | "privacyAccepted"
 /** En el orden de la pantalla: el primero con error recibe el foco. */
 const FIELD_ORDER: readonly FieldKey[] = [
   "me.givenNames",
-  "me.surnames",
+  "me.paternalSurname",
   "me.docNumber",
   "me.docCountry",
   "phone",
   "other.givenNames",
-  "other.surnames",
+  "other.paternalSurname",
   "other.docNumber",
   "other.docCountry",
   "otherBirthDate",
@@ -124,7 +125,8 @@ function buildAnswers(profile: ClinicalCountryProfile, draft: BookingDataDraft, 
   const forOther = draft.who === "representative"
   const patient = forOther ? draft.other : draft.me
   const givenNames = patient.givenNames.trim()
-  const { paternalSurname, maternalSurname } = splitSurnames(patient.surnames)
+  const paternalSurname = patient.paternalSurname.trim().replace(/\s+/g, " ")
+  const maternalSurname = patient.maternalSurname.trim().replace(/\s+/g, " ")
   const myDocNumber = draft.me.docNumber.trim()
   return {
     demographics: {
@@ -141,7 +143,11 @@ function buildAnswers(profile: ClinicalCountryProfile, draft: BookingDataDraft, 
     ...(forOther
       ? {
           representative: {
-            displayName: [draft.me.givenNames, draft.me.surnames].map((part) => part.trim().replace(/\s+/g, " ")).filter(Boolean).join(" "),
+            displayName: composeDisplayName({
+              givenNames: draft.me.givenNames.trim(),
+              paternalSurname: draft.me.paternalSurname.trim(),
+              maternalSurname: draft.me.maternalSurname.trim(),
+            }),
             relationship: minor ? "guardian" : draft.relationship,
             relationshipDetail: "",
             ...(phone ? { phone } : {}),
@@ -228,13 +234,22 @@ function PersonFields({
         onChange={(givenNames) => onChange({ givenNames }, "givenNames")}
       />
       <TextField
-        name={`${scope}.surnames`}
-        label="Apellidos"
+        name={`${scope}.paternalSurname`}
+        label="Primer apellido"
         autoComplete={mine ? "family-name" : "off"}
         maxLength={100}
-        value={person.surnames}
-        error={errors[`${scope}.surnames`]}
-        onChange={(surnames) => onChange({ surnames }, "surnames")}
+        value={person.paternalSurname}
+        error={errors[`${scope}.paternalSurname`]}
+        onChange={(paternalSurname) => onChange({ paternalSurname }, "paternalSurname")}
+      />
+      <TextField
+        name={`${scope}.maternalSurname`}
+        label="Segundo apellido"
+        autoComplete="off"
+        maxLength={100}
+        value={person.maternalSurname}
+        error={errors[`${scope}.maternalSurname`]}
+        onChange={(maternalSurname) => onChange({ maternalSurname }, "maternalSurname")}
       />
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-2 gap-y-3">
         <Field>
@@ -376,10 +391,10 @@ export function BookingDataForm({
     }
     const patient = forOther ? "other" : "me"
     if (!draft.me.givenNames.trim()) put("me.givenNames", "Escribe tus nombres")
-    if (!draft.me.surnames.trim()) put("me.surnames", "Escribe tus apellidos")
+    if (!draft.me.paternalSurname.trim()) put("me.paternalSurname", "Escribe tu primer apellido")
     if (forOther) {
       if (!draft.other.givenNames.trim()) put("other.givenNames", "Escribe sus nombres")
-      if (!draft.other.surnames.trim()) put("other.surnames", "Escribe sus apellidos")
+      if (!draft.other.paternalSurname.trim()) put("other.paternalSurname", "Escribe su primer apellido")
       if (!draft.otherBirthDate) put("otherBirthDate", "Indica su fecha de nacimiento")
       // De quien escribe, el registro solo exige el documento si representa a un menor.
       put("me.docNumber", found["representative.docNumber"])
@@ -387,7 +402,7 @@ export function BookingDataForm({
     }
     if (!draft[patient].docNumber.trim()) put(`${patient}.docNumber`, "Escribe el número de documento")
     put(`${patient}.givenNames`, found["demographics.givenNames"])
-    put(`${patient}.surnames`, found["demographics.paternalSurname"])
+    put(`${patient}.paternalSurname`, found["demographics.paternalSurname"])
     put(`${patient}.docNumber`, found["demographics.docNumber"] ?? found["demographics.docType"])
     put(`${patient}.docCountry`, found["demographics.docCountry"])
     put("otherBirthDate", found["demographics.birthDate"])
@@ -470,7 +485,7 @@ export function BookingDataForm({
               { who: next === "representative" ? "representative" : "patient" },
               "me.docNumber",
               "other.givenNames",
-              "other.surnames",
+              "other.paternalSurname",
               "other.docNumber",
               "other.docCountry",
               "otherBirthDate",

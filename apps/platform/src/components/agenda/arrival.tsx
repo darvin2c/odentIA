@@ -20,6 +20,11 @@ export interface ArrivalInput {
 export function useAppointmentArrival(options: {
   /** Reagendar a la persona cuando su hora ya está ocupada; sin esto el aviso solo lo dice. */
   onRebook?: (patient: { id: string; name: string }) => void
+  /**
+   * El aviso ofrece «Deshacer»; no donde la pantalla ya lo tiene a la vista (el
+   * cajón de la cita): un solo «Deshacer» por pantalla.
+   */
+  undoInToast?: boolean
 } = {}) {
   const queryClient = useQueryClient()
   const mutation = useMutation({
@@ -31,9 +36,12 @@ export function useAppointmentArrival(options: {
     onSuccess: async (result, input) => {
       await invalidateAppointmentQueries(queryClient)
       if (input.arrived) {
-        toast.success(`Llegó ${result.data.patientName}`, {
-          action: { label: "Deshacer", onClick: () => mutation.mutate({ id: input.id, arrived: false }) },
-        })
+        toast.success(
+          `Llegó ${result.data.patientName}`,
+          options.undoInToast === false
+            ? undefined
+            : { action: { label: "Deshacer", onClick: () => mutation.mutate({ id: input.id, arrived: false }) } },
+        )
       } else {
         toast.success(`Se deshizo la llegada de ${result.data.patientName}`)
       }

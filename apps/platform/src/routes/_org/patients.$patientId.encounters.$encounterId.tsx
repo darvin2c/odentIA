@@ -11,6 +11,7 @@ import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ClipboardList } from "lucide-react"
+import { SignedOdontogramFact } from "../../components/odontogram-assessments"
 import { ControlesPanel } from "../../components/patient/clinical-panels"
 import { EncounterDocumentsBlock } from "../../components/patient/encounter-documents"
 import { EncounterDetailView } from "../../components/patient/encounter-detail-view"
@@ -18,6 +19,7 @@ import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { lastPatientSection } from "../../lib/people"
 import {
   type EncounterDetail,
   encounterStatusLabel,
@@ -30,8 +32,9 @@ export const Route = createFileRoute("/_org/patients/$patientId/encounters/$enco
 })
 
 /**
- * Miga `Pacientes > {paciente} > Atención`. El enlace al paciente conserva la
- * pestaña `historia` que usaba el botón "Volver al paciente" anterior.
+ * Miga `Pacientes > {paciente} > Atención`. El enlace a su página vuelve a la
+ * pestaña donde estaba quien abrió la atención; si no se sabe (llegó desde la
+ * Agenda o Inicio), a la que su página abre por su rol.
  */
 function EncounterBreadcrumb({
   patientId,
@@ -40,6 +43,7 @@ function EncounterBreadcrumb({
   patientId: string
   patientName?: string
 }) {
+  const back = lastPatientSection(patientId)
   return (
     <Breadcrumb>
       <BreadcrumbList>
@@ -49,9 +53,7 @@ function EncounterBreadcrumb({
         <BreadcrumbSeparator />
         <BreadcrumbItem>
           <BreadcrumbLink
-            render={
-              <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "historia" }} />
-            }
+            render={<Link to="/patients/$patientId" params={{ patientId }} search={back ? { tab: back } : {}} />}
           >
             {patientName ?? "…"}
           </BreadcrumbLink>
@@ -166,6 +168,7 @@ function EncounterPage() {
       {/* Los documentos de la atención en un solo lugar: ya no se crean aquí, pero se envían e imprimen. */}
       <section aria-label="Documentos" className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Documentos</h2>
+        <SignedOdontogramFact patientId={patientId} encounterId={detail.encounter.id} />
         <EncounterDocumentsBlock
           patientId={patientId}
           encounterId={detail.encounter.id}

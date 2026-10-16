@@ -3,6 +3,7 @@ import { ConfirmDialog } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { formatDate } from "../../lib/clinical-journey"
 
 interface SendPreview {
   recipient: { contactId: string; name: string; relation: string }
@@ -10,6 +11,8 @@ interface SendPreview {
   label: string | null
   blocked: string | null
   text: string
+  /** Hasta cuándo sirve el enlace que ya tiene; nulo si no tiene uno. */
+  liveUntil: string | null
 }
 
 /**
@@ -34,6 +37,10 @@ export function SendPersonalLinkButton({ patientId, size = "sm" }: { patientId: 
         body: JSON.stringify({ requestId }),
       }),
   })
+  const revoke = useMutation({
+    mutationFn: () => apiFetch<{ data: { revoked: number } }>(`/api/patients/${patientId}/personal-link`, { method: "DELETE" }),
+    onSuccess: () => void preview.refetch(),
+  })
   const data = preview.data?.data
   const problem = send.error instanceof ApiError ? (send.error.shape.message ?? "No se pudo enviar.") : send.error ? "No se pudo enviar. Revisa tu conexión." : null
   const description = send.isSuccess
@@ -55,6 +62,7 @@ export function SendPersonalLinkButton({ patientId, size = "sm" }: { patientId: 
         variant="outline"
         onClick={() => {
           send.reset()
+          revoke.reset()
           setRequestId(crypto.randomUUID())
           setOpen(true)
         }}
@@ -77,7 +85,27 @@ export function SendPersonalLinkButton({ patientId, size = "sm" }: { patientId: 
           if (send.isSuccess) setOpen(false)
           else send.mutate()
         }}
-      />
+      >
+        {preview.isError ? (
+          <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void preview.refetch()}>
+            Reintentar
+          </Button>
+        ) : null}
+        {!send.isSuccess && revoke.isSuccess && !data?.liveUntil ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Enlace quitado: el que tenía ya no sirve. Lo que hizo con él se conserva.
+          </p>
+        ) : null}
+        {!send.isSuccess && data?.liveUntil ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+            <span>Ya tiene un enlace que sirve hasta el {formatDate(data.liveUntil)}.</span>
+            <Button type="button" size="sm" variant="outline" disabled={revoke.isPending} onClick={() => revoke.mutate()}>
+              Quitar enlace
+            </Button>
+            {revoke.isError ? <p className="w-full text-destructive">No se pudo quitar. Vuelve a intentarlo.</p> : null}
+          </div>
+        ) : null}
+      </ConfirmDialog>
     </>
   )
 }

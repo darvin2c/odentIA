@@ -215,7 +215,7 @@ export function PersonalDataForm({
           <FieldLegend variant="label" className="mb-0">
             Su madre, padre o tutor
           </FieldLegend>
-          <FieldDescription>Es menor de edad: necesitamos los datos de quien responde por él o ella.</FieldDescription>
+          <FieldDescription>Es menor de edad: déjanos los datos de quien responde por él o ella. La clínica lo registra con su documento cuando vengan.</FieldDescription>
           <Field>
             <FieldLabel htmlFor="datos-rep-name">Nombres y apellidos</FieldLabel>
             <Input id="datos-rep-name" className="min-h-11" maxLength={200} value={rep.displayName} onChange={(event) => setRep({ ...rep, displayName: event.target.value })} />

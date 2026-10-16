@@ -9,7 +9,7 @@
 
 import { label } from "../../lib/glossary"
 import { surfacesForTooth } from "@odentia/clinical"
-import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
+import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -903,11 +903,7 @@ export function RecorridoClinicoTab({
               <div className="flex flex-wrap gap-2">
                 {surfaceOptions.map((surface) => (
                   <label key={surface} className="flex items-center gap-1.5 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={surfaces.includes(surface)}
-                      onChange={() => toggleSurface(surface)}
-                    />
+                    <Checkbox checked={surfaces.includes(surface)} onCheckedChange={() => toggleSurface(surface)} />
                     {surface}
                   </label>
                 ))}
@@ -949,13 +945,11 @@ export function RecorridoClinicoTab({
           ) : null}
           <Field>
             <FieldLabel htmlFor={`${uid}-revise-tooth`}>
-              {service?.scope === "quadrant" || service?.scope === "arch"
-                ? "Pieza FDI (opcional)"
-                : "Pieza FDI"}
+              {service?.scope === "quadrant" || service?.scope === "arch" ? "Pieza (opcional)" : "Pieza"}
             </FieldLabel>
-            <input
+            <Input
               id={`${uid}-revise-tooth`}
-              className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              inputMode="numeric"
               value={toothNumber}
               onChange={(event) => setToothNumber(event.target.value)}
             />

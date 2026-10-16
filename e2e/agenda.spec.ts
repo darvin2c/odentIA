@@ -640,7 +640,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await page.getByRole("button", { name: "Registrar a Rosa Quispe" }).click()
   // Lo tecleado al buscar ya viene puesto.
   await expect(page.getByLabel("Nombres", { exact: true })).toHaveValue("Rosa")
-  await expect(page.getByLabel("Apellidos", { exact: true })).toHaveValue("Quispe")
+  await expect(page.getByLabel("Primer apellido", { exact: true })).toHaveValue("Quispe")
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
   // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
   await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()

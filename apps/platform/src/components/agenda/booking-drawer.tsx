@@ -1,4 +1,4 @@
-import { pendingRegistrationFields, type RegistrationConfig } from "@odentia/clinical"
+import { composeDisplayName, pendingRegistrationFields, type RegistrationConfig, splitSurnames } from "@odentia/clinical"
 import {
   Button,
   Dialog,
@@ -94,7 +94,8 @@ export function BookingDrawer({
   const [registering, setRegistering] = React.useState(Boolean(seed.person))
   const [newPatient, setNewPatient] = React.useState(() => {
     const [first = "", ...rest] = (seed.person?.name ?? "").trim().split(/\s+/)
-    return { givenNames: first, surname: rest.join(" ") }
+    const { paternalSurname, maternalSurname } = splitSurnames(rest.join(" "))
+    return { givenNames: first, surname: paternalSurname, secondSurname: maternalSurname }
   })
   const [newPhone, setNewPhone] = React.useState<string | null>(seed.person?.phone ?? null)
   const [created, setCreated] = React.useState<{ id: string; name: string } | null>(null)
@@ -113,7 +114,11 @@ export function BookingDrawer({
     retry: false,
   })
 
-  const newName = `${newPatient.givenNames.trim()} ${newPatient.surname.trim()}`.trim()
+  const newName = composeDisplayName({
+    givenNames: newPatient.givenNames.trim(),
+    paternalSurname: newPatient.surname.trim(),
+    maternalSurname: newPatient.secondSurname.trim(),
+  })
   // Quien abrió el formulario, se eligió o se acaba de registrar: su nombre se conserva.
   const patientName = registering
     ? newName || undefined
@@ -197,7 +202,7 @@ export function BookingDrawer({
       let id = patientId
       if (registering) {
         if (!newPatient.givenNames.trim() || !newPatient.surname.trim()) {
-          throw new Error("Escribe los nombres y los apellidos.")
+          throw new Error("Escribe los nombres y el primer apellido.")
         }
         // El mismo registro de pacientes de siempre, con lo mínimo: el resto de la ficha se completa después.
         const registered = await apiFetch<{
@@ -214,6 +219,7 @@ export function BookingDrawer({
                   displayName: newName,
                   givenNames: newPatient.givenNames.trim(),
                   paternalSurname: newPatient.surname.trim(),
+                  ...(newPatient.secondSurname.trim() ? { maternalSurname: newPatient.secondSurname.trim() } : {}),
                   ...(newPhone ? { phone: newPhone } : {}),
                 },
                 respondent: "staff",
@@ -341,7 +347,8 @@ export function BookingDrawer({
   const startRegistering = (typed = "") => {
     // Lo que ya se tecleó al buscar sirve de punto de partida.
     const [first = "", ...rest] = typed.trim().split(/\s+/)
-    setNewPatient({ givenNames: first, surname: rest.join(" ") })
+    const { paternalSurname, maternalSurname } = splitSurnames(rest.join(" "))
+    setNewPatient({ givenNames: first, surname: paternalSurname, secondSurname: maternalSurname })
     setRegistering(true)
   }
   const hasPatient = registering
@@ -405,7 +412,7 @@ export function BookingDrawer({
                 )}
               </div>
               <div className="grid grid-cols-2 gap-2.5">
-                <div className="grid gap-1.5">
+                <div className="col-span-2 grid gap-1.5">
                   <FieldLabel htmlFor="cita-nuevo-nombres">Nombres</FieldLabel>
                   <Input
                     id="cita-nuevo-nombres"
@@ -417,13 +424,24 @@ export function BookingDrawer({
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <FieldLabel htmlFor="cita-nuevo-apellidos">Apellidos</FieldLabel>
+                  <FieldLabel htmlFor="cita-nuevo-apellidos">Primer apellido</FieldLabel>
                   <Input
                     id="cita-nuevo-apellidos"
                     maxLength={100}
                     value={newPatient.surname}
                     onChange={(event) =>
                       setNewPatient((current) => ({ ...current, surname: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <FieldLabel htmlFor="cita-nuevo-segundo-apellido">Segundo apellido</FieldLabel>
+                  <Input
+                    id="cita-nuevo-segundo-apellido"
+                    maxLength={100}
+                    value={newPatient.secondSurname}
+                    onChange={(event) =>
+                      setNewPatient((current) => ({ ...current, secondSurname: event.target.value }))
                     }
                   />
                 </div>

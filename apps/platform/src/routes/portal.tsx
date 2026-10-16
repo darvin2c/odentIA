@@ -39,6 +39,7 @@ import {
   verifyPasskeyAuthApi,
   verifyPasskeyRegistrationApi,
 } from "../lib/portal"
+import { ApiError } from "../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
 import { setOrgLocale } from "../lib/locale"
 import { AnswerInput, isFieldVisible, missingRequired } from "../components/patient/form-fields"
@@ -52,6 +53,17 @@ import { AnswerInput, isFieldVisible, missingRequired } from "../components/pati
  * el paso principal; después entra con su huella o su cara. Si el teléfono no
  * puede guardarlo, la sesión se recuerda 30 días.
  */
+/**
+ * La sesión del portal terminó de verdad: no hay sesión (401), no es de nadie
+ * (403 o 404) o fue revocada o venció (409 con su código). Otro error no la
+ * cierra.
+ */
+function sessionEnded(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false
+  if (error.status === 401 || error.status === 403 || error.status === 404) return true
+  return error.shape.code === "PORTAL_REVOKED" || error.shape.code === "PORTAL_EXPIRED" || error.shape.code === "PORTAL_DISABLED"
+}
+
 export const Route = createFileRoute("/portal")({
   validateSearch: (search: Record<string, unknown>) => ({
     token: typeof search.token === "string" && search.token.length <= 256 ? search.token : undefined,
@@ -404,14 +416,24 @@ function PortalDashboard({
     mutationFn: () => closePortalSessionApi(sessionToken),
     onSettled: onClose,
   })
+  // Solo una sesión que terminó se olvida; un corte de red o un error del
+  // servidor no cierra el portal: se reintenta.
+  const ended = sessionQuery.isError && sessionEnded(sessionQuery.error)
   useEffect(() => {
-    if (sessionQuery.isError) writeStored(STORAGE_KEY, null)
-  }, [sessionQuery.isError])
+    if (ended) writeStored(STORAGE_KEY, null)
+  }, [ended])
 
   if (sessionQuery.isPending) {
     return (
       <PageShell maxWidth="md">
         <LoadingState message="Abriendo tu portal…" />
+      </PageShell>
+    )
+  }
+  if (sessionQuery.isError && !ended) {
+    return (
+      <PageShell maxWidth="md">
+        <ErrorState title="No pudimos abrir tu portal" message={portalErrorMessage(sessionQuery.error)} onRetry={() => void sessionQuery.refetch()} />
       </PageShell>
     )
   }
@@ -730,7 +752,7 @@ function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
     onError: (e) => setError(portalErrorMessage(e)),
   })
   if (query.isPending) return null
-  if (query.isError) return <ErrorState message={portalErrorMessage(query.error)} />
+  if (query.isError) return <ErrorState message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
   const { template, response, respondent } = query.data
   if (!template) return null
   if (response?.submittedAt) {

@@ -59,7 +59,7 @@ import {
   visibleSections,
 } from "../../lib/patient-areas"
 import type { PatientFull, PatientSummary } from "../../lib/patients"
-import { personOfPatientKey, usePerson } from "../../lib/people"
+import { personOfPatientKey, rememberPatientSection, usePerson } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 
 const areaLabel = (id: string) => PATIENT_AREAS.find((area) => area.id === id)?.label ?? id
@@ -149,6 +149,10 @@ function PersonPageRoute() {
   useEffect(() => {
     if (patientId) queryClient.setQueryData(personOfPatientKey(patientId), { data: { personId } })
   }, [patientId, personId, queryClient])
+  // La miga de una atención vuelve a la pestaña donde estaba quien la abrió.
+  useEffect(() => {
+    if (patientId && section) rememberPatientSection(patientId, section)
+  }, [patientId, section])
   useOrgEvents(["contact.updated", "stream.reconnected"], (kind) => {
     // Al conectar o reconectar se concilia lo que ya se muestra. Si la persona
     // no llegó (error o aún cargando), no se vuelve a pedir sola: un fallo se
