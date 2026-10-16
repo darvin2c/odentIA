@@ -8,7 +8,10 @@ import {
   cancelClinicalOrder,
   cancelConsentDocument,
   clinicalOrderPatientId,
+  confirmLinkSignedConsent,
   consentDocumentPatientId,
+  markConsentSentByLink,
+  sendPersonalLink,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -831,6 +834,47 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
       // el PDF se reintenta con POST …/pdf (no se repite la firma).
+      try {
+        return await generateConsentPdf(orgId, userId, signed.id)
+      } catch (e) {
+        console.error("consent pdf", e)
+        return signed
+      }
+    })
+  })
+
+  // Antes de llegar (decisión 3): se envía a firmar por «Su enlace» de la
+  // persona (o de su representante legal), con la regla de envío de siempre.
+  app.post("/consents/:id/send-link", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para enviar consentimientos")
+    }
+    const parsed = z.strictObject({ requestId: z.uuid().optional() }).safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"))
+        return sendPersonalLink(
+          tx,
+          orgId,
+          userId,
+          { patientId: consent.patientId, requestId: parsed.data.requestId ?? null },
+          { secretsKey: deps.secretsKey },
+        )
+      }),
+    )
+  })
+
+  // En la cita, el profesional confirma lo que la persona firmó en su enlace.
+  app.post("/consents/:id/confirm", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para firmar consentimientos")
+    }
+    return runService(c, 200, async () => {
+      const signed = await withOrgContext(deps.db, orgId, (tx) => confirmLinkSignedConsent(tx, orgId, userId, c.req.param("id")))
+      // Como al firmar en la clínica: el PDF se genera después y se reintenta aparte si falla.
       try {
         return await generateConsentPdf(orgId, userId, signed.id)
       } catch (e) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { agendaSummary, attendedPercent, daysAgo, longDay, patientsSummary, waitingOpenText, waitingText, type HomeTextContext } from "./home"
+import { agendaSummary, attendedPercent, daysAgo, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
 const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false }
@@ -79,6 +79,22 @@ describe("textos de «Te espera»", () => {
     expect(text.detail).toMatch(/^Armado ayer · 3 tratamientos · S\/\s?540\.00$/)
     expect(waitingText({ ...unsent, options: 2 }, context).detail).toMatch(/ · 2 opciones$/)
     expect(waitingText({ kind: "more", of: "unsentBudgets", count: 2 }, context).title).toBe("2 presupuestos más sin enviar")
+  })
+
+  it("lo que dejaron «Su enlace» y el portal dice qué hacer, sin datos de la otra ficha", () => {
+    const createdAt = new Date(Date.now() - 20 * 60_000).toISOString()
+    const duplicate: WaitingRow = {
+      kind: "possibleDuplicate", id: "t1", patientId: "p1", patientName: "Pedro Ríos",
+      detail: "El documento ya está en otra ficha", createdAt,
+    }
+    expect(waitingText(duplicate, context)).toEqual({
+      title: "Posible ficha repetida: Pedro Ríos", detail: "Desde su enlace hace 20 min · El documento ya está en otra ficha", action: "Revisar",
+    })
+    const reentry: WaitingRow = { kind: "portalReentry", id: "t2", patientId: "p2", contactName: "Lucía Fernández", grantId: "g1", createdAt }
+    expect(waitingText(reentry, context)).toEqual({
+      title: "Lucía Fernández quiere volver a entrar al portal", detail: "Lo pidió hace 20 min · su acceso sigue vigente", action: "Enviar nuevo enlace",
+    })
+    expect(waitingKey(reentry)).toBe("portalReentry:t2")
   })
 
   it("el día se cuenta en la zona de la clínica, no en la del navegador", () => {

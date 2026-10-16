@@ -13,7 +13,7 @@ import {
   DOSAGE_FORMS,
 } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, Checkbox, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
@@ -22,7 +22,6 @@ import { apiFetch } from "../../lib/api"
 import {
   cancelFollowUpApi,
   cancelPrescriptionApi,
-  clinicDateTimeValue,
   completeFollowUpApi,
   createFollowUpApi,
   createPrescriptionApi,
@@ -50,6 +49,8 @@ import { HealthDocumentSendDrawer } from "./health-document-send"
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
 const MAX_INSTRUCTIONS = 4000
+/** Un control previsto vence a las 9:00 de la clínica del día elegido (la hora la pone su cita). */
+const CONTROL_HOUR = "09:00"
 
 function statusBadge(status: string): "default" | "secondary" | "success" | "destructive" {
   if (status === "realizado") return "success"
@@ -116,10 +117,9 @@ export function ControlesPanel({
   const kind = itemId ? "tratamiento" : kindState
   const planItemId = itemId ?? planItemIdState
   const [title, setTitle] = useState("")
-  // La fecha prevista se escribe y se lee en la zona de la clínica, no la del navegador.
-  const [dueAt, setDueAt] = useState(() =>
-    clinicDateTimeValue(new Date(Date.now() + 86_400_000).toISOString()),
-  )
+  // El día previsto se elige en la zona de la clínica, no en la del navegador:
+  // un control es para un día, no para una hora (la hora la pone la cita).
+  const [dueDay, setDueDay] = useState(() => addDays(regionToday(), 1))
   const [instructions, setInstructions] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -135,7 +135,7 @@ export function ControlesPanel({
       createFollowUpApi(patientId, {
         kind,
         title: title.trim(),
-        dueAt: instantFromClinicValue(dueAt) ?? "",
+        dueAt: instantFromClinicValue(`${dueDay}T${CONTROL_HOUR}`) ?? "",
         instructions: instructions.trim() || null,
         planItemId: kind === "tratamiento" ? planItemId || null : null,
         originEncounterId: encounterId ?? null,
@@ -242,7 +242,7 @@ export function ControlesPanel({
                 </Badge>
                 <span className="text-sm text-muted-foreground">
                   {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto{" "}
-                  {formatDateTime(row.dueAt)}
+                  {formatDate(row.dueAt)}
                   {row.legacyScheduledAt && !row.appointment
                     ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
                     : ""}
@@ -362,7 +362,7 @@ export function ControlesPanel({
             setError("Indica el título del control.")
             return
           }
-          if (!instantFromClinicValue(dueAt)) {
+          if (!dueDay) {
             setError("Indica la fecha prevista del control.")
             return
           }
@@ -423,11 +423,12 @@ export function ControlesPanel({
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-due`}>Fecha prevista</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-due`}
-              type="datetime-local"
-              value={dueAt}
-              onChange={(event) => setDueAt(event.target.value)}
+              className="w-56"
+              min={regionToday()}
+              value={dueDay}
+              onChange={setDueDay}
             />
           </Field>
           <Field>
@@ -1080,13 +1081,13 @@ export function RecetasPanel({
           />
           <Field>
             <FieldLabel htmlFor={`${uid}-rx-valid`}>Válida hasta (opcional)</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-rx-valid`}
-              type="date"
-              className="w-44"
-              min={clinicDateTimeValue(new Date().toISOString()).slice(0, 10)}
+              className="w-56"
+              min={regionToday()}
               value={validUntil}
-              onChange={(event) => setValidUntil(event.target.value)}
+              emptyLabel="Sin fecha"
+              onChange={setValidUntil}
             />
           </Field>
           <Field>

@@ -156,8 +156,10 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       // Ninguna conversación queda abierta: al terminar se despide y la cierra (ADR 0024).
       "despedirse_y_cerrar",
       "send_template",
-      // El enlace de reserva no depende de Agendar: con Agendar apagado es la vía para sacar una cita.
+      // «Su enlace» no depende de Agendar: con Agendar apagado es la vía para sacar una cita.
       "enviar_enlace_cita",
+      // Volver a entrar al portal lo atiende una persona: el agente solo deja el pedido (decisión 9).
+      "pedir_volver_al_portal",
       // Confirmar por escrito su propia cita es lo mismo que el botón del recordatorio: no depende de Agendar.
       "confirmar_cita",
       // La respuesta escrita a la pregunta del permiso general tras reservar (ADR 0030).

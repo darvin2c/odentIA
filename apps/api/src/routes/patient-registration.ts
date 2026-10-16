@@ -1,8 +1,19 @@
 import { registrationConfigSchema } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { createPatientRegistrationLink, getPatientRegistrationConfig, patientOrganizationToday, savePatientRegistrationConfig } from "@odentia/services"
-import { eq } from "drizzle-orm"
+import { conversation } from "@odentia/db/schema/crm"
+import {
+  createBookingLink,
+  createPatientRegistrationLink,
+  getPatientRegistrationConfig,
+  patientOrganizationToday,
+  personalLinkUrl,
+  previewPersonalLinkSend,
+  savePatientRegistrationConfig,
+  sendPersonalLink,
+  ServiceError,
+} from "@odentia/services"
+import { and, eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -53,6 +64,65 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
       url.searchParams.set("token", link.token)
       return { url: url.toString(), expiresAt: link.expiresAt.toISOString() }
     }))
+  })
+
+  // «Su enlace» de la persona de una conversación, para escribirlo en el hilo
+  // (Bandeja, «Contexto»): elige su cita y, si aún no es paciente, deja sus datos.
+  app.post("/contacts/:id/personal-link", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para enviar su enlace"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
+    const parsed = z.strictObject({ conversationId: z.uuid(), patientId: z.uuid().optional() }).safeParse(await c.req.json().catch(() => null))
+    if (!params.success) return validationError(c, params.error.issues)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    c.header("Cache-Control", "no-store")
+    c.header("Referrer-Policy", "no-referrer")
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, async tx => {
+      const [thread] = await tx
+        .select({ contactId: conversation.contactId })
+        .from(conversation)
+        .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, parsed.data.conversationId)))
+        .limit(1)
+      if (thread?.contactId !== params.data.id) throw new ServiceError("VALIDATION", 400, "La conversación no es de esta persona")
+      const link = await createBookingLink(
+        tx,
+        orgId,
+        { conversationId: parsed.data.conversationId, createdBy: userId, ...(parsed.data.patientId ? { patientId: parsed.data.patientId } : {}) },
+        { secretsKey: deps.secretsKey },
+      )
+      const url = await personalLinkUrl(tx, orgId, link.token)
+      if (!url) throw new Error("La organización no tiene dirección pública")
+      return { url, expiresAt: link.expiresAt.toISOString(), needsRegistration: link.needsRegistration, patientName: link.patientName }
+    }))
+  })
+
+  // «Enviarle su enlace» desde la página de la persona: dice antes a quién y por dónde.
+  app.get("/patients/:id/personal-link/preview", async c => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Enviarle su enlace es de quien edita sus datos"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => previewPersonalLinkSend(tx, orgId, params.data.id)))
+  })
+
+  app.post("/patients/:id/personal-link", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Enviarle su enlace es de quien edita sus datos"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
+    const parsed = z.strictObject({ requestId: z.uuid().optional() }).safeParse(await c.req.json().catch(() => ({})))
+    if (!params.success) return validationError(c, params.error.issues)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, tx =>
+        sendPersonalLink(tx, orgId, userId, { patientId: params.data.id, requestId: parsed.data.requestId ?? null }, { secretsKey: deps.secretsKey }),
+      ),
+    )
   })
   return app
 }

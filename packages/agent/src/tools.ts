@@ -22,8 +22,9 @@ import {
   answerGeneralPermission,
   confirmAppointmentByContact,
   type ContactAppointmentOption,
-  BOOKING_LINK_TTL_HOURS,
+  PERSONAL_LINK_TTL_DAYS,
   createBookingLink,
+  requestPortalReentry,
   annotateHandoff,
   closeConversationWith,
   closurePendingReason,
@@ -156,7 +157,8 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   ver_presupuesto: "Consultó los presupuestos que la persona recibió.",
   reenviar_presupuesto: "Reenvió el presupuesto a la persona (o, si no estaba listo, dejó la tarea a recepción).",
   anotar_respuesta_presupuesto: "Propuso anotar la respuesta al presupuesto; se anota con el sí de la persona.",
-  enviar_enlace_cita: "Envió un enlace para que la persona elija su cita.",
+  enviar_enlace_cita: "Envió su enlace para que la persona elija su cita.",
+  pedir_volver_al_portal: "Dejó a recepción el pedido de volver a entrar al portal.",
   create_opportunity: "Propuso registrar una oportunidad.",
   update_followup: "Dejó la tarea de una oportunidad.",
   close_opportunity: "Propuso cerrar una oportunidad.",
@@ -1096,7 +1098,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       try {
         const { link, slug } = await inOrg(async (tx) => {
           const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, ctx.orgId)).limit(1)
-          return { link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }), slug: org?.slug ?? null }
+          return {
+            link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey }),
+            slug: org?.slug ?? null,
+          }
         })
         if (!slug) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
         const url = new URL(publicUrl.webURL)
@@ -1107,7 +1112,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         url.searchParams.set("token", link.token)
         const who = link.patientName ?? "la persona"
         const data = link.needsRegistration ? " Como aún no es paciente, la página le pedirá sus datos antes de reservar: díselo." : ""
-        return `Enlace para que ${who} elija su cita viendo los horarios libres (es personal y vale ${BOOKING_LINK_TTL_HOURS} horas): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje, y ofrece también seguir por aquí si lo prefiere.${data} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
+        return `Su enlace, para que ${who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje, y ofrece también seguir por aquí si lo prefiere.${data} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
       } catch (error) {
         if (error instanceof ServiceError && error.code === "BOOKING_NEEDS_PATIENT") {
           return "La persona aún no es paciente y la clínica no tiene activo el registro de pacientes en línea: no puede reservar desde un enlace. Sigue por aquí o pasa el caso a una persona para completar sus datos."
@@ -1122,12 +1127,40 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "enviar_enlace_cita",
       description:
-        "Crea un enlace personal para que la persona elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat. Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir.",
+        "Envía «Su enlace»: la página personal de la persona, para que elija ella misma el día y la hora de su cita viendo los horarios libres, en vez de ir y venir por el chat; ahí también ve lo que tiene pendiente (su cita, sus datos por completar, su presupuesto). Sirve a quien ya es paciente y a quien recién se contacta (este completa sus datos en la misma página). Úsalo también cuando la persona diga que su enlace ya no sirve: le das uno nuevo. Es una opción: también puedes reservar por aquí. Indica serviceId y branchId si ya se habló de un servicio o una sede (ids exactos de «Sedes» y «Servicios»); patientId solo si tiene varios pacientes vinculados. La página no muestra precios. No reserva nada por sí sola: la cita la crea la persona al elegir. Nunca es acceso al portal.",
       schema: z.object({
         patientId: z.string().uuid().optional(),
         serviceId: z.string().uuid().optional(),
         branchId: z.string().uuid().optional(),
       }),
+    },
+  )
+
+  /**
+   * Volver a entrar al portal (decisión 9): la persona lo pide por el chat y
+   * el agente lo deja en «Te espera» de recepción, que le envía un enlace nuevo
+   * y le dice el código aparte. El agente nunca envía el enlace ni el código:
+   * tener el chat de alguien no prueba que sea esa persona.
+   */
+  const portalReentry = tool(
+    async () => {
+      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se dejaría a recepción el pedido de volver a entrar al portal."
+      const result = await inOrg((tx) =>
+        requestPortalReentry(tx, ctx.orgId, { contactId: ctx.contactId, conversationId: ctx.conversationId }),
+      )
+      if (result.status === "portal_apagado") {
+        return "La clínica no tiene el portal encendido. Díselo con amabilidad y ofrécele lo que necesite por aquí."
+      }
+      if (result.status === "sin_acceso") {
+        return "La persona no tiene acceso al portal. El acceso se da en la clínica, en persona y con su documento: díselo con send_reply. No envíes ningún enlace de acceso."
+      }
+      return "Listo: recepción tiene el pedido y le enviará un enlace nuevo; el código se lo dan en recepción o por llamada. Díselo con send_reply, por ejemplo: «Te damos tu código en recepción o por llamada». No envíes enlaces ni códigos: eso lo hace una persona del equipo."
+    },
+    {
+      name: "pedir_volver_al_portal",
+      description:
+        "Úsala cuando la persona pida volver a entrar al portal del paciente (cambió de teléfono, perdió su acceso, el enlace venció). No envía nada: deja el pedido a recepción, que le manda un enlace nuevo y le da el código por otra vía. Nunca envíes tú un enlace o un código del portal.",
+      schema: z.object({}),
     },
   )
 
@@ -1767,6 +1800,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     patientSummary,
     availability,
     bookingLink,
+    portalReentry,
     proposeBooking,
     rescheduleAppointment,
     cancelAppointmentProposal,

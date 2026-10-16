@@ -419,6 +419,9 @@ function BudgetCard({
             {budget.createdBy ? (
               <span className="text-xs text-muted-foreground">Preparó {memberName(budget.createdBy)}</span>
             ) : null}
+            {budget.seenInPortalAt ? (
+              <span className="text-xs text-muted-foreground">Lo vio en el portal el {day(budget.seenInPortalAt)}</span>
+            ) : null}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">

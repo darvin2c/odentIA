@@ -1,14 +1,14 @@
 import { withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import {
-  issuePortalLink,
-  listPortalLinks,
-  revokePortalLink,
-  revokePortalSession,
-  getPortalPolicy, upsertPortalPolicy, listPortalRequests, approvePortalRequest,
-  rejectPortalRequest, createPortalGrant, listPortalGrants, revokePortalGrant,
-  listPortalSessions, listPortalPasskeys, revokePortalPasskey,
-  issuePortalActivationQr,
+  changePortalAccess,
+  getPortalAccessSummary,
+  getPortalPolicy,
+  givePortalAccess,
+  type PortalShareRights,
+  resendPortalAccess,
+  revokePortalGrant,
+  upsertPortalPolicy,
 } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -17,28 +17,17 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { portalOrigin } from "../lib/portal-origin.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-
-import { portalScopeInput, portalGrantInput, portalPolicyInput, portalIdInput } from "./portal-input.js"
-
-const issueInput = z
-  .object({
-    patientId: z.uuid(),
-    contactId: z.uuid(),
-    conversationId: z.uuid(),
-    scope: portalScopeInput,
-    ttlHours: z.number().int().min(1).max(720).optional(),
-    idempotencyKey: z.string().trim().min(8).max(128).optional(),
-  })
-  .strict()
+import { portalAccessInput, portalIdInput, portalPolicyInput, portalScopeInput } from "./portal-input.js"
 
 /**
- * Emisión staff de accesos al portal desde la ficha del paciente.
- * Montaje del padre: `guarded.route("/portal", createPortalRoute(...))`
- * (rutas internas sin prefijo: /links, /links/:id/revoke, /sessions/:id/revoke).
- * - Requiere `patients.write`; documentos exige además `clinical.read`;
- *   alcance financiero (presupuestos/cuenta) exige `finance.read`.
- * - El token crudo jamás se devuelve: se entrega por la conversación
- *   indicada del contacto; la respuesta trae metadata + entrega + PIN único.
+ * El portal del paciente desde la página de la persona (Datos › Acceso al
+ * portal) y su configuración. Un solo paso (decisión 9, ADR 0037): «Dar
+ * acceso», «Cambiar», «Enviar nuevo enlace» y «Quitar acceso».
+ * - Requiere `patients.write`. Compartir presupuestos, quien puede enviarlos
+ *   (recepción incluida, decisión 4); la cuenta, quien ve la caja; los
+ *   documentos, quien lee la historia.
+ * - El token crudo solo viaja en el QR (una vez) o en el mensaje a la persona;
+ *   el código de 6 dígitos vuelve a quien da el acceso, para decírselo aparte.
  */
 export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; cookieDomain: string }) {
   const app = new Hono()
@@ -52,8 +41,6 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; 
     "settings.read": "El portal del paciente lo configura quien administra la clínica",
     "settings.write": "El portal del paciente lo configura quien administra la clínica",
     "patients.write": "El acceso de un paciente al portal lo gestiona quien puede editar su ficha",
-    "clinical.read": "Solo quien ve la ficha clínica puede dar acceso a sus documentos",
-    "finance.read": "Solo quien ve los cobros puede dar acceso a presupuestos o a la cuenta",
   }
 
   function deny(c: Context, permission: string) {
@@ -61,6 +48,23 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; 
       errorBody(c, "FORBIDDEN", DENIED[permission] ?? "No tienes permiso para hacer esto en el portal"),
       403,
     )
+  }
+
+  /** Lo que quien da el acceso puede compartir: lo comprueba el servicio con el alcance pedido. */
+  function rightsOf(c: Context): PortalShareRights {
+    const { memberRole } = orgContextOf(c)
+    return {
+      canShareBudgets: canAccess(memberRole, "budgets.send") || canAccess(memberRole, "finance.read"),
+      canShareAccount: canAccess(memberRole, "finance.read"),
+      canShareDocuments: canAccess(memberRole, "clinical.read"),
+    }
+  }
+
+  async function linkUrl(orgId: string): Promise<((token: string) => string) | null> {
+    const [org] = await deps.db.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
+    if (!org?.slug) return null
+    const base = portalOrigin(deps, org.slug)
+    return (token: string) => `${base}/portal?token=${token}`
   }
 
   app.get("/policy", async (c) => {
@@ -77,176 +81,68 @@ export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; 
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => upsertPortalPolicy(tx, orgId, userId, parsed.data)))
   })
 
-  function scopeDenied(c: Context, scope: z.infer<typeof portalScopeInput>) {
-    const { memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    if (scope.documentIds?.length && !canAccess(memberRole, "clinical.read")) return deny(c, "clinical.read")
-    if ((scope.budgets || scope.account) && !canAccess(memberRole, "finance.read")) return deny(c, "finance.read")
-    return null
-  }
-
-  app.get("/requests", async (c) => {
+  // La fila de acceso de la persona y a quién se le puede dar.
+  app.get("/access", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = z.object({ status: z.enum(["pendiente", "aprobada", "rechazada", "expirada"]).optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listPortalRequests(tx, orgId, parsed.data.status)))
-  })
-
-  app.post("/requests/:id/approve", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const params = portalIdInput.safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    const parsed = portalGrantInput.extend({ conversationId: z.uuid() }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const denied = scopeDenied(c, parsed.data.scope)
-    if (denied) return denied
-    const [org] = await deps.db.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-    if (!org?.slug) return c.json(errorBody(c, "NOT_FOUND", "Organización no disponible"), 404)
-    const base = portalOrigin(deps, org.slug)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => approvePortalRequest(tx, orgId, userId, params.data.id, {
-      ...parsed.data, deliver: { linkUrl: token => `${base}/portal?token=${token}`, canShareFinance: canAccess(memberRole, "finance.read") },
-    })))
-  })
-
-  app.post("/requests/:id/reject", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const params = portalIdInput.safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    const parsed = z.strictObject({ note: z.string().trim().max(1000).optional() }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => rejectPortalRequest(tx, orgId, userId, params.data.id, parsed.data.note)))
-  })
-
-  app.post("/grants", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = portalGrantInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const denied = scopeDenied(c, parsed.data.scope)
-    if (denied) return denied
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx => createPortalGrant(tx, orgId, userId, parsed.data)))
-  })
-
-  app.get("/grants", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = z.object({ patientId: z.uuid().optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listPortalGrants(tx, orgId, parsed.data.patientId)))
-  })
-
-  app.post("/grants/:id/revoke", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const params = portalIdInput.safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    const parsed = z.strictObject({ reason: z.string().trim().max(1000).optional() }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => revokePortalGrant(tx, orgId, userId, params.data.id, parsed.data.reason)))
-  })
-
-  app.get("/sessions", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = z.object({ patientId: z.uuid().optional(), contactId: z.uuid().optional(), grantId: z.uuid().optional() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listPortalSessions(tx, orgId, parsed.data)))
-  })
-
-  app.get("/passkeys", async c => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = z.object({ contactId: z.uuid() }).safeParse(c.req.query())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => listPortalPasskeys(tx, orgId, parsed.data.contactId)))
-  })
-
-  app.post("/passkeys/:id/revoke", async c => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = portalIdInput.safeParse(c.req.param())
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => revokePortalPasskey(tx, orgId, userId, parsed.data.id)))
-  })
-
-  app.post("/activations/qr", async c => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = issueInput.omit({ conversationId: true }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const denied = scopeDenied(c, parsed.data.scope)
-    if (denied) return denied
-    const [org] = await deps.db.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-    if (!org?.slug) return c.json(errorBody(c, "NOT_FOUND", "Organización no disponible"), 404)
-    const base = portalOrigin(deps, org.slug)
-    c.header("Cache-Control", "no-store")
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, async tx => {
-      const issued = await issuePortalActivationQr(tx, orgId, userId, parsed.data)
-      return { link: issued.link, activationUrlOnce: `${base}/portal?token=${issued.rawTokenOnce}`, pinOnce: issued.pinOnce }
+    const query = z.object({ patientId: z.uuid() }).safeParse(c.req.query())
+    if (!query.success) return validationError(c, query.error.issues)
+    return runService(c, 200, async () => ({
+      ...(await withOrgContext(deps.db, orgId, (tx) => getPortalAccessSummary(tx, orgId, query.data.patientId))),
+      rights: rightsOf(c),
     }))
   })
 
-
-  app.post("/links", async (c) => {
+  app.post("/access", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const parsed = issueInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = portalAccessInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    if ((parsed.data.scope.documentIds?.length ?? 0) > 0 && !canAccess(memberRole, "clinical.read")) {
-      return deny(c, "clinical.read")
-    }
-    const needsFinance = parsed.data.scope.budgets === true || parsed.data.scope.account === true
-    if (needsFinance && !canAccess(memberRole, "finance.read")) {
-      return deny(c, "finance.read")
-    }
-    const [org] = await deps.db
-      .select({ slug: organization.slug })
-      .from(organization)
-      .where(eq(organization.id, orgId))
-      .limit(1)
-    if (!org?.slug) return c.json(errorBody(c, "NOT_FOUND", "Organización no disponible"), 404)
-    const base = portalOrigin(deps, org.slug)
-    const canShareFinance = canAccess(memberRole, "finance.read")
+    const url = await linkUrl(orgId)
+    if (!url) return c.json(errorBody(c, "NOT_FOUND", "Organización no disponible"), 404)
+    const { patientId, ...input } = parsed.data
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => givePortalAccess(tx, orgId, userId, patientId, input, { linkUrl: url, ...rightsOf(c) })),
+    )
+  })
+
+  app.patch("/access/:id", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
+    const params = portalIdInput.safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = z.strictObject({ scope: portalScopeInput }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => changePortalAccess(tx, orgId, userId, params.data.id, parsed.data, rightsOf(c))),
+    )
+  })
+
+  // «Enviar nuevo enlace»: para volver a entrar, sin volver a comprobar su identidad.
+  app.post("/access/:id/resend", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
+    const params = portalIdInput.safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    const parsed = z.strictObject({ delivery: z.enum(["qr", "whatsapp"]) }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const url = await linkUrl(orgId)
+    if (!url) return c.json(errorBody(c, "NOT_FOUND", "Organización no disponible"), 404)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        issuePortalLink(tx, orgId, userId, parsed.data, {
-          linkUrl: (rawLinkToken) => `${base}/portal?token=${rawLinkToken}`,
-          canShareFinance,
-        }),
+        resendPortalAccess(tx, orgId, userId, params.data.id, parsed.data, { linkUrl: url, ...rightsOf(c) }),
       ),
     )
   })
 
-  app.get("/links", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const query = z.object({ patientId: z.uuid().optional() }).safeParse(c.req.query())
-    if (!query.success) return validationError(c, query.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPortalLinks(tx, orgId, query.data.patientId)),
-    )
-  })
-
-  app.patch("/links/:id/revoke", async (c) => {
+  // «Quitar acceso» cierra todo: sesiones, llaves y enlaces.
+  app.post("/access/:id/revoke", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    const params = portalIdInput.safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => revokePortalLink(tx, orgId, userId, params.data.id)),
-    )
-  })
-
-  app.patch("/sessions/:id/revoke", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "patients.write")) return deny(c, "patients.write")
-    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => revokePortalSession(tx, orgId, userId, params.data.id)),
+      withOrgContext(deps.db, orgId, (tx) => revokePortalGrant(tx, orgId, userId, params.data.id, "Quitó el acceso desde la página de la persona")),
     )
   })
 

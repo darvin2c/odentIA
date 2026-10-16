@@ -839,40 +839,11 @@ export async function registerPatient(
     !!demographics.birthDate && isRealDate(demographics.birthDate) && isMinor(demographics.birthDate, today)
   if (answers.representative && minorPatient) {
     const linkedGuardian = links.find((l) => l.relationship === "guardian")
-    let representativeId = linkedGuardian?.contactId ?? null
-    if (!representativeId) {
-      const rep = answers.representative
-      const [person] = await tx
-        .insert(contact)
-        .values({
-          organizationId: orgId,
-          displayName: rep.displayName,
-          phone: rep.phone ? normalizePhone(rep.phone, countryCode) : null,
-          email: rep.email || null,
-          docType: rep.docType ?? null,
-          docNumber: rep.docNumber || null,
-          // El documento con su país emisor, como el de la persona.
-          docCountry: rep.docNumber
-            ? documentIssuerCountry(clinicalProfileFor(countryCode), rep.docType, rep.docCountry)
-            : null,
-        })
-        .returning({ id: contact.id })
-      if (!person) throw new Error("No se pudo crear al representante")
-      representativeId = person.id
-      await tx.insert(patientContact).values({
-        organizationId: orgId,
-        patientId: created.id,
-        contactId: person.id,
-        relationship: "guardian",
-        relationshipDetail: rep.relationshipDetail || null,
-        isPreferred: false,
-        createdBy: actorUserId,
-      })
-    }
-    await grantResponsibility(tx, orgId, actorUserId, created.id, {
-      contactId: representativeId,
-      kind: "representante_legal",
-      startsAt: today,
+    await attachLegalRepresentative(tx, orgId, actorUserId, created.id, {
+      existingContactId: linkedGuardian?.contactId ?? null,
+      representative: answers.representative,
+      countryCode,
+      today,
     })
   }
 
@@ -931,6 +902,65 @@ export async function registerPatient(
   // Releer para no responder con una revisión anterior a salud/consentimiento.
   const saved = await requirePatient(tx, orgId, created.id)
   return whatsapp ? { ...saved, whatsapp } : saved
+}
+
+/**
+ * El representante legal de un menor, en la misma transacción que sus datos:
+ * su persona con documento (con su país emisor), el vínculo `guardian` y la
+ * responsabilidad de representante legal desde hoy. Si ya está vinculado,
+ * solo se le asigna el rol. Lo usan el registro y «Tus datos» de su enlace.
+ */
+export async function attachLegalRepresentative(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  patientId: string,
+  input: {
+    existingContactId?: string | null
+    representative: Pick<
+      NonNullable<RegistrationAnswers["representative"]>,
+      "displayName" | "phone" | "email" | "docType" | "docNumber" | "docCountry" | "relationshipDetail"
+    >
+    countryCode: string | null
+    today: string
+  },
+): Promise<string> {
+  let representativeId = input.existingContactId ?? null
+  if (!representativeId) {
+    const rep = input.representative
+    const [person] = await tx
+      .insert(contact)
+      .values({
+        organizationId: orgId,
+        displayName: rep.displayName,
+        phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
+        email: rep.email || null,
+        docType: rep.docType ?? null,
+        docNumber: rep.docNumber || null,
+        // El documento con su país emisor, como el de la persona.
+        docCountry: rep.docNumber
+          ? documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry)
+          : null,
+      })
+      .returning({ id: contact.id })
+    if (!person) throw new Error("No se pudo crear al representante")
+    representativeId = person.id
+    await tx.insert(patientContact).values({
+      organizationId: orgId,
+      patientId,
+      contactId: person.id,
+      relationship: "guardian",
+      relationshipDetail: rep.relationshipDetail || null,
+      isPreferred: false,
+      createdBy: actorUserId,
+    })
+  }
+  await grantResponsibility(tx, orgId, actorUserId, patientId, {
+    contactId: representativeId,
+    kind: "representante_legal",
+    startsAt: input.today,
+  })
+  return representativeId
 }
 
 /** La clínica tiene un WhatsApp conectado por el que escribir. */

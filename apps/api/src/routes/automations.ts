@@ -1,23 +1,18 @@
 import { createHash } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import {
-  cancelAppointmentByToken,
-  confirmAppointmentByToken,
-  getPublicLinkInfo,
-  unsubscribeByToken,
-} from "@odentia/services"
+import { getPublicLinkInfo, personalLinkForEmailToken, unsubscribeByToken } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService } from "./helpers.js"
 
 /**
- * Enlaces públicos seguros (confirmar/cancelar cita, baja). Sin sesión: el
+ * Enlaces públicos seguros (los de la cita, que llevan a «Su enlace», y la baja). Sin sesión: el
  * token opaco (hash en DB) resuelve el tenant; las respuestas nunca incluyen
  * paciente ni contacto. El padre monta en `/api/public/automations`.
  */
-export function createPublicAutomationsRoute(deps: { db: CrmDeps["db"]; ownerDb: CrmDeps["db"] }) {
+export function createPublicAutomationsRoute(deps: { db: CrmDeps["db"]; ownerDb: CrmDeps["db"]; secretsKey: Buffer }) {
   const app = new Hono()
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store")
@@ -36,28 +31,15 @@ export function createPublicAutomationsRoute(deps: { db: CrmDeps["db"]; ownerDb:
     return link?.organizationId ?? null
   }
 
-  app.get("/cita/:token", async (c) => {
-    const token = c.req.param("token")
-    const orgId = await orgIdOf(token)
-    if (!orgId) return c.json(errorBody(c, "NOT_FOUND", "Enlace no disponible"), 404)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPublicLinkInfo(tx, token)))
-  })
-
-  app.post("/cita/:token/confirmar", async (c) => {
+  // Confirmar o cancelar desde un correo solo lleva a «Su enlace» (ADR 0037):
+  // con el token del correo, aún vigente, se da el enlace de esa persona con
+  // esa cita, y ahí la confirma, la cambia o la cancela.
+  app.post("/cita/:token/enlace", async (c) => {
     const token = c.req.param("token")
     const orgId = await orgIdOf(token)
     if (!orgId) return c.json(errorBody(c, "NOT_FOUND", "Enlace no disponible"), 404)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => confirmAppointmentByToken(tx, token)),
-    )
-  })
-
-  app.post("/cita/:token/cancelar", async (c) => {
-    const token = c.req.param("token")
-    const orgId = await orgIdOf(token)
-    if (!orgId) return c.json(errorBody(c, "NOT_FOUND", "Enlace no disponible"), 404)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => cancelAppointmentByToken(tx, token)),
+      withOrgContext(deps.db, orgId, (tx) => personalLinkForEmailToken(tx, orgId, token, { secretsKey: deps.secretsKey })),
     )
   })
 

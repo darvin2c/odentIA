@@ -4,8 +4,8 @@ import { common } from "../common.js"
 import {
   type CountryCode,
   countryOptions,
-  DEFAULT_COUNTRY,
   getCountryCallingCode,
+  regionCountry,
 } from "./phone.js"
 
 export interface CountrySelectProps {
@@ -31,7 +31,7 @@ export function CountrySelect({
   id,
 }: CountrySelectProps) {
   const options = React.useMemo(
-    () => countryOptions(value || DEFAULT_COUNTRY, countries),
+    () => countryOptions(value || regionCountry(), countries),
     [value, countries],
   )
 

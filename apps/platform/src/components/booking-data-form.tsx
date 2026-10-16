@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { ErrorState, LoadingState, PhoneInput, SubmitButton } from "@odentia/ui-patterns"
+import { BirthDateInput, ErrorState, LoadingState, PhoneInput, SubmitButton } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, type InputHTMLAttributes, useState } from "react"
 import { ApiError } from "../lib/api"
@@ -503,18 +503,26 @@ export function BookingDataForm({
             La persona que se va a atender
           </FieldLegend>
           <PersonFields scope="other" profile={profile} person={draft.other} errors={errors} mine={false} onChange={setPerson("other")} />
-          {/* Mismo control que el registro de pacientes: una fecha de nacimiento se escribe, no se busca mes a mes. */}
-          <TextField
-            name="otherBirthDate"
-            label="Fecha de nacimiento"
-            hint="Si es menor de edad, quedas como su responsable."
-            type="date"
-            autoComplete="off"
-            max={info.today}
-            value={draft.otherBirthDate}
-            error={errors.otherBirthDate}
-            onChange={(otherBirthDate) => set({ otherBirthDate }, "otherBirthDate", "relationship", "me.docNumber")}
-          />
+          {/* Mismo control que el registro de pacientes: una fecha de nacimiento se escribe, en el orden de la clínica. */}
+          <Field>
+            <FieldLabel htmlFor={fieldId("otherBirthDate")}>Fecha de nacimiento</FieldLabel>
+            <BirthDateInput
+              id={fieldId("otherBirthDate")}
+              className="[&_input]:min-h-11"
+              today={info.today}
+              value={draft.otherBirthDate}
+              invalid={Boolean(errors.otherBirthDate)}
+              aria-describedby={`${fieldId("otherBirthDate")}-${errors.otherBirthDate ? "error" : "hint"}`}
+              onChange={(otherBirthDate) => set({ otherBirthDate }, "otherBirthDate", "relationship", "me.docNumber")}
+            />
+            {errors.otherBirthDate ? (
+              <FieldError id={`${fieldId("otherBirthDate")}-error`}>{errors.otherBirthDate}</FieldError>
+            ) : (
+              <FieldDescription id={`${fieldId("otherBirthDate")}-hint`}>
+                Si es menor de edad, quedas como su responsable.
+              </FieldDescription>
+            )}
+          </Field>
           <Field>
             <FieldLabel htmlFor={relationshipId}>Tu relación con esa persona</FieldLabel>
             <Select<Relationship>

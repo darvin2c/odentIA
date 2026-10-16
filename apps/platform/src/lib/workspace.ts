@@ -95,6 +95,13 @@ export type WaitingRow =
       currency: string
       options: number
     }
+  /**
+   * El documento que la persona escribió en «Su enlace» ya es de otra ficha:
+   * no se guardó y recepción revisa si son la misma persona (ADR 0037).
+   */
+  | { kind: "possibleDuplicate"; id: string; patientId: string; patientName: string; detail: string; createdAt: string }
+  /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
+  | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
   | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
   | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }

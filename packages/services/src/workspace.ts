@@ -22,6 +22,8 @@ import {
   type WaitingCase,
   type WaitingStaleEncounter,
   type WaitingStillOpen,
+  type WaitingPortalReentry,
+  type WaitingPossibleDuplicate,
   type WaitingTask,
   type WaitingUnconfirmed,
   type WaitingUnsentBudget,
@@ -502,7 +504,8 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const cases = access.agent
     ? sql`and not exists (select 1 from agent_handoff h where h.organization_id = t.organization_id and h.task_id = t.id)`
     : sql``
-  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}`
+  // Lo que dejó el sistema con su propia fila (`task.kind`) no se repite como tarea.
+  const scope = sql`t.organization_id=${orgId} and t.status='open' and t.kind is null and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}`
   type Row = Omit<WaitingTask, "href"> & { conversationId: string | null }
   const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
       case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
@@ -521,6 +524,53 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
     href: access.conversations && conversationId ? `/inbox?conversation=${conversationId}` : `/tasks?task=${task.id}`,
   })
   return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
+}
+
+/**
+ * Lo que dejaron «Su enlace» y el portal para recepción, con su propia fila:
+ * la posible ficha repetida y quien pide volver a entrar al portal (ADR 0037).
+ * Son tareas abiertas de su área; se van al hacerlas.
+ */
+async function waitingSystemTasks(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  access: WorkspaceAccess,
+): Promise<{ duplicates: WaitingPossibleDuplicate[]; reentries: WaitingPortalReentry[] }> {
+  const areas = access.taskAreas?.length ? sql`or (t.assignee_user_id is null and t.area in ${[...access.taskAreas]})` : sql``
+  const rows = await tx.execute<{
+    id: string
+    kind: string
+    patientId: string
+    patientName: string
+    contactName: string | null
+    reason: string | null
+    createdAt: string
+    grantId: string | null
+  }>(sql`
+    select t.id, t.kind, t.patient_id as "patientId", p.display_name as "patientName", ct.display_name as "contactName",
+      t.reason, ${iso(sql`t.created_at`)} as "createdAt",
+      (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
+        and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId"
+    from task t join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
+    left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
+    where t.organization_id = ${orgId} and t.status = 'open' and t.kind is not null
+      and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
+    order by t.created_at, t.id limit 20`)
+  return {
+    duplicates: rows
+      .filter((row) => row.kind === "ficha_repetida")
+      .map((row) => ({ id: row.id, patientId: row.patientId, patientName: row.patientName, detail: row.reason ?? "", createdAt: row.createdAt })),
+    reentries: rows
+      .filter((row) => row.kind === "volver_al_portal")
+      .map((row) => ({
+        id: row.id,
+        patientId: row.patientId,
+        contactName: row.contactName ?? row.patientName,
+        grantId: row.grantId,
+        createdAt: row.createdAt,
+      })),
+  }
 }
 
 /**
@@ -600,6 +650,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const cash = access.finance && branch ? await getCashToday(tx, orgId, { branchId: branch.id }) : null
 
   const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
+  const system = access.tasks && access.patients ? await waitingSystemTasks(tx, orgId, userId, access) : { duplicates: [], reentries: [] }
   // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador,
   // y solo las que quien mira puede atender. Quien atiende solo ve lo suyo, y las
   // recomendaciones son de toda la clínica: no las recibe.
@@ -617,6 +668,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
     // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).
     unsentBudgets: access.sendsBudgets ? await waitingUnsentBudgets(tx, orgId, dayStart) : null,
+    possibleDuplicates: system.duplicates,
+    portalReentries: system.reentries,
     conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent) : null,
     stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,

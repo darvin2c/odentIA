@@ -673,6 +673,13 @@
       "when": 1792113996286,
       "tag": "0095_lo_de_cada_pais",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792113996287,
+      "tag": "0096_su_enlace_y_portal_en_un_paso",
+      "breakpoints": true
     }
   ]
 }

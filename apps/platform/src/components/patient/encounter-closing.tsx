@@ -10,13 +10,9 @@ import {
   DialogTitle,
   Field,
   FieldLabel,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Textarea,
 } from "@odentia/ui"
+import { TimeSelect } from "@odentia/ui-patterns"
 import { useId } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
@@ -38,26 +34,23 @@ function findingsLine(odontogram: ClosingOdontogram): string | null {
   return `Hallazgos: ${parts.join("; ")}`
 }
 
-/** Horas de fin posibles: de 5 en 5 minutos, desde el inicio hasta ahora, en la zona de la clínica. */
-export function endTimeOptions(startedAt: string | null | undefined, now = new Date()): string[] {
+/**
+ * Entre qué horas puede haber terminado la atención, en la zona de la clínica:
+ * desde su inicio (una de otro día, desde las 00:00) hasta ahora. La lista
+ * («Hora», cada 15 minutos) va dentro de esos límites.
+ */
+export function endTimeBounds(
+  startedAt: string | null | undefined,
+  now = new Date(),
+): { min: string; max: string } {
   const nowValue = clinicDateTimeValue(now.toISOString())
-  const today = nowValue.slice(0, 10)
-  const [nh, nm] = nowValue.slice(11, 16).split(":").map(Number) as [number, number]
-  const end = nh * 60 + nm
-  let begin = 0
+  const max = nowValue.slice(11, 16)
+  let min = "00:00"
   if (startedAt) {
     const startValue = clinicDateTimeValue(startedAt)
-    // Una atención de otro día termina hoy desde las 00:00; la de hoy, desde su inicio.
-    if (startValue.slice(0, 10) === today) {
-      const [sh, sm] = startValue.slice(11, 16).split(":").map(Number) as [number, number]
-      begin = Math.ceil((sh * 60 + sm) / 5) * 5
-    }
+    if (startValue.slice(0, 10) === nowValue.slice(0, 10)) min = startValue.slice(11, 16)
   }
-  const out: string[] = []
-  for (let minute = end - (end % 5); minute >= begin && out.length < 96; minute -= 5) {
-    out.push(`${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`)
-  }
-  return out
+  return { min, max }
 }
 
 function consentLine(need: ConsentNeed, who: string): { title: string; detail: string } {
@@ -127,7 +120,7 @@ export function EncounterClosingDialog({
   children?: React.ReactNode
 }): React.JSX.Element {
   const ids = useId()
-  const options = endTimeOptions(startedAt)
+  const bounds = endTimeBounds(startedAt)
   const needsReason = consents.length > 0
   const ready = canSign && !pending && (!needsReason || skipReason.trim().length > 0)
   return (
@@ -196,23 +189,15 @@ export function EncounterClosingDialog({
           ) : null}
           <Field>
             <FieldLabel htmlFor={`${ids}-end`}>Hora de fin</FieldLabel>
-            <Select
-              items={Object.fromEntries([["", `Ahora${options[0] ? ` (${options[0]})` : ""}`], ...options.map((o) => [o, o])])}
+            <TimeSelect
+              id={`${ids}-end`}
+              className="w-44"
+              min={bounds.min}
+              max={bounds.max}
+              emptyLabel={`Ahora (${bounds.max})`}
               value={endTime}
-              onValueChange={(value) => onEndTime(value ?? "")}
-            >
-              <SelectTrigger id={`${ids}-end`} className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Ahora{options[0] ? ` (${options[0]})` : ""}</SelectItem>
-                {options.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={onEndTime}
+            />
           </Field>
           {children}
           {blockedReason ? (

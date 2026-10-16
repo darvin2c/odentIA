@@ -6,7 +6,8 @@ import {
   isValidPhoneNumber,
   parsePhoneNumberFromString,
 } from "libphonenumber-js"
-import { formatLocale } from "../locale.js"
+import { formatCountry, formatLocale } from "../locale.js"
+import { detectedTimeZone, zonesForCountry } from "../time-zone/time-zone.js"
 
 /**
  * Núcleo de teléfono: el formato canónico es E.164 (`+51987654321`) y todo lo
@@ -20,11 +21,56 @@ import { formatLocale } from "../locale.js"
  * máscara es solo presentación.
  */
 
-/** Perú primero: país de partida mientras el consumidor no fije otro. */
-export const DEFAULT_COUNTRY: CountryCode = "PE"
-
 export type { CountryCode }
 export { getCountryCallingCode }
+
+/** Región (país) de una etiqueta BCP 47, completada con CLDR: `es-PE` → `PE`. */
+function regionOfLocale(tag: string | undefined): CountryCode | undefined {
+  if (!tag || typeof Intl.Locale !== "function") return undefined
+  try {
+    return normalizeCountry(new Intl.Locale(tag).maximize().region)
+  } catch {
+    return undefined
+  }
+}
+
+let zoneCountries: Map<string, CountryCode> | null = null
+/** País al que el runtime atribuye una zona (`America/Lima` → `PE`), si es uno solo. */
+function countryOfTimeZone(zone: string | undefined): CountryCode | undefined {
+  if (!zone) return undefined
+  if (!zoneCountries) {
+    zoneCountries = new Map()
+    const shared = new Set<string>()
+    for (const code of getCountries()) {
+      for (const each of zonesForCountry(code)) {
+        if (zoneCountries.has(each)) shared.add(each)
+        else zoneCountries.set(each, code)
+      }
+    }
+    // Una zona de varios países no dice cuál: no se adivina.
+    for (const each of shared) zoneCountries.delete(each)
+  }
+  return zoneCountries.get(zone)
+}
+
+/**
+ * País de partida del teléfono y de los selectores de país: el de la clínica
+ * cuando la app lo fijó (`setFormatRegion({ country })`); si no, el de su
+ * formato regional (`es-PE`); y sin clínica (alta de una organización, página
+ * pública sin región), el del entorno: el de su zona horaria y, al final, el de
+ * su idioma según CLDR. Nunca un país escrito en el código.
+ */
+export function regionCountry(): CountryCode {
+  return (
+    normalizeCountry(formatCountry()) ??
+    regionOfLocale(formatLocale()) ??
+    countryOfTimeZone(detectedTimeZone()) ??
+    regionOfLocale(Intl.DateTimeFormat().resolvedOptions().locale) ??
+    // «und» (idioma sin determinar) también tiene región probable en CLDR.
+    regionOfLocale("und") ??
+    (getCountries()[0] as CountryCode)
+  )
+}
 
 export interface PhoneMeta {
   /**

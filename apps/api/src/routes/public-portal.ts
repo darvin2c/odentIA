@@ -1,5 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  cancelPortalAppointment,
   confirmPortalAppointment,
   decidePortalBudget,
   exchangePortalToken,
@@ -11,6 +12,8 @@ import {
   getPortalSessionInfo,
   listPortalBudgets,
   listPortalDocuments,
+  markPortalBudgetSeen,
+  rememberPortalSession,
   requirePortalSession,
   reschedulePortalAppointment,
   resolvePortalOrgByLinkToken,
@@ -20,7 +23,7 @@ import {
   ServiceError,
   type PortalContext,
   type Storage,
-  getPortalPolicy, createPublicPortalRequest, listMyPortalGrants, selectPortalGrant,
+  getPortalPolicy, listMyPortalGrants, selectPortalGrant,
   createPasskeyRegistrationOptions, verifyPasskeyRegistration,
   createPasskeyAuthOptions, verifyPasskeyAuth,
   recordPortalPinFailure,
@@ -38,6 +41,9 @@ const exchangeInput = z.strictObject({ token: z.string().min(1).max(256), pin: z
 const rescheduleInput = z.strictObject({
   expectedVersion: z.number().int().min(1),
   startsAt: z.string().min(1).max(64),
+  // El horario elegido en la semana: con quién y en qué sillón está libre.
+  dentistUserId: z.string().min(1).max(200),
+  chairId: z.uuid().optional(),
 })
 const decisionLineInput = z.strictObject({
   planItemId: z.uuid(),
@@ -161,25 +167,12 @@ export function createPublicPortalRoute(deps: {
     if (throttled) return throttled
     const parsed = portalSlugInput.safeParse(c.req.query("orgSlug"))
     const org = parsed.success ? await portalOrganization(deps.ownerDb, parsed.data) : null
-    if (!org) return c.json({ data: { enabled: false, requestsEnabled: false, passkeysEnabled: false } })
+    if (!org) return c.json({ data: { enabled: false } })
+    // Sin solicitudes públicas (ADR 0037): el acceso se da en la clínica y se vuelve a entrar con la llave guardada.
     return runService(c, 200, () => withOrgContext(deps.db, org.id, async tx => {
       const policy = await getPortalPolicy(tx, org.id)
-      return { enabled: policy.enabled, requestsEnabled: policy.enabled && policy.requestsEnabled && policy.publicRequestsEnabled, passkeysEnabled: policy.enabled && policy.passkeysEnabled, orgName: org.name }
+      return { enabled: policy.enabled, orgName: org.name }
     }))
-  })
-
-  app.post("/requests", async c => {
-    const throttled = publicLimited(c)
-    if (throttled) return throttled
-    const parsed = z.strictObject({
-      orgSlug: portalSlugInput, contactName: z.string().trim().min(1).max(200),
-      contactText: z.string().trim().min(1).max(300), patientHint: z.string().trim().max(300).optional(),
-      idempotencyKey: z.string().trim().min(8).max(128).optional(),
-    }).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    const org = await portalOrganization(deps.ownerDb, parsed.data.orgSlug)
-    if (!org) return c.json({ data: { received: true } })
-    return runService(c, 200, () => withOrgContext(deps.db, org.id, tx => createPublicPortalRequest(tx, org.id, parsed.data)))
   })
 
   app.post("/passkeys/register/options", async c => {
@@ -277,6 +270,12 @@ export function createPublicPortalRoute(deps: {
     return portalCall(c, (tx, ctx) => confirmPortalAppointment(tx, ctx, params.data.id))
   })
 
+  app.post("/appointments/:id/cancel", async (c) => {
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return portalCall(c, (tx, ctx) => cancelPortalAppointment(tx, ctx, params.data.id))
+  })
+
   app.post("/appointments/:id/reschedule", async (c) => {
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
     if (!params.success) return validationError(c, params.error.issues)
@@ -286,6 +285,16 @@ export function createPublicPortalRoute(deps: {
   })
 
   app.get("/budgets", async (c) => portalCall(c, (tx, ctx) => listPortalBudgets(tx, ctx)))
+
+  // «Lo vio en el portal el …»: lo anota al abrir «Ver y responder».
+  app.post("/budgets/:id/seen", async (c) => {
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return portalCall(c, async (tx, ctx) => {
+      await markPortalBudgetSeen(tx, ctx, params.data.id)
+      return { seen: true }
+    })
+  })
 
   app.post("/budgets/:id/decision", async (c) => {
     const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
@@ -315,6 +324,9 @@ export function createPublicPortalRoute(deps: {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return portalCall(c, (tx, ctx) => savePortalQuestionnaire(tx, ctx, parsed.data))
   })
+
+  // Si el teléfono no puede guardar la llave, la sesión se recuerda 30 días (decisión 9).
+  app.post("/session/remember", async (c) => portalCall(c, (tx, ctx) => rememberPortalSession(tx, ctx)))
 
   app.post("/session/revoke", async (c) =>
     portalCall(c, async (tx, ctx) => {

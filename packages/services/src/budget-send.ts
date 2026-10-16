@@ -11,8 +11,9 @@
  * reenvía lo ya preparado, nunca entrega un borrador ni cambia precios.
  *
  * Le llega a la persona, o a su representante legal si es menor. «Ver y
- * responder» apuntará al enlace personal (paso 6); mientras tanto, el
- * mensaje lleva el PDF.
+ * responder» abre «Su enlace» (ADR 0037), donde lo ve, elige una opción,
+ * responde y reserva lo que aceptó; dentro de las 24 horas y por correo va
+ * además el PDF, con la dirección de su enlace escrita.
  */
 import { budgetOptionLabel, formatMoney, isMinor } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -25,7 +26,10 @@ import {
   type MessageSpec,
   renderMessage,
   replyId,
+  withLinkLine,
 } from "./automation-messages.js"
+import { issuePersonalLink } from "./booking-links.js"
+import { personalLinkUrl } from "./public-links.js"
 import { clinicName, firstName, previewMessageRoute, routeMessage } from "./automation-routing.js"
 import { mayWriteFirst } from "./automation.js"
 import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } from "./budgets.js"
@@ -45,8 +49,11 @@ import type { Storage } from "./storage.js"
 /** Estados en los que el presupuesto se puede enviar (o reenviar). */
 const SENDABLE = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"] as const
 
-/** A quién le llega: la propia persona o, si es menor, su representante legal. */
-async function budgetRecipient(
+/**
+ * A quién le llega lo del servicio de un paciente (su presupuesto, «Su
+ * enlace»): la propia persona o, si es menor, su representante legal.
+ */
+export async function serviceRecipient(
   tx: Db,
   orgId: string,
   patientId: string,
@@ -138,7 +145,7 @@ export async function previewBudgetSend(
   opts: { actorUserId?: string; memberRole?: string } = {},
 ): Promise<BudgetSendPreview> {
   const budget = await getBudgetDetail(tx, orgId, patientId, budgetId, opts)
-  const recipient = await budgetRecipient(tx, orgId, patientId)
+  const recipient = await serviceRecipient(tx, orgId, patientId)
   const patientName = await patientFirstName(tx, orgId, patientId)
   const { spec, text } = await readyMessage(tx, orgId, budget, recipient, patientName)
   const base = { recipient: { contactId: recipient.contactId, name: recipient.displayName, relation: recipient.relation }, text }
@@ -264,7 +271,7 @@ export async function sendBudget(
     deliveredBudget = true
     budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
   }
-  const recipient = await budgetRecipient(tx, orgId, input.patientId, input.recipientContactId)
+  const recipient = await serviceRecipient(tx, orgId, input.patientId, input.recipientContactId)
   const patientName = await patientFirstName(tx, orgId, input.patientId)
   const { spec, params, text } = await readyMessage(tx, orgId, budget, recipient, patientName)
   const route = await routeMessage(tx, orgId, recipient.contactId, spec)
@@ -277,10 +284,21 @@ export async function sendBudget(
   const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId)
   const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   const senderKind = actor.by === "agente" || !actor.userId ? "agent" : "user"
+  // «Ver y responder» abre su enlace: el mismo que ya tenga, donde el presupuesto aparece.
+  const link =
+    spec.link && deps.secretsKey
+      ? await issuePersonalLink(
+          tx,
+          orgId,
+          { contactId: recipient.contactId, patientId: input.patientId, createdBy: senderKind === "user" ? actor.userId : null },
+          { secretsKey: deps.secretsKey },
+        )
+      : null
+  const url = link ? await personalLinkUrl(tx, orgId, link.token) : null
   let sent: { conversationId: string; messageId: string }
   if (route.via === "plantilla" && route.template) {
-    // Pasadas las 24 horas solo sale el mensaje aprobado; el PDF llega al
-    // tocar «Ver y responder» (`handleAutomationReply`).
+    // Pasadas las 24 horas solo sale el mensaje aprobado, con el botón de su enlace.
+    if (spec.link && !link) throw new ServiceError("BUDGET_NO_ROUTE", 409, "No se pudo preparar su enlace. Imprímelo y entrégaselo.")
     const message = await sendTemplateOutbound(tx, orgId, deps.secretsKey ?? Buffer.alloc(0), {
       conversationId: route.conversationId,
       senderKind,
@@ -289,15 +307,17 @@ export async function sendBudget(
       language: route.template.language,
       params,
       buttons: spec.buttons.map((button) => ({ id: replyId(button.action, input.budgetId), title: button.title })),
+      ...(link ? { link: link.token } : {}),
       preview: text,
     })
     sent = { conversationId: route.conversationId, messageId: message.id }
   } else {
     const pdf = await renderBudgetPdf(snap, null)
+    const body = withLinkLine(text, spec.link, url)
     const caption =
       route.via === "correo"
-        ? `${BUDGET_READY_SUBJECT} · ${await clinicName(tx, orgId)}\n\n${text}\n${budgetOptionLine(budget)}`
-        : text
+        ? `${BUDGET_READY_SUBJECT} · ${await clinicName(tx, orgId)}\n\n${body}\n${budgetOptionLine(budget)}`
+        : body
     sent = await deliverDocumentPdf(
       tx,
       orgId,

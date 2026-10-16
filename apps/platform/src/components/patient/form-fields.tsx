@@ -11,6 +11,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
+import { DatePickerButton } from "@odentia/ui-patterns"
 import { useId } from "react"
 import type { FormFieldDef, FormSchemaDef } from "../../lib/clinical-forms"
 import { FirmaPad, FirmaView } from "./firma-pad"
@@ -276,11 +277,12 @@ export function AnswerInput({
       return (
         <Field>
           <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <Input
+          <DatePickerButton
             {...common}
-            type="date"
+            className="w-56"
             value={typeof value === "string" ? value : ""}
-            onChange={(event) => onChange(event.target.value || null)}
+            emptyLabel={field.required ? undefined : "Sin fecha"}
+            onChange={(next) => onChange(next || null)}
           />
           {help}
         </Field>

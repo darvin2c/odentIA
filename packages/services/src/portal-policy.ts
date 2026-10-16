@@ -1,6 +1,5 @@
 import type { Db } from "@odentia/db"
 import { portalLink } from "@odentia/db/schema/portal"
-import { channelConnection } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   portalGrant,
@@ -30,17 +29,7 @@ export interface PortalAllowedScope {
 
 export interface PortalPolicy {
   enabled: boolean
-  requestsEnabled: boolean
-  publicRequestsEnabled: boolean
-  channelRequestsEnabled: boolean
-  autoApproveVerified: boolean
-  allowedConnectionIds: string[]
-  linkTtlMinutes: number
-  sessionTtlHours: number
-  grantTtlDays: number | null
   allowedScope: PortalAllowedScope
-  passkeysEnabled: boolean
-  assistedRecoveryEnabled: boolean
   updatedAt: Date
 }
 
@@ -48,26 +37,26 @@ export type PortalPolicyInput = Omit<PortalPolicy, "updatedAt">
 
 export type PortalGrantRow = typeof portalGrant.$inferSelect
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/**
+ * Valores fijos del portal (decisión 9, ADR 0037), en lugar de las «Opciones
+ * avanzadas» de antes: el enlace de la primera entrada vale 3 días, la sesión
+ * dura 48 horas y, si el teléfono no puede guardar la llave, se recuerda 30
+ * días. El acceso no vence: dura hasta «Quitar acceso». La llave guardada y
+ * el código de 6 dígitos valen siempre.
+ */
+export const PORTAL_FIXED = {
+  linkTtlHours: 72,
+  sessionTtlHours: 48,
+  rememberDays: 30,
+} as const
+
 const LINK_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
-const LINK_TTL_MINUTES_MAX = 43200
-const SESSION_TTL_HOURS_MAX = 168
 const MAX_PIN_ATTEMPTS = 10
 
 function defaultPolicy(): PortalPolicy {
   return {
     enabled: false,
-    requestsEnabled: true,
-    publicRequestsEnabled: true,
-    channelRequestsEnabled: true,
-    autoApproveVerified: false,
-    allowedConnectionIds: [],
-    linkTtlMinutes: 4320,
-    sessionTtlHours: 48,
-    grantTtlDays: null,
     allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-    passkeysEnabled: true,
-    assistedRecoveryEnabled: true,
     updatedAt: new Date(0),
   }
 }
@@ -75,21 +64,11 @@ function defaultPolicy(): PortalPolicy {
 function toPolicy(row: typeof portalPolicy.$inferSelect): PortalPolicy {
   return {
     enabled: row.portalEnabled,
-    requestsEnabled: row.requestsEnabled,
-    publicRequestsEnabled: row.publicRequestsEnabled,
-    channelRequestsEnabled: row.channelRequestsEnabled,
-    autoApproveVerified: row.autoApproveVerified,
-    allowedConnectionIds: [...row.allowedChannelIds],
-    linkTtlMinutes: row.linkTtlMinutes,
-    sessionTtlHours: row.sessionTtlHours,
-    grantTtlDays: row.grantTtlDays,
     allowedScope: { ...row.allowedScope },
-    passkeysEnabled: row.passkeysEnabled,
-    assistedRecoveryEnabled: row.assistedRecoveryEnabled,
     updatedAt: row.updatedAt,
   }
 }
-/** Sin fila = portal deshabilitado (producción nueva exige configuración). */
+/** Sin fila = portal apagado: está apagado por defecto. */
 export async function getPortalPolicy(tx: Db, orgId: string): Promise<PortalPolicy> {
   const [row] = await tx
     .select()
@@ -121,7 +100,7 @@ function assertScopeFlags(value: unknown): PortalAllowedScope {
   }
 }
 
-
+/** Encender o apagar el portal y decir lo que el paciente puede ver: lo único que se configura. */
 export async function upsertPortalPolicy(
   tx: Db,
   orgId: string,
@@ -129,58 +108,12 @@ export async function upsertPortalPolicy(
   input: PortalPolicyInput,
 ): Promise<PortalPolicy> {
   const allowedScope = assertScopeFlags(input.allowedScope)
-  const linkTtlMinutes = Math.floor(input.linkTtlMinutes)
-  if (!Number.isFinite(linkTtlMinutes) || linkTtlMinutes < 1 || linkTtlMinutes > LINK_TTL_MINUTES_MAX) {
-    throw validation(`La vigencia del enlace debe estar entre 1 y ${LINK_TTL_MINUTES_MAX} minutos`)
-  }
-  const sessionTtlHours = Math.floor(input.sessionTtlHours)
-  if (!Number.isFinite(sessionTtlHours) || sessionTtlHours < 1 || sessionTtlHours > SESSION_TTL_HOURS_MAX) {
-    throw validation(`La vigencia de la sesión debe estar entre 1 y ${SESSION_TTL_HOURS_MAX} horas`)
-  }
-  const grantTtlDays =
-    input.grantTtlDays === null || input.grantTtlDays === undefined ? null : Math.floor(input.grantTtlDays)
-  if (grantTtlDays !== null && (!Number.isFinite(grantTtlDays) || grantTtlDays < 1 || grantTtlDays > 3650)) {
-    throw validation("La vigencia del grant debe estar entre 1 y 3650 días o vacía")
-  }
-  const allowedConnectionIds = [...new Set((input.allowedConnectionIds ?? []).filter((id) => typeof id === "string"))]
-  if (allowedConnectionIds.length > 50) throw validation("Demasiadas conexiones autorizadas (máximo 50)")
-  for (const id of allowedConnectionIds) {
-    if (!UUID_RE.test(id)) throw validation("Una conexión autorizada no es válida")
-  }
-  if (allowedConnectionIds.length > 0) {
-    const found = await tx
-      .select({ id: channelConnection.id, status: channelConnection.status })
-      .from(channelConnection)
-      .where(
-        and(
-          eq(channelConnection.organizationId, orgId),
-          inArray(channelConnection.id, allowedConnectionIds),
-        ),
-      )
-    const active = new Set(
-      found.filter((row) => row.status === "active").map((row) => row.id),
-    )
-    const invalid = allowedConnectionIds.filter((id) => !active.has(id))
-    if (invalid.length > 0) {
-      throw validation("Una conexión autorizada no existe o no está activa en esta organización")
-    }
-  }
   const [row] = await tx
     .insert(portalPolicy)
     .values({
       organizationId: orgId,
       portalEnabled: input.enabled,
-      requestsEnabled: input.requestsEnabled,
-      publicRequestsEnabled: input.publicRequestsEnabled,
-      channelRequestsEnabled: input.channelRequestsEnabled,
-      autoApproveVerified: input.autoApproveVerified,
-      allowedChannelIds: allowedConnectionIds,
-      linkTtlMinutes,
-      sessionTtlHours,
-      grantTtlDays,
       allowedScope,
-      passkeysEnabled: input.passkeysEnabled,
-      assistedRecoveryEnabled: input.assistedRecoveryEnabled,
       updatedBy: actorUserId,
       updatedAt: new Date(),
     })
@@ -188,17 +121,7 @@ export async function upsertPortalPolicy(
       target: portalPolicy.organizationId,
       set: {
         portalEnabled: input.enabled,
-        requestsEnabled: input.requestsEnabled,
-        publicRequestsEnabled: input.publicRequestsEnabled,
-        channelRequestsEnabled: input.channelRequestsEnabled,
-        autoApproveVerified: input.autoApproveVerified,
-        allowedChannelIds: allowedConnectionIds,
-        linkTtlMinutes,
-        sessionTtlHours,
-        grantTtlDays,
         allowedScope,
-        passkeysEnabled: input.passkeysEnabled,
-        assistedRecoveryEnabled: input.assistedRecoveryEnabled,
         updatedBy: actorUserId,
         updatedAt: new Date(),
       },
@@ -211,7 +134,7 @@ export async function upsertPortalPolicy(
     action: "portal.policy_updated",
     entity: "portal_policy",
     entityId: orgId,
-    metadata: { enabled: input.enabled, requestsEnabled: input.requestsEnabled },
+    metadata: { enabled: input.enabled },
   })
   return toPolicy(row)
 }
@@ -288,12 +211,10 @@ export async function ensurePortalGrant(
     scope: PortalScope
     verifiedMethod: string
     evidenceNote?: string | null
-    requestId?: string | null
     audit: (action: string, entityId: string, metadata: Record<string, unknown>) => Promise<void>
   },
 ): Promise<{ grant: PortalGrantRow; created: boolean }> {
   const verifiedMethod = assertVerifiedMethod(input.verifiedMethod)
-  const policy = await getPortalPolicy(tx, orgId)
   const existing = await findActivePortalGrant(tx, orgId, input.patientId, input.contactId)
   if (existing) {
     if (JSON.stringify(existing.scope) === JSON.stringify(input.scope)) {
@@ -324,7 +245,8 @@ export async function ensurePortalGrant(
       verifiedMethod,
       verifiedBy: actorUserId,
       verifiedAt: now,
-      expiresAt: policy.grantTtlDays === null ? null : new Date(now.getTime() + policy.grantTtlDays * 86_400_000),
+      // El acceso no vence: dura hasta «Quitar acceso».
+      expiresAt: null,
       createdBy: actorUserId,
     })
     .returning()
@@ -334,7 +256,6 @@ export async function ensurePortalGrant(
     patientId: input.patientId,
     contactId: input.contactId,
     grantId: grant.id,
-    requestId: input.requestId ?? null,
     method: verifiedMethod,
     verifiedBy: actorUserId,
     evidenceNote: input.evidenceNote?.trim()?.slice(0, 500) || null,
@@ -343,7 +264,6 @@ export async function ensurePortalGrant(
     patientId: input.patientId,
     contactId: input.contactId,
     verifiedMethod,
-    requestId: input.requestId ?? null,
   })
   return { grant, created: true }
 }

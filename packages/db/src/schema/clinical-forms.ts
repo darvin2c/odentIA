@@ -403,6 +403,13 @@ export const consentDocument = pgTable(
     signatureLevel: text("signature_level"),
     /** Foto o escaneo de la hoja firmada en papel (FK compuesta en la migración). */
     paperDocumentId: uuid("paper_document_id"),
+    /** Se envió a firmar por su enlace antes de llegar (ADR 0037): sale en «Su enlace». */
+    linkSentAt: timestamp("link_sent_at", { withTimezone: true }),
+    /**
+     * La persona firmó en su enlace; sigue pendiente hasta que el profesional
+     * confirme en la cita que la informó (`signature_method` = `enlace`).
+     */
+    personSignedAt: timestamp("person_signed_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [

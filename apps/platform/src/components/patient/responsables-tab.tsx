@@ -9,8 +9,8 @@
  * historia.
  */
 
-import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
+import { DatePickerButton, EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -256,20 +256,25 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-start`}>Vigente desde</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-resp-start`}
-              type="date"
+              className="w-56"
               value={startsAt}
-              onChange={(event) => setStartsAt(event.target.value)}
+              onChange={(next) => {
+                setStartsAt(next)
+                if (endsAt && endsAt < next) setEndsAt(next)
+              }}
             />
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-end`}>Vigente hasta</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-resp-end`}
-              type="date"
+              className="w-56"
               value={endsAt}
-              onChange={(event) => setEndsAt(event.target.value)}
+              min={startsAt}
+              emptyLabel="Sin fecha final"
+              onChange={setEndsAt}
             />
           </Field>
           <Field>

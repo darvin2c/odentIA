@@ -10,8 +10,10 @@
  * El orden es fijo y sin puntajes: casos «Ahora», atenciones de días
  * anteriores sin cerrar de quien mira, citas que siguen sin confirmar tras el
  * primer recordatorio del agente, los presupuestos armados que nadie envió
- * desde el día anterior (para quien habla con la persona, decisión 12), las
- * personas a las que el agente no pudo escribir, conversaciones sin responder, tareas vencidas, casos
+ * desde el día anterior (para quien habla con la persona, decisión 12), lo
+ * que dejó «Su enlace» y el portal para recepción (una posible ficha repetida,
+ * quien pide volver a entrar al portal), las personas a las que el agente no
+ * pudo escribir, conversaciones sin responder, tareas vencidas, casos
  * «Hoy» y «Sin apuro», conversaciones que siguen abiertas con una persona a
  * cargo, la siguiente tarea con el resto resumido, los consentimientos que
  * una atención pidió y faltan publicar (para quien configura), lo que recomienda el
@@ -91,6 +93,35 @@ export interface WaitingUnsentBudget {
   options: number
 }
 
+/**
+ * El documento que la persona escribió en «Su enlace» ya es de otra ficha: no
+ * se guardó y recepción revisa si son la misma persona (nunca se unen solas).
+ */
+export interface WaitingPossibleDuplicate {
+  /** La tarea que lo recuerda. */
+  id: string
+  patientId: string
+  patientName: string
+  /** De quién es el documento, en palabras. */
+  detail: string
+  createdAt: string
+}
+
+/**
+ * Pidió volver a entrar al portal (cambió de teléfono, perdió el enlace): el
+ * agente lo dejó aquí y recepción le envía un enlace nuevo, sin volver a
+ * comprobar su identidad. El código se le dice aparte.
+ */
+export interface WaitingPortalReentry {
+  /** La tarea que lo recuerda. */
+  id: string
+  patientId: string
+  contactName: string
+  /** Su acceso vigente: «Enviar nuevo enlace» es de él. */
+  grantId: string | null
+  createdAt: string
+}
+
 /** Una cita que sigue sin confirmar después del primer recordatorio del agente: hay que llamar. */
 export interface WaitingUnconfirmed {
   id: string
@@ -145,6 +176,8 @@ export type WaitingRow =
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
+  | ({ kind: "possibleDuplicate" } & WaitingPossibleDuplicate)
+  | ({ kind: "portalReentry" } & WaitingPortalReentry)
   | ({ kind: "unreached" } & WaitingUnreached)
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   | ({ kind: "stillOpen" } & WaitingStillOpen)
@@ -164,6 +197,10 @@ export interface WaitingParts {
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
   /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
   unsentBudgets?: { items: WaitingUnsentBudget[]; total: number } | null
+  /** Lo que «Su enlace» encontró repetido, del más antiguo al más reciente. */
+  possibleDuplicates?: WaitingPossibleDuplicate[]
+  /** Quien pidió volver a entrar al portal, del más antiguo al más reciente. */
+  portalReentries?: WaitingPortalReentry[]
   conversations: { waiting: number; oldestAt: string | null } | null
   stillOpen?: WaitingStillOpen | null
   /** Tareas vencidas, de la que venció antes a la más reciente. */
@@ -202,6 +239,10 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
     const left = parts.unsentBudgets.total - shown.length
     if (left > 0) rows.push({ kind: "more", of: "unsentBudgets", count: left })
   }
+
+  // Lo que dejaron «Su enlace» y el portal para recepción (ADR 0037).
+  for (const item of (parts.portalReentries ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "portalReentry", ...item })
+  for (const item of (parts.possibleDuplicates ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "possibleDuplicate", ...item })
 
   if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })
 

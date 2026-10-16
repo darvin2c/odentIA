@@ -112,7 +112,7 @@ import { ACTION_LABEL, type AgentProposal, permissionForAction, proposalErrorMes
 import { channelIcon, channelLabel } from "../../lib/channels"
 import { NewConversationDialog } from "../../components/inbox-new-conversation"
 import { useOrgEvents } from "../../lib/org-events"
-import { createRegistrationLink } from "../../lib/patient-registration"
+import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { activeOrgLocale } from "../../lib/locale"
 import {
   closeWithoutResolvingWords,
@@ -1024,7 +1024,9 @@ function ThreadView({
   }
 
   const registrationMutation = useMutation({
-    mutationFn: (contactId: string) => createRegistrationLink(contactId, id),
+    // Quien ya es paciente registra a un familiar; quien aún no lo es recibe «Su enlace» (ADR 0037).
+    mutationFn: (contactId: string) =>
+      detail?.contact.isPatient ? createRegistrationLink(contactId, id) : createPersonalLinkForContact(contactId, id),
     onSuccess: (result) => {
       const url = result.data.url
       setRegistrationLink(result.data)
@@ -1036,7 +1038,7 @@ function ThreadView({
       setComposer(
         detail?.contact.isPatient
           ? `Aquí puedes registrar a tu hijo o a un familiar en ${orgName}: ${url}`
-          : `Completa los datos del paciente para ${orgName}: ${url}`,
+          : `Aquí puedes elegir tu cita y dejarnos tus datos en ${orgName}: ${url}`,
       )
     },
     onError: (error) => {
@@ -1343,7 +1345,7 @@ function ThreadView({
             ) : (
               <UserPlus className="size-4" />
             )}
-            {detail.contact.isPatient ? "Enviar registro de un familiar" : "Enviar registro"}
+            {detail.contact.isPatient ? "Enviar registro de un familiar" : "Enviarle su enlace"}
           </Button>
         )}
         {canWrite && (
@@ -1546,7 +1548,7 @@ function ThreadView({
         {registrationLink && (
           <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2 text-xs">
             <span className="min-w-0 flex-1 truncate" title={registrationLink.url}>
-              Enlace de registro listo para revisar antes de enviar: {registrationLink.url}
+              {detail.contact.isPatient ? "Enlace de registro" : "Su enlace"} listo para revisar antes de enviar: {registrationLink.url}
             </span>
             <Button
               variant="outline"

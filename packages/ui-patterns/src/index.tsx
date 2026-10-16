@@ -101,6 +101,7 @@ export {
   type RowActionTone,
 } from "./row-actions.js"
 export { DatePickerButton, type DatePickerButtonProps } from "./date-picker-button.js"
+export * from "./dates/index.js"
 export * from "./schedule/index.js"
 export {
   SectionNav,
@@ -110,7 +111,13 @@ export {
   type SectionNavProps,
   type SectionNavSide,
 } from "./section-nav/index.js"
-export { type FormatRegion, formatLocale, formatTimeZone, setFormatRegion } from "./locale.js"
+export {
+  type FormatRegion,
+  formatCountry,
+  formatLocale,
+  formatTimeZone,
+  setFormatRegion,
+} from "./locale.js"
 export { normalizeSearchText } from "./text.js"
 export {
   applyTheme,

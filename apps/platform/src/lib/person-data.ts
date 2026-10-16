@@ -14,7 +14,7 @@ import {
   insuranceScheme,
   regionOption,
 } from "@odentia/clinical"
-import { countryOptions, DEFAULT_COUNTRY, normalizeCountry } from "@odentia/ui-patterns"
+import { countryOptions, normalizeCountry, regionCountry } from "@odentia/ui-patterns"
 import { activeOrgLocale } from "./locale"
 import { countryName, displayLanguage } from "./region-format"
 
@@ -31,7 +31,7 @@ export function countryText(code: string | null | undefined): string | null {
 export function countryChoices(clinicCountry: string | null): Array<{ value: string; label: string }> {
   const language = displayLanguage(activeOrgLocale())
   const first = normalizeCountry(clinicCountry ?? undefined)
-  const options = countryOptions(first ?? DEFAULT_COUNTRY, undefined, language).map(({ value, label }) => ({
+  const options = countryOptions(first ?? regionCountry(), undefined, language).map(({ value, label }) => ({
     value: value as string,
     label,
   }))

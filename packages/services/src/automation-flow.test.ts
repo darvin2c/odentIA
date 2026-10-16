@@ -48,6 +48,7 @@ import { ingestInbound } from "./conversations.js"
 import { closeOpportunity, createOpportunity, setOpportunityTask } from "./opportunities.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
+import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -59,6 +60,8 @@ import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
  * conexión de prueba; nada de esto acredita que WhatsApp la acepte.
  */
 setupTestDb()
+// Los mensajes con «Su enlace» llevan un botón con la dirección de la clínica.
+configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -827,20 +830,22 @@ async function forgetTemplate(c: Clinic, key: AutomationMessageKey) {
 }
 
 describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
-  it("al conectar quedan pedidos los once, sin esperar a que se prenda una línea", async () => {
+  it("al conectar quedan pedidos los trece, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
       ["odentia_aviso_cita_cancelada_v1", "en_revision", "aviso_cita_cancelada"],
+      ["odentia_aviso_cita_datos_v1", "en_revision", "aviso_cita_reservada_datos"],
       ["odentia_aviso_cita_movida_v1", "en_revision", "aviso_cita_movida"],
       ["odentia_aviso_cita_reservada_v1", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
-      ["odentia_presupuesto_listo_v1", "en_revision", "presupuesto_listo"],
+      ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo"],
       ["odentia_recordatorio_cita_v1", "en_revision", "recordatorio_cita"],
       ["odentia_recordatorio_control_v1", "en_revision", "recordatorio_control"],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion"],
       ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia"],
       ["odentia_seguimiento_oportunidad_v1", "en_revision", "seguimiento_comercial"],
       ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto"],
+      ["odentia_su_enlace_v1", "en_revision", "su_enlace"],
     ])
     // Ya están pedidos: el ciclo no vuelve a llamar a WhatsApp.
     const meta = fakeMeta()
@@ -966,16 +971,18 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     expect(synced.map((item) => [item.name, item.status, item.messageKey, item.variables])).toEqual([
       ["bienvenida", "aprobada", null, 1],
       ["odentia_aviso_cita_cancelada_v1", "en_revision", "aviso_cita_cancelada", 3],
+      ["odentia_aviso_cita_datos_v1", "en_revision", "aviso_cita_reservada_datos", 3],
       ["odentia_aviso_cita_movida_v1", "en_revision", "aviso_cita_movida", 3],
       ["odentia_aviso_cita_reservada_v1", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
-      ["odentia_presupuesto_listo_v1", "en_revision", "presupuesto_listo", 2],
+      ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo", 2],
       ["odentia_recordatorio_cita_v1", "rechazada", "recordatorio_cita", 3],
       ["odentia_recordatorio_control_v1", "deshabilitada", "recordatorio_control", 0],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion", 2],
       ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia", 3],
       ["odentia_seguimiento_oportunidad_v1", "en_revision", "seguimiento_comercial", 3],
       ["odentia_seguimiento_presupuesto_v1", "en_revision", "seguimiento_presupuesto", 3],
+      ["odentia_su_enlace_v1", "en_revision", "su_enlace", 2],
     ])
     expect(synced.find((item) => item.status === "rechazada")?.reason).toBe("INVALID_FORMAT")
     // Con el cuerpo conocido, se exige un dato por variable.
@@ -983,7 +990,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0 })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
-    expect(rows).toHaveLength(12)
+    expect(rows).toHaveLength(14)
   })
 })
 

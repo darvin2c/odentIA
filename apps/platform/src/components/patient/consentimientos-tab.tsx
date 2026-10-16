@@ -36,6 +36,7 @@ import { ConsentSheet } from "./consent-sheet"
 import { ConsentSigningScreen, PaperSignDrawer, useSignerChoices } from "./consent-signing"
 import { FirmaPad } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 
 const errorMessage = (e: unknown) =>
   e instanceof ApiError
@@ -272,16 +273,22 @@ export function ConsentDetail({
       {canWrite && document.status === "pendiente" ? (
         <div className="flex flex-col gap-2 rounded-md border p-3">
           <p className="text-sm">
-            Falta la firma. En la silla, la persona firma con el dedo en pantalla completa y tú
-            confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja.
+            {consentLinkWords(document) ??
+              "Falta la firma. En la silla, la persona firma con el dedo en pantalla completa y tú confirmas con tu perfil; si la firmó en papel, sube la foto de la hoja. También puedes enviárselo para que lo firme desde su teléfono."}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => setSigning(true)}>
-              Firmar ahora
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setPaperOpen(true)}>
-              Firmado en papel
-            </Button>
+            {/* Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces. */}
+            {document.personSignedAt ? null : (
+              <>
+                <Button size="sm" onClick={() => setSigning(true)}>
+                  Firmar ahora
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setPaperOpen(true)}>
+                  Firmado en papel
+                </Button>
+              </>
+            )}
+            <ConsentLinkActions document={document} onChanged={onChanged} />
           </div>
         </div>
       ) : null}

@@ -319,10 +319,14 @@ export function buildBody(to: string, kind: OutboundMessage["kind"]): Record<str
           ...(kind.params.length > 0
             ? [{ type: "body", parameters: kind.params.map((text) => ({ type: "text", text })) }]
             : []),
+          // El botón que abre un enlace va primero: su dato es lo que completa la dirección.
+          ...(kind.link
+            ? [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: kind.link }] }]
+            : []),
           ...(kind.buttons ?? []).map((button, index) => ({
             type: "button",
             sub_type: "quick_reply",
-            index: String(index),
+            index: String(index + (kind.link ? 1 : 0)),
             parameters: [{ type: "payload", payload: button.id }],
           })),
         ],
@@ -432,6 +436,7 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
   if (!name || !language) return null
   let body = ""
   const buttons: string[] = []
+  let link: { title: string; url: string } | null = null
   const components = "components" in raw && Array.isArray(raw.components) ? raw.components : []
   for (const component of components) {
     if (!component || typeof component !== "object" || !("type" in component)) continue
@@ -442,6 +447,15 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
         if (!button || typeof button !== "object") continue
         const kind = "type" in button && typeof button.type === "string" ? button.type.toUpperCase() : ""
         if (kind === "QUICK_REPLY" && "text" in button && typeof button.text === "string") buttons.push(button.text)
+        if (
+          kind === "URL" &&
+          !link &&
+          "text" in button &&
+          typeof button.text === "string" &&
+          "url" in button &&
+          typeof button.url === "string"
+        )
+          link = { title: button.text, url: button.url }
       }
     }
   }
@@ -456,6 +470,7 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
     body,
     variables: positions.length > 0 ? Math.max(...positions) : 0,
     buttons,
+    link,
   }
 }
 
@@ -712,8 +727,19 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
               // Meta exige un valor de ejemplo por cada variable del cuerpo.
               ...(request.examples.length > 0 ? { example: { body_text: [request.examples] } } : {}),
             },
-            ...(request.buttons.length > 0
-              ? [{ type: "BUTTONS", buttons: request.buttons.map((title) => ({ type: "QUICK_REPLY", text: title })) }]
+            ...(request.buttons.length > 0 || request.link
+              ? [
+                  {
+                    type: "BUTTONS",
+                    buttons: [
+                      // Meta pide la dirección con su dato al final y un ejemplo completo.
+                      ...(request.link
+                        ? [{ type: "URL", text: request.link.title, url: request.link.url, example: [request.link.example] }]
+                        : []),
+                      ...request.buttons.map((title) => ({ type: "QUICK_REPLY", text: title })),
+                    ],
+                  },
+                ]
               : []),
           ],
         },

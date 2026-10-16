@@ -19,6 +19,7 @@ import {
   ErrorState,
   findScheduleConflicts,
   formatDateLong,
+  formatMonthLong,
   formatSpan,
   freeMinutesOf,
   hourLabel,
@@ -176,16 +177,19 @@ function rangesOn(
     })
 }
 
-/** «12 al 17 de octubre», o con los dos meses si la semana los cruza. */
+/**
+ * «12 al 17 de octubre», o con los dos meses si la semana los cruza; el año
+ * solo cuando no es el en curso («29 de diciembre al 4 de enero de 2027»).
+ */
 function weekLabel(dates: string[]): string {
   const first = dates[0] ?? ""
   const last = dates[dates.length - 1] ?? first
-  const said = (date: string) => formatDateLong(date).split(" ").slice(1)
-  const [firstDay = "", , firstMonth = ""] = said(first)
-  const [lastDay = "", , lastMonth = ""] = said(last)
+  const day = (date: string) => String(Number(date.slice(8, 10)))
+  const firstMonth = formatMonthLong(first)
+  const lastMonth = formatMonthLong(last)
   return firstMonth === lastMonth
-    ? `${firstDay} al ${lastDay} de ${lastMonth}`
-    : `${firstDay} de ${firstMonth} al ${lastDay} de ${lastMonth}`
+    ? `${day(first)} al ${day(last)} de ${lastMonth}`
+    : `${day(first)} de ${firstMonth} al ${day(last)} de ${lastMonth}`
 }
 
 function AgendaPage() {

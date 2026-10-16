@@ -7,7 +7,7 @@ import {
   SEX_LABELS,
 } from "@odentia/clinical"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
-import { FormDrawer, normalizeCountry, PhoneInput } from "@odentia/ui-patterns"
+import { BirthDateInput, FormDrawer, normalizeCountry, PhoneInput } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useMemo, useState } from "react"
@@ -25,6 +25,7 @@ import {
 import type { Patient } from "../../lib/patients"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
+import { SendPersonalLinkButton } from "./send-personal-link"
 
 type FieldKind =
   | { kind: "text"; max: number; wide?: boolean }
@@ -341,6 +342,8 @@ export function FiliacionSectionDrawer({
             <Badge variant="warning">
               {missing?.length === 1 ? "Falta 1" : `Faltan ${missing?.length ?? 0}`}
             </Badge>
+            {/* O que lo complete ella desde su teléfono, con «Su enlace» (decisión 8). */}
+            {patient && (missing?.length ?? 0) > 0 ? <SendPersonalLinkButton patientId={patient.id} /> : null}
           </div>
         ) : null}
         {namesInView ? (
@@ -392,11 +395,12 @@ export function FiliacionSectionDrawer({
                   defaultCountry={countryCode}
                   onChange={(next) => set(field.key, next ?? "")}
                 />
+              ) : t.kind === "date" ? (
+                <BirthDateInput id={id} value={value} onChange={(next) => set(field.key, next)} />
               ) : (
                 <Input
                   id={id}
-                  type={t.kind === "date" ? "date" : "text"}
-                  maxLength={t.kind === "text" ? t.max : undefined}
+                  maxLength={t.max}
                   value={value}
                   onChange={(event) => set(field.key, event.target.value)}
                 />

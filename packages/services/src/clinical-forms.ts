@@ -1869,6 +1869,9 @@ export async function signConsentDocument(
   if (current.status !== "pendiente") {
     throw conflict("SIGNED", "El consentimiento ya no está pendiente")
   }
+  if (current.personSignedAt) {
+    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: infórmale y confírmalo con «Confirmar»")
+  }
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
   }
@@ -2016,6 +2019,185 @@ export async function signConsentDocument(
       actorUserId,
     })
   }
+  return row
+}
+
+/** Un documento escrito por la persona, comparado sin espacios, puntos ni guiones. */
+function sameDocument(typed: string, stored: string): boolean {
+  const clean = (value: string) => value.replace(/[\s.-]/g, "").toUpperCase()
+  return clean(typed).length > 0 && clean(typed) === clean(stored)
+}
+
+/**
+ * Enviar a firmar antes de llegar (decisión 3, ADR 0037): el consentimiento
+ * pendiente aparece en «Su enlace» de la persona (o de su representante legal
+ * si es menor). Lo marca aquí; el enlace lo envía `sendPersonalLink`.
+ */
+export async function markConsentSentByLink(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente") throw conflict("SIGNED", "El consentimiento ya no está pendiente")
+  if (current.personSignedAt) throw conflict("SIGNED", "La persona ya lo firmó en su enlace: falta que lo confirmes en la cita")
+  const [row] = await tx
+    .update(consentDocument)
+    .set({ linkSentAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Consentimiento")
+  await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {})
+  return row
+}
+
+export interface SignConsentByLinkInput {
+  /** Su documento, escrito por la persona: se compara con el de su registro. */
+  docNumber: string
+  comprehensionConfirmed: boolean
+  /** Su firma con el dedo. */
+  signatureData: unknown
+}
+
+/**
+ * La persona firma en su enlace, antes de llegar: la propia persona si es
+ * mayor de edad o su representante legal vigente, nunca otra. Escribe su
+ * documento como comprobación. Queda pendiente hasta que el profesional, en
+ * la cita, la informe y lo confirme con su perfil (`confirmLinkSignedConsent`).
+ * Nivel de firma: simple, por enlace.
+ */
+export async function signConsentByLink(
+  tx: Db,
+  orgId: string,
+  signerContactId: string,
+  documentId: string,
+  input: SignConsentByLinkInput,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente" || !current.linkSentAt || current.personSignedAt) {
+    throw conflict("SIGNED", "Este consentimiento ya no se firma desde aquí")
+  }
+  if (input.comprehensionConfirmed !== true) throw validation("Marca que entendiste lo que te explicaron y aceptas")
+  const subject = await requirePatient(tx, orgId, current.patientId)
+  const now = new Date()
+  const minor = subject.birthDate ? ageOn(subject.birthDate, now) < 18 : false
+  const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, signerContactId)
+  let signerKind: "paciente" | "representante"
+  let verified: { displayName: string; docNumber: string | null; docType: string | null }
+  if (linked.relationship === "self") {
+    if (minor) throw conflict("SIGNER_NOT_AUTHORIZED", "Como es menor de edad, lo firma su madre, padre o tutor")
+    signerKind = "paciente"
+    verified = linked.contact
+  } else {
+    signerKind = "representante"
+    // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
+    verified = await requireDecisionContact(tx, orgId, current.patientId, signerContactId)
+  }
+  const typed = assertOptionalText(input.docNumber, "Tu documento", 40)
+  if (!typed) throw validation("Escribe tu documento")
+  if (verified.docNumber && !sameDocument(typed, verified.docNumber))
+    throw validation("Ese documento no coincide con el que tenemos registrado")
+  const signerDoc = verified.docNumber ? `${verified.docType ?? ""} ${verified.docNumber}`.trim() : typed
+  const signatureData = assertSignatureData(input.signatureData)
+  const [row] = await tx
+    .update(consentDocument)
+    .set({
+      signerKind,
+      signerContactId,
+      signerName: assertName(verified.displayName, "Nombre de quien firma", 200),
+      signerDoc,
+      representativeRelation: signerKind === "representante" ? "Representante legal" : null,
+      signatureData,
+      comprehensionConfirmed: true,
+      signatureMethod: "enlace",
+      signatureLevel: "simple",
+      personSignedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Consentimiento")
+  await audit(tx, orgId, `contact:${signerContactId}`, "consent.person_signed", "consent_document", documentId, {
+    signerKind,
+    minor,
+    method: "enlace",
+  })
+  return row
+}
+
+/**
+ * En la cita, el profesional informa a quien firmó en su enlace y lo confirma
+ * con su perfil (sin dibujar otra firma): ahí queda firmado.
+ */
+export async function confirmLinkSignedConsent(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente" || current.signatureMethod !== "enlace" || !current.personSignedAt) {
+    throw conflict("NOT_LINK_SIGNED", "Este consentimiento no espera tu confirmación")
+  }
+  const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
+  const now = new Date()
+  const [row] = await tx
+    .update(consentDocument)
+    .set({
+      informedAt: now,
+      informedBy: actorUserId,
+      informerName: informer.name,
+      informerTitle: informer.title,
+      informerRegistration: informer.registration,
+      status: "firmado",
+      signedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Consentimiento")
+  await tx.insert(consentEvent).values([
+    {
+      organizationId: orgId,
+      documentId,
+      fromStatus: "pendiente",
+      toStatus: "informado",
+      actorUserId,
+      reason: `${informer.name} · ${informer.registration}`,
+      createdAt: now,
+    },
+    {
+      organizationId: orgId,
+      documentId,
+      fromStatus: "pendiente",
+      toStatus: "firmado",
+      actorUserId,
+      reason: `${current.signerKind}: ${current.signerName} · ${CONSENT_SIGNATURE_WORDS.enlace}`,
+    },
+  ])
+  await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
+    signerKind: current.signerKind,
+    method: "enlace",
+  })
   return row
 }
 

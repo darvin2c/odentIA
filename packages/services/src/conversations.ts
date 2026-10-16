@@ -494,6 +494,8 @@ export type OutboundContent =
       language: string
       params: string[]
       buttons?: ReplyButton[]
+      /** Token de «Su enlace» para el botón que lo abre (ADR 0037). */
+      link?: string
       preview?: string
     }
   | { type: "media"; attachment: AttachmentRef; caption?: string }
@@ -675,6 +677,7 @@ export async function sendOutbound(
       templateName: content.type === "template" ? content.name : null,
       templateLanguage: content.type === "template" ? content.language : null,
       templateParams: content.type === "template" ? content.params : null,
+      templateLink: content.type === "template" ? (content.link ?? null) : null,
       replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       status: "queued",
@@ -716,6 +719,8 @@ export async function sendTemplateOutbound(
     language: string
     params: string[]
     buttons?: ReplyButton[]
+    /** Token de «Su enlace» para el botón de la plantilla que lo abre. */
+    link?: string
     preview?: string
   },
 ): Promise<MessageItem> {
@@ -748,6 +753,7 @@ export async function sendTemplateOutbound(
       language: input.language,
       params: input.params,
       ...(input.buttons?.length ? { buttons: input.buttons } : {}),
+      ...(input.link ? { link: input.link } : {}),
       ...(preview ? { preview } : {}),
     },
   })

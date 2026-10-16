@@ -62,17 +62,7 @@ it("el portal entrega totales, líneas por sesión y el formato de la clínica",
   await withOrgContext(appDb, ORG, async (tx) => {
     await upsertPortalPolicy(tx, ORG, actor, {
       enabled: true,
-      requestsEnabled: true,
-      publicRequestsEnabled: false,
-      channelRequestsEnabled: false,
-      autoApproveVerified: false,
-      allowedConnectionIds: [],
-      linkTtlMinutes: 4320,
-      sessionTtlHours: 48,
-      grantTtlDays: null,
       allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-      passkeysEnabled: true,
-      assistedRecoveryEnabled: true,
     })
     await createPortalGrant(tx, ORG, actor, {
       patientId,

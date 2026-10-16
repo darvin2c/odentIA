@@ -11,11 +11,11 @@ import {
 import {
   common,
   countryOptions,
-  DEFAULT_COUNTRY,
   ErrorState,
   fieldErrorMessages,
   normalizeCountry,
   PageHeader,
+  regionCountry,
   SubmitButton,
   TimeZoneSelect,
   zonesForCountry,
@@ -133,7 +133,7 @@ function toValues(profile: OrgProfile): ProfileValues {
  */
 function countryChoices(country: string, language: string): NamedOption[] {
   const selected = normalizeCountry(country)
-  const options = countryOptions(selected ?? DEFAULT_COUNTRY, undefined, language).map(
+  const options = countryOptions(selected ?? regionCountry(), undefined, language).map(
     ({ value, label }) => ({
       value: value as string,
       label,

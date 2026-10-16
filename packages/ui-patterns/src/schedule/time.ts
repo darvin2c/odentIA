@@ -8,7 +8,7 @@
  * desde la medianoche local convertida a UTC.
  */
 
-import { formatLocale } from "../locale.js"
+import { formatLocale, formatTimeZone } from "../locale.js"
 import type { ScheduleEntry, ScheduleWindow } from "./types.js"
 
 const MINUTE_MS = 60_000
@@ -76,6 +76,16 @@ export function zonedDateOf(iso: string, timeZone: string): string {
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "00"
   return `${value("year")}-${value("month")}-${value("day")}`
+}
+
+/** Zona de la clínica (`setFormatRegion`) o, sin ella, la del entorno. */
+export function regionTimeZone(): string {
+  return formatTimeZone() ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+/** «Hoy» como «yyyy-mm-dd» en la zona de la clínica, nunca en la del navegador si hay clínica. */
+export function regionToday(now: Date = new Date()): string {
+  return zonedDateOf(now.toISOString(), regionTimeZone())
 }
 
 /** Inversa de `dayMinutesIn`: minutos del día → instante ISO. */
@@ -165,23 +175,61 @@ const longDateFormatter = () =>
 const shortDateFormatter = () =>
   formatter("short", { timeZone: "UTC", weekday: "short", day: "numeric" })
 const monthShortFormatter = () => formatter("month", { timeZone: "UTC", month: "short" })
+const dayMonthYearFormatter = () =>
+  formatter("dmy", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short", year: "numeric" })
+
+/** Mediodía UTC del día civil: ningún formato lo corre al día anterior o al siguiente. */
+function noonOf(dateISO: string): Date {
+  const [year, month, day] = dateISO.split("-").map(Number)
+  return new Date(Date.UTC(year, month - 1, day, 12))
+}
 
 function dateParts(dateISO: string): Map<string, string> {
-  const [year, month, day] = dateISO.split("-").map(Number)
-  const parts = longDateFormatter().formatToParts(new Date(Date.UTC(year, month - 1, day, 12)))
+  const parts = longDateFormatter().formatToParts(noonOf(dateISO))
   return new Map(parts.map((part) => [part.type, part.value]))
+}
+
+/** El año de la fecha, solo si no es el año en curso de la clínica. */
+function otherYear(dateISO: string): string | null {
+  const year = dateISO.slice(0, 4)
+  return year === regionToday().slice(0, 4) ? null : String(Number(year))
+}
+
+function capitalize(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 }
 
 /**
  * Fecha rotulada para barras y nombres accesibles: «Lunes 21 de setiembre».
- * Sin año (la agenda se mira dentro del año en curso) y compuesta por partes
- * porque algunos formatos regionales meten una coma entre el día de la semana
- * y el del mes.
+ * Lleva el año cuando no es el año en curso de la clínica («Lunes 4 de enero
+ * de 2027»): sin él, una fecha de otro año se confunde con la de este. Se
+ * compone por partes porque algunos formatos regionales meten una coma entre
+ * el día de la semana y el del mes.
  */
 export function formatDateLong(dateISO: string): string {
   const parts = dateParts(dateISO)
-  const weekday = parts.get("weekday") ?? ""
-  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${parts.get("day")} de ${parts.get("month")}`
+  const said = `${capitalize(parts.get("weekday") ?? "")} ${parts.get("day")} de ${parts.get("month")}`
+  const year = otherYear(dateISO)
+  return year ? `${said} de ${year}` : said
+}
+
+/** «setiembre», o «enero de 2027» si no es el año en curso de la clínica. */
+export function formatMonthLong(dateISO: string): string {
+  // El mes dentro de una fecha («21 de setiembre»), no el suelto: algunos
+  // formatos regionales escriben el suelto con mayúscula.
+  const month = dateParts(dateISO).get("month") ?? ""
+  const year = otherYear(dateISO)
+  return year ? `${month} de ${year}` : month
+}
+
+/**
+ * «Jue 20 nov 2026»: el día con su año siempre escrito, para el botón que
+ * elige un día (`DatePickerButton`). Sin puntos de abreviatura ni comas.
+ */
+export function formatDayMonthYear(dateISO: string): string {
+  const parts = dayMonthYearFormatter().formatToParts(noonOf(dateISO))
+  const get = (type: string) => (parts.find((part) => part.type === type)?.value ?? "").replace(".", "")
+  return `${capitalize(get("weekday"))} ${get("day")} ${get("month")} ${get("year")}`
 }
 /** «lun 21» para cabeceras estrechas, sin coma. */
 export function formatDayShort(dateISO: string): string {

@@ -159,6 +159,10 @@ export interface ConsentDocument {
   signatureLevel: "simple" | null
   /** Foto de la hoja firmada en papel. */
   paperDocumentId: string | null
+  /** Se le envió para firmar en «Su enlace» (ADR 0037). */
+  linkSentAt?: string | null
+  /** Lo firmó desde su enlace: falta que el profesional lo confirme. */
+  personSignedAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -599,4 +603,14 @@ export const CONSENT_STATUS_LABELS: Record<ConsentDocument["status"], string> = 
   firmado: "Firmado",
   revocado: "Revocado",
   anulado: "Anulado",
+}
+
+/** «Enviar para firmar»: el consentimiento aparece en «Su enlace» y se le envía. */
+export async function sendConsentByLink(consentId: string, requestId: string): Promise<{ data: { recipientName: string } }> {
+  return apiFetch(`${BASE}/consents/${consentId}/send-link`, { method: "POST", body: JSON.stringify({ requestId }) })
+}
+
+/** El profesional confirma lo que la persona firmó desde su enlace: recién entonces queda firmado. */
+export async function confirmLinkSignedConsent(consentId: string): Promise<{ data: ConsentDocument }> {
+  return apiFetch(`${BASE}/consents/${consentId}/confirm`, { method: "POST" })
 }

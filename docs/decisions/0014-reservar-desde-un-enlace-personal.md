@@ -1,6 +1,6 @@
 # 0014 · Reservar desde un enlace personal y efímero
 
-Fecha: 2026-10-11 · Estado: aceptada
+Fecha: 2026-10-11 · Estado: aceptada · Precisada por [0037](0037-su-enlace-y-portal-en-un-paso.md) («Su enlace»: uno por persona, vence cuando ya no hace falta)
 
 ## Problema
 

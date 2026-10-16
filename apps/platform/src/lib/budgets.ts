@@ -67,6 +67,8 @@ export interface Budget {
   supersedesBudgetId?: string | null
   /** Cuándo se entregó al paciente (impreso o enviado). */
   presentedAt?: string | null
+  /** «Lo vio en el portal el …»: la última vez que lo abrió en el portal (ADR 0037). */
+  seenInPortalAt?: string | null
   decidedAt: string | null
   decidedBy?: string | null
   createdBy?: string | null

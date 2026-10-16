@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { dueFromParts, dueParts, dueWords, formatDueAt, isOverdue } from "./crm-helpers"
+import { dueWords, formatDueAt, isOverdue } from "./crm-helpers"
 
 const LIMA = "America/Lima"
 const MADRID = "Europe/Madrid"
@@ -37,14 +37,5 @@ describe("dueWords", () => {
     // Medianoche de Lima es la fecha sola.
     expect(dueWords("2026-10-17T05:00:00Z", now, LIMA)).toBe("sáb 17")
     expect(dueWords(null, now, LIMA)).toBe("sin fecha")
-  })
-})
-
-describe("dueParts / dueFromParts", () => {
-  it("una fecha y una hora elegidas en la clínica vuelven al mismo instante", () => {
-    const iso = dueFromParts("2026-10-17", 10 * 60 + 30, LIMA)
-    expect(iso).toBe("2026-10-17T15:30:00.000Z")
-    expect(dueParts(iso, LIMA)).toEqual({ date: "2026-10-17", minutes: 630 })
-    expect(dueParts("basura", LIMA)).toBeNull()
   })
 })

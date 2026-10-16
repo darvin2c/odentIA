@@ -379,17 +379,12 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
                 ) : def.type === "date" ? (
                   <DatePickerButton
                     id={id}
+                    className="w-56"
                     value={typeof value === "string" ? value : ""}
-                    onChange={set}
-                  >
-                    {typeof value === "string" && value
-                      ? new Date(`${value}T12:00:00`).toLocaleDateString(activeOrgLocale(), {
-                          day: "numeric",
-                          month: "long",
-                          year: "numeric",
-                        })
-                      : "Elegir fecha"}
-                  </DatePickerButton>
+                    emptyLabel="Sin dato"
+                    // Sin fecha viaja como null: el servidor la quita (una cadena vacía no es fecha).
+                    onChange={(next) => set(next || null)}
+                  />
                 ) : (
                   <Input
                     id={id}

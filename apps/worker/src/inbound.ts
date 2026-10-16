@@ -6,12 +6,10 @@ import {
   sendAgentRun,
   withOrgContext,
 } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   handleAutomationReply,
-  handlePortalChannelRequest,
   ingestInbound,
   ServiceError,
   type Storage,
@@ -25,8 +23,6 @@ export interface IngestDeps {
   fetch: typeof fetch
   secretsKey: Buffer
   transcribe?: TranscribeFn
-  webURL?: string
-  cookieDomain?: string
   /** Ventana de ráfaga: retardo de la corrida del agente tras cada entrante. */
   agentBurstWindowSeconds?: number
 }
@@ -105,20 +101,6 @@ export async function processInbound(
             throw error
           })
         if (handled) return
-      }
-      if (deps.webURL && deps.cookieDomain) {
-        const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-        if (org?.slug) {
-          const portal = new URL(deps.webURL)
-          portal.hostname = `${org.slug}.${deps.cookieDomain.replace(/^\./, "")}`
-          portal.pathname = "/portal"
-          portal.search = ""
-          portal.hash = ""
-          const handled = await handlePortalChannelRequest(tx, orgId, {
-            conversationId: result.conversationId, messageId: result.messageId,
-          }, { portalUrl: () => portal.toString() })
-          if (handled) return
-        }
       }
       const [conv] = await tx
         .select({ agentStatus: conversation.agentStatus, status: conversation.status })

@@ -47,11 +47,15 @@ import {
   FieldError,
 } from "@odentia/ui"
 import {
+  BirthDateInput,
+  clinicDateLocale,
   type CountryCode,
-  DEFAULT_COUNTRY,
   isValidE164,
+  normalizeCountry,
   PhoneInput,
   WizardSteps,
+  writeDate,
+  writtenDateFormat,
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useEffect, useRef, useState } from "react"
@@ -508,11 +512,13 @@ export function PatientRegistrationForm({
   branches,
   initialValues,
   defaultRecipient,
-  defaultCountry = DEFAULT_COUNTRY,
+  defaultCountry: defaultCountryProp,
   countryCode = null,
   onSubmit,
   children,
 }: PatientRegistrationFormProps): React.JSX.Element {
+  // El teléfono parte del país de la clínica; el núcleo no supone ninguno.
+  const defaultCountry = defaultCountryProp ?? normalizeCountry(countryCode)
   const profile = clinicalProfileFor(countryCode)
   const countries = countryChoices(profile.country)
   const hasContact = context.kind !== "generic" && Boolean(context.contact)
@@ -899,15 +905,23 @@ export function PatientRegistrationForm({
                       {(field) => (
                         <TextRow
                           label={label("Fecha de nacimiento", "birthDate")}
-                          value={field.state.value ?? ""}
                           error={errors["demographics.birthDate"]}
-                          inputProps={{ "aria-label": "Fecha de nacimiento", type: "date" }}
-                          onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("demographics.birthDate")
-                            clearError("representative")
-                            clearError("respondent")
-                          }}
+                          renderControl={(id) => (
+                            <BirthDateInput
+                              id={id}
+                              aria-label="Fecha de nacimiento"
+                              today={today}
+                              country={countryCode}
+                              value={field.state.value ?? ""}
+                              invalid={Boolean(errors["demographics.birthDate"])}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError("demographics.birthDate")
+                                clearError("representative")
+                                clearError("respondent")
+                              }}
+                            />
+                          )}
                         />
                       )}
                     </form.Field>
@@ -1812,7 +1826,8 @@ function ReviewSummary({
   const health = answers.health
   const rows: Array<[string, string]> = [
     ["Nombre", trim(demographics.displayName) || "—"],
-    ["Nacimiento", trim(demographics.birthDate) || "—"],
+    // En el orden de la clínica, como se escribió (se guarda en ISO 8601).
+    ["Nacimiento", writeDate(trim(demographics.birthDate), writtenDateFormat(clinicDateLocale(countryCode))) || "—"],
     ["Documento", documentLine(demographics.docType, trim(demographics.docNumber), demographics.docCountry) ?? "—"],
     [
       "Sexo",

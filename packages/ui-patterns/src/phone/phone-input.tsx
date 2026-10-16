@@ -6,7 +6,6 @@ import { CountrySelect } from "./country-select.js"
 import {
   type CountryCode,
   countryOf,
-  DEFAULT_COUNTRY,
   getCountryCallingCode,
   nationalText,
   normalizeCountry,
@@ -14,6 +13,7 @@ import {
   phoneDigits,
   phoneMeta,
   readInternational,
+  regionCountry,
 } from "./phone.js"
 import { maskNationalDigits, phoneMaskOptions, phonePlaceholder } from "./phone-mask.js"
 
@@ -25,7 +25,10 @@ export interface PhoneInputProps {
   value: string | null
   /** Recibe el E.164 (o `null` mientras lo tecleado no sea un número) y su lectura. */
   onChange: (value: string | null, meta: PhoneMeta) => void
-  /** País del selector y del formato nacional. Por defecto, Perú. */
+  /**
+   * País del selector y del formato nacional. Por defecto, el de la clínica
+   * (`regionCountry`): el núcleo no supone ninguno.
+   */
   defaultCountry?: CountryCode
   /** Acota el selector cuando la organización atiende unos pocos países. */
   countries?: readonly CountryCode[]
@@ -85,7 +88,7 @@ export function PhoneInput({
     // El número guardado manda sobre el país por defecto: la ficha de un
     // paciente argentino debe abrir con la máscara argentina.
     () =>
-      (value ? countryOf(value) : undefined) ?? normalizeCountry(defaultCountry) ?? DEFAULT_COUNTRY,
+      (value ? countryOf(value) : undefined) ?? normalizeCountry(defaultCountry) ?? regionCountry(),
   )
   const [display, setDisplay] = React.useState(() => (value ? fieldText(value) : ""))
   const [touched, setTouched] = React.useState(false)

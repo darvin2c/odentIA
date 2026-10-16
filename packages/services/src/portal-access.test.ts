@@ -8,17 +8,16 @@ import { createHash, randomBytes } from "node:crypto"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import {
-  approvePortalRequest,
   createPasskeyAuthOptions,
   createPasskeyRegistrationOptions,
   createPortalGrant,
-  createPublicPortalRequest,
-  handlePortalChannelRequest,
+  getPortalAccessSummary,
+  givePortalAccess,
   listMyPortalGrants,
   listPortalGrants,
-  listPortalRequests,
   listPortalSessions,
-  rejectPortalRequest,
+  requestPortalReentry,
+  resendPortalAccess,
   revokePortalGrant,
   selectPortalGrant,
   verifyPasskeyAuth,
@@ -34,7 +33,8 @@ import {
 } from "./clinical-forms.js"
 import { recordPortalPinFailure, upsertPortalPolicy } from "./portal-policy.js"
 import { ServiceError } from "./errors.js"
-import { listTasks } from "./tasks.js"
+import { patientPersonId } from "./patients.js"
+import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -149,22 +149,14 @@ beforeAll(async () => {
     conversationId = conv!.id
     await upsertPortalPolicy(tx, ORG, ACTOR, {
       enabled: true,
-      requestsEnabled: true,
-      publicRequestsEnabled: true,
-      channelRequestsEnabled: true,
-      autoApproveVerified: false,
-      allowedConnectionIds: [connectionId],
-      linkTtlMinutes: 4320,
-      sessionTtlHours: 48,
-      grantTtlDays: null,
       allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-      passkeysEnabled: true,
-      assistedRecoveryEnabled: true,
     })
   })
 }, 180_000)
 
-it("sin política el portal está deshabilitado y la web no revela nada", async () => {
+const NO_RIGHTS = { canShareBudgets: false, canShareAccount: false, canShareDocuments: false }
+
+it("sin política el portal está apagado", async () => {
   const issue = await errorCode(
     withOrgContext(appDb, ORG_OFF, (tx) =>
       issuePortalLink(
@@ -177,33 +169,11 @@ it("sin política el portal está deshabilitado y la web no revela nada", async 
           conversationId: "00000000-0000-0000-0000-000000000000",
           scope: { appointments: true },
         },
-        { linkUrl: () => "https://x", canShareFinance: false },
+        { linkUrl: () => "https://x", ...NO_RIGHTS },
       ),
     ),
   )
   expect(issue).toBe("PORTAL_DISABLED")
-  const received = await withOrgContext(appDb, ORG_OFF, (tx) =>
-    createPublicPortalRequest(tx, ORG_OFF, { contactName: "Alguien", contactText: "+51000" }),
-  )
-  expect(received).toEqual({ received: true })
-  const requests = await withOrgContext(appDb, ORG_OFF, (tx) => listPortalRequests(tx, ORG_OFF))
-  expect(requests).toEqual([])
-})
-
-it("la web pública nunca matchea por teléfono ni crea accesos", async () => {
-  const received = await withOrgContext(appDb, ORG, (tx) =>
-    createPublicPortalRequest(tx, ORG, {
-      contactName: "Contacto Portal",
-      contactText: "+51999000111",
-      patientHint: "Paciente Portal",
-    }),
-  )
-  expect(received).toEqual({ received: true })
-  const grants = await withOrgContext(appDb, ORG, (tx) => listPortalGrants(tx, ORG, patientId))
-  expect(grants).toEqual([])
-  const requests = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG))
-  expect(requests).toHaveLength(1)
-  expect(requests[0]?.patientName).toBeNull()
 })
 
 it("el canje exige grant verificado aunque el PIN sea correcto", async () => {
@@ -231,7 +201,7 @@ it("la emisión exige grant verificado y es discreta", async () => {
       ORG,
       ACTOR,
       { patientId, contactId, conversationId, scope: { appointments: true } },
-      { linkUrl: (token) => `https://portal.test/a/${token}`, canShareFinance: false },
+      { linkUrl: (token) => `https://portal.test/a/${token}`, ...NO_RIGHTS },
     ),
   )
   expect(issued.link.status).toBe("pendiente")
@@ -319,79 +289,12 @@ it("sesión, anti-escalada PIN y revocación en cascada del grant", async () => 
   expect(reused).toBe("PORTAL_REVOKED")
 })
 
-it("el canal solo gestiona conexiones autorizadas y responde genérico", async () => {
-  const policyBase = {
-    enabled: true,
-    requestsEnabled: true,
-    publicRequestsEnabled: true,
-    channelRequestsEnabled: true,
-    autoApproveVerified: false,
-    allowedConnectionIds: [] as string[],
-    linkTtlMinutes: 4320,
-    sessionTtlHours: 48,
-    grantTtlDays: null as number | null,
-    allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-    passkeysEnabled: true,
-    assistedRecoveryEnabled: true,
-  }
-  await withOrgContext(appDb, ORG, (tx) => upsertPortalPolicy(tx, ORG, ACTOR, policyBase))
-  const [inbound] = await withOrgContext(appDb, ORG, (tx) =>
-    tx
-      .insert(message)
-      .values({
-        organizationId: ORG,
-        conversationId,
-        direction: "in",
-        senderKind: "contact",
-        contentType: "text",
-        body: "Hola, quiero mi acceso al portal por favor",
-        status: "received",
-      })
-      .returning({ id: message.id }),
-  )
-  const denied = await withOrgContext(appDb, ORG, (tx) =>
-    handlePortalChannelRequest(
-      tx,
-      ORG,
-      { conversationId, messageId: inbound!.id },
-      { portalUrl: () => "https://portal.test/ingresar" },
-    ),
-  )
-  expect(denied).toBe(false)
-  await withOrgContext(appDb, ORG, (tx) =>
-    upsertPortalPolicy(tx, ORG, ACTOR, { ...policyBase, allowedConnectionIds: [connectionId] }),
-  )
-  const handled = await withOrgContext(appDb, ORG, (tx) =>
-    handlePortalChannelRequest(
-      tx,
-      ORG,
-      { conversationId, messageId: inbound!.id },
-      { portalUrl: () => "https://portal.test/ingresar" },
-    ),
-  )
-  expect(handled).toBe(true)
-  const channelRequests = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "pendiente"))
-  const created = channelRequests.find((request) => request.channel === "conversacion")
-  expect(created?.contactName).toBe("Contacto Portal")
-  const replies = await withOrgContext(appDb, ORG, (tx) =>
-    tx
-      .select({ body: message.body })
-      .from(message)
-      .where(and(eq(message.conversationId, conversationId), eq(message.direction, "out"))),
-  )
-  const reply = replies[replies.length - 1]?.body ?? ""
-  expect(reply).toContain("solicitud de acceso al portal")
-  expect(reply).not.toContain("Paciente Portal")
-  expect(reply).not.toContain("portal.test")
-})
-
-it("la ruta automática responde ingreso con passkey sin credenciales nuevas", async () => {
+it("la emisión conserva las passkeys vigentes", async () => {
   const grants = await withOrgContext(appDb, ORG, (tx) => listPortalGrants(tx, ORG, patientId))
-  expect(grants.length).toBeGreaterThan(0)
   await withOrgContext(appDb, ORG, (tx) =>
     tx.insert(portalPasskey).values({
       organizationId: ORG,
-      grantId: grants[0]!.id,
+      grantId: grants.find((grant) => grant.status === "activo")!.id,
       credentialId: "credencial-auto-test",
       publicKey: "c2VtaWxsYQ",
       counter: 0,
@@ -400,122 +303,12 @@ it("la ruta automática responde ingreso con passkey sin credenciales nuevas", a
     }),
   )
   await withOrgContext(appDb, ORG, (tx) =>
-    upsertPortalPolicy(tx, ORG, ACTOR, {
-      enabled: true,
-      requestsEnabled: true,
-      publicRequestsEnabled: true,
-      channelRequestsEnabled: true,
-      autoApproveVerified: true,
-      allowedConnectionIds: [connectionId],
-      linkTtlMinutes: 4320,
-      sessionTtlHours: 48,
-      grantTtlDays: null,
-      allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-      passkeysEnabled: true,
-      assistedRecoveryEnabled: true,
-    }),
-  )
-  const [inbound] = await withOrgContext(appDb, ORG, (tx) =>
-    tx
-      .insert(message)
-      .values({
-        organizationId: ORG,
-        conversationId,
-        direction: "in",
-        senderKind: "contact",
-        contentType: "text",
-        body: "Necesito mi acceso al portal, por favor",
-        status: "received",
-      })
-      .returning({ id: message.id }),
-  )
-  const handled = await withOrgContext(appDb, ORG, (tx) =>
-    handlePortalChannelRequest(
-      tx,
-      ORG,
-      { conversationId, messageId: inbound!.id },
-      { portalUrl: () => "https://portal.test/ingresar" },
-    ),
-  )
-  expect(handled).toBe(true)
-  const approved = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "aprobada"))
-  expect(approved.some((request) => request.channel === "conversacion")).toBe(true)
-  const pending = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "pendiente"))
-  expect(pending.filter((request) => request.channel === "conversacion")).toHaveLength(1)
-  const replies = await withOrgContext(appDb, ORG, (tx) =>
-    tx
-      .select({ body: message.body })
-      .from(message)
-      .where(and(eq(message.conversationId, conversationId), eq(message.direction, "out"))),
-  )
-  const reply = replies[replies.length - 1]?.body ?? ""
-  expect(reply).toContain("https://portal.test/ingresar")
-  expect(reply).not.toContain("portal.test/a/")
-  await withOrgContext(appDb, ORG, (tx) =>
-    upsertPortalPolicy(tx, ORG, ACTOR, {
-      enabled: true,
-      requestsEnabled: true,
-      publicRequestsEnabled: true,
-      channelRequestsEnabled: true,
-      autoApproveVerified: false,
-      allowedConnectionIds: [connectionId],
-      linkTtlMinutes: 4320,
-      sessionTtlHours: 48,
-      grantTtlDays: null,
-      allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-      passkeysEnabled: true,
-      assistedRecoveryEnabled: true,
-    }),
-  )
-})
-
-it("aprobar crea vínculo+grant+enlace y liquida la tarea", async () => {
-  const pending = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "pendiente"))
-  const web = pending.find((request) => request.channel === "web_publica")
-  expect(web).toBeDefined()
-  const decided = await withOrgContext(appDb, ORG, (tx) =>
-    approvePortalRequest(tx, ORG, ACTOR, web!.id, {
-      patientId: patient3Id,
-      contactId,
-      relationship: "family",
-      scope: { appointments: true },
-      verifiedMethod: "presencial_documento",
-      evidenceNote: "DNI del apoderado revisado en recepción.",
-      conversationId,
-      deliver: { linkUrl: (token) => `https://portal.test/a/${token}`, canShareFinance: false },
-    }),
-  )
-  expect(decided.grant.patientId).toBe(patient3Id)
-  expect(decided.link.link.status).toBe("pendiente")
-  const open = await withOrgContext(appDb, ORG, (tx) => listTasks(tx, ORG, { status: "open" }))
-  const openPortal = open.filter((task) => task.title.includes("portal"))
-  // La tarea de la solicitud web quedó liquidada; solo sigue abierta la del canal.
-  expect(openPortal).toHaveLength(1)
-  const decidedList = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "aprobada"))
-  expect(decidedList.some((request) => request.id === web!.id)).toBe(true)
-})
-it("rechazar una solicitud cierra su tarea, igual que aprobarla o que venza", async () => {
-  const openPortalTasks = async () =>
-    (await withOrgContext(appDb, ORG, (tx) => listTasks(tx, ORG, { status: "open" }))).filter((task) => task.title.includes("portal")).length
-  const before = await openPortalTasks()
-  await withOrgContext(appDb, ORG, (tx) =>
-    createPublicPortalRequest(tx, ORG, { contactName: "Persona que rechazan", contactText: "+51999000222" }),
-  )
-  expect(await openPortalTasks()).toBe(before + 1)
-  const pending = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "pendiente"))
-  const request = pending.find((item) => item.contactName === "Persona que rechazan")
-  await withOrgContext(appDb, ORG, (tx) => rejectPortalRequest(tx, ORG, ACTOR, request!.id, "No es paciente"))
-  expect(await openPortalTasks()).toBe(before)
-})
-
-it("la emisión conserva las passkeys vigentes", async () => {
-  await withOrgContext(appDb, ORG, (tx) =>
     issuePortalLink(
       tx,
       ORG,
       ACTOR,
       { patientId, contactId, conversationId, scope: { appointments: true } },
-      { linkUrl: (token) => `https://portal.test/a/${token}`, canShareFinance: false },
+      { linkUrl: (token) => `https://portal.test/a/${token}`, ...NO_RIGHTS },
     ),
   )
   const creds = await withOrgContext(appDb, ORG, (tx) =>
@@ -534,6 +327,15 @@ it("la emisión conserva las passkeys vigentes", async () => {
 })
 
 it("passkeys: registro con sesión Bearer; respuestas inválidas no crean nada", async () => {
+  await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, {
+      patientId: patient3Id,
+      contactId,
+      relationship: "family",
+      scope: { appointments: true },
+      verifiedMethod: "presencial_documento",
+    }),
+  )
   const { raw } = await insertPendingLink(patient3Id)
   const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
   const ctx = await withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, opened.sessionToken))
@@ -626,29 +428,12 @@ it("cuestionario previo: lo responde quien tiene la sesión, se envía completo 
   ).toMatchObject({ status: "finalizado" })
 })
 
-it("el código de 6 dígitos siempre activa el acceso; apagado, solo impide recuperarlo así", async () => {
+it("el código de 6 dígitos siempre activa el acceso, también para volver a entrar", async () => {
   const [created] = await ownerDb
     .insert(patient)
     .values({ organizationId: ORG, displayName: "Paciente Portal Cuatro", patientNumber: 9204 })
     .returning({ id: patient.id })
   const patient4Id = created!.id
-  const policy = (assistedRecoveryEnabled: boolean) =>
-    withOrgContext(appDb, ORG, (tx) =>
-      upsertPortalPolicy(tx, ORG, ACTOR, {
-        enabled: true,
-        requestsEnabled: true,
-        publicRequestsEnabled: true,
-        channelRequestsEnabled: true,
-        autoApproveVerified: false,
-        allowedConnectionIds: [connectionId],
-        linkTtlMinutes: 4320,
-        sessionTtlHours: 48,
-        grantTtlDays: null,
-        allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-        passkeysEnabled: true,
-        assistedRecoveryEnabled,
-      }),
-    )
   await withOrgContext(appDb, ORG, async (tx) => {
     await tx.insert(patientContact).values({ organizationId: ORG, patientId: patient4Id, contactId, relationship: "family", createdBy: ACTOR })
     await createPortalGrant(tx, ORG, ACTOR, {
@@ -657,42 +442,169 @@ it("el código de 6 dígitos siempre activa el acceso; apagado, solo impide recu
       relationship: "family",
       scope: { appointments: true },
       verifiedMethod: "presencial_documento",
-      evidenceNote: "DNI revisado en recepción.",
     })
   })
-  await policy(false)
-  try {
-    // La primera vez entra con su código aunque la clínica no recupere accesos así.
-    const { raw } = await insertPendingLink(patient4Id)
-    const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
-    expect(opened.session.patientId).toBe(patient4Id)
+  const { raw } = await insertPendingLink(patient4Id)
+  const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
+  expect(opened.session.patientId).toBe(patient4Id)
+  // La sesión dura 48 horas: es un valor fijo, no una opción de la clínica.
+  const hours = (opened.session.expiresAt.getTime() - Date.now()) / 3_600_000
+  expect(hours).toBeGreaterThan(47)
+  expect(hours).toBeLessThanOrEqual(48)
 
-    // Volver a entrar con otro código es recuperarlo: el equipo no puede emitirlo
-    // y un enlace que ya salió tampoco sirve. Los dos lo dicen en palabras.
-    const issued = await withOrgContext(appDb, ORG, (tx) =>
-      issuePortalLink(
-        tx,
-        ORG,
-        ACTOR,
-        { patientId: patient4Id, contactId, conversationId, scope: { appointments: true } },
-        { linkUrl: (token) => `https://portal.test/a/${token}`, canShareFinance: false },
-      ),
-    ).then(() => null, (error: unknown) => error)
-    expect(issued).toMatchObject({ code: "PORTAL_RECOVERY_OFF", message: expect.stringContaining("quita su acceso") })
-    const { raw: again } = await insertPendingLink(patient4Id)
-    expect(
-      await errorCode(withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, again, { pin: "123456" }))),
-    ).toBe("PORTAL_RECOVERY_OFF")
-
-    // «Sesiones activas»: la sesión cerrada por el equipo llega con su cierre.
-    await withOrgContext(appDb, ORG, (tx) => revokePortalSession(tx, ORG, ACTOR, opened.session.id))
-    const sessions = await withOrgContext(appDb, ORG, (tx) => listPortalSessions(tx, ORG, { patientId: patient4Id }))
-    expect(sessions.find((row) => row.id === opened.session.id)?.revokedAt).toBeInstanceOf(Date)
-  } finally {
-    await policy(true)
-  }
-  // Con la recuperación encendida, el mismo enlace vuelve a servir.
-  const { raw: recovered } = await insertPendingLink(patient4Id)
-  const reopened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, recovered, { pin: "123456" }))
+  // Volver a entrar con un enlace nuevo y otro código siempre se puede.
+  const issued = await withOrgContext(appDb, ORG, (tx) =>
+    issuePortalLink(
+      tx,
+      ORG,
+      ACTOR,
+      { patientId: patient4Id, contactId, conversationId, scope: { appointments: true } },
+      { linkUrl: (token) => `https://portal.test/a/${token}`, ...NO_RIGHTS },
+    ),
+  )
+  expect(issued.pinOnce).toMatch(/^\d{6}$/)
+  const { raw: again } = await insertPendingLink(patient4Id)
+  const reopened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, again, { pin: "123456" }))
   expect(reopened.session.revokedAt).toBeNull()
+
+  // «Entró el …» en la fila de acceso sale de sus sesiones.
+  const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, patient4Id))
+  expect(summary.access[0]?.lastEntryAt).toBeInstanceOf(Date)
+
+  // «Sesiones activas»: la sesión cerrada por el equipo llega con su cierre.
+  await withOrgContext(appDb, ORG, (tx) => revokePortalSession(tx, ORG, ACTOR, opened.session.id))
+  const sessions = await withOrgContext(appDb, ORG, (tx) => listPortalSessions(tx, ORG, { patientId: patient4Id }))
+  expect(sessions.find((row) => row.id === opened.session.id)?.revokedAt).toBeInstanceOf(Date)
+})
+
+/** Una persona adulta con su ficha propia y su documento, que escribe por WhatsApp. */
+async function adultWithDocument(number: number, doc: string | null): Promise<{ patientId: string; personId: string }> {
+  const [created] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: `Adulta ${number}`, patientNumber: number, birthDate: "1990-05-05" })
+    .returning({ id: patient.id })
+  const personId = await withOrgContext(appDb, ORG, (tx) => patientPersonId(tx, ORG, created!.id))
+  if (!personId) throw new Error("Sin persona propia")
+  if (doc) {
+    await ownerDb.update(patient).set({ docType: "DNI", docNumber: doc, docCountry: "PE" }).where(eq(patient.id, created!.id))
+  }
+  return { patientId: created!.id, personId }
+}
+
+it("dar acceso en un paso: su documento a la vista, recepción comparte presupuestos y el código va aparte", async () => {
+  const sin = await adultWithDocument(9301, null)
+  // Sin documento no se puede comprobar su identidad.
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) =>
+        givePortalAccess(
+          tx,
+          ORG,
+          ACTOR,
+          sin.patientId,
+          { contactId: sin.personId, scope: { appointments: true }, identityChecked: true, delivery: "qr" },
+          { linkUrl: (token) => `https://portal.test/a/${token}`, ...NO_RIGHTS },
+        ),
+      ),
+    ),
+  ).toBe("VALIDATION")
+
+  const con = await adultWithDocument(9302, "47120836")
+  const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, con.patientId))
+  // El documento se dice con su tipo y sin el número entero.
+  expect(summary.candidates).toEqual([
+    expect.objectContaining({ contactId: con.personId, relation: "self", document: "DNI 4•••••36", whatsappReady: false }),
+  ])
+  const rights = { canShareBudgets: true, canShareAccount: false, canShareDocuments: false }
+  // Sin marcar la comprobación no se da.
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) =>
+        givePortalAccess(
+          tx,
+          ORG,
+          ACTOR,
+          con.patientId,
+          { contactId: con.personId, scope: { appointments: true }, identityChecked: false, delivery: "qr" },
+          { linkUrl: (token) => `https://portal.test/a/${token}`, ...rights },
+        ),
+      ),
+    ),
+  ).toBe("VALIDATION")
+  // La cuenta pide caja: recepción no la comparte.
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) =>
+        givePortalAccess(
+          tx,
+          ORG,
+          ACTOR,
+          con.patientId,
+          { contactId: con.personId, scope: { appointments: true, account: true }, identityChecked: true, delivery: "qr" },
+          { linkUrl: (token) => `https://portal.test/a/${token}`, ...rights },
+        ),
+      ),
+    ),
+  ).toBe("PORTAL_FORBIDDEN")
+  const given = await withOrgContext(appDb, ORG, (tx) =>
+    givePortalAccess(
+      tx,
+      ORG,
+      ACTOR,
+      con.patientId,
+      { contactId: con.personId, scope: { appointments: true, budgets: true }, identityChecked: true, delivery: "qr" },
+      { linkUrl: (token) => `https://portal.test/a/${token}`, ...rights },
+    ),
+  )
+  expect(given.activationUrlOnce).toMatch(/^https:\/\/portal\.test\/a\//)
+  expect(given.pinOnce).toMatch(/^\d{6}$/)
+  // El código nunca viaja con el enlace.
+  expect(given.activationUrlOnce).not.toContain(given.pinOnce)
+  const after = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, con.patientId))
+  expect(after.access).toEqual([
+    expect.objectContaining({ contactId: con.personId, relation: "self", saved: false, lastEntryAt: null }),
+  ])
+  expect(after.access[0]?.scope).toMatchObject({ appointments: true, budgets: true, account: false })
+})
+
+it("pedir volver al portal por el chat deja el pedido en «Te espera» y lo atiende una persona", async () => {
+  const lucia = await adultWithDocument(9303, "40000004")
+  const [conv] = await withOrgContext(appDb, ORG, (tx) =>
+    tx
+      .insert(conversation)
+      .values({ organizationId: ORG, contactId: lucia.personId, channelConnectionId: connectionId, externalThreadId: "portal:lucia", status: "open" })
+      .returning({ id: conversation.id }),
+  )
+  // Sin acceso vigente no hay nada que reenviar: se da en la clínica.
+  expect(
+    await withOrgContext(appDb, ORG, (tx) => requestPortalReentry(tx, ORG, { contactId: lucia.personId, conversationId: conv!.id })),
+  ).toEqual({ status: "sin_acceso", names: [] })
+  const grant = await withOrgContext(appDb, ORG, (tx) =>
+    createPortalGrant(tx, ORG, ACTOR, {
+      patientId: lucia.patientId,
+      contactId: lucia.personId,
+      scope: { appointments: true },
+      verifiedMethod: "presencial_documento",
+    }),
+  )
+  const asked = await withOrgContext(appDb, ORG, (tx) => requestPortalReentry(tx, ORG, { contactId: lucia.personId, conversationId: conv!.id }))
+  expect(asked.status).toBe("pedido")
+  // El mismo pedido repetido el mismo día no deja otra fila.
+  await withOrgContext(appDb, ORG, (tx) => requestPortalReentry(tx, ORG, { contactId: lucia.personId, conversationId: conv!.id }))
+  const access: WorkspaceAccess = {
+    patients: true, appointments: false, conversations: false, tasks: true, finance: false, clinical: false,
+    crm: true, agent: false, allTasks: true, configure: false, ownAppointments: false,
+  }
+  const home = await withOrgContext(appDb, ORG, (tx) => getWorkspaceHome(tx, ORG, ACTOR, access))
+  const rows = home.waiting.filter((row) => row.kind === "portalReentry")
+  expect(rows).toEqual([expect.objectContaining({ patientId: lucia.patientId, grantId: grant.id })])
+  // No sale además como una tarea cualquiera.
+  expect(home.waiting.some((row) => row.kind === "task" && row.title.includes("volver a entrar"))).toBe(false)
+  // «Enviar nuevo enlace» sin volver a comprobar su identidad: el pedido se va solo.
+  const resent = await withOrgContext(appDb, ORG, (tx) =>
+    resendPortalAccess(tx, ORG, ACTOR, grant.id, { delivery: "qr" }, { linkUrl: (token) => `https://portal.test/a/${token}`, ...NO_RIGHTS }),
+  )
+  expect(resent.pinOnce).toMatch(/^\d{6}$/)
+  const later = await withOrgContext(appDb, ORG, (tx) => getWorkspaceHome(tx, ORG, ACTOR, access))
+  expect(later.waiting.some((row) => row.kind === "portalReentry")).toBe(false)
 })

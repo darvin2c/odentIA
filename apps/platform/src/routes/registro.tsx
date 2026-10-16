@@ -6,6 +6,7 @@ import type { RegistrationAnswers } from "@odentia/clinical"
 import { PatientRegistrationForm } from "../components/patient/patient-registration-form"
 import { ApiError } from "../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { setOrgLocale } from "../lib/locale"
 import {
   fetchPublicRegistration,
   submitPublicRegistration,
@@ -96,6 +97,9 @@ function PublicRegistrationPage() {
   }
 
   const info = infoQuery.data.data
+  // Página pública, sin layout de organización: el formato regional, la zona y
+  // el país de la clínica llegan con el registro y se fijan antes de pintar fechas.
+  setOrgLocale(info.locale, info.timeZone, info.countryCode)
 
   if (!info.config.enabled) {
     return (

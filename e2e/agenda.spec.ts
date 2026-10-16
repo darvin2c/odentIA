@@ -394,8 +394,9 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   }
   // Horario partido: el segundo turno del día propone la tarde.
   await page.getByRole("button", { name: "Añadir turno el lunes" }).click()
-  await expect(page.getByLabel("lunes, desde").nth(1)).toHaveValue("15:00")
-  await expect(page.getByLabel("lunes, hasta").nth(1)).toHaveValue("19:00")
+  // La hora es la lista «Hora» (cada 15 minutos): dice la elegida.
+  await expect(page.getByLabel("lunes, desde").nth(1)).toContainText("15:00")
+  await expect(page.getByLabel("lunes, hasta").nth(1)).toContainText("19:00")
   await page.getByRole("button", { name: "Guardar horario" }).click()
   // La agenda se llena al lado, sin haber salido de ella.
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
@@ -409,7 +410,7 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await expect(
     page.getByRole("heading", { name: `Horario semanal de ${owner.user.name}` }),
   ).toBeVisible()
-  await expect(page.getByLabel("lunes, desde").first()).toHaveValue("09:00")
+  await expect(page.getByLabel("lunes, desde").first()).toContainText("09:00")
   await expect(page.getByLabel("lunes, desde")).toHaveCount(2)
   await expect(page.getByRole("heading", { name: "Sillones" })).toBeVisible()
   await expect(page.getByText("Sillón 1", { exact: true })).toBeVisible()

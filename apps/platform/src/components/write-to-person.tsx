@@ -74,7 +74,7 @@ export function WriteToPersonDialog({
   open: boolean
   onClose: () => void
   people: WriteTarget[]
-  /** Al abrir la conversación, la Bandeja prepara el enlace de registro para revisarlo. */
+  /** Al abrir la conversación, la Bandeja prepara «Su enlace» para revisarlo antes de enviarlo. */
   prepareRegistration?: boolean
 }) {
   const navigate = useNavigate()
@@ -114,7 +114,7 @@ export function WriteToPersonDialog({
     if (only) go(only)
   }, [open])
 
-  const title = prepareRegistration ? "Enviar registro" : "Escribirle"
+  const title = prepareRegistration ? "Enviarle su enlace" : "Escribirle"
   const name = chosen?.displayName ?? ""
   const working = write.isPending && !needsPhone
   const choosing = people.length > 1 && !chosen

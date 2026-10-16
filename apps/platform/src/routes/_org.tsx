@@ -74,6 +74,7 @@ import { RouterLink } from "../lib/router-link"
 interface OrgRegion {
   locale: string | undefined
   timeZone: string | undefined
+  country: string | undefined
 }
 let orgRegionLoaded: OrgRegion | null = null
 async function loadOrgRegion(): Promise<OrgRegion> {
@@ -83,14 +84,15 @@ async function loadOrgRegion(): Promise<OrgRegion> {
     const region = {
       locale: profile?.locale?.trim() || undefined,
       timeZone: profile?.timezone?.trim() || undefined,
+      country: profile?.countryCode?.trim() || undefined,
     }
     if (typeof window !== "undefined") {
       orgRegionLoaded = region
-      setOrgLocale(region.locale, region.timeZone)
+      setOrgLocale(region.locale, region.timeZone, region.country)
     }
     return region
   } catch {
-    return { locale: undefined, timeZone: undefined }
+    return { locale: undefined, timeZone: undefined, country: undefined }
   }
 }
 
@@ -219,10 +221,11 @@ function OrgLayout() {
   const profile = useOrgProfile()
   const activeLocale = profile.data === undefined ? region.locale : profile.data?.locale
   const activeTimeZone = profile.data === undefined ? region.timeZone : profile.data?.timezone
-  setOrgLocale(activeLocale, activeTimeZone)
+  const activeCountry = profile.data === undefined ? region.country : profile.data?.countryCode
+  setOrgLocale(activeLocale, activeTimeZone, activeCountry)
   useEffect(() => {
     notifyOrgLocale()
-  }, [activeLocale, activeTimeZone])
+  }, [activeLocale, activeTimeZone, activeCountry])
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const role = org.members.find((member) => member.userId === session?.userId)?.role ?? "member"
   const queryClient = useQueryClient()

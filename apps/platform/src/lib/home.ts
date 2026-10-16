@@ -157,6 +157,18 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         ]),
         action: "Enviar",
       }
+    case "possibleDuplicate":
+      return {
+        title: `Posible ficha repetida: ${row.patientName}`,
+        detail: joined([`Desde su enlace ${ago(row.createdAt)}`, row.detail]),
+        action: "Revisar",
+      }
+    case "portalReentry":
+      return {
+        title: `${row.contactName} quiere volver a entrar al portal`,
+        detail: joined([`Lo pidió ${ago(row.createdAt)}`, "su acceso sigue vigente"]),
+        action: "Enviar nuevo enlace",
+      }
     case "consentToPublish":
       return {
         title: `Publicar el consentimiento de «${row.title}»`,
@@ -206,7 +218,7 @@ export function waitingOpenText(row: WaitingRow, context: HomeTextContext): stri
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
   if (row.kind === "more") return `more:${row.of}`

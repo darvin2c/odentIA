@@ -23,6 +23,7 @@ import {
   FORM_RESPONSE_STATUS_LABELS,
 } from "../../lib/clinical-forms"
 import { fetchPrescriptionDetail, fetchPrescriptions, type Prescription } from "../../lib/clinical-journey"
+import { sendConsentByLink } from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
 import {
   type ConsentNeed,
@@ -39,6 +40,7 @@ import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 
 const errorMessage = (e: unknown, fallback: string) =>
   e instanceof ApiError ? (e.shape.message ?? fallback) : fallback
@@ -312,12 +314,30 @@ export function EncounterDocumentsBlock({
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <Button type="button" size="sm" disabled={disabled} onClick={() => setSigning(docs.pendingSignatures)}>
+              <Button type="button" size="sm" disabled={disabled} onClick={() => setSigning(docs.pendingSignatures.filter((doc) => !doc.personSignedAt))}>
                 Firmar ahora
               </Button>
               <RowActions
                 label="Otras formas de firmar"
                 items={docs.pendingSignatures.flatMap((doc) => [
+                  ...(doc.linkSentAt || doc.personSignedAt
+                    ? []
+                    : [
+                        {
+                          key: `link-${doc.id}`,
+                          label: `Enviar para firmar desde su teléfono: ${doc.titleSnapshot}`,
+                          disabled,
+                          onSelect: () =>
+                            void sendConsentByLink(doc.id, crypto.randomUUID())
+                              .then(() => {
+                                toast.success("Se lo enviamos: aparece en «Su enlace»")
+                                return refresh()
+                              })
+                              .catch((error: unknown) =>
+                                toast.error(error instanceof ApiError ? (error.shape.message ?? "No se pudo enviar") : "No se pudo enviar"),
+                              ),
+                        },
+                      ]),
                   {
                     key: `paper-${doc.id}`,
                     label: `Firmado en papel: ${doc.titleSnapshot}`,
@@ -335,6 +355,18 @@ export function EncounterDocumentsBlock({
             </div>
           </li>
         ) : null}
+        {/* Lo que se le envió a firmar desde su enlace: espera su firma o tu confirmación. */}
+        {docs.pendingSignatures
+          .filter((doc) => doc.linkSentAt || doc.personSignedAt)
+          .map((doc) => (
+            <li key={`enlace-${doc.id}`} className="flex flex-wrap items-center justify-between gap-3 p-3">
+              <div className="flex min-w-0 flex-col">
+                <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
+                <span className="text-xs text-muted-foreground">{consentLinkWords(doc)}</span>
+              </div>
+              {canWrite ? <ConsentLinkActions document={doc} onChanged={refresh} /> : null}
+            </li>
+          ))}
         {docs.consents
           .filter((doc) => doc.status === "firmado")
           .map((doc) => (

@@ -46,6 +46,7 @@ import type { NewDocumentKind } from "./encounter-documents"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { ImagenesTab } from "./imagenes-tab"
 import { NewOrderDrawer, OrderResultDrawer, OrderRow } from "./ordenes-tab"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 
 type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "odontograma"
 type Tone = "success" | "warning" | "outline" | "secondary"
@@ -336,9 +337,7 @@ export function DocumentosSection({
         title: `Consentimiento · ${consent.titleSnapshot}`,
         detail:
           consent.status === "pendiente"
-            ? pendingSigner
-              ? `Falta la firma de ${pendingSigner}`
-              : "Falta la firma"
+            ? (consentLinkWords(consent) ?? (pendingSigner ? `Falta la firma de ${pendingSigner}` : "Falta la firma"))
             : `Firma: ${consent.signerName}`,
         date: consent.signedAt ?? consent.createdAt,
         status: {
@@ -380,6 +379,8 @@ export function DocumentosSection({
     const { action } = row
     switch (action.type) {
       case "firmar":
+        // Firmado desde «Su enlace»: solo falta que el profesional lo confirme.
+        if (action.consent.personSignedAt) return <ConsentLinkActions document={action.consent} onChanged={() => void consents.refetch()} />
         return (
           <Button type="button" size="sm" onClick={() => setSigning([action.consent])}>
             Firmar

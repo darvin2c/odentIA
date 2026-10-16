@@ -1,7 +1,7 @@
 import { formatMoney } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { AgentMark, EmptyState } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
 import { type ReactNode, useState } from "react"
@@ -15,8 +15,9 @@ import type { PatientSectionId } from "../../lib/patient-areas"
 import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patients"
 import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
+import { TaskDrawer } from "../crm/task-drawer"
 import { usePlanNextStep } from "./plan/plan-next"
-import { NewPatientTaskButton } from "./new-patient-task-button"
+import { SendPersonalLinkButton } from "./send-personal-link"
 
 interface Pending {
   id: string
@@ -108,8 +109,12 @@ export function PatientPendingCard({
   const canDecide = usePermission("agent.decide")
   const canReadAgent = usePermission("agent.read")
   const canTasks = usePermission("tasks.read")
+  const canWriteTasks = usePermission("tasks.write")
+  const queryClient = useQueryClient()
   // «Completar» abre el cajón con solo lo que falta, sin salir del Resumen.
   const [completing, setCompleting] = useState<FiliacionSectionKey | null>(null)
+  // Una tarea de la persona se crea con el mismo cajón que en Tareas (vence con «Día y hora»).
+  const [newTask, setNewTask] = useState(false)
 
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -211,13 +216,16 @@ export function PatientPendingCard({
         title: gaps.length > 0 ? "Faltan datos para atenderla" : "Apellidos por confirmar",
         detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
         action: (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setCompleting(gaps.length > 0 ? "completar" : "identidad")}
-          >
-            Completar
-          </Button>
+          <span className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCompleting(gaps.length > 0 ? "completar" : "identidad")}
+            >
+              Completar
+            </Button>
+            {gaps.length > 0 ? <SendPersonalLinkButton patientId={patientId} /> : null}
+          </span>
         ),
       })
   }
@@ -238,8 +246,25 @@ export function PatientPendingCard({
     })
 
   return (
-    <SummaryCard title="Pendientes" action={<NewPatientTaskButton patientId={patientId} />}>
+    <SummaryCard
+      title="Pendientes"
+      action={
+        canWriteTasks ? (
+          <Button size="sm" variant="outline" onClick={() => setNewTask(true)}>
+            Nueva tarea
+          </Button>
+        ) : null
+      }
+    >
       <PendingList pending={pending} />
+      {canWriteTasks ? (
+        <TaskDrawer
+          open={newTask}
+          patientId={patientId}
+          onClose={() => setNewTask(false)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["patient-tasks", patientId] })}
+        />
+      ) : null}
       {completing ? (
         <FiliacionSectionDrawer
           key={completing}

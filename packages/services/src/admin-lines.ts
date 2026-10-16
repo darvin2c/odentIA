@@ -355,6 +355,8 @@ export function adminLineOf(key: string): AdminLine | null {
  */
 const JOB_KIND_LINE: Record<string, AdminLineKey> = {
   aviso_cita_reservada: "recordatorio_cita",
+  // El aviso de reserva con «Su enlace», cuando le faltan datos (ADR 0037).
+  aviso_cita_reservada_datos: "recordatorio_cita",
   aviso_cita_movida: "recordatorio_cita",
   aviso_cita_cancelada: "recordatorio_cita",
 }

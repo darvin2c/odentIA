@@ -59,6 +59,7 @@ async function buildOutbound(
             ? m.templateParams
             : [],
         ...(replyButtonsOf(m.replyButtons) ? { buttons: replyButtonsOf(m.replyButtons)! } : {}),
+        ...(m.templateLink ? { link: m.templateLink } : {}),
       },
     }
   }

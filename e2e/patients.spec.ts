@@ -662,7 +662,9 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await page.getByRole("button", { name: "Más acciones" }).click()
   await page.getByRole("menuitem", { name: "Editar datos personales" }).click()
   const edit = surface(page, { name: "Editar identidad" })
-  await edit.getByLabel("Fecha de nacimiento").fill("1990-04-05")
+  // Se escribe en el orden de la clínica (día/mes/año) y se guarda en ISO.
+  await edit.getByLabel("Fecha de nacimiento").fill("05/04/1990")
+  await expect(edit.getByText(/^\d+ años$/)).toBeVisible()
   await edit.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(edit).toBeHidden()
   await page.screenshot({ path: test.info().outputPath("persona.png"), fullPage: true })
@@ -673,7 +675,7 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   await page.getByRole("button", { name: "Nueva tarea" }).click()
   const task = surface(page, { name: "Nueva tarea" })
   await task.getByLabel("Qué hay que hacer").fill("Llamar por el laboratorio")
-  await task.getByRole("button", { name: "Crear tarea" }).click()
+  await task.getByRole("button", { name: "Crear", exact: true }).click()
   await expect(page.getByText("Tarea: Llamar por el laboratorio")).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("resumen-con-tarea.png"), fullPage: true })
 

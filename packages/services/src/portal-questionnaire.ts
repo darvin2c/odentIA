@@ -24,7 +24,18 @@ export interface PortalQuestionnaireView {
   respondent: { name: string; relationship: string }
 }
 
-async function respondentOf(tx: Db, ctx: PortalContext) {
+/** Quién responde: la persona del paciente o quien habla por ella, con su vínculo. */
+interface Respondent {
+  orgId: string
+  patientId: string
+  contactId: string
+}
+
+function fromSession(ctx: PortalContext): Respondent {
+  return { orgId: ctx.orgId, patientId: ctx.session.patientId, contactId: ctx.session.contactId }
+}
+
+async function respondentOf(tx: Db, who: Respondent) {
   const [row] = await tx
     .select({ name: contact.displayName, relationship: patientContact.relationship })
     .from(patientContact)
@@ -34,9 +45,9 @@ async function respondentOf(tx: Db, ctx: PortalContext) {
     )
     .where(
       and(
-        eq(patientContact.organizationId, ctx.orgId),
-        eq(patientContact.patientId, ctx.session.patientId),
-        eq(patientContact.contactId, ctx.session.contactId),
+        eq(patientContact.organizationId, who.orgId),
+        eq(patientContact.patientId, who.patientId),
+        eq(patientContact.contactId, who.contactId),
       ),
     )
   if (!row) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Tu acceso ya no está vinculado al paciente")
@@ -60,15 +71,15 @@ async function currentTemplate(tx: Db, orgId: string) {
 }
 
 /** Borrador abierto del portal o, si no hay, el último enviado (solo lectura). */
-async function latestResponse(tx: Db, ctx: PortalContext, templateKey: string | null) {
+async function latestResponse(tx: Db, who: Respondent, templateKey: string | null) {
   const rows = await tx
     .select({ response: clinicalFormResponse, key: clinicalFormTemplate.key })
     .from(clinicalFormResponse)
     .innerJoin(clinicalFormTemplate, eq(clinicalFormTemplate.id, clinicalFormResponse.templateId))
     .where(
       and(
-        eq(clinicalFormResponse.organizationId, ctx.orgId),
-        eq(clinicalFormResponse.patientId, ctx.session.patientId),
+        eq(clinicalFormResponse.organizationId, who.orgId),
+        eq(clinicalFormResponse.patientId, who.patientId),
         eq(clinicalFormResponse.source, "portal"),
       ),
     )
@@ -82,9 +93,9 @@ export async function getPortalQuestionnaire(
   ctx: PortalContext,
 ): Promise<PortalQuestionnaireView> {
   requireScope(ctx.session, "appointments")
-  const respondent = await respondentOf(tx, ctx)
+  const respondent = await respondentOf(tx, fromSession(ctx))
   const template = await currentTemplate(tx, ctx.orgId)
-  const response = template ? await latestResponse(tx, ctx, template.key) : null
+  const response = template ? await latestResponse(tx, fromSession(ctx), template.key) : null
   await logAccess(tx, ctx.orgId, ctx.session.id, "questionnaire.viewed")
   return {
     template: template
@@ -117,12 +128,60 @@ export async function savePortalQuestionnaire(
   input: { answers: unknown; submit?: boolean },
 ): Promise<PortalQuestionnaireView> {
   requireScope(ctx.session, "appointments")
-  await respondentOf(tx, ctx)
-  const template = await currentTemplate(tx, ctx.orgId)
+  const id = await saveQuestionnaire(tx, fromSession(ctx), input)
+  await logAccess(
+    tx,
+    ctx.orgId,
+    ctx.session.id,
+    input.submit ? "questionnaire.submitted" : "questionnaire.saved",
+    "clinical_form_response",
+    id,
+  )
+  return getPortalQuestionnaire(tx, ctx)
+}
+
+/**
+ * «Antes de tu cita» por responder: la plantilla vigente de la clínica y si
+ * ya la envió. Es lo que muestra «Su enlace»: nunca las respuestas guardadas.
+ */
+export async function pendingQuestionnaire(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{ id: string; title: string; version: number; schema: FormSchemaDef } | null> {
+  const template = await currentTemplate(tx, orgId)
+  if (!template) return null
+  const latest = await latestResponse(tx, { orgId, patientId, contactId: "" }, template.key)
+  if (latest && latest.templateId === template.id && latest.submittedAt) return null
+  return { id: template.id, title: template.title, version: template.version, schema: assertFormSchema(template.schema) }
+}
+
+/** Lo envía desde «Su enlace» la persona o quien habla por ella: queda declarado y lo revisa el equipo. */
+export async function submitQuestionnaireFromLink(
+  tx: Db,
+  who: Respondent,
+  answers: unknown,
+): Promise<{ submitted: true }> {
+  await saveQuestionnaire(tx, who, { answers, submit: true, origin: "enlace" })
+  return { submitted: true }
+}
+
+/**
+ * Guarda el avance (validación parcial) o lo envía (obligatorios completos),
+ * la misma regla para el portal y «Su enlace». Tras enviarlo ya no se edita:
+ * lo revisa el equipo.
+ */
+async function saveQuestionnaire(
+  tx: Db,
+  who: Respondent,
+  input: { answers: unknown; submit?: boolean; origin?: "portal" | "enlace" },
+): Promise<string> {
+  await respondentOf(tx, who)
+  const template = await currentTemplate(tx, who.orgId)
   if (!template) throw notFound("Cuestionario")
   const schema = assertFormSchema(template.schema)
   const answers = assertAnswers(schema, input.answers, { requireAll: input.submit === true })
-  const existing = await latestResponse(tx, ctx, template.key)
+  const existing = await latestResponse(tx, who, template.key)
   const open =
     existing && existing.status === "borrador" && !existing.submittedAt && existing.templateId === template.id
       ? existing
@@ -136,7 +195,7 @@ export async function savePortalQuestionnaire(
       .update(clinicalFormResponse)
       .set({
         answers,
-        respondentContactId: ctx.session.contactId,
+        respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
         updatedAt: now,
       })
@@ -148,38 +207,30 @@ export async function savePortalQuestionnaire(
     const [row] = await tx
       .insert(clinicalFormResponse)
       .values({
-        organizationId: ctx.orgId,
+        organizationId: who.orgId,
         templateId: template.id,
         templateVersion: template.version,
         templateTitle: template.title,
         templateSnapshot: template.schema as Record<string, unknown>,
-        patientId: ctx.session.patientId,
+        patientId: who.patientId,
         status: "borrador",
         answers,
         source: "portal",
-        respondentContactId: ctx.session.contactId,
+        respondentContactId: who.contactId,
         submittedAt: input.submit ? now : null,
       })
       .returning({ id: clinicalFormResponse.id })
     id = row!.id
   }
-  await logAccess(
-    tx,
-    ctx.orgId,
-    ctx.session.id,
-    input.submit ? "questionnaire.submitted" : "questionnaire.saved",
-    "clinical_form_response",
-    id,
-  )
   if (input.submit) {
     await tx.insert(auditEvent).values({
-      organizationId: ctx.orgId,
-      actorUserId: null,
+      organizationId: who.orgId,
+      actorUserId: `contact:${who.contactId}`,
       action: "form_response.portal_submitted",
       entity: "clinical_form_response",
       entityId: id,
-      metadata: { patientId: ctx.session.patientId, contactId: ctx.session.contactId },
+      metadata: { patientId: who.patientId, contactId: who.contactId, via: input.origin ?? "portal" },
     })
   }
-  return getPortalQuestionnaire(tx, ctx)
+  return id
 }

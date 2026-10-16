@@ -2142,7 +2142,8 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   const url = /https:\/\/norte\.odentia\.test\/reserva\?token=([0-9a-f]{64})/.exec(sent)
   expect(url).not.toBeNull()
   expect(sent).toContain("Paciente enlace")
-  expect(sent).toContain("vale 24 horas")
+  // «Su enlace» vale una semana y es el mismo si ya tenía uno.
+  expect(sent).toContain("vale 7 días")
   // Quien aún no es paciente tampoco recibe enlace mientras la clínica no active su registro en línea.
   const stranger = await ingestText("tg:enlace-nuevo", "evt-enlace-2", "Hola")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) => tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, stranger.conversationId)))
@@ -2205,8 +2206,8 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
-        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "reenviar_presupuesto",
-        "request_human_handoff", "send_reply", "send_template", "ver_presupuesto", "ver_sedes_y_servicios",
+        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "pedir_volver_al_portal",
+        "reenviar_presupuesto", "request_human_handoff", "send_reply", "send_template", "ver_presupuesto", "ver_sedes_y_servicios",
       ],
     )
 

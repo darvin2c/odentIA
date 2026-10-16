@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, tenant } from "./env"
-import { api, call, expect, test } from "./fixtures"
+import { api, call, chooseDay, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
 
@@ -158,7 +158,7 @@ test("conocimiento: lo que no supo responder, lo básico, respuestas en filas co
   await promoForm.getByLabel("La respuesta", { exact: true }).fill("Dos por uno hasta fin de mes.")
   await promoForm.getByRole("combobox", { name: "Sede" }).click()
   await page.getByRole("option", { name: "Solo Miraflores", exact: true }).click()
-  await promoForm.getByLabel("Vale hasta", { exact: true }).fill(day(-1))
+  await chooseDay(promoForm.getByLabel("Vale hasta", { exact: true }), day(-1))
   await promoForm.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(promoForm).toBeHidden()
   const promo = row("Promoción de blanqueamiento")

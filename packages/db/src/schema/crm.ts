@@ -427,6 +427,8 @@ export const message = pgTable(
     templateName: text("template_name"),
     templateLanguage: text("template_language"),
     templateParams: jsonb("template_params"),
+    // Dato del botón que abre «Su enlace» (su token), si la plantilla lo lleva.
+    templateLink: text("template_link"),
     // Botones de respuesta que acompañan al mensaje: `id` es lo que vuelve
     // cuando la persona toca uno. Nulo si no lleva.
     replyButtons: jsonb("reply_buttons").$type<{ id: string; title: string }[]>(),
@@ -443,6 +445,14 @@ export const message = pgTable(
 /** Partes del equipo a las que puede ir una tarea sin responsable. */
 export const TASK_AREAS = ["recepcion", "caja", "clinico", "administracion"] as const
 export type TaskArea = (typeof TASK_AREAS)[number]
+
+/**
+ * Pendientes que deja el sistema para recepción, cada uno con su fila en «Te
+ * espera»: el documento escrito en «Su enlace» ya es de otra ficha
+ * (`ficha_repetida`) y quien pide volver a entrar al portal (`volver_al_portal`).
+ */
+export const TASK_KINDS = ["ficha_repetida", "volver_al_portal"] as const
+export type TaskKind = (typeof TASK_KINDS)[number]
 
 export const crmTask = pgTable(
   "task",
@@ -476,6 +486,11 @@ export const crmTask = pgTable(
     settledReason: text("settled_reason"),
     /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
     idempotencyKey: text("idempotency_key"),
+    /**
+     * Pendientes que deja el sistema con su propia fila en «Te espera»
+     * (`TASK_KINDS`, ADR 0037); nulo en una tarea cualquiera.
+     */
+    kind: text("kind"),
     ...timestamps,
   },
   (table) => [

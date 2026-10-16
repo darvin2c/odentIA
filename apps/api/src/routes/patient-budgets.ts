@@ -11,6 +11,7 @@ import {
   deliverBudget,
   duplicateBudgetOption,
   getBudgetDetail,
+  budgetsSeenInPortal,
   listBudgets,
   operationBodySchema,
   previewBudgetSend,
@@ -150,13 +151,14 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     const { orgId, userId, memberRole } = orgContextOf(c)
     const patientId = c.req.param("id")
     const planId = c.req.query("planId") || undefined
-    return runService(c, 200, async () =>
-      (
-        await withOrgContext(deps.db, orgId, (tx) =>
-          listBudgets(tx, orgId, patientId, planId, { memberRole, actorUserId: userId }),
-        )
-      ).map((budget) => economicView(memberRole, budget)),
-    )
+    return runService(c, 200, async () => {
+      const { budgets, seen } = await withOrgContext(deps.db, orgId, async (tx) => {
+        const list = await listBudgets(tx, orgId, patientId, planId, { memberRole, actorUserId: userId })
+        // «Lo vio en el portal el …», del registro de accesos (decisión 9).
+        return { budgets: list, seen: await budgetsSeenInPortal(tx, orgId, list.map((budget) => budget.id)) }
+      })
+      return budgets.map((budget) => ({ ...economicView(memberRole, budget), seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null }))
+    })
   })
 
   app.post("/:id/budgets", async (c) => {
@@ -174,17 +176,16 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
 
   app.get("/:id/budgets/:budgetId", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    return runService(c, 200, async () =>
-      economicView(
-        memberRole,
-        await withOrgContext(deps.db, orgId, (tx) =>
-          getBudgetDetail(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
-            memberRole,
-            actorUserId: userId,
-          }),
-        ),
-      ),
-    )
+    return runService(c, 200, async () => {
+      const { budget, seen } = await withOrgContext(deps.db, orgId, async (tx) => {
+        const detail = await getBudgetDetail(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
+          memberRole,
+          actorUserId: userId,
+        })
+        return { budget: detail, seen: await budgetsSeenInPortal(tx, orgId, [detail.id]) }
+      })
+      return { ...economicView(memberRole, budget), seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null }
+    })
   })
 
   app.patch("/:id/budgets/:budgetId", async (c) => {

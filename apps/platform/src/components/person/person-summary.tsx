@@ -369,7 +369,7 @@ export function PersonSummary({
           <AlertTitle>Falta registrarla como paciente</AlertTitle>
           <AlertDescription>
             <span className="block">
-              Se necesita antes de su primera atención. Puede hacerlo ella con su enlace o tú ahora.
+              Se necesita antes de su primera atención. Puede hacerlo ella con «Su enlace», donde también elige su cita, o tú ahora.
             </span>
             {canSendLink || canRegister ? (
               <span className="mt-2 flex flex-wrap gap-2">
@@ -380,7 +380,7 @@ export function PersonSummary({
                     size="sm"
                     onClick={() => setSendingLink(true)}
                   >
-                    Enviar enlace
+                    Enviarle su enlace
                   </Button>
                 ) : null}
                 {canRegister ? (

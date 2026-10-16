@@ -85,6 +85,8 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   informacion: [
     ...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica",
     "ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto",
+    // «Cambié de teléfono y no puedo entrar al portal»: se pide como información.
+    "pedir_volver_al_portal",
   ],
   // Un agradecimiento o una despedida pueden cerrar la conversación (ADR 0024).
   // «Sí, ahí estaré» a un recordatorio puede llegar como saludo: confirmar_cita la confirma.

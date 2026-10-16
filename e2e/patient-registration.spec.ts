@@ -5,7 +5,7 @@ import type { Browser, Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
-import { call, expect, fillPatientNames, test } from "./fixtures"
+import { call, expect, fillPatientNames, test, writtenDate } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
@@ -61,7 +61,8 @@ async function anonymousPage(browser: Browser, viewport?: { width: number; heigh
 /** Paso "Datos": adulto con nombre y nacimiento, y avanza al siguiente paso. */
 async function fillAdultDatos(page: Page, input: { name: string; birthDate: string }) {
   await fillPatientNames(page, input.name)
-  await page.getByLabel("Fecha de nacimiento").fill(input.birthDate)
+  // Se escribe en el orden de la clínica (día/mes/año en Perú); se guarda en ISO.
+  await page.getByLabel("Fecha de nacimiento").fill(writtenDate(input.birthDate))
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
 }
 
@@ -184,7 +185,7 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await expect(anon.getByText(`Registro de paciente · ${org.name}`).first()).toBeVisible()
 
     await fillPatientNames(anon, patientName)
-    await anon.getByLabel("Fecha de nacimiento").fill("1990-04-11")
+    await anon.getByLabel("Fecha de nacimiento").fill("11/04/1990")
     await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
     await anon.getByLabel(/^Teléfono(?: \*)?$/).fill(sharedPhone)
     // Volver conserva el nombre y reavanzar conserva el teléfono.
@@ -474,7 +475,7 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
     await expect(minor.getByLabel("¿Quién completa el registro?")).toHaveCount(0)
     const minorName = `Menor Enlace ${org.slug}`
     await fillPatientNames(minor, minorName)
-    await minor.getByLabel("Fecha de nacimiento").fill("2018-06-15")
+    await minor.getByLabel("Fecha de nacimiento").fill("15/06/2018")
     await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
     // El responsable se pide en "Contacto y filiación" cuando el paciente es menor.
     await minor.getByLabel("Nombre del responsable").fill(`Madre Enlace ${org.slug}`)

@@ -15,7 +15,6 @@ import {
 } from "@odentia/ui"
 import {
   CountrySelect,
-  DEFAULT_COUNTRY,
   detectedTimeZone,
   fieldErrorMessages,
   isValidE164,
@@ -23,6 +22,7 @@ import {
   PageHeader,
   PageShell,
   PhoneInput,
+  regionCountry,
   SubmitButton,
   TimeZoneSelect,
   WizardSteps,
@@ -178,7 +178,8 @@ function OnboardingPage() {
     slug: "",
     legalName: "",
     fiscalDocNumber: "",
-    countryCode: DEFAULT_COUNTRY,
+    // Sin clínica todavía: el país del dispositivo (su zona y su idioma), nunca uno fijo.
+    countryCode: regionCountry(),
     // Se completa con lo que propone el país elegido.
     currency: "",
     branchName: "",
@@ -512,7 +513,7 @@ function OnboardingPage() {
                     <FieldLabel htmlFor="countryCode">País</FieldLabel>
                     <CountrySelect
                       id="countryCode"
-                      value={normalizeCountry(field.state.value) ?? DEFAULT_COUNTRY}
+                      value={normalizeCountry(field.state.value) ?? regionCountry()}
                       onChange={(next) => field.handleChange(next)}
                     />
                     <FieldDescription>

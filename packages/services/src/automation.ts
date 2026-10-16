@@ -35,8 +35,10 @@ import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } fro
 import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
+  APPOINTMENT_DATA_NOTICE_KEY,
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
+  type AutomationMessage,
   automationMessageOf,
   GENERAL_PERMISSION_NO,
   GENERAL_PERMISSION_QUESTION,
@@ -44,11 +46,14 @@ import {
   generalPermissionButtons,
   isAppointmentNotice,
   parseReplyId,
+  withLinkLine,
 } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { issuePersonalLink } from "./booking-links.js"
 import { answerBudgetButton } from "./budget-send.js"
 import { applyTemplateStatuses, type TemplateDeps } from "./channel-templates.js"
 import {
+  currentAutomationMessage,
   currentAutomationMessageOf,
   MESSAGES_HREF,
   messageOfTemplate,
@@ -60,6 +65,8 @@ import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { updateOpportunity } from "./opportunities.js"
+import { getPatientMissingData } from "./patient-registration.js"
+import { personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
@@ -1553,6 +1560,40 @@ async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, no
   return !!next
 }
 
+/**
+ * El aviso de reserva con «Su enlace» cuando al paciente de la cita le faltan
+ * datos para atenderlo: el enlace de quien recibe el aviso, con esa cita. Sin
+ * dirección pública configurada sale el aviso de siempre.
+ */
+async function dataNoticeFor(
+  tx: Db,
+  orgId: string,
+  job: typeof automationJob.$inferSelect,
+  contactId: string,
+  deps: DeliverDeps,
+): Promise<{ spec: AutomationMessage; link: { token: string; url: string } } | null> {
+  if (!job.appointmentId || !publicLinksConfigured()) return null
+  const [row] = await tx
+    .select({ patientId: appointment.patientId })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, job.appointmentId)))
+    .limit(1)
+  if (!row) return null
+  if ((await getPatientMissingData(tx, orgId, row.patientId)).length === 0) return null
+  const issued = await issuePersonalLink(
+    tx,
+    orgId,
+    { contactId, patientId: row.patientId, appointmentId: job.appointmentId },
+    { secretsKey: deps.secretsKey },
+  )
+  const url = await personalLinkUrl(tx, orgId, issued.token)
+  if (!url) return null
+  return {
+    spec: await currentAutomationMessage(tx, orgId, APPOINTMENT_DATA_NOTICE_KEY),
+    link: { token: issued.token, url },
+  }
+}
+
 export interface DeliverDeps {
   secretsKey: Buffer
   /** Origen público de la plataforma, para los enlaces que van en el correo. */
@@ -2146,14 +2187,26 @@ export async function deliverJob(
   }
 
   // El texto y la plantilla son los vigentes de la clínica, iguales para las tres vías.
-  const spec = await currentAutomationMessageOf(tx, orgId, job.kind)
+  let spec = await currentAutomationMessageOf(tx, orgId, job.kind)
+  // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
+  // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
+  const withData = spec && job.kind === "aviso_cita_reservada" ? await dataNoticeFor(tx, orgId, job, contactId, deps) : null
+  if (withData) spec = withData.spec
   const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now) : null
   if (!spec || !composed) {
     await close(ids(), "cancelado", "Ya no existe lo que originó el mensaje")
     return { jobId: job.id, outcome: "cancelado", detail: "Sin datos para el mensaje" }
   }
-  const route = await routeMessage(tx, orgId, contactId, spec)
+  let route = await routeMessage(tx, orgId, contactId, spec)
+  let link = withData?.link ?? null
+  if ("cause" in route && withData) {
+    // Mientras WhatsApp no aprueba el aviso con su enlace, sale el aviso de siempre.
+    spec = await currentAutomationMessage(tx, orgId, "aviso_cita_reservada")
+    route = await routeMessage(tx, orgId, contactId, spec)
+    link = null
+  }
   if ("cause" in route) return cannot(route.detail, route.cause)
+  const linkedText = link ? withLinkLine(composed.text, spec.link, link.url) : composed.text
   try {
     let sent: { id: string }
     if (route.via === "plantilla" && route.template) {
@@ -2164,6 +2217,7 @@ export async function deliverJob(
         language: route.template.language,
         params: composed.params,
         buttons: composed.buttons,
+        ...(link ? { link: link.token } : {}),
         preview: composed.text,
       })
     } else if (route.via === "correo") {
@@ -2192,7 +2246,7 @@ export async function deliverJob(
         senderKind: "agent",
         content: {
           type: "text",
-          text: emailBody(composed, profile?.tradeName?.trim() || profile?.legalName || "", links),
+          text: emailBody({ ...composed, text: linkedText }, profile?.tradeName?.trim() || profile?.legalName || "", links),
         },
       })
     } else {
@@ -2201,7 +2255,7 @@ export async function deliverJob(
         senderKind: "agent",
         content: {
           type: "text",
-          text: composed.text,
+          text: linkedText,
           ...(composed.buttons.length ? { buttons: composed.buttons } : {}),
         },
       })

@@ -1,5 +1,5 @@
 import { formatMoney } from "@odentia/clinical"
-import { addDays, dayMinutesIn, formatDayShort, hourLabel, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
+import { addDays, dayMinutesIn, formatDayShort, hourLabel, zonedDateOf } from "@odentia/ui-patterns"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 /**
@@ -51,20 +51,6 @@ export function dueWords(
   if (day === addDays(today, 1)) return `mañana${time}`
   if (day === addDays(today, -1)) return `ayer${time}`
   return `${formatDayShort(day)}${time}`
-}
-
-/** Fecha («2026-10-17») y minutos del día de un instante, en la zona de la clínica. */
-export function dueParts(
-  iso: string | null | undefined,
-  timeZone: string = activeOrgTimeZone(),
-): { date: string; minutes: number } | null {
-  if (!iso || Number.isNaN(Date.parse(iso))) return null
-  return { date: zonedDateOf(iso, timeZone), minutes: dayMinutesIn(iso, timeZone) }
-}
-
-/** El instante de una fecha y una hora elegidas en la zona de la clínica. */
-export function dueFromParts(date: string, minutes: number, timeZone: string = activeOrgTimeZone()): string {
-  return minutesToInstant(date, minutes, timeZone)
 }
 
 /**

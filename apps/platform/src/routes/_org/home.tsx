@@ -141,6 +141,7 @@ function HomePage() {
               onBudgets: setBudgets,
               onTake: canTake ? (row) => take.mutate(row) : undefined,
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
+              onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onVoidEncounter: (row) => {
                 setDiscardReason("")
                 setDiscarding(row)

@@ -106,6 +106,11 @@ export interface ProviderTemplate {
   variables: number
   /** Títulos de los botones de respuesta rápida, en orden. */
   buttons: string[]
+  /**
+   * Botón que abre una dirección, con su parte variable al final (`{{1}}`):
+   * «Su enlace» de cada persona. Nulo si la plantilla no lo tiene.
+   */
+  link?: { title: string; url: string } | null
 }
 
 /** Lo que se pide aprobar: texto, un ejemplo por variable y botones. */
@@ -116,6 +121,11 @@ export interface TemplateRequest {
   body: string
   examples: string[]
   buttons: string[]
+  /**
+   * Botón que abre una dirección fija con un dato al final (`…?token={{1}}`),
+   * con un ejemplo de la dirección completa. Va antes de los de respuesta.
+   */
+  link?: { title: string; url: string; example: string }
 }
 
 /** Aviso del proveedor: una plantilla cambió de estado. */
@@ -138,7 +148,8 @@ export interface OutboundMessage {
   kind:
     | { type: "text"; text: string; buttons?: ReplyButton[] }
     // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.
-    | { type: "template"; name: string; language: string; params: string[]; buttons?: ReplyButton[] }
+    // `link`: la parte variable de la dirección del botón que abre un enlace (va primero).
+    | { type: "template"; name: string; language: string; params: string[]; buttons?: ReplyButton[]; link?: string }
     // `url` es una URL firmada que el proveedor descarga al enviar.
     | {
         type: "media"

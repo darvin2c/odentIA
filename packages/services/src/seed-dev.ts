@@ -137,7 +137,8 @@ import { seedChannels } from "./seed-channels.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { registerToothFinding } from "./tooth-panel.js"
-import { createClinicalOrder, signConsentDocument } from "./clinical-forms.js"
+import { issuePersonalLink } from "./booking-links.js"
+import { createClinicalOrder, markConsentSentByLink, signConsentDocument } from "./clinical-forms.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
@@ -356,7 +357,6 @@ async function wipeSeed(): Promise<void> {
     "portal_challenge",
     "portal_passkey",
     "portal_verification",
-    "portal_request",
     "portal_grant",
     "portal_policy",
     "portal_access_log",
@@ -2847,6 +2847,32 @@ for (const seed of [
       paperDocumentId: sheet.id,
     })
   }
+}
+// «Su enlace» (fase 3, paso 6, ADR 0037): Pedro Ríos tiene su enlace para
+// completar lo que le falta (documento y fecha de nacimiento) y ver su cita; y
+// el consentimiento de la exodoncia se le envió a la paciente para firmarlo
+// desde su teléfono: en su página dice «Se le envió para firmar».
+if (pedroRiosPerson) {
+  const pedroLink = await db.transaction((tx) =>
+    issuePersonalLink(tx, ORG_A, { contactId: pedroRiosPerson, patientId: pedroRios.id, createdBy: ANA_ID }, { secretsKey }),
+  )
+  console.log(`«Su enlace» de Pedro Ríos (dental-smile): /reserva?token=${pedroLink.token}`)
+}
+{
+  const [exodonciaPending] = await db
+    .select({ id: consentDocument.id })
+    .from(consentDocument)
+    .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
+    .where(
+      and(
+        eq(consentDocument.organizationId, ORG_A),
+        eq(consentDocument.patientId, domainSeed.patientId),
+        eq(consentDocument.status, "pendiente"),
+        eq(consentTemplate.key, "exodoncia"),
+      ),
+    )
+    .limit(1)
+  if (exodonciaPending) await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
 }
 // Consentimientos firmados en la semilla: su PDF con huella, como al firmar
 // desde la API (mismo generador).
