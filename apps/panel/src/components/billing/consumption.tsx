@@ -24,6 +24,8 @@ export interface Consumption {
     amountCents: number
     baseAmountCents: number
   }>
+  /** Conversaciones ya cobradas que devuelven las citas recuperadas; ya restadas de la línea de la cita. */
+  refunds?: { count: number; amountCents: number }
   pendingRecoveries: number
   subtotalCents: number
   baseSubtotalCents: number
@@ -123,6 +125,12 @@ export function ConsumptionCard({
                 {AGENT_OF[line.kind].what(line.count)}
                 {line.kind === "cita" && data.pendingRecoveries > 0 ? (
                   <span className="font-normal text-muted-foreground"> · {data.pendingRecoveries} más esperan que el paciente asista</span>
+                ) : null}
+                {line.kind === "cita" && data.priced && data.refunds?.count ? (
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    · menos {money(data.refunds.amountCents)} de {data.refunds.count === 1 ? "la conversación ya cobrada que llevó a ella" : `${data.refunds.count} conversaciones ya cobradas que llevaron a ellas`}
+                  </span>
                 ) : null}
               </p>
             </div>

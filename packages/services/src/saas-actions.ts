@@ -2,8 +2,8 @@ import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDictationSuggestion, patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { type SaasActionKind, saasAction, saasCharge, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, like, lt, sql } from "drizzle-orm"
+import { type SaasActionKind, saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
 import { ServiceError } from "./errors.js"
 
@@ -277,7 +277,20 @@ export interface SaasActionRow {
   discountBps: number
   state: SaasActionState
   chargeId: string | null
+  /** De una cita recuperada: las conversaciones que llevaron a ella y ya se cobraron; se devuelven con la cita. */
+  refunds: SaasRefund[]
 }
+
+export interface SaasRefund {
+  actionId: string
+  occurredAt: Date
+  basePriceMicros: number
+  priceMicros: number
+}
+
+/** Lo que cuesta una acción en su tramo: la cita, menos lo que devuelve. */
+export const netMicros = (row: Pick<SaasActionRow, "priceMicros" | "refunds">): number =>
+  Math.max(0, (row.priceMicros ?? 0) - row.refunds.reduce((sum, refund) => sum + refund.priceMicros, 0))
 
 export interface SaasPeriod {
   start: Date
@@ -305,164 +318,161 @@ export async function currentSaasPeriod(tx: Db, orgId: string, now = new Date())
   return { start, end, credit: "mes", creditCents: pricing.creditCents }
 }
 
-const ACTION_COLUMNS = {
-  id: saasAction.id,
-  kind: saasAction.kind,
-  occurredAt: saasAction.occurredAt,
-  contactId: saasAction.contactId,
-  personName: contact.displayName,
-  conversationId: saasAction.conversationId,
-  appointmentId: saasAction.appointmentId,
-  channel: saasAction.channel,
-  detail: saasAction.detail,
-  basePriceMicros: saasAction.basePriceMicros,
-  priceMicros: saasAction.priceMicros,
-  discountBps: saasAction.discountBps,
-  chargeId: saasAction.chargeId,
-}
-
-const actionsFrom = (tx: Db, where: ReturnType<typeof and>) =>
-  tx
-    .select(ACTION_COLUMNS)
-    .from(saasAction)
-    .leftJoin(contact, and(eq(contact.id, saasAction.contactId), eq(contact.organizationId, saasAction.organizationId)))
-    .where(where)
-    .orderBy(asc(saasAction.occurredAt), asc(saasAction.id))
-
 /**
  * Las acciones de un tramo con su estado: del saldo de prueba o del crédito
  * hasta agotarlo, después por encima del crédito; la cita cuya asistencia se
  * deshizo queda anulada. Una sola definición para la pantalla y el cobro.
  *
- * La conversación que llevó a una cita recuperada va dentro de ella aunque la
- * cita se cuente en otro tramo: mientras esa cita sigue en pie, la
- * conversación queda «esperando» (no se cobra ni gasta crédito); si la persona
- * asiste, va dentro de la cita; si la cita no se da, se cobra en el primer
- * tramo que se cierre después, como una conversación más.
+ * La conversación que llevó a una cita recuperada se cobra en su tramo, como
+ * cualquiera; si la persona asiste, la cita la devuelve (`refunds`) y cuesta
+ * su precio menos esa conversación. Si aún no se cobró cuando se cuenta la
+ * cita (el mismo tramo), va dentro de ella y no se cobra.
  */
 export async function listPeriodActions(
   tx: Db,
   orgId: string,
   period: SaasPeriod & { creditCents: number },
 ): Promise<SaasActionRow[]> {
-  const own = await actionsFrom(
-    tx,
-    and(eq(saasAction.organizationId, orgId), gte(saasAction.occurredAt, period.start), lt(saasAction.occurredAt, period.end)),
-  )
-  const carried = period.credit === "mes" ? await heldConversations(tx, orgId, period.start) : []
-  const rows = [...carried, ...own]
-  const windows = await recoveryWindows(tx, orgId, rows)
-  const within = (row: (typeof rows)[number], state: RecoveryWindow["state"]) =>
-    row.kind === "conversacion" &&
-    windows.some(
-      (window) =>
-        window.state === state && window.contactId === row.contactId && row.occurredAt >= window.from && row.occurredAt <= window.to,
-    )
-  const attended = new Set(windows.filter((window) => window.state === "contada").map((window) => window.appointmentId))
-  let usedMicros = 0
-  const creditMicros = period.creditCents * 10_000
-  const result = rows.map((row) => {
-    let state: SaasActionState
-    if (row.kind === "cita" && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
-    else if (within(row, "contada")) state = "dentro_de_cita"
-    else if (within(row, "en_pie")) state = "esperando"
-    else if (row.priceMicros === null) state = "sin_precio"
-    else {
-      usedMicros += row.priceMicros
-      state = period.credit === "prueba" ? "prueba" : usedMicros <= creditMicros ? "credito" : "sobre_credito"
-    }
-    return { ...row, kind: row.kind as SaasActionKind, state }
-  })
-  // De lo que viene de tramos cerrados solo queda lo que este tramo cobra.
-  const carriedIds = new Set(carried.map((row) => row.id))
-  return result.filter((row) => !carriedIds.has(row.id) || row.state === "credito" || row.state === "sobre_credito")
-}
-
-interface RecoveryWindow {
-  appointmentId: string
-  contactId: string
-  /** Del mensaje del Administrador a la reserva. */
-  from: Date
-  to: Date
-  /** `contada`: la persona asistió y la cita se contó; `en_pie`: reservada y aún sin cerrar. */
-  state: "contada" | "en_pie"
-}
-
-/**
- * Las ventanas de cita recuperada de estas acciones, de cualquier tramo. Las
- * contadas salen de la acción `cita` con su cita atendida; las que siguen en
- * pie, de la misma regla de la cita recuperada (`recoveredSql`).
- */
-async function recoveryWindows(
-  tx: Db,
-  orgId: string,
-  rows: Array<{ kind: string; contactId: string | null; appointmentId: string | null }>,
-): Promise<RecoveryWindow[]> {
-  const contactIds = [...new Set(rows.filter((row) => row.kind === "conversacion" && row.contactId).map((row) => row.contactId as string))]
+  const rows = await tx
+    .select({
+      id: saasAction.id,
+      kind: saasAction.kind,
+      occurredAt: saasAction.occurredAt,
+      contactId: saasAction.contactId,
+      personName: contact.displayName,
+      conversationId: saasAction.conversationId,
+      appointmentId: saasAction.appointmentId,
+      channel: saasAction.channel,
+      windowStart: saasAction.windowStart,
+      detail: saasAction.detail,
+      basePriceMicros: saasAction.basePriceMicros,
+      priceMicros: saasAction.priceMicros,
+      discountBps: saasAction.discountBps,
+      chargeId: saasAction.chargeId,
+    })
+    .from(saasAction)
+    .leftJoin(contact, and(eq(contact.id, saasAction.contactId), eq(contact.organizationId, saasAction.organizationId)))
+    .where(and(eq(saasAction.organizationId, orgId), gte(saasAction.occurredAt, period.start), lt(saasAction.occurredAt, period.end)))
+    .orderBy(asc(saasAction.occurredAt), asc(saasAction.id))
   const appointmentIds = rows.filter((row) => row.kind === "cita" && row.appointmentId).map((row) => row.appointmentId as string)
-  if (!contactIds.length && !appointmentIds.length) return []
-  const list = (ids: string[]) => sql.join(ids.map((id) => sql`${id}`), sql`, `)
-  const counted = (await tx.execute(sql`
-    select s.appointment_id, s.contact_id, s.window_start, a.created_at
-    from saas_action s
-    join appointment a on a.id = s.appointment_id and a.organization_id = s.organization_id
-    where s.organization_id = ${orgId} and s.kind = 'cita' and a.status = 'atendida'
-      and (${contactIds.length ? sql`s.contact_id in (${list(contactIds)})` : sql`false`}
-        or ${appointmentIds.length ? sql`s.appointment_id in (${list(appointmentIds)})` : sql`false`})`)) as unknown as Array<{
-    appointment_id: string
-    contact_id: string
-    window_start: Date | string | null
-    created_at: Date | string
-  }>
-  const windows: RecoveryWindow[] = counted.map((row) => ({
-    appointmentId: row.appointment_id,
-    contactId: row.contact_id,
-    from: asDate(row.window_start ?? row.created_at),
-    to: asDate(row.created_at),
-    state: "contada",
-  }))
-  if (contactIds.length) {
-    const standing = (await tx.execute(
-      recoveredSql(orgId, sql`a.status in ('programada', 'confirmada') and pc.contact_id in (${list(contactIds)})`),
-    )) as unknown as RecoveredRow[]
-    for (const row of standing) {
-      windows.push({ appointmentId: row.appointment_id, contactId: row.contact_id, from: asDate(row.sent_at), to: asDate(row.created_at), state: "en_pie" })
+  const attended = new Set<string>()
+  const bookedAt = new Map<string, Date>()
+  if (appointmentIds.length) {
+    const found = (await tx.execute(sql`
+      select id, status, created_at from appointment
+      where organization_id = ${orgId} and id in (${sql.join(appointmentIds.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{
+      id: string
+      status: string
+      created_at: Date | string
+    }>
+    for (const item of found) {
+      if (item.status === "atendida") attended.add(item.id)
+      bookedAt.set(item.id, asDate(item.created_at))
     }
   }
-  return windows
+  // La conversación de la persona entre el mensaje del Administrador y la reserva va dentro de la cita.
+  const insideCita = (row: (typeof rows)[number]) =>
+    row.kind === "conversacion" &&
+    rows.some(
+      (cita) =>
+        cita.kind === "cita" &&
+        cita.contactId === row.contactId &&
+        cita.appointmentId !== null &&
+        attended.has(cita.appointmentId) &&
+        cita.windowStart !== null &&
+        row.occurredAt >= cita.windowStart &&
+        row.occurredAt <= (bookedAt.get(cita.appointmentId) ?? cita.occurredAt),
+    )
+  const refunds = await refundsOf(
+    tx,
+    orgId,
+    rows.filter((row) => row.kind === "cita" && row.appointmentId !== null && attended.has(row.appointmentId)),
+  )
+  let usedMicros = 0
+  const creditMicros = period.creditCents * 10_000
+  return rows.map((row) => {
+    let state: SaasActionState
+    const own = refunds.get(row.id) ?? []
+    if (row.kind === "cita" && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
+    // La que aún no se cobró va dentro de la cita; la ya cobrada se devuelve con ella.
+    else if (row.chargeId === null && insideCita(row)) state = "dentro_de_cita"
+    else if (row.priceMicros === null) state = "sin_precio"
+    else {
+      usedMicros += netMicros({ priceMicros: row.priceMicros, refunds: own })
+      state = period.credit === "prueba" ? "prueba" : usedMicros <= creditMicros ? "credito" : "sobre_credito"
+    }
+    return {
+      refunds: state === "anulada" ? [] : own,
+      id: row.id,
+      kind: row.kind as SaasActionKind,
+      occurredAt: row.occurredAt,
+      contactId: row.contactId,
+      personName: row.personName,
+      conversationId: row.conversationId,
+      appointmentId: row.appointmentId,
+      channel: row.channel,
+      detail: row.detail,
+      basePriceMicros: row.basePriceMicros,
+      priceMicros: row.priceMicros,
+      discountBps: row.discountBps,
+      state,
+      chargeId: row.chargeId,
+    }
+  })
 }
 
 /**
- * Conversaciones con precio de tramos ya cerrados que quedaron sin cobrar.
- * Con el plan activo, lo único que deja una conversación sin cargo al cerrar
- * su tramo es esperar su cita recuperada o ir dentro de ella: se vuelven a
- * mirar en cada tramo hasta que se cobran o la cita las cubre.
+ * Las conversaciones ya cobradas que llevaron a cada una de estas citas
+ * recuperadas (atendidas): de esa persona, entre el mensaje del Administrador
+ * y la reserva, en cualquier tramo. Si dos citas cubren la misma
+ * conversación, la devuelve la primera que se contó: nunca dos veces.
  */
-async function heldConversations(tx: Db, orgId: string, before: Date) {
-  const [sub] = await tx
-    .select({ activatedAt: saasSubscription.activatedAt })
-    .from(saasSubscription)
-    .where(eq(saasSubscription.organizationId, orgId))
-    .limit(1)
-  if (!sub?.activatedAt) return []
-  const [closed] = await tx
-    .select({ until: sql<Date | string | null>`max(${saasCharge.periodEnd})` })
-    .from(saasCharge)
-    .where(and(eq(saasCharge.organizationId, orgId), like(saasCharge.dedupeKey, "ciclo:%:final")))
-  if (!closed?.until) return []
-  const until = new Date(Math.min(asDate(closed.until).getTime(), before.getTime()))
-  if (until <= sub.activatedAt) return []
-  return actionsFrom(
-    tx,
-    and(
-      eq(saasAction.organizationId, orgId),
-      eq(saasAction.kind, "conversacion"),
-      isNull(saasAction.chargeId),
-      isNotNull(saasAction.priceMicros),
-      gte(saasAction.occurredAt, sub.activatedAt),
-      lt(saasAction.occurredAt, until),
-    ),
-  )
+async function refundsOf(
+  tx: Db,
+  orgId: string,
+  citas: Array<{ id: string; contactId: string | null; chargeId: string | null }>,
+): Promise<Map<string, SaasRefund[]>> {
+  const result = new Map<string, SaasRefund[]>()
+  const contactIds = [...new Set(citas.map((cita) => cita.contactId).filter((id): id is string => id !== null))]
+  if (!contactIds.length) return result
+  const found = (await tx.execute(sql`
+    with cita as (
+      select s.id, s.contact_id, s.window_start, a.created_at as booked_at, s.occurred_at
+      from saas_action s
+      join appointment a on a.id = s.appointment_id and a.organization_id = s.organization_id
+      where s.organization_id = ${orgId} and s.kind = 'cita' and a.status = 'atendida' and s.window_start is not null
+        and s.contact_id in (${sql.join(contactIds.map((id) => sql`${id}`), sql`, `)})
+    )
+    select v.id, v.occurred_at, v.base_price_micros, v.price_micros, v.charge_id,
+      (select cita.id from cita
+        where cita.contact_id = v.contact_id and v.occurred_at >= cita.window_start and v.occurred_at <= cita.booked_at
+        order by cita.occurred_at, cita.id limit 1) as cita_id
+    from saas_action v
+    where v.organization_id = ${orgId} and v.kind = 'conversacion' and v.charge_id is not null and v.price_micros is not null
+      and v.contact_id in (${sql.join(contactIds.map((id) => sql`${id}`), sql`, `)})
+    order by v.occurred_at, v.id`)) as unknown as Array<{
+    id: string
+    occurred_at: Date | string
+    base_price_micros: string | number | null
+    price_micros: string | number
+    charge_id: string
+    cita_id: string | null
+  }>
+  const chargeOf = new Map(citas.map((cita) => [cita.id, cita.chargeId]))
+  for (const row of found) {
+    if (!row.cita_id || !chargeOf.has(row.cita_id)) continue
+    // Cobrada en el mismo cargo que su cita no pasa: lo que se cobra junto ya va dentro.
+    if (chargeOf.get(row.cita_id) === row.charge_id) continue
+    const list = result.get(row.cita_id) ?? []
+    list.push({
+      actionId: row.id,
+      occurredAt: asDate(row.occurred_at),
+      basePriceMicros: Number(row.base_price_micros ?? row.price_micros),
+      priceMicros: Number(row.price_micros),
+    })
+    result.set(row.cita_id, list)
+  }
+  return result
 }
 
 /** Citas recuperadas que aún esperan que el paciente asista: no se cobran todavía. */
@@ -493,6 +503,7 @@ export async function listPendingRecoveries(tx: Db, orgId: string): Promise<Saas
     discountBps: base === null ? 0 : pricing.discountBps,
     state: "esperando",
     chargeId: null,
+    refunds: [],
   }))
 }
 
@@ -512,6 +523,8 @@ export interface SaasConsumption {
   priced: boolean
   discountBps: number
   lines: SaasConsumptionLine[]
+  /** Conversaciones ya cobradas que devuelven las citas recuperadas del tramo (restadas de la línea de la cita). */
+  refunds: { count: number; amountCents: number }
   pendingRecoveries: number
   subtotalCents: number
   baseSubtotalCents: number
@@ -530,13 +543,15 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   const pricing = await getActionPricing(tx, orgId)
   const actions = await listPeriodActions(tx, orgId, period)
   const pending = await listPendingRecoveries(tx, orgId)
-  // Lo anulado, lo que va dentro de una cita y lo que la espera no suman.
-  const billable = actions.filter((row) => row.state !== "anulada" && row.state !== "dentro_de_cita" && row.state !== "esperando")
+  const billable = actions.filter((row) => row.state !== "anulada" && row.state !== "dentro_de_cita")
   const kinds: SaasActionKind[] = ["conversacion", "consulta", "cita"]
   const lines = kinds.map((kind) => {
     const ofKind = billable.filter((row) => row.kind === kind)
-    const price = ofKind.reduce((sum, row) => sum + (row.priceMicros ?? 0), 0)
-    const base = ofKind.reduce((sum, row) => sum + (row.basePriceMicros ?? 0), 0)
+    const price = ofKind.reduce((sum, row) => sum + netMicros(row), 0)
+    const base = ofKind.reduce(
+      (sum, row) => sum + Math.max(0, (row.basePriceMicros ?? 0) - row.refunds.reduce((total, refund) => total + refund.basePriceMicros, 0)),
+      0,
+    )
     const currentBase = pricing.base[kind]
     return {
       kind,
@@ -553,7 +568,7 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   let exhaustedAt: Date | null = null
   for (const row of billable) {
     if (row.priceMicros === null) continue
-    used += row.priceMicros
+    used += netMicros(row)
     if (exhaustedAt === null && creditMicros > 0 && used >= creditMicros) exhaustedAt = row.occurredAt
   }
   const elapsed = Math.min(1, Math.max(0, (now.getTime() - period.start.getTime()) / (period.end.getTime() - period.start.getTime())))
@@ -563,6 +578,10 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
     priced: kinds.some((kind) => pricing.base[kind] !== null),
     discountBps: pricing.discountBps,
     lines,
+    refunds: {
+      count: billable.reduce((sum, row) => sum + row.refunds.length, 0),
+      amountCents: microsToCents(billable.reduce((sum, row) => sum + (row.priceMicros ?? 0) - netMicros(row), 0)),
+    },
     pendingRecoveries: pending.length,
     subtotalCents,
     baseSubtotalCents: lines.reduce((sum, line) => sum + line.baseAmountCents, 0),

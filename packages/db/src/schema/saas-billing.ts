@@ -520,8 +520,9 @@ export const saasWhatsappRate = pgTable(
 
 /**
  * Línea congelada de un cargo del cobro por acción (ADR 0031): la cuota, las
- * acciones por encima del crédito por tipo, lo que cubrió el crédito (importe
- * 0, para que se vea) y el impuesto. Inmutable como el cargo.
+ * acciones por encima del crédito por tipo, la devolución de las conversaciones
+ * ya cobradas que llevaron a una cita recuperada (negativa), lo que cubrió el
+ * crédito (importe 0, para que se vea) y el impuesto. Inmutable como el cargo.
  */
 export const saasChargeLine = pgTable(
   "saas_charge_line",
@@ -541,8 +542,12 @@ export const saasChargeLine = pgTable(
   (table) => [
     index("saas_charge_line_charge_idx").on(table.organizationId, table.chargeId, table.sortOrder),
     foreignKey({ columns: [table.organizationId, table.chargeId], foreignColumns: [saasCharge.organizationId, saasCharge.id] }),
-    check("saas_charge_line_kind_check", sql`${table.kind} IN ('cuota','conversacion','consulta','cita','credito','impuesto')`),
-    check("saas_charge_line_amount_check", sql`${table.amountCents} >= 0 AND ${table.quantity} >= 0`),
+    check("saas_charge_line_kind_check", sql`${table.kind} IN ('cuota','conversacion','consulta','cita','devolucion','credito','impuesto')`),
+    // Solo la devolución resta: la conversación ya cobrada que llevó a una cita recuperada.
+    check(
+      "saas_charge_line_amount_check",
+      sql`${table.quantity} >= 0 AND CASE WHEN ${table.kind} = 'devolucion' THEN ${table.amountCents} <= 0 ELSE ${table.amountCents} >= 0 END`,
+    ),
   ],
 )
 
