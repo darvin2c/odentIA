@@ -239,6 +239,10 @@ export const saasCharge = pgTable(
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
     paidCents: integer("paid_cents").notNull().default(0),
+    /** Cargo del cobro por acción: lo que suman sus líneas sin impuesto, y el impuesto. Manual: null y 0. */
+    subtotalCents: integer("subtotal_cents"),
+    taxCents: integer("tax_cents").notNull().default(0),
+    taxLabel: text("tax_label"),
     status: text("status").notNull().default("pendiente"),
     dueAt: timestamp("due_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
@@ -511,6 +515,34 @@ export const saasWhatsappRate = pgTable(
     uniqueIndex("saas_whatsapp_rate_country_category_uidx").on(table.countryCode, table.category),
     check("saas_whatsapp_rate_category_check", sql`${table.category} IN ('marketing','utility','authentication')`),
     check("saas_whatsapp_rate_price_check", sql`${table.priceMicros} >= 0`),
+  ],
+)
+
+/**
+ * Línea congelada de un cargo del cobro por acción (ADR 0030): la cuota, las
+ * acciones por encima del crédito por tipo, lo que cubrió el crédito (importe
+ * 0, para que se vea) y el impuesto. Inmutable como el cargo.
+ */
+export const saasChargeLine = pgTable(
+  "saas_charge_line",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    chargeId: uuid("charge_id").notNull(),
+    kind: text("kind").notNull(),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    unitBaseMicros: bigint("unit_base_micros", { mode: "number" }),
+    unitPriceMicros: bigint("unit_price_micros", { mode: "number" }),
+    amountCents: integer("amount_cents").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("saas_charge_line_charge_idx").on(table.organizationId, table.chargeId, table.sortOrder),
+    foreignKey({ columns: [table.organizationId, table.chargeId], foreignColumns: [saasCharge.organizationId, saasCharge.id] }),
+    check("saas_charge_line_kind_check", sql`${table.kind} IN ('cuota','conversacion','consulta','cita','credito','impuesto')`),
+    check("saas_charge_line_amount_check", sql`${table.amountCents} >= 0 AND ${table.quantity} >= 0`),
   ],
 )
 

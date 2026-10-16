@@ -101,7 +101,11 @@ export function ConsumptionCard({
           <p className="rounded-lg bg-muted px-3 py-2 text-sm">
             Este mes no se cobra: así sería tu factura. Revisa que cada acción sea correcta en «Ver cada acción».
           </p>
-        ) : null}
+        ) : (
+          <p className="text-sm">
+            Se factura al cerrar tu mes, el {day(data.period.end)}: la cuota y lo que pase del crédito, más {data.tax?.label ?? "impuestos"}.
+          </p>
+        )}
       </div>
 
       {!data.priced ? (

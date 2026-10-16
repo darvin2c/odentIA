@@ -629,13 +629,11 @@ export function planMarginScenario(plan: {
 }
 
 /**
- * ¿Lo de este tramo se factura? Mientras el cobro por acción no emite cargos
- * (fase 4 de la ADR 0030) la clínica ve «así sería tu factura».
+ * ¿Lo de este tramo se factura? Sí con el plan activo (o en gracia) y fuera
+ * de la demo: el ciclo emite el cargo al cerrar el tramo.
  */
 export function isChargingPeriod(status: string, isDemo: boolean): boolean {
-  void status
-  void isDemo
-  return false
+  return !isDemo && (status === "activa" || status === "gracia")
 }
 
 /** Impuesto que se suma a la factura de odentIA según el país de la clínica. */

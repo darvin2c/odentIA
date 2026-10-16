@@ -13,6 +13,7 @@ import { SubscriptionStatusCard, type BillingSummary } from "../../components/bi
 import { ConsumptionCard, type Consumption } from "../../components/billing/consumption"
 import { type OfferPlan, PlanOffer } from "../../components/billing/plan-offer"
 import { SpendCapDrawer } from "../../components/billing/spend-cap"
+import { ChargesList, type ChargeLine } from "../../components/billing/charges"
 import { formatPlanMoney } from "../../components/billing/money"
 import { apiFetch, ApiError } from "../../lib/api"
 
@@ -23,9 +24,12 @@ export const Route = createFileRoute("/_app/billing/$organizationId")({
 type Plan = OfferPlan
 
 interface Charge extends ReceiptCharge {
+  planName: string
   periodStart: string
   periodEnd: string
+  paidCents: number
   dueAt: string | null
+  lines?: ChargeLine[]
 }
 
 interface Payment {
@@ -206,6 +210,19 @@ function BillingPage() {
               />
             ))}
           </div>
+        )}
+      </section>
+
+      <section aria-labelledby="cargos" className="flex flex-col gap-2">
+        <h2 id="cargos" className="text-base font-semibold">
+          Tus cargos
+        </h2>
+        {charges.isPending ? (
+          <LoadingState message="Cargando cargos…" />
+        ) : charges.isError ? (
+          <p className="text-sm text-muted-foreground">No se pudieron cargar los cargos.</p>
+        ) : (
+          <ChargesList charges={charges.data} />
         )}
       </section>
 

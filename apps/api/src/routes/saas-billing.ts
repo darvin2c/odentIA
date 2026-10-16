@@ -37,6 +37,7 @@ import {
   getOrganizationBillingSummary,
   getSaasConsumption,
   listPendingRecoveries,
+  listSaasChargeLines,
   listPeriodActions,
   getSaasReceiptUrl,
   getSaasSubscription,
@@ -1062,8 +1063,13 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountOwnerOrAdmin(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve los cargos"), 403)
+    // Cada cargo con sus líneas: la factura suma exactamente lo que se ve (ADR 0030).
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listSaasCharges(tx, orgId)),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const charges = await listSaasCharges(tx, orgId)
+        const lines = await listSaasChargeLines(tx, orgId, charges.map((charge) => charge.id))
+        return charges.map((charge) => ({ ...charge, lines: lines.filter((line) => line.chargeId === charge.id) }))
+      }),
     )
   })
 
