@@ -5,7 +5,8 @@ import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { listHandoffs } from "./agent-operations.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
-import { unansweredSinceSql } from "./conversation-state.js"
+import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
+import { handoffOpenExistsSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -14,7 +15,9 @@ import {
   WAITING_LIMITS,
   type WaitingBudgets,
   type WaitingCase,
+  type WaitingStillOpen,
   type WaitingTask,
+  type WaitingUnconfirmed,
 } from "./workspace-home.js"
 
 export interface WorkspaceAccess {
@@ -37,17 +40,65 @@ export interface WorkspaceAccess {
   ownAppointments: boolean
 }
 
-export async function createWorkspaceNotification(tx: Db, orgId: string, input: {
-  userId: string; dedupeKey: string; title: string; body: string; href: string; permission: string
-}) {
+/**
+ * Lo que dice un aviso. `subject` es su asunto cuando tiene uno que se resuelve
+ * (ver `NOTICE_SUBJECTS`); `actorUserId`, quien hizo lo que se avisa: nadie
+ * recibe aviso de algo que hizo él mismo.
+ */
+export interface WorkspaceNoticeInput {
+  userId: string
+  dedupeKey: string
+  title: string
+  body: string
+  href: string
+  /** Permiso que necesita quien lo lee: el aviso llega a quien lo tiene. */
+  permission: string
+  subject?: string | null
+  actorUserId?: string | null
+}
+
+/**
+ * Clases de asunto con su regla de «ya se resolvió» (`settleWorkspaceNotifications`).
+ * - `producto:<id>`: el stock volvió al mínimo (o el producto se desactivó).
+ * - `orden-clinica:<id>`: la orden dejó de estar solicitada.
+ * - `oportunidad:<id>`: se cerró o ya no la lleva quien recibió el aviso.
+ * - `modelo-del-agente`: el agente volvió a responder después del aviso.
+ */
+export const NOTICE_SUBJECTS = ["producto", "orden-clinica", "oportunidad", "modelo-del-agente"] as const
+
+/**
+ * La campana es para enterarse, no para trabajar: lo que pide trabajo está en
+ * «Te espera» (`getWorkspaceHome`) y no se avisa aquí. Devuelve si el aviso
+ * es para su destinatario (falso si lo hizo él mismo).
+ */
+async function checkNotice(tx: Db, orgId: string, input: WorkspaceNoticeInput): Promise<boolean> {
   if (!/^\/(?!\/)[a-zA-Z0-9/_?=&.%+-]*$/.test(input.href)) throw validation("El destino del aviso debe ser una ruta interna")
-  if (!input.title.trim() || input.title.length > 200 || input.body.length > 1000 || input.dedupeKey.length > 300)
+  if (!input.title.trim() || input.title.length > 200 || input.body.length > 1000 || input.dedupeKey.length > 300
+    || (input.subject?.length ?? 0) > 200)
     throw validation("El aviso excede los límites admitidos")
+  if (input.subject && !NOTICE_SUBJECTS.some((kind) => input.subject === kind || input.subject?.startsWith(`${kind}:`)))
+    throw validation("El asunto del aviso no es de una clase conocida")
+  if (input.actorUserId && input.actorUserId === input.userId) return false
   const [recipient] = await tx.select({ id: member.id }).from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, input.userId))).limit(1)
   if (!recipient) throw notFound("Destinatario")
-  await tx.insert(workspaceNotification).values({ organizationId: orgId, ...input })
-    .onConflictDoNothing({ target: [workspaceNotification.organizationId, workspaceNotification.userId, workspaceNotification.dedupeKey] })
+  return true
+}
+
+function noticeRow(orgId: string, { actorUserId: _actor, subject, ...input }: WorkspaceNoticeInput) {
+  return { organizationId: orgId, ...input, subject: subject ?? null }
+}
+
+export async function createWorkspaceNotification(tx: Db, orgId: string, input: WorkspaceNoticeInput) {
+  if (!(await checkNotice(tx, orgId, input))) return
+  // La misma clave no avisa dos veces, salvo que el aviso anterior se haya
+  // retirado por resolverse: entonces el asunto volvió y se avisa de nuevo.
+  await tx.insert(workspaceNotification).values(noticeRow(orgId, input))
+    .onConflictDoUpdate({
+      target: [workspaceNotification.organizationId, workspaceNotification.userId, workspaceNotification.dedupeKey],
+      set: { title: input.title, body: input.body, href: input.href, readAt: null, resolvedAt: null, createdAt: sql`now()` },
+      setWhere: sql`${workspaceNotification.resolvedAt} is not null`,
+    })
 }
 
 /**
@@ -55,78 +106,74 @@ export async function createWorkspaceNotification(tx: Db, orgId: string, input: 
  * cambia su texto (una cuenta que sube) y vuelve a quedar sin leer solo cuando
  * el texto cambió. Para avisos que no cambian, `createWorkspaceNotification`.
  */
-export async function upsertWorkspaceNotification(tx: Db, orgId: string, input: {
-  userId: string; dedupeKey: string; title: string; body: string; href: string; permission: string
-}) {
-  if (!/^\/(?!\/)[a-zA-Z0-9/_?=&.%+-]*$/.test(input.href)) throw validation("El destino del aviso debe ser una ruta interna")
-  if (!input.title.trim() || input.title.length > 200 || input.body.length > 1000 || input.dedupeKey.length > 300)
-    throw validation("El aviso excede los límites admitidos")
-  const [recipient] = await tx.select({ id: member.id }).from(member)
-    .where(and(eq(member.organizationId, orgId), eq(member.userId, input.userId))).limit(1)
-  if (!recipient) throw notFound("Destinatario")
-  await tx.insert(workspaceNotification).values({ organizationId: orgId, ...input })
+export async function upsertWorkspaceNotification(tx: Db, orgId: string, input: WorkspaceNoticeInput) {
+  if (!(await checkNotice(tx, orgId, input))) return
+  await tx.insert(workspaceNotification).values(noticeRow(orgId, input))
     .onConflictDoUpdate({
       target: [workspaceNotification.organizationId, workspaceNotification.userId, workspaceNotification.dedupeKey],
       set: {
         title: input.title,
         body: input.body,
         href: input.href,
-        readAt: sql`case when ${workspaceNotification.title} = ${input.title} and ${workspaceNotification.body} = ${input.body}
-          then ${workspaceNotification.readAt} else null end`,
+        readAt: sql`case when ${workspaceNotification.resolvedAt} is null and ${workspaceNotification.title} = ${input.title}
+          and ${workspaceNotification.body} = ${input.body} then ${workspaceNotification.readAt} else null end`,
+        createdAt: sql`case when ${workspaceNotification.resolvedAt} is null then ${workspaceNotification.createdAt} else now() end`,
+        resolvedAt: null,
       },
     })
 }
 
+/** El id del asunto: lo que va después de `<clase>:`. */
+const subjectId = (kind: string) => sql`substr(n.subject, ${kind.length + 2})`
+
+/**
+ * Retira los avisos cuyo asunto ya se resolvió (anota `resolved_at`; los avisos
+ * no se borran). Es la única regla que retira avisos: ninguna pantalla ni
+ * servicio los retira caso por caso. Se aplica al
+ * leer la campana y, con `subject`, cuando cambia el asunto (el stock se
+ * repone), para que el siguiente aviso vuelva a llegar. Un aviso sin asunto
+ * solo informa y queda hasta que se lee.
+ */
+export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope: { userId?: string; subject?: string } = {}) {
+  await tx.execute(sql`update workspace_notification n set resolved_at = now()
+    where n.organization_id = ${orgId} and n.subject is not null and n.resolved_at is null
+      ${scope.userId ? sql`and n.user_id = ${scope.userId}` : sql``}
+      ${scope.subject ? sql`and n.subject = ${scope.subject}` : sql``}
+      and (
+        (n.subject like 'producto:%' and not exists (select 1 from product p
+          where p.organization_id = n.organization_id and p.id::text = ${subjectId("producto")} and p.is_active
+            and (select coalesce(sum(l.quantity_on_hand), 0) from product_lot l
+              where l.organization_id = p.organization_id and l.product_id = p.id) < p.min_stock))
+        or (n.subject like 'orden-clinica:%' and not exists (select 1 from clinical_order o
+          where o.organization_id = n.organization_id and o.id::text = ${subjectId("orden-clinica")} and o.status = 'solicitado'))
+        or (n.subject like 'oportunidad:%' and not exists (select 1 from opportunity o
+          where o.organization_id = n.organization_id and o.id::text = ${subjectId("oportunidad")}
+            and o.status = 'open' and o.assigned_user_id = n.user_id))
+        or (n.subject = 'modelo-del-agente' and exists (select 1 from agent_run_ledger r
+          where r.organization_id = n.organization_id and r.status in ('ok', 'handoff') and r.started_at > n.created_at))
+      )`)
+}
+
+/**
+ * Los avisos de quien mira: los que declaran un permiso que tiene, sin los que
+ * ya se resolvieron. Ninguno repite lo que está en «Te espera».
+ */
 export async function listWorkspaceNotifications(tx: Db, orgId: string, userId: string, permissions: string[]) {
-  // Materializa avisos de vencimiento para el destinatario, sin un temporizador en memoria.
-  if (permissions.includes("tasks.read")) {
-    const canReadCrm = permissions.includes("crm.read")
-    const canReadConversations = permissions.includes("conversations.read")
-    await tx.execute(sql`insert into workspace_notification
-      (organization_id, user_id, dedupe_key, title, body, href, permission)
-      select ${orgId}, ${userId}, 'task-due:' || id || ':' || due_at::text,
-        'Tarea vencida', title,
-        case
-          when ${canReadCrm} and opportunity_id is not null then '/opportunities/' || opportunity_id
-          when ${canReadConversations} and conversation_id is not null then '/inbox?conversation=' || conversation_id
-          when ${canReadCrm} and contact_id is not null then '/contacts/' || contact_id
-          else '/tasks?task=' || id
-        end,
-        case
-          when ${canReadCrm} and opportunity_id is not null then 'crm.read'
-          when ${canReadConversations} and conversation_id is not null then 'conversations.read'
-          when ${canReadCrm} and contact_id is not null then 'crm.read'
-          else 'tasks.read'
-        end
-      from task where organization_id = ${orgId} and assignee_user_id = ${userId}
-        and status = 'open' and due_at <= now()
-      on conflict (organization_id, user_id, dedupe_key) do nothing`)
-  }
-  if (permissions.includes("conversations.read")) {
-    await tx.execute(sql`insert into workspace_notification
-      (organization_id, user_id, dedupe_key, title, body, href, permission)
-      select ${orgId}, ${userId}, 'conversation:' || id || ':' || last_inbound_at::text,
-        'Conversación pendiente', 'Tienes un mensaje pendiente de atención.',
-        '/inbox?conversation=' || id, 'conversations.read'
-      from conversation where organization_id = ${orgId} and assigned_user_id = ${userId}
-        and status = 'open' and unread_count > 0 and last_inbound_at is not null
-      on conflict (organization_id, user_id, dedupe_key) do nothing`)
-  }
   if (permissions.length === 0) return { items: [], unread: 0 }
-  const scope = and(eq(workspaceNotification.organizationId, orgId), eq(workspaceNotification.userId, userId), inArray(workspaceNotification.permission, permissions))
-  const storedItems = await tx.select().from(workspaceNotification).where(scope)
+  await settleWorkspaceNotifications(tx, orgId, { userId })
+  const scope = and(eq(workspaceNotification.organizationId, orgId), eq(workspaceNotification.userId, userId),
+    inArray(workspaceNotification.permission, permissions), isNull(workspaceNotification.resolvedAt))
+  const items = await tx.select({
+    id: workspaceNotification.id, title: workspaceNotification.title, body: workspaceNotification.body,
+    href: workspaceNotification.href, createdAt: workspaceNotification.createdAt, readAt: workspaceNotification.readAt,
+  }).from(workspaceNotification).where(scope)
     .orderBy(desc(workspaceNotification.createdAt), desc(workspaceNotification.id)).limit(100)
-  const canReadConversations = permissions.includes("conversations.read")
-  const items = storedItems.map((item) => {
-    if (canReadConversations || !item.href.startsWith("/inbox?")) return item
-    const fallbackTask = new URL(item.href, "https://workspace.invalid").searchParams.get("fallbackTask")
-    return fallbackTask ? { ...item, href: `/tasks?task=${fallbackTask}` } : item
-  })
   const [count] = await tx.select({ value: sql<number>`count(*)::int` }).from(workspaceNotification)
     .where(and(scope, isNull(workspaceNotification.readAt)))
   return { items, unread: count?.value ?? 0 }
 }
 
+/** Abrir un aviso lo da por leído. */
 export async function readWorkspaceNotification(tx: Db, orgId: string, userId: string, id: string, permissions: string[]) {
   if (permissions.length === 0) throw notFound("Aviso")
   const [row] = await tx.update(workspaceNotification).set({ readAt: sql`coalesce(${workspaceNotification.readAt}, now())` })
@@ -135,6 +182,16 @@ export async function readWorkspaceNotification(tx: Db, orgId: string, userId: s
     .returning({ id: workspaceNotification.id })
   if (!row) throw notFound("Aviso")
   return row
+}
+
+/** «Marcar todo leído»: los avisos que quien mira puede ver. Devuelve cuántos cambió. */
+export async function readAllWorkspaceNotifications(tx: Db, orgId: string, userId: string, permissions: string[]) {
+  if (permissions.length === 0) return { read: 0 }
+  const rows = await tx.update(workspaceNotification).set({ readAt: sql`now()` })
+    .where(and(eq(workspaceNotification.organizationId, orgId), eq(workspaceNotification.userId, userId),
+      inArray(workspaceNotification.permission, permissions), isNull(workspaceNotification.readAt), isNull(workspaceNotification.resolvedAt)))
+    .returning({ id: workspaceNotification.id })
+  return { read: rows.length }
 }
 
 async function workspaceZone(tx: Db, orgId: string) {
@@ -244,46 +301,89 @@ async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean)
     .map(row => ({
       id: row.id, priority: row.priority, reason: row.reason, contactName: row.contactName,
       channel: row.channel, createdAt: row.createdAt, conversationId: row.conversationId,
+      unclaimed: row.assigneeUserId === null,
     }))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 }
 
 /**
  * Conversaciones que esperan respuesta (la vista «Esperan respuesta» de la
- * Bandeja, con su misma definición: también las cerradas que un mensaje
- * reabrió) y desde cuándo espera la que más lleva.
+ * Bandeja, con su misma definición) y desde cuándo espera la que más lleva.
+ * Con `withoutCases`, sin las que tienen un caso abierto del agente: esas ya
+ * son su propia fila y no se cuentan dos veces.
  */
-async function waitingConversations(tx: Db, orgId: string) {
+async function waitingConversations(tx: Db, orgId: string, withoutCases: boolean) {
+  const conv = sql.raw("c")
   const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
     with pending as (
-      select ${unansweredSinceSql(sql.raw("c"))} as since from conversation c where c.organization_id=${orgId} and c.status='open'
+      select ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
+        ${withoutCases ? sql`and not ${handoffOpenExistsSql(conv)}` : sql``}
     ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
   return row ?? { waiting: 0, oldestAt: null }
 }
 
+/**
+ * Conversaciones que siguen abiertas con una persona a cargo y sin mensajes
+ * desde hace las horas que eligió la clínica (`stillOpenWithPersonSql`): las de
+ * quien mira y, para quien atiende lo del agente o dirige, las que no tiene nadie.
+ */
+async function waitingStillOpen(tx: Db, orgId: string, userId: string, access: WorkspaceAccess): Promise<WaitingStillOpen | null> {
+  const conv = sql.raw("c")
+  const scope = access.allTasks
+    ? sql`true`
+    : access.agent
+      ? sql`(c.assigned_user_id = ${userId} or c.assigned_user_id is null)`
+      : sql`c.assigned_user_id = ${userId}`
+  const rows = await tx.execute<{ id: string; contactName: string | null; quietSince: string | null; total: number }>(sql`
+    select c.id, ct.display_name as "contactName",
+      ${iso(sql`greatest(coalesce(c.last_message_at, '-infinity'::timestamptz), c.attention_started_at)`)} as "quietSince",
+      count(*) over ()::int as total
+    from conversation c join contact ct on ct.id = c.contact_id and ct.organization_id = c.organization_id
+    where c.organization_id = ${orgId} and ${scope} and ${stillOpenWithPersonSql(conv)}
+    order by greatest(coalesce(c.last_message_at, '-infinity'::timestamptz), c.attention_started_at), c.id limit 1`)
+  const first = rows[0]
+  if (!first) return null
+  const one = first.total === 1
+  return { total: first.total, conversationId: one ? first.id : null, contactName: one ? first.contactName : null, quietSince: first.quietSince }
+}
+
+/** Citas que siguen sin confirmar después del primer recordatorio del agente, de la más próxima a la más lejana. */
+async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
+  const appt = sql.raw("a")
+  const rows = await tx.execute<{ [K in keyof WaitingUnconfirmed]: WaitingUnconfirmed[K] } & { total: number }>(sql`
+    select a.id, a.patient_id as "patientId", p.display_name as "patientName", p.phone,
+      ${iso(sql`a.starts_at`)} as "startsAt", b.name as "branchName", a.service_name as "serviceName",
+      count(*) over ()::int as total
+    from appointment a join patient p on p.id = a.patient_id and p.organization_id = ${orgId}
+    join branch b on b.id = a.branch_id and b.organization_id = ${orgId}
+    where a.organization_id = ${orgId} and ${remindedUnconfirmedSql(appt)}
+    order by a.starts_at, a.id limit ${WAITING_LIMITS.unconfirmed}`)
+  return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+}
+
 async function waitingTasks(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, dayEnd: SQL) {
   const areas = access.taskAreas?.length ? sql`or (t.assignee_user_id is null and t.area in ${[...access.taskAreas]})` : sql``
-  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId} ${areas})`
-  type Row = Omit<WaitingTask, "href"> & { contactId: string | null; conversationId: string | null; opportunityId: string | null }
+  // La tarea de un caso del agente no es otra fila: el caso ya está en la lista.
+  const cases = access.agent
+    ? sql`and not exists (select 1 from agent_handoff h where h.organization_id = t.organization_id and h.task_id = t.id)`
+    : sql``
+  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}`
+  type Row = Omit<WaitingTask, "href"> & { conversationId: string | null }
   const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
       case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
         when t.due_at < ${dayEnd} then 'today' else 'later' end as due,
       coalesce(t.assignee_user_id=${userId}, false) as mine, u.name as "assigneeName",
-      t.contact_id as "contactId", t.conversation_id as "conversationId", t.opportunity_id as "opportunityId"
+      t.conversation_id as "conversationId",
+      ${access.crm ? sql`(select o.title from opportunity o where o.id = t.opportunity_id and o.organization_id = t.organization_id)` : sql`null`} as "opportunityTitle"
     from task t left join "user" u on u.id=t.assignee_user_id where ${scope}`
   const overdue = await tx.execute<Row>(sql`${select} and t.due_at < now() order by t.due_at, t.id limit ${WAITING_LIMITS.overdueTasks}`)
   const [next] = await tx.execute<Row>(sql`${select} and (t.due_at is null or t.due_at >= now()) order by t.due_at asc nulls last, t.id limit 1`)
   const [count] = await tx.execute<{ open: number }>(sql`select count(*)::int as open from task t where ${scope}`)
-  // Cada tarea abre lo más cercano a su contexto que el rol puede ver.
-  const place = ({ contactId, conversationId, opportunityId, ...task }: Row): WaitingTask => ({
+  // Una tarea de una conversación abre el hilo; las demás (de una oportunidad,
+  // de una persona o sueltas) se abren en Tareas con la tarea a la vista.
+  const place = ({ conversationId, ...task }: Row): WaitingTask => ({
     ...task,
-    href: access.crm && opportunityId
-      ? `/opportunities/${opportunityId}`
-      : access.conversations && conversationId
-        ? `/inbox?conversation=${conversationId}`
-        : access.crm && contactId
-          ? `/contacts/${contactId}`
-          : `/tasks?task=${task.id}`,
+    href: access.conversations && conversationId ? `/inbox?conversation=${conversationId}` : `/tasks?task=${task.id}`,
   })
   return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
 }
@@ -321,14 +421,21 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const cash = access.finance && branch ? await getCashToday(tx, orgId, { branchId: branch.id }) : null
 
   const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
-  // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador.
-  const admin = options.can ? await getAdminRecommendations(tx, orgId, options.can) : { enabled: false, recommendations: [] }
+  // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador,
+  // y solo las que quien mira puede atender. Quien atiende solo ve lo suyo, y las
+  // recomendaciones son de toda la clínica: no las recibe.
+  const admin = options.can && !access.ownAppointments
+    ? await getAdminRecommendations(tx, orgId, options.can, { actionable: true })
+    : { enabled: false, recommendations: [] }
   const advice = admin.recommendations
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
   const waiting = composeWaiting({
     cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
-    conversations: access.conversations ? await waitingConversations(tx, orgId) : null,
+    // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
+    unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
+    conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent) : null,
+    stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,
     nextTask: tasks.next,
     openTasks: tasks.open,
@@ -344,6 +451,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     select exists(select 1 from professional_schedule where organization_id=${orgId} and is_active) as availability,
       exists(select 1 from schedule_chair where organization_id=${orgId} and is_active) as chairs,
       exists(select 1 from patient where organization_id=${orgId}) as patients`) : []
+  // Sin Recepción ni el Administrador no sale «Recordar la cita» ni ningún aviso:
+  // es un paso más de la puesta en marcha para quien puede encenderlos.
+  const agentStep = setup && options.can?.("agent.write") ? await adminRuntime(tx, orgId) : null
   // Con trabajo ya registrado, Inicio deja de ofrecer la puesta en marcha.
   const [activity] = await tx.execute<{ recorded: boolean }>(sql`
     select (
@@ -359,7 +469,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       or ${access.agent} and exists(select 1 from agent_proposal where organization_id=${orgId})
     ) as recorded`)
   return { date: day.date, timezone, locale, access, multiBranch: many, waiting, today, cash,
-    setup: setup ?? null, activity: { recorded: activity?.recorded ?? false } }
+    setup: setup ? { ...setup, ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}) } : null,
+    activity: { recorded: activity?.recorded ?? false } }
 }
 
 /** Una fila de «Actividad del equipo»: el registro y, además, cómo se dice con palabras. */

@@ -3,8 +3,10 @@ import { ErrorState, LoadingState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { channelLabel } from "../../lib/channels"
 import { type ContactFull, usePermission } from "../../lib/crm"
-import { type Patient, type PatientDocument, type PatientFull } from "../../lib/patients"
+import { PersonPicker } from "../person-picker"
+import type { PatientDocument, PatientFull } from "../../lib/patients"
 import {
   approvePortalRequestApi,
   formatPortalDate,
@@ -128,7 +130,6 @@ function ApproveForm({
   const queryClient = useQueryClient()
   const canAuthorizeDocs = usePermission("clinical.read")
   const canShareFinance = usePermission("finance.read")
-  const [q, setQ] = useState("")
   const [patientId, setPatientId] = useState("")
   const [contactId, setContactId] = useState("")
   const [conversationId, setConversationId] = useState("")
@@ -140,13 +141,6 @@ function ApproveForm({
   const [scopeAccount, setScopeAccount] = useState(false)
   const [documentIds, setDocumentIds] = useState<string[]>([])
 
-  const searchQuery = useQuery({
-    queryKey: ["portal-patient-search", q.trim()],
-    queryFn: () =>
-      apiFetch<{ data: Patient[] }>(`/api/patients?q=${encodeURIComponent(q.trim())}&limit=10`),
-    enabled: q.trim().length >= 2 && patientId === "",
-    retry: false,
-  })
   const patientQuery = useQuery({
     queryKey: ["portal-patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
@@ -167,7 +161,10 @@ function ApproveForm({
   })
 
   const contacts = patientQuery.data?.data.contacts ?? []
-  const conversations = (contactQuery.data?.data.conversations ?? []).filter((c) => c.status === "open")
+  // Una conversación cerrada también sirve: enviar el enlace la reabre (ADR 0024). Primero las abiertas.
+  const conversations = [...(contactQuery.data?.data.conversations ?? [])].sort(
+    (a, b) => Number(b.status === "open") - Number(a.status === "open"),
+  )
   const documents = documentsQuery.data?.data ?? []
   const [result, setResult] = useState<ApprovedPortalRequest | null>(null)
 
@@ -244,56 +241,22 @@ function ApproveForm({
         </span>
       </p>
       <div className="grid gap-2">
-        <Label htmlFor={`portal-approve-patient-${request.id}`}>Paciente verificado</Label>
-        {patientId === "" ? (
-          <>
-            <Input
-              id={`portal-approve-patient-${request.id}`}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Busca por nombre o documento…"
-            />
-            {searchQuery.data && (
-              <div className="grid gap-1">
-                {searchQuery.data.data.map((p) => (
-                  <Button
-                    key={p.id}
-                    variant="ghost"
-                    className="justify-start"
-                    onClick={() => {
-                      setPatientId(p.id)
-                      setContactId("")
-                      setConversationId("")
-                      setDocumentIds([])
-                    }}
-                  >
-                    {p.displayName} · N.º {p.patientNumber}
-                  </Button>
-                ))}
-                {searchQuery.data.data.length === 0 && (
-                  <p className="text-sm text-muted-foreground">Sin resultados.</p>
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium">{patientQuery.data?.data.patient.displayName ?? "Paciente"}</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setPatientId("")
-                setContactId("")
-                setConversationId("")
-                setDocumentIds([])
-                setQ("")
-              }}
-            >
-              Cambiar
-            </Button>
-          </div>
-        )}
+        {/* El buscador de personas de toda la aplicación, solo con pacientes (ADR 0029). */}
+        <PersonPicker
+          label="Paciente verificado"
+          patientsOnly
+          value={
+            patientId
+              ? { id: `ficha:${patientId}`, name: patientQuery.data?.data.patient.displayName ?? "Paciente", patientId }
+              : null
+          }
+          onChange={(person) => {
+            setPatientId(person?.patientId ?? "")
+            setContactId("")
+            setConversationId("")
+            setDocumentIds([])
+          }}
+        />
       </div>
 
       {patientId !== "" && (
@@ -336,7 +299,7 @@ function ApproveForm({
             <LoadingState message="Cargando conversaciones…" />
           ) : conversations.length === 0 ? (
             <p className="text-sm text-muted-foreground" role="alert">
-              Sin conversación abierta para este contacto.
+              Este contacto no tiene conversaciones: escríbele primero desde la Bandeja para poder enviarle el enlace.
             </p>
           ) : (
             <Select
@@ -351,7 +314,8 @@ function ApproveForm({
               <SelectContent>
                 {conversations.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.channel} · {c.connectionName ?? "sin conexión"}
+                    {channelLabel(c.channel)} · {c.connectionName ?? "sin conexión"}
+                    {c.status === "closed" ? " · cerrada, se reabre al enviar" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

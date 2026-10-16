@@ -397,25 +397,16 @@ function RegistrationSettings() {
           </li>
           <li className="flex min-h-11 items-center gap-3 p-3">
             <Checkbox
-              id="registro-recordatorios"
-              checked={askReminders}
-              onCheckedChange={(value) => setAskReminders(value === true)}
-              disabled={!canWrite}
-            />
-            <label htmlFor="registro-recordatorios" className="flex-1 text-sm font-medium">
-              Recordatorios de citas y controles
-            </label>
-          </li>
-          <li className="flex min-h-11 items-center gap-3 p-3">
-            <Checkbox
               id="registro-otros-mensajes"
               checked={askMessages}
               onCheckedChange={(value) => setAskMessages(value === true)}
               disabled={!canWrite}
             />
             <label htmlFor="registro-otros-mensajes" className="flex-1">
-              <span className="block text-sm font-medium">Otros mensajes de la clínica</span>
-              <span className="block text-sm text-muted-foreground">Inasistencias y presupuestos pendientes.</span>
+              <span className="block text-sm font-medium">Novedades y promociones de la clínica</span>
+              <span className="block text-sm text-muted-foreground">
+                Es lo único que pide permiso. Lo de su atención (citas, controles, presupuestos) no se pregunta: es parte del servicio.
+              </span>
             </label>
           </li>
         </ul>

@@ -43,7 +43,7 @@ import {
   type PortalContext,
   type PortalSessionView,
 } from "./portal.js"
-import { completeTask, createTask } from "./tasks.js"
+import { completeTask, createTask, settleTask } from "./tasks.js"
 
 /**
  * Portal del paciente: solicitudes iniciadas por el paciente, grants
@@ -262,15 +262,7 @@ async function expireStaleRequests(tx: Db, orgId: string): Promise<void> {
       ),
     )
     .returning({ taskId: portalRequest.taskId, id: portalRequest.id })
-  for (const row of stale) {
-    if (row.taskId) {
-      try {
-        await completeTask(tx, orgId, row.taskId)
-      } catch {
-        await auditPortal(tx, orgId, null, "portal.request_task_missing", "portal_request", row.id, {})
-      }
-    }
-  }
+  for (const row of stale) await settleRequestTask(tx, orgId, row.taskId, row.id, "la solicitud del portal venció")
 }
 
 /**
@@ -573,10 +565,15 @@ async function assertApprovalEvidence(
   throw validation("En modo manual, registra la evidencia de la verificación presencial (qué documento revisaste)")
 }
 
-async function settleRequestTask(tx: Db, orgId: string, taskId: string | null, requestId: string): Promise<void> {
+/**
+ * La tarea de revisar una solicitud: hecha cuando alguien la aprueba; si se
+ * rechaza o vence, se cierra sola diciendo por qué (ADR 0028).
+ */
+async function settleRequestTask(tx: Db, orgId: string, taskId: string | null, requestId: string, reason?: string): Promise<void> {
   if (!taskId) return
   try {
-    await completeTask(tx, orgId, taskId)
+    if (reason) await settleTask(tx, orgId, taskId, reason)
+    else await completeTask(tx, orgId, taskId)
   } catch {
     await auditPortal(tx, orgId, null, "portal.request_task_missing", "portal_request", requestId, {})
   }
@@ -620,7 +617,7 @@ export async function approvePortalRequest(
       .update(portalRequest)
       .set({ status: "expirada", updatedAt: new Date() })
       .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
-    await settleRequestTask(tx, orgId, request.taskId, requestId)
+    await settleRequestTask(tx, orgId, request.taskId, requestId, "la solicitud del portal venció")
     throw new ServiceError("PORTAL_EXPIRED", 409, "Esta solicitud venció; crea una nueva")
   }
   const patientRow = await requirePatient(tx, orgId, input.patientId)
@@ -710,6 +707,8 @@ export async function rejectPortalRequest(
     .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Solicitud de acceso")
+  // Rechazar cierra su tarea, igual que aprobar o vencer: ya no hay nada que revisar.
+  await settleRequestTask(tx, orgId, request.taskId, requestId, "la solicitud del portal se rechazó")
   await auditPortal(tx, orgId, actorUserId, "portal.request_rejected", "portal_request", requestId, {})
   return requestView(updated)
 }

@@ -15,7 +15,12 @@ import type { ConsentPurpose } from "@odentia/db/schema/automation"
  */
 
 /** Qué hace un botón cuando la persona lo toca. */
-export const REPLY_ACTIONS = ["confirmar", "responder", "baja"] as const
+/**
+ * Lo que puede devolver un botón. «permiso_si» y «permiso_no» son la respuesta
+ * a la pregunta del permiso general tras reservar: su id lleva la persona, no
+ * un trabajo (`generalPermissionButtons`).
+ */
+export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no"] as const
 export type ReplyAction = (typeof REPLY_ACTIONS)[number]
 
 export interface MessageButton {
@@ -71,8 +76,22 @@ export type MessageVariable = keyof typeof MESSAGE_VARIABLES
 /** Todo mensaje deja darse de baja con un toque, de ese tipo de mensaje y no de los demás. */
 const OPT_OUT: MessageButton = { action: "baja", title: "No enviar más" }
 
+/**
+ * Avisos de «Recordar la cita» cuando la cita cambia: se reservó, se movió o se
+ * canceló. Son de la misma línea (su permiso es el de recordatorios) y cada uno
+ * es un trabajo de su propio tipo, con la clave de su mensaje (ADR 0027).
+ */
+export const APPOINTMENT_NOTICE_KEYS = ["aviso_cita_reservada", "aviso_cita_movida", "aviso_cita_cancelada"] as const
+export type AppointmentNoticeKey = (typeof APPOINTMENT_NOTICE_KEYS)[number]
+
+export function isAppointmentNotice(kind: string): kind is AppointmentNoticeKey {
+  return (APPOINTMENT_NOTICE_KEYS as readonly string[]).includes(kind)
+}
+
 export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
+  // Los avisos de la cita van junto a su línea, «Recordar la cita».
+  ...APPOINTMENT_NOTICE_KEYS,
   "recordatorio_control",
   "seguimiento_presupuesto",
   "seguimiento_comercial",
@@ -150,6 +169,38 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     variables: ["persona", "cita_pasada", "clinica"],
     buttons: [{ action: "responder", title: "Sí, otra fecha", asks: "reservar" }, OPT_OUT],
     subject: "¿Te buscamos otra fecha?",
+  },
+  // Los tres avisos de «Recordar la cita». No piden confirmar: eso lo pide el
+  // recordatorio, cerca de la fecha.
+  aviso_cita_reservada: {
+    key: "aviso_cita_reservada",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_aviso_cita_reservada_v1",
+    body: "Hola, {{1}}. Tu cita en {{2}} quedó reservada: {{3}}. Si necesitas cambiarla, responde a este mensaje.",
+    variables: ["persona", "lugar", "citas"],
+    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, OPT_OUT],
+    subject: "Tu cita quedó reservada",
+  },
+  aviso_cita_movida: {
+    key: "aviso_cita_movida",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_aviso_cita_movida_v1",
+    body: "Hola, {{1}}. Tu cita en {{2}} cambió de fecha: ahora es {{3}}. Si no te queda bien, responde a este mensaje.",
+    variables: ["persona", "lugar", "citas"],
+    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, OPT_OUT],
+    subject: "Tu cita cambió de fecha",
+  },
+  aviso_cita_cancelada: {
+    key: "aviso_cita_cancelada",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_aviso_cita_cancelada_v1",
+    body: "Hola, {{1}}. Tu cita del {{2}} en {{3}} quedó cancelada. ¿Te buscamos otra fecha?",
+    variables: ["persona", "cita_pasada", "clinica"],
+    buttons: [{ action: "responder", title: "Sí, otra fecha", asks: "reservar" }, OPT_OUT],
+    subject: "Tu cita quedó cancelada",
   },
 }
 
@@ -287,6 +338,22 @@ const REPLY_PREFIX = "odentia"
 /** Lo que devuelve un botón cuando la persona lo toca: acción y trabajo que lo originó. */
 export function replyId(action: ReplyAction, jobId: string): string {
   return `${REPLY_PREFIX}:${action}:${jobId}`
+}
+
+/**
+ * La pregunta del permiso de novedades y promociones, una sola vez por
+ * persona, tras reservar (ADR 0030). Texto y botones fijos; la respuesta la
+ * resuelve el sistema sin modelo.
+ */
+export const GENERAL_PERMISSION_QUESTION = "¿Te podemos escribir para enviarte novedades y promociones de la clínica?"
+export const GENERAL_PERMISSION_YES = "¡Listo! Te enviaremos novedades y promociones. Puedes darte de baja cuando quieras."
+export const GENERAL_PERMISSION_NO = "Entendido: no te enviaremos novedades ni promociones."
+
+export function generalPermissionButtons(contactId: string): Array<{ id: string; title: string }> {
+  return [
+    { id: replyId("permiso_si", contactId), title: "Sí" },
+    { id: replyId("permiso_no", contactId), title: "No, gracias" },
+  ]
 }
 
 export function parseReplyId(value: string | null | undefined): { action: ReplyAction; jobId: string } | null {

@@ -13,11 +13,20 @@ export const workspaceNotification = pgTable("workspace_notification", {
   body: text("body").notNull(),
   href: text("href").notNull(),
   permission: text("permission").notNull(),
+  /**
+   * El asunto del aviso (`<clase>:<id>`), cuando tiene uno que se resuelve: el
+   * aviso se retira solo al resolverse (`settleWorkspaceNotifications`). Nulo en
+   * los avisos que solo informan.
+   */
+  subject: text("subject"),
+  /** Cuándo se retiró por resolverse su asunto: deja de mostrarse (el aviso no se borra). */
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   readAt: timestamp("read_at", { withTimezone: true }),
 }, table => [
   uniqueIndex("workspace_notification_recipient_key_uidx").on(table.organizationId, table.userId, table.dedupeKey),
   index("workspace_notification_recipient_date_idx").on(table.organizationId, table.userId, table.createdAt),
+  index("workspace_notification_subject_idx").on(table.organizationId, table.subject),
 ])
 
 /**

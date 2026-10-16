@@ -101,7 +101,7 @@ export async function listAgentActivity(
       title: sent
         ? (MESSAGE_TITLE[messageStatus ?? ""] ?? MESSAGE_TITLE.unknown)
         : r.kind === "derivacion"
-          ? "Derivó el caso al equipo"
+          ? "Te pasó el caso"
           : (ACTION_TITLE[r.action ?? ""] ?? "Propuso un cambio"),
       detail: r.detail,
       status: sent ? messageStatus : r.status,

@@ -1,4 +1,4 @@
-import { urgencyWord } from "./agent"
+import { AGENT_CASE_ROW, urgencyWord } from "./agent"
 import type { ConversationAttention, ConversationClosure, ResolvePreview } from "./crm"
 import { timeAgo } from "./crm"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
@@ -38,7 +38,7 @@ function since(iso: string): string {
 
 /**
  * La palabra de la fila y de la cabecera del hilo. Orden: cerrada; caso que
- * pasó al equipo; la tiene una persona (dice quién); escribió y espera
+ * te pasó el agente; la tiene una persona (dice quién); escribió y espera
  * respuesta; espera al paciente; la atiende el agente. Sin `attention` (respuesta antigua en caché)
  * una abierta no dice nada.
  */
@@ -51,11 +51,12 @@ export function conversationWords(input: {
   if (input.status === "closed") return { text: "Cerrada", tone: "closed" }
   const attention = input.attention
   if (!attention) return null
+  // Un solo nombre para lo que el agente le pasa al equipo (`AGENT_CASE_ROW`), con su urgencia «Ahora / Hoy / Sin apuro».
   if (attention.handoffPriority) {
     return attention.assignedName
-      ? { text: `Con el equipo · la atiende ${attention.assignedName}`, tone: "team" }
+      ? { text: `${AGENT_CASE_ROW} · la atiende ${attention.assignedName}`, tone: "team" }
       : {
-          text: `Con el equipo · ${urgencyWord(attention.handoffPriority).toLowerCase()}`,
+          text: `${AGENT_CASE_ROW} · ${urgencyWord(attention.handoffPriority)}`,
           tone: attention.handoffPriority === "alta" ? "urgent" : "team",
         }
   }
@@ -116,7 +117,7 @@ export function resolveWords(name: string, preview: ResolvePreview): { descripti
 export function pendingWords(handoffs: number, pendingContact: number, how: "resolver" | "cerrar"): string[] {
   const words: string[] = []
   if (handoffs > 0) {
-    const what = handoffs === 1 ? "el caso que pasó al equipo" : `los ${handoffs} casos que pasaron al equipo`
+    const what = handoffs === 1 ? "el caso que te pasó el agente" : `los ${handoffs} casos que te pasó el agente`
     words.push(
       how === "resolver"
         ? `También se dará por resuelto ${what}.`

@@ -50,6 +50,8 @@ function capabilitiesOf(memberRole: string): CrmCapabilities {
     // El caso muestra decisiones pendientes a quien supervisa o decide;
     // nunca clínica ni finanzas completas (ver servicios crm-workspace).
     agent: canAccessAny(memberRole, ["agent.read", "agent.decide"]),
+    // La próxima cita de la persona, solo para quien ve la agenda.
+    appointments: canAccess(memberRole, "appointments.read"),
   }
 }
 

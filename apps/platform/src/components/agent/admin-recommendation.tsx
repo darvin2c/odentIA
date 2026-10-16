@@ -9,6 +9,7 @@ import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { AdminPersonItem, WhoDoesIt } from "./admin-line"
+import { PersonLink } from "../person-link"
 
 const PREVIEW = 4
 const hour = (iso: string) => new Date(iso).toLocaleTimeString(activeOrgLocale(), { hour: "2-digit", minute: "2-digit" })
@@ -103,12 +104,12 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                 <ul className="flex flex-col divide-y rounded-xl border bg-card">
                   {rows.map((row) => (
                     <li key={row.id} className="flex flex-col px-3 py-2 text-sm">
-                      {row.patientId ? (
-                        <Link to="/patients/$patientId" params={{ patientId: row.patientId }} className="font-semibold text-primary hover:underline">
+                      {row.patientId || row.contactId ? (
+                        <PersonLink patientId={row.patientId} contactId={row.contactId} className="font-semibold text-primary hover:underline">
                           {row.personName}
-                        </Link>
+                        </PersonLink>
                       ) : row.opportunityId ? (
-                        <Link to="/opportunities/$opportunityId" params={{ opportunityId: row.opportunityId }} className="font-semibold text-primary hover:underline">
+                        <Link to="/pipeline" search={{ oportunidad: row.opportunityId }} className="font-semibold text-primary hover:underline">
                           {row.personName}
                         </Link>
                       ) : (

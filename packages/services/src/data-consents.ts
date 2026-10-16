@@ -28,7 +28,8 @@ export type DataConsentRow = typeof patientDataConsent.$inferSelect
 /** Finalidad del consentimiento de datos → permiso de mensajes que concede. */
 const MESSAGE_PERMISSION_OF: Record<string, MessagePermissionKey> = {
   recordatorios: "recordatorio",
-  comunicaciones: "seguimiento",
+  // El único permiso de mensajes que se pregunta: novedades y promociones (ADR 0030).
+  comunicaciones: "novedades",
 }
 
 /** Cómo quedó registrado el permiso según por dónde se otorgó el consentimiento. */
@@ -135,9 +136,11 @@ export async function grantDataConsent(
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar el consentimiento")
+  // Solo se pregunta el de novedades y promociones: lo demás es parte del servicio
+  // (ADR 0030) y no marcarlo aquí no lo apaga.
   await applyMessagePermissions(tx, orgId, actorUserId, grantor.id, {
     accepted: purposes,
-    asked: Object.keys(MESSAGE_PERMISSION_OF),
+    asked: ["comunicaciones", ...(purposes.includes("recordatorios") ? ["recordatorios"] : [])],
     channel,
   })
   if (!person.dataConsentAt) {

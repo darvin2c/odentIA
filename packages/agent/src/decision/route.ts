@@ -82,14 +82,16 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   derivar: ["request_human_handoff"],
   informacion: [...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica"],
   // Un agradecimiento o una despedida pueden cerrar la conversación (ADR 0024).
-  saludo: [...ALWAYS, "despedirse_y_cerrar"],
+  // «Sí, ahí estaré» a un recordatorio puede llegar como saludo: confirmar_cita la confirma.
+  // «Sí» a la pregunta del permiso general tras reservar también: responder_permiso_mensajes.
+  saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes"],
   clinico: [...ALWAYS],
   cita: [
-    ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta",
-    "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
+    ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
+    "responder_permiso_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
   ],
   cambio_cita: [
-    ...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "reprogramar_cita", "cancelar_cita", "confirmar_propuesta",
+    ...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "reprogramar_cita", "cancelar_cita", "confirmar_propuesta", "confirmar_cita",
     "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso",
   ],
 }

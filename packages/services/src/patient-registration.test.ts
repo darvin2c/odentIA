@@ -3,6 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
+import { getCaseBrief } from "./agent-case-brief.js"
 import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, getContact } from "./contacts.js"
@@ -21,10 +22,12 @@ import {
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
+import { listPersonNotes } from "./people.js"
 import { listResponsibilities } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
-import { sql } from "drizzle-orm"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { and, eq, sql } from "drizzle-orm"
+import { auditEvent } from "@odentia/db/schema/org"
 
 setupTestDb()
 
@@ -656,6 +659,134 @@ it("interno exige el contacto contextual en los vínculos y lo público rechaza 
       ),
     ),
   ).rejects.toMatchObject({ status: 400 })
+})
+
+it("al reservar, el equipo registra con lo mínimo a la persona de la conversación: lo que falta queda anotado y la identidad por revisar", async () => {
+  await seedActor()
+  // La clínica exige la fecha de nacimiento (configuración por defecto, publicada).
+  await publish("org_a")
+  const { person, threadId } = await makeContactWithConversation("org_a", "Carmen Huamán")
+  const minimal: RegistrationAnswers = {
+    demographics: { displayName: "Carmen Huamán", givenNames: "Carmen", paternalSurname: "Huamán", phone: "+51977000100" },
+    respondent: "staff",
+    privacyAccepted: false,
+  }
+  const self = [{ contactId: person.id, relationship: "self" as const, isPreferred: true }]
+  const register = (
+    context: Partial<{ conversationId: string; scope: "essentials" }>,
+    answers: RegistrationAnswers = minimal,
+    contacts: RegistrationInput["contacts"] = self,
+  ) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(
+        tx,
+        "org_a",
+        { kind: "internal", userId: ACTOR, contactId: person.id, ...context },
+        { submissionId: randomUUID(), answers, contacts },
+      ),
+    )
+
+  // El alta interna de siempre sigue exigiendo lo que pide la clínica (el fallo que se veía al reservar).
+  await expect(register({ conversationId: threadId })).rejects.toMatchObject({
+    status: 400,
+    message: "Fecha de nacimiento: obligatorio según la configuración del registro",
+  })
+  // Lo mínimo solo vale para la persona de una conversación, como su propia ficha, y solo con lo esencial.
+  await expect(register({ scope: "essentials" })).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, minimal, [{ ...self[0]!, relationship: "family" }]),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, { ...minimal, demographics: { ...minimal.demographics, occupation: "Abogada" } }),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, { ...minimal, health: emptyClinical() }),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    register({ conversationId: threadId, scope: "essentials" }, { ...minimal, demographics: { displayName: "Carmen", givenNames: "Carmen" } }),
+  ).rejects.toMatchObject({ status: 400 })
+  expect(await withOrgContext(appDb, "org_a", (tx) => listPatientsByContact(tx, "org_a", person.id))).toEqual([])
+
+  const created = await register({ conversationId: threadId, scope: "essentials" })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  expect(detail.patient).toMatchObject({ displayName: "Carmen Huamán", birthDate: null, identityNeedsReview: true })
+  expect(detail.contacts).toEqual([expect.objectContaining({ contactId: person.id, relationship: "self" })])
+  expect(detail.registration).toMatchObject({ entryPoint: "conversation", respondent: "staff", contextContactId: person.id, conversationId: threadId })
+  // Lo que la clínica pide y falta queda en el caso, con las mismas palabras que el enlace de reserva.
+  const notes = (await withOrgContext(appDb, "org_a", (tx) => getCaseBrief(tx, "org_a", threadId))).known.map((item) => item.text)
+  expect(notes).toContain("El equipo creó su ficha con lo mínimo al reservar. Falta en la clínica: confirmar apellidos y nombres, fecha de nacimiento.")
+})
+
+it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con lo mínimo y lo que falta queda en sus notas", async () => {
+  await seedActor()
+  await publish("org_a")
+  const answers = (phone?: string): RegistrationAnswers => ({
+    demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", paternalSurname: "Ríos", ...(phone ? { phone } : {}) },
+    respondent: "staff",
+    privacyAccepted: false,
+  })
+  const register = (input: { answers: RegistrationAnswers; contacts?: RegistrationInput["contacts"] }) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(tx, "org_a", { kind: "internal", userId: ACTOR, scope: "essentials" }, { submissionId: randomUUID(), ...input }),
+    )
+  // Sin teléfono no hay cómo ubicarlo; con vínculos ya no es «alguien nuevo».
+  await expect(register({ answers: answers() })).rejects.toMatchObject({ status: 400, message: "Indica el teléfono" })
+  const { person } = await makeContactWithConversation("org_a", "Otra Persona")
+  await expect(
+    register({ answers: answers("+51987111222"), contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }] }),
+  ).rejects.toMatchObject({ status: 400 })
+
+  const created = await register({ answers: answers("+51987111222") })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
+  expect(detail.patient).toMatchObject({ displayName: "Pedro Ríos", birthDate: null, identityNeedsReview: true })
+  expect(detail.registration).toMatchObject({ entryPoint: "platform", respondent: "staff", conversationId: null })
+  const self = detail.contacts.find((link) => link.relationship === "self")
+  expect(self).toBeTruthy()
+  const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", self!.contactId))
+  expect(notes.map((note) => note.body)).toContain(
+    "El equipo creó su ficha con lo mínimo al reservar. Falta en la clínica: confirmar apellidos y nombres, fecha de nacimiento.",
+  )
+})
+
+it("desde la Agenda, su teléfono pasa a ser su WhatsApp a nombre de quien la registra; si ya es de otra persona, no se mueve y se dice", async () => {
+  await seedActor()
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `wa-${orgId.slice(0, 8)}`)
+  const register = (givenNames: string, paternalSurname: string, phone: string) =>
+    withOrgContext(appDb, orgId, (tx) =>
+      registerPatient(tx, orgId, { kind: "internal", userId: ACTOR, scope: "essentials" }, {
+        submissionId: randomUUID(),
+        answers: { demographics: { displayName: `${givenNames} ${paternalSurname}`, givenNames, paternalSurname, phone }, respondent: "staff", privacyAccepted: false },
+      }),
+    )
+  const ownPerson = async (patientId: string) =>
+    (await withOrgContext(appDb, orgId, (tx) => getPatient(tx, orgId, patientId))).contacts.find((link) => link.relationship === "self")!.contactId
+  // Sin WhatsApp conectado no nace ninguna identidad.
+  const before = await register("Ana", "Lara", "+51987000301")
+  expect(before.whatsapp).toBeUndefined()
+  expect(await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, await ownPerson(before.id)))).toEqual([])
+  await withOrgContext(appDb, orgId, (tx) =>
+    createConnection(tx, orgId, KEY, {
+      channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA",
+      config: { phoneNumberId: "P", wabaId: "W", accessToken: "T", appSecret: "S" },
+    }, { fetch, validateExternal: false }),
+  )
+  // Con WhatsApp: la misma operación que «Escribirle», auditada a nombre de quien la registra.
+  const pedro = await register("Pedro", "Ríos", "+51987111222")
+  expect(pedro.whatsapp).toBe("creado")
+  const pedroPerson = await ownPerson(pedro.id)
+  const identities = await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, pedroPerson))
+  expect(identities.map((row) => [row.channel, row.externalUserId])).toEqual([["whatsapp", "wa:51987111222"]])
+  const trail = await ownerDb.select({ actor: auditEvent.actorUserId }).from(auditEvent)
+    .where(and(eq(auditEvent.organizationId, orgId), eq(auditEvent.entityId, pedroPerson), eq(auditEvent.action, "contact.identity_added")))
+  expect(trail).toEqual([{ actor: ACTOR }])
+  // El mismo número para otra persona: su ficha se crea igual, el número no se mueve y se dice.
+  const pablo = await register("Pablo", "Ríos", "+51987111222")
+  expect(pablo.whatsapp).toBe("en_uso")
+  expect(await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, await ownPerson(pablo.id)))).toEqual([])
+  const owner = await ownerDb.select({ contactId: contactIdentity.contactId }).from(contactIdentity)
+    .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.externalUserId, "wa:51987111222")))
+  expect(owner).toEqual([{ contactId: pedroPerson }])
 })
 
 it("enlace inválido o vacío no cae al formulario genérico", async () => {

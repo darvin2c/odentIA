@@ -17,6 +17,7 @@ import { sumAcceptedCents } from "@odentia/clinical"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
+import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -872,6 +873,15 @@ export async function deliverBudget(
     patientId,
     itemCount: lines.length,
   })
+  // Se une sola a la oportunidad del mismo tratamiento (o a la más reciente),
+  // que pasa a «Presupuesto enviado» (ADR 0028).
+  await linkPresentedBudget(tx, orgId, {
+    patientId,
+    budgetId,
+    serviceIds: lines.map((line) => line.serviceId).filter((id): id is string => !!id),
+    // Su valor pasa a ser el total presentado (la misma suma que ve el presupuesto).
+    total: { cents: sumCents(lines.map((line) => line.lineTotalCents)), currency: updated.currency },
+  })
   await notifyBudget(tx, orgId)
   return updated
 }
@@ -1156,6 +1166,18 @@ export async function decideBudget(
   if (!updated) throw notFound("Presupuesto")
   await audit(tx, orgId, actorUserId, "budget.decision", budgetId, {
     patientId, status, acceptedCount, decisionContactId: representative?.id ?? null,
+  })
+  // Aceptarlo, aunque sea en parte, gana su oportunidad; rechazarlo la pierde.
+  await decideBudgetOpportunity(tx, orgId, {
+    patientId,
+    budgetId,
+    status,
+    serviceIds: lines.map((line) => line.serviceId).filter((id): id is string => !!id),
+    // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
+    accepted: {
+      cents: sumAcceptedCents(lines.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: decisions.get(line.planItemId) }))),
+      currency: updated.currency,
+    },
   })
   await notifyBudget(tx, orgId)
   return withTotals(updated, await listBudgetLines(tx, orgId, patientId, budgetId))

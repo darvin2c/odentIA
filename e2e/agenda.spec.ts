@@ -591,6 +591,17 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   )
   expect(resources.defaultDurationMin).toBe(30)
 
+  // La clínica publica su registro, que pide la fecha de nacimiento: aun así se reserva con lo mínimo (fase 2.1).
+  const registration = await call<{ version: number; fields: Record<string, string> }>(page, "GET", "/api/patient-registration/config", owner.org.slug)
+  await call(page, "PUT", "/api/patient-registration/config", owner.org.slug, {
+    expectedVersion: registration.version, enabled: false, fields: registration.fields, privacyNotice: "Aviso de prueba.",
+  })
+  // Con WhatsApp conectado, el teléfono que escribe recepción pasa a ser su WhatsApp (alta manual, ADR 0027).
+  await call(page, "POST", "/api/channels/connections", owner.org.slug, {
+    channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA Agenda",
+    config: { phoneNumberId: "E2E-AGENDA", wabaId: "E2E-AGENDA-WABA", accessToken: "e2e", appSecret: "e2e-secret" },
+  }, 201)
+
   // Paciente nuevo: se registra con lo mínimo sin salir de «Nueva cita».
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
   await openBooking(page)
@@ -602,6 +613,12 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await expect(page.getByLabel("Nombres", { exact: true })).toHaveValue("Rosa")
   await expect(page.getByLabel("Apellidos", { exact: true })).toHaveValue("Quispe")
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
+  // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
+  await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()
+  // Lo único que pide permiso, opcional: lo que dijo por teléfono.
+  await expect(page.getByText("¿Acepta recibir novedades y promociones de la clínica?")).toBeVisible()
+  await page.getByRole("button", { name: "Sí, aceptó por teléfono" }).click()
+  await expect(page.getByRole("button", { name: "Sí, aceptó por teléfono" })).toHaveAttribute("aria-pressed", "true")
   // Una semana después el día entero está libre, sea la hora que sea hoy.
   await page.getByRole("button", { name: "Semana siguiente" }).click()
   const hours = page.getByRole("region", { name: /^Horas del/ })
@@ -620,6 +637,15 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
     owner.org.slug,
   )
   expect(people.map((person) => person.displayName)).toEqual(["Rosa Quispe"])
+  const rosaPerson = await call<{ personId: string }>(page, "GET", `/api/people/by-patient/${people[0]!.id}`, owner.org.slug)
+  const rosaPage = await call<{ channels: string[] }>(page, "GET", `/api/people/${rosaPerson.personId}`, owner.org.slug)
+  expect(rosaPage.channels).toEqual(["whatsapp"])
+  const said = await call<Array<{ purpose: string; granted: boolean | null; source: string | null }>>(
+    page, "GET", `/api/agent/admin/people/${rosaPerson.personId}/permissions`, owner.org.slug,
+  )
+  expect(said.find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "telefono" })
+  const rosaFicha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${people[0]!.id}`, owner.org.slug)
+  expect(rosaFicha.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
 
   // Urgencia: fuera del horario no se reserva sin más; se pregunta y queda dicho.
   await openBooking(page)

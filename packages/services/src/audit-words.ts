@@ -322,6 +322,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "opportunity.reopened": say("Reabrió una oportunidad"),
   "task.created": say("Creó una tarea"),
   "task.updated": say("Cambió una tarea"),
+  "task.settled": say("Una tarea se cerró sola: su motivo ya no estaba", "sistema"),
   // Conversaciones
   "conversation.started": say("Empezó una conversación"),
   "conversation.updated": say("Cambió una conversación"),
@@ -345,6 +346,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "agent.admin_once": say("Pidió al Administrador atender una línea solo esta vez"),
   "admin_line.updated": say("Cambió una línea del Administrador"),
   "admin_line.deleted": say("Eliminó una línea del Administrador"),
+  "admin_line.default_on": say("Prendió «Recordar la cita» al crear la clínica"),
   "admin_line.draft_saved": say("Dejó un borrador de cambio para una línea del Administrador"),
   "admin_line.draft_discarded": say("Descartó un borrador de cambio de una línea del Administrador"),
   "agent.proposal_created": say("Propuso una acción", "agente"),
@@ -372,6 +374,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "agent.error": say("Tuvo un error al responder", "agente"),
   "automation_consent.set": say("Cambió un permiso de mensajes de una persona"),
   "automation_consent.unsubscribed": say("Pidió no recibir más un tipo de mensaje", "paciente"),
+  "automation_consent.asked": say("Le preguntó si le puede escribir por sus controles y novedades", "agente"),
   "clinic_message.created": say("Creó un mensaje de WhatsApp de la clínica"),
   "clinic_message.text_changed": say("Cambió el texto de un mensaje de WhatsApp de la clínica"),
   "clinic_message.reverted": say("Volvió al texto anterior de un mensaje de WhatsApp de la clínica"),

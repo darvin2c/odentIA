@@ -54,7 +54,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft, ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
-import { ContactConversationDialog } from "../../components/contact-conversation-dialog"
+import { WriteToPersonDialog } from "../../components/write-to-person"
 import {
   CashCloseDrawer,
   CashMoveDrawer,
@@ -785,7 +785,7 @@ function DebtLine({
   canWrite: boolean
   /**
    * «Escribirle» (solo en Deudas y con permiso de conversaciones): abre su
-   * conversación abierta o, si no tiene, deja elegir por dónde escribirle.
+   * conversación en la Bandeja, la misma vía que en la ficha y la Agenda.
    */
   onMessage?: (row: DebtRow) => void
   onCollect: (patient: CollectTarget) => void
@@ -820,16 +820,7 @@ function DebtLine({
             </p>
           ) : null}
         </div>
-        {onMessage && row.conversationId ? (
-          <Link
-            to="/inbox"
-            search={{ conversation: row.conversationId }}
-            aria-label={`Escribirle a ${name}`}
-            className={buttonVariants({ variant: "ghost" })}
-          >
-            Escribirle
-          </Link>
-        ) : onMessage && row.contactId ? (
+        {onMessage && row.contactId ? (
           <Button variant="ghost" aria-label={`Escribirle a ${name}`} onClick={() => onMessage(row)}>
             Escribirle
           </Button>
@@ -1656,14 +1647,10 @@ function DebtsTab({
         Lo aceptado en un presupuesto que todavía no se atiende no aparece aquí: no es deuda.
       </p>
 
-      <ContactConversationDialog
+      <WriteToPersonDialog
         open={writeTo !== null}
         onClose={() => setWriteTo(null)}
-        contacts={
-          writeTo?.contactId
-            ? [{ contactId: writeTo.contactId, displayName: writeTo.displayName }]
-            : []
-        }
+        people={writeTo?.contactId ? [{ contactId: writeTo.contactId, displayName: writeTo.displayName }] : []}
       />
     </div>
   )

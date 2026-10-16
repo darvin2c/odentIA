@@ -379,6 +379,22 @@ describe("filtros de listas", () => {
     expect(onSelect).toHaveBeenCalledWith({ from: "2026-08-12", to: "2026-09-10" })
   })
 
+  it("plegada, la búsqueda dice «Buscar» para no cortar la ayuda; al abrirse, la ayuda completa", () => {
+    const { container } = render(
+      <FilterBar filters={[]} sortOptions={[]} searchPlaceholder="Buscar por nombre, teléfono o documento" />,
+    )
+    const row = within(container.querySelector<HTMLElement>('[data-filter-row="desktop"]') as HTMLElement)
+    const search = row.getByRole("searchbox", { name: "Buscar por nombre, teléfono o documento" })
+    expect(search.getAttribute("placeholder")).toBe("Buscar")
+    fireEvent.focus(search)
+    expect(search.getAttribute("placeholder")).toBe("Buscar por nombre, teléfono o documento")
+    fireEvent.blur(search)
+    expect(search.getAttribute("placeholder")).toBe("Buscar")
+    // En la fila compacta (teléfono) el campo no se pliega: muestra la ayuda entera.
+    const compact = within(container.querySelector<HTMLElement>('[class~="md:hidden"]') as HTMLElement)
+    expect(compact.getByRole("searchbox").getAttribute("placeholder")).toBe("Buscar por nombre, teléfono o documento")
+  })
+
   it("actualiza q con replace tras 300 ms", () => {
     vi.useFakeTimers()
     render(<SearchInput />)

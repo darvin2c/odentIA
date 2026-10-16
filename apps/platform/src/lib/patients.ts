@@ -1,5 +1,5 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
-import { activeFindingsAsOf, type FindingDetails } from "@odentia/clinical"
+import { activeFindingsAsOf, type FindingDetails, REGISTRATION_FIELDS, type RegistrationConfig } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
 
@@ -880,4 +880,33 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   return apiFetch<{
     data: Array<{ id: string; version: number; createdAt: string; createdBy: string | null }>
   }>(`/api/patients/${patientId}/anamnesis/history`)
+}
+
+/**
+ * Lo que le falta a la filiación: los datos que «Registro de pacientes» marca
+ * como obligatorios y la ficha no tiene. Un solo criterio para el Resumen y
+ * para Datos personales; la clínica decide qué es obligatorio, no la pantalla.
+ */
+/** «fecha de nacimiento, sexo y documento»: el tipo y el número de documento se dicen juntos. */
+export function filiationGapsText(gaps: string[]): string {
+  const words = [...new Set(gaps.map((gap) => (/documento/.test(gap) ? "documento" : gap)))]
+  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
+}
+
+export function missingFiliation(
+  config: Pick<RegistrationConfig, "fields">,
+  patient: Patient,
+): string[] {
+  return REGISTRATION_FIELDS.filter(
+    (field) =>
+      (field.step === "datos" || field.step === "contacto") &&
+      config.fields[field.key] === "required" &&
+      field.key !== "displayName" &&
+      !(field.key === "insuranceDetail" && !patient.insuranceType),
+  )
+    .filter((field) => {
+      const value = (patient as unknown as Record<string, unknown>)[field.key]
+      return value === null || value === undefined || value === ""
+    })
+    .map((field) => field.label.toLowerCase())
 }

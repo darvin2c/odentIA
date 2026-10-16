@@ -115,7 +115,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const derivedRow = page.getByRole("button").filter({ hasText: DERIVED_TEXT })
   // Cada fila dice en qué está con palabras del servidor, no solo con color.
   await expect(waitingRow).toContainText("Espera respuesta")
-  await expect(derivedRow).toContainText("Con el equipo · ahora")
+  await expect(derivedRow).toContainText("Te lo pasó el agente · Ahora")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -171,8 +171,8 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await proposeAppointment(waiting, "Cita el martes 3 de noviembre a las 10:00")
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const pending = page.getByRole("region", { name: "Te espera" })
-  // La derivación deja además su tarea: el caso es la fila que dice de dónde viene.
-  const homeCase = pending.getByRole("listitem").filter({ hasText: "Caso que pasó el agente" })
+  // Un caso, una fila: ni su tarea ni su conversación se repiten.
+  const homeCase = pending.getByRole("listitem").filter({ hasText: "Te lo pasó el agente" })
   await expect(homeCase).toContainText("Pide hablar con una persona")
   await expect(pending).not.toContainText("espera tu aprobación")
   await expect(pending).not.toContainText("Cita el martes 3 de noviembre")
@@ -197,7 +197,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await waitingRow.click()
   await expect(band).toBeVisible()
   await expect(chip("Con el equipo · 1")).toBeHidden()
-  await expect(page.getByPlaceholder("Buscar contacto")).toHaveCount(0)
+  await expect(page.getByPlaceholder("Buscar por nombre o teléfono")).toHaveCount(0)
   await info.attach("hilo-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByRole("button", { name: "Volver" }).click()
   await expect(chip("Con el equipo · 1")).toBeVisible()
@@ -303,7 +303,7 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   const waitingRow = page.getByRole("button").filter({ hasText: WAITING_TEXT })
   await expect(waitingRow).toContainText("Espera respuesta")
-  await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Con el equipo · ahora")
+  await expect(page.getByRole("button").filter({ hasText: DERIVED_TEXT })).toContainText("Te lo pasó el agente · Ahora")
   await waitingRow.click()
   const band = page.getByRole("status").filter({ hasText: "El agente propuso" })
   await expect(band).toContainText("un cambio")

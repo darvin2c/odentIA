@@ -33,6 +33,14 @@ export const DOC_TYPE_LABELS: Record<IdentityDocType, string> = {
   DIE: "Documento de identidad extranjero",
   OTRO: "Otro",
 }
+/**
+ * Un documento como se lee en pantalla, con la etiqueta del catálogo y nunca
+ * el código guardado: «Pasaporte AB1234567», «Carné de extranjería 001234567».
+ */
+export function documentText(docType: string | null | undefined, docNumber: string): string {
+  const label = docType ? (DOC_TYPE_LABELS[docType as IdentityDocType] ?? docType) : ""
+  return `${label} ${docNumber}`.trim()
+}
 /** Documentos emitidos fuera del Perú: exigen el país emisor (ISO 3166-1 alfa-2). */
 export const FOREIGN_DOC_TYPES: readonly IdentityDocType[] = ["PASAPORTE", "DIE"]
 

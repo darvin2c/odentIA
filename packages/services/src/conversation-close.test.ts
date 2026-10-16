@@ -18,6 +18,7 @@ import {
   closurePendingReason,
   farewellText,
   getResolvePreview,
+  getTaskResolvePreview,
   greetingName,
   nudgeText,
   releaseConversation,
@@ -27,6 +28,7 @@ import {
 } from "./conversation-close.js"
 import { reopenConversation, sendOutbound } from "./conversations.js"
 import { completeTask } from "./tasks.js"
+import { getWorkspaceHome } from "./workspace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -155,7 +157,7 @@ describe("cerrar y reabrir", () => {
     const [task] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!))
     expect(task?.status).toBe("done")
     const notes = await ownerDb.select().from(crmNote).where(eq(crmNote.conversationId, conv.id))
-    expect(notes.map((note) => note.body)).toEqual(["Caso derivado cerrado sin resolver: se cerró la conversación."])
+    expect(notes.map((note) => note.body)).toEqual(["Caso del agente cerrado sin resolver: se cerró la conversación."])
     expect((await c.messages(conv.id)).filter((item) => item.direction === "out")).toHaveLength(0)
   })
 })
@@ -205,6 +207,37 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
     await c.run((tx) => releaseConversation(tx, c.orgId, conv.id, c.receptionId))
     expect(await c.row(conv.id)).toMatchObject({ assignedUserId: null, agentStatus: "on" })
   })
+
+  it("tomar una cerrada la reabre antes: nunca queda una conversación cerrada a cargo de alguien", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Hilda")
+    await c.run((tx) => closeConversation(tx, c.orgId, conv.id, c.ownerId))
+    await c.run((tx) => takeConversation(tx, c.orgId, conv.id, c.receptionId))
+    expect(await c.row(conv.id)).toMatchObject({ status: "open", closedAt: null, closeReason: null, assignedUserId: c.receptionId, agentStatus: "off" })
+    const [audit] = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.entityId, conv.id), eq(auditEvent.action, "conversation.reopened")))
+    expect(audit).toMatchObject({ actorUserId: c.receptionId, metadata: { via: "equipo" } })
+  })
+
+  it("completar la tarea de un caso dice antes lo mismo que «Resolver», y solo si cierra la conversación", async () => {
+    const c = await clinic({ provider: "whatsapp_cloud_api" })
+    const conv = await c.thread("Lucía Paredes", { lastInboundAt: new Date(Date.now() - HOUR) })
+    await c.say(conv.id, "in", "¿Me devuelven lo que pagué?", new Date(Date.now() - HOUR))
+    const first = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Reembolso", summary: "Reembolso", createdBy: "agent" }))
+    const second = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Factura", summary: "Factura", createdBy: "agent" }))
+    // Con otro caso abierto, completar no toca la conversación: no hay nada que advertir.
+    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, first.taskId!))).toBeNull()
+    await c.run((tx) => completeTask(tx, c.orgId, first.taskId!, { userId: c.receptionId }))
+    const preview = await c.run((tx) => getTaskResolvePreview(tx, c.orgId, second.taskId!))
+    expect(preview).toEqual({
+      conversationId: conv.id,
+      contactName: "Lucía Paredes",
+      preview: await c.run((tx) => getResolvePreview(tx, c.orgId, conv.id)),
+    })
+    expect(preview?.preview).toMatchObject({ farewell: true, handoffs: 1 })
+    // Una tarea que no es de un caso no cierra nada.
+    const [loose] = await ownerDb.insert(crmTask).values({ organizationId: c.orgId, title: "Llamar", contactId: conv.contactId, conversationId: conv.id, createdBy: "user" }).returning()
+    expect(await c.run((tx) => getTaskResolvePreview(tx, c.orgId, loose!.id))).toBeNull()
+  })
 })
 
 describe("el ciclo: insistir una vez y cerrar por silencio", () => {
@@ -227,7 +260,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await c.say(conv.id, "in", "¿Atienden sábados?", IN)
     await c.say(conv.id, "out", "Sí, de 9 a 13. ¿Te busco un horario?", OUT)
     // A las 2 horas, nada.
-    expect(await tick(c, new Date("2026-10-12T16:30:00Z"))).toEqual({ nudged: 0, closed: 0, noticed: 0 })
+    expect(await tick(c, new Date("2026-10-12T16:30:00Z"))).toEqual({ nudged: 0, closed: 0 })
     // A las 3 horas (12:05 en Lima), insiste.
     expect(await tick(c, new Date("2026-10-12T17:05:00Z"))).toMatchObject({ nudged: 1 })
     expect((await c.messages(conv.id)).at(-1)).toMatchObject({ senderKind: "agent", body: "Hugo, ¿pudiste ver lo que te comenté? Si te queda alguna duda, aquí estoy para ayudarte." })
@@ -293,23 +326,27 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect(await c.messages(conv.id)).toHaveLength(before)
   })
 
-  it("con una persona a cargo no se cierra: avisa una vez a esa persona; sin asignar, a recepción", async () => {
+  it("con una persona a cargo no se cierra ni avisa en la campana: la muestra «Te espera» a quien la lleva", async () => {
     const c = await clinic()
     const mine = await c.thread("Nora Paz", { assignedUserId: c.ownerId, lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(mine.id, "in", "Hola", IN)
     await c.say(mine.id, "out", "Hola Nora", OUT, "user")
     const off = await c.thread("Omar", { agentStatus: "off", lastInboundAt: IN, lastMessageAt: IN, attentionStartedAt: IN })
     await c.say(off.id, "in", "¿Me ayudan?", IN)
-    expect(await tick(c, new Date("2026-10-12T22:00:00Z"))).toMatchObject({ noticed: 0 })
-    expect(await tick(c, new Date("2026-10-13T12:30:00Z"))).toMatchObject({ closed: 0, noticed: 2 })
-    await tick(c, new Date("2026-10-13T13:30:00Z"))
-    const notices = await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.organizationId, c.orgId))
-    expect(notices.map((item) => [item.userId, item.title]).sort()).toEqual([
-      [c.ownerId, "La conversación con Nora Paz sigue abierta: ciérrala o continúa"],
-      [c.receptionId, "La conversación con Omar sigue abierta: ciérrala o continúa"],
-    ].sort())
+    expect(await tick(c, new Date("2026-10-13T12:30:00Z"))).toEqual({ nudged: 0, closed: 0 })
+    expect(await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.organizationId, c.orgId))).toEqual([])
     expect((await c.row(mine.id)).status).toBe("open")
     expect((await c.row(off.id)).status).toBe("open")
+    const access = { patients: false, appointments: false, conversations: true, tasks: false, finance: false, clinical: false, crm: false, agent: true, allTasks: false, configure: false, ownAppointments: false }
+    // Nora la lleva la dueña: a ella le espera; a recepción no. Omar espera respuesta: es otra fila.
+    const ownerHome = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.ownerId, access))
+    expect(ownerHome.waiting.find((row) => row.kind === "stillOpen")).toMatchObject({ total: 1, conversationId: mine.id, contactName: "Nora Paz" })
+    expect(ownerHome.waiting.find((row) => row.kind === "conversations")).toMatchObject({ waiting: 1 })
+    const receptionHome = await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.receptionId, access))
+    expect(receptionHome.waiting.find((row) => row.kind === "stillOpen")).toBeUndefined()
+    // Con Recepción apagada nada se cierra solo, así que no hay nada que recordar.
+    await ownerDb.update(agentConfig).set({ enabled: false }).where(eq(agentConfig.organizationId, c.orgId))
+    expect((await c.run((tx) => getWorkspaceHome(tx, c.orgId, c.ownerId, access))).waiting.find((row) => row.kind === "stillOpen")).toBeUndefined()
   })
 
   it("con Recepción apagada o una derivación abierta, el ciclo no toca la conversación", async () => {
@@ -317,9 +354,9 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     const conv = await c.thread("Pía", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(conv.id, "in", "Hola", IN)
     await c.say(conv.id, "out", "¿En qué te ayudo?", OUT)
-    expect(await tick(c, new Date("2026-10-14T17:00:00Z"))).toEqual({ nudged: 0, closed: 0, noticed: 0 })
+    expect(await tick(c, new Date("2026-10-14T17:00:00Z"))).toEqual({ nudged: 0, closed: 0 })
     await ownerDb.update(agentConfig).set({ enabled: true }).where(eq(agentConfig.organizationId, c.orgId))
     await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Caso", summary: "Caso", createdBy: "agent" }))
-    expect(await tick(c, new Date("2026-10-14T17:00:00Z"))).toEqual({ nudged: 0, closed: 0, noticed: 0 })
+    expect(await tick(c, new Date("2026-10-14T17:00:00Z"))).toEqual({ nudged: 0, closed: 0 })
   })
 })

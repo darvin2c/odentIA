@@ -17,6 +17,7 @@ import {
   listMyPortalGrants,
   listPortalGrants,
   listPortalRequests,
+  rejectPortalRequest,
   revokePortalGrant,
   selectPortalGrant,
   verifyPasskeyAuth,
@@ -492,6 +493,20 @@ it("aprobar crea vínculo+grant+enlace y liquida la tarea", async () => {
   const decidedList = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "aprobada"))
   expect(decidedList.some((request) => request.id === web!.id)).toBe(true)
 })
+it("rechazar una solicitud cierra su tarea, igual que aprobarla o que venza", async () => {
+  const openPortalTasks = async () =>
+    (await withOrgContext(appDb, ORG, (tx) => listTasks(tx, ORG, { status: "open" }))).filter((task) => task.title.includes("portal")).length
+  const before = await openPortalTasks()
+  await withOrgContext(appDb, ORG, (tx) =>
+    createPublicPortalRequest(tx, ORG, { contactName: "Persona que rechazan", contactText: "+51999000222" }),
+  )
+  expect(await openPortalTasks()).toBe(before + 1)
+  const pending = await withOrgContext(appDb, ORG, (tx) => listPortalRequests(tx, ORG, "pendiente"))
+  const request = pending.find((item) => item.contactName === "Persona que rechazan")
+  await withOrgContext(appDb, ORG, (tx) => rejectPortalRequest(tx, ORG, ACTOR, request!.id, "No es paciente"))
+  expect(await openPortalTasks()).toBe(before)
+})
+
 it("la emisión conserva las passkeys vigentes", async () => {
   await withOrgContext(appDb, ORG, (tx) =>
     issuePortalLink(

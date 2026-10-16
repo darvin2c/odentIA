@@ -254,6 +254,8 @@ export interface ReportSales extends ReportHead {
   procedures: Array<{ name: string; currency: string | null; count: number; cents: number }>
   previousProcedureCount: number
   opportunities: Array<{ status: string; count: number }>
+  /** Por qué se perdieron las del periodo: clave del motivo y cuántas. */
+  lostReasons?: Array<{ reason: string; count: number }>
   wholeClinic: string[]
   series: Array<YearMonth & { partial: boolean; newPatients: number }>
 }

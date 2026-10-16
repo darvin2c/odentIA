@@ -2,8 +2,10 @@
  * Responsables del paciente: quién representa, autoriza información, responde
  * económicamente o acompaña, con vigencia y documento de respaldo.
  *
- * Solo los contactos ya vinculados al paciente pueden recibir un rol; la
- * responsabilidad se revoca con motivo y se conserva en la historia.
+ * La persona se elige con el buscador de personas de la aplicación; si aún no
+ * está vinculada al paciente, se vincula en el mismo paso (tutor si es menor,
+ * familiar si no). La responsabilidad se revoca con motivo y se conserva en la
+ * historia.
  */
 
 import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
@@ -22,7 +24,8 @@ import {
   revokeResponsibilityApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import type { PatientDocument, PatientFull } from "../../lib/patients"
+import { ageFrom, type PatientDocument, type PatientFull } from "../../lib/patients"
+import { type PickedPerson, PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
 
 const MAX_TEXT = 2000
@@ -54,7 +57,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   })
 
   const [grantOpen, setGrantOpen] = useState(false)
-  const [contactId, setContactId] = useState("")
+  const [chosen, setChosen] = useState<PickedPerson | null>(null)
   const [kind, setKind] = useState<ResponsibilityKind>("representante_legal")
   const [startsAt, setStartsAt] = useState(todayIso())
   const [endsAt, setEndsAt] = useState("")
@@ -70,15 +73,30 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   }
 
   const grantMutation = useMutation({
-    mutationFn: () =>
-      grantResponsibilityApi(patientId, {
+    mutationFn: async () => {
+      const contactId = chosen?.id ?? ""
+      // Quien aún no está vinculado al paciente se vincula en el mismo paso.
+      if (!contacts.some((link) => link.contactId === contactId)) {
+        const age = Number(ageFrom(patient.data?.data.patient.birthDate ?? null))
+        await apiFetch(`/api/patients/${patientId}/contacts/${contactId}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            relationship: Number.isFinite(age) && age < 18 ? "guardian" : "family",
+            isPreferred: false,
+          }),
+        })
+        void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
+        void queryClient.invalidateQueries({ queryKey: ["person"] })
+      }
+      return grantResponsibilityApi(patientId, {
         contactId,
         kind,
         startsAt,
         endsAt: endsAt || null,
         evidenceDocumentId: evidenceDocumentId || null,
         notes: notes.trim() || null,
-      }),
+      })
+    },
     onSuccess: () => {
       setGrantOpen(false)
       setNotes("")
@@ -116,10 +134,10 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
           <Button
             type="button"
             size="sm"
-            disabled={contacts.length === 0}
             onClick={() => {
               setError(null)
-              setContactId(contacts[0]?.contactId ?? "")
+              const first = contacts.find((link) => link.relationship !== "self")
+              setChosen(first ? { id: first.contactId, name: first.displayName } : null)
               setGrantOpen(true)
             }}
           >
@@ -127,12 +145,6 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
           </Button>
         ) : null}
       </div>
-
-      {contacts.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Vincula primero un contacto al paciente para poder asignarle un rol.
-        </p>
-      ) : null}
 
       {list.isPending ? (
         <p className="text-sm text-muted-foreground">Cargando responsables…</p>
@@ -207,8 +219,8 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
         }}
         onSubmit={(event) => {
           event.preventDefault()
-          if (!contactId) {
-            setError("Elige el contacto vinculado al paciente.")
+          if (!chosen) {
+            setError("Elige a la persona.")
             return
           }
           if (endsAt && endsAt < startsAt) {
@@ -219,22 +231,13 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
         }}
       >
         <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor={`${uid}-resp-contact`}>Contacto vinculado</FieldLabel>
-            <ChoiceSelect
-              id={`${uid}-resp-contact`}
-              className="w-full"
-              value={contactId}
-              onChange={(event) => setContactId(event.target.value)}
-            >
-              <option value="">Seleccionar contacto</option>
-              {contacts.map((contact) => (
-                <option key={contact.contactId} value={contact.contactId}>
-                  {contact.displayName}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
+          <PersonPicker
+            label="Persona"
+            value={chosen}
+            onChange={setChosen}
+            excludeId={contacts.find((link) => link.relationship === "self")?.contactId}
+            description="Si aún no está vinculada al paciente, se vincula al asignarle el rol."
+          />
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-kind`}>Responsabilidad</FieldLabel>
             <ChoiceSelect

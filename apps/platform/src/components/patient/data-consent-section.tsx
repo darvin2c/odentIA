@@ -22,8 +22,7 @@ interface DataConsent {
 
 const PURPOSES = [
   { key: "atencion", label: "Atención clínica", fixed: true },
-  { key: "recordatorios", label: "Recordatorios de citas y controles", fixed: false },
-  { key: "comunicaciones", label: "Otros mensajes de la clínica", fixed: false },
+  { key: "comunicaciones", label: "Novedades y promociones de la clínica", fixed: false },
 ] as const
 
 const day = (iso: string) =>

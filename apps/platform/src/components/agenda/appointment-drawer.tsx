@@ -13,6 +13,7 @@ import {
   DetailDrawer,
   DetailField,
   DetailList,
+  internationalText,
   ResourceSelect,
   SCHEDULE_AGENDA_LABELS,
   type ScheduleColumn,
@@ -25,18 +26,23 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Check } from "lucide-react"
+import { Check, MessageCircle } from "lucide-react"
 import * as React from "react"
 import type {
   AgendaAppointment,
   AgendaResources,
   AgendaServiceOption,
+  AppointmentContext,
   AppointmentStatus,
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
+import { channelLabel } from "../../lib/channels"
+import { usePermission } from "../../lib/crm"
 import { NewEncounterButton } from "../patient/new-encounter-button"
-import { errorMessage, rangeSaid, whenSaid } from "./shared"
+import { WriteToPersonDialog } from "../write-to-person"
+import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
+import { PersonLink } from "../person-link"
 
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
 
@@ -46,6 +52,13 @@ const CANCEL_REASONS: Array<{ id: CancelReason; label: string }> = [
   { id: "clinica", label: "Lo pidió la clínica" },
   { id: "otro", label: "Otro motivo" },
 ]
+
+/** De dónde salió una cita que no nació en una conversación. */
+const SOURCE_WORDS: Record<string, string> = {
+  enlace: "Enlace de reserva",
+  agent: "El agente, en una conversación",
+  portal: "Portal del paciente",
+}
 
 const STATUS_DONE: Record<AppointmentStatus, string> = {
   programada: "Cita por confirmar",
@@ -88,6 +101,15 @@ export function AppointmentDrawer({
 }) {
   const [mode, setMode] = React.useState<AppointmentDrawerMode | "edit">(initialMode)
   const [error, setError] = React.useState("")
+  const [writing, setWriting] = React.useState(false)
+  const canMessage = usePermission("conversations.write")
+  const canReadChats = usePermission("conversations.read")
+  // A quién se le escribe, de dónde salió y cuándo pedirá el agente confirmar.
+  const contextQuery = useQuery({
+    queryKey: ["agenda-appointment", appointment.id, "context", appointment.version, appointment.status],
+    queryFn: () => apiFetch<{ data: AppointmentContext }>(`/api/appointments/${appointment.id}/context`),
+  })
+  const context = contextQuery.data?.data
   const active = appointment.status === "programada" || appointment.status === "confirmada"
   const started = Date.parse(appointment.startsAt) <= Date.parse(now)
 
@@ -107,7 +129,9 @@ export function AppointmentDrawer({
         ),
       }),
     onSuccess: async (result) => {
-      toast.success(STATUS_DONE[result.data.status])
+      toast.success(STATUS_DONE[result.data.status], {
+        description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
+      })
       setError("")
       await onChanged()
       if (result.data.status === "cancelada") {
@@ -172,6 +196,7 @@ export function AppointmentDrawer({
     onSuccess: async (result) => {
       toast.success(
         `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
+        { description: result.data.notice?.queued ? "El agente le avisa la nueva fecha." : undefined },
       )
       setError("")
       setMode("view")
@@ -391,28 +416,67 @@ export function AppointmentDrawer({
             </div>
 
             <DetailList columns={1}>
+              {context?.person ? (
+                <DetailField label="Teléfono">
+                  {context.person.phone ? internationalText(context.person.phone) : "Sin teléfono"}
+                  {context.person.relationship !== "self" ? ` · de ${context.person.name}` : ""}
+                </DetailField>
+              ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
               <DetailField label="Profesional">{appointment.dentistName}</DetailField>
               <DetailField label="Sillón">{appointment.chairName}</DetailField>
               {appointment.reason ? (
                 <DetailField label="Motivo">{appointment.reason}</DetailField>
               ) : null}
+              {context && (context.origin.conversationId || SOURCE_WORDS[context.origin.source]) ? (
+                <DetailField label="Salió de">
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    {context.origin.conversationId
+                      ? `Conversación de ${channelLabel(context.origin.channel ?? "")} del ${dayShort(zonedDateOf(context.origin.at, timeZone))}`
+                      : SOURCE_WORDS[context.origin.source]}
+                    {context.origin.conversationId && canReadChats ? (
+                      <Link
+                        to="/inbox"
+                        search={{ conversation: context.origin.conversationId }}
+                        className="font-semibold text-primary hover:underline"
+                      >
+                        Ver conversación
+                      </Link>
+                    ) : null}
+                  </span>
+                </DetailField>
+              ) : null}
+              {active && context?.confirmation ? (
+                <DetailField label="Confirmación">
+                  {context.confirmation.askAt
+                    ? `El agente le pedirá confirmar ${whenSaid(context.confirmation.askAt, timeZone, today)}`
+                    : context.confirmation.askedAt
+                      ? `El agente se lo pidió ${whenSaid(context.confirmation.askedAt, timeZone, today)} y aún no confirma`
+                      : null}
+                </DetailField>
+              ) : null}
             </DetailList>
 
             <div className="grid gap-2">
+              {canMessage && context?.person ? (
+                <Button variant="outline" className="h-11" onClick={() => setWriting(true)}>
+                  <MessageCircle aria-hidden />
+                  Escribirle
+                </Button>
+              ) : null}
               {canWrite && active ? (
                 <Button variant="outline" className="h-11" onClick={() => setMode("move")}>
                   Reprogramar
                 </Button>
               ) : null}
-              {/* De la cita a la persona: la ficha conserva el contexto de quien se atiende. */}
-              <Link
-                to="/patients/$patientId"
-                params={{ patientId: appointment.patientId }}
+              {/* De la cita a la página de la persona: la misma desde todas partes (ADR 0029). */}
+              <PersonLink
+                patientId={appointment.patientId}
+                contactId={context?.person?.relationship === "self" ? context.person.contactId : null}
                 className={cn(buttonVariants({ variant: "outline" }), "h-11")}
               >
                 Abrir la ficha de {appointment.patientName.split(/\s+/)[0]}
-              </Link>
+              </PersonLink>
               {active ? (
                 <NewEncounterButton
                   patientId={appointment.patientId}
@@ -428,6 +492,12 @@ export function AppointmentDrawer({
           </div>
         )}
       </DetailDrawer>
+
+      <WriteToPersonDialog
+        open={writing}
+        onClose={() => setWriting(false)}
+        people={context?.person ? [{ contactId: context.person.contactId, displayName: context.person.name }] : []}
+      />
 
       <ConfirmDialog
         open={mode === "cancel"}

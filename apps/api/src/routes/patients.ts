@@ -128,6 +128,13 @@ const createInput = z.strictObject({
   contacts: z.array(registrationContactInputSchema).max(50).optional(),
   registeredBranchId: z.uuid().optional(),
   contextContactId: z.uuid().optional(),
+  /**
+   * Lo mínimo al reservar: a la persona de una conversación (`contextContactId`
+   * y `conversationId`) o a alguien nuevo desde la Agenda (sin vínculos). La
+   * regla del registro con alcance `essentials`.
+   */
+  conversationId: z.uuid().optional(),
+  scope: z.literal("essentials").optional(),
 })
 
 const patchInput = z.object({
@@ -595,16 +602,20 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
 
   app.post("/", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    // Lo mínimo es para reservar: lo pide quien registra y además agenda.
+    if (parsed.data.scope === "essentials" && !canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar este recurso"), 403)
+    }
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => {
-        const { contextContactId, ...input } = parsed.data
+        const { contextContactId, conversationId, scope, ...input } = parsed.data
         return registerPatient(
           tx,
           orgId,
-          { kind: "internal", userId, contactId: contextContactId },
+          { kind: "internal", userId, contactId: contextContactId, conversationId, ...(scope ? { scope } : {}) },
           input,
         )
       }),
@@ -657,25 +668,31 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
 
   app.get("/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    const clinical = canAccess(memberRole, "clinical.read")
+    const clinicalRead = canAccess(memberRole, "clinical.read")
+    // La ficha administrativa la pide la página de la persona al abrirse: no
+    // es una lectura clínica. Condiciones, medicación y la salud declarada en
+    // el registro solo viajan cuando se piden (`?clinical=1`, desde Clínica o
+    // la atención), y solo esa lectura deja traza en la bitácora.
+    const clinical = clinicalRead && c.req.query("clinical") === "1"
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const full = await getPatient(tx, orgId, c.req.param("id"))
-        // Sin `clinical.read` (recepción/caja): filiación y vínculos sin
-        // registro de salud ni antecedentes/condiciones/medicación. Las
-        // alergias activas solo se conservan con `clinical.alerts`.
         if (clinical) return full
+        // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
+        // lo declaró y sus datos de contacto), sin la salud declarada: así la
+        // ficha no dice «origen no disponible» por algo que solo está oculto.
+        // Las alergias activas son la alerta de quien recibe al paciente.
+        const { health: _health, ...declared } = full.registration?.answers ?? { health: undefined }
         return {
           ...full,
-          registration: null,
-          activeAllergies: canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
+          registration: full.registration ? { ...full.registration, answers: declared } : null,
+          activeAllergies:
+            clinicalRead || canAccess(memberRole, "clinical.alerts") ? full.activeAllergies : [],
           activeConditions: [],
           currentMedications: [],
         }
       }),
     )
-    // La ficha completa entrega condiciones, medicación y registro de salud:
-    // es una lectura de antecedentes y deja la misma traza que `/health`.
     if (clinical && response.status === 200) {
       const patientId = c.req.param("id")
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "antecedentes" })

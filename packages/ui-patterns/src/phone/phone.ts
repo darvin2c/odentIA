@@ -102,6 +102,14 @@ export function nationalText(value: string): string {
 }
 
 /**
+ * Lectura internacional de un número guardado (`+51987654100` →
+ * `+51 987 654 100`), para mostrarlo fuera de un campo.
+ */
+export function internationalText(value: string): string {
+  return parsePhoneNumberFromString(value)?.formatInternational() ?? value
+}
+
+/**
  * Lee un texto pegado con prefijo internacional (`+54 9 11 2345 6789`) y
  * devuelve el país que declara. Sin `+` no se interpreta: un número nacional
  * suelto pertenece al país del selector, y adivinarlo sería inventar.

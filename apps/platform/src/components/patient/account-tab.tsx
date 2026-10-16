@@ -8,7 +8,7 @@
  * saldo a favor y caja anota la respuesta de un presupuesto. Dinero con
  * `@odentia/clinical`; formato y zona del perfil de la clínica.
  */
-import { formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { documentText, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -114,7 +114,18 @@ function Section({
   )
 }
 
-export function AccountTab({ patientId }: { patientId: string }): React.JSX.Element {
+/**
+ * Cobros del paciente. `part` separa lo que va en cada pestaña de su página:
+ * «Cobros» (saldo, pendiente, cobros y pagos) y, para quien no lee la
+ * clínica, «Plan» con solo los presupuestos (caja registra su respuesta).
+ */
+export function AccountTab({
+  patientId,
+  part = "todo",
+}: {
+  patientId: string
+  part?: "todo" | "cuenta" | "presupuestos"
+}): React.JSX.Element {
   const uid = useId()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -315,9 +326,7 @@ export function AccountTab({ patientId }: { patientId: string }): React.JSX.Elem
       : [{ currency: orgUnit, porCobrar: 0, pagado: 0, aFavor: 0 }]
   const person = patient.data?.data.patient
   const patientName = person?.displayName ?? ""
-  const patientDocument = person?.docNumber
-    ? `${person.docType ? `${person.docType} ` : ""}${person.docNumber}`
-    : null
+  const patientDocument = person?.docNumber ? documentText(person.docType, person.docNumber) : null
   const cobros = [...data.cobros].reverse()
   const methodList = methods.data?.data ?? []
   const refundChoice = methodList.find((item) => item.id === refundMethod) ?? methodList[0] ?? null
@@ -425,6 +434,8 @@ export function AccountTab({ patientId }: { patientId: string }): React.JSX.Elem
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
+      {part !== "presupuestos" ? (
+        <>
       <section aria-label="Saldo" className="elevated rounded-xl border bg-card p-4 sm:p-6">
         <div className="flex flex-col gap-4">
           {balances.map((balance) => (
@@ -620,7 +631,10 @@ export function AccountTab({ patientId }: { patientId: string }): React.JSX.Elem
         </Section>
       ) : null}
 
-      {canBudgets ? (
+        </>
+      ) : null}
+
+      {canBudgets && part !== "cuenta" ? (
         <Section title="Presupuestos">
           {budgets.isPending ? (
             <div className="flex flex-col gap-2" aria-busy="true">

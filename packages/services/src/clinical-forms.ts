@@ -78,15 +78,14 @@ async function notifyUser(
   tx: Db,
   orgId: string,
   userId: string,
-  input: { dedupeKey: string; title: string; body: string; href: string },
+  input: { dedupeKey: string; title: string; body: string; href: string; actorUserId: string; subject?: string },
 ): Promise<void> {
   try {
+    // Nadie recibe aviso de lo que hizo él mismo (`actorUserId`).
     await createWorkspaceNotification(tx, orgId, {
+      ...input,
       userId,
       dedupeKey: `${input.dedupeKey}:${userId}`,
-      title: input.title,
-      body: input.body,
-      href: input.href,
       permission: "clinical.read",
     })
   } catch (e) {
@@ -1676,13 +1675,7 @@ export async function createConsentDocument(
   await audit(tx, orgId, actorUserId, "consent.create", "consent_document", row.id, {
     template: template.key,
   })
-  // Pendiente de firma: se avisa al autor para recabarla en consulta.
-  await notifyUser(tx, orgId, actorUserId, {
-    dedupeKey: `consent-${row.id}-pendiente`,
-    title: "Un consentimiento está pendiente de firma",
-    body: "Generaste un consentimiento que aún debe firmarse.",
-    href: `/patients/${row.patientId}`,
-  })
+  // Sin aviso a quien lo generó: lo hizo él mismo y lo ve en la ficha.
   return row
 }
 
@@ -1890,6 +1883,7 @@ export async function signConsentDocument(
       title: "Un consentimiento fue firmado",
       body: "Un consentimiento que generaste ya tiene firma registrada.",
       href: `/patients/${row.patientId}`,
+      actorUserId,
     })
   }
   return row
@@ -2219,6 +2213,9 @@ export async function createClinicalOrder(
       title: "Nueva orden clínica por atender",
       body: "Tienes una orden clínica pendiente de atención.",
       href: `/patients/${row.patientId}`,
+      actorUserId,
+      // Se retira cuando alguien la toma o se cancela.
+      subject: `orden-clinica:${row.id}`,
     })
   }
   return row
@@ -2275,6 +2272,7 @@ export async function advanceClinicalOrder(
       title: "Una orden clínica tiene resultado disponible",
       body: "Ya puedes revisar el resultado de la orden clínica.",
       href: `/patients/${row.patientId}`,
+      actorUserId,
     })
   }
   return row

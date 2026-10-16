@@ -3,6 +3,7 @@ import {
   isMinor,
   isRealDate,
   normalizePhone,
+  pendingRegistrationFields,
   registrationAnswersSchema,
   registrationConfigSchema,
   validateRegistrationAnswers,
@@ -23,13 +24,15 @@ import { contact, conversation, contactIdentity, channelConnection } from "@oden
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes } from "node:crypto"
 import { and, eq, sql, type SQL } from "drizzle-orm"
+import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
-import { createPatient, patientOrganizationToday, requirePatient, type PatientRow } from "./patients.js"
+import { createContactNote } from "./crm-workspace.js"
+import { createPatient, patientOrganizationToday, patientPersonId, requirePatient, type PatientRow } from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import { grantResponsibility } from "./responsibilities.js"
-import { isDirectThread, lockRegistrationContacts } from "./contacts.js"
+import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
 const UUID_RE =
@@ -367,7 +370,22 @@ export async function getPublicPatientRegistration(
 // --- Registro transaccional ---
 
 export type RegistrationContext =
-  | { kind: "internal"; userId: string; contactId?: string; conversationId?: string }
+  | {
+      kind: "internal"
+      userId: string
+      contactId?: string
+      conversationId?: string
+      /**
+       * `essentials`: el equipo registra con lo mínimo, al reservar, a la
+       * persona de una conversación (`contactId` y `conversationId`, ficha
+       * unida a ella como propia) o a alguien nuevo desde la Agenda (sin
+       * vínculos ni conversación, con su teléfono). La misma regla que el
+       * enlace de reserva: lo que la clínica exige y no se pidió queda anotado
+       * (en el caso o en las notas de su persona) y la identidad, por revisar.
+       * Ningún otro alta interna lo usa.
+       */
+      scope?: "essentials"
+    }
   | {
       kind: "public"
       token?: string
@@ -433,12 +451,37 @@ async function lockTokenRow(tx: Db, orgId: string, token: string): Promise<Resol
   return { id: link.id, contactId: link.contactId, conversationId: link.conversationId }
 }
 
+/**
+ * Lo que queda anotado tras un registro con lo esencial: qué pide la clínica y
+ * aún falta. Es corta: si la lista no cabe, dice cuántos más faltan en vez de cortarse.
+ */
+function pendingRegistrationNote(who: string, config: RegistrationConfig, answers: RegistrationAnswers): string {
+  const pending = pendingRegistrationFields(config, answers).map((field) => field.label.toLowerCase())
+  const head = `${who}. Falta en la clínica: confirmar apellidos y nombres`
+  const named: string[] = []
+  for (const label of pending) {
+    const rest = pending.length - named.length - 1
+    const tail = rest > 0 ? ` y ${rest} más` : ""
+    if (`${head}, ${[...named, label].join(", ")}${tail}.`.length > CASE_NOTE_CHARS) break
+    named.push(label)
+  }
+  const left = pending.length - named.length
+  return `${head}${named.length ? `, ${named.join(", ")}` : ""}${left > 0 ? ` y ${left} más` : ""}.`
+}
+
+/**
+ * Lo que pasó con su WhatsApp en el alta mínima desde la Agenda: su teléfono
+ * pasó a ser su WhatsApp, ya era de otra persona de la clínica (no se mueve y
+ * se dice), o no aplica (sin WhatsApp conectado o en otra vía de alta).
+ */
+export type RegistrationWhatsApp = "creado" | "en_uso"
+
 export async function registerPatient(
   tx: Db,
   orgId: string,
   context: RegistrationContext,
   input: RegistrationInput,
-): Promise<PatientRow> {
+): Promise<PatientRow & { whatsapp?: RegistrationWhatsApp }> {
   if (!UUID_RE.test(input.submissionId)) throw validation("Identificador de envío inválido")
   input = { ...input, submissionId: input.submissionId.toLowerCase() }
   const isPublic = context.kind === "public"
@@ -469,8 +512,23 @@ export async function registerPatient(
   const internalContext = context.kind === "internal" ? context : null
   const publicToken = publicContext?.token
   const hasToken = publicToken !== undefined
-  const essentials = publicContext?.scope === "essentials"
-  if (essentials && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
+  const essentials = (publicContext ?? internalContext)?.scope === "essentials"
+  if (essentials && publicContext && !hasToken) throw validation("Los datos esenciales solo se aceptan desde el enlace de una conversación")
+  // El equipo registra con lo mínimo solo al reservar: a la persona de una
+  // conversación, como su propia ficha, o a alguien nuevo desde la Agenda (sin
+  // vínculos: su persona nace con la ficha y el teléfono es como ubicarla).
+  const fromConversation =
+    !!internalContext?.contactId &&
+    !!internalContext.conversationId &&
+    !!input.contacts?.some((link) => link.contactId === internalContext.contactId && link.relationship === "self")
+  const newPerson =
+    !!internalContext && !internalContext.contactId && !internalContext.conversationId && !input.contacts?.length
+  if (essentials && internalContext) {
+    if (!fromConversation && !newPerson) {
+      throw validation("Lo mínimo solo se acepta al reservar: a la persona de una conversación o a alguien nuevo")
+    }
+    if (newPerson && !input.answers?.demographics?.phone) throw validation("Indica el teléfono")
+  }
   const entryPoint: RegistrationEntryPoint = publicContext
     ? (hasToken ? "conversation" : publicContext.entryPoint)
     : (internalContext?.conversationId ? "conversation" : "platform")
@@ -484,6 +542,7 @@ export async function registerPatient(
         actorUserId,
         contactId: internalContext?.contactId ?? null,
         conversationId: internalContext?.conversationId ?? null,
+        ...(essentials ? { scope: "essentials" } : {}),
       }
   const payloadHash = sha256Hex(
     canonicalJson({
@@ -668,14 +727,42 @@ export async function registerPatient(
     throw e
   }
 
+  let whatsapp: RegistrationWhatsApp | undefined
   // 5b. Con los datos esenciales los apellidos llegan de un solo campo y se
   // reparten sin certeza: la ficha queda «identidad por revisar» hasta que
-  // recepción los confirme.
+  // recepción los confirme. Lo que la clínica exige y no se pidió queda
+  // anotado en el caso de la conversación o, sin conversación (la Agenda), en
+  // las notas de su persona, a nombre de quien la registró.
   if (essentials) {
     await tx
       .update(patient)
       .set({ identityNeedsReview: true })
       .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
+    const who = publicContext
+      ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
+      : "El equipo creó su ficha con lo mínimo al reservar"
+    const note = pendingRegistrationNote(who, config, answers)
+    if (conversationId) await addAgentCaseNote(tx, orgId, conversationId, note)
+    else {
+      // Su persona la crea la base al cerrar la transacción (disparador diferido,
+      // `ensure_patient_person`): se adelanta con la misma función para anotarle lo pendiente.
+      await tx.execute(sql`select ensure_patient_person(${orgId}, ${created.id}::uuid)`)
+      const personId = await patientPersonId(tx, orgId, created.id)
+      if (personId) await createContactNote(tx, orgId, personId, { body: note }, { userId: actorUserId })
+      // Registrarla en «Nueva cita» con su teléfono es un alta manual del equipo: ese
+      // número pasa a ser su WhatsApp (ADR 0027), con la misma operación que
+      // «Escribirle» y a nombre de quien la registra, para que le lleguen el aviso y
+      // los recordatorios. Si ya es de otra persona no se mueve: la cita sigue y se dice.
+      if (personId && newPerson && created.phone && (await hasActiveWhatsApp(tx, orgId))) {
+        try {
+          await claimWhatsAppNumber(tx, orgId, actorUserId, personId, created.phone)
+          whatsapp = "creado"
+        } catch (error) {
+          if (!(error instanceof ServiceError) || error.code !== "IDENTITY_IN_USE") throw error
+          whatsapp = "en_uso"
+        }
+      }
+    }
   }
 
   // 6. Salud declarada solo con contenido significativo; nunca firma revisión.
@@ -730,7 +817,9 @@ export async function registerPatient(
     // Los permisos de mensajes son finalidades de este mismo consentimiento:
     // cuentan solo las que el registro de la clínica pregunta.
     const asked = [
-      ...(config.askReminders && answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
+      // Los recordatorios de su cita no se preguntan: son parte del servicio (ADR 0030).
+      // `askReminders` queda sin uso; un «no» que llegue igual se guarda como baja.
+      ...(answers.acceptsReminders === false ? ["recordatorios"] : []),
       ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
     ]
     const purposes = [
@@ -779,5 +868,22 @@ export async function registerPatient(
   }
 
   // Releer para no responder con una revisión anterior a salud/consentimiento.
-  return requirePatient(tx, orgId, created.id)
+  const saved = await requirePatient(tx, orgId, created.id)
+  return whatsapp ? { ...saved, whatsapp } : saved
+}
+
+/** La clínica tiene un WhatsApp conectado por el que escribir. */
+async function hasActiveWhatsApp(tx: Db, orgId: string): Promise<boolean> {
+  const [connected] = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .limit(1)
+  return !!connected
 }

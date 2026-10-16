@@ -66,10 +66,13 @@ describe("mismas validaciones para la pantalla y para el agente", () => {
 
   it("los límites de texto y las opciones coinciden", () => {
     for (const schema of [operationBodySchema("oportunidad.cerrar"), operationAgentSchema("oportunidad.cerrar")]) {
-      expect(schema.safeParse({ outcome: "won", reason: "Aceptó el presupuesto" }).success).toBe(true)
-      expect(schema.safeParse({ outcome: "ganada", reason: "x" }).success).toBe(false)
+      // El motivo es de la lista; el texto libre solo va como nota.
+      expect(schema.safeParse({ outcome: "won", reason: "acepto" }).success).toBe(true)
+      expect(schema.safeParse({ outcome: "lost", reason: "precio", note: "Le pareció caro" }).success).toBe(true)
+      expect(schema.safeParse({ outcome: "won", reason: "Aceptó el presupuesto" }).success).toBe(false)
+      expect(schema.safeParse({ outcome: "ganada", reason: "acepto" }).success).toBe(false)
       expect(schema.safeParse({ outcome: "lost", reason: "" }).success).toBe(false)
-      expect(schema.safeParse({ outcome: "lost", reason: "x".repeat(501) }).success).toBe(false)
+      expect(schema.safeParse({ outcome: "lost", reason: "otro", note: "x".repeat(501) }).success).toBe(false)
     }
   })
 

@@ -21,7 +21,7 @@ import {
 } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { createOpportunity, getOpportunity, updateOpportunity } from "./opportunities.js"
+import { createOpportunity, getOpportunity, setOpportunityTask, updateOpportunity } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { createTask, listTasks } from "./tasks.js"
 import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
@@ -422,24 +422,20 @@ it("transferencia conserva negocio en origen y desvincula el hilo movido", async
     createOpportunity(
       tx,
       "org_a",
-      {
-        contactId: from.id,
-        title: "Ortodoncia",
-        conversationId: moved.id,
-        nextActionAt: new Date(Date.now() + 86_400_000).toISOString(),
-        nextActionNote: "Llamar mañana",
-      },
+      { contactId: from.id, title: "Ortodoncia", conversationId: moved.id },
       { userId: null },
     ),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setOpportunityTask(tx, "org_a", opp.id, { title: "Llamar mañana", dueAt: new Date(Date.now() + 86_400_000).toISOString() }, { userId: null, createdBy: "user" }),
   )
   const followUps = await withOrgContext(appDb, "org_a", (tx) =>
     listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
   )
   expect(followUps).toHaveLength(1)
   expect(followUps[0]?.conversationId).toBe(moved.id)
-  const commercial = await withOrgContext(appDb, "org_a", (tx) =>
-    createTask(tx, "org_a", { title: "Comercial", contactId: from.id, conversationId: moved.id, opportunityId: opp.id, createdBy: "user" }),
-  )
+  // La tarea de la oportunidad (su próxima acción) es la que acompaña al negocio.
+  const commercial = followUps[0]!
   const manual = await withOrgContext(appDb, "org_a", (tx) =>
     createTask(tx, "org_a", { title: "Operativa", contactId: from.id, conversationId: moved.id, createdBy: "user" }),
   )
@@ -453,7 +449,7 @@ it("transferencia conserva negocio en origen y desvincula el hilo movido", async
     movedConversations: 1,
     movedTasks: 1,
     reconciledOpportunities: 1,
-    reconciledTasks: 2,
+    reconciledTasks: 1,
   })
   // Hilo e identidad pasan a B con la tarea operativa.
   const detail = await withOrgContext(appDb, "org_a", (tx) =>
@@ -486,16 +482,18 @@ it("transferencia conserva negocio en origen y desvincula el hilo movido", async
   )
   expect(stayedDetail.contact.id).toBe(from.id)
   expect(byId.get(loose.id)?.contactId).toBe(from.id)
-  // Editar el seguimiento luego no revincula la conversación antigua.
+  // Editar la oportunidad o su tarea luego no revincula la conversación antigua.
   const edited = await withOrgContext(appDb, "org_a", (tx) =>
-    updateOpportunity(tx, "org_a", opp.id, { nextActionNote: "Llamar pasado mañana" }, { userId: null }),
+    updateOpportunity(tx, "org_a", opp.id, { title: "Ortodoncia invisible" }, { userId: null }),
+  )
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setOpportunityTask(tx, "org_a", opp.id, { title: "Llamar pasado mañana" }, { userId: null, createdBy: "user" }),
   )
   expect(edited.contactId).toBe(from.id)
   expect(edited.conversationId).toBeNull()
-  const after = await withOrgContext(appDb, "org_a", (tx) =>
+  const openFollowUps = await withOrgContext(appDb, "org_a", (tx) =>
     listTasks(tx, "org_a", { opportunityId: opp.id, status: "open" }),
   )
-  const openFollowUps = after.filter(task => task.kind === "opportunity_follow_up")
   expect(openFollowUps).toHaveLength(1)
   expect(openFollowUps[0]?.contactId).toBe(from.id)
   expect(openFollowUps[0]?.conversationId).toBeNull()

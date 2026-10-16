@@ -251,6 +251,11 @@ export async function getReportSales(tx: Db, orgId: string, query: ReportQuery, 
     select status, count(*)::int as count from opportunity
     where organization_id=${orgId} and created_at >= ${at(window.start)} and created_at < ${at(window.end)}
     group by status order by status`)
+  // Por qué se pierden las ventas: los motivos de las perdidas del mismo tramo.
+  const lostReasons = await tx.execute<{ reason: string; count: number }>(sql`
+    select coalesce(close_reason, 'otro') as reason, count(*)::int as count from opportunity
+    where organization_id=${orgId} and status = 'lost' and created_at >= ${at(window.start)} and created_at < ${at(window.end)}
+    group by 1 order by count desc, reason`)
   return {
     ...reportHead(scope),
     newPatients: await newPatients(tx, orgId, scope, window),
@@ -260,6 +265,8 @@ export async function getReportSales(tx: Db, orgId: string, query: ReportQuery, 
     procedures,
     previousProcedureCount: previousProcedures.reduce((sum, row) => sum + row.count, 0),
     opportunities: [...opportunities],
+    /** Motivos de las perdidas (claves de la lista; los nombres los escribe la interfaz). */
+    lostReasons: [...lostReasons],
     /** Presupuestos y oportunidades son de la persona, no de una sede. */
     wholeClinic: scope.branch ? (["budgets", "opportunities"] as const) : ([] as const),
     series: await monthlySeries(scope, async (span) => ({ newPatients: await newPatients(tx, orgId, scope, span) })),

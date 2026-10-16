@@ -19,7 +19,7 @@ interface ListCopy {
   noun: { one: string; many: string }
   /** Cómo se calcula, en una línea; recibe el periodo ya escrito. */
   how: (period: string) => string
-  where: { to: "/agenda" | "/patients"; label: string }
+  where: { to: "/agenda" | "/people"; label: string }
   /** La fila lleva a la sección del paciente donde se resuelve. */
   patientTab?: "plan"
   /** «Ya tiene otra cita» solo importa donde alguien va a llamar. */
@@ -59,7 +59,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Presupuestos que esperan respuesta",
     noun: { one: "presupuesto", many: "presupuestos" },
     how: (period) => `Presupuestos presentados en ${period} que hoy siguen sin respuesta o pospuestos.`,
-    where: { to: "/patients", label: "Ir a Pacientes" },
+    where: { to: "/people", label: "Ir a Pacientes" },
     patientTab: "plan",
     showNext: false,
   },
@@ -67,7 +67,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Pacientes nuevos",
     noun: { one: "persona", many: "personas" },
     how: (period) => `Personas cuya primera cita atendida fue en ${period}.`,
-    where: { to: "/patients", label: "Ir a Pacientes" },
+    where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
 }

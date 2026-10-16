@@ -182,3 +182,13 @@ describe("fronteras económicas por rol", () => {
     expect(canAccess("owner", "budgets.delete")).toBe(false)
   })
 })
+
+describe("tareas de toda la clínica", () => {
+  it("solo propietario y administrador ven las de toda la clínica; los demás, las suyas y las de su área", () => {
+    for (const role of ["owner", "admin"]) expect(canAccess(role, "tasks.all")).toBe(true)
+    for (const role of ["reception", "dentist", "cashier", "member"]) {
+      expect(canAccess(role, "tasks.read")).toBe(true)
+      expect(canAccess(role, "tasks.all")).toBe(false)
+    }
+  })
+})

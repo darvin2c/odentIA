@@ -40,7 +40,6 @@ import {
   Smile,
   Tags,
   UserRound,
-  Users,
   Wallet,
 } from "lucide-react"
 import { useEffect } from "react"
@@ -141,8 +140,8 @@ const navDefinitions: NavDefinition[] = [
   {
     label: "Personas",
     children: [
-      { label: "Pacientes", to: "/patients", icon: Smile, permission: "patients.read" },
-      { label: "Contactos", to: "/contacts", icon: Users, permission: "crm.read" },
+      // Una sola entrada para todas las personas (ADR 0029): pacientes, por registrar y responsables.
+      { label: "Pacientes", to: "/people", icon: Smile, permission: "patients.read" },
       { label: "Oportunidades", to: "/pipeline", icon: Kanban, permission: "crm.read" },
     ],
   },
@@ -236,7 +235,8 @@ function OrgLayout() {
   })
   // Contador ligero para el badge del agente; la misma consulta alimenta el panel.
   const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
-  // Lo que espera al equipo: los casos que el agente pasó y siguen sin resolver.
+  // El único contador de los casos del agente: lo que nadie tomó más lo tuyo
+  // (lo cuenta el servidor para quien mira). Panel, pestañas y Resumen no lo repiten.
   const pendingCases = agentSummary.data?.data.openHandoffs ?? 0
   // El agente lleva su contador y, para quien solo decide, entra por Pendientes.
   const withAgentState = <T extends AppShellNavItem>(item: T): T => {

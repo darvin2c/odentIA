@@ -1,6 +1,6 @@
 # 0023 · El Administrador detecta, Recepción habla y el equipo atiende lo que no se resuelve solo
 
-Fecha: 2026-10-14 · Estado: aceptada · Ajusta a [0015](0015-administrador-lineas-prendidas-o-apagadas.md) y a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md)
+Fecha: 2026-10-14 · Estado: aceptada · Ajusta a [0015](0015-administrador-lineas-prendidas-o-apagadas.md) y a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md) · Ajustada por [0028](0028-ventas-que-se-mueven-solas.md): los casos de «Retomar una oportunidad» son las oportunidades con su tarea vencida, y esa misma tarea es la que queda o se da por hecha
 
 ## Problema
 

@@ -85,7 +85,7 @@ export interface AdminPage {
   today: { recommendations: number; done: number; yours: number }
   monthTemplates: number
   /** Prendida, pero casi no escribe: la mayoría no aceptó ese tipo de mensaje. */
-  permissionGaps: Array<{ purpose: "recordatorio" | "seguimiento"; refused: number; total: number; asks: boolean; lineKey: string }>
+  permissionGaps: Array<{ purpose: "novedades"; refused: number; total: number; asks: boolean; lineKey: string }>
 }
 
 export interface AdminFlowStep {
@@ -203,12 +203,11 @@ export function refreshAdmin(queryClient: QueryClient): void {
 export const ADMIN_LINE_WHERE: Record<string, { to: string; label: string }> = {
   recordatorio_cita: { to: "/agenda", label: "Abrir la agenda" },
   recordatorio_control: { to: "/agenda", label: "Abrir la agenda" },
-  seguimiento_presupuesto: { to: "/patients", label: "Abrir pacientes" },
+  seguimiento_presupuesto: { to: "/people", label: "Abrir pacientes" },
   seguimiento_comercial: { to: "/pipeline", label: "Abrir oportunidades" },
   seguimiento_no_asistencia: { to: "/agenda", label: "Abrir la agenda" },
   presupuestos_sin_cita: { to: "/agenda", label: "Abrir la agenda" },
-  atenciones_sin_firmar: { to: "/patients", label: "Abrir pacientes" },
+  atenciones_sin_firmar: { to: "/people", label: "Abrir pacientes" },
   cobranza_vencida: { to: "/finance", label: "Abrir finanzas" },
-  seguimientos_sin_responsable: { to: "/pipeline", label: "Abrir oportunidades" },
   cita_cancelada: { to: "/agenda", label: "Abrir la agenda" },
 }

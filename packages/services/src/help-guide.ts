@@ -13,6 +13,8 @@ export interface HelpTopic {
   id: string
   /** Ruta de la pantalla, tal como está en la aplicación. */
   path: string
+  /** Otras direcciones de la misma pantalla (las que redirigen o cuelgan de ella). */
+  alsoAt?: string[]
   /** Nombre con el que el sistema la llama (el del menú). */
   title: string
   /** Sección del menú o de Configuración donde está. */
@@ -37,21 +39,27 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/home",
     title: "Inicio",
     parent: null,
-    purpose: "Lo que te toca hoy. «Te espera» reúne en una lista, por orden de urgencia, los casos que pasó el agente, las conversaciones sin responder, las tareas, lo que recomienda el administrador y las personas a las que el agente no pudo escribir. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo.",
-    terms: ["resumen del día", "pendientes", "panel", "dashboard", "qué tengo hoy", "recomendaciones"],
+    purpose: "Lo que te toca hoy. «Te espera» es la única lista de lo que hay que hacer, una fila por asunto y por orden de urgencia: lo que te pasó el agente (con «Tomar»), las citas que no se confirmaron tras el recordatorio (para llamar), las conversaciones sin responder, las tareas (con «Hecha»), lo que recomienda el administrador y las personas a las que el agente no pudo escribir. Al lado, tu día: la agenda de la sede, tus pacientes o la caja, según tu trabajo. La campana de avisos es solo para enterarte: no repite nada de «Te espera».",
+    terms: ["resumen del día", "pendientes", "panel", "dashboard", "qué tengo hoy", "recomendaciones", "avisos", "campana", "notificaciones", "marcar todo leído", "te lo pasó el agente", "no confirmó"],
+    faqs: [
+      { q: "¿Qué trae la campana?", a: "Lo que conviene saber y no pide trabajo: un consentimiento firmado, la caja que cerró con diferencia, una oportunidad ganada o perdida, un mensaje que WhatsApp aprobó. Abrir un aviso lo marca leído y «Marcar todo leído» los marca todos. Un aviso desaparece solo cuando su asunto se resuelve, y nunca te avisa de algo que hiciste tú. Lo que hay que hacer está en «Te espera»." },
+      { q: "¿Por qué aparece «no confirmó · llamar»?", a: "Con «Recordar la cita» prendida, el agente le recordó la cita y la persona no la confirmó. La cita aparece con su teléfono para que alguien la llame con tiempo; el agente igual le recuerda otra vez tres horas antes. Al confirmar, la fila desaparece." },
+    ],
   },
   {
     id: "bandeja",
     path: "/inbox",
     title: "Bandeja",
     parent: null,
-    purpose: "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, agrupadas por lo que esperan: respuesta, al equipo, al paciente, al agente o cerradas. Desde ahí respondes, tomas la conversación, la devuelves al agente o la resuelves. Ninguna queda abierta: el agente la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
-    terms: ["mensajes", "chats", "conversaciones", "responder", "inbox", "escribir a un paciente", "cerrar conversación", "resolver", "reabrir", "cerradas"],
+    purpose: "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, agrupadas por lo que esperan: respuesta, al equipo, al paciente, al agente o cerradas. Se buscan por nombre o por teléfono. Desde ahí respondes, empiezas una «Nueva conversación», tomas la conversación, la devuelves al agente o la resuelves; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Ninguna queda abierta: el agente la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
+    terms: ["mensajes", "chats", "conversaciones", "responder", "inbox", "escribir a un paciente", "escribirle", "nueva conversación", "iniciar conversación", "cerrar conversación", "resolver", "reabrir", "cerradas"],
     writePermission: "conversations.write",
     faqs: [
-      { q: "¿Cómo respondo yo en vez del agente?", a: "Abre la conversación y pulsa «Tomar». Desde ese momento respondes tú y los casos derivados de esa conversación quedan a tu nombre; con «Devolver al agente» vuelve a atender él." },
-      { q: "¿Cómo cierro una conversación?", a: "Con «Resolver»: sale una despedida si aún se le puede escribir, los casos derivados quedan resueltos y la conversación se cierra como «Resuelta por el equipo». Si la persona vuelve a escribir, se reabre sola." },
-      { q: "¿Por qué se cerró sola una conversación?", a: "El agente la cierra cuando la persona se despide y no queda nada pendiente («Resuelta») o cuando deja de responder («Sin respuesta del paciente»): antes insiste una vez si había algo por responder y se despide en un horario razonable. Las que tiene una persona del equipo no se cierran solas: te llega un aviso." },
+      { q: "¿Cómo le escribo a alguien que nunca me escribió?", a: "En la Bandeja pulsa «Nueva conversación», búscalo por nombre o por teléfono y elígelo; si no existe, créalo con su número. Si tiene teléfono se le escribe por WhatsApp, sin escribir nada más. Como nunca escribió, WhatsApp pide empezar con uno de los mensajes aprobados de la clínica: la conversación te los ofrece y, si no hay ninguno, te dice qué falta y a quién pedírselo. Desde la ficha, la Agenda o Finanzas es el mismo botón: «Escribirle»." },
+      { q: "¿Cómo respondo yo en vez del agente?", a: "Abre la conversación y pulsa «Tomar». Desde ese momento respondes tú y lo que te pasó el agente en esa conversación queda a tu nombre; con «Devolver al agente» vuelve a atender él. Si estaba cerrada, tomarla la reabre." },
+      { q: "¿Cómo cierro una conversación?", a: "Con «Resolver»: sale una despedida si aún se le puede escribir, los casos del agente quedan resueltos y la conversación se cierra como «Resuelta por el equipo». Si la persona vuelve a escribir, se reabre sola." },
+      { q: "¿Por qué se cerró sola una conversación?", a: "El agente la cierra cuando la persona se despide y no queda nada pendiente («Resuelta») o cuando deja de responder («Sin respuesta del paciente»): antes insiste una vez si había algo por responder y se despide en un horario razonable. Las que tiene una persona del equipo no se cierran solas: aparecen en «Te espera» para que la cierres o sigas." },
+      { q: "¿Cómo dejo constancia de que la persona aceptó lo que le propuso el agente?", a: "En la banda de la conversación, «Registrar confirmación». Solo deja constancia de que la persona ya dijo que sí en el chat; el equipo no aprueba nada por ella." },
       { q: "¿Cómo veo en qué se basó una respuesta del agente?", a: "En la conversación, debajo de cada mensaje del agente, pulsa «En qué se basó». Verás qué consultó y qué datos se comprobaron antes de enviarlo." },
     ],
   },
@@ -60,12 +68,15 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/agenda",
     title: "Agenda",
     parent: null,
-    purpose: "Las citas por día, por semana o en lista, de cada profesional. Desde ahí reservas, mueves y cancelas citas.",
-    terms: ["citas", "calendario", "reservar", "turnos", "horario del día", "mover una cita", "cancelar una cita", "reprogramar"],
+    purpose: "Las citas por día, por semana o en lista, de cada profesional. Desde ahí reservas, mueves y cancelas citas. Cada cita dice el teléfono de la persona, de qué conversación salió y cuándo le pedirá el agente que confirme, y te deja escribirle.",
+    terms: ["citas", "calendario", "reservar", "turnos", "horario del día", "mover una cita", "cancelar una cita", "reprogramar", "confirmar cita", "escribirle", "avisar la cita"],
     writePermission: "appointments.write",
     faqs: [
       { q: "¿Cómo bloqueo un horario?", a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo no se puede reservar; las citas que ya estaban no se mueven solas." },
       { q: "¿Por qué no aparece un profesional en la agenda?", a: "Un profesional aparece cuando tiene un horario definido en Configuración › Horarios y ausencias. Sin horario explícito no se le pueden reservar citas." },
+      { q: "¿Cómo le reservo una cita desde la conversación?", a: "Abre «Contexto» y pulsa «Reservar cita». Si aún no es paciente, la Agenda crea su ficha con su nombre y su teléfono, unida a esa misma persona. Al guardar vuelves a la conversación y, con «Recordar la cita» prendida, el agente le avisa solo la fecha y la sede." },
+      { q: "¿Quién le avisa a la persona su cita?", a: "Con «Recordar la cita» prendida (viene así en toda clínica nueva) y Recepción y el Administrador encendidos, el agente le avisa al reservar, al mover y al cancelar la cita, y le pide confirmar un día antes y tres horas antes. Es parte del servicio: no pide permiso, salvo que la persona se haya dado de baja. Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, el agente le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona." },
+      { q: "¿Cómo le doy cita a alguien que llama y nunca vino?", a: "En «Nueva cita», «Registrar paciente nuevo»: con nombres, apellidos y teléfono basta para reservar, aunque la clínica pida más en su registro. Lo que falta queda pendiente en su página. Ahí mismo puedes anotar, si se lo preguntaste, si acepta novedades y promociones." },
     ],
   },
   {
@@ -73,47 +84,51 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/tasks",
     title: "Tareas",
     parent: null,
-    purpose: "Los pendientes del equipo: llamadas, seguimientos y casos que pasó el agente, con su responsable y su vencimiento.",
-    terms: ["pendientes", "recordatorios", "to do", "llamar", "asignar", "vencidas"],
+    purpose: "Los pendientes del equipo, con páginas y búsqueda: se abre en «Mías y de mi área» (las tuyas y las sin responsable de tu parte del equipo); «Vencidas» y «Hechas» las filtran, y «Toda la clínica» la ven el propietario y el administrador. Cada tarea dice de quién es y lleva a su persona. Las que dejó el Administrador se cierran solas cuando ya no hacen falta (la cita pasó, la persona confirmó, el presupuesto se decidió) y dicen por qué. Completar la tarea de un caso del agente te dice antes qué se le enviará y que la conversación se cerrará, igual que «Resolver».",
+    terms: ["pendientes", "recordatorios", "to do", "llamar", "asignar", "vencidas", "hechas", "mis tareas", "toda la clínica", "se cerró sola", "te lo pasó el agente"],
     writePermission: "tasks.write",
-  },
-  {
-    id: "pacientes",
-    path: "/patients",
-    title: "Pacientes",
-    parent: "Personas",
-    purpose: "La lista de pacientes y la ficha de cada uno: filiación, historia clínica, plan de tratamiento, presupuestos y pagos, según lo que tu rol puede ver.",
-    terms: ["historia clínica", "ficha", "expediente", "registrar paciente", "nuevo paciente", "odontograma", "buscar paciente"],
-    writePermission: "patients.write",
     faqs: [
-      { q: "¿Cómo registro un paciente nuevo?", a: "En Pacientes, pulsa «Nuevo paciente». También puedes enviarle un enlace de registro desde la conversación para que complete sus datos." },
+      { q: "¿Por qué no veo las tareas de los demás?", a: "Tareas se abre en «Mías y de mi área»: las tuyas y las que no tienen responsable en tu parte del equipo. «Toda la clínica» solo la ven el propietario y el administrador." },
+      { q: "¿Por qué una tarea se marcó como hecha sola?", a: "Porque su motivo ya no estaba: la cita pasó, la persona confirmó o reservó otra, el presupuesto se decidió o la oportunidad se cerró. La tarea dice «Se cerró sola» y el porqué." },
     ],
   },
   {
-    id: "contactos",
-    path: "/contacts",
-    title: "Contactos",
+    id: "pacientes",
+    path: "/people",
+    alsoAt: ["/patients"],
+    title: "Pacientes",
     parent: "Personas",
-    purpose: "Todas las personas que escribieron o que registraste, sean o no pacientes: sus datos, etiquetas, conversaciones y oportunidades.",
-    terms: ["personas", "clientes", "leads", "interesados", "etiquetas", "teléfono", "directorio"],
-    writePermission: "crm.write",
+    purpose: "Todas las personas de la clínica en una lista: pacientes, quienes aún no se registran y sus responsables. Cada persona tiene una sola página, la misma antes y después de registrarla: resumen, conversaciones, citas, datos y, ya registrada, su clínica, su plan y sus cobros, según lo que tu rol puede ver.",
+    terms: ["historia clínica", "ficha", "expediente", "registrar paciente", "nueva persona", "odontograma", "buscar paciente", "contactos", "por registrar", "responsables", "archivar", "notas"],
+    writePermission: "patients.write",
+    faqs: [
+      { q: "¿Cómo registro un paciente nuevo?", a: "Abre su página (desde la Bandeja, o con «Nueva persona» en Pacientes) y pulsa «Registrar»: el formulario ya trae lo que se sabe de ella y solo pide lo que falta. También puedes enviarle su enlace de registro con «Enviar enlace»." },
+      { q: "¿Dónde quedaron los contactos?", a: "En Pacientes: elige «Por registrar» para quienes escribieron y aún no son pacientes, «Responsables» para quienes hablan por un paciente o «Todos». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes." },
+      { q: "¿Qué mensajes le podemos enviar sin preguntarle?", a: "Todo lo de su atención: su cita (aviso, recordatorio y confirmación), sus controles, sus presupuestos y la inasistencia. Es parte del servicio. Solo las novedades y promociones piden su sí: se ve y se cambia en su página › Datos › Mensajes. Si pide no recibir algo, se respeta siempre." },
+      { q: "¿Cómo archivo a una persona?", a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha, y se recupera igual desde la vista «Archivados»." },
+    ],
   },
   {
     id: "oportunidades",
     path: "/pipeline",
     title: "Oportunidades",
     parent: "Personas",
-    purpose: "El tablero de seguimiento comercial: cada persona interesada en un tratamiento, en qué etapa está y cuál es su próxima acción.",
-    terms: ["embudo", "pipeline", "ventas", "seguimiento", "interesados", "tablero", "kanban", "cerrar una oportunidad"],
+    purpose: "El tablero de ventas: cada interés concreto de una persona (un precio, un tratamiento, una evaluación) en cuatro pasos que avanzan solos: Interesado, Evaluación agendada (al agendar su cita), Presupuesto enviado (al presentarle el presupuesto) y Decidió (al aceptarlo o rechazarlo). Cada tarjeta dice por qué está donde está y cuál es su tarea. Muestra lo abierto y lo decidido en los últimos 30 días; el total suma solo lo abierto.",
+    terms: ["embudo", "pipeline", "ventas", "interesados", "tablero", "kanban", "cerrar una oportunidad", "ganada", "perdida", "mover a", "avanza sola", "tomar"],
     writePermission: "crm.write",
+    faqs: [
+      { q: "¿Por qué una oportunidad cambió de paso sola?", a: "Porque pasó algo real: al agendar su cita pasa a «Evaluación agendada», al presentarle el presupuesto a «Presupuesto enviado», y al aceptarlo (aunque sea en parte) se gana; al rechazarlo se pierde. La tarjeta y el historial dicen qué la movió." },
+      { q: "¿Cómo cierro una oportunidad?", a: "Ábrela y pulsa «Ganada» o «Perdida» (o arrástrala a «Decidió»). Perdida pide el motivo: precio, eligió otra clínica, no responde, ya no lo necesita u otro." },
+      { q: "¿Qué es «Recepción · sin persona asignada»?", a: "La oportunidad que creó el agente o que nadie lleva todavía es de Recepción. «Tomar» la deja a tu nombre, con su tarea." },
+    ],
   },
   {
     id: "agente",
     path: "/agent",
     title: "Agente",
     parent: null,
-    purpose: "El resumen de tus agentes: cómo van, qué necesita de ti y la entrada para configurar cada uno, atender en «Pendientes» los casos que te pasan, revisar lo que aprenden y mantener su conocimiento.",
-    terms: ["inteligencia artificial", "ia", "bot", "asistente virtual", "automático", "pendientes", "aprobaciones", "casos derivados", "conocimiento", "aprender", "tope diario", "autonomía", "cerrar conversaciones"],
+    purpose: "El resumen de tus agentes: cómo van, qué necesita de ti y la entrada para configurar cada uno, atender en «Pendientes» los casos del agente, revisar lo que aprenden y mantener su conocimiento. El número junto a Agente en el menú cuenta lo que nadie ha tomado más lo tuyo.",
+    terms: ["inteligencia artificial", "ia", "bot", "asistente virtual", "automático", "pendientes", "aprobaciones", "casos derivados", "casos del agente", "te lo pasó el agente", "conocimiento", "aprender", "tope diario", "autonomía", "cerrar conversaciones"],
     writePermission: "agent.write",
     faqs: [
       { q: "¿Cómo enciendo el agente?", a: "En Agente, en la fila de Recepción, usa el interruptor. Te muestra cuatro comprobaciones (canal, lo básico de tu clínica, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve." },
@@ -130,9 +145,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["recordatorios", "mensajes automáticos", "automatizaciones", "confirmar cita", "avisos", "reglas", "seguimientos", "recomendaciones", "asesor"],
     writePermission: "agent.write",
     faqs: [
-      { q: "¿Dónde enciendo los recordatorios de cita?", a: "En Agente › Administrador, en «Listas para activar», prende «Recordar la cita». Antes enciende al administrador con el interruptor de arriba. El recordatorio llega solo a quien aceptó recibirlo." },
+      { q: "¿Dónde enciendo los recordatorios de cita?", a: "«Recordar la cita» viene prendida. Para que salga, enciende al administrador con el interruptor de arriba y a Recepción en su página: la página del Administrador te avisa si falta alguno. El recordatorio es parte del servicio y llega a todos, salvo a quien se dio de baja." },
       { q: "¿Puedo pedirle algo con mis palabras?", a: "Sí. En Agente › Administrador, escribe en «Dile qué quieres que haga» lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador con su flujo y una prueba con tus últimos 30 días; nada cambia hasta que lo prendas o lo guardes." },
-      { q: "¿Por qué el agente no le escribió a una persona?", a: "En Agente › Administrador, abre la línea y mira «Qué pasó con cada persona»: dice el motivo (no aceptó mensajes, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo." },
+      { q: "¿Por qué el agente no le escribió a una persona?", a: "En Agente › Administrador, abre la línea y mira «Qué pasó con cada persona»: dice el motivo (pidió no recibirlo, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo." },
     ],
   },
   {
@@ -269,8 +284,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/settings/pipelines",
     title: "Etapas de venta",
     parent: SETTINGS,
-    purpose: "Las etapas del tablero de oportunidades: cuáles son, en qué orden y cuáles cierran como ganada o perdida.",
-    terms: ["etapas", "embudo", "columnas del tablero", "fases de venta", "pipelines"],
+    purpose: "Los cuatro pasos del tablero de oportunidades (Interesado, Evaluación agendada, Presupuesto enviado y Decidió) y cuándo llega sola la oportunidad a cada uno. Puedes cambiarles el nombre; no se añaden ni se quitan pasos, porque así la oportunidad avanza sola.",
+    terms: ["etapas", "pasos", "embudo", "columnas del tablero", "fases de venta", "pipelines", "renombrar etapa"],
     writePermission: "settings.write",
   },
   {
@@ -343,8 +358,9 @@ export function helpTopicLabel(topic: HelpTopic): string {
 /** El tema de la pantalla donde está la persona: el de la ruta más larga que coincide. */
 export function helpTopicForScreen(pathname: string): HelpTopic | undefined {
   const clean = pathname.replace(/\/+$/, "") || "/"
+  const under = (base: string) => clean === base || clean.startsWith(`${base}/`)
   return [...HELP_TOPICS]
-    .filter((topic) => clean === topic.path || clean.startsWith(`${topic.path}/`))
+    .filter((topic) => under(topic.path) || (topic.alsoAt ?? []).some(under))
     .sort((a, b) => b.path.length - a.path.length)[0]
 }
 

@@ -89,16 +89,18 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
     provider: { problem: null },
   })
 
-  // --- Escritorio: las cuatro fichas, los tres agentes, la semana en tres tramos y lo aprendido ---
+  // --- Escritorio: las tres fichas, los tres agentes, la semana en tres tramos y lo aprendido ---
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   await expect(page.getByRole("heading", { level: 1, name: "Agente" })).toBeVisible()
   const needs = page.getByRole("region", { name: "Necesita de ti" })
   const tiles = needs.getByRole("link")
-  await expect(tiles).toHaveCount(4)
-  for (const [index, name] of ["Pendientes", "Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
+  await expect(tiles).toHaveCount(3)
+  for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
+  // Los casos del agente se cuentan en un solo sitio, el menú (ADR 0025): el resumen no repite «Pendientes».
+  await expect(needs.getByRole("link", { name: /Pendientes/ })).toHaveCount(0)
   const agents = page.getByRole("region", { name: "Tus agentes" })
   await expect(agents).toContainText("La base que comparten los tres")
   const rows = agents.getByRole("listitem")
@@ -132,15 +134,14 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await learned.getByRole("link", { name: "Ver todo lo aprendido" }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/learn"))
 
-  // --- Teléfono: fichas en 2×2, cada agente en una fila que navega y «Pendientes» al final de las pestañas ---
+  // --- Teléfono: fichas de dos en dos, cada agente en una fila que navega y «Pendientes» al final de las pestañas ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent"))
-  await expect(tiles).toHaveCount(4)
-  const tileBoxes = await Promise.all([0, 1, 2, 3].map((index) => box(tiles.nth(index))))
-  const [first, second, third, fourth] = tileBoxes
-  if (!first || !second || !third || !fourth) throw new Error("Faltan fichas")
+  await expect(tiles).toHaveCount(3)
+  const tileBoxes = await Promise.all([0, 1, 2].map((index) => box(tiles.nth(index))))
+  const [first, second, third] = tileBoxes
+  if (!first || !second || !third) throw new Error("Faltan fichas")
   expect(Math.abs(first.y - second.y)).toBeLessThan(2)
-  expect(Math.abs(third.y - fourth.y)).toBeLessThan(2)
   expect(third.y).toBeGreaterThan(first.y + first.height - 1)
   expect(Math.abs(first.x - third.x)).toBeLessThan(2)
   expect(second.x).toBeGreaterThan(first.x + first.width - 1)

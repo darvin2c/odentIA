@@ -1,5 +1,5 @@
-import { Badge, Button, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
-import { ConfirmDialog, EmptyState } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
+import { ConfirmDialog, EmptyState, internationalText } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
 import {
@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
-import { channelIcon, channelLabel } from "../../lib/channels"
+import { channelIcon, channelLabel, identityText } from "../../lib/channels"
 import { timeAgo, usePermission, type OpportunityListItem, type TaskItem } from "../../lib/crm"
 import {
   activityKindLabel,
@@ -26,14 +26,19 @@ import {
   createCrmNote,
   fetchCrmActivityPage,
   fetchCrmContext,
+  messagePermissionsSaid,
+  nextAppointmentSaid,
   type CrmActivityItem,
 } from "../../lib/crm-workspace"
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
-import { formatDueAt, isOverdue } from "./crm-helpers"
+import { dueWords, isOverdue } from "./crm-helpers"
 import { PersonMemoryDrawer } from "../agent/person-memory"
+import { useCompleteTask } from "./resolve-preview"
 import { OpportunityDrawer } from "./opportunity-drawer"
+import { OpportunityPanel } from "./opportunity-panel"
 import { TaskDrawer } from "./task-drawer"
+import { PersonLink } from "../person-link"
 import { activeOrgLocale } from "../../lib/locale"
 import { amountFromCents } from "../../lib/workspace"
 
@@ -105,6 +110,7 @@ export function ContactWorkspace({
   const canDecide = usePermission("agent.decide")
   const canReadAgent = usePermission("agent.read")
   const canWriteAppointments = usePermission("appointments.write")
+  const canReadAppointments = usePermission("appointments.read")
   const canRegister = usePermission("patients.write")
 
   const [tab, setTab] = useState("resumen")
@@ -115,6 +121,8 @@ export function ContactWorkspace({
   // trae propuestas pendientes, así que un outcome fallido/expirado se muestra
   // aquí, hasta cambiar de contacto o registrar otra.
   const [outcome, setOutcome] = useState<AgentProposal | null>(null)
+  // La oportunidad se abre al lado, sin salir del caso (ADR 0028).
+  const [oppPanel, setOppPanel] = useState<string | null>(null)
   const [oppDrawer, setOppDrawer] = useState<{ open: boolean; opportunityId?: string }>({
     open: false,
   })
@@ -256,6 +264,8 @@ export function ContactWorkspace({
       "agent.proposal.decided",
       "agent.proposal.executed",
       "agent.handoff.created",
+      // La próxima cita cambia con la Agenda, el agente o el enlace de reserva.
+      "appointment.updated",
       "stream.reconnected",
     ],
     handleOrgEvent,
@@ -270,20 +280,8 @@ export function ContactWorkspace({
     onRefreshRef.current?.()
   }, [queryClient, contactId])
 
-  // «Tomar» y «Devolver al agente»: las mismas acciones que la cabecera del hilo.
-  // Devolver con un caso derivado abierto responde 409 con su motivo, que se muestra.
-  const agentMutation = useMutation({
-    retry: false,
-    mutationFn: (action: "take" | "release") =>
-      apiFetch(`/api/conversations/${conversationId}/${action}`, { method: "POST" }),
-    onSuccess: () => {
-      invalidateWorkspace()
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] })
-      if (conversationId) {
-        void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] })
-      }
-    },
-  })
+  // «Tomar», «Devolver al agente» y «Resolver» viven solo en la cabecera del
+  // hilo, con una sola regla: «Contexto» no los repite.
 
   // La confirmación del interlocutor registra evidencia real por /confirm. Un
   // stale llega como 200 fallida: se guarda el outcome tipado y se muestra
@@ -309,6 +307,7 @@ export function ContactWorkspace({
       }),
     onSuccess: () => invalidateWorkspace(),
   })
+  const completion = useCompleteTask(() => invalidateWorkspace())
 
   const noteMutation = useMutation({
     mutationFn: (body: string) =>
@@ -355,10 +354,18 @@ export function ContactWorkspace({
   }
 
   const agent = workspace.agent
-  const agentConv = agent.conversationId ?? conversationId ?? null
   const contact = workspace.contact.contact
   const identities = workspace.contact.identities
   const patients = workspace.contact.patients
+  // «Reservar cita» de la persona: su ficha si ya es paciente; si aún no lo es,
+  // la Agenda crea su ficha mínima unida a ella. Quien solo lleva a otros
+  // (un padre) reserva desde cada paciente, más abajo.
+  const selfPatient = patients.find((link) => link.relationship === "self")
+  const bookTarget: { patientId?: string } | null = selfPatient
+    ? { patientId: selfPatient.id }
+    : patients.length === 0
+      ? {}
+      : null
   const tasks: TaskItem[] = canReadTasks ? workspace.tasks : []
   const opps = oppsQuery.data?.pages.flatMap((page) => page.data) ?? []
   const activity = activityQuery.data?.pages.flatMap((page) => page.data) ?? []
@@ -376,9 +383,7 @@ export function ContactWorkspace({
     return canWriteNote
   }
   const mutationError =
-    agentMutation.error instanceof ApiError
-      ? (agentMutation.error.shape.message ?? "No se pudo cambiar la atención")
-      : confirmMutation.error instanceof ApiError
+    confirmMutation.error instanceof ApiError
           ? (confirmMutation.error.shape.message ?? "No se pudo registrar la confirmación")
           : taskMutation.error instanceof ApiError
             ? (taskMutation.error.shape.message ?? "No se pudo actualizar la tarea")
@@ -386,7 +391,7 @@ export function ContactWorkspace({
               ? (noteMutation.error.shape.message ?? "No se pudo guardar la nota")
               : registrationMutation.error instanceof ApiError
                 ? (registrationMutation.error.shape.message ?? "No se pudo crear el enlace")
-                : null
+                : completion.error
 
   return (
     <section
@@ -403,15 +408,16 @@ export function ContactWorkspace({
             {contact.displayName}
           </h2>
           <p className="text-xs text-muted-foreground">
-            {[contact.phone, contact.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}
+            {[contact.phone ? internationalText(contact.phone) : null, contact.email].filter(Boolean).join(" · ") ||
+              "Sin datos de contacto"}
           </p>
         </div>
         <Link
-          to="/contacts/$contactId"
-          params={{ contactId }}
+          to="/people/$personId"
+          params={{ personId: contactId }}
           className="shrink-0 text-xs text-primary hover:underline"
         >
-          Ver ficha
+          Ver su página
         </Link>
         {onClose && (
           <Button
@@ -430,6 +436,7 @@ export function ContactWorkspace({
           {mutationError}
         </p>
       )}
+      {completion.dialog}
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label="Secciones del contexto">
@@ -438,6 +445,50 @@ export function ContactWorkspace({
         </TabsList>
 
         <TabsContent value="resumen" className="flex flex-col gap-4">
+          {/* Lo que recepción necesita para darle una cita, sin salir del hilo. */}
+          <div className="flex flex-col gap-2">
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+              {canReadAppointments ? (
+                <>
+                  <dt className="text-muted-foreground">Próxima cita</dt>
+                  <dd className="font-medium">
+                    {workspace.nextAppointment ? (
+                      <Link
+                        to="/agenda"
+                        search={{ appointmentId: workspace.nextAppointment.id }}
+                        className="hover:underline"
+                      >
+                        {nextAppointmentSaid(workspace.nextAppointment, activeOrgLocale(), contact.displayName)}
+                      </Link>
+                    ) : (
+                      "Ninguna"
+                    )}
+                  </dd>
+                </>
+              ) : null}
+              <dt className="text-muted-foreground">Mensajes</dt>
+              <dd className="font-medium">{messagePermissionsSaid(workspace.messages)}</dd>
+            </dl>
+            {canWriteAppointments && bookTarget ? (
+              <Link
+                to="/agenda"
+                search={{
+                  ...(bookTarget.patientId ? { patientId: bookTarget.patientId } : {}),
+                  contactId,
+                  conversationId,
+                }}
+                className={cn(buttonVariants({ size: "sm" }), "min-h-11 w-fit sm:min-h-9")}
+              >
+                Reservar cita
+              </Link>
+            ) : null}
+            {canWriteAppointments && patients.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {contact.displayName.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y
+                teléfono, y el resto lo completa con el enlace de registro.
+              </p>
+            ) : null}
+          </div>
           {/* Resultado persistente de la última decisión: visible aunque la
               propuesta salga de pendientes o cambie el estado del agente. */}
           {outcome && (outcome.status === "fallida" || outcome.status === "expirada") && (
@@ -472,7 +523,7 @@ export function ContactWorkspace({
               <Badge variant="secondary">{agentStateLabel(agent.state)}</Badge>
               {pendingIds.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  {pendingIds.length} por aprobar
+                  {pendingIds.length === 1 ? "1 cita espera el sí del paciente" : `${pendingIds.length} citas esperan el sí del paciente`}
                 </span>
               )}
             </div>
@@ -488,35 +539,11 @@ export function ContactWorkspace({
             <Button variant="link" size="sm" className="h-auto min-h-11 w-fit p-0 sm:min-h-8" onClick={() => setMemoryOpen(true)}>
               Lo que recuerda el agente
             </Button>
-            {agentConv && canWriteConv && agent.state !== "closed" && (
-              <div className="flex flex-wrap gap-2">
-                {agent.state === "agent" || agent.state === "approval" || agent.state === "handoff" ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-h-11 sm:min-h-8"
-                    disabled={agentMutation.isPending}
-                    onClick={() => agentMutation.mutate("take")}
-                  >
-                    {agentMutation.isPending ? "Guardando…" : "Tomar"}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-h-11 sm:min-h-8"
-                    disabled={agentMutation.isPending}
-                    onClick={() => agentMutation.mutate("release")}
-                  >
-                    {agentMutation.isPending ? "Guardando…" : "Devolver al agente"}
-                  </Button>
-                )}
-              </div>
-            )}
             {/* Lo que espera el sí del interlocutor: el equipo solo registra una
                 confirmación que ya dio en el chat (agent.decide más el dominio del
                 acto); sin decide solo se ve el estado mínimo. */}
-            {agent.state === "approval" && (
+            {/* Se ve con cualquier estado (el orden es el de la Bandeja): la cita espera el sí aunque la lleve una persona. */}
+            {agent.awaitingContact && (
               <div className="flex flex-col gap-2 border-t pt-2">
                 {!canDecide ? (
                   <p className="text-xs text-muted-foreground">
@@ -650,7 +677,7 @@ export function ContactWorkspace({
                       <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                       <span className="font-medium">{channelLabel(ident.channel)}</span>
                       <span className="truncate text-muted-foreground">
-                        {ident.displayName ?? ident.externalUserId}
+                        {identityText(ident)}
                       </span>
                     </li>
                   )
@@ -666,7 +693,7 @@ export function ContactWorkspace({
             <h3 className="text-sm font-semibold">Pacientes</h3>
             {patients.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                Sin pacientes vinculados. El registro lo completa el paciente con su enlace.
+                Aún no es paciente. El registro lo completa con su enlace o se crea al reservarle una cita.
               </p>
             ) : (
               <ul className="flex flex-col gap-1.5">
@@ -680,7 +707,8 @@ export function ContactWorkspace({
                       </span>
                     </span>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      {canWriteAppointments && (
+                      {/* La propia persona se reserva arriba; aquí, quien ella lleva. */}
+                      {canWriteAppointments && link.relationship !== "self" && (
                         <Link
                           to="/agenda"
                           search={{ patientId: link.id, contactId, conversationId }}
@@ -689,13 +717,9 @@ export function ContactWorkspace({
                           Reservar cita
                         </Link>
                       )}
-                      <Link
-                        to="/patients/$patientId"
-                        params={{ patientId: link.id }}
-                        className="text-xs text-primary hover:underline"
-                      >
-                        Abrir ficha
-                      </Link>
+                      <PersonLink patientId={link.id} className="text-xs text-primary hover:underline">
+                        Abrir su página
+                      </PersonLink>
                     </div>
                   </li>
                 ))}
@@ -793,24 +817,14 @@ export function ContactWorkspace({
                     <span className="min-w-0">
                       <span className="block truncate font-medium">{opp.title}</span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        {opp.stageName} · {money(opp.amountCents, opp.currency)}
-                        {opp.nextActionAt ? ` · sigue ${timeAgo(opp.nextActionAt)}` : ""}
+                        {opp.status === "won" ? "Ganada" : opp.status === "lost" ? "Perdida" : opp.stageName} · {money(opp.amountCents, opp.currency)}
+                        {opp.nextTask ? ` · ${opp.nextTask.title}${opp.nextTask.dueAt ? ` · ${dueWords(opp.nextTask.dueAt)}` : ""}` : ""}
                       </span>
+                      {opp.why ? <span className="block truncate text-xs text-muted-foreground">{opp.why}</span> : null}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
-                      <Link
-                        to="/opportunities/$opportunityId"
-                        params={{ opportunityId: opp.id }}
-                        className="text-xs text-primary hover:underline"
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setOppPanel(opp.id)}>
                         Abrir
-                      </Link>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setOppDrawer({ open: true, opportunityId: opp.id })}
-                      >
-                        Editar
                       </Button>
                     </span>
                   </li>
@@ -840,10 +854,10 @@ export function ContactWorkspace({
 
           <Separator />
 
-          {/* Seguimientos: completar sin salir del caso */}
+          {/* Tareas: completar sin salir del caso */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">Seguimientos</h3>
+              <h3 className="text-sm font-semibold">Tareas</h3>
               <Button
                 variant="outline"
                 size="sm"
@@ -872,7 +886,7 @@ export function ContactWorkspace({
                           {task.title}
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
-                          {[task.opportunityTitle, task.dueAt ? `vence ${formatDueAt(task.dueAt)}` : null]
+                          {[task.opportunityTitle, task.dueAt ? `vence ${dueWords(task.dueAt)}` : null]
                             .filter(Boolean)
                             .join(" · ") || "Sin vencimiento"}
                           {overdue ? " · vencida" : ""}
@@ -882,12 +896,10 @@ export function ContactWorkspace({
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={taskMutation.isPending}
+                          disabled={taskMutation.isPending || completion.pendingId !== null}
                           onClick={() =>
-                            taskMutation.mutate({
-                              id: task.id,
-                              status: done ? "open" : "done",
-                            })
+                            // Completar la de un caso del agente muestra antes lo mismo que «Resolver».
+                            done ? taskMutation.mutate({ id: task.id, status: "open" }) : void completion.complete(task.id)
                           }
                         >
                           {done ? "Reabrir" : "Completar"}
@@ -1044,6 +1056,7 @@ export function ContactWorkspace({
           invalidateWorkspace()
         }}
       />
+      <OpportunityPanel opportunityId={oppPanel} onClose={() => setOppPanel(null)} />
       <TaskDrawer
         open={taskDrawer.open}
         contactId={contactId}
@@ -1089,8 +1102,8 @@ function ActivityRow({ item }: { item: CrmActivityItem }) {
         )}
         {item.opportunityId && (
           <Link
-            to="/opportunities/$opportunityId"
-            params={{ opportunityId: item.opportunityId }}
+            to="/pipeline"
+            search={{ oportunidad: item.opportunityId }}
             className="text-xs text-primary hover:underline"
           >
             Ver oportunidad

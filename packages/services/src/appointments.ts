@@ -17,12 +17,17 @@ import { member, user } from "@odentia/db/schema/auth"
 import { patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { scheduleBlock } from "@odentia/db/schema/availability"
-import { conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { and, asc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm"
 import { validateAvailability } from "./availability.js"
 import {
+  appointmentConfirmationPlan,
   cancelPendingForAppointment,
+  type ConfirmationPlan,
+  enqueueAppointmentNotice,
   invalidateAppointmentTokens,
+  preferredContact,
+  rescheduleAppointmentReminders,
 } from "./automation.js"
 import {
   branchNotFound,
@@ -32,6 +37,7 @@ import {
   validation,
 } from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
+import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -62,6 +68,11 @@ export interface AppointmentItem {
   source: string
   conversationId: string | null
   version: number
+  /**
+   * Solo al reservar, mover o cancelar: si el agente le avisará a la persona
+   * («Recordar la cita»). Ausente en las lecturas.
+   */
+  notice?: { queued: boolean }
 }
 
 export interface ScheduleResources {
@@ -213,6 +224,64 @@ export async function getAppointment(tx: Db, orgId: string, id: string): Promise
     .limit(1)
   if (!row) throw notFound("Cita")
   return toItem(row)
+}
+
+/** Lo que el cajón de la cita dice de la persona y de dónde salió la cita. */
+export interface AppointmentContext {
+  /**
+   * A quién se le escribe por esta cita: la persona del paciente o quien
+   * habla por él (la misma que recibe los recordatorios).
+   */
+  person: { contactId: string; name: string; phone: string | null; relationship: string } | null
+  /** De dónde salió: `source` y, si nació en una conversación, cuál, su canal y cuándo. */
+  origin: {
+    source: string
+    conversationId: string | null
+    channel: string | null
+    at: string
+  }
+  /** Cuándo le pedirá (o le pidió) el agente confirmar; null si no se lo va a pedir. */
+  confirmation: ConfirmationPlan | null
+}
+
+export async function getAppointmentContext(tx: Db, orgId: string, id: string): Promise<AppointmentContext> {
+  const current = await requireAppointment(tx, orgId, id)
+  const contactId = await preferredContact(tx, orgId, current.patientId)
+  const [person] = contactId
+    ? await tx
+        .select({ id: contact.id, name: contact.displayName, phone: contact.phone, relationship: patientContact.relationship })
+        .from(contact)
+        .innerJoin(
+          patientContact,
+          and(
+            eq(patientContact.contactId, contact.id),
+            eq(patientContact.organizationId, orgId),
+            eq(patientContact.patientId, current.patientId),
+          ),
+        )
+        .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+        .limit(1)
+    : []
+  const [thread] = current.conversationId
+    ? await tx
+        .select({ channel: channelConnection.channel })
+        .from(conversation)
+        .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+        .where(and(eq(conversation.id, current.conversationId), eq(conversation.organizationId, orgId)))
+        .limit(1)
+    : []
+  return {
+    person: person
+      ? { contactId: person.id, name: person.name, phone: person.phone, relationship: person.relationship }
+      : null,
+    origin: {
+      source: current.source,
+      conversationId: thread ? current.conversationId : null,
+      channel: thread?.channel ?? null,
+      at: current.createdAt.toISOString(),
+    },
+    confirmation: await appointmentConfirmationPlan(tx, orgId, id),
+  }
 }
 
 function toItem(row: {
@@ -508,6 +577,12 @@ export interface CreateAppointmentInput {
    * auditoría y en `source`. Sin indicar, la autora es `actorUserId`.
    */
   createdByUserId?: string | null
+  /**
+   * `false`: no se le avisa a la persona porque ya se le dijo donde se reservó
+   * (el agente en la conversación, la persona en su enlace). Por defecto se le
+   * avisa si «Recordar la cita» está prendida.
+   */
+  notice?: boolean
 }
 
 export async function createAppointment(
@@ -604,8 +679,15 @@ export async function createAppointment(
       startsAt: startsAt.toISOString(),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
     })
+    const notice =
+      input.notice === false || !standing ? null : await enqueueAppointmentNotice(tx, orgId, created.id, "reservada")
+    // Su oportunidad «Interesado» pasa sola a «Evaluación agendada» (ADR 0028).
+    if (standing && startsAt.getTime() > Date.now()) {
+      await advanceForAppointment(tx, orgId, { patientId: input.patientId, serviceId: service?.id ?? null, startsAt })
+    }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
-    return await getAppointment(tx, orgId, created.id)
+    const item = await getAppointment(tx, orgId, created.id)
+    return notice ? { ...item, notice } : item
   } catch (error) {
     if (isExclusionViolation(error)) {
       throw conflict(
@@ -625,13 +707,19 @@ export interface MoveAppointmentInput {
   chairId?: string
 }
 
-/** Arrastre: nueva hora y recurso de la agrupación activa, con bloqueo optimista. */
+/**
+ * Arrastre: nueva hora y recurso de la agrupación activa, con bloqueo
+ * optimista. Sus recordatorios pasan a contar desde la hora nueva y, si la
+ * fecha cambió, el agente le avisa a la persona (salvo `notice: false`, como
+ * en `createAppointment`).
+ */
 export async function moveAppointment(
   tx: Db,
   orgId: string,
   actorUserId: string,
   id: string,
   input: MoveAppointmentInput,
+  options: { notice?: boolean } = {},
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id)
   const startsAt = parseInstant(input.startsAt, "startsAt")
@@ -700,8 +788,13 @@ export async function moveAppointment(
       chairId,
     })
     await invalidateAppointmentTokens(tx, orgId, id)
+    const moved = startsAt.getTime() !== current.startsAt.getTime()
+    if (moved) await rescheduleAppointmentReminders(tx, orgId, id, startsAt)
+    const notice =
+      moved && active && options.notice !== false ? await enqueueAppointmentNotice(tx, orgId, id, "movida") : null
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
-    return await getAppointment(tx, orgId, id)
+    const item = await getAppointment(tx, orgId, id)
+    return notice ? { ...item, notice } : item
   } catch (error) {
     if (isExclusionViolation(error)) {
       throw conflict(
@@ -799,7 +892,9 @@ export type AppointmentCancelReason = (typeof APPOINTMENT_CANCEL_REASONS)[number
  * Transición explícita; cancelada y no_asistio liberan el recurso en DB. Al
  * cancelar, el motivo y la nota (opcionales) quedan en la auditoría de la cita.
  * El actor es nulo cuando quien confirma o cancela es la propia persona desde
- * su enlace; `via` deja dicho por dónde llegó el cambio.
+ * su enlace o su conversación; `via` deja dicho por dónde llegó el cambio y
+ * `conversationId`, en cuál. Al cancelar una cita por venir el agente le
+ * avisa a la persona con la opción de reservar otra (salvo `notice: false`).
  */
 export async function setAppointmentStatus(
   tx: Db,
@@ -807,13 +902,14 @@ export async function setAppointmentStatus(
   actorUserId: string | null,
   id: string,
   status: string,
-  detail?: { cancelReason?: string; cancelNote?: string; via?: string },
+  detail?: { cancelReason?: string; cancelNote?: string; via?: string; conversationId?: string; notice?: boolean },
 ): Promise<AppointmentItem> {
   const next = assertStatus(status)
   const current = await requireAppointment(tx, orgId, id)
   if (current.status === next) return getAppointment(tx, orgId, id)
   const metadata: Record<string, unknown> = { from: current.status }
   if (detail?.via) metadata.via = detail.via
+  if (detail?.conversationId) metadata.conversationId = detail.conversationId
   if (next === "cancelada") {
     if (detail?.cancelReason !== undefined) {
       if (!(APPOINTMENT_CANCEL_REASONS as readonly string[]).includes(detail.cancelReason)) {
@@ -834,8 +930,22 @@ export async function setAppointmentStatus(
     await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, metadata)
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
+    const notice =
+      next === "cancelada" && detail?.notice !== false
+        ? await enqueueAppointmentNotice(tx, orgId, id, "cancelada")
+        : null
+    // Cancelar la evaluación que llevó su oportunidad a «Evaluación agendada»
+    // la devuelve a «Interesado» si no le queda otra cita (ADR 0028).
+    if (
+      next === "cancelada" &&
+      (current.status === "programada" || current.status === "confirmada") &&
+      current.startsAt.getTime() > Date.now()
+    ) {
+      await returnForCancelledAppointment(tx, orgId, { patientId: current.patientId, startsAt: current.startsAt })
+    }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
-    return await getAppointment(tx, orgId, id)
+    const item = await getAppointment(tx, orgId, id)
+    return notice ? { ...item, notice } : item
   } catch (error) {
     if (isExclusionViolation(error)) {
       throw conflict(

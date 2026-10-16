@@ -6,6 +6,11 @@ import { useListSearch } from "./list-search.js"
 
 export interface SearchInputProps {
   placeholder?: string
+  /**
+   * Plegado en una fila de filtros: estrecho hasta recibir el foco. Plegado y
+   * vacío muestra el texto corto («Buscar») para no cortar la ayuda; al
+   * desplegarse, el completo. El nombre accesible siempre es el completo.
+   */
   expandable?: boolean
   /**
    * Revalidación en curso (p. ej. `isFetching` de React Query): muestra el
@@ -24,6 +29,8 @@ export function SearchInput({
   const { get, setParam } = useListSearch()
   const query = get("q") ?? ""
   const [value, setValue] = React.useState(query)
+  const [focused, setFocused] = React.useState(false)
+  const folded = expandable && !focused && !value
 
   React.useEffect(() => {
     setValue(query)
@@ -54,8 +61,10 @@ export function SearchInput({
           type="search"
           value={value}
           onChange={(event: React.ChangeEvent<HTMLInputElement>) => setValue(event.target.value)}
-          placeholder={placeholder}
+          placeholder={folded ? common.filters.search : placeholder}
           aria-label={placeholder}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           aria-busy={isFetching}
         />
         <InputGroupAddon align="inline-end">
