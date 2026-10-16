@@ -49,6 +49,10 @@ export interface PersonResponsibleFor {
 export interface PersonSpokenForBy {
   personId: string
   displayName: string
+  /** Su teléfono: el Resumen de quien no tiene uno propio dice «el de Martín Salas (padre)». */
+  phone: string | null
+  /** También es paciente: su página la abre también quien solo ve pacientes. */
+  isPatient: boolean
   relationship: string
   relationshipDetail: string | null
   isPreferred: boolean
@@ -129,6 +133,22 @@ export async function personOfPatient(
   return { personId }
 }
 
+/**
+ * Quien aún no es paciente (por registrar o solo responsable) lo ven solo
+ * quienes llevan la relación con las personas: recepción y quien dirige
+ * (`crm.read`). Caja y odontología ven solo pacientes; para ellos no existe.
+ */
+export function seesNonPatients(can: PersonCan): boolean {
+  return can("crm.read")
+}
+
+/** La persona existe para quien mira: si no es paciente, solo con `crm.read` (404 si no). */
+export async function assertPersonVisible(tx: Db, orgId: string, contactId: string, can: PersonCan): Promise<void> {
+  await requireContact(tx, orgId, contactId)
+  if (seesNonPatients(can)) return
+  if (!(await selfPatientOf(tx, orgId, contactId))) throw notFound("Persona")
+}
+
 /** Lo que la página necesita para dibujarse: quién es y qué es para la clínica. */
 export async function getPersonPage(
   tx: Db,
@@ -136,6 +156,7 @@ export async function getPersonPage(
   contactId: string,
   can: PersonCan,
 ): Promise<PersonPage> {
+  await assertPersonVisible(tx, orgId, contactId, can)
   const row = await requireContact(tx, orgId, contactId)
   const [own] = await tx
     .select({ patient })
@@ -187,6 +208,8 @@ export async function getPersonPage(
         .select({
           personId: contact.id,
           displayName: contact.displayName,
+          phone: contact.phone,
+          isPatient: sql<boolean>`exists (select 1 from patient_contact s where s.organization_id = ${orgId} and s.contact_id = ${contact.id} and s.relationship = 'self')`,
           relationship: patientContact.relationship,
           relationshipDetail: patientContact.relationshipDetail,
           isPreferred: patientContact.isPreferred,
@@ -270,6 +293,8 @@ export async function getPersonPage(
     spokenForBy: spokenRows.map((r) => ({
       personId: r.personId,
       displayName: r.displayName,
+      phone: r.phone,
+      isPatient: Boolean(r.isPatient),
       relationship: r.relationship,
       relationshipDetail: r.relationshipDetail,
       isPreferred: r.isPreferred,
@@ -380,7 +405,8 @@ function decodePeopleCursor(cursor: string): { n: string; id: string; f: string 
  * La lista de personas de la clínica, una sola: los filtros son vistas de la
  * misma persona («Pacientes» por defecto). Búsqueda, orden por nombre y
  * páginas los hace el servidor; el total de «Por registrar» es de toda la
- * clínica, no de la página cargada.
+ * clínica, no de la página cargada. Quien no ve a quien aún no es paciente
+ * (`seesNonPatients`) recibe solo pacientes, en cualquier vista que tenga.
  */
 export async function listPeople(
   tx: Db,
@@ -394,6 +420,11 @@ export async function listPeople(
 }> {
   const view = (input.view ?? "pacientes") as PeopleView
   if (!PEOPLE_VIEWS.includes(view)) throw validation("Vista inválida")
+  // Caja y odontología solo ven pacientes: sin las vistas de quien aún no lo es.
+  const everyone = seesNonPatients(can)
+  if (!everyone && (view === "por_registrar" || view === "responsables"))
+    throw new ServiceError("FORBIDDEN", 403, "Esta vista es de quien lleva la relación con las personas")
+  const onlyPatients = everyone ? sql`true` : sql`p.id is not null`
   const limit = Math.min(Math.max(input.limit ?? PEOPLE_PAGE, 1), 100)
   const q = input.q?.trim() ?? ""
   const fingerprint = JSON.stringify({ view, q })
@@ -446,6 +477,7 @@ export async function listPeople(
     left join patient p on p.organization_id = pc.organization_id and p.id = pc.patient_id
     where c.organization_id = ${orgId}
       and ${viewCondition(view)}
+      and ${onlyPatients}
       and ${searchCondition(q)}
       and ${after}
     order by c.display_name asc, c.id asc
@@ -453,12 +485,14 @@ export async function listPeople(
   `)
   const list = [...rows]
   const page = list.slice(0, limit)
-  const [counted] = await tx.execute<{ count: number }>(sql`
+  const [counted] = everyone
+    ? await tx.execute<{ count: number }>(sql`
     select count(*)::int as count from contact c
     left join patient_contact pc on pc.organization_id = c.organization_id and pc.contact_id = c.id and pc.relationship = 'self'
     left join patient p on p.organization_id = pc.organization_id and p.id = pc.patient_id
     where c.organization_id = ${orgId} and ${viewCondition("por_registrar")}
   `)
+    : [{ count: 0 }]
   const items: PersonListItem[] = page.map((r) => {
     const responsibleCount = Number(r.responsible_count ?? 0)
     const archived = !r.is_active || r.patient_active === false

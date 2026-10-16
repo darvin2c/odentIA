@@ -64,7 +64,13 @@ export type AutomationChannel = (typeof AUTOMATION_CHANNELS)[number]
  * (citas y controles) y `seguimiento` (inasistencias, presupuestos y oportunidades). Es un
  * permiso de la persona, no de un canal.
  */
-export const CONSENT_PURPOSES = ["recordatorio", "seguimiento"] as const
+/**
+ * Tipos de mensaje de una persona. «recordatorio» (su cita y sus controles) y
+ * «seguimiento» (presupuestos, oportunidades, inasistencias) son parte del
+ * servicio: no piden permiso y su fila solo dice si se dio de baja. Solo
+ * «novedades» (novedades y promociones de la clínica) pide su permiso (ADR 0030).
+ */
+export const CONSENT_PURPOSES = ["recordatorio", "seguimiento", "novedades"] as const
 export type ConsentPurpose = (typeof CONSENT_PURPOSES)[number]
 
 /** Por dónde salió un mensaje automático. */
@@ -250,6 +256,8 @@ export const automationConsent = pgTable(
 export const CONSENT_SOURCES = [
   "registro",
   "presencial",
+  /** Lo dijo por teléfono, al reservar desde la Agenda. */
+  "telefono",
   "conversacion",
   "portal",
   "baja",

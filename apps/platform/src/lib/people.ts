@@ -30,6 +30,10 @@ export interface PersonResponsibleFor {
 export interface PersonSpokenForBy {
   personId: string
   displayName: string
+  /** Su teléfono, para quien no tiene uno propio. */
+  phone?: string | null
+  /** También es paciente: su página la abre también quien solo ve pacientes. */
+  isPatient?: boolean
   relationship: string
   relationshipDetail: string | null
   isPreferred: boolean
@@ -152,4 +156,9 @@ export const RELATIONSHIP_WORDS: Record<string, string> = {
   guardian: "tutor o responsable",
   family: "familiar",
   other: "otra persona",
+}
+
+/** El parentesco como lo escribió la clínica («Padre») o, si no, el tipo de vínculo. */
+export function relationshipText(relationship: string, detail: string | null): string {
+  return detail?.trim() || RELATIONSHIP_WORDS[relationship] || relationship
 }

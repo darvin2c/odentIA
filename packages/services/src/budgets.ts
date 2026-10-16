@@ -879,6 +879,8 @@ export async function deliverBudget(
     patientId,
     budgetId,
     serviceIds: lines.map((line) => line.serviceId).filter((id): id is string => !!id),
+    // Su valor pasa a ser el total presentado (la misma suma que ve el presupuesto).
+    total: { cents: sumCents(lines.map((line) => line.lineTotalCents)), currency: updated.currency },
   })
   await notifyBudget(tx, orgId)
   return updated
@@ -1171,6 +1173,11 @@ export async function decideBudget(
     budgetId,
     status,
     serviceIds: lines.map((line) => line.serviceId).filter((id): id is string => !!id),
+    // Lo que de verdad aceptó: el valor de la oportunidad ganada (en parte, lo aceptado).
+    accepted: {
+      cents: sumAcceptedCents(lines.map((line) => ({ lineTotalCents: line.lineTotalCents, decision: decisions.get(line.planItemId) }))),
+      currency: updated.currency,
+    },
   })
   await notifyBudget(tx, orgId)
   return withTotals(updated, await listBudgetLines(tx, orgId, patientId, budgetId))

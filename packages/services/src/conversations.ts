@@ -14,12 +14,13 @@ import {
   message,
 } from "@odentia/db/schema/crm"
 import { automationJob } from "@odentia/db/schema/automation"
+import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, lt, or, type SQL, sql } from "drizzle-orm"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
 import {
-  addContactIdentity,
+  claimWhatsAppNumber,
   findChannelIdentity,
   isDirectThread,
   isTelegramGroupThread,
@@ -1094,7 +1095,8 @@ export interface ConversationDetail {
     assignedUserId: string | null
     lastMessageAt: string | null
   }
-  contact: { id: string; displayName: string; isActive: boolean }
+  /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
+  contact: { id: string; displayName: string; isActive: boolean; isPatient: boolean }
   connection: {
     id: string
     channel: string
@@ -1110,6 +1112,22 @@ export interface ConversationDetail {
   whatsappWindow: { open: boolean; lastInboundAt: string | null } | null
   messages: MessageItem[]
   messagesCursor: string | null
+}
+
+/** La persona ya es paciente (tiene su ficha propia). */
+async function isSelfPatient(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+  const [own] = await tx
+    .select({ id: patientContact.id })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, contactId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .limit(1)
+  return !!own
 }
 
 export async function getConversationDetail(
@@ -1142,6 +1160,7 @@ export async function getConversationDetail(
       id: row.contact.id,
       displayName: row.contact.displayName,
       isActive: row.contact.isActive,
+      isPatient: await isSelfPatient(tx, orgId, row.contact.id),
     },
     connection: {
       id: row.connection.id,
@@ -1614,21 +1633,9 @@ export async function writeToPerson(
     if (!phone) throw validation("Escribe el número de WhatsApp con el código de su país.")
   }
   if (!identityId && phone) {
-    const digits = phone.replace(/\D/g, "")
-    const before = await findChannelIdentity(tx, orgId, "whatsapp", `wa:${digits}`)
-    try {
-      identityId = (await addContactIdentity(tx, orgId, actorUserId, contactId, { channel: "whatsapp", externalUserId: digits })).id
-    } catch (error) {
-      if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") {
-        throw new ServiceError(
-          "IDENTITY_IN_USE",
-          409,
-          "Ese número de WhatsApp ya es de otra persona de la clínica. Ábrela desde Contactos o escribe otro número.",
-        )
-      }
-      throw error
-    }
-    identityCreated = !before
+    const claimed = await claimWhatsAppNumber(tx, orgId, actorUserId, contactId, phone)
+    identityId = claimed.identityId
+    identityCreated = claimed.created
   }
   if (!identityId) {
     if (fallback) return { conversationId: fallback.id, created: false, channel: fallback.channel, identityCreated: false }

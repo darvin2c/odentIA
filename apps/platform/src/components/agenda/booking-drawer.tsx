@@ -1,3 +1,4 @@
+import { pendingRegistrationFields, type RegistrationConfig } from "@odentia/clinical"
 import {
   Button,
   Dialog,
@@ -22,11 +23,10 @@ import {
   SubmitButton,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import * as React from "react"
 import type { AgendaAppointment, AgendaServiceOption } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useCan, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { PersonPicker } from "../person-picker"
 import { errorMessage, whenSaid } from "./shared"
@@ -94,8 +94,16 @@ export function BookingDrawer({
   const queryClient = useQueryClient()
   // Registrar a alguien pide su propio permiso: sin él solo se elige entre quienes ya existen.
   const canRegister = usePermission("patients.write")
-  const [registerFailed, setRegisterFailed] = React.useState(false)
+  const can = useCan()
   const profile = useOrgProfile()
+  // Lo que la clínica pide en su registro y aquí no se escribe: queda pendiente en su página.
+  const configQuery = useQuery({
+    queryKey: ["patient-registration-config"],
+    queryFn: () =>
+      apiFetch<{ data: RegistrationConfig; meta: { today: string } }>("/api/patient-registration/config"),
+    enabled: registering && (can("crm.read") || can("settings.read")),
+    retry: false,
+  })
 
   const newName = `${newPatient.givenNames.trim()} ${newPatient.surname.trim()}`.trim()
   // Quien abrió el formulario, se eligió o se acaba de registrar: su nombre se conserva.
@@ -156,6 +164,12 @@ export function BookingDrawer({
   }, [shown, patientName, onPreview])
   React.useEffect(() => () => onPreview(null), [onPreview])
 
+  // Lo que dijo por teléfono de novedades y promociones, el único permiso que se pide.
+  // Opcional: si no se toca no se guarda nada; lo de su atención es parte del servicio (ADR 0030).
+  const [generalConsent, setGeneralConsent] = React.useState<boolean | null>(null)
+  const consentNote = React.useRef<string | null>(null)
+  const whatsappNote = React.useRef<string | null>(null)
+
   // ----- Reservar -----
   const [error, setError] = React.useState("")
   const [urgent, setUrgent] = React.useState(false)
@@ -167,7 +181,9 @@ export function BookingDrawer({
           throw new Error("Escribe los nombres y los apellidos.")
         }
         // El mismo registro de pacientes de siempre, con lo mínimo: el resto de la ficha se completa después.
-        const registered = await apiFetch<{ data: { id: string; displayName: string } }>(
+        const registered = await apiFetch<{
+          data: { id: string; displayName: string; whatsapp?: "creado" | "en_uso" }
+        }>(
           "/api/patients",
           {
             method: "POST",
@@ -191,19 +207,40 @@ export function BookingDrawer({
                     contacts: [{ contactId: seed.person.contactId, relationship: "self", isPreferred: true }],
                   }
                 : {}),
-              // Desde su conversación basta lo mínimo, como en el enlace de reserva: lo que la
-              // clínica pide y falta queda anotado en el caso y la identidad, por revisar.
+              // Al reservar basta lo mínimo, como en el enlace de reserva: desde su conversación
+              // o, si es alguien nuevo, desde la Agenda. Lo que la clínica pide y falta queda
+              // anotado y la identidad, por revisar.
               ...(seed.person && seed.conversationId
                 ? { conversationId: seed.conversationId, scope: "essentials" }
-                : {}),
+                : !seed.person
+                  ? { scope: "essentials" }
+                  : {}),
             }),
           },
         ).catch((cause) => {
-          // La clínica puede exigir más datos de los que caben aquí: se dice y se ofrece el registro completo.
-          setRegisterFailed(true)
           throw new Error(`No se pudo registrar a ${newName}: ${errorMessage(cause)}`)
         })
         id = registered.data.id
+        consentNote.current = null
+        // Su teléfono pasó a ser su WhatsApp (ADR 0027); si ya era de otra persona no se movió.
+        whatsappNote.current =
+          registered.data.whatsapp === "en_uso"
+            ? "Su número de WhatsApp ya es de otra persona de la clínica: no se movió. Revísalo en su página antes de escribirle."
+            : null
+        if (generalConsent !== null) {
+          // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono.
+          await (async () => {
+            const personId =
+              seed.person?.contactId ??
+              (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
+            await apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
+              method: "POST",
+              body: JSON.stringify({ purpose: "novedades", granted: generalConsent, source: "telefono" }),
+            })
+          })().catch(() => {
+            consentNote.current = "No se pudo anotar si acepta novedades y promociones: anótalo en su página, en Datos."
+          })
+        }
         // Las búsquedas de pacientes ya hechas dejaron de valer.
         void queryClient.invalidateQueries({ queryKey: ["patients"] })
         // Si la reserva fallara después, la persona ya está registrada: no se crea dos veces.
@@ -231,9 +268,16 @@ export function BookingDrawer({
     onSuccess: async (result) => {
       // Si «Recordar la cita» está prendida, el agente le avisa solo: recepción no escribe nada.
       toast.success(`Cita reservada ${whenSaid(result.data.startsAt, timeZone, today)}`, {
-        description: result.data.notice?.queued
-          ? `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`
-          : undefined,
+        description:
+          [
+            result.data.notice?.queued
+              ? `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`
+              : null,
+            whatsappNote.current,
+            consentNote.current,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
       })
       await onSaved(result.data)
     },
@@ -244,6 +288,34 @@ export function BookingDrawer({
       when.refetch()
     },
   })
+
+  // «Lo que la clínica pide (fecha de nacimiento y documento) queda pendiente en su página.»
+  const pendingWords = (() => {
+    const config = configQuery.data?.data
+    if (!config) return "Lo que la clínica pide en su registro queda pendiente en su página."
+    const words = [
+      ...new Set(
+        pendingRegistrationFields(config, {
+          demographics: {
+            displayName: newName || "Paciente",
+            givenNames: newPatient.givenNames.trim() || "Paciente",
+            paternalSurname: newPatient.surname.trim() || "Paciente",
+            ...(newPhone ? { phone: newPhone } : {}),
+          },
+          respondent: "staff",
+          privacyAccepted: false,
+        })
+          // El teléfono se pide aquí mismo: nunca queda pendiente.
+          .filter((field) => field.key !== "phone")
+          .map((field) =>
+            field.key === "docType" || field.key === "docNumber" ? "documento" : field.label.toLowerCase(),
+          ),
+      ),
+    ]
+    if (words.length === 0) return ""
+    const list = words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
+    return `Lo que la clínica pide (${list}) queda pendiente en su página.`
+  })()
 
   const startRegistering = (typed = "") => {
     // Lo que ya se tecleó al buscar sirve de punto de partida.
@@ -358,25 +430,38 @@ export function BookingDrawer({
                   ))}
                 </div>
               ) : null}
-              {registerFailed ? (
-                <p className="text-sm">
-                  Si la clínica pide más datos para registrar,{" "}
-                  <Link
-                    to="/people"
-                    target="_blank"
-                    className="font-semibold text-primary underline"
-                  >
-                    regístrala en Pacientes
-                  </Link>{" "}
-                  y vuelve para elegirla aquí.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {seed.person
-                    ? "Se crea su ficha con nombre y teléfono, unida a esta persona. El resto lo completa con el enlace de registro o cuando venga."
-                    : "Con esto basta para la cita. El documento y el resto de la ficha se completan cuando venga."}
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                {seed.person
+                  ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
+                  : `Con esto basta para la cita. ${pendingWords}`.trim()}
+              </p>
+              <div role="group" aria-labelledby="cita-nuevo-permiso" className="grid gap-1.5">
+                <span id="cita-nuevo-permiso" className="text-sm font-medium">
+                  ¿Acepta recibir novedades y promociones de la clínica?
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Opcional: si no se lo preguntaste, déjalo así.
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: true, label: "Sí, aceptó por teléfono" },
+                    { value: false, label: "No aceptó" },
+                  ].map((option) => (
+                    <Button
+                      key={option.label}
+                      type="button"
+                      size="sm"
+                      variant={generalConsent === option.value ? "default" : "outline"}
+                      aria-pressed={generalConsent === option.value}
+                      onClick={() =>
+                        setGeneralConsent((current) => (current === option.value ? null : option.value))
+                      }
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="grid gap-1.5">

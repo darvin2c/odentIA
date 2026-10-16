@@ -17,6 +17,7 @@ interface Advice {
 interface PageData {
   enabled: boolean
   lines: Array<{ key: string; enabled: boolean; actor: string; agentPart: boolean; teamPart: boolean; hour: number | null; taskNote: string | null }>
+  permissionGaps: unknown[]
 }
 
 const overflow = (page: Page) =>
@@ -63,6 +64,10 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await expect(onWhileOff.getByRole("switch")).toHaveCount(1)
   await expect(onWhileOff.getByRole("switch", { name: "Apagar: Recordar la cita" })).toBeEnabled()
   await expect(onWhileOff).toContainText("Empiezan a hacerse solas cuando enciendas al administrador.")
+  // Sin ellos no sale nada: el aviso lo dice con sus botones (fase 2.1, decisión 3).
+  const missing = page.getByRole("status").filter({ hasText: "«Recordar la cita» está prendida, pero el Administrador y Recepción están apagados" })
+  await expect(missing.getByRole("button", { name: "Encender al administrador" })).toBeVisible()
+  await expect(missing.getByRole("link", { name: "Encender Recepción" })).toBeVisible()
   await expect(preview).toContainText("Al encenderlo solo hace lo que ya está prendido.")
   // Con una línea prendida ya no dice que al encenderlo no hace nada.
   await expect(preview).not.toContainText("Al encenderlo no hace nada por su cuenta.")
@@ -333,36 +338,38 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("canales-mensajes-aprobados", { body: await approved.screenshot(), contentType: "image/png" })
 
-  // --- Registro: se elige qué permisos de mensajes pregunta ---
+  // --- Registro: solo pregunta por novedades y promociones; lo de su atención es parte del servicio ---
   const config = () => call<{ askReminders: boolean; askMessages: boolean }>(page, "GET", "/api/patient-registration/config", org.slug)
-  expect(await config()).toMatchObject({ askReminders: true, askMessages: true })
+  expect(await config()).toMatchObject({ askMessages: true })
   await gotoHydrated(page, tenant(org.slug, "/settings/patient-registration"))
   // Son casillas del formulario: valen al pulsar «Guardar», que está al final de la página.
-  await expect(page.getByRole("checkbox", { name: "Recordatorios de citas y controles" })).toBeChecked()
-  const others = page.getByRole("checkbox", { name: /Otros mensajes de la clínica/ })
+  await expect(page.getByRole("checkbox", { name: /Recordatorios/ })).toHaveCount(0)
+  const others = page.getByRole("checkbox", { name: /Novedades y promociones de la clínica/ })
   await expect(others).toBeChecked()
   await others.click()
   await page.getByRole("button", { name: "Guardar", exact: true }).click()
   await expect(page.getByText("Registro de pacientes guardado", { exact: true })).toBeVisible()
-  await expect.poll(config).toMatchObject({ askReminders: true, askMessages: false })
+  await expect.poll(config).toMatchObject({ askMessages: false })
 
-  // --- Ficha: lo que la persona aceptó recibir; el interruptor pregunta antes cómo lo dijo ---
+  // --- Ficha: lo de su atención es servicio; novedades y promociones pregunta antes cómo lo dijo ---
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}?tab=filiacion`))
   const consent = page.getByRole("region", { name: "Datos y consentimiento" })
   await expect(consent).toContainText("Mensajes de la clínica")
-  await expect(consent.getByText("No se le ha preguntado.")).toHaveCount(2)
-  const reminders = consent.getByRole("switch", { name: "Recordatorios de citas y controles" })
-  await reminders.click()
+  await expect(consent).toContainText("Atención (citas, controles, presupuestos)")
+  await expect(consent).toContainText("Parte del servicio: no pide permiso.")
+  await expect(consent.getByText("No se le ha preguntado.")).toHaveCount(1)
+  const general = consent.getByRole("switch", { name: "Novedades y promociones" })
+  await general.click()
   await expect(consent).toContainText("¿Cómo lo aceptó?")
   const contacts = await call<{ contacts: Array<{ contactId: string }> }>(page, "GET", `/api/patients/${patient.id}`, org.slug)
   const permissions = () => call<Array<{ purpose: string; granted: boolean | null; source: string | null }>>(page, "GET", `/api/agent/admin/people/${contacts.contacts[0]!.contactId}/permissions`, org.slug)
   // Hasta confirmarlo no se guarda nada.
-  expect((await permissions()).find((row) => row.purpose === "recordatorio")).toMatchObject({ granted: null })
-  await consent.getByRole("radio", { name: "Por la conversación" }).click()
+  expect((await permissions()).find((row) => row.purpose === "novedades")).toMatchObject({ granted: null })
+  await consent.getByRole("radio", { name: "Por teléfono" }).click()
   await consent.getByRole("button", { name: "Guardar", exact: true }).click()
-  await expect(consent).toContainText("Lo aceptó por la conversación")
-  await expect(reminders).toBeChecked()
-  expect((await permissions()).find((row) => row.purpose === "recordatorio")).toMatchObject({ granted: true, source: "conversacion" })
+  await expect(consent).toContainText("Sí · aceptó por teléfono")
+  await expect(general).toBeChecked()
+  expect((await permissions()).find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "telefono" })
   await info.attach("ficha-mensajes-de-la-clinica", { body: await consent.screenshot(), contentType: "image/png" })
 
   // --- Una línea se ajusta a mano, sin pedírselo con palabras ---
@@ -379,7 +386,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await expect.poll(async () => (await admin()).lines.find((item) => item.key === "seguimiento_no_asistencia")).toMatchObject({ hour: 10, taskNote: "Ofrecerle el horario de la tarde" })
   await info.attach("linea-ajustes-a-mano", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  // --- «Prendida, pero casi no escribe»: la mayoría no aceptó, y el registro no lo pregunta ---
+  // --- «Prendida, pero casi no escribe» ya no aplica a lo que es parte del servicio (ADR 0030) ---
   const [rule] = await fixtureDb.select({ id: automationRule.id }).from(automationRule)
     .where(and(eq(automationRule.organizationId, org.id), eq(automationRule.kind, "seguimiento_no_asistencia")))
   await fixtureDb.insert(automationJob).values(
@@ -389,17 +396,13 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
     })),
   )
   await gotoHydrated(page, tenant(org.slug, "/agent/administrador"))
-  const gap = page.getByRole("status").filter({ hasText: "Prendida, pero casi no escribe" })
-  await expect(gap).toContainText("en 30 días no pudo escribirle a 6 de 6 personas")
-  await expect(gap).toContainText("Tu registro de pacientes no pregunta por otros mensajes")
+  await expect(page.getByRole("heading", { level: 1, name: "Administrador" })).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: "Prendida, pero casi no escribe" })).toHaveCount(0)
+  expect((await admin()).permissionGaps).toEqual([])
   expect(await overflow(page)).toBeLessThanOrEqual(0)
-  await info.attach("casi-no-escribe", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   // Teléfono: la lista completa, con sus avisos, sin desbordes.
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(gap).toBeVisible()
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("lista-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
-  await gap.getByRole("link", { name: "Preguntarlo en el registro" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Registro de pacientes" })).toBeVisible()
 })

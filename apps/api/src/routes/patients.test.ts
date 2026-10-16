@@ -250,6 +250,25 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   }
   expect(detailBody.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
   expect(detailBody.data.contacts).toEqual([expect.objectContaining({ contactId: person.id, relationship: "self" })])
+
+  // Desde la Agenda, sin conversación: alguien nuevo con nombres, apellidos y
+  // teléfono, aunque la clínica pida la fecha de nacimiento. Pide además agendar.
+  const fresh = (phone: string | null) =>
+    JSON.stringify({
+      ...registrationBody("Pedro Ríos", { givenNames: "Pedro", paternalSurname: "Ríos", ...(phone ? { phone } : {}) }),
+      scope: "essentials",
+    })
+  const postFresh = (role: string, phone: string | null) =>
+    buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: fresh(phone) })
+  expect((await postFresh("dentist", "+51987111222")).status).toBe(403)
+  expect((await postFresh("reception", null)).status).toBe(400)
+  const agenda = await postFresh("reception", "+51987111222")
+  expect(agenda.status).toBe(201)
+  const agendaId = ((await agenda.json()) as { data: { id: string } }).data.id
+  const agendaDetail = (await (await buildApp("reception").request(`/patients/${agendaId}`, { method: "GET" })).json()) as {
+    data: { patient: { birthDate: string | null; identityNeedsReview: boolean } }
+  }
+  expect(agendaDetail.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
   // Las demás pruebas registran sin configuración publicada (alta rápida).
   await ownerDb.execute(sql`delete from patient_registration_config where organization_id = 'org_a'`)
 })

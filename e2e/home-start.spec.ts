@@ -76,7 +76,9 @@ for (const width of [1440, 390]) {
       await expect(start.getByRole("heading", { name: "Prepara tu primera atención", exact: true })).toBeVisible()
       const primary = start.getByRole("link", { name: "Definir horarios", exact: true })
       await expect(primary).toBeInViewport()
-      await expect(start.getByRole("list", { name: "Puesta en marcha" }).getByRole("listitem")).toHaveCount(3)
+      // Quien puede encenderlos ve también encender Recepción y el Administrador (fase 2.1, decisión 3).
+      await expect(start.getByRole("list", { name: "Puesta en marcha" }).getByRole("listitem")).toHaveCount(4)
+      await expect(start).toContainText("Encender Recepción y el Administrador")
       await expect(page.getByRole("region", { name: "Te espera" })).toHaveCount(0)
       await expect(page.getByRole("heading", { name: "Agenda de hoy", exact: true })).toHaveCount(0)
       expect(retired).toEqual([])
@@ -101,7 +103,12 @@ for (const width of [1440, 390]) {
         submissionId: randomUUID(), answers: { demographics: { displayName: "Primera paciente", docType: "DNI", docNumber: "76543210" }, respondent: "staff", privacyAccepted: false },
       }, 201)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
-      // Con los tres pasos hechos, Inicio pasa a sus dos bloques: una línea y la agenda a la vista.
+      // Sin Recepción ni el Administrador no sale ningún recordatorio: es el último paso.
+      await expect(start.getByRole("link", { name: "Encender Recepción y el Administrador", exact: true })).toBeInViewport()
+      await call(page, "PUT", "/api/agent/config", owner.org.slug, { enabled: true })
+      await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
+      await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+      // Con los pasos hechos, Inicio pasa a sus dos bloques: una línea y la agenda a la vista.
       await expect(start).toHaveCount(0)
       const waiting = page.getByRole("region", { name: "Te espera" })
       await expect(waiting.getByText("Nada te espera por ahora", { exact: true })).toBeVisible()
@@ -109,7 +116,7 @@ for (const width of [1440, 390]) {
       await expect(agenda).toContainText("Hoy no hay citas en")
       await expect(page.getByText(/No acredita|los ceros no indican|Sin actividad todavía|Sin pendientes en este resumen/)).toHaveCount(0)
       const home = await call<WorkspaceHome>(page, "GET", "/api/workspace/home", owner.org.slug)
-      expect(home.setup).toEqual({ availability: true, chairs: true, patients: true })
+      expect(home.setup).toEqual({ availability: true, chairs: true, patients: true, agent: true })
       expect(home.waiting).toEqual([])
       expect(home.today?.summary).toEqual({ total: 0, attended: 0, upcoming: 0, unconfirmed: 0 })
       await observe(page, info, "configurada-sin-pendientes")

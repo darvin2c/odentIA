@@ -12,7 +12,7 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { createAppointment } from "./appointments.js"
+import { createAppointment, setAppointmentStatus } from "./appointments.js"
 import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
@@ -110,6 +110,59 @@ it("el presupuesto se une solo a la del mismo tratamiento y la mueve; aceptarlo 
   // Reportes dice por qué se pierden las ventas, con las claves de la lista.
   const sales = await g.run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))
   expect(sales.lostReasons).toContainEqual({ reason: "rechazo_presupuesto", count: 1 })
+})
+
+it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otra cita; con otra por venir, no", async () => {
+  const f = await clinicalFixture()
+  const contactId = await ownContact(f.patient.id)
+  const { branchId, chairId } = await agendaPlace()
+  const opp = await f.run((tx) => createOpportunity(tx, "org_a", { contactId, title: "Evaluación", serviceId: f.service.id }))
+  // Horas que no usa otra prueba del mismo sillón.
+  const at = (days: number) => {
+    const date = new Date(Date.now() + days * DAY)
+    date.setUTCHours(3, 0, 0, 0)
+    return date
+  }
+  const book = (startsAt: Date) =>
+    f.run((tx) =>
+      createAppointment(tx, "org_a", f.actor, {
+        branchId, chairId, patientId: f.patient.id, dentistUserId: f.actor, serviceId: f.service.id,
+        startsAt: startsAt.toISOString(), outsideSchedule: true,
+      }),
+    )
+  const first = await book(at(3))
+  const second = await book(at(6))
+  expect((await f.run((tx) => getOpportunity(tx, "org_a", opp.id))).moment).toBe("evaluacion_agendada")
+  // Le queda otra cita por venir: no vuelve.
+  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, first.id, "cancelada"))
+  expect((await f.run((tx) => getOpportunity(tx, "org_a", opp.id))).moment).toBe("evaluacion_agendada")
+  // Sin ninguna, vuelve sola y la tarjeta dice por qué, con la fecha de la cita cancelada.
+  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, second.id, "cancelada"))
+  const back = await f.run((tx) => getOpportunity(tx, "org_a", opp.id))
+  expect(back).toMatchObject({ moment: "interesado", status: "open" })
+  expect(back.why).toMatch(/^Volvió sola: canceló su evaluación del \S+ \d+$/)
+  expect(back.history.at(-1)).toMatchObject({ origin: "automatico", who: "Automático" })
+  expect(back.history.at(-1)?.what).toMatch(/^Volvió sola a «Interesado»: canceló su evaluación del /)
+})
+
+it("al presentar el presupuesto su total es el valor de la oportunidad; aceptado en parte, lo aceptado", async () => {
+  const f = await clinicalFixture()
+  const contactId = await ownContact(f.patient.id)
+  const opp = await f.run((tx) => createOpportunity(tx, "org_a", { contactId, title: "Ortodoncia" }))
+  expect(opp.amountCents).toBeNull()
+  const one = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+  const two = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [one.id, two.id] }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp.id))).toMatchObject({
+    amountCents: 240000, currency: "PEN", amountFromBudget: true, amountFromPriceList: false, moment: "presupuesto_enviado",
+  })
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, budget.id, {
+      decisions: [{ planItemId: one.id, decision: "aceptado" }, { planItemId: two.id, decision: "rechazado" }],
+    }),
+  )
+  expect(await f.run((tx) => getOpportunity(tx, "org_a", opp.id))).toMatchObject({ status: "won", amountCents: 120000 })
 })
 
 it("el equipo no duplica una oportunidad abierta del mismo interés; cerrada, sí puede abrir otra", async () => {

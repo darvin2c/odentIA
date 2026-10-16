@@ -983,7 +983,9 @@ function ThreadView({
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
   const canTakeCase = usePermission("conversations.write")
   const myUserId = useMyUserId()
-  const canOpenPerson = usePermission("patients.read")
+  // Quien aún no es paciente solo lo ven recepción y quien dirige (`crm.read`); caja y odontología, solo pacientes.
+  const canOpenPeople = usePermission("patients.read")
+  const canSeeNonPatients = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1237,8 +1239,8 @@ function ThreadView({
           </Button>
         )}
         <div className="min-w-0 flex-1">
-          {/* El nombre lleva a la página de la persona (ADR 0029): también para odontología, que la ve sin el CRM. */}
-          {canOpenPerson ? (
+          {/* El nombre lleva a la página de la persona (ADR 0029): también para odontología, que la ve sin el CRM si es paciente. */}
+          {canOpenPeople && (canSeeNonPatients || detail.contact.isPatient) ? (
             <Link
               to="/people/$personId"
               params={{ personId: detail.contact.id }}

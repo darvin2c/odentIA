@@ -142,6 +142,8 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "enviar_enlace_cita",
       // Confirmar por escrito su propia cita es lo mismo que el botón del recordatorio: no depende de Agendar.
       "confirmar_cita",
+      // La respuesta escrita a la pregunta del permiso general tras reservar (ADR 0030).
+      "responder_permiso_mensajes",
       "confirmar_propuesta",
       "ver_contexto_paciente",
       "ver_resumen_paciente",

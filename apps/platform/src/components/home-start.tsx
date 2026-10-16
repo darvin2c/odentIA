@@ -3,18 +3,30 @@ import { Link } from "@tanstack/react-router"
 import { ArrowRight, CheckCircle2 } from "lucide-react"
 import type { WorkspaceHome } from "../lib/workspace"
 
-/** Los tres pasos de una clínica nueva; solo los recibe quien puede configurarla. */
+/**
+ * Los pasos de una clínica nueva; solo los recibe quien puede configurarla. El
+ * de encender Recepción y el Administrador, solo quien puede encenderlos: sin
+ * ellos «Recordar la cita» y los avisos de la cita no salen.
+ */
 function setupSteps(setup: NonNullable<WorkspaceHome["setup"]>) {
   return [
     { title: "Definir horarios", description: "Indica cuándo atiende cada profesional.", href: "/settings/availability", done: setup.availability },
     { title: "Preparar un sillón", description: "Añade el espacio donde se atenderán las citas.", href: "/agenda", done: setup.chairs },
     { title: "Registrar un paciente", description: "Busca primero para evitar fichas duplicadas.", href: "/people", done: setup.patients },
+    ...(setup.agent === undefined
+      ? []
+      : [{
+          title: "Encender Recepción y el Administrador",
+          description: "Sin ellos no salen los recordatorios ni los avisos de la cita, aunque «Recordar la cita» esté prendida.",
+          href: "/agent/administrador",
+          done: setup.agent,
+        }]),
   ]
 }
 
 /**
  * Hay que preparar la clínica: quien puede configurarla aún no completó los
- * tres pasos, no hay trabajo registrado y hoy no le espera nada. Es el único
+ * pasos, no hay trabajo registrado y hoy no le espera nada. Es el único
  * caso en que Inicio muestra la puesta en marcha en vez de sus dos bloques.
  */
 export function needsSetup(data: WorkspaceHome): boolean {
@@ -35,7 +47,7 @@ export function HomeStart({ setup }: { setup: NonNullable<WorkspaceHome["setup"]
     <Link to={next.href} className={cn(buttonVariants(), "mt-4 min-h-11")}>
       {next.title}<ArrowRight className="size-4 shrink-0" aria-hidden />
     </Link>
-    <ol aria-label="Puesta en marcha" className="mt-5 grid gap-4 sm:grid-cols-3">
+    <ol aria-label="Puesta en marcha" className={cn("mt-5 grid gap-4", steps.length > 3 ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3")}>
       {steps.map((step, index) => <li key={step.href} className="flex gap-3 text-sm">
         {step.done ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label="Preparado" /> : <span className="text-muted-foreground" aria-hidden>{index + 1}.</span>}
         <div><p className="font-medium">{step.title}{step.done ? " · Preparado" : ""}</p><p className="mt-1 text-muted-foreground">{step.description}</p></div>

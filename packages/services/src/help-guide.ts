@@ -75,7 +75,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       { q: "¿Cómo bloqueo un horario?", a: "En Configuración › Horarios y ausencias: registra una ausencia del profesional (de uno o varios días) o un feriado o cierre de la sede. En ese tramo no se puede reservar; las citas que ya estaban no se mueven solas." },
       { q: "¿Por qué no aparece un profesional en la agenda?", a: "Un profesional aparece cuando tiene un horario definido en Configuración › Horarios y ausencias. Sin horario explícito no se le pueden reservar citas." },
       { q: "¿Cómo le reservo una cita desde la conversación?", a: "Abre «Contexto» y pulsa «Reservar cita». Si aún no es paciente, la Agenda crea su ficha con su nombre y su teléfono, unida a esa misma persona. Al guardar vuelves a la conversación y, con «Recordar la cita» prendida, el agente le avisa solo la fecha y la sede." },
-      { q: "¿Quién le avisa a la persona su cita?", a: "Con «Recordar la cita» prendida (viene así en toda clínica nueva), el agente le avisa al reservar, al mover y al cancelar la cita, y le pide confirmar un día antes y tres horas antes. Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona." },
+      { q: "¿Quién le avisa a la persona su cita?", a: "Con «Recordar la cita» prendida (viene así en toda clínica nueva) y Recepción y el Administrador encendidos, el agente le avisa al reservar, al mover y al cancelar la cita, y le pide confirmar un día antes y tres horas antes. Es parte del servicio: no pide permiso, salvo que la persona se haya dado de baja. Si responde «sí, ahí estaré» o toca «Confirmar», la cita queda confirmada sola; si confirma por sus hijos, el agente le dice de quiénes eran. «Confirmar cita» en la cita es para cuando te confirma por teléfono o en persona." },
+      { q: "¿Cómo le doy cita a alguien que llama y nunca vino?", a: "En «Nueva cita», «Registrar paciente nuevo»: con nombres, apellidos y teléfono basta para reservar, aunque la clínica pida más en su registro. Lo que falta queda pendiente en su página. Ahí mismo puedes anotar, si se lo preguntaste, si acepta novedades y promociones." },
     ],
   },
   {
@@ -102,7 +103,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "patients.write",
     faqs: [
       { q: "¿Cómo registro un paciente nuevo?", a: "Abre su página (desde la Bandeja, o con «Nueva persona» en Pacientes) y pulsa «Registrar»: el formulario ya trae lo que se sabe de ella y solo pide lo que falta. También puedes enviarle su enlace de registro con «Enviar enlace»." },
-      { q: "¿Dónde quedaron los contactos?", a: "En Pacientes: elige «Por registrar» para quienes escribieron y aún no son pacientes, «Responsables» para quienes hablan por un paciente o «Todos». Cada persona tiene una sola página." },
+      { q: "¿Dónde quedaron los contactos?", a: "En Pacientes: elige «Por registrar» para quienes escribieron y aún no son pacientes, «Responsables» para quienes hablan por un paciente o «Todos». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes." },
+      { q: "¿Qué mensajes le podemos enviar sin preguntarle?", a: "Todo lo de su atención: su cita (aviso, recordatorio y confirmación), sus controles, sus presupuestos y la inasistencia. Es parte del servicio. Solo las novedades y promociones piden su sí: se ve y se cambia en su página › Datos › Mensajes. Si pide no recibir algo, se respeta siempre." },
       { q: "¿Cómo archivo a una persona?", a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha, y se recupera igual desde la vista «Archivados»." },
     ],
   },
@@ -143,9 +145,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["recordatorios", "mensajes automáticos", "automatizaciones", "confirmar cita", "avisos", "reglas", "seguimientos", "recomendaciones", "asesor"],
     writePermission: "agent.write",
     faqs: [
-      { q: "¿Dónde enciendo los recordatorios de cita?", a: "En Agente › Administrador, en «Listas para activar», prende «Recordar la cita». Antes enciende al administrador con el interruptor de arriba. El recordatorio llega solo a quien aceptó recibirlo." },
+      { q: "¿Dónde enciendo los recordatorios de cita?", a: "«Recordar la cita» viene prendida. Para que salga, enciende al administrador con el interruptor de arriba y a Recepción en su página: la página del Administrador te avisa si falta alguno. El recordatorio es parte del servicio y llega a todos, salvo a quien se dio de baja." },
       { q: "¿Puedo pedirle algo con mis palabras?", a: "Sí. En Agente › Administrador, escribe en «Dile qué quieres que haga» lo que quieres: prender, apagar o ajustar una línea, o que le ofrezca otra fecha a quien cancela su cita. Te lo deja como borrador con su flujo y una prueba con tus últimos 30 días; nada cambia hasta que lo prendas o lo guardes." },
-      { q: "¿Por qué el agente no le escribió a una persona?", a: "En Agente › Administrador, abre la línea y mira «Qué pasó con cada persona»: dice el motivo (no aceptó mensajes, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo." },
+      { q: "¿Por qué el agente no le escribió a una persona?", a: "En Agente › Administrador, abre la línea y mira «Qué pasó con cada persona»: dice el motivo (pidió no recibirlo, no tiene WhatsApp ni correo, o WhatsApp aún no aprueba el mensaje) y cómo habilitarlo." },
     ],
   },
   {

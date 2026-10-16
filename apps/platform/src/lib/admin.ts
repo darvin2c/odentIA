@@ -85,7 +85,7 @@ export interface AdminPage {
   today: { recommendations: number; done: number; yours: number }
   monthTemplates: number
   /** Prendida, pero casi no escribe: la mayoría no aceptó ese tipo de mensaje. */
-  permissionGaps: Array<{ purpose: "recordatorio" | "seguimiento"; refused: number; total: number; asks: boolean; lineKey: string }>
+  permissionGaps: Array<{ purpose: "novedades"; refused: number; total: number; asks: boolean; lineKey: string }>
 }
 
 export interface AdminFlowStep {

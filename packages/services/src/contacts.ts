@@ -904,6 +904,37 @@ export async function addContactIdentity(
 }
 
 /**
+ * Un teléfono pasa a ser el WhatsApp de una persona por la decisión de una
+ * persona del equipo (ADR 0027): «Escribirle» con el número de la ficha o uno
+ * que escribe, o el alta mínima desde la Agenda con su teléfono. Una sola
+ * operación para las dos vías, auditada a nombre de quien lo decide; un número
+ * que ya es de otra persona no se mueve (`IDENTITY_IN_USE`).
+ */
+export async function claimWhatsAppNumber(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  contactId: string,
+  phone: string,
+): Promise<{ identityId: string; created: boolean }> {
+  const digits = phone.replace(/\D/g, "")
+  const before = await findChannelIdentity(tx, orgId, "whatsapp", `wa:${digits}`)
+  try {
+    const identity = await addContactIdentity(tx, orgId, actorUserId, contactId, { channel: "whatsapp", externalUserId: digits })
+    return { identityId: identity.id, created: !before }
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") {
+      throw new ServiceError(
+        "IDENTITY_IN_USE",
+        409,
+        "Ese número de WhatsApp ya es de otra persona de la clínica. Ábrela desde Contactos o escribe otro número.",
+      )
+    }
+    throw error
+  }
+}
+
+/**
  * Reasignación explícita de una identidad («Reasignar canal»).
  * Orden de locks: advisory de identidad → enlaces de registro pendientes
  * ordenados por id → contactos ordenados por id (FOR UPDATE) → oportunidades

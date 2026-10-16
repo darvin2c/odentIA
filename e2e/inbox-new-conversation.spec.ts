@@ -55,7 +55,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   const context = page.getByRole("region", { name: "Contexto del contacto" })
   await expect(context).toContainText("Próxima cita")
   await expect(context).toContainText("Ninguna")
-  await expect(context).toContainText("Aún no se le preguntó")
+  await expect(context).toContainText("Novedades y promociones: aún no se le preguntó")
   await expect(context.getByRole("link", { name: "Reservar cita", exact: true })).toHaveAttribute("href", new RegExp(`contactId=${detail.contact.id}`))
   await expect(context).toContainText("todavía no es paciente")
   // Su número con el formato de toda la aplicación, en la cabecera y en Canales; nunca «wa:».
@@ -106,7 +106,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await gotoHydrated(page, tenant(org.slug, `/people/${detail.contact.id}`))
   const pendingRow = page.getByText("Faltan datos que la clínica pide").first()
   await expect(pendingRow).toBeVisible()
-  await expect(page.getByText("Falta: fecha de nacimiento. Confirma apellidos y nombres.")).toBeVisible()
+  await expect(page.getByText("Fecha de nacimiento. Confirma apellidos y nombres.")).toBeVisible()
   await info.attach("persona-ficha-minima", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Odontología escribe a las personas, pero no lee el CRM: sin «Contexto» ni «Nueva conversación» ---

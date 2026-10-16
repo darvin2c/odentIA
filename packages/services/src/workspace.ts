@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { listHandoffs } from "./agent-operations.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
-import { remindedUnconfirmedSql } from "./automation.js"
+import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { handoffOpenExistsSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
@@ -451,6 +451,9 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     select exists(select 1 from professional_schedule where organization_id=${orgId} and is_active) as availability,
       exists(select 1 from schedule_chair where organization_id=${orgId} and is_active) as chairs,
       exists(select 1 from patient where organization_id=${orgId}) as patients`) : []
+  // Sin Recepción ni el Administrador no sale «Recordar la cita» ni ningún aviso:
+  // es un paso más de la puesta en marcha para quien puede encenderlos.
+  const agentStep = setup && options.can?.("agent.write") ? await adminRuntime(tx, orgId) : null
   // Con trabajo ya registrado, Inicio deja de ofrecer la puesta en marcha.
   const [activity] = await tx.execute<{ recorded: boolean }>(sql`
     select (
@@ -466,7 +469,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       or ${access.agent} and exists(select 1 from agent_proposal where organization_id=${orgId})
     ) as recorded`)
   return { date: day.date, timezone, locale, access, multiBranch: many, waiting, today, cash,
-    setup: setup ?? null, activity: { recorded: activity?.recorded ?? false } }
+    setup: setup ? { ...setup, ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}) } : null,
+    activity: { recorded: activity?.recorded ?? false } }
 }
 
 /** Una fila de «Actividad del equipo»: el registro y, además, cómo se dice con palabras. */

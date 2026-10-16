@@ -4,7 +4,7 @@ import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/
 import { member, user } from "@odentia/db/schema/auth"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { encounter, encounterProcedure, patient, patientCharge, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
+import { agentConfig, channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { automationJob } from "@odentia/db/schema/automation"
 import { product } from "@odentia/db/schema/inventory"
 import { opportunity } from "@odentia/db/schema/opportunities"
@@ -594,4 +594,20 @@ it("una cita sin confirmar tras el primer recordatorio del agente aparece para l
   // Confirmada, deja de esperar.
   await ownerDb.update(appointment).set({ status: "confirmada" }).where(eq(appointment.id, rosa))
   expect(rowsOf((await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, randomUUID(), reception))).waiting, "unconfirmed")).toEqual([])
+})
+
+it("la puesta en marcha trae encender Recepción y el Administrador, solo a quien puede encenderlos", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `puesta-${orgId.slice(0, 8)}`)
+  const access: WorkspaceAccess = { ...full, appointments: false, finance: false, clinical: false, configure: true }
+  const setupOf = (can: (permission: string) => boolean) =>
+    withOrgContext(appDb, orgId, (tx) => getWorkspaceHome(tx, orgId, recipient, access, { can })).then((home) => home.setup)
+  expect(await setupOf(() => true)).toMatchObject({ agent: false })
+  // Sin poder encenderlos, el paso no viaja.
+  expect(await setupOf((permission) => permission !== "agent.write")).not.toHaveProperty("agent")
+  // Solo con los dos encendidos queda hecho.
+  await ownerDb.insert(agentConfig).values({ organizationId: orgId, enabled: true, advisor: { enabled: false } })
+  expect(await setupOf(() => true)).toMatchObject({ agent: false })
+  await ownerDb.update(agentConfig).set({ advisor: { enabled: true } }).where(eq(agentConfig.organizationId, orgId))
+  expect(await setupOf(() => true)).toMatchObject({ agent: true })
 })

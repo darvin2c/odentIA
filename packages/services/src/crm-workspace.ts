@@ -89,8 +89,12 @@ export interface CrmContactWorkspace {
   activity: { items: CrmActivityItem[]; nextCursor: string | null }
   /** Solo para quien ve la agenda; null si no tiene ninguna por venir. */
   nextAppointment: CrmNextAppointment | null
-  /** Lo que aceptó recibir sin haber escrito primero (null: nunca se le preguntó). */
-  messages: { recordatorio: boolean | null; seguimiento: boolean | null }
+  /**
+   * Lo que dijo de cada tipo de mensaje (null: nunca dijo nada). `recordatorio` y
+   * `seguimiento` son parte del servicio: solo cuenta si se dio de baja (false);
+   * `novedades` es el único que pide su permiso (ADR 0030).
+   */
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades: boolean | null }
 }
 
 /**
@@ -968,7 +972,7 @@ export async function getContactWorkspace(
     agent,
     activity,
     nextAppointment,
-    messages: { recordatorio: granted("recordatorio"), seguimiento: granted("seguimiento") },
+    messages: { recordatorio: granted("recordatorio"), seguimiento: granted("seguimiento"), novedades: granted("novedades") },
   }
 }
 

@@ -12,6 +12,7 @@ import type { PersonPage } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { SummaryCard } from "../patient/resumen-tab"
+import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { usePersonConversations } from "./person-summary"
 
@@ -108,13 +109,9 @@ export function PersonConversations({ person }: { person: PersonPage }) {
               {spokenWithConversation.map((other) => (
                 <li key={other.personId}>
                   Habla por ella{" "}
-                  <Link
-                    to="/people/$personId"
-                    params={{ personId: other.personId }}
-                    className="font-medium text-primary hover:underline"
-                  >
+                  <PersonLink contactId={other.personId} isPatient={other.isPatient}>
                     {other.displayName}
-                  </Link>
+                  </PersonLink>
                   {" · "}
                   <Link
                     to="/inbox"

@@ -10,7 +10,7 @@ Las líneas del Administrador nacen apagadas: nada se prende sin una persona (`s
 
 - Al crear una clínica (la primera vez que se guarda su perfil, en el alta), «Recordar la cita» queda prendida con `setLine`, a nombre de quien crea la clínica, y con un registro propio (`admin_line.default_on`) además del de la línea. Es la misma operación y la misma huella que si esa persona la hubiera prendido con el interruptor.
 - Solo esa línea, solo en clínicas nuevas y solo si la línea no tiene ya un estado: nunca se toca una clínica existente ni una línea que alguien apagó.
-- No cambia nada más: Recepción y el Administrador siguen apagados hasta que la clínica los encienda, el permiso de recordatorios de cada persona sigue siendo necesario y lo que sale por WhatsApp espera a que sus mensajes estén aprobados. La línea prendida solo evita tener que buscarla.
+- No cambia nada más: Recepción y el Administrador siguen apagados hasta que la clínica los encienda, la baja de cada persona se respeta (desde [0030](0030-lo-del-servicio-no-pide-permiso.md) los recordatorios no piden permiso previo) y lo que sale por WhatsApp espera a que sus mensajes estén aprobados. La línea prendida solo evita tener que buscarla.
 
 El usuario lo aprobó el 15 de octubre (tablero 3 de la fase 2).
 

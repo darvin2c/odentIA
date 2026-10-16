@@ -71,7 +71,13 @@ function PeoplePage() {
   const can = useCan()
   const canCreate = can("patients.write") || can("crm.write")
   const listSearch = useListSearch()
-  const view: PeopleView = ((v) => (isPeopleView(v) ? v : "pacientes"))(listSearch.get("ver"))
+  // Quien aún no es paciente solo lo ven recepción y quien dirige; caja y odontología, solo pacientes.
+  const seesAll = can("crm.read")
+  const views = PEOPLE_VIEWS.filter(
+    (item) => seesAll || (item.id !== "por_registrar" && item.id !== "responsables"),
+  )
+  const view: PeopleView = ((v) =>
+    isPeopleView(v) && views.some((item) => item.id === v) ? v : "pacientes")(listSearch.get("ver"))
   const search = listSearch.get("q") ?? ""
   const [cursors, setCursors] = useState<string[]>([])
   const cursor = cursors.at(-1) ?? null
@@ -141,7 +147,11 @@ function PeoplePage() {
     <PageShell>
       <PageHeader
         title="Pacientes"
-        subtitle="Todas las personas de la clínica: pacientes, quienes aún no se registran y sus responsables"
+        subtitle={
+          seesAll
+            ? "Todas las personas de la clínica: pacientes, quienes aún no se registran y sus responsables"
+            : "Los pacientes de la clínica"
+        }
         actions={
           canCreate ? (
             <Button type="button" onClick={() => setCreating(true)}>
@@ -154,7 +164,7 @@ function PeoplePage() {
       <div className="flex flex-col gap-2 py-4">
         <fieldset className="flex min-w-0 flex-wrap gap-1.5">
           <legend className="sr-only">Qué personas ver</legend>
-          {PEOPLE_VIEWS.map((item) => {
+          {views.map((item) => {
             const pressed = view === item.id
             return (
               <Button

@@ -10,6 +10,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   type AgentConfig,
   countAgentModelRunsToday,
+  askGeneralPermissionAfterBooking,
   automationReplyOf,
   getAgentConfig,
   getLesson,
@@ -508,6 +509,14 @@ export async function processAgentRun(
       await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
     } else {
       await invokeGraph()
+      // Tras reservar en esta corrida, la pregunta del permiso general, una sola
+      // vez por persona y después de la respuesta (ADR 0030). Texto y botones
+      // fijos, sin modelo; si no puede salir, la corrida sigue igual.
+      if (toolCtx.replySettled && !toolCtx.handedOff && !toolCtx.dryRun) {
+        await withOrgContext(db, orgId, (tx) =>
+          askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: startedAt }),
+        ).catch(() => false)
+      }
     }
     // Sin envío ni derivación en esta corrida: queda como sin respuesta salvo
     // que el hilo ya tenga una respuesta posterior al disparador (reentrega o

@@ -63,8 +63,17 @@ const AFTER_WORDS: Record<SaleMoment, string | null> = {
   decidio: null,
 }
 
-/** Lo que pasó de verdad cuando avanzó sola. */
-export type MoveCause = "cita_agendada" | "presupuesto_presentado" | "presupuesto_aceptado" | "presupuesto_rechazado"
+/**
+ * Lo que pasó de verdad cuando se movió sola. Solo avanza, salvo una
+ * excepción: cancelar la evaluación que la llevó a «Evaluación agendada» la
+ * devuelve a «Interesado» (`evaluacion_cancelada`).
+ */
+export type MoveCause =
+  | "cita_agendada"
+  | "evaluacion_cancelada"
+  | "presupuesto_presentado"
+  | "presupuesto_aceptado"
+  | "presupuesto_rechazado"
 
 /** Quién hace algo con la oportunidad: una persona, el agente o el sistema por algo que pasó. */
 export interface OpportunityActor {
@@ -147,6 +156,8 @@ export interface OpportunityDetail extends OpportunityListItem {
   contactEmail: string | null
   /** El valor es el precio del servicio en la lista de precios. */
   amountFromPriceList: boolean
+  /** El valor es el total del presupuesto que se le presentó. */
+  amountFromBudget: boolean
   budgetTitle: string | null
   budgetNumber: number | null
   budgetStatus: string | null
@@ -277,6 +288,7 @@ interface LastEvent {
 
 function causeWords(cause: string | null, causeAt: Date | null, at: Date, now: Date, zone: Zone): string | null {
   if (cause === "cita_agendada") return causeAt ? `agendó su evaluación para ${dayWords(causeAt, now, zone)}` : "agendó su evaluación"
+  if (cause === "evaluacion_cancelada") return causeAt ? `canceló su evaluación del ${shortDay(causeAt, zone)}` : "canceló su evaluación"
   if (cause === "presupuesto_presentado") return `presupuesto presentado ${dayWords(at, now, zone)}`
   if (cause === "presupuesto_aceptado") return "aceptó el presupuesto"
   if (cause === "presupuesto_rechazado") return "rechazó el presupuesto"
@@ -297,7 +309,8 @@ function whyOf(
   if (last.action === "opportunity.moved") {
     if (last.origin === "automatico") {
       const words = causeWords(last.cause, last.causeAt, last.createdAt, now, zone)
-      return words ? `Pasó sola: ${words}` : `Pasó sola ${when}`
+      const verb = last.cause === "evaluacion_cancelada" ? "Volvió sola" : "Pasó sola"
+      return words ? `${verb}: ${words}` : `${verb} ${when}`
     }
     if (last.origin === "agente") return `La movió el agente ${when}`
     return `La movió ${last.actorName ?? "el equipo"} ${when}`
@@ -331,7 +344,8 @@ function historyWhat(
   if (event.action === "opportunity.moved") {
     const words = event.origin === "automatico" ? causeWords(event.cause, event.causeAt, event.createdAt, now, zone) : null
     const target = toStageName ? ` a «${toStageName}»` : ""
-    return words ? `Pasó sola${target}: ${words}` : `La movió${target}`
+    const verb = event.cause === "evaluacion_cancelada" ? "Volvió sola" : "Pasó sola"
+    return words ? `${verb}${target}: ${words}` : `La movió${target}`
   }
   if (event.action === "opportunity.won" || event.action === "opportunity.lost") {
     const reason = event.note ? `: ${event.note}` : ""
@@ -934,6 +948,9 @@ export async function getOpportunity(
     contactEmail: contactRow?.email ?? null,
     amountFromPriceList:
       !!service && row.opp.amountCents === service.priceCents && row.opp.currency === service.currency,
+    amountFromBudget:
+      !!budget && budget.status !== "borrador" && row.opp.amountCents !== null &&
+      !(!!service && row.opp.amountCents === service.priceCents && row.opp.currency === service.currency),
     budgetTitle: budget?.title ?? null,
     budgetNumber: budget?.number ?? null,
     budgetStatus: budget?.status ?? null,
@@ -1504,20 +1521,111 @@ export async function advanceForAppointment(
 }
 
 /**
+ * La única vuelta atrás que da sola (ADR 0028): si se cancela la evaluación
+ * que la llevó a «Evaluación agendada» y no le queda otra cita por venir,
+ * vuelve a «Interesado» y la tarjeta dice por qué («Volvió sola: canceló su
+ * evaluación del jue 17»). Solo la que llegó ahí sola por una cita y cuya
+ * evaluación no se atendió después. Misma `moveOpportunity`, con `origin` y
+ * `cause`. Devuelve las que volvieron.
+ */
+export async function returnForCancelledAppointment(
+  tx: Db,
+  orgId: string,
+  input: { patientId: string; startsAt: Date },
+): Promise<string[]> {
+  const now = new Date()
+  const [upcoming] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, input.patientId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gte(appointment.startsAt, now),
+      ),
+    )
+    .limit(1)
+  if (upcoming) return []
+  const rows = await tx
+    .select({ opp: opportunity })
+    .from(opportunity)
+    .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
+    .where(
+      and(
+        eq(opportunity.organizationId, orgId),
+        eq(opportunity.status, "open"),
+        eq(pipelineStage.moment, "evaluacion_agendada"),
+        ofPerson(orgId, input.patientId),
+      ),
+    )
+  const returned: string[] = []
+  for (const { opp } of rows) {
+    // Cómo llegó a su paso actual: sola, por una cita.
+    const [arrival] = await tx
+      .select({ origin: opportunityEvent.origin, cause: opportunityEvent.cause, createdAt: opportunityEvent.createdAt })
+      .from(opportunityEvent)
+      .where(
+        and(
+          eq(opportunityEvent.organizationId, orgId),
+          eq(opportunityEvent.opportunityId, opp.id),
+          eq(opportunityEvent.action, "opportunity.moved"),
+          eq(opportunityEvent.toStageId, opp.stageId),
+        ),
+      )
+      .orderBy(desc(opportunityEvent.createdAt), desc(opportunityEvent.id))
+      .limit(1)
+    if (!arrival || arrival.origin !== "automatico" || arrival.cause !== "cita_agendada") continue
+    // Si la evaluación ya se atendió, cancelar otra cita no la devuelve.
+    const [attended] = await tx
+      .select({ id: appointment.id })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.patientId, input.patientId),
+          eq(appointment.status, "atendida"),
+          gte(appointment.startsAt, arrival.createdAt),
+        ),
+      )
+      .limit(1)
+    if (attended) continue
+    const target = await stageOfMoment(tx, orgId, opp.pipelineId, "interesado")
+    await moveOpportunity(tx, orgId, opp.id, target.id, {
+      userId: null,
+      origin: "automatico",
+      cause: "evaluacion_cancelada",
+      causeAt: input.startsAt,
+    })
+    returned.push(opp.id)
+  }
+  return returned
+}
+
+/**
  * Al presentar un presupuesto, se une solo a la oportunidad abierta del mismo
  * tratamiento o, si no hay, a la más reciente; la oportunidad adopta al
- * paciente y, si aún no llegaba ahí, pasa sola a «Presupuesto enviado».
+ * paciente, su valor pasa a ser el total del presupuesto y, si aún no llegaba
+ * ahí, pasa sola a «Presupuesto enviado».
  */
 export async function linkPresentedBudget(
   tx: Db,
   orgId: string,
-  input: { patientId: string; budgetId: string; serviceIds: string[] },
+  input: {
+    patientId: string
+    budgetId: string
+    serviceIds: string[]
+    /** Total del presupuesto presentado, en su moneda: pasa a ser el valor de la oportunidad. */
+    total?: { cents: number | null; currency: string }
+  },
 ): Promise<string | null> {
   const picked = await pickOpportunity(tx, orgId, { patientId: input.patientId, serviceIds: input.serviceIds })
   if (!picked) return null
+  // El valor de la oportunidad pasa a ser lo que de verdad se le presentó.
+  const value = input.total && input.total.cents !== null ? { amountCents: input.total.cents, currency: input.total.currency } : {}
   await tx
     .update(opportunity)
-    .set({ budgetId: input.budgetId, patientId: picked.opp.patientId ?? input.patientId, updatedAt: new Date() })
+    .set({ budgetId: input.budgetId, patientId: picked.opp.patientId ?? input.patientId, ...value, updatedAt: new Date() })
     .where(and(eq(opportunity.id, picked.opp.id), eq(opportunity.organizationId, orgId)))
   if (momentRank(picked.moment) < momentRank("presupuesto_enviado")) {
     const target = await stageOfMoment(tx, orgId, picked.opp.pipelineId, "presupuesto_enviado")
@@ -1530,13 +1638,20 @@ export async function linkPresentedBudget(
 
 /**
  * La persona decidió su presupuesto: aceptarlo, aunque sea en parte, gana la
- * oportunidad; rechazarlo la pierde con «Rechazó el presupuesto». Pospuesto no
- * cambia nada.
+ * oportunidad con lo aceptado como valor; rechazarlo la pierde con «Rechazó el
+ * presupuesto». Pospuesto no cambia nada.
  */
 export async function decideBudgetOpportunity(
   tx: Db,
   orgId: string,
-  input: { patientId: string; budgetId: string; status: string; serviceIds: string[] },
+  input: {
+    patientId: string
+    budgetId: string
+    status: string
+    serviceIds: string[]
+    /** Lo aceptado, en la moneda del presupuesto: el valor de la oportunidad ganada. */
+    accepted?: { cents: number | null; currency: string }
+  },
 ): Promise<string | null> {
   const outcome = input.status === "aceptado" || input.status === "parcial" ? "won" : input.status === "rechazado" ? "lost" : null
   if (!outcome) return null
@@ -1551,6 +1666,13 @@ export async function decideBudgetOpportunity(
   if (!open && linked.length > 0) return null
   const id = open?.id ?? (await linkPresentedBudget(tx, orgId, input))
   if (!id) return null
+  // Ganada, su valor es lo que aceptó (aceptado en parte, solo esa parte).
+  if (outcome === "won" && input.accepted && input.accepted.cents !== null) {
+    await tx
+      .update(opportunity)
+      .set({ amountCents: input.accepted.cents, currency: input.accepted.currency, updatedAt: new Date() })
+      .where(and(eq(opportunity.id, id), eq(opportunity.organizationId, orgId)))
+  }
   await closeOpportunity(
     tx,
     orgId,

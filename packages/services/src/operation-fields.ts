@@ -109,6 +109,17 @@ export const OPERATIONS = {
       appointmentId: { kind: "uuid", label: "Cita", description: "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirma la única cita suya que espera confirmación.", body: "path", agent: "fills" },
     },
   },
+  // Lo que la persona aceptó recibir. La pantalla elige el tipo y cómo lo dijo;
+  // el agente solo registra su respuesta a la pregunta de novedades y promociones.
+  "mensajes.permiso": {
+    label: "Permiso de mensajes",
+    strict: true,
+    fields: {
+      purpose: { kind: "enum", values: ["recordatorio", "seguimiento", "novedades"], label: "Qué mensajes", description: "Los de su cita y sus controles (recordatorio), los de sus presupuestos y seguimientos (seguimiento) o novedades y promociones (novedades).", body: "required", agent: "context" },
+      granted: { kind: "flag", label: "Lo aceptó", description: "true si la persona dijo que sí a recibir novedades y promociones de la clínica; false si dijo que no.", body: "required", agent: "requires" },
+      source: { kind: "enum", values: ["presencial", "telefono", "conversacion"], label: "Cómo lo dijo", description: "En persona, por teléfono o por la conversación.", body: "required", agent: "context" },
+    },
+  },
   "oportunidad.crear": {
     label: "Crear una oportunidad",
     fields: {
@@ -364,6 +375,7 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
   proponer_cita: "cita.reservar",
   reprogramar_cita: "cita.mover",
   confirmar_cita: "cita.confirmar",
+  responder_permiso_mensajes: "mensajes.permiso",
   create_opportunity: "oportunidad.crear",
   move_to_stage: "oportunidad.mover",
   close_opportunity: "oportunidad.cerrar",

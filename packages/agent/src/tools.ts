@@ -11,6 +11,7 @@ import {
   type AgentCaseProposal,
   buildAgentProposalKey,
   confirmProposalByContact,
+  answerGeneralPermission,
   confirmAppointmentByContact,
   type ContactAppointmentOption,
   BOOKING_LINK_TTL_HOURS,
@@ -139,6 +140,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   cancelar_cita: "Propuso cancelar una cita.",
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
   confirmar_cita: "Confirmó la cita que la persona dijo que no se perderá.",
+  responder_permiso_mensajes: "Anotó si acepta mensajes de controles y novedades.",
   enviar_enlace_cita: "Envió un enlace para que la persona elija su cita.",
   create_opportunity: "Propuso registrar una oportunidad.",
   update_followup: "Dejó la tarea de una oportunidad.",
@@ -1140,17 +1142,47 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return "La persona no tiene citas por venir que confirmar. Si habla de otra cita, pregúntale cuál o pasa el caso a una persona."
       }
       if (result.outcome !== "varias") {
-        return result.outcome === "confirmada"
-          ? `Cita confirmada: ${said(result.appointment)}. Díselo con send_reply.`
-          : `Esa cita ya estaba confirmada: ${said(result.appointment)}. Díselo con send_reply.`
+        // Un padre confirma las citas de quienes lleva: se le dice de quiénes son.
+        const list = result.appointments
+          .map((item) => `- ${said(item)}${item.was === "ya_confirmada" ? " (ya estaba confirmada)" : ""}`)
+          .join("\n")
+        const head =
+          result.outcome === "confirmada"
+            ? result.appointments.length > 1 ? "Citas confirmadas:" : "Cita confirmada:"
+            : result.appointments.length > 1 ? "Esas citas ya estaban confirmadas:" : "Esa cita ya estaba confirmada:"
+        return `${head}\n${list}\nDíselo con send_reply, con estas palabras o parecidas: «${result.reply}»`
       }
       return `Tiene varias citas por confirmar: pregúntale cuál y vuelve a llamar con su id.\n${result.options.map((item) => `- ${said(item)} (id ${item.appointmentId})`).join("\n")}`
     },
     {
       name: "confirmar_cita",
       description:
-        "Confirma una cita que la persona ya tiene cuando ella lo dice por escrito («sí, ahí estaré», «confirmo»), por ejemplo al responder un recordatorio. No es una propuesta ni pide otro sí. Sin id confirma la única cita suya que espera confirmación; si tiene varias, te las devuelve para que preguntes cuál.",
+        "Confirma una cita que la persona ya tiene cuando ella lo dice por escrito («sí, ahí estaré», «confirmo»), por ejemplo al responder un recordatorio. No es una propuesta ni pide otro sí. Sin id confirma, como el botón, las citas del último recordatorio que recibió (si escribe por sus hijos, las de ellos); si no hay recordatorio, la única cita que espera confirmación, y si tiene varias te las devuelve para que preguntes cuál. Te devuelve qué confirmó y la frase para decírselo.",
       schema: operationAgentSchema("cita.confirmar"),
+    },
+  )
+
+  /**
+   * La persona responde por escrito a la pregunta del permiso general que hizo
+   * el sistema tras reservar («¿Te podemos escribir también…?»). Es la misma
+   * operación que su botón (`answerGeneralPermission`): solo vale si se le
+   * preguntó y aún no respondió; queda con origen «conversación» (ADR 0030).
+   */
+  const answerPermission = tool(
+    async ({ granted }: { granted: boolean }) => {
+      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se anotaría su respuesta sobre los mensajes de controles y novedades."
+      const outcome = await inOrg((tx) => answerGeneralPermission(tx, ctx.orgId, { conversationId: ctx.conversationId, granted }))
+      if (outcome === "no_preguntado") return "No se le hizo esa pregunta: no hay nada que anotar. Sigue la conversación."
+      if (outcome === "ya_respondio") return "Ya había respondido antes; no cambia nada. Sigue la conversación."
+      return granted
+        ? "Anotado: aceptó que le escribamos por sus controles y novedades. Agradéceselo en una línea con send_reply."
+        : "Anotado: no quiere mensajes de controles y novedades. Dile en una línea que solo le escribiremos por sus citas, con send_reply."
+    },
+    {
+      name: "responder_permiso_mensajes",
+      description:
+        "Anota la respuesta de la persona a la pregunta que le hizo la clínica tras reservar: «¿Te podemos escribir también para avisarte de tus controles y novedades de la clínica?». Úsala solo si su último mensaje responde a esa pregunta (sí o no); nunca para confirmar una cita.",
+      schema: operationAgentSchema("mensajes.permiso"),
     },
   )
 
@@ -1506,6 +1538,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     rescheduleAppointment,
     cancelAppointmentProposal,
     confirmAppointment,
+    answerPermission,
     confirmProposal,
     noteCase,
     rememberFact,

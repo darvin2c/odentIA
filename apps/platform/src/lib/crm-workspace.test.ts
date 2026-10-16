@@ -3,10 +3,13 @@ import { type CrmNextAppointment, messagePermissionsSaid, nextAppointmentSaid } 
 
 describe("«Contexto» dice lo que la persona aceptó y su próxima cita", () => {
   it("los permisos de mensajes, con palabras", () => {
-    expect(messagePermissionsSaid({ recordatorio: true, seguimiento: null })).toBe("Aceptó recordatorios")
-    expect(messagePermissionsSaid({ recordatorio: true, seguimiento: true })).toBe("Aceptó recordatorios y seguimientos")
-    expect(messagePermissionsSaid({ recordatorio: false, seguimiento: null })).toBe("No aceptó mensajes de la clínica")
-    expect(messagePermissionsSaid({ recordatorio: null, seguimiento: null })).toBe("Aún no se le preguntó")
+    // Lo de su atención es parte del servicio: solo se dice si se dio de baja (ADR 0030).
+    expect(messagePermissionsSaid({ recordatorio: true, seguimiento: null, novedades: true })).toBe("Acepta novedades y promociones")
+    expect(messagePermissionsSaid({ recordatorio: null, seguimiento: null, novedades: false })).toBe("No quiere novedades ni promociones")
+    expect(messagePermissionsSaid({ recordatorio: false, seguimiento: null, novedades: null })).toBe(
+      "Novedades y promociones: aún no se le preguntó · pidió no recibir recordatorios",
+    )
+    expect(messagePermissionsSaid({ recordatorio: null, seguimiento: null, novedades: null })).toBe("Novedades y promociones: aún no se le preguntó")
   })
 
   it("la próxima cita va con la hora de la sede y nombra al paciente si no es la propia persona", () => {

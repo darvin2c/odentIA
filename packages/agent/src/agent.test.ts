@@ -1223,7 +1223,8 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
   // La de otra persona, nunca.
   expect(String(await confirm.invoke({ appointmentId: theirs.id }))).toContain("No se pudo confirmar")
   const said = String(await confirm.invoke({}))
-  expect(said).toContain("Cita confirmada: Rosa Confirma")
+  expect(said).toContain("Cita confirmada:\n- Rosa Confirma")
+  expect(said).toContain("«¡Listo! Tu cita quedó confirmada. Te esperamos.»")
   expect(said).toContain("Sede Confirmar con Dra. Confirma")
   const statusOf = async (id: string) =>
     (await withOrgContext(appDb, "org_a", (tx) => tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, id))))[0]?.status

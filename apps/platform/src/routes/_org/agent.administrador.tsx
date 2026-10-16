@@ -166,14 +166,70 @@ function QuietHours({ page, canWrite }: { page: AdminPage; canWrite: boolean }) 
 }
 
 /** Lo que falta para que las líneas que escriben puedan salir, con su acción. */
+/** Solo novedades y promociones pide permiso (ADR 0030): lo demás es parte del servicio. */
 const PURPOSE_WORDS = {
-  recordatorio: { what: "recordatorios de citas y controles", field: "recordatorios" },
-  seguimiento: { what: "otros mensajes de la clínica", field: "otros mensajes" },
+  novedades: { what: "novedades y promociones", field: "novedades y promociones" },
 } as const
 
-function MissingNotices({ page, onOpen }: { page: AdminPage; onOpen: (key: string) => void }) {
-  const writes = page.lines.some((line) => line.enabled && line.agentPart)
-  if (!page.enabled || !writes) return null
+/**
+ * Lo que falta para que lo prendido escriba, cada cosa con su acción. Sin
+ * Recepción o sin el Administrador, «Recordar la cita» y sus avisos no salen
+ * aunque estén prendidos: se dice y se ofrece encenderlos a quien puede.
+ */
+function MissingNotices({
+  page,
+  onOpen,
+  canWrite,
+  powering,
+  onTurnOn,
+}: {
+  page: AdminPage
+  onOpen: (key: string) => void
+  canWrite: boolean
+  powering: boolean
+  onTurnOn: () => void
+}) {
+  const writing = page.lines.filter((line) => line.enabled && line.agentPart)
+  if (writing.length === 0) return null
+  const what = writing.length === 1 ? `«${writing[0]!.name}» está prendida` : `${writing.length} líneas que escriben están prendidas`
+  const offWords =
+    !page.enabled && !page.receptionOn
+      ? "el Administrador y Recepción están apagados"
+      : !page.enabled
+        ? "el Administrador está apagado"
+        : !page.receptionOn
+          ? "Recepción está apagada"
+          : null
+  // Sin ellos no sale nada: lo ve quien puede encenderlos.
+  if (offWords) {
+    if (!canWrite) return null
+    return (
+      <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4 text-sm">
+        <div className="min-w-0 flex-1 basis-64">
+          <p className="font-semibold">
+            {what}, pero {offWords}: no le sale ningún mensaje a nadie
+          </p>
+          <p>
+            {page.enabled
+              ? "Recepción es quien escribe. Al encenderla salen los recordatorios y los avisos de lo que pase desde ahí; no se envía lo que quedó atrás."
+              : "El Administrador detecta a quién escribir y Recepción escribe. Al encenderlos salen los recordatorios y los avisos de lo que pase desde ahí; no se envía lo que quedó atrás."}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {!page.enabled ? (
+            <Button type="button" className="min-h-11 sm:min-h-8" disabled={powering} onClick={onTurnOn}>
+              Encender al administrador
+            </Button>
+          ) : null}
+          {!page.receptionOn ? (
+            <Link to="/agent/recepcion" className={LINK}>
+              Encender Recepción
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
   return (
     <>
       {page.permissionGaps.map((gap) => (
@@ -200,17 +256,6 @@ function MissingNotices({ page, onOpen }: { page: AdminPage; onOpen: (key: strin
           )}
         </div>
       ))}
-      {!page.receptionOn ? (
-        <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4 text-sm">
-          <div className="min-w-0 flex-1 basis-64">
-            <p className="font-semibold">Recepción está apagada: las que escriben a las personas quedan en pausa</p>
-            <p>Recepción es quien escribe. Vuelven a salir cuando la enciendas; no se envía lo que quedó atrás. Las que dejan trabajo al equipo siguen.</p>
-          </div>
-          <Link to="/agent/recepcion" className={LINK}>
-            Encender Recepción
-          </Link>
-        </div>
-      ) : null}
       {!page.whatsapp ? (
         <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-warning/40 bg-warning-soft p-4 text-sm">
           <div className="min-w-0 flex-1 basis-64">
@@ -347,7 +392,7 @@ function AdministratorPage() {
             </Card>
           )}
 
-          <MissingNotices page={page} onOpen={open} />
+          <MissingNotices page={page} onOpen={open} canWrite={canWrite} powering={power.isPending} onTurnOn={() => power.mutate(true)} />
 
           {page.enabled && canWrite ? <AdminRequest onOpen={open} /> : null}
 

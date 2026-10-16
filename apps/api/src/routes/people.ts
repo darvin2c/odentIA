@@ -1,5 +1,6 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  assertPersonVisible,
   createContactNote,
   createPerson,
   getPersonPage,
@@ -64,7 +65,9 @@ function forbidden(c: Context, message: string) {
  * propia ruta con su permiso: la cabecera y la lista con `patients.read`, las
  * conversaciones con `conversations.read`, las notas con el CRM; lo clínico,
  * el plan y los cobros siguen en `/api/patients/:id/...` con los suyos. No hay
- * una ruta que lo traiga todo.
+ * una ruta que lo traiga todo. Quien aún no es paciente solo existe para
+ * quien lleva la relación con las personas (`assertPersonVisible`): caja y
+ * odontología reciben 404 en cada bloque.
  */
 export function createPeopleRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -135,7 +138,10 @@ export function createPeopleRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "conversations.read"))
       return forbidden(c, "No tienes permiso para ver conversaciones")
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listPersonConversations(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
+        return listPersonConversations(tx, orgId, c.req.param("id"))
+      }),
     )
   })
 
@@ -161,6 +167,7 @@ export function createPeopleRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
         await updatePersonIdentity(
           tx,
           orgId,
@@ -185,6 +192,7 @@ export function createPeopleRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
         await setPersonArchived(tx, orgId, { userId }, c.req.param("id"), parsed.data.archived)
         return { archived: parsed.data.archived }
       }),

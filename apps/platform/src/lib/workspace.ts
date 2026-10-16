@@ -9,7 +9,8 @@ export interface WorkspaceHome {
   access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure" | "ownAppointments", boolean>
   /** Hay más de una sede activa: solo entonces se ofrece elegirla. */
   multiBranch: boolean
-  setup: { availability: boolean; chairs: boolean; patients: boolean } | null
+  /** `agent`: Recepción y el Administrador encendidos; solo viaja a quien puede encenderlos. */
+  setup: { availability: boolean; chairs: boolean; patients: boolean; agent?: boolean } | null
   activity: { recorded: boolean }
   /** Lo que necesita a una persona, en el orden en que se muestra. */
   waiting: WaitingRow[]

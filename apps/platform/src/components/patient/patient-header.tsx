@@ -28,7 +28,8 @@ import { label } from "../../lib/glossary"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { sexLabel } from "../../lib/patient-overview"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
-import { PERSON_KIND_LABELS, type PersonPage, RELATIONSHIP_WORDS } from "../../lib/people"
+import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
+import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
 import { NewEncounterButton } from "./new-encounter-button"
@@ -121,10 +122,6 @@ function initials(name: string): string {
     .map((word) => word[0])
     .join("")
     .toUpperCase()
-}
-
-function relationshipText(relationship: string, detail: string | null): string {
-  return detail?.trim() || RELATIONSHIP_WORDS[relationship] || relationship
 }
 
 /**
@@ -352,13 +349,9 @@ export function PersonHeader({
             {person.spokenForBy.map((other, index) => (
               <span key={other.personId}>
                 {index > 0 ? ", " : ""}
-                <Link
-                  to="/people/$personId"
-                  params={{ personId: other.personId }}
-                  className="font-medium text-primary hover:underline"
-                >
+                <PersonLink contactId={other.personId} isPatient={other.isPatient}>
                   {other.displayName}
-                </Link>
+                </PersonLink>
                 <span className="text-muted-foreground">
                   {" "}
                   · {relationshipText(other.relationship, other.relationshipDetail)}

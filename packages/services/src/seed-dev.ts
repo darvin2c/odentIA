@@ -108,10 +108,11 @@ import {
   registerPatient,
   savePatientRegistrationConfig,
 } from "./patient-registration.js"
-import { createPatient, updatePatient } from "./patients.js"
+import { createPatient, patientPersonId, updatePatient } from "./patients.js"
 import { collectCharge, createCharge, refundCredit } from "./payments.js"
 import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
+import { setConsent } from "./automation.js"
 import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
@@ -2212,10 +2213,33 @@ const rosaContactId = contactIdByName.get("Rosa Quispe")!
 // Consentimiento de datos (Ley 29733) con la versión vigente del aviso.
 await db.transaction((tx) =>
   grantDataConsent(tx, ORG_A, ANA_ID, rosaPatientId, {
-    purposes: ["atencion", "recordatorios"],
+    purposes: ["atencion", "comunicaciones"],
     grantedByContactId: rosaContactId,
   }),
 )
+// --- Fase 2.1 (ADR 0030): Pedro Ríos llamó y recepción le dio cita desde la
+// Agenda con lo mínimo (nombres, apellidos y teléfono), aunque el registro pide
+// la fecha de nacimiento: su página dice lo que falta. Dijo por teléfono que
+// acepta novedades y promociones, lo único que pide permiso.
+const pedroRios = await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "internal", userId: ANA_ID, scope: "essentials" },
+    {
+      submissionId: randomUUID(),
+      answers: {
+        demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", paternalSurname: "Ríos", phone: "+51987111222" },
+        respondent: "staff",
+        privacyAccepted: false,
+      },
+    },
+  ),
+)
+const pedroRiosPerson = await patientPersonId(db, ORG_A, pedroRios.id)
+if (pedroRiosPerson) {
+  await setConsent(db, ORG_A, ANA_ID, pedroRiosPerson, { purpose: "novedades", granted: true, source: "telefono" })
+}
 const telegramConnection = await createConnection(
   db,
   ORG_A,

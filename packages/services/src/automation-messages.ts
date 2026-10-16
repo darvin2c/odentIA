@@ -15,7 +15,12 @@ import type { ConsentPurpose } from "@odentia/db/schema/automation"
  */
 
 /** Qué hace un botón cuando la persona lo toca. */
-export const REPLY_ACTIONS = ["confirmar", "responder", "baja"] as const
+/**
+ * Lo que puede devolver un botón. «permiso_si» y «permiso_no» son la respuesta
+ * a la pregunta del permiso general tras reservar: su id lleva la persona, no
+ * un trabajo (`generalPermissionButtons`).
+ */
+export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no"] as const
 export type ReplyAction = (typeof REPLY_ACTIONS)[number]
 
 export interface MessageButton {
@@ -333,6 +338,22 @@ const REPLY_PREFIX = "odentia"
 /** Lo que devuelve un botón cuando la persona lo toca: acción y trabajo que lo originó. */
 export function replyId(action: ReplyAction, jobId: string): string {
   return `${REPLY_PREFIX}:${action}:${jobId}`
+}
+
+/**
+ * La pregunta del permiso de novedades y promociones, una sola vez por
+ * persona, tras reservar (ADR 0030). Texto y botones fijos; la respuesta la
+ * resuelve el sistema sin modelo.
+ */
+export const GENERAL_PERMISSION_QUESTION = "¿Te podemos escribir para enviarte novedades y promociones de la clínica?"
+export const GENERAL_PERMISSION_YES = "¡Listo! Te enviaremos novedades y promociones. Puedes darte de baja cuando quieras."
+export const GENERAL_PERMISSION_NO = "Entendido: no te enviaremos novedades ni promociones."
+
+export function generalPermissionButtons(contactId: string): Array<{ id: string; title: string }> {
+  return [
+    { id: replyId("permiso_si", contactId), title: "Sí" },
+    { id: replyId("permiso_no", contactId), title: "No, gracias" },
+  ]
 }
 
 export function parseReplyId(value: string | null | undefined): { action: ReplyAction; jobId: string } | null {

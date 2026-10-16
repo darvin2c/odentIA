@@ -2,6 +2,7 @@ import { asAdminDecider, createAdminDecisionModel, type PlatformDecisions, type 
 import { withOrgContext } from "@odentia/db"
 import {
   ADMIN_MODEL_DOWN,
+  operationBodySchema,
   adminLineOf,
   applyAdminDraft,
   deleteAdminLine,
@@ -65,11 +66,7 @@ const peopleQuery = z.object({
 })
 
 /** Lo que una persona del equipo registra en la ficha: qué aceptó y cómo lo dijo. */
-const permissionInput = z.object({
-  purpose: z.enum(["recordatorio", "seguimiento"]),
-  granted: z.boolean(),
-  source: z.enum(["presencial", "conversacion"]),
-})
+const permissionInput = operationBodySchema("mensajes.permiso")
 
 /**
  * Administrador: su página (las líneas), lo que recomienda y lo que pasó con

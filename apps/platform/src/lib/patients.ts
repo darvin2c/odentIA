@@ -887,6 +887,12 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
  * como obligatorios y la ficha no tiene. Un solo criterio para el Resumen y
  * para Datos personales; la clínica decide qué es obligatorio, no la pantalla.
  */
+/** «fecha de nacimiento, sexo y documento»: el tipo y el número de documento se dicen juntos. */
+export function filiationGapsText(gaps: string[]): string {
+  const words = [...new Set(gaps.map((gap) => (/documento/.test(gap) ? "documento" : gap)))]
+  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
+}
+
 export function missingFiliation(
   config: Pick<RegistrationConfig, "fields">,
   patient: Patient,

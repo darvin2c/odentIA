@@ -53,15 +53,20 @@ export interface CrmContactWorkspace {
   activity: { items: CrmActivityItem[]; nextCursor: string | null }
   nextAppointment: CrmNextAppointment | null
   /** Lo que aceptó recibir sin haber escrito primero; null: nunca se le preguntó. */
-  messages: { recordatorio: boolean | null; seguimiento: boolean | null }
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades?: boolean | null }
 }
 
 /** «Aceptó recordatorios», «No aceptó mensajes de la clínica»…, para «Contexto». */
 export function messagePermissionsSaid(messages: CrmContactWorkspace["messages"]): string {
-  const accepted = [messages.recordatorio ? "recordatorios" : null, messages.seguimiento ? "seguimientos" : null].filter(Boolean)
-  if (accepted.length > 0) return `Aceptó ${accepted.join(" y ")}`
-  if (messages.recordatorio === false || messages.seguimiento === false) return "No aceptó mensajes de la clínica"
-  return "Aún no se le preguntó"
+  // Lo de su atención es parte del servicio (ADR 0030): solo se dice si se dio de baja.
+  const news =
+    messages.novedades === true
+      ? "Acepta novedades y promociones"
+      : messages.novedades === false
+        ? "No quiere novedades ni promociones"
+        : "Novedades y promociones: aún no se le preguntó"
+  const out = [messages.recordatorio === false ? "recordatorios" : null, messages.seguimiento === false ? "seguimientos" : null].filter(Boolean)
+  return out.length > 0 ? `${news} · pidió no recibir ${out.join(" ni ")}` : news
 }
 
 /** «jue 17 oct, 10:30 · Evaluación · Dra. Ruiz», con la hora de la sede. */

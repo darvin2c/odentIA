@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { automationJob, automationRule } from "@odentia/db/schema/automation"
-import { encounter, patient, patientCharge, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
+import { encounter, patient, patientCharge, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, contact, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { ADMIN_LINES, flowOf } from "./admin-lines.js"
 import {
@@ -363,21 +363,27 @@ describe("las líneas que dejan trabajo al equipo", () => {
 describe("a quién no pudo escribirle", () => {
   it("junta por motivo a las personas de hoy, con cómo habilitar a cada una", async () => {
     const c = await clinic()
-    await noShow(c, await person(c, "Tomás Rivas"), 3)
-    await noShow(c, await person(c, "Pedro Lara"), 4)
+    // Los dos pidieron no recibir estos mensajes (su baja): es parte del servicio, pero la baja se respeta.
+    for (const [name, days] of [["Tomás Rivas", 3], ["Pedro Lara", 4]] as const) {
+      const patientId = await person(c, name)
+      const [own] = await ownerDb.select({ contactId: patientContact.contactId }).from(patientContact)
+        .where(and(eq(patientContact.patientId, patientId), eq(patientContact.relationship, "self")))
+      await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId: own!.contactId, purpose: "seguimiento", status: "revoked", source: "baja" })
+      await noShow(c, patientId, days)
+    }
     await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))
-    // Ninguno aceptó mensajes: el agente no escribe, avisa, y queda la tarea de llamada.
+    // El agente no escribe, avisa, y queda la tarea de llamada.
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido"])
     const unreached = await run(c, (tx) => getAdminUnreached(tx, c.orgId, all))
     expect(unreached.total).toBe(2)
     expect(unreached.byCause).toEqual([
-      { cause: "sin_permiso", total: 2, reason: "no aceptó mensajes de la clínica", fix: "Pídele el permiso la próxima vez que venga o escriba." },
+      { cause: "sin_permiso", total: 2, reason: "pidió no recibir este tipo de mensaje", fix: "Si cambia de opinión, anótalo en su página, en Datos › Mensajes." },
     ])
     expect(unreached.people.map((row) => [row.personName, row.lineName, row.outcome]).sort()).toEqual([
       ["Pedro Lara", "Reprogramar tras una inasistencia", "no_pudo"],
       ["Tomás Rivas", "Reprogramar tras una inasistencia", "no_pudo"],
     ])
-    expect(unreached.people[0]?.text).toBe("El agente no pudo escribirle: no aceptó mensajes de la clínica. Lo tiene el equipo de recepción.")
+    expect(unreached.people[0]?.text).toBe("El agente no pudo escribirle: pidió no recibir este tipo de mensaje. Lo tiene el equipo de recepción.")
     expect(await tasksOf(c)).toHaveLength(2)
     // Quien no ve la agenda no ve a esas personas.
     expect(await run(c, (tx) => getAdminUnreached(tx, c.orgId, (permission) => permission === "finance.read"))).toEqual({ total: 0, byCause: [], people: [] })

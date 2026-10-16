@@ -432,6 +432,9 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
     const account = await api(page, "GET", `${apiPath}/account`, slug)
     const chats = await api(page, "GET", `/api/people/${personId}/conversations`, slug)
     const notes = await api(page, "GET", `/api/people/${personId}/notes`, slug)
+    // Quien aún no es paciente solo lo ven recepción y quien dirige (fase 2.1, decisión 8).
+    const pending = await api(page, "GET", "/api/people?ver=por_registrar", slug)
+    expect(pending.status).toBe(role === "reception" ? 200 : 403)
 
     if (role === "reception") {
       await expect(areas).toHaveText(["Resumen", "Conversaciones", "Citas", "Datos"])

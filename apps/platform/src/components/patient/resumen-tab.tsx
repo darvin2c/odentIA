@@ -17,6 +17,7 @@ import type { PatientSectionId } from "../../lib/patient-areas"
 import type { PatientFull, PatientSummary } from "../../lib/patients"
 import {
   fetchPatientHealth,
+  filiationGapsText,
   hasHealthInfo,
   isHealthReviewPending,
   missingFiliation,
@@ -226,7 +227,14 @@ export function PatientPendingCard({
       pending.push({
         id: "filiacion",
         title: gaps.length > 0 ? "Faltan datos que la clínica pide" : "Identidad por revisar",
-        detail: [gaps.length > 0 ? `Falta: ${gaps.join(", ")}.` : "", review].filter(Boolean).join(" "),
+        detail: [
+          gaps.length > 0
+            ? `${filiationGapsText(gaps).charAt(0).toUpperCase()}${filiationGapsText(gaps).slice(1)}.`
+            : "",
+          review,
+        ]
+          .filter(Boolean)
+          .join(" "),
         action: go("filiacion", "Completar"),
       })
     if (!detail.contacts.some((link) => link.phone || link.email))

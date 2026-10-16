@@ -182,6 +182,7 @@ export function OpportunityPanel({ opportunityId, onClose }: { opportunityId: st
               <dd>
                 {money ?? (profile.isPending ? "…" : "Sin valor")}
                 {money && detail.amountFromPriceList ? <span className="text-muted-foreground"> · de la lista de precios</span> : null}
+                {money && detail.amountFromBudget ? <span className="text-muted-foreground"> · del presupuesto</span> : null}
               </dd>
               {detail.nextAppointment ? (
                 <>

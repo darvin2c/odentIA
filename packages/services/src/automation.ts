@@ -32,11 +32,16 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, type SQL, sql } from "drizzle-orm"
 import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } from "./admin-lines.js"
+import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
   automationMessageOf,
+  GENERAL_PERMISSION_NO,
+  GENERAL_PERMISSION_QUESTION,
+  GENERAL_PERMISSION_YES,
+  generalPermissionButtons,
   isAppointmentNotice,
   parseReplyId,
 } from "./automation-messages.js"
@@ -381,7 +386,12 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
 export type ConsentRow = typeof automationConsent.$inferSelect
 
 /** Los dos permisos que una persona da para que la clínica le escriba primero. */
-export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento"] as const
+/**
+ * Lo que la persona dijo de cada tipo de mensaje. Los dos primeros son parte del
+ * servicio (solo cuenta si se dio de baja); «novedades» es el único que pide su
+ * permiso (ADR 0030).
+ */
+export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento", "novedades"] as const
 export type MessagePermissionKey = (typeof MESSAGE_PERMISSIONS)[number]
 
 export interface MessagePermission {
@@ -495,6 +505,44 @@ export async function setConsent(
   return row
 }
 
+/**
+ * ¿Se le puede escribir este tipo de mensaje sin que haya escrito primero? Lo
+ * que es parte del servicio que pidió (su cita y su confirmación, sus
+ * controles, sus presupuestos y oportunidades, la inasistencia, otra fecha tras
+ * cancelar: `recordatorio` y `seguimiento`) sale sin permiso previo, salvo que se
+ * haya dado de baja de ese tipo. Solo `novedades` (novedades y promociones) pide
+ * su permiso (ADR 0030). Un «no» guardado antes cuenta como baja.
+ */
+export async function mayWriteFirst(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  purpose: ConsentPurpose,
+): Promise<boolean> {
+  const status = await consentStatusOf(tx, orgId, contactId, purpose)
+  return purpose === "novedades" ? status === "granted" : status !== "revoked"
+}
+
+async function consentStatusOf(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  purpose: ConsentPurpose,
+): Promise<string | null> {
+  const [row] = await tx
+    .select({ status: automationConsent.status })
+    .from(automationConsent)
+    .where(
+      and(
+        eq(automationConsent.organizationId, orgId),
+        eq(automationConsent.contactId, contactId),
+        eq(automationConsent.purpose, purpose),
+      ),
+    )
+    .limit(1)
+  return row?.status ?? null
+}
+
 /** true solo si la persona aceptó ese tipo de mensaje y no lo retiró después. */
 export async function hasConsent(
   tx: Db,
@@ -514,6 +562,87 @@ export async function hasConsent(
     )
     .limit(1)
   return row?.status === "granted"
+}
+
+// ------------------------------ novedades y promociones: la pregunta tras reservar ---
+
+/**
+ * ¿Ya se le preguntó si acepta novedades y promociones? Lo dice su historia: un mensaje con
+ * los botones de la pregunta en cualquiera de sus conversaciones.
+ */
+async function generalPermissionAsked(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+  const [row] = await tx.execute<{ asked: boolean }>(sql`
+    select exists (
+      select 1 from message m join conversation c on c.id = m.conversation_id and c.organization_id = m.organization_id
+      where m.organization_id = ${orgId} and c.contact_id = ${contactId} and m.direction = 'out'
+        and m.reply_buttons is not null
+        and exists (select 1 from jsonb_array_elements(m.reply_buttons) b where b->>'id' like 'odentia:permiso_%')
+    ) as asked`)
+  return row?.asked === true
+}
+
+/**
+ * Tras reservar en la conversación, el agente pregunta una sola vez por persona
+ * si se le pueden enviar novedades y promociones (`novedades`, el único tipo de
+ * mensaje que pide permiso; ADR 0030). No pregunta si ya lo dio o lo negó, ni si ya se le
+ * preguntó: sin respuesta tampoco se vuelve a preguntar. Solo si en esta
+ * conversación se reservó una cita desde `since`. Devuelve si la preguntó.
+ */
+export async function askGeneralPermissionAfterBooking(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; since: Date },
+): Promise<boolean> {
+  const [thread] = await tx
+    .select({ contactId: conversation.contactId, status: conversation.status })
+    .from(conversation)
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread || thread.status !== "open") return false
+  const [booked] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.conversationId, input.conversationId),
+        gte(appointment.createdAt, input.since),
+        inArray(appointment.status, ["programada", "confirmada"]),
+      ),
+    )
+    .limit(1)
+  if (!booked) return false
+  if ((await consentStatusOf(tx, orgId, thread.contactId, "novedades")) !== null) return false
+  if (await generalPermissionAsked(tx, orgId, thread.contactId)) return false
+  await sendOutbound(tx, orgId, {
+    conversationId: input.conversationId,
+    senderKind: "agent",
+    content: { type: "text", text: GENERAL_PERMISSION_QUESTION, buttons: generalPermissionButtons(thread.contactId) },
+  })
+  await audit(tx, orgId, null, "automation_consent.asked", thread.contactId, { purpose: "novedades", conversationId: input.conversationId })
+  return true
+}
+
+/**
+ * La persona responde a la pregunta de novedades y promociones, con su botón o por
+ * escrito (la herramienta del agente). Solo vale si se le preguntó y aún no
+ * lo dio ni lo negó: queda con origen «conversación» y su fecha (`setConsent`).
+ */
+export async function answerGeneralPermission(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; granted: boolean },
+): Promise<"guardado" | "ya_respondio" | "no_preguntado"> {
+  const [thread] = await tx
+    .select({ contactId: conversation.contactId })
+    .from(conversation)
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread) throw notFound("Conversación")
+  if (!(await generalPermissionAsked(tx, orgId, thread.contactId))) return "no_preguntado"
+  if ((await consentStatusOf(tx, orgId, thread.contactId, "novedades")) !== null) return "ya_respondio"
+  await setConsent(tx, orgId, null, thread.contactId, { purpose: "novedades", granted: input.granted, source: "conversacion" })
+  return "guardado"
 }
 
 // ------------------------------------------------------------------ trabajos ---
@@ -1411,11 +1540,13 @@ function isDefinitiveCode(code: string | undefined): boolean {
  * tarea de respaldo y la lista de «no pude» de Inicio.
  */
 export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; fix: string; fixMany: string }> = {
+  // Lo de su atención no pide permiso (ADR 0030): este motivo es su baja de ese
+  // tipo de mensaje (o, en una línea de novedades, que no las aceptó).
   sin_permiso: {
-    one: "no aceptó mensajes de la clínica",
-    many: "no aceptaron recibir este mensaje",
-    fix: "Pídele el permiso la próxima vez que venga o escriba.",
-    fixMany: "Para habilitarlo, pídeles el permiso la próxima vez que vengan o escriban.",
+    one: "pidió no recibir este tipo de mensaje",
+    many: "pidieron no recibir este tipo de mensaje",
+    fix: "Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
+    fixMany: "Si cambian de opinión, anótalo en su página, en Datos › Mensajes.",
   },
   sin_destino: {
     one: "no tiene WhatsApp ni correo registrados",
@@ -1852,8 +1983,12 @@ export async function deliverJob(
   if (!job.contactId) return cannot("Sin persona a quien escribirle", "sin_destino")
   const contactId = job.contactId
   const purpose = line.agent.purpose
-  if (!(await hasConsent(tx, orgId, contactId, purpose))) {
-    return cannot(`La persona no aceptó mensajes de ${purpose}`, "sin_permiso", { status: "omitido" })
+  if (!(await mayWriteFirst(tx, orgId, contactId, purpose))) {
+    return cannot(
+      purpose === "novedades" ? `La persona no aceptó mensajes de ${purpose}` : `La persona pidió no recibir mensajes de ${purpose}`,
+      "sin_permiso",
+      { status: "omitido" },
+    )
   }
 
   if (job.kind === "recordatorio_cita") {
@@ -2261,7 +2396,7 @@ export interface ConfirmationPlan {
 
 /**
  * Si «Recordar la cita» está prendida (y Recepción y el Administrador
- * encendidos) y la persona aceptó recordatorios, cuándo le pedirá el agente
+ * encendidos) y la persona no pidió dejar de recibir recordatorios, cuándo le pedirá el agente
  * confirmar una cita por confirmar, o cuándo se lo pidió. Null si el agente no
  * se lo va a pedir: entonces se confirma a mano.
  */
@@ -2282,7 +2417,7 @@ export async function appointmentConfirmationPlan(
   const runtime = await adminRuntime(tx, orgId)
   if (!runtime.adminOn || !runtime.receptionOn) return null
   const contactId = await preferredContact(tx, orgId, appt.patientId)
-  if (!contactId || !(await hasConsent(tx, orgId, contactId, "recordatorio"))) return null
+  if (!contactId || !(await mayWriteFirst(tx, orgId, contactId, "recordatorio"))) return null
   const jobs = await tx
     .select({ status: automationJob.status, scheduledFor: automationJob.scheduledFor, updatedAt: automationJob.updatedAt })
     .from(automationJob)
@@ -2566,6 +2701,21 @@ export async function handleAutomationReply(
     .from(conversation)
     .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
+  // La pregunta de novedades y promociones: su botón lleva la persona y solo vale en su conversación.
+  if (reply.action === "permiso_si" || reply.action === "permiso_no") {
+    if (!thread || thread.contactId !== reply.jobId) return false
+    const granted = reply.action === "permiso_si"
+    const outcome = await answerGeneralPermission(tx, orgId, { conversationId: input.conversationId, granted })
+    if (outcome === "no_preguntado") return false
+    if (outcome === "guardado") {
+      await sendOutbound(tx, orgId, {
+        conversationId: input.conversationId,
+        senderKind: "agent",
+        content: { type: "text", text: granted ? GENERAL_PERMISSION_YES : GENERAL_PERMISSION_NO },
+      })
+    }
+    return true
+  }
   const [origin] = await tx
     .select()
     .from(automationJob)
@@ -2600,39 +2750,36 @@ export async function handleAutomationReply(
     )
   const appointmentIds = [...new Set(together.map((row) => row.appointmentId).filter((id): id is string => !!id))]
   if (appointmentIds.length === 0) return false
-  let confirmed = 0
-  let already = 0
+  const items: ConfirmedItem[] = []
   for (const appointmentId of appointmentIds) {
     const [appt] = await tx
-      .select({ status: appointment.status, startsAt: appointment.startsAt })
+      .select({
+        status: appointment.status,
+        startsAt: appointment.startsAt,
+        patientName: patient.displayName,
+        self: sql<boolean>`exists (select 1 from patient_contact pc where pc.organization_id = ${orgId}
+          and pc.patient_id = ${appointment.patientId} and pc.contact_id = ${thread.contactId} and pc.relationship = 'self')`,
+      })
       .from(appointment)
+      .innerJoin(patient, and(eq(patient.id, appointment.patientId), eq(patient.organizationId, orgId)))
       .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
-      .for("update")
+      .for("update", { of: appointment })
       .limit(1)
     if (!appt || appt.startsAt.getTime() < Date.now()) continue
-    if (appt.status === "confirmada") already++
+    if (appt.status === "confirmada") items.push({ patientName: appt.patientName, self: appt.self, was: "ya_confirmada", startsAt: appt.startsAt })
     if (appt.status !== "programada") continue
     await setAppointmentStatus(tx, orgId, null, appointmentId, "confirmada", { via: "respuesta" })
-    confirmed++
+    items.push({ patientName: appt.patientName, self: appt.self, was: "confirmada", startsAt: appt.startsAt })
   }
   // Cita cancelada, atendida o ya pasada: no hay nada que confirmar y lo
   // correcto es que alguien lea la conversación.
-  if (confirmed + already === 0) return false
-  const many = confirmed + already > 1
+  if (items.length === 0) return false
+  const confirmed = items.filter((item) => item.was === "confirmada").length
+  // Un padre confirma las citas de quienes lleva: la respuesta dice de quiénes son.
   await sendOutbound(tx, orgId, {
     conversationId: input.conversationId,
     senderKind: "agent",
-    content: {
-      type: "text",
-      text:
-        confirmed === 0
-          ? many
-            ? "Tus citas ya estaban confirmadas. ¡Te esperamos!"
-            : "Tu cita ya estaba confirmada. ¡Te esperamos!"
-          : many
-            ? "¡Listo! Tus citas quedaron confirmadas. Te esperamos."
-            : "¡Listo! Tu cita quedó confirmada. Te esperamos.",
-    },
+    content: { type: "text", text: confirmationReply(items) },
   })
   await audit(tx, orgId, null, "automation_job.confirmed", origin.id, {
     appointments: appointmentIds.length,

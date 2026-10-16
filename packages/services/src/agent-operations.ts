@@ -52,6 +52,7 @@ import {
   moveOpportunity,
   setOpportunityTask,
 } from "./opportunities.js"
+import { confirmationReply } from "./appointment-confirm-words.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
@@ -353,10 +354,42 @@ export interface ContactAppointmentOption {
   dentistName: string
 }
 
+/** Una cita de las que quedaron confirmadas, con si ya lo estaba. */
+export type ContactConfirmedAppointment = ContactAppointmentOption & { was: "confirmada" | "ya_confirmada" }
+
 export type ContactConfirmOutcome =
-  | { outcome: "confirmada" | "ya_confirmada"; appointment: ContactAppointmentOption }
+  | {
+      outcome: "confirmada" | "ya_confirmada"
+      /** La primera de las confirmadas; `appointments` las trae todas. */
+      appointment: ContactAppointmentOption
+      appointments: ContactConfirmedAppointment[]
+      /** Lo que se le contesta, la misma frase que el botón: «¡Listo! Confirmé las citas de Sofía y Pedro…». */
+      reply: string
+    }
   | { outcome: "ninguna" }
   | { outcome: "varias"; options: ContactAppointmentOption[] }
+
+/** Cuánto tiempo un «sí» sin decir cuál responde al último recordatorio. */
+const REMINDER_REPLY_HOURS = 72
+
+/**
+ * Las citas del último recordatorio que se le envió por esta conversación
+ * (todas las de un mismo mensaje: un padre recibe juntas las de sus hijos),
+ * si salió en las últimas `REMINDER_REPLY_HOURS` horas.
+ */
+async function lastReminderAppointments(tx: Db, orgId: string, contactId: string, conversationId: string): Promise<string[]> {
+  const rows = await tx.execute<{ appointment_id: string }>(sql`
+    with last as (
+      select j.sent_message_id from automation_job j
+      join message m on m.id = j.sent_message_id and m.organization_id = j.organization_id
+      where j.organization_id = ${orgId} and j.contact_id = ${contactId} and j.kind = 'recordatorio_cita'
+        and j.status = 'enviado' and m.conversation_id = ${conversationId}
+        and m.created_at > now() - make_interval(hours => ${REMINDER_REPLY_HOURS})
+      order by m.created_at desc limit 1)
+    select j.appointment_id from automation_job j join last on last.sent_message_id = j.sent_message_id
+    where j.organization_id = ${orgId} and j.contact_id = ${contactId} and j.appointment_id is not null`)
+  return [...new Set(rows.map((row) => row.appointment_id))]
+}
 
 /**
  * El interlocutor confirma por escrito («sí, ahí estaré») una cita que ya
@@ -364,8 +397,10 @@ export type ContactConfirmOutcome =
  * (`setAppointmentStatus`), sin propuesta: confirmar su propia cita no cambia
  * nada más y se deshace en la Agenda. Solo citas por venir de los pacientes
  * que el interlocutor está autorizado a ver (`resolveAgentPatientContext`):
- * nunca la de otra persona. Sin `appointmentId` confirma la única que espera
- * su sí; con varias devuelve las opciones para que el agente pregunte.
+ * nunca la de otra persona. Sin `appointmentId`, como el botón, confirma las
+ * citas del último recordatorio que recibió (un padre, las de quienes lleva);
+ * si no hay, la única que espera su sí, y con varias devuelve las opciones para
+ * que el agente pregunte. La respuesta dice de quiénes son (`confirmationReply`).
  * Queda auditado con `via: "conversacion"` y la conversación.
  */
 export async function confirmAppointmentByContact(
@@ -374,7 +409,7 @@ export async function confirmAppointmentByContact(
   input: { contactId: string; conversationId: string; appointmentId?: string },
 ): Promise<ContactConfirmOutcome> {
   const now = new Date()
-  const options: Array<ContactAppointmentOption & { status: string }> = []
+  const options: Array<ContactAppointmentOption & { status: string; self: boolean }> = []
   for (const candidate of await listPatientsByContact(tx, orgId, input.contactId)) {
     try {
       await resolveAgentPatientContext(tx, orgId, input.contactId, candidate.id)
@@ -404,32 +439,62 @@ export async function confirmAppointmentByContact(
       )
       .orderBy(asc(appointment.startsAt))
     for (const row of rows) {
-      options.push({ ...row, startsAt: row.startsAt.toISOString(), patientName: candidate.displayName })
+      options.push({
+        ...row,
+        startsAt: row.startsAt.toISOString(),
+        patientName: candidate.displayName,
+        self: candidate.relationship === "self",
+      })
     }
   }
-  const strip = ({ status: _status, ...option }: (typeof options)[number]): ContactAppointmentOption => option
-  let chosen: (typeof options)[number] | undefined
+  const strip = ({ status: _status, self: _self, ...option }: (typeof options)[number]): ContactAppointmentOption => option
+  let chosen: Array<(typeof options)[number]>
   if (input.appointmentId) {
-    chosen = options.find((option) => option.appointmentId === input.appointmentId)
-    if (!chosen) {
+    const found = options.find((option) => option.appointmentId === input.appointmentId)
+    if (!found) {
       throw new ServiceError(
         "APPOINTMENT_NOT_CONFIRMABLE",
         409,
         "Esa cita no es una cita por venir de alguien que esta persona puede confirmar",
       )
     }
+    chosen = [found]
   } else {
+    const reminded = await lastReminderAppointments(tx, orgId, input.contactId, input.conversationId)
+    const together = options.filter((option) => reminded.includes(option.appointmentId))
     const waiting = options.filter((option) => option.status === "programada")
-    if (waiting.length > 1) return { outcome: "varias", options: waiting.map(strip) }
-    chosen = waiting[0] ?? (options.length === 1 ? options[0] : undefined)
-    if (!chosen) return options.length === 0 ? { outcome: "ninguna" } : { outcome: "varias", options: options.map(strip) }
+    if (together.length > 0) chosen = together
+    else if (waiting.length > 1) return { outcome: "varias", options: waiting.map(strip) }
+    else {
+      const one = waiting[0] ?? (options.length === 1 ? options[0] : undefined)
+      if (!one) return options.length === 0 ? { outcome: "ninguna" } : { outcome: "varias", options: options.map(strip) }
+      chosen = [one]
+    }
   }
-  if (chosen.status === "confirmada") return { outcome: "ya_confirmada", appointment: strip(chosen) }
-  await setAppointmentStatus(tx, orgId, null, chosen.appointmentId, "confirmada", {
-    via: "conversacion",
-    conversationId: input.conversationId,
-  })
-  return { outcome: "confirmada", appointment: strip(chosen) }
+  const appointments: ContactConfirmedAppointment[] = []
+  for (const item of chosen) {
+    if (item.status === "programada") {
+      await setAppointmentStatus(tx, orgId, null, item.appointmentId, "confirmada", {
+        via: "conversacion",
+        conversationId: input.conversationId,
+      })
+    }
+    appointments.push({ ...strip(item), was: item.status === "programada" ? "confirmada" : "ya_confirmada" })
+  }
+  const reply = confirmationReply(
+    chosen.map((item) => ({
+      patientName: item.patientName,
+      self: item.self,
+      was: item.status === "programada" ? "confirmada" : "ya_confirmada",
+      startsAt: item.startsAt,
+    })),
+  )
+  return {
+    outcome: appointments.some((item) => item.was === "confirmada") ? "confirmada" : "ya_confirmada",
+    appointment: strip(chosen[0]!),
+    appointments,
+    reply,
+  }
 }
 
 async function hasEconomicRole(tx: Db, orgId: string, patientId: string, contactId: string): Promise<boolean> {

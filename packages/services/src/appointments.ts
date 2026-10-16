@@ -37,7 +37,7 @@ import {
   validation,
 } from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
-import { advanceForAppointment } from "./opportunities.js"
+import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -934,6 +934,15 @@ export async function setAppointmentStatus(
       next === "cancelada" && detail?.notice !== false
         ? await enqueueAppointmentNotice(tx, orgId, id, "cancelada")
         : null
+    // Cancelar la evaluación que llevó su oportunidad a «Evaluación agendada»
+    // la devuelve a «Interesado» si no le queda otra cita (ADR 0028).
+    if (
+      next === "cancelada" &&
+      (current.status === "programada" || current.status === "confirmada") &&
+      current.startsAt.getTime() > Date.now()
+    ) {
+      await returnForCancelledAppointment(tx, orgId, { patientId: current.patientId, startsAt: current.startsAt })
+    }
     await notify(tx, { orgId, kind: "appointment.updated", at: new Date().toISOString() })
     const item = await getAppointment(tx, orgId, id)
     return notice ? { ...item, notice } : item

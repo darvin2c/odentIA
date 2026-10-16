@@ -129,8 +129,9 @@ const createInput = z.strictObject({
   registeredBranchId: z.uuid().optional(),
   contextContactId: z.uuid().optional(),
   /**
-   * Lo mínimo al reservar a la persona de una conversación (`contextContactId`
-   * y `conversationId`): la regla del registro con alcance `essentials`.
+   * Lo mínimo al reservar: a la persona de una conversación (`contextContactId`
+   * y `conversationId`) o a alguien nuevo desde la Agenda (sin vínculos). La
+   * regla del registro con alcance `essentials`.
    */
   conversationId: z.uuid().optional(),
   scope: z.literal("essentials").optional(),

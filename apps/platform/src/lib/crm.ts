@@ -119,7 +119,8 @@ export interface ConversationDetail {
     /** Por si el servidor lo entrega dentro de la conversación en vez de junto a `attention`. */
     closure?: ConversationClosure | null
   }
-  contact: { id: string; displayName: string; isActive: boolean }
+  /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
+  contact: { id: string; displayName: string; isActive: boolean; isPatient?: boolean }
   connection: {
     id: string
     channel: string
@@ -385,6 +386,8 @@ export interface OpportunityDetail extends OpportunityListItem {
   contactPhone: string | null
   contactEmail: string | null
   amountFromPriceList: boolean
+  /** El valor es el total del presupuesto que se le presentó. */
+  amountFromBudget: boolean
   budgetTitle: string | null
   budgetNumber: number | null
   budgetStatus: string | null

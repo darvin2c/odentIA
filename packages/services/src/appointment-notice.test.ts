@@ -10,10 +10,15 @@ import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { confirmAppointmentByContact } from "./agent-operations.js"
 import { createAppointment, getAppointmentContext, moveAppointment, setAppointmentStatus } from "./appointments.js"
-import { AUTOMATION_MESSAGES, type AutomationMessageKey } from "./automation-messages.js"
+import { AUTOMATION_MESSAGES, type AutomationMessageKey, GENERAL_PERMISSION_QUESTION, GENERAL_PERMISSION_YES, replyId } from "./automation-messages.js"
 import {
+  answerGeneralPermission,
   appointmentConfirmationPlan,
+  askGeneralPermissionAfterBooking,
   deliverDueJobs,
+  getMessagePermissions,
+  handleAutomationReply,
+  mayWriteFirst,
   setLine,
   syncAppointmentReminders,
   syncBudgetFollowUps,
@@ -99,7 +104,13 @@ function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
 async function person(
   c: Clinic,
   name: string,
-  options: { consent?: Array<"recordatorio" | "seguimiento">; openWindow?: boolean; phone?: string } = {},
+  options: {
+    consent?: Array<"recordatorio" | "seguimiento">
+    /** Pidió no recibir ese tipo de mensaje (baja). */
+    refused?: Array<"recordatorio" | "seguimiento">
+    openWindow?: boolean
+    phone?: string
+  } = {},
 ) {
   const [row] = await ownerDb
     .insert(patient)
@@ -128,6 +139,9 @@ async function person(
   }
   for (const purpose of options.consent ?? []) {
     await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId, purpose, status: "granted", source: "presencial" })
+  }
+  for (const purpose of options.refused ?? []) {
+    await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId, purpose, status: "revoked", source: "baja" })
   }
   return { patientId: row!.id, contactId, conversationId }
 }
@@ -270,13 +284,19 @@ describe("al cambiar la cita, el agente le avisa", () => {
     expect((await run(c, (tx) => syncCancelledAppointments(tx, c.orgId, new Date(Date.now() + 2 * HOUR)))).programados).toBe(0)
   })
 
-  it("sin permiso de recordatorios no se le escribe ni queda una tarea: el motivo queda en el caso", async () => {
+  it("lo de su cita es parte del servicio: sale sin permiso previo, y si pidió no recibirlo no se le escribe ni queda tarea", async () => {
     const c = await clinic()
     await lineOn(c)
+    // Nunca se le preguntó: el aviso de su reserva sale igual (ADR 0030).
     const rosa = await person(c, "Rosa Quispe", { openWindow: true })
     await book(c, rosa.patientId, later(3 * DAY))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    // Se dio de baja de los recordatorios: la baja se respeta siempre.
+    const ana = await person(c, "Ana Torres", { openWindow: true, refused: ["recordatorio"] })
+    await book(c, ana.patientId, later(4 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido"])
-    expect((await jobsOf(c))[0]).toMatchObject({ status: "omitido", cause: "sin_permiso", taskId: null })
+    const theirs = (await jobsOf(c)).find((job) => job.contactId === ana.contactId)
+    expect(theirs).toMatchObject({ status: "omitido", cause: "sin_permiso", taskId: null })
     expect(await ownerDb.select().from(crmTask).where(eq(crmTask.organizationId, c.orgId))).toEqual([])
   })
 })
@@ -302,9 +322,14 @@ describe("cuándo le pide el agente confirmar", () => {
     await run(c, (tx) => setAppointmentStatus(tx, c.orgId, c.ownerId, soon.id, "confirmada"))
     expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, soon.id))).toBeNull()
 
-    const other = await person(c, "Sin permiso", { openWindow: true })
+    // Nunca se le preguntó: igual se le pedirá confirmar (es parte del servicio).
+    const other = await person(c, "Sin preguntar", { openWindow: true })
     const unasked = await book(c, other.patientId, later(3 * DAY + 2 * HOUR), { notice: false })
-    expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, unasked.id))).toBeNull()
+    expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, unasked.id))).not.toBeNull()
+    // Pidió no recibir recordatorios: no se le pedirá.
+    const refused = await person(c, "Se dio de baja", { openWindow: true, refused: ["recordatorio"] })
+    const optedOut = await book(c, refused.patientId, later(3 * DAY + 4 * HOUR), { notice: false })
+    expect(await run(c, (tx) => appointmentConfirmationPlan(tx, c.orgId, optedOut.id))).toBeNull()
   })
 
   it("el cajón de la cita dice a quién se le escribe, de qué conversación salió y cuándo confirmará", async () => {
@@ -362,6 +387,63 @@ describe("la persona confirma por escrito", () => {
     expect(many.outcome === "varias" ? many.options : []).toHaveLength(2)
     const statuses = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.organizationId, c.orgId))
     expect(statuses.every((item) => item.status === "programada")).toBe(true)
+  })
+})
+
+describe("solo novedades y promociones pide permiso (ADR 0030)", () => {
+  it("lo de su atención sale sin preguntar y respeta la baja; novedades solo con su sí", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe")
+    const may = (purpose: "recordatorio" | "seguimiento" | "novedades") =>
+      run(c, (tx) => mayWriteFirst(tx, c.orgId, rosa.contactId, purpose))
+    expect([await may("recordatorio"), await may("seguimiento"), await may("novedades")]).toEqual([true, true, false])
+    // Un «no» guardado cuenta como baja; un sí habilita las novedades.
+    await ownerDb.insert(automationConsent).values([
+      { organizationId: c.orgId, contactId: rosa.contactId, purpose: "seguimiento", status: "revoked", source: "registro" },
+      { organizationId: c.orgId, contactId: rosa.contactId, purpose: "novedades", status: "granted", source: "presencial" },
+    ])
+    expect([await may("recordatorio"), await may("seguimiento"), await may("novedades")]).toEqual([true, false, true])
+  })
+
+  it("tras reservar en la conversación, el agente pregunta una sola vez y el botón lo anota sin modelo", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe", { openWindow: true })
+    const ana = await person(c, "Ana Torres", { openWindow: true })
+    const since = new Date(Date.now() - 60_000)
+    const ask = (conversationId: string) => run(c, (tx) => askGeneralPermissionAfterBooking(tx, c.orgId, { conversationId, since }))
+    // Sin una reserva en esa conversación no pregunta; tampoco se anota una respuesta sin pregunta.
+    expect(await ask(rosa.conversationId!)).toBe(false)
+    expect(await run(c, (tx) => answerGeneralPermission(tx, c.orgId, { conversationId: rosa.conversationId!, granted: true }))).toBe("no_preguntado")
+    await run(c, (tx) =>
+      createAppointment(tx, c.orgId, c.ownerId, {
+        branchId: c.branchId, patientId: rosa.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+        startsAt: later(3 * DAY).toISOString(), outsideSchedule: true, source: "conversacion", conversationId: rosa.conversationId!, notice: false,
+      }),
+    )
+    expect(await ask(rosa.conversationId!)).toBe(true)
+    const thread = await ownerDb.select().from(message).where(eq(message.conversationId, rosa.conversationId!)).orderBy(asc(message.createdAt))
+    expect(thread.at(-1)).toMatchObject({ direction: "out", senderKind: "agent", body: GENERAL_PERMISSION_QUESTION })
+    expect(thread.at(-1)?.replyButtons?.map((button) => button.title)).toEqual(["Sí", "No, gracias"])
+    // Una sola vez por persona, aunque no responda.
+    expect(await ask(rosa.conversationId!)).toBe(false)
+    // El botón solo vale en su conversación.
+    expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: ana.conversationId!, replyId: replyId("permiso_si", rosa.contactId) }))).toBe(false)
+    expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: rosa.conversationId!, replyId: replyId("permiso_si", rosa.contactId) }))).toBe(true)
+    const permissions = await run(c, (tx) => getMessagePermissions(tx, c.orgId, rosa.contactId))
+    expect(permissions.find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "conversacion" })
+    const after = await ownerDb.select().from(message).where(eq(message.conversationId, rosa.conversationId!)).orderBy(asc(message.createdAt))
+    expect(after.at(-1)?.body).toBe(GENERAL_PERMISSION_YES)
+    // Ya respondió: escribirlo después no cambia nada.
+    expect(await run(c, (tx) => answerGeneralPermission(tx, c.orgId, { conversationId: rosa.conversationId!, granted: false }))).toBe("ya_respondio")
+    // Si ya dio o negó ese permiso, no se le pregunta.
+    await ownerDb.insert(automationConsent).values({ organizationId: c.orgId, contactId: ana.contactId, purpose: "novedades", status: "revoked", source: "registro" })
+    await run(c, (tx) =>
+      createAppointment(tx, c.orgId, c.ownerId, {
+        branchId: c.branchId, patientId: ana.patientId, dentistUserId: c.dentistId, chairId: c.chairId,
+        startsAt: later(4 * DAY).toISOString(), outsideSchedule: true, source: "conversacion", conversationId: ana.conversationId!, notice: false,
+      }),
+    )
+    expect(await ask(ana.conversationId!)).toBe(false)
   })
 })
 
@@ -461,7 +543,7 @@ describe("«Contexto» de la conversación", () => {
     const caps = { conversations: true, tasks: true, agent: false }
     const seen = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: { ...caps, appointments: true } }))
     expect(seen.nextAppointment).toMatchObject({ id: next.id, patientName: "Rosa Quispe", branchName: "Centro", dentistName: "Dra. Ana Torres", timeZone: "America/Lima" })
-    expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null })
+    expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null, novedades: null })
     const blind = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: caps }))
     expect(blind.nextAppointment).toBeNull()
   })

@@ -23,7 +23,7 @@ import {
 } from "../../lib/patient-appointments"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { ageFrom, hcLabel, type PatientFull } from "../../lib/patients"
-import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS } from "../../lib/people"
+import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
 import { TaskDrawer } from "../crm/task-drawer"
 import { CreatePatientDrawer } from "../patient/create-patient-drawer"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
@@ -124,6 +124,8 @@ export function PersonSummary({
     (allergy) => allergy.verification !== "descartada",
   )
   const phoneText = person.phone ? internationalText(person.phone) : null
+  // Sin teléfono propio, el de quien habla por ella (la preferida primero, como la entrega el servidor).
+  const spokenPhone = phoneText ? null : (person.spokenForBy.find((other) => other.phone) ?? null)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -158,7 +160,9 @@ export function PersonSummary({
           <Fact label="Teléfono">
             {phoneText
               ? `${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
-              : "Sin teléfono"}
+              : spokenPhone?.phone
+                ? `el de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
+                : "Sin teléfono"}
           </Fact>
           {(canChats || canCrm) && person.channels.length > 0 ? (
             <Fact label="Canales">

@@ -295,8 +295,9 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     }
     if (!data.demographics.phone && !data.demographics.email && !(needsRepresentative && (data.representative?.phone || data.representative?.email))) errors["demographics.phone"] = "Indica al menos un medio de contacto"
   } else if (context.scope === "essentials") {
-    // Lo mínimo que registra el equipo al reservar a una persona que ya conoce
-    // (su nombre; el teléfono y los canales ya son de ella). Como en el enlace
+    // Lo mínimo que registra el equipo al reservar: nombres, apellidos y, si se
+    // conoce, el teléfono (a quien escribe ya se le conocen sus canales; a quien
+    // llega por la Agenda el servicio le exige el teléfono). Como en el enlace
     // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
     // pendiente (`pendingRegistrationFields`) y la identidad, por revisar.
     essentialIdentityErrors(data, errors)

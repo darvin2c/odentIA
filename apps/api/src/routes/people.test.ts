@@ -129,7 +129,7 @@ beforeAll(async () => {
     severity: "severa",
   })
   await withOrgContext(appDb, "org_a", async (tx) => {
-    const guardian = await createContact(tx, "org_a", { displayName: "Martín Salas" })
+    const guardian = await createContact(tx, "org_a", { displayName: "Martín Salas", phone: "+51987650001" })
     guardianId = guardian.id
     await setPatientContact(tx, "org_a", "u-1", patientId, {
       contactId: guardian.id,
@@ -160,10 +160,44 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
       expect(body.data.spokenForBy.map((row) => row.personId)).toEqual([guardianId])
     }
     expect((await get("member", `/people/${personId}`)).status).toBe(403)
-    const guardian = (await (await get("cashier", `/people/${guardianId}`)).json()) as {
+    const guardian = (await (await get("reception", `/people/${guardianId}`)).json()) as {
       data: { kind: string }
     }
     expect(guardian.data.kind).toBe("responsable")
+  })
+
+  it("caja y odontología solo ven pacientes: quien aún no lo es no existe para ellos", async () => {
+    for (const role of ["cashier", "dentist"]) {
+      // Ni su página ni sus bloques: 404, como si no existiera.
+      expect((await get(role, `/people/${leadId}`)).status, role).toBe(404)
+      expect((await get(role, `/people/${guardianId}`)).status, role).toBe(404)
+      // Ni las vistas de quien aún no es paciente; en las demás, solo pacientes.
+      expect((await get(role, "/people?ver=por_registrar")).status, role).toBe(403)
+      expect((await get(role, "/people?ver=responsables")).status, role).toBe(403)
+      const all = (await (await get(role, "/people?ver=todos")).json()) as {
+        data: { id: string }[]
+        counts: { porRegistrar: number }
+      }
+      expect(all.data.map((row) => row.id), role).toEqual([personId])
+      expect(all.counts.porRegistrar, role).toBe(0)
+      const found = (await (await get(role, "/people?ver=activos&q=Rosa")).json()) as { data: unknown[] }
+      expect(found.data, role).toEqual([])
+    }
+    // Odontología lee conversaciones, pero no las de quien no es paciente.
+    expect((await get("dentist", `/people/${leadId}/conversations`)).status).toBe(404)
+    expect((await get("dentist", `/people/${personId}/conversations`)).status).toBe(200)
+    // Recepción y quien dirige sí.
+    for (const role of ["reception", "owner"]) {
+      expect((await get(role, `/people/${leadId}`)).status, role).toBe(200)
+      expect((await get(role, "/people?ver=por_registrar")).status, role).toBe(200)
+    }
+    // La página del paciente dice si quien habla por ella es paciente (su enlace) y su teléfono.
+    const page = (await (await get("dentist", `/people/${personId}`)).json()) as {
+      data: { spokenForBy: { personId: string; isPatient: boolean; phone: string | null }[] }
+    }
+    expect(page.data.spokenForBy).toEqual([
+      expect.objectContaining({ personId: guardianId, isPatient: false, phone: "+51987650001" }),
+    ])
   })
 
   it("recepción: datos, alergias, conversaciones y notas; nada clínico ni de caja", async () => {
@@ -215,7 +249,8 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
     const list = (await (await get("cashier", "/people?ver=todos")).json()) as {
       data: { id: string; lastInteractionAt: string | null; nextAppointmentAt: string | null }[]
     }
-    expect(list.data.map((row) => row.id).sort()).toEqual([guardianId, leadId, personId].sort())
+    // Caja solo ve pacientes: ni a Rosa (por registrar) ni a Martín (responsable).
+    expect(list.data.map((row) => row.id)).toEqual([personId])
     expect(
       list.data.every((row) => row.lastInteractionAt === null && row.nextAppointmentAt === null),
     ).toBe(true)

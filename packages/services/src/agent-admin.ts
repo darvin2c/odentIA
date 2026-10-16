@@ -885,7 +885,7 @@ export interface AdminPage {
 }
 
 export interface PermissionGap {
-  purpose: "recordatorio" | "seguimiento"
+  purpose: "novedades"
   /** Personas a las que no pudo escribir por falta de permiso, de `total`. */
   refused: number
   total: number
@@ -899,8 +899,10 @@ export interface PermissionGap {
 export const PERMISSION_GAP_MIN = 5
 
 async function permissionGaps(tx: Db, orgId: string, rules: Map<string, RuleRow>): Promise<PermissionGap[]> {
+  // Lo que es parte del servicio no pide permiso (ADR 0030): solo cuentan las líneas
+  // de novedades y promociones, y hoy no hay ninguna, así que no se afirma nada.
   const kinds = [...ADMIN_LINES, ...CUSTOM_LINES]
-    .filter((line) => line.agent && rules.get(line.key)?.enabled && rules.get(line.key)?.agentPart)
+    .filter((line) => line.agent?.purpose === "novedades" && rules.get(line.key)?.enabled && rules.get(line.key)?.agentPart)
     .map((line) => line.key)
   if (kinds.length === 0) return []
   const rows = await tx.execute<{ kind: string; refused: number; total: number }>(sql`
@@ -911,7 +913,7 @@ async function permissionGaps(tx: Db, orgId: string, rules: Map<string, RuleRow>
     group by j.kind`)
   const config = await getPatientRegistrationConfig(tx, orgId)
   const gaps: PermissionGap[] = []
-  for (const purpose of ["recordatorio", "seguimiento"] as const) {
+  for (const purpose of ["novedades"] as const) {
     const mine = rows.filter((row) => adminLineOf(row.kind)?.agent?.purpose === purpose)
     const refused = mine.reduce((sum, row) => sum + Number(row.refused), 0)
     const total = mine.reduce((sum, row) => sum + Number(row.total), 0)
@@ -919,7 +921,7 @@ async function permissionGaps(tx: Db, orgId: string, rules: Map<string, RuleRow>
     const worst = [...mine].sort((a, b) => Number(b.refused) - Number(a.refused))[0]
     const line = worst ? adminLineOf(worst.kind) : null
     if (!line) continue
-    gaps.push({ purpose, refused, total, asks: purpose === "recordatorio" ? config.askReminders : config.askMessages, lineKey: line.key })
+    gaps.push({ purpose, refused, total, asks: config.askMessages, lineKey: line.key })
   }
   return gaps
 }
