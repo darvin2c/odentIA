@@ -8,6 +8,7 @@ import type { PatientDocument, PatientFull } from "../../lib/patients"
 import {
   createPortalGrantApi,
   formatPortalDate,
+  isPortalSessionActive,
   listPortalGrantsApi,
   listPortalPasskeysApi,
   listPortalSessionsApi,
@@ -24,11 +25,10 @@ const RELATIONSHIP_LABEL: Record<PortalRelationship, string> = {
   other: "Otro",
 }
 
+/** Los dos únicos métodos que acepta el servidor (`PORTAL_VERIFIED_METHODS`). */
 const VERIFIED_METHOD_LABEL: Record<string, string> = {
   presencial_documento: "Presencial con documento",
   representacion_verificada: "Representación verificada",
-  asistida_pin: "Asistida con código",
-  passkey: "Passkey",
 }
 
 const GRANT_STATUS_LABEL: Record<string, string> = {
@@ -396,7 +396,7 @@ function SessionsList({ patientId }: { patientId: string }) {
       />
     )
   }
-  const active = sessionsQuery.data.filter((s) => new Date(s.expiresAt).getTime() > Date.now())
+  const active = sessionsQuery.data.filter((s) => isPortalSessionActive(s))
   if (active.length === 0) {
     return <p className="text-sm text-muted-foreground">Sin sesiones activas para este paciente.</p>
   }

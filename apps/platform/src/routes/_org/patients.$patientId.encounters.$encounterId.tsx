@@ -93,6 +93,7 @@ function EncounterPage() {
       [
         "encounter",
         "patient-summary",
+        "open-encounter",
         "timeline",
         "plan-items",
         "patient-account",

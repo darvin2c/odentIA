@@ -7,7 +7,7 @@ import { confirmSaasPayment, createSaasPlan, tickSaasBilling } from "./saas-bill
 import { addMonth, closeSaasPeriods } from "./saas-invoicing.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Cobrar (ADR 0030, fase 4): el cargo del tramo con sus líneas, el mes anclado y la gracia. */
+/** Cobrar (ADR 0031, fase 4): el cargo del tramo con sus líneas, el mes anclado y la gracia. */
 setupTestDb()
 let planId: string
 const admin = "invoice-admin"

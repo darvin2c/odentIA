@@ -106,6 +106,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       { q: "¿Dónde quedaron los contactos?", a: "En Pacientes: elige «Por registrar» para quienes escribieron y aún no son pacientes, «Responsables» para quienes hablan por un paciente o «Todos». Cada persona tiene una sola página. Caja y odontología solo ven a los pacientes." },
       { q: "¿Qué mensajes le podemos enviar sin preguntarle?", a: "Todo lo de su atención: su cita (aviso, recordatorio y confirmación), sus controles, sus presupuestos y la inasistencia. Es parte del servicio. Solo las novedades y promociones piden su sí: se ve y se cambia en su página › Datos › Mensajes. Si pide no recibir algo, se respeta siempre." },
       { q: "¿Cómo archivo a una persona?", a: "En su página, en el menú de «Más acciones», pulsa «Archivar». Se archiva entera, con su ficha, y se recupera igual desde la vista «Archivados»." },
+      { q: "¿Puedo enviarle el registro a quien ya es paciente?", a: "Sí, para que registre a su hijo o a un familiar: la Bandeja lo ofrece como «Enviar registro de un familiar». Su enlace no le pide registrarse otra vez; lo que a ella le falte se completa en su página, en Datos." },
+      { q: "¿La atención queda unida a su cita?", a: "Sí. Si el paciente tiene una cita hoy, la atención que abres desde su página se une a ella; al firmarla, la cita queda atendida y sus controles hechos. Si ya hay una atención en curso, el botón dice «Continuar la atención» y te lleva a ella, sin perder lo escrito." },
     ],
   },
   {
@@ -251,6 +253,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     purpose: "Las plantillas de consentimientos informados y de cuestionarios que usa tu clínica, con sus versiones.",
     terms: ["consentimiento informado", "anamnesis", "cuestionario", "plantillas", "firma del paciente", "documentos para firmar"],
     writePermission: "settings.write",
+    faqs: [
+      { q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?", a: "Sí, si en la pregunta marcas «Son alergias: pasan a sus antecedentes». Cuando el profesional finaliza el cuestionario, cada alergia entra a Antecedentes como declarada, sin confirmar, y la receta avisa al escribir un medicamento que choca. No repite una alergia que ya está ni cambia lo que un profesional confirmó o descartó." },
+    ],
   },
   {
     id: "registro_pacientes",
@@ -269,6 +274,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     purpose: "El portal donde el paciente ve sus citas y documentos: si está activo y cómo entra.",
     terms: ["portal", "acceso de pacientes", "que el paciente vea sus citas", "acceso del paciente", "pin"],
     writePermission: "settings.write",
+    faqs: [
+      { q: "¿Qué pasa si apago «Recuperar el acceso con un código»?", a: "La primera vez la persona siempre entra con el código de 6 dígitos que le da tu equipo. Lo que se apaga es volver a entrar con un código nuevo cuando ya había entrado antes: para que vuelva a entrar, quita su acceso y dáselo de nuevo." },
+    ],
   },
   {
     id: "medios-de-pago",
@@ -341,6 +349,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     parent: SETTINGS,
     purpose: "Quién hizo qué y cuándo en la clínica, dicho con palabras. Es una consulta: desde ahí no se cambia nada.",
     terms: ["auditoría", "historial de cambios", "quién cambió", "registro de actividad", "log", "bitácora"],
+    faqs: [
+      { q: "¿Por qué algunas filas dicen «El paciente o su contacto»?", a: "Porque lo hizo la propia persona: confirmó o cambió su cita, respondió un presupuesto o abrió un documento desde el portal o desde su enlace. Nunca queda a nombre de quien le envió el enlace." },
+    ],
   },
 ] as const
 

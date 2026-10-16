@@ -515,14 +515,12 @@ it("odontograma: buccal en anterior 400; facial en anterior 201; void exige moti
   expect(voidBody.data.voidReason).toBe("Error de registro")
 })
 
-it("actas: POST 201 con identidad firmada y GET lista; firma vacía 400", async () => {
+it("actas: POST 201 firmada con el perfil y GET lista; firma vacía o identidad escrita 400", async () => {
   const app = buildApp("admin")
   const base = {
     purpose: "initial",
     specifications: "Odontograma inicial",
     observations: "Sin observaciones",
-    examinerName: "Doctora Test",
-    registrationNumber: "COP 1",
     signature: [
       [
         [5, 90],
@@ -530,27 +528,76 @@ it("actas: POST 201 con identidad firmada y GET lista; firma vacía 400", async 
       ],
     ],
   }
-  const empty = await app.request(`/patients/${patientId}/odontogram/assessments`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...base, signature: [] }),
-  })
+  const post = (body: unknown) =>
+    app.request(`/patients/${patientId}/odontogram/assessments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  const empty = await post({ ...base, signature: [] })
   expect(empty.status).toBe(400)
-  const sealed = await app.request(`/patients/${patientId}/odontogram/assessments`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(base),
-  })
+  // El nombre y la colegiatura no se escriben: un cuerpo que los trae se rechaza.
+  const forged = await post({ ...base, examinerName: "Otra persona", registrationNumber: "COP 1" })
+  expect(forged.status).toBe(400)
+  // Sin perfil con colegiatura no se firma.
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+        values ('m-u-1', 'org_a', 'u-1', 'admin', now()) on conflict do nothing`,
+  )
+  const unsigned = await post(base)
+  expect(unsigned.status).toBe(409)
+  expect(await unsigned.json()).toMatchObject({ error: { code: "PROFILE_INCOMPLETE" } })
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "signature_name", "professional_title", "registration_body", "registration_number")
+        values ('org_a', 'u-1', 'Doctora Perfil', 'Cirujano dentista', 'COP', '4321')`,
+  )
+  const sealed = await post(base)
   expect(sealed.status).toBe(201)
   const sealedBody = (await sealed.json()) as {
-    data: { patientName: string; patientNumber: number; entries: unknown[] }
+    data: {
+      patientName: string
+      patientNumber: number
+      entries: unknown[]
+      examinerName: string
+      registrationNumber: string
+    }
   }
+  expect(sealedBody.data).toMatchObject({ examinerName: "Doctora Perfil", registrationNumber: "COP 4321" })
   expect(sealedBody.data.patientName).toBe("María Pérez")
   expect(sealedBody.data.patientNumber).toBe(1)
   const listed = await app.request(`/patients/${patientId}/odontogram/assessments`)
   expect(listed.status).toBe(200)
   const listedBody = (await listed.json()) as { data: unknown[] }
   expect(listedBody.data).toHaveLength(1)
+})
+
+it("atención en curso: solo cuál es y quién la lleva, para quien atiende y sin traza", async () => {
+  const path = `/patients/${patientId}/open-encounter`
+  expect((await buildApp("reception").request(path)).status).toBe(403)
+  expect((await buildApp("cashier").request(path)).status).toBe(403)
+  const dentist = buildApp("dentist")
+  const none = await dentist.request(path)
+  expect(none.status).toBe(200)
+  expect(await none.json()).toEqual({ data: null })
+  const created = await dentist.request(`/patients/${patientId}/encounters`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "Dolor" }),
+  })
+  expect(created.status).toBe(201)
+  const draft = ((await created.json()) as { data: { id: string } }).data
+  const log = async () =>
+    (
+      (await (await buildApp("admin").request(`/patients/${patientId}/access-log`)).json()) as {
+        data: { resource: string; hits: number }[]
+      }
+    ).data.reduce((sum, entry) => sum + entry.hits, 0)
+  const before = await log()
+  const open = await dentist.request(path)
+  expect(open.status).toBe(200)
+  expect(await open.json()).toEqual({ data: { id: draft.id, dentistUserId: "u-1" } })
+  // No es una lectura de la historia: no deja traza en la bitácora.
+  expect(await log()).toBe(before)
 })
 
 it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", async () => {

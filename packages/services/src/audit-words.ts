@@ -212,6 +212,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "patient-registration.link_created": say("Creó un enlace de registro para un paciente"),
   "health.declared": say("Declaró antecedentes de salud en el registro", "paciente"),
   "health.saved": say("Guardó los antecedentes de salud de un paciente"),
+  "health.allergies_declared": say("Pasó a los antecedentes las alergias que declaró un paciente en un cuestionario"),
   "document.uploaded": say("Subió un archivo a la ficha de un paciente"),
   "document.retired": say("Retiró un archivo de la ficha de un paciente"),
   "document.context_corrected": say("Corrigió a qué pertenece un archivo de un paciente"),
@@ -223,6 +224,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "branch.appointment_default_minutes": say("Cambió lo que dura una cita regular en una sede"),
   // Atención clínica
   "encounter.created": say("Abrió una atención"),
+  "encounter.appointment_joined": say("Unió una atención en curso a su cita"),
   "encounter.updated": say("Editó una atención"),
   "encounter.finalized": say("Firmó y cerró una atención"),
   "encounter.voided": say("Anuló una atención"),
@@ -503,14 +505,15 @@ export interface AuditWords {
 
 /**
  * Un registro dicho con palabras. Nunca devuelve el código. `origin` es lo que
- * el propio registro anotó sobre quién actuó (hoy, `agent` en los contactos).
+ * el propio registro anotó sobre quién actuó: `agent` (los contactos) o
+ * `patient` (lo que hizo la propia persona, con el actor `contact:<id>`).
  */
 export function describeAuditEvent(action: string, origin?: string | null): AuditWords {
   const phrase = phraseOf(action)
   const area = auditAreaOf(action)
   return {
     what: phrase.what,
-    author: AUTHOR_WORDS[origin === "agent" ? "agente" : (phrase.by ?? "sistema")],
+    author: AUTHOR_WORDS[origin === "agent" ? "agente" : origin === "patient" ? "paciente" : (phrase.by ?? "sistema")],
     area,
     areaLabel: AUDIT_AREA_LABELS[area],
   }

@@ -110,6 +110,8 @@ function PublicRegistrationPage() {
 
 
   const contextKind = info.context.kind === "conversation" ? "conversation" : "generic"
+  // Ya tiene su ficha: el enlace solo sirve para registrar a otra persona.
+  const ownRecord = info.context.kind === "conversation" && info.context.ownRecord === true
 
   return (
     <PageShell maxWidth="md">
@@ -124,7 +126,11 @@ function PublicRegistrationPage() {
         ) : null}
         <div>
           <h1 className="text-xl font-semibold">Registro de paciente · {info.organization.name}</h1>
-          {contextKind === "conversation" ? (
+          {ownRecord ? (
+            <p className="text-sm text-muted-foreground">
+              Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar.
+            </p>
+          ) : contextKind === "conversation" ? (
             <p className="text-sm text-muted-foreground">
               Continúa con el registro compartido por la clínica.
             </p>
@@ -145,7 +151,7 @@ function PublicRegistrationPage() {
         mode="public"
         config={info.config}
         today={info.today}
-        context={{ kind: contextKind }}
+        context={{ kind: contextKind, ownRecord }}
         initialValues={retainedDraft}
         onSubmit={async (draft) => {
           setNotice(null)

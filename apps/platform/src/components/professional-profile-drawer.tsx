@@ -11,7 +11,8 @@ import {
 
 /**
  * Perfil profesional: nombre de firma, título y colegiatura. Es la identidad
- * con la que se firman atenciones, actas, recetas y consentimientos; cada
+ * con la que se firman atenciones, recetas, consentimientos y evaluaciones del
+ * odontograma (nadie escribe su nombre a mano al firmar); cada
  * documento guarda su copia, así que cambiarlo no reescribe lo ya firmado.
  */
 export function ProfessionalProfileDrawer({
@@ -74,7 +75,7 @@ export function ProfessionalProfileDrawer({
     <FormDrawer
       open={open}
       title="Perfil profesional"
-      description="Con estos datos firmas atenciones, actas, recetas y consentimientos."
+      description="Con estos datos firmas atenciones, recetas, consentimientos y evaluaciones del odontograma."
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault()

@@ -11,7 +11,6 @@ import {
   DialogTitle,
   Field,
   FieldLabel,
-  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -24,9 +23,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { type PointerEvent, useEffect, useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { apiFetch } from "../lib/api"
+import { fetchMyProfessionalProfile, registrationLabel } from "../lib/encounters"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 import type { OdontogramAssessment, OdontogramEntry, PatientFull } from "../lib/patients"
 import { OdontogramDocument } from "./odontogram-document"
-import { activeOrgLocale } from "../lib/locale"
+import { ProfessionalProfileDrawer } from "./professional-profile-drawer"
 
 const PURPOSES: Record<OdontogramAssessment["purpose"], string> = {
   initial: "Inicio del plan de tratamiento",
@@ -47,6 +48,11 @@ interface PrintableSnapshot {
   signature?: number[][][]
   patientName?: string
   draft: boolean
+}
+
+/** Cuándo se firmó, en el formato y la zona de la clínica (no la del navegador). */
+function signedAtLabel(iso: string): string {
+  return new Date(iso).toLocaleString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
 }
 
 export function OdontogramAssessments({
@@ -71,9 +77,8 @@ export function OdontogramAssessments({
   const [purpose, setPurpose] = useState<OdontogramAssessment["purpose"]>("initial")
   const [specifications, setSpecifications] = useState("")
   const [observations, setObservations] = useState("")
-  const [examinerName, setExaminerName] = useState("")
-  const [registrationNumber, setRegistrationNumber] = useState("")
   const [signature, setSignature] = useState<number[][][]>([])
+  const [profileOpen, setProfileOpen] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -92,14 +97,16 @@ export function OdontogramAssessments({
   const reviewCount = history.filter(
     (entry) => entry.needsReview && entry.status !== "voided",
   ).length
-  const dirty = !!(
-    specifications ||
-    observations ||
-    examinerName ||
-    registrationNumber ||
-    signature.length ||
-    confirmed
-  )
+  const dirty = !!(specifications || observations || signature.length || confirmed)
+  // Se firma con el perfil profesional, como el cierre de la atención y la receta:
+  // nombre y colegiatura no se escriben aquí.
+  const profileQuery = useQuery({
+    queryKey: ["professional-profile", "me"],
+    queryFn: fetchMyProfessionalProfile,
+    enabled: open && !readOnly,
+  })
+  const profile = profileQuery.data?.data ?? null
+  const signerRegistration = profile ? registrationLabel(profile) : null
   const patientQuery = useQuery({
     queryKey: ["patient", patientId],
     queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
@@ -126,7 +133,7 @@ export function OdontogramAssessments({
         draft: true,
       }
   const previewLabel = assessment
-    ? `${new Date(assessment.createdAt).toLocaleString(activeOrgLocale())} · ${PURPOSES[assessment.purpose]} · ${assessment.examinerName}`
+    ? `${signedAtLabel(assessment.createdAt)} · ${PURPOSES[assessment.purpose]} · ${assessment.examinerName}`
     : "Borrador actual · sin firmar"
 
   useEffect(() => {
@@ -148,13 +155,12 @@ export function OdontogramAssessments({
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (pending || disabled || readOnly) return
-    if (
-      !examinerName.trim() ||
-      !registrationNumber.trim() ||
-      !signature.some((stroke) => stroke.length >= 2) ||
-      !confirmed
-    ) {
-      setError("Completa la identificación profesional, firma y confirmación de la evaluación.")
+    if (!signerRegistration) {
+      setError("Registra tu colegiatura en tu perfil profesional para firmar.")
+      return
+    }
+    if (!signature.some((stroke) => stroke.length >= 2) || !confirmed) {
+      setError("Completa la firma y la confirmación de la evaluación.")
       return
     }
     setPending(true)
@@ -170,8 +176,6 @@ export function OdontogramAssessments({
             purpose,
             specifications: specifications.trim(),
             observations: observations.trim(),
-            examinerName: examinerName.trim(),
-            registrationNumber: registrationNumber.trim(),
             signature,
           }),
         },
@@ -241,7 +245,7 @@ export function OdontogramAssessments({
               ...Object.fromEntries(
                 assessments.map((item) => [
                   item.id,
-                  `${new Date(item.createdAt).toLocaleString(activeOrgLocale())} · ${PURPOSES[item.purpose]} · ${item.examinerName}`,
+                  `${signedAtLabel(item.createdAt)} · ${PURPOSES[item.purpose]} · ${item.examinerName}`,
                 ]),
               ),
             }}
@@ -253,7 +257,7 @@ export function OdontogramAssessments({
               <SelectItem value="current">Borrador actual · sin firmar</SelectItem>
               {assessments.map((item) => (
                 <SelectItem key={item.id} value={item.id}>
-                  {new Date(item.createdAt).toLocaleString(activeOrgLocale())} · {PURPOSES[item.purpose]} ·{" "}
+                  {signedAtLabel(item.createdAt)} · {PURPOSES[item.purpose]} ·{" "}
                   {item.examinerName}
                 </SelectItem>
               ))}
@@ -282,7 +286,9 @@ export function OdontogramAssessments({
         isSubmitting={pending}
         error={error}
         submitLabel="Firmar y conservar evaluación"
-        submitDisabled={disabled || readOnly || reviewCount > 0 || !confirmed}
+        submitDisabled={
+          disabled || readOnly || reviewCount > 0 || !confirmed || !signerRegistration
+        }
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
       >
         <div className="flex flex-col gap-4">
@@ -337,35 +343,33 @@ export function OdontogramAssessments({
               placeholder="Hallazgos no contemplados en la nomenclatura."
             />
           </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${id}-examiner`}>Examinador</FieldLabel>
-              <Input
-                id={`${id}-examiner`}
-                value={examinerName}
-                onChange={(event) => setExaminerName(event.target.value)}
-                maxLength={200}
-                required
-                disabled={pending}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-registration`}>Número de colegiatura</FieldLabel>
-              <Input
-                id={`${id}-registration`}
-                value={registrationNumber}
-                onChange={(event) => setRegistrationNumber(event.target.value)}
-                maxLength={40}
-                required
-                disabled={pending}
-              />
-            </Field>
-          </div>
+          {profileQuery.isPending ? (
+            <p className="text-sm text-muted-foreground">Cargando tu perfil profesional…</p>
+          ) : profileQuery.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              No se pudo cargar tu perfil profesional.{" "}
+              <Button type="button" variant="link" onClick={() => void profileQuery.refetch()}>
+                Reintentar
+              </Button>
+            </p>
+          ) : signerRegistration && profile ? (
+            <p className="text-sm">
+              Firmarás como <strong>{profile.signatureName ?? profile.accountName}</strong>
+              {profile.professionalTitle ? ` · ${profile.professionalTitle}` : ""} ·{" "}
+              {signerRegistration} · de tu perfil
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm">
+              <span>Para firmar, registra tu colegiatura en tu perfil profesional.</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => setProfileOpen(true)}>
+                Completar perfil
+              </Button>
+            </div>
+          )}
           <SignatureInput value={signature} onChange={setSignature} disabled={pending} />
           <p className="text-xs text-muted-foreground">
             Firma manuscrita capturada y vinculada al usuario autenticado. No equivale a una firma
-            digital certificada. La evaluación y la identidad profesional declarada son
-            responsabilidad del cirujano dentista.
+            digital certificada. La evaluación es responsabilidad del cirujano dentista que firma.
           </p>
           <label className="flex items-start gap-2 text-sm">
             <Checkbox
@@ -378,6 +382,14 @@ export function OdontogramAssessments({
           </label>
         </div>
       </FormDrawer>
+      {profileOpen ? (
+        <ProfessionalProfileDrawer
+          open
+          target="me"
+          profile={profile}
+          onClose={() => setProfileOpen(false)}
+        />
+      ) : null}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent
           initialFocus={previewTitleRef}

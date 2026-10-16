@@ -702,8 +702,7 @@ export function PlanTab({
                   <DataTable table={itemTable} />
                 )}
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Añadir o corregir indicaciones exige una atención en curso: se hace en el panel
-                  Plan de la atención, no desde aquí.
+                  Los tratamientos se indican en la atención, en su bloque «Plan de tratamiento».
                 </p>
               </section>
 

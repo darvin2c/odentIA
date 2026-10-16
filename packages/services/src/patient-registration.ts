@@ -55,6 +55,29 @@ function notCompleted(): ServiceError {
   )
 }
 
+/**
+ * Quien abrió su enlace ya tiene su ficha: no se registra otra vez, pero sí
+ * puede registrar a otra persona. Solo lo sabe quien tiene el enlace de su
+ * conversación, que es esa misma persona.
+ */
+const ALREADY_REGISTERED_TEXT = "Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."
+
+/** El contacto ya tiene ficha propia (su vínculo `self`). */
+async function hasOwnRecord(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+  const [own] = await tx
+    .select({ id: patientContact.id })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, contactId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .limit(1)
+  return !!own
+}
+
 function cloneDefaultConfig(): RegistrationConfig {
   return {
     version: 0,
@@ -316,7 +339,11 @@ export async function createPatientRegistrationLink(
 
 // --- Vista pública ---
 
-export type PublicRegistrationContext = { kind: "generic" } | { kind: "conversation" }
+/**
+ * `ownRecord`: quien abrió el enlace de su conversación ya tiene su ficha; el
+ * formulario no le ofrece registrarse a sí misma, solo a otra persona.
+ */
+export type PublicRegistrationContext = { kind: "generic" } | { kind: "conversation"; ownRecord: boolean }
 
 export async function getPublicPatientRegistration(
   tx: Db,
@@ -364,7 +391,11 @@ export async function getPublicPatientRegistration(
   if (!person || !person.isActive || !thread || thread.contactId !== link.contactId || !await directConversation(tx, orgId, thread.id, person.id)) {
     throw unavailable()
   }
-  return { config: rowToConfig(config), today, context: { kind: "conversation" } }
+  return {
+    config: rowToConfig(config),
+    today,
+    context: { kind: "conversation", ownRecord: await hasOwnRecord(tx, orgId, link.contactId) },
+  }
 }
 
 // --- Registro transaccional ---
@@ -637,19 +668,9 @@ export async function registerPatient(
         isRealDate(answers.demographics.birthDate) &&
         isMinor(answers.demographics.birthDate, today)
       if (answers.respondent === "patient") {
-        const [existing] = await tx
-          .select({ id: patientContact.id })
-          .from(patientContact)
-          .where(
-            and(
-              eq(patientContact.organizationId, orgId),
-              eq(patientContact.contactId, link.contactId),
-              eq(patientContact.relationship, "self"),
-            ),
-          )
-          .limit(1)
-          .for("share")
-        if (existing) throw notCompleted()
+        // Quien ya tiene su ficha no se registra otra vez: se le dice en palabras
+        // y el formulario le ofrece registrar a otra persona.
+        if (await hasOwnRecord(tx, orgId, link.contactId)) throw conflict("ALREADY_REGISTERED", ALREADY_REGISTERED_TEXT)
         links = [{ contactId: link.contactId, relationship: "self", isPreferred: true }]
       } else {
         const relationship = minor ? "guardian" : (answers.representative?.relationship ?? "family")

@@ -6,6 +6,7 @@ import { automationConsent, automationJob, automationRule } from "@odentia/db/sc
 import { patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { portalSession } from "@odentia/db/schema/portal"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { confirmAppointmentByContact } from "./agent-operations.js"
@@ -31,6 +32,7 @@ import { createContact, listContacts } from "./contacts.js"
 import { listConversations, writeToPerson } from "./conversations.js"
 import { getContactWorkspace } from "./crm-workspace.js"
 import { nextPatientNumber } from "./patients.js"
+import { reschedulePortalAppointment } from "./portal.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -229,6 +231,33 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const told = await book(c, rosa.patientId, later(4 * DAY), { notice: false })
     expect(told.notice).toBeUndefined()
     await run(c, (tx) => setAppointmentStatus(tx, c.orgId, null, told.id, "cancelada", { notice: false }))
+    expect(await jobsOf(c)).toEqual([])
+  })
+
+  it("reprogramar desde el portal no le avisa a la persona lo que ella misma hizo", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
+    const booked = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+    const [session] = await ownerDb
+      .insert(portalSession)
+      .values({
+        organizationId: c.orgId,
+        patientId: rosa.patientId,
+        contactId: rosa.contactId,
+        scope: { appointments: true, budgets: false, account: false, documents: [] },
+        tokenHash: randomUUID(),
+        expiresAt: new Date(Date.now() + HOUR),
+      })
+      .returning()
+    const to = later(4 * DAY)
+    const moved = await run(c, (tx) =>
+      reschedulePortalAppointment(tx, { orgId: c.orgId, session: session!, patientName: "Rosa Quispe" }, booked.id, {
+        expectedVersion: booked.version,
+        startsAt: to.toISOString(),
+      }),
+    )
+    expect(new Date(moved.startsAt).getTime()).toBe(to.getTime())
     expect(await jobsOf(c)).toEqual([])
   })
 

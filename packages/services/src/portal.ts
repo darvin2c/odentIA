@@ -33,7 +33,7 @@ import {
 } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { getPatientAccount } from "./payments.js"
-import { getOrgLocale } from "./locale.js"
+import { findOrgLocale, getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { getPortalPolicy, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
@@ -46,10 +46,10 @@ import { getPortalPolicy, portalDisabled, requireActivePortalGrant } from "./por
  * - La entrega del enlace exige una conversación abierta del mismo contacto
  *   (canal ya validado por el operador): la API staff jamás devuelve el token.
  * - Cada sesión queda ligada a UN paciente + UN contacto + alcance congelado.
- * - Las acciones que escriben (confirmar/reprogramar/decidir) se firman con
- *   el operador emisor (issuedBy, usuario real) y el contacto verificado va
- *   en decidedByContactId / metadata; cada lectura sensible se registra en
- *   portal_access_log.
+ * - Lo que hace la persona en el portal (confirmar, reprogramar, decidir, abrir
+ *   un documento) queda a su nombre: el actor es `contact:<id>` (`portalActor`),
+ *   nunca quien emitió el enlace, que solo recibe el aviso. Cada lectura
+ *   sensible se registra en portal_access_log.
  */
 
 const LINK_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
@@ -160,6 +160,8 @@ export interface PortalSessionView {
   contactId: string
   scope: PortalScope
   expiresAt: Date
+  /** Cerrada por el equipo, por un acceso retirado o por la persona: ya no sirve aunque no haya vencido. */
+  revokedAt: Date | null
   grantId: string | null
   authMethod: "enlace_pin" | "passkey"
 }
@@ -171,6 +173,7 @@ export function toSessionView(row: PortalSessionRow): PortalSessionView {
     contactId: row.contactId,
     scope: row.scope,
     expiresAt: row.expiresAt,
+    revokedAt: row.revokedAt,
     grantId: row.grantId,
     authMethod: row.authMethod === "passkey" ? "passkey" : "enlace_pin",
   }
@@ -212,6 +215,29 @@ async function requirePatientLink(tx: Db, orgId: string, patientId: string, cont
     )
     .limit(1)
   if (!link) throw validation("El contacto no está vinculado a este paciente")
+}
+
+/**
+ * Volver a entrar con un enlace y el código de 6 dígitos es recuperar el acceso
+ * con ayuda del equipo cuando ese permiso ya abrió una sesión antes. La primera
+ * activación siempre usa el código; «Recuperar el acceso con un código»
+ * (`assistedRecoveryEnabled`) solo decide si se puede recuperar así.
+ */
+async function isAssistedRecovery(tx: Db, orgId: string, grantId: string): Promise<boolean> {
+  const [opened] = await tx
+    .select({ id: portalSession.id })
+    .from(portalSession)
+    .where(and(eq(portalSession.organizationId, orgId), eq(portalSession.grantId, grantId)))
+    .limit(1)
+  return !!opened
+}
+
+/** Lo que dice al equipo cuando la clínica apagó la recuperación con código. */
+function staffRecoveryOff(): ServiceError {
+  return conflict(
+    "PORTAL_RECOVERY_OFF",
+    "Ya entró antes con este acceso y la clínica apagó la recuperación con código. Para que vuelva a entrar, quita su acceso y dáselo de nuevo.",
+  )
 }
 
 /** El vínculo puede retirarse tras emitir: sin fila el acceso equivale a revocado. */
@@ -368,7 +394,10 @@ export async function issuePortalLink(
   // La emisión exige el grant verificado ya creado (vía grants/solicitud
   // aprobada): nunca crea grants implícitos ni toca las passkeys (la
   // recuperación usa el endpoint dedicado de revocación).
-  await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
+  const issuingGrant = await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
+  if (!policy.assistedRecoveryEnabled && (await isAssistedRecovery(tx, orgId, issuingGrant.id))) {
+    throw staffRecoveryOff()
+  }
 
   const [conv] = await tx
     .select()
@@ -518,7 +547,10 @@ export async function issuePortalActivationQr(
   if (idempotencyKey) {
     throw conflict("PORTAL_REPLAY", "La activación QR no admite reintentos con la misma clave")
   }
-  await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
+  const issuingGrant = await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
+  if (!policy.assistedRecoveryEnabled && (await isAssistedRecovery(tx, orgId, issuingGrant.id))) {
+    throw staffRecoveryOff()
+  }
   const token = rawToken()
   const pin = String(randomInt(0, 1_000_000)).padStart(6, "0")
   const now = new Date()
@@ -705,7 +737,9 @@ export async function exchangePortalToken(
   input: ExchangePortalTokenInput,
 ): Promise<PortalExchangeResult> {
   const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled || !policy.assistedRecoveryEnabled) throw portalDisabled()
+  // El código siempre activa el acceso: apagar «Recuperar el acceso con un
+  // código» solo impide recuperarlo así (más abajo, con el permiso a la vista).
+  if (!policy.enabled) throw portalDisabled()
   const token = assertTokenFormat(rawLinkToken)
   if (typeof input?.pin !== "string" || !PIN_RE.test(input.pin)) {
     throw validation("El código de 6 dígitos es inválido")
@@ -730,6 +764,12 @@ export async function exchangePortalToken(
   }
   await requireActiveGrant(tx, orgId, link.patientId, link.contactId)
   const grant = await requireActivePortalGrant(tx, orgId, link.patientId, link.contactId)
+  if (!policy.assistedRecoveryEnabled && (await isAssistedRecovery(tx, orgId, grant.id))) {
+    throw conflict(
+      "PORTAL_RECOVERY_OFF",
+      "Ya activaste este acceso antes y la clínica no lo recupera con un código. Pide en recepción que te den un acceso nuevo.",
+    )
+  }
   if (!pinMatches(link.pinHash, input.pin)) {
     throw new ServiceError("PORTAL_PIN_INVALID", 400, "El código es incorrecto")
   }
@@ -884,9 +924,12 @@ function requireDocumentInScope(session: PortalSessionRow, documentId: string): 
   if (!allowed) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este documento no está autorizado en tu acceso")
 }
 
-function requireIssuer(session: PortalSessionRow): string {
-  if (!session.issuedBy) throw conflict("PORTAL_ISSUER", "El acceso no tiene operador emisor")
-  return session.issuedBy
+/**
+ * Quien actúa en el portal es la persona de la sesión, no quien le emitió el
+ * enlace: «Actividad del equipo» lo dice como del paciente o su contacto.
+ */
+function portalActor(session: PortalSessionRow): string {
+  return `contact:${session.contactId}`
 }
 
 export interface PortalAppointmentView {
@@ -896,7 +939,43 @@ export interface PortalAppointmentView {
   serviceName: string | null
   status: string
   branchName: string
+  /** Zona de la sede (o de la clínica): la hora de la cita se dice en ella, no en la del teléfono. */
+  timeZone: string
   version: number
+}
+
+/**
+ * Lo que la página del portal necesita de su sesión: quién es y el formato y la
+ * zona de la clínica, para decir cada fecha como en la clínica y no como en el
+ * teléfono de la persona.
+ */
+export async function getPortalSessionInfo(tx: Db, ctx: PortalContext) {
+  const zone = await findOrgLocale(tx, ctx.orgId)
+  return {
+    session: {
+      id: ctx.session.id,
+      patientId: ctx.session.patientId,
+      contactId: ctx.session.contactId,
+      scope: ctx.session.scope,
+      expiresAt: ctx.session.expiresAt,
+      grantId: ctx.session.grantId,
+      authMethod: ctx.session.authMethod,
+    },
+    patientName: ctx.patientName,
+    locale: zone.locale,
+    timeZone: zone.timezone,
+  }
+}
+
+/** Nombre y zona de la sede de una cita: sin zona propia, la de la clínica. */
+async function branchPlace(tx: Db, orgId: string, branchId: string): Promise<{ name: string; timeZone: string } | null> {
+  const [row] = await tx
+    .select({ name: branch.name, timezone: branch.timezone })
+    .from(branch)
+    .where(and(eq(branch.id, branchId), eq(branch.organizationId, orgId)))
+    .limit(1)
+  if (!row) return null
+  return { name: row.name, timeZone: row.timezone ?? (await findOrgLocale(tx, orgId)).timezone }
 }
 
 /** Próximas citas del paciente autorizado (sin datos del profesional). */
@@ -915,6 +994,7 @@ export async function getPortalAppointments(
       status: appointment.status,
       version: appointment.version,
       branchName: branch.name,
+      branchTimeZone: branch.timezone,
     })
     .from(appointment)
     .innerJoin(branch, eq(branch.id, appointment.branchId))
@@ -928,10 +1008,12 @@ export async function getPortalAppointments(
     .orderBy(asc(appointment.startsAt))
     .limit(50)
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointments.listed")
-  return rows.map((row) => ({
+  const clinicZone = (await findOrgLocale(tx, ctx.orgId)).timezone
+  return rows.map(({ branchTimeZone, ...row }) => ({
     ...row,
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
+    timeZone: branchTimeZone ?? clinicZone,
   }))
 }
 
@@ -964,8 +1046,8 @@ export async function confirmPortalAppointment(
   if (current.startsAt.getTime() <= Date.now()) {
     throw conflict("APPOINTMENT_STATUS", "Esta cita ya pasó; pide una nueva en recepción")
   }
-  const updated = await setAppointmentStatus(tx, ctx.orgId, requireIssuer(ctx.session), current.id, "confirmada")
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.appointment_confirmed", "appointment", current.id, {
+  const updated = await setAppointmentStatus(tx, ctx.orgId, portalActor(ctx.session), current.id, "confirmada", { via: "portal" })
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_confirmed", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
   })
@@ -976,19 +1058,16 @@ export async function confirmPortalAppointment(
     body: "Un paciente confirmó su cita desde el portal.",
     href: "/agenda",
   })
-  const [branchRow] = await tx
-    .select({ name: branch.name })
-    .from(branch)
-    .where(eq(branch.id, updated.branchId))
-    .limit(1)
-  if (!branchRow) throw branchNotFound()
+  const place = await branchPlace(tx, ctx.orgId, updated.branchId)
+  if (!place) throw branchNotFound()
   return {
     id: updated.id,
     startsAt: updated.startsAt,
     endsAt: updated.endsAt,
     serviceName: updated.serviceName,
     status: updated.status,
-    branchName: branchRow.name,
+    branchName: place.name,
+    timeZone: place.timeZone,
     version: updated.version,
   }
 }
@@ -1025,11 +1104,16 @@ export async function reschedulePortalAppointment(
   if (startsAt.getTime() > Date.now() + RESCHEDULE_HORIZON_DAYS * 24 * 3600_000) {
     throw validation(`Solo puedes reprogramar dentro de ${RESCHEDULE_HORIZON_DAYS} días`)
   }
-  const moved = await moveAppointment(tx, ctx.orgId, requireIssuer(ctx.session), current.id, {
-    expectedVersion: input.expectedVersion,
-    startsAt: startsAt.toISOString(),
-  })
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.appointment_rescheduled", "appointment", current.id, {
+  // La movió la propia persona: no se le avisa lo que acaba de hacer (ADR 0027).
+  const moved = await moveAppointment(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    current.id,
+    { expectedVersion: input.expectedVersion, startsAt: startsAt.toISOString() },
+    { notice: false },
+  )
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_rescheduled", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
     startsAt: startsAt.toISOString(),
@@ -1041,18 +1125,15 @@ export async function reschedulePortalAppointment(
     body: "Un paciente reprogramó su cita desde el portal.",
     href: "/agenda",
   })
-  const [branchRow] = await tx
-    .select({ name: branch.name })
-    .from(branch)
-    .where(eq(branch.id, moved.branchId))
-    .limit(1)
+  const place = await branchPlace(tx, ctx.orgId, moved.branchId)
   return {
     id: moved.id,
     startsAt: moved.startsAt,
     endsAt: moved.endsAt,
     serviceName: moved.serviceName,
     status: moved.status,
-    branchName: branchRow?.name ?? "",
+    branchName: place?.name ?? "",
+    timeZone: place?.timeZone ?? (await findOrgLocale(tx, ctx.orgId)).timezone,
     version: moved.version,
   }
 }
@@ -1239,7 +1320,9 @@ export async function decidePortalBudget(
   }
   let decided: BudgetWithTotals
   try {
-    decided = await decideBudget(tx, ctx.orgId, requireIssuer(ctx.session), ctx.session.patientId, budgetId, {
+    // Decide la persona, no el equipo: el presupuesto no queda a nombre de nadie
+    // de la clínica y la auditoría lo anota a su contacto.
+    decided = await decideBudget(tx, ctx.orgId, null, ctx.session.patientId, budgetId, {
       decisions: input.decisions,
       decidedByContactId: ctx.session.contactId,
       decisionNote: input.decisionNote ?? null,
@@ -1254,7 +1337,7 @@ export async function decidePortalBudget(
     }
     throw error
   }
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.budget_decided", "treatment_budget", budgetId, {
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.budget_decided", "treatment_budget", budgetId, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
     status: decided.status,
@@ -1310,7 +1393,7 @@ export async function getPortalDocumentUrl(
 ): Promise<{ url: string; expiresInSeconds: number }> {
   requireDocumentInScope(ctx.session, documentId)
   const doc = await getPatientDocument(tx, ctx.orgId, ctx.session.patientId, documentId)
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.document_read", "patient_document", documentId, {
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.document_read", "patient_document", documentId, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
   })

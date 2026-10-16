@@ -1031,8 +1031,13 @@ function ThreadView({
       setRegistrationError(null)
       setCopied(false)
       // Preparar el borrador en el composer existente; el operador revisa y envía.
-      // Nunca se envía automáticamente al generar el enlace.
-      setComposer(`Completa los datos del paciente para ${orgName}: ${url}`)
+      // Nunca se envía automáticamente al generar el enlace. Quien ya es paciente
+      // lo recibe para registrar a un familiar: el enlace no le ofrece registrarse.
+      setComposer(
+        detail?.contact.isPatient
+          ? `Aquí puedes registrar a tu hijo o a un familiar en ${orgName}: ${url}`
+          : `Completa los datos del paciente para ${orgName}: ${url}`,
+      )
     },
     onError: (error) => {
       setRegistrationError(error instanceof ApiError ? error.message : "No se pudo crear el enlace")
@@ -1323,6 +1328,7 @@ function ThreadView({
             Contexto
           </Button>
         )}
+        {/* Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar. */}
         {canRegister && (
           <Button
             variant="outline"
@@ -1337,7 +1343,7 @@ function ThreadView({
             ) : (
               <UserPlus className="size-4" />
             )}
-            Enviar registro
+            {detail.contact.isPatient ? "Enviar registro de un familiar" : "Enviar registro"}
           </Button>
         )}
         {canWrite && (

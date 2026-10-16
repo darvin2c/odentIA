@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
-import { cie10Code, odontogramEntry, patientCharge } from "@odentia/db/schema/clinical"
+import { cie10Code, encounter, odontogramEntry, patientCharge } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -71,6 +71,162 @@ async function withAgenda() {
     )
   return { ...f, site, chair, date, book }
 }
+
+/**
+ * Zona fija cuyo reloj marca ahora entre las 12:00 y las 12:59: «hoy» y «la
+ * más cercana» no dependen de la hora a la que corre la prueba. `Etc/GMT`
+ * invierte el signo: «Etc/GMT-3» es UTC+3.
+ */
+function noonZone(now = new Date()): { zone: string; offsetHours: number } {
+  const offsetHours = 12 - now.getUTCHours()
+  const zone =
+    offsetHours === 0
+      ? "Etc/GMT"
+      : offsetHours > 0
+        ? `Etc/GMT-${offsetHours}`
+        : `Etc/GMT+${-offsetHours}`
+  return { zone, offsetHours }
+}
+
+/** Sede en esa zona, con horario todo el día y citas que se reservan a una hora local. */
+async function withZoneAgenda() {
+  const f = await clinicalFixture()
+  const { zone, offsetHours } = noonZone()
+  const [site] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: `Sede ${randomUUID().slice(0, 6)}`, timezone: zone })
+    .returning()
+  if (!site) throw new Error("Sin sede")
+  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Sillón" }))
+  const schedule = (dentistUserId: string) =>
+    f.run((tx) =>
+      setProfessionalSchedule(tx, "org_a", f.actor, {
+        branchId: site.id,
+        dentistUserId,
+        rules: Array.from({ length: 7 }, (_, weekday) => ({ weekday, startMin: 0, endMin: 24 * 60 - 1 })),
+      }),
+    )
+  await schedule(f.actor)
+  const localToday = new Date(Date.now() + offsetHours * 3_600_000)
+  /** Cita a esa hora local, `dayOffset` días desde hoy en la zona de la sede. */
+  const bookLocal = (dayOffset: number, hour: number, minute: number, dentistUserId = f.actor) =>
+    f.run((tx) =>
+      createAppointment(tx, "org_a", f.actor, {
+        branchId: site.id,
+        patientId: f.patient.id,
+        dentistUserId,
+        chairId: chair.id,
+        startsAt: new Date(
+          Date.UTC(
+            localToday.getUTCFullYear(),
+            localToday.getUTCMonth(),
+            localToday.getUTCDate() + dayOffset,
+            hour,
+            minute,
+          ) -
+            offsetHours * 3_600_000,
+        ).toISOString(),
+        durationMin: 30,
+        status: "confirmada",
+      }),
+    )
+  return { ...f, site, schedule, bookLocal }
+}
+
+it("sin cita indicada, la atención se une a la cita de hoy más cercana y al cerrarla queda atendida", async () => {
+  const f = await withZoneAgenda()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Borrador de prueba" }))
+  const early = await f.bookLocal(0, 9, 0)
+  const near = await f.bookLocal(0, 13, 30)
+  await f.bookLocal(1, 12, 30)
+  const control = await f.run((tx) =>
+    createFollowUp(tx, ...f.args, { kind: "mantenimiento", title: "Control", dueAt: near.startsAt }),
+  )
+  await f.run((tx) => scheduleFollowUp(tx, ...f.args, control.id, { appointmentId: near.id }))
+  // La sede elegida por defecto no manda: manda la de la cita.
+  const first = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor", branchId: null }))
+  expect(first).toMatchObject({ appointmentId: near.id, branchId: f.site.id, dentistUserId: f.actor })
+  await f.ready(first.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, first.id))
+  expect((await f.run((tx) => getAppointment(tx, "org_a", near.id))).status).toBe("atendida")
+  expect((await f.run((tx) => listFollowUps(tx, "org_a", f.patient.id)))[0]).toMatchObject({
+    status: "realizado",
+    completedEncounterId: first.id,
+  })
+  expect((await f.run((tx) => getAppointment(tx, "org_a", early.id))).status).toBe("confirmada")
+  // La siguiente se une a la que queda hoy; la de mañana nunca.
+  const second = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Otra molestia" }))
+  expect(second.appointmentId).toBe(early.id)
+  await f.ready(second.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, second.id))
+  const third = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Sin cita hoy" }))
+  expect(third.appointmentId).toBeNull()
+})
+
+it("atender la cita con un borrador sin cita del mismo día lo une a ella en vez de abrir otro", async () => {
+  const f = await withZoneAgenda()
+  const visit = await f.bookLocal(0, 13, 30)
+  // Un borrador de otro día no es esta visita: no se mueve.
+  await ownerDb
+    .update(encounter)
+    .set({ createdAt: new Date(Date.now() - 2 * 86_400_000) })
+    .where(eq(encounter.id, f.encounter.id))
+  await expect(
+    f.run((tx) => createEncounter(tx, ...f.args, { reason: "Control", appointmentId: visit.id })),
+  ).rejects.toMatchObject({ code: "DRAFT_OPEN" })
+  await ownerDb.update(encounter).set({ createdAt: new Date() }).where(eq(encounter.id, f.encounter.id))
+  const joined = await f.run((tx) =>
+    createEncounter(tx, ...f.args, { reason: "Control", appointmentId: visit.id }),
+  )
+  expect(joined).toMatchObject({
+    id: f.encounter.id,
+    appointmentId: visit.id,
+    branchId: f.site.id,
+    status: "borrador",
+    reason: "Consulta",
+  })
+  // Atender otra vez la misma cita continúa el mismo borrador.
+  const again = await f.run((tx) =>
+    createEncounter(tx, ...f.args, { reason: "Otra vez", appointmentId: visit.id }),
+  )
+  expect(again.id).toBe(f.encounter.id)
+  // Ya unido a una cita, no se une a otra.
+  const other = await f.bookLocal(0, 9, 0)
+  await expect(
+    f.run((tx) => createEncounter(tx, ...f.args, { reason: "Otra", appointmentId: other.id })),
+  ).rejects.toMatchObject({ code: "DRAFT_OPEN" })
+  await f.ready(joined.id)
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, joined.id))
+  expect((await f.run((tx) => getAppointment(tx, "org_a", visit.id))).status).toBe("atendida")
+})
+
+it("por defecto atiende quien abre, aunque la cita sea de otro, y solo un profesional clínico puede atender", async () => {
+  const f = await withZoneAgenda()
+  await f.run((tx) => voidEncounter(tx, ...f.args, f.encounter.id, { reason: "Borrador de prueba" }))
+  const colleague = randomUUID()
+  const cashier = randomUUID()
+  await ownerDb.insert(user).values([
+    { id: colleague, name: "Ana", email: `${colleague}@example.test` },
+    { id: cashier, name: "Caja", email: `${cashier}@example.test` },
+  ])
+  await makeSigner("org_a", colleague)
+  await ownerDb
+    .insert(member)
+    .values({ id: randomUUID(), organizationId: "org_a", userId: cashier, role: "cashier", createdAt: new Date() })
+  await f.schedule(colleague)
+  // La cita es de Ana; quien pulsa (el actor) la cubre y es quien escribe.
+  const visit = await f.bookLocal(0, 13, 30, colleague)
+  await expect(
+    f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor", dentistUserId: cashier })),
+  ).rejects.toMatchObject({ status: 400 })
+  const covered = await f.run((tx) => createEncounter(tx, ...f.args, { reason: "Dolor" }))
+  expect(covered).toMatchObject({ appointmentId: visit.id, dentistUserId: f.actor })
+  await f.run((tx) => voidEncounter(tx, ...f.args, covered.id, { reason: "Lo atiende Ana" }))
+  const byColleague = await f.run((tx) =>
+    createEncounter(tx, ...f.args, { reason: "Dolor", dentistUserId: colleague }),
+  )
+  expect(byColleague.dentistUserId).toBe(colleague)
+})
 
 it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su instantánea", async () => {
   const f = await clinicalFixture()

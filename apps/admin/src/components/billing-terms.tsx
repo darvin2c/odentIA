@@ -1,6 +1,6 @@
 /**
  * Facturación › tarifas de WhatsApp (Meta) y pedidos de negociación que
- * esperan aprobación (ADR 0030, tableros O1 y O2).
+ * esperan aprobación (ADR 0031, tableros O1 y O2).
  */
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { EmptyState, ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"

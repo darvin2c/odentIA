@@ -1,5 +1,5 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
-import { activeFindingsAsOf, type FindingDetails, REGISTRATION_FIELDS, type RegistrationConfig } from "@odentia/clinical"
+import { activeFindingsAsOf, type FindingDetails, missingFiliationFields, type RegistrationConfig } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
 
@@ -882,31 +882,28 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   }>(`/api/patients/${patientId}/anamnesis/history`)
 }
 
-/**
- * Lo que le falta a la filiación: los datos que «Registro de pacientes» marca
- * como obligatorios y la ficha no tiene. Un solo criterio para el Resumen y
- * para Datos personales; la clínica decide qué es obligatorio, no la pantalla.
- */
 /** «fecha de nacimiento, sexo y documento»: el tipo y el número de documento se dicen juntos. */
 export function filiationGapsText(gaps: string[]): string {
   const words = [...new Set(gaps.map((gap) => (/documento/.test(gap) ? "documento" : gap)))]
   return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
 }
 
+/**
+ * Lo que le falta a la filiación: los datos que «Registro de pacientes» marca
+ * como obligatorios y la ficha no tiene. Un solo criterio para el Resumen y
+ * para Datos personales, el mismo del registro (`missingFiliationFields`): el
+ * teléfono o el correo de quien habla por la persona cuentan como suyos. La
+ * clínica decide qué es obligatorio, no la pantalla.
+ */
 export function missingFiliation(
   config: Pick<RegistrationConfig, "fields">,
   patient: Patient,
+  contacts: ReadonlyArray<Pick<PatientContactLink, "relationship" | "isActive" | "phone" | "email">>,
 ): string[] {
-  return REGISTRATION_FIELDS.filter(
-    (field) =>
-      (field.step === "datos" || field.step === "contacto") &&
-      config.fields[field.key] === "required" &&
-      field.key !== "displayName" &&
-      !(field.key === "insuranceDetail" && !patient.insuranceType),
+  const representativeContact = contacts.some(
+    (link) => link.relationship !== "self" && link.isActive && !!(link.phone || link.email),
   )
-    .filter((field) => {
-      const value = (patient as unknown as Record<string, unknown>)[field.key]
-      return value === null || value === undefined || value === ""
-    })
-    .map((field) => field.label.toLowerCase())
+  return missingFiliationFields(config, patient as unknown as Record<string, unknown>, {
+    representativeContact,
+  }).map((field) => field.label.toLowerCase())
 }

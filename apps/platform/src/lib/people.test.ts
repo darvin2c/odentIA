@@ -23,15 +23,28 @@ describe("lo que le falta a la filiación: un solo criterio, el de «Registro de
         occupation: "optional",
       },
     } as typeof DEFAULT_REGISTRATION_CONFIG
-    expect(missingFiliation(config, patient({ birthDate: "1990-01-01" }))).toEqual(
+    expect(missingFiliation(config, patient({ birthDate: "1990-01-01" }), [])).toEqual(
       expect.arrayContaining(["tipo de documento", "número de documento"]),
     )
-    expect(missingFiliation(config, patient({ birthDate: "1990-01-01" }))).not.toContain(
+    expect(missingFiliation(config, patient({ birthDate: "1990-01-01" }), [])).not.toContain(
       "ocupación",
     )
-    expect(missingFiliation(config, patient({}))).toContain("fecha de nacimiento")
+    expect(missingFiliation(config, patient({}), [])).toContain("fecha de nacimiento")
     // El nombre lo tiene siempre: nunca falta.
-    expect(missingFiliation(config, patient({}))).not.toContain("nombre completo")
+    expect(missingFiliation(config, patient({}), [])).not.toContain("nombre completo")
+  })
+
+  it("a Mateo, de 6 años, no le falta teléfono si el de su madre está: la misma regla que el registro", () => {
+    const config = {
+      fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, phone: "required" },
+    } as typeof DEFAULT_REGISTRATION_CONFIG
+    const mateo = patient({ displayName: "Mateo Quispe", birthDate: "2020-03-01" })
+    const mother = { relationship: "guardian" as const, isActive: true, phone: "+51987654301", email: null }
+    expect(missingFiliation(config, mateo, [])).toContain("teléfono")
+    expect(missingFiliation(config, mateo, [mother])).not.toContain("teléfono")
+    // Su propio vínculo o un contacto archivado no hablan por él.
+    expect(missingFiliation(config, mateo, [{ ...mother, relationship: "self" as const }])).toContain("teléfono")
+    expect(missingFiliation(config, mateo, [{ ...mother, isActive: false }])).toContain("teléfono")
   })
 })
 

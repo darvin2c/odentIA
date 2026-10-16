@@ -73,7 +73,7 @@ export const saasPlan = pgTable(
     isActive: boolean("is_active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     /**
-     * Cobro por acción (ADR 0030). Lo que la cuota devuelve como crédito para
+     * Cobro por acción (ADR 0031). Lo que la cuota devuelve como crédito para
      * los agentes cada mes, en la unidad menor de `currency`.
      */
     creditCents: integer("credit_cents").notNull().default(0),
@@ -193,7 +193,7 @@ export const saasSubscription = pgTable(
     sellerStartedAt: timestamp("seller_started_at", { withTimezone: true }),
     sellerEndedAt: timestamp("seller_ended_at", { withTimezone: true }),
     billingEmail: text("billing_email"),
-    /** Descuento negociado sobre el precio base de cada acción (ADR 0030); la cuota no tiene descuento. */
+    /** Descuento negociado sobre el precio base de cada acción (ADR 0031); la cuota no tiene descuento. */
     discountBps: integer("discount_bps").notNull().default(0),
     /** Prueba negociada para esta clínica; null = la del plan. */
     trialCreditCents: integer("trial_credit_cents"),
@@ -466,7 +466,7 @@ export const saasNotice = pgTable(
 )
 
 /**
- * Negociación por clínica que pide aprobación (ADR 0030): un descuento por
+ * Negociación por clínica que pide aprobación (ADR 0031): un descuento por
  * encima de lo que da el vendedor o una prueba más larga o con más saldo que
  * la del plan. La pide soporte o el vendedor; la decide la administración.
  * Solo owner (rutas admin) la escribe.
@@ -519,7 +519,7 @@ export const saasWhatsappRate = pgTable(
 )
 
 /**
- * Línea congelada de un cargo del cobro por acción (ADR 0030): la cuota, las
+ * Línea congelada de un cargo del cobro por acción (ADR 0031): la cuota, las
  * acciones por encima del crédito por tipo, lo que cubrió el crédito (importe
  * 0, para que se vea) y el impuesto. Inmutable como el cargo.
  */
@@ -550,7 +550,7 @@ export const SAAS_ACTION_KINDS = ["conversacion", "consulta", "cita"] as const
 export type SaasActionKind = (typeof SAAS_ACTION_KINDS)[number]
 
 /**
- * Lo que hicieron los agentes y se cobra por acción (ADR 0030): una
+ * Lo que hicieron los agentes y se cobra por acción (ADR 0031): una
  * conversación de Recepción por persona cada 24 horas, una consulta dictada y
  * confirmada por atención y una cita recuperada que el paciente atendió. El
  * precio se congela al contar (base, descuento de la clínica y precio

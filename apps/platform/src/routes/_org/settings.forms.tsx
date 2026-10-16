@@ -386,7 +386,16 @@ function TemplateBuilder({
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const schema: FormSchemaDef = { sections }
+      // Pasar a los antecedentes es del cuestionario que responde el paciente.
+      const schema: FormSchemaDef = {
+        sections:
+          respondent === "portal"
+            ? sections
+            : sections.map((section) => ({
+                ...section,
+                fields: section.fields.map(({ definition: _definition, ...field }) => field),
+              })),
+      }
       const body = {
         title: title.trim(),
         description: description.trim() ? description.trim() : null,
@@ -503,7 +512,7 @@ function TemplateBuilder({
         <Field>
           <FieldLabel htmlFor={`${ids}-responde`}>Quién lo responde</FieldLabel>
           <Select
-            items={{ staff: "El equipo, desde la ficha o la atención", portal: "El paciente, desde el portal (cuestionario previo)" }}
+            items={{ staff: "El equipo, desde la ficha", portal: "El paciente, desde el portal (cuestionario previo)" }}
             value={respondent}
             onValueChange={(v) => setRespondent(v === "portal" ? "portal" : "staff")}
             disabled={!canAdmin}
@@ -512,13 +521,15 @@ function TemplateBuilder({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="staff">El equipo, desde la ficha o la atención</SelectItem>
+              <SelectItem value="staff">El equipo, desde la ficha</SelectItem>
               <SelectItem value="portal">El paciente, desde el portal (cuestionario previo)</SelectItem>
             </SelectContent>
           </Select>
           {respondent === "portal" ? (
             <FieldDescription>
-              Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo finaliza.
+              Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo
+              finaliza. Al finalizarlo, las respuestas marcadas como alergias pasan a sus
+              antecedentes sin confirmar y la receta avisa.
             </FieldDescription>
           ) : null}
         </Field>
@@ -549,6 +560,7 @@ function TemplateBuilder({
                 <FieldEditor
                   key={field.id}
                   field={field}
+                  declaresHealth={respondent === "portal"}
                   previousFields={sections
                     .flatMap((s) => s.fields)
                     .slice(
@@ -620,12 +632,15 @@ function TemplateBuilder({
 
 function FieldEditor({
   field,
+  declaresHealth,
   previousFields,
   disabled,
   onPatch,
   onRemove,
 }: {
   field: FormFieldDef
+  /** Lo responde el paciente: una respuesta de texto puede pasar a sus antecedentes. */
+  declaresHealth: boolean
   /** Campos anteriores Sí/No u opciones: los únicos que pueden condicionar este. */
   previousFields: FormFieldDef[]
   disabled: boolean
@@ -659,11 +674,13 @@ function FieldEditor({
             items={FIELD_TYPE_LABELS}
             value={field.type}
             onValueChange={(value) =>
-              onPatch(
-                value === "escala"
+              onPatch({
+                ...(value === "escala"
                   ? { type: "escala", min: field.min ?? 0, max: field.max ?? 10 }
-                  : { type: value as FormFieldType },
-              )
+                  : { type: value as FormFieldType }),
+                // Solo una respuesta de texto pasa a los antecedentes.
+                ...(value === "texto" || value === "texto_largo" ? {} : { definition: null }),
+              })
             }
             disabled={disabled}
           >
@@ -690,6 +707,19 @@ function FieldEditor({
           />
           <label htmlFor={`${ids}-obligatorio`}>Obligatorio</label>
         </div>
+        {declaresHealth && (field.type === "texto" || field.type === "texto_largo") ? (
+          <div className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0">
+            <Checkbox
+              id={`${ids}-alergias`}
+              checked={field.definition === "AllergyIntolerance.code"}
+              disabled={disabled}
+              onCheckedChange={(checked) =>
+                onPatch({ definition: checked === true ? "AllergyIntolerance.code" : null })
+              }
+            />
+            <label htmlFor={`${ids}-alergias`}>Son alergias: pasan a sus antecedentes</label>
+          </div>
+        ) : null}
         {(field.type === "texto" || field.type === "texto_largo") && (
           <Input
             className="w-32"
@@ -1238,7 +1268,7 @@ function ConsentBuilder({
             ? `Nueva versión de «${initial.title}»`
             : "Nueva plantilla"
       }
-      description="Se guarda como borrador; para usarla, publícala desde la lista. El diagnóstico y el profesional que informa se toman de la atención al generar el consentimiento."
+      description="Se guarda como borrador; para usarla, publícala desde la lista. El diagnóstico se elige al generar el consentimiento (o se toma del tratamiento) y el profesional que informa firma con su perfil profesional."
       onSubmit={(event: FormEvent) => {
         event.preventDefault()
         const problem = missing()

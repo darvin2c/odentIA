@@ -22,7 +22,7 @@ import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Lo que hicieron los agentes, por acción (ADR 0030, fase 2): qué cuenta, cuánto y una sola vez. */
+/** Lo que hicieron los agentes, por acción (ADR 0031, fase 2): qué cuenta, cuánto y una sola vez. */
 setupTestDb()
 const ORG = "org_a"
 const KEY = secretsKeyFromEnv("cd".repeat(32))
@@ -73,7 +73,7 @@ const actionsOf = (kind: string) =>
   run((tx) => tx.select().from(saasAction).where(and(eq(saasAction.organizationId, ORG), eq(saasAction.kind, kind))))
 
 beforeAll(async () => {
-  // El plan de la ADR 0030 como plan por defecto, y un 10 % negociado para la clínica.
+  // El plan de la ADR 0031 como plan por defecto, y un 10 % negociado para la clínica.
   await ownerDb.insert(saasPlan).values({
     code: "odentia-prueba-acciones",
     name: "Plan odentIA",

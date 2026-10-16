@@ -1116,7 +1116,8 @@ export async function verifyPasskeyRegistration(
     .returning()
   if (!created) throw new Error("No se pudo guardar la passkey")
   await tx.update(portalChallenge).set({ usedAt: new Date() }).where(eq(portalChallenge.id, challenge.id))
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.passkey_registered", "portal_passkey", created.id, {
+  // Lo guarda la persona en su dispositivo: queda a su nombre, no al de quien le dio el acceso.
+  await auditPortal(tx, ctx.orgId, `contact:${ctx.session.contactId}`, "portal.passkey_registered", "portal_passkey", created.id, {
     grantId: grant.id,
     sessionId: ctx.session.id,
   })

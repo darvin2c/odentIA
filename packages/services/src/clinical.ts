@@ -10,6 +10,7 @@ import {
   imageTypeCategory,
   isImageType,
   isValidTooth,
+  normalizeDrugText,
   normalizeTags,
   ODONTOGRAM_STANDARD,
   type RegistrationAnswers,
@@ -47,6 +48,7 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
 
 async function requireDraftLink(tx: Db, orgId: string, patientId: string, encounterId: string) {
   const [row] = await tx
@@ -563,6 +565,99 @@ export async function savePatientHealth(
   input: SavePatientHealthInput,
 ): Promise<PatientHealth> {
   return persistPatientHealth(tx, orgId, { kind: "staff", userId: actorUserId }, patientId, input)
+}
+
+/** Una alergia que declaró la persona (o quien habla por ella), sin verificar. */
+export interface DeclaredAllergy {
+  substance: string
+  reaction: string | null
+}
+
+/**
+ * Lo que la persona declaró sobre sus alergias (el cuestionario «Antes de tu
+ * cita») pasa a los antecedentes como alergia sin confirmar (`no_confirmada`,
+ * el `unconfirmed` de HL7 FHIR AllergyIntolerance), para que la receta avise.
+ * No duplica una alergia activa de la misma sustancia y nunca cambia lo que ya
+ * existe: lo confirmado o descartado lo decidió un clínico. Avanza la revisión
+ * del agregado, así una edición abierta de Antecedentes recarga en vez de
+ * pisarlo. Devuelve cuántas alergias añadió.
+ */
+export async function addDeclaredAllergies(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  declared: DeclaredAllergy[],
+  origin: { entity: string; entityId: string },
+): Promise<number> {
+  if (declared.length === 0) return 0
+  await requirePatient(tx, orgId, patientId)
+  const [locked] = await tx
+    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  const existing = await tx
+    .select({
+      substance: patientAllergy.substance,
+      isActive: patientAllergy.isActive,
+      verification: patientAllergy.verification,
+    })
+    .from(patientAllergy)
+    .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId)))
+  // Lo que ya está decidido o vigente no se repite: una activa de la misma
+  // sustancia, o una que un clínico descartó (aunque la archivara).
+  const known = new Set(
+    existing
+      .filter((row) => row.isActive || row.verification === "descartada")
+      .map((row) => normalizeDrugText(row.substance)),
+  )
+  const fresh: DeclaredAllergy[] = []
+  for (const item of declared) {
+    const substance = item.substance.trim().slice(0, 200)
+    const key = normalizeDrugText(substance)
+    if (!key || known.has(key)) continue
+    known.add(key)
+    fresh.push({ substance, reaction: item.reaction?.trim().slice(0, 2000) || null })
+  }
+  if (fresh.length === 0) return 0
+  await tx.insert(patientAllergy).values(
+    fresh.map((item) => ({
+      organizationId: orgId,
+      patientId,
+      substance: item.substance,
+      reaction: item.reaction,
+      severity: "desconocida",
+      kind: "alergia",
+      verification: "no_confirmada",
+      isActive: true,
+      createdBy: actorUserId,
+    })),
+  )
+  const reviewStatus = { ...((locked.reviewStatus ?? {}) as Record<string, unknown>) }
+  await tx
+    .update(patient)
+    .set({
+      healthRevision: locked.revision + 1,
+      // Con alergias activas el grupo queda «registrado» (la misma regla del agregado).
+      healthReviewStatus: {
+        allergies: "recorded",
+        conditions: reviewStatus.conditions ?? "unknown",
+        medications: reviewStatus.medications ?? "unknown",
+      },
+      updatedAt: new Date(),
+    })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // Sin copiar lo declarado: la auditoría dice qué pasó, no el dato clínico.
+  await audit(tx, orgId, actorUserId, "health.allergies_declared", "patient", patientId, {
+    origin: origin.entity,
+    originId: origin.entityId,
+    count: fresh.length,
+    revision: { before: locked.revision, after: locked.revision + 1 },
+  })
+  return fresh.length
 }
 
 async function persistPatientHealth(
@@ -1324,12 +1419,14 @@ export const ASSESSMENT_PURPOSES = [
   "personal",
 ] as const
 
+/**
+ * Quién firma no viaja en la entrada: el examinador y su colegiatura salen del
+ * perfil profesional de quien firma, como en el cierre de la atención y la receta.
+ */
 export interface CreateAssessmentInput {
   purpose: string
   specifications: string
   observations: string
-  examinerName: string
-  registrationNumber: string
   signature: number[][][]
 }
 
@@ -1372,15 +1469,11 @@ export async function createOdontogramAssessment(
     throw validation("purpose inválido")
   const specifications = input.specifications?.trim() ?? ""
   const observations = input.observations?.trim() ?? ""
-  const examinerName = input.examinerName?.trim() ?? ""
-  const registrationNumber = input.registrationNumber?.trim() ?? ""
   if (specifications.length > 4000) throw validation("specifications admite hasta 4000 caracteres")
   if (observations.length > 4000) throw validation("observations admite hasta 4000 caracteres")
-  if (!examinerName || examinerName.length > 200)
-    throw validation("examinerName es obligatorio (1–200 caracteres)")
-  if (!registrationNumber || registrationNumber.length > 40)
-    throw validation("registrationNumber es obligatorio (1–40 caracteres)")
   assertSignature(input.signature)
+  // Firma con su perfil: sin colegiatura no se firma (nadie firma con otro nombre).
+  const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   // Sin firma sobre revisión pendiente: primero se revisan los legados.
   const [pending] = await tx
     .select({ id: odontogramEntry.id })
@@ -1416,8 +1509,8 @@ export async function createOdontogramAssessment(
       purpose: input.purpose,
       specifications,
       observations,
-      examinerName,
-      registrationNumber,
+      examinerName: signer.name,
+      registrationNumber: signer.registration,
       patientName,
       patientNumber: patientRow.patientNumber,
       signature: input.signature,

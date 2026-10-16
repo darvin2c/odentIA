@@ -485,8 +485,8 @@ function PortalSettings() {
                 onChange={(checked) => set("passkeysEnabled", checked)}
               />
               <Option
-                label="Código de 6 dígitos que entrega tu equipo"
-                hint="Sirve para activar el acceso o recuperarlo con ayuda de tu equipo, por una vía distinta del mensaje. No sirve para entrar de forma habitual."
+                label="Recuperar el acceso con un código"
+                hint="Si la persona ya entró y necesita volver a entrar, tu equipo le envía un enlace nuevo y le dice un código de 6 dígitos por una vía distinta del mensaje. La primera vez siempre entra con ese código, aunque esto esté apagado."
                 checked={form.assistedRecoveryEnabled}
                 disabled={!canWrite}
                 onChange={(checked) => set("assistedRecoveryEnabled", checked)}

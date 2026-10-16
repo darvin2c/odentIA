@@ -1,5 +1,5 @@
 /**
- * Activar el plan (ADR 0030, tablero C1): lo que resalta es que la cuota
+ * Activar el plan (ADR 0031, tablero C1): lo que resalta es que la cuota
  * vuelve en crédito; después el precio de cada acción, con cuándo se cobra y
  * cuándo no, y un estimado sacado de lo que la clínica hizo en su prueba.
  */

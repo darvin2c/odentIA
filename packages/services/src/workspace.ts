@@ -6,6 +6,7 @@ import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { listHandoffs } from "./agent-operations.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { handoffOpenExistsSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
@@ -388,9 +389,10 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
 }
 
-/** Presupuestos presentados o pospuestos que siguen sin respuesta; quien atiende, solo los de sus planes. */
+/** Presupuestos que siguen esperando respuesta (`budgetAwaitsAnswerSql`); quien atiende, solo los de sus planes. */
 async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: boolean): Promise<WaitingBudgets> {
-  const scope = sql`b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
+  const awaiting = budgetAwaitsAnswerSql({ id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` })
+  const scope = sql`b.organization_id=${orgId} and ${awaiting}
     and (not ${ownOnly} or exists (select 1 from treatment_plan tp
       where tp.id=b.plan_id and tp.organization_id=${orgId} and tp.created_by=${userId}))`
   const items = await tx.execute<WaitingBudgets["items"][number]>(sql`
@@ -501,7 +503,8 @@ export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?
   const rows = await tx.execute<{ id: string; action: string; entity: string; entityId: string | null; actorName: string | null; createdAt: string; origin: string | null }>(sql`
     select a.id, a.action, a.entity, a.entity_id as "entityId", u.name as "actorName",
       to_char(a.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt",
-      a.metadata->>'origin' as origin
+      -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
+      case when a.actor_user_id like 'contact:%' then 'patient' else a.metadata->>'origin' end as origin
     from audit_event a left join "user" u on u.id=a.actor_user_id
     where a.organization_id=${orgId}
     ${input.action ? sql`and a.action = ${input.action}` : sql``}

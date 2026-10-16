@@ -115,6 +115,8 @@ export interface BudgetWithTotals extends Budget {
   acceptedCents: number | null
   tariffTotalCents: number | null
   discountCents: number | null
+  /** Espera la respuesta de quien decide: lo dice el servidor con su única regla, la pantalla no lo deduce. */
+  awaitsAnswer: boolean
 }
 
 /**

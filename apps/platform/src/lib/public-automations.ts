@@ -9,6 +9,12 @@ export interface PublicAutomationLink {
   timeZone: string
   expired: boolean
   used: boolean
+  /**
+   * En una baja, lo que deja de recibir, con las palabras del servidor
+   * (`what` completa «Dejar de recibir…»). Null en los enlaces de una cita;
+   * ausente en respuestas antiguas.
+   */
+  stops?: { what: string; detail: string; keeps: string | null } | null
 }
 
 async function throwPublicError(response: Response): Promise<never> {

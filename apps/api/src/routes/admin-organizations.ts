@@ -440,7 +440,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     )
   })
 
-  // O2: cobro y consumo de la clínica (ADR 0030). Lo ve todo el personal; negociar fuera de lo de siempre pide aprobación.
+  // O2: cobro y consumo de la clínica (ADR 0031). Lo ve todo el personal; negociar fuera de lo de siempre pide aprobación.
   app.get("/:id/billing", async (c) => {
     adminContextOf(c)
     return runService(c, 200, () => owner((tx) => getOrganizationBillingTerms(tx, c.req.param("id"))))

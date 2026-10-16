@@ -213,6 +213,34 @@ function isUnanswered(value: unknown): boolean {
   return value === undefined || value === null || value === "" || (typeof value === "object" && "state" in value && value.state === "unanswered")
 }
 /**
+ * El teléfono o el correo de quien habla por la persona (su madre, su tutor)
+ * cuentan como su medio de contacto: a un niño de 6 años no le falta teléfono si
+ * el de su madre está. La misma regla para el registro y para el aviso de los
+ * datos que faltan en su página.
+ */
+export function contactCoveredByRepresentative(key: RegistrationFieldKey, representativeContact: boolean): boolean {
+  return representativeContact && (key === "phone" || key === "email")
+}
+/**
+ * Lo que «Registro de pacientes» marca como obligatorio en los datos de la
+ * persona (identidad y contacto) y su ficha no tiene. El nombre nunca falta; el
+ * detalle del seguro solo se pide con un seguro elegido. `representativeContact`:
+ * quien habla por ella tiene teléfono o correo.
+ */
+export function missingFiliationFields(
+  config: Pick<RegistrationConfig, "fields">,
+  demographics: Partial<Record<RegistrationFieldKey, unknown>>,
+  options: { representativeContact: boolean },
+): Array<{ key: RegistrationFieldKey; label: string }> {
+  return REGISTRATION_FIELDS.filter((field) => {
+    if (field.step !== "datos" && field.step !== "contacto") return false
+    if (field.key === "displayName" || config.fields[field.key] !== "required") return false
+    if (field.key === "insuranceDetail" && !demographics.insuranceType) return false
+    if (contactCoveredByRepresentative(field.key, options.representativeContact)) return false
+    return isUnanswered(demographics[field.key])
+  }).map(({ key, label }) => ({ key, label }))
+}
+/**
  * Lo que la clínica configuró como obligatorio y estas respuestas no traen.
  * Con el alcance `essentials` no impide registrar: es lo que queda por
  * completar en la clínica.
@@ -222,7 +250,7 @@ export function pendingRegistrationFields(config: RegistrationConfig, answers: R
   return REGISTRATION_FIELDS.filter((field) => {
     if (config.fields[field.key] !== "required") return false
     if (field.key === "insuranceDetail" && !answers.demographics.insuranceType) return false
-    if (representativeContact && (field.key === "phone" || field.key === "email")) return false
+    if (contactCoveredByRepresentative(field.key, representativeContact)) return false
     return isUnanswered(registrationFieldValue(answers, field))
   }).map(({ key, label }) => ({ key, label }))
 }
@@ -289,7 +317,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
         continue
       }
       if (key === "insuranceDetail" && !data.demographics.insuranceType) continue
-      if (needsRepresentative && (key === "phone" || key === "email") && (data.representative?.phone || data.representative?.email)) continue
+      if (contactCoveredByRepresentative(key, representativeContact)) continue
       if (config.fields[key] === "required" && isUnanswered(value)) errors[path] = "Este campo es obligatorio"
       if (["allergies", "conditions", "medications"].includes(key) && value === undefined) errors[path] = "Indica una respuesta, incluido Sin responder"
     }

@@ -9,7 +9,7 @@ import {
 } from "@odentia/clinical"
 import { useId } from "react"
 import type { OdontogramEntry } from "../lib/patients"
-import { activeOrgLocale } from "../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 
 export interface OdontogramDocumentProps {
   entries: OdontogramEntry[]
@@ -740,7 +740,8 @@ function formatDate(raw?: string): string {
   if (!raw) return ""
   const time = new Date(raw).getTime()
   if (Number.isNaN(time)) return raw
-  return new Date(raw).toLocaleDateString(activeOrgLocale())
+  // La fecha del documento es la de la clínica, no la del navegador que imprime.
+  return new Date(raw).toLocaleDateString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
 }
 
 /**

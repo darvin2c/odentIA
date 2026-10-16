@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type ContactFull, usePermission } from "../../lib/crm"
+import { channelLabel } from "../../lib/channels"
 import { type PatientFull } from "../../lib/patients"
+import { relationshipText } from "../../lib/people"
 import { formatPortalDate, issuePortalActivationQrApi, issuePortalLinkApi, listPortalGrantsApi, listPortalLinksApi, revokePortalLinkApi } from "../../lib/portal"
 
 /**
@@ -62,7 +64,7 @@ export function PortalInvitePanel({ patientId }: { patientId: string }) {
       }),
     onSuccess: (result) => {
       setSent(
-        `Enlace enviado a ${result.link.contactName} por ${selectedConversation?.channel ?? "la conversación"}. Vence el ${formatPortalDate(result.link.expiresAt)}.`,
+        `Enlace enviado a ${result.link.contactName} por ${selectedConversation ? channelLabel(selectedConversation.channel) : "la conversación"}. Vence el ${formatPortalDate(result.link.expiresAt)}.`,
       )
       setPinOnce(result.pinOnce)
       void queryClient.invalidateQueries({ queryKey: ["portal-links"] })
@@ -181,7 +183,7 @@ export function PortalInvitePanel({ patientId }: { patientId: string }) {
           <SelectContent>
             {contacts.map((c) => (
               <SelectItem key={c.contactId} value={c.contactId}>
-                {c.displayName} · {c.relationship}
+                {c.displayName} · {relationshipText(c.relationship, c.relationshipDetail)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -240,7 +242,7 @@ export function PortalInvitePanel({ patientId }: { patientId: string }) {
               <SelectContent>
                 {conversations.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
-                    {c.channel} · {c.connectionName ?? "sin conexión"}
+                    {channelLabel(c.channel)} · {c.connectionName ?? "sin conexión"}
                   </SelectItem>
                 ))}
               </SelectContent>

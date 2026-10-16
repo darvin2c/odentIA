@@ -126,7 +126,7 @@ export async function processInbound(
         .where(eq(agentConfig.organizationId, orgId))
         .limit(1)
       // El agente nunca responde en una conversación cerrada (ADR 0024); la ingesta ya la reabrió.
-      // Un correo que escribió una máquina queda en la bandeja sin gastar una corrida (ADR 0030).
+      // Un correo que escribió una máquina queda en la bandeja sin gastar una corrida (ADR 0031).
       if (conv?.status === "open" && conv.agentStatus === "on" && cfg?.enabled && !msg.message.event.automated) {
         await sendAgentRun(
           tx,

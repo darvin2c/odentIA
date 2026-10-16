@@ -636,8 +636,6 @@ it("acta: snapshot inmutable con identidad firmada; bloquear con revisión pendi
     purpose: "initial",
     specifications: "Odontograma inicial",
     observations: "Sin observaciones",
-    examinerName: "Doctora Tests",
-    registrationNumber: "COP 999",
     signature: [
       [
         [5, 90],
@@ -646,9 +644,31 @@ it("acta: snapshot inmutable con identidad firmada; bloquear con revisión pendi
       ],
     ],
   }
-  const first = await withOrgContext(appDb, "org_a", (tx) =>
-    createOdontogramAssessment(tx, "org_a", ACTOR, p.id, base),
+  // Quien firma lo hace con su perfil: sin colegiatura no hay firma.
+  const signer = `acta-${crypto.randomUUID()}`
+  await ownerDb.execute(
+    sql`insert into "user" ("id", "name", "email") values (${signer}, 'Cuenta de Ana', ${`${signer}@example.com`})`,
   )
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+        values (${crypto.randomUUID()}, 'org_a', ${signer}, 'dentist', now())`,
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => createOdontogramAssessment(tx, "org_a", signer, p.id, base)),
+  ).rejects.toMatchObject({ code: "PROFILE_INCOMPLETE" })
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "signature_name", "professional_title", "registration_body", "registration_number")
+        values ('org_a', ${signer}, 'Ana Torres', 'Cirujano dentista', 'COP', '12345')`,
+  )
+  // Lo que se escriba como examinador no cuenta: firma el perfil.
+  const first = await withOrgContext(appDb, "org_a", (tx) =>
+    createOdontogramAssessment(tx, "org_a", signer, p.id, {
+      ...base,
+      examinerName: "Otra persona",
+      registrationNumber: "COP 999",
+    } as typeof base),
+  )
+  expect(first).toMatchObject({ examinerName: "Ana Torres", registrationNumber: "COP 12345" })
   expect(first.patientName).toBe("Acta A")
   expect(first.patientNumber).toBeGreaterThan(0)
   expect(first.entries).toEqual([])
@@ -666,13 +686,13 @@ it("acta: snapshot inmutable con identidad firmada; bloquear con revisión pendi
   expect(listed).toHaveLength(1)
   expect(listed[0]!.entries).toEqual([])
   const second = await withOrgContext(appDb, "org_a", (tx) =>
-    createOdontogramAssessment(tx, "org_a", ACTOR, p.id, { ...base, purpose: "new_findings" }),
+    createOdontogramAssessment(tx, "org_a", signer, p.id, { ...base, purpose: "new_findings" }),
   )
   expect(second.entries as unknown[]).toHaveLength(1)
   // Sin firma capturada no se sella.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
-      createOdontogramAssessment(tx, "org_a", ACTOR, p.id, { ...base, signature: [] }),
+      createOdontogramAssessment(tx, "org_a", signer, p.id, { ...base, signature: [] }),
     ),
   ).rejects.toMatchObject({ status: 400 })
 })

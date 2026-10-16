@@ -34,6 +34,7 @@ import {
   type PortalBudget,
 } from "../lib/portal"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { setOrgLocale } from "../lib/locale"
 import { AnswerInput, isFieldVisible, missingRequired } from "../components/patient/form-fields"
 
 export const Route = createFileRoute("/portal")({
@@ -311,6 +312,9 @@ function PortalDashboard({
     )
   }
   const info = sessionQuery.data
+  // Página pública, sin layout de organización: el formato y la zona de la
+  // clínica llegan con la sesión y se fijan antes de pintar fechas y horas.
+  setOrgLocale(info.locale, info.timeZone)
   const scope = info.session.scope
   const tabs = [
     scope.appointments && { value: "citas", label: "Citas" },
@@ -436,7 +440,7 @@ function AppointmentsTab({ sessionToken }: { sessionToken: string }) {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {formatPortalDate(appt.startsAt)} · {appt.branchName}
+              {formatPortalDate(appt.startsAt, { timeZone: appt.timeZone })} · {appt.branchName}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {confirmable && (
@@ -544,7 +548,7 @@ function RescheduleSlots({
               size="sm"
               onClick={() => onChoose(slot.startsAt)}
             >
-              {formatPortalDate(slot.startsAt)}
+              {formatPortalDate(slot.startsAt, { timeZone: slot.timeZone })}
             </Button>
           ))}
         </div>
@@ -845,7 +849,7 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
       ) : null}
       {budget.decidedAt && (
         <p className="mt-1 text-xs text-muted-foreground">
-          Respondido el {formatPortalDate(budget.decidedAt, budget.locale)}
+          Respondido el {formatPortalDate(budget.decidedAt, { locale: budget.locale })}
           {budget.acceptedByName ? ` por ${budget.acceptedByName}` : ""}
           {budget.decisionNote ? ` · ${budget.decisionNote}` : ""}
         </p>
@@ -977,7 +981,7 @@ function AccountTab({ sessionToken }: { sessionToken: string }) {
         {account.payments.map((payment) => (
           <div key={`p-${payment.id}`} className="flex items-center gap-2 text-sm">
             <span className="flex-1">
-              Pago · {payment.method}{payment.reference ? ` · ${payment.reference}` : ""} · {formatPortalDate(payment.paidAt, account.locale)}
+              Pago · {payment.method}{payment.reference ? ` · ${payment.reference}` : ""} · {formatPortalDate(payment.paidAt, { locale: account.locale })}
             </span>
             <span>{formatPortalMoney(payment.amountCents, payment.currency, account.locale)}</span>
           </div>

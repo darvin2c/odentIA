@@ -23,6 +23,7 @@ import { FileText, Upload, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { clinicDateTimeValue, instantFromClinicValue } from "../../lib/clinical-journey"
 import { orgSlugFromHostname } from "../../lib/host"
 import type { Encounter, PlanItem } from "../../lib/patients"
 import {
@@ -224,8 +225,13 @@ export function DocumentUploadDialog({
     if (!row.category) return "Elige la categoría."
     if (imageTypesFor(row.category).length > 0 && !row.imageType)
       return "Elige el tipo de imagen."
-    if (row.capturedAt && new Date(row.capturedAt).getTime() > Date.now() + 5 * 60_000)
-      return "La fecha de toma no puede ser futura."
+    if (row.capturedAt) {
+      // La fecha de toma se escribe en la zona de la clínica, no en la del navegador.
+      const taken = instantFromClinicValue(row.capturedAt)
+      if (!taken) return "Indica una fecha de toma válida."
+      if (new Date(taken).getTime() > Date.now() + 5 * 60_000)
+        return "La fecha de toma no puede ser futura."
+    }
     return null
   }
 
@@ -238,7 +244,8 @@ export function DocumentUploadDialog({
       form.append("label", row.title.trim())
       if (row.imageType && imageTypesFor(row.category).includes(row.imageType as never))
         form.append("imageType", row.imageType)
-      if (row.capturedAt) form.append("capturedAt", new Date(row.capturedAt).toISOString())
+      const capturedAt = row.capturedAt ? instantFromClinicValue(row.capturedAt) : null
+      if (capturedAt) form.append("capturedAt", capturedAt)
       if (row.source.trim()) form.append("source", row.source.trim())
       if (encounterChoice) form.append("encounterId", encounterChoice)
       if (row.planItemId) form.append("planItemId", row.planItemId)
@@ -627,9 +634,7 @@ function QueuedRow({
                   type="datetime-local"
                   value={row.capturedAt}
                   disabled={busy}
-                  max={new Date(Date.now() - new Date().getTimezoneOffset() * 60_000)
-                    .toISOString()
-                    .slice(0, 16)}
+                  max={clinicDateTimeValue(new Date().toISOString())}
                   onChange={(e) => onPatch({ capturedAt: e.currentTarget.value, validationError: null })}
                   aria-describedby={`${titleId}-taken-help`}
                 />

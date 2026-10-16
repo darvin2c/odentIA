@@ -43,7 +43,7 @@ export interface NormalizedInbound {
   sentAt: string
   /**
    * Lo escribió una máquina (correo noreply, respuesta automática, boletín):
-   * entra a la bandeja, pero el agente no lo atiende (ADR 0030).
+   * entra a la bandeja, pero el agente no lo atiende (ADR 0031).
    */
   automated?: boolean
 }

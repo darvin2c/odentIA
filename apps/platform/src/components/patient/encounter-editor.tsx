@@ -36,7 +36,12 @@ import { DictationMobileBar, dictationMobileBarVisible, DictationPanel, Dictatio
 import { type DictationKind, type DictationSuggestion, useDictationSession } from "./dictation-session"
 import { DictationSignDialog } from "./dictation-sign-dialog"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
-import { fetchFollowUps, fetchPrescriptions } from "../../lib/clinical-journey"
+import {
+  clinicDateTimeValue,
+  fetchFollowUps,
+  fetchPrescriptions,
+  instantFromClinicValue,
+} from "../../lib/clinical-journey"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
 import {
@@ -68,7 +73,7 @@ import { EncounterProcedures } from "./encounter-procedures"
 import { EncounterTreatments } from "./encounter-treatments"
 import { ImagenesTab } from "./imagenes-tab"
 import { PatientClinicalStrip } from "./patient-header"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 export interface EncounterEditorProps {
   patientId: string
@@ -184,18 +189,15 @@ const SAVE_LABEL: Record<SaveState, string> = {
   error: "Error al guardar",
 }
 
+// Fecha y hora de la revisión sugerida, en la zona de la clínica (no la del navegador).
 function toLocalDate(iso: string | null): string {
-  if (!iso) return ""
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ""
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+  if (!iso || Number.isNaN(Date.parse(iso))) return ""
+  return clinicDateTimeValue(iso).slice(0, 10)
 }
 
 function toLocalTime(iso: string | null): string {
-  if (!iso) return ""
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ""
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+  if (!iso || Number.isNaN(Date.parse(iso))) return ""
+  return clinicDateTimeValue(iso).slice(11, 16)
 }
 
 /** La cita solo se serializa con fecha+hora válidas, o null si ambas están vacías. */
@@ -210,13 +212,12 @@ function serializeAppt(
   const year = Number(dateMatch[1])
   const month = Number(dateMatch[2])
   const day = Number(dateMatch[3])
-  const hour = Number(timeMatch[1])
-  const minute = Number(timeMatch[2])
-  const local = new Date(year, month - 1, day, hour, minute, 0, 0)
-  if (local.getFullYear() !== year || local.getMonth() !== month - 1 || local.getDate() !== day) {
+  const check = new Date(Date.UTC(year, month - 1, day))
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
     return { ok: false }
   }
-  return { ok: true, value: local.toISOString() }
+  const value = instantFromClinicValue(`${date}T${time}`)
+  return value ? { ok: true, value } : { ok: false }
 }
 
 function sortTeeth(teeth: number[]): number[] {
@@ -293,7 +294,11 @@ function formatClock(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime())
     ? ""
-    : date.toLocaleTimeString(activeOrgLocale(), { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleTimeString(activeOrgLocale(), {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: activeOrgTimeZone(),
+      })
 }
 
 /** Resumen económico del cierre: qué quedó por cobrar y qué no. */
@@ -803,13 +808,11 @@ export function EncounterEditor({
   const refreshClosing = () =>
     queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
 
-  /** Hora de fin declarada: hoy a la hora indicada, en la zona del navegador. */
+  /** Hora de fin declarada: hoy a la hora indicada, en la zona de la clínica. */
   const endedAtIso = (): string | null => {
     if (!endTime) return null
-    const [hours, minutes] = endTime.split(":").map(Number)
-    const at = new Date()
-    at.setHours(hours ?? 0, minutes ?? 0, 0, 0)
-    return at.toISOString()
+    const today = clinicDateTimeValue(new Date().toISOString()).slice(0, 10)
+    return instantFromClinicValue(`${today}T${endTime}`)
   }
 
   const handleVoid = async () => {
@@ -820,6 +823,7 @@ export function EncounterEditor({
       await voidEncounterApi(patientId, encounterId, voidReason.trim())
       setVoidOpen(false)
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
       await queryClient.invalidateQueries({ queryKey: ["encounters", patientId] })
       await onChanged()
     } catch (err) {
@@ -837,6 +841,7 @@ export function EncounterEditor({
     setTakingOver(true)
     try {
       await takeOverEncounterApi(patientId, encounterId)
+      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
       await onChanged()
       await refreshClosing()
     } catch (err) {

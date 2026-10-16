@@ -3,6 +3,7 @@ import {
   type ConsentSections,
   consentSectionsToText,
   isValidTooth,
+  normalizeDrugText,
   parseConsentSections,
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
@@ -30,6 +31,7 @@ import { member } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
@@ -435,6 +437,15 @@ export const FIELD_TYPES = [
 ] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
 
+/**
+ * A qué dato de los antecedentes va una respuesta al finalizar el formulario.
+ * Es la extracción por definición de HL7 FHIR SDC (`Questionnaire.item.definition`,
+ * aquí solo el elemento): `AllergyIntolerance.code` es la sustancia de una
+ * alergia declarada, escrita como «sustancia: lo que le pasó», una por línea.
+ */
+export const FIELD_DEFINITIONS = ["AllergyIntolerance.code"] as const
+export type FieldDefinition = (typeof FIELD_DEFINITIONS)[number]
+
 /** Mostrar el campo solo si otro campo anterior tiene ese valor. */
 export interface FieldCondition {
   field: string
@@ -452,6 +463,8 @@ export interface FormFieldDef {
   max?: number | null
   help?: string | null
   showIf?: FieldCondition | null
+  /** Solo en texto: la respuesta pasa a los antecedentes al finalizar. */
+  definition?: FieldDefinition | null
 }
 
 export interface FormSectionDef {
@@ -514,6 +527,7 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
         const rawMin: unknown = "min" in f ? f.min : undefined
         const rawMax: unknown = "max" in f ? f.max : undefined
         const rawShowIf: unknown = "showIf" in f ? f.showIf : undefined
+        const rawDefinition: unknown = "definition" in f ? f.definition : undefined
         const fieldId = assertFieldId(typeof rawId === "string" ? rawId : "")
         if (seenFields.has(fieldId)) throw validation(`Campo duplicado: ${fieldId}`)
         seenFields.add(fieldId)
@@ -578,6 +592,13 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
             throw validation(`"${label}" solo puede depender de un campo Sí/No o de opciones`)
           }
           field.showIf = { field: target, equals: cond.equals }
+        }
+        if (rawDefinition !== undefined && rawDefinition !== null) {
+          if (!(FIELD_DEFINITIONS as readonly string[]).includes(String(rawDefinition)))
+            throw validation(`"${label}" va a un dato de los antecedentes que no existe`)
+          if (type !== "texto" && type !== "texto_largo")
+            throw validation(`"${label}" pasa a los antecedentes: debe ser una respuesta de texto`)
+          field.definition = rawDefinition as FieldDefinition
         }
         if (type === "numero") {
           if (rawMin !== undefined && rawMin !== null) {
@@ -1206,7 +1227,41 @@ export async function finalizeFormResponse(
     .returning()
   if (!row) throw notFound("Formulario")
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
+  // Lo declarado sobre alergias pasa a los antecedentes sin confirmar, para que
+  // la receta avise; la misma transacción: si no se puede, no se finaliza.
+  await addDeclaredAllergies(tx, orgId, actorUserId, row.patientId, declaredAllergiesOf(schema, answers), {
+    entity: "clinical_form_response",
+    entityId: row.id,
+  })
   return row
+}
+
+/**
+ * Alergias declaradas en las respuestas de texto marcadas como
+ * `AllergyIntolerance.code`: una por línea (o separadas por «;»), con la
+ * sustancia antes de «:» y lo que le pasó después («Penicilina: ronchas en la
+ * piel»). Sin «:», todo es la sustancia. «Ninguna» o «No» no es una alergia.
+ */
+const NO_ALLERGY = new Set(["no", "ninguna", "ninguno", "nada", "no tengo", "no se", "no sé", "n/a", "na", "-"])
+
+function declaredAllergiesOf(schema: FormSchemaDef, answers: Record<string, unknown>): DeclaredAllergy[] {
+  return schema.sections
+    .flatMap((section) => section.fields)
+    .filter((field) => field.definition === "AllergyIntolerance.code")
+    .flatMap((field) => {
+      const value = answers[field.id]
+      return typeof value === "string" ? value.split(/[\n;]+/) : []
+    })
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((part) => {
+      const colon = part.indexOf(":")
+      return colon > 0
+        ? { substance: part.slice(0, colon).trim(), reaction: part.slice(colon + 1).trim() || null }
+        : { substance: part, reaction: null }
+    })
+    .filter((item) => item.substance.length > 0 && !NO_ALLERGY.has(normalizeDrugText(item.substance).replace(/[.!]+$/, "")))
 }
 
 /** Descarta un borrador con motivo: no cuenta como registro clínico y no se edita más. */
@@ -2191,33 +2246,8 @@ export async function createClinicalOrder(
   await audit(tx, orgId, actorUserId, "order.create", "clinical_order", row.id, {
     kind: input.kind,
   })
-  // Responsable: profesionales adscritos a la especialidad destino; sin ellos,
-  // el solicitante (da seguimiento al destinatario externo libre).
-  const responsible = row.specialtyId
-    ? (
-        await tx
-          .select({ userId: professionalSpecialty.userId })
-          .from(professionalSpecialty)
-          .where(
-            and(
-              eq(professionalSpecialty.organizationId, orgId),
-              eq(professionalSpecialty.specialtyId, row.specialtyId),
-            ),
-          )
-      ).map((r) => r.userId)
-    : []
-  const recipients = [...new Set(responsible.length > 0 ? responsible : [actorUserId])]
-  for (const userId of recipients) {
-    await notifyUser(tx, orgId, userId, {
-      dedupeKey: `clinical-order-${row.id}-solicitado`,
-      title: "Nueva orden clínica por atender",
-      body: "Tienes una orden clínica pendiente de atención.",
-      href: `/patients/${row.patientId}`,
-      actorUserId,
-      // Se retira cuando alguien la toma o se cancela.
-      subject: `orden-clinica:${row.id}`,
-    })
-  }
+  // Sin aviso por la campana: una orden por atender es trabajo y queda en su
+  // lista, no se avisa (ADR 0025).
   return row
 }
 

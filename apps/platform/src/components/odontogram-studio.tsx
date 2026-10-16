@@ -48,7 +48,8 @@ import { OdontogramArch } from "./odontogram-arch"
 import { OdontogramAssessments } from "./odontogram-assessments"
 import { ToothDrawer } from "./tooth-drawer"
 import { ToothSVG } from "./tooth-svg"
-import { activeOrgLocale } from "../lib/locale"
+import { formatDate } from "../lib/clinical-journey"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 
 /** Ancho del contenedor disponible (no del viewport): a partir de 960 px el área es de dos columnas. */
 function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: boolean } {
@@ -64,6 +65,11 @@ function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: bool
     return () => observer.disconnect()
   }, [])
   return { ref, wide }
+}
+
+/** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
+function snapshotLabel(iso: string): string {
+  return new Date(iso).toLocaleString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
 }
 
 export function OdontogramStudio({
@@ -315,7 +321,7 @@ export function OdontogramStudio({
                   items={{
                     current: "Actual",
                     ...Object.fromEntries(
-                      dates.map((date) => [date, new Date(date).toLocaleString(activeOrgLocale())]),
+                      dates.map((date) => [date, snapshotLabel(date)]),
                     ),
                   }}
                   onValueChange={(value) => {
@@ -330,7 +336,7 @@ export function OdontogramStudio({
                     <SelectItem value="current">Actual</SelectItem>
                     {dates.map((date) => (
                       <SelectItem key={date} value={date}>
-                        {new Date(date).toLocaleString(activeOrgLocale())}
+                        {snapshotLabel(date)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -499,7 +505,7 @@ export function OdontogramStudio({
                                 <p className="text-xs text-muted-foreground">
                                   Pieza {entry.toothNumber}
                                   {entry.createdAt
-                                    ? ` · ${new Date(entry.createdAt).toLocaleDateString(activeOrgLocale())}`
+                                    ? ` · ${formatDate(entry.createdAt)}`
                                     : ""}
                                 </p>
                                 <h4 className="mt-1 font-medium">
@@ -637,7 +643,7 @@ export function OdontogramStudio({
                       <span>
                         Pieza {entry.toothNumber} · {conditionLabel(entry.condition)}
                         {entry.createdAt
-                          ? ` · ${new Date(entry.createdAt).toLocaleDateString(activeOrgLocale())}`
+                          ? ` · ${formatDate(entry.createdAt)}`
                           : ""}
                       </span>
                       <span className="flex gap-2">

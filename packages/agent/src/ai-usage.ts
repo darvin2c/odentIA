@@ -18,7 +18,7 @@ interface ModelPrice {
 
 /**
  * Precios de los modelos que usa odentIA, revisados el 2026-10-15 para la
- * ADR 0030. Un modelo sin fila deja su uso con costo null: nunca 0 ni un
+ * ADR 0031. Un modelo sin fila deja su uso con costo null: nunca 0 ni un
  * estimado. Si un proveedor cambia su precio, se cambia aquí; lo ya
  * registrado conserva el costo de su momento.
  * - claude-haiku-5-5: precio de Anthropic hasta 100K tokens de entrada por
@@ -184,7 +184,7 @@ export async function withAiMeter<T>(run: () => Promise<T>, save: (entries: AiUs
 
 /**
  * Mide una operación de una clínica y guarda su uso con el origen dado (ADR
- * 0030). La usan la corrida, las pruebas, el dictado, el Administrador, la
+ * 0031). La usan la corrida, las pruebas, el dictado, el Administrador, la
  * transcripción y el índice de vectores: una sola forma de medir.
  */
 export function meterAiUse<T>(

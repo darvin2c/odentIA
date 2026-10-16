@@ -955,7 +955,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
       withOrgContext(deps.db, orgId, (tx) => listSaasPlans(tx, { currency: parsed.data.currency })),
     )
   })
-  // C2: lo que hicieron los agentes en el tramo que corre, con sus precios (ADR 0030).
+  // C2: lo que hicieron los agentes en el tramo que corre, con sus precios (ADR 0031).
   app.get("/consumption", async (c) => {
     const orgId = c.req.query("orgId")
     if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
@@ -1063,7 +1063,7 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const membership = await accountOwnerOrAdmin(deps, c, orgId)
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve los cargos"), 403)
-    // Cada cargo con sus líneas: la factura suma exactamente lo que se ve (ADR 0030).
+    // Cada cargo con sus líneas: la factura suma exactamente lo que se ve (ADR 0031).
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const charges = await listSaasCharges(tx, orgId)

@@ -384,8 +384,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         standard: "NTS 188-MINSA/DGIESP-2022",
         specifications: String(body.specifications ?? ""),
         observations: String(body.observations ?? ""),
-        examinerName: String(body.examinerName ?? ""),
-        registrationNumber: String(body.registrationNumber ?? ""),
+        // Como el servidor: quién firma sale del perfil profesional, no del cuerpo.
+        examinerName: "Ana Torres",
+        registrationNumber: "COP 12345",
         signature: (body.signature as number[][][]) ?? [],
         entries: entries.filter((entry) => !entry.voidedAt),
       } as OdontogramAssessment
@@ -551,6 +552,23 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         (!specialty || service.specialty === specialty),
     )
     return json({ data: rows, nextCursor: null }) as T
+  }
+
+  // Perfil profesional propio: con él se firma la evaluación del odontograma.
+  if (rawPath === "/api/clinical-forms/professionals/me/profile" && method === "GET") {
+    return json({
+      data: {
+        userId: "demo-user",
+        accountName: "Ana Torres",
+        signatureName: "Ana Torres",
+        professionalTitle: "Cirujano dentista",
+        registrationBody: "COP",
+        registrationNumber: "12345",
+        specialtyRegistration: null,
+        complete: true,
+        updatedAt: null,
+      },
+    }) as T
   }
 
   if (segments[1] === "cie10" && method === "GET") {

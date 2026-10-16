@@ -363,7 +363,7 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient" })
 })
 
-test("enlace contextual registra a un menor sin duplicar self y luego no está disponible", async ({
+test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerle registrarse y luego no está disponible", async ({
   browser,
   createOwner,
   nextEventId,
@@ -420,9 +420,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
   const conversationId = expected!.id
   const contactId = expected!.contact.id
 
-  // El contacto ya tiene ficha propia: un segundo «A mí» no debe duplicarla.
-  // Documento deliberadamente repetido: es la condición del caso duplicado.
-  const selfDoc = docFromId(nextEventId())
+  // El contacto ya tiene ficha propia: su enlace es para registrar a un familiar.
   const selfPatient = await call<{ id: string }>(
     page,
     "POST",
@@ -435,7 +433,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
           displayName: `Titular Enlace ${org.slug}`,
           birthDate: "1985-03-20",
           docType: "DNI",
-          docNumber: selfDoc,
+          docNumber: docFromId(nextEventId()),
           // La configuración publicada exige teléfono también en el alta interna.
           phone: phoneFromId(nextEventId()),
         },
@@ -460,44 +458,15 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
   // El enlace conserva el origen público del tenant, puerto incluido.
   expect(new URL(linkUrl).origin).toBe(new URL(tenant(org.slug, "/")).origin)
 
-  // Intento duplicado como "Soy el paciente" con el mismo documento: mensaje neutro.
-  const { context: dupContext, page: dup } = await anonymousPage(browser)
-  try {
-    await gotoHydrated(dup, linkUrl)
-    await expect(
-      dup.getByText("Continúa con el registro compartido por la clínica."),
-    ).toBeVisible()
-    await fillPatientNames(dup, `Duplicado Enlace ${org.slug}`)
-    await dup.getByLabel("Fecha de nacimiento").fill("1985-03-20")
-    await dup.getByLabel("Tipo de documento").click()
-    await dup.getByRole("option", { name: "DNI", exact: true }).click()
-    await dup.getByLabel("Número de documento").fill(selfDoc)
-    await dup.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await dup.getByLabel(/^Teléfono(?: \*)?$/).fill(phoneFromId(nextEventId()))
-    await dup.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await dup.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await dup.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
-    await dup.getByRole("button", { name: "Enviar registro", exact: true }).click()
-
-    await expect(
-      dup.getByText("No pudimos completar el registro. Comunícate con recepción.", {
-        exact: true,
-      }),
-    ).toBeVisible()
-    await expect(dup.getByText("Paciente registrado", { exact: true })).toHaveCount(0)
-    await expect(dup.getByText(/HC-\d{6}/)).toHaveCount(0)
-  } finally {
-    await dupContext.close()
-  }
-  const stillOne = await call<PatientListItem[]>(page, "GET", "/api/patients", org.slug)
-  expect(stillOne).toHaveLength(1)
-
   // Registro del menor como "otra persona": vínculo de tutor, sin ficha self nueva.
+  // Ya tiene su ficha: el formulario no le ofrece registrarse a sí misma.
   const { context: minorContext, page: minor } = await anonymousPage(browser)
   try {
     await gotoHydrated(minor, linkUrl)
-    await minor.getByLabel("¿Quién completa el registro?").click()
-    await minor.getByRole("option", { name: "Registro a otra persona", exact: true }).click()
+    await expect(
+      minor.getByText("Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."),
+    ).toBeVisible()
+    await expect(minor.getByLabel("¿Quién completa el registro?")).toHaveCount(0)
     const minorName = `Menor Enlace ${org.slug}`
     await fillPatientNames(minor, minorName)
     await minor.getByLabel("Fecha de nacimiento").fill("2018-06-15")

@@ -361,7 +361,7 @@ export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Dat
 export interface AdminRuntime {
   adminOn: boolean
   receptionOn: boolean
-  /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0030). */
+  /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0031). */
   agentsPaused: boolean
   quietStart: string
   quietEnd: string
@@ -398,6 +398,50 @@ export type ConsentRow = typeof automationConsent.$inferSelect
  */
 export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento", "novedades"] as const
 export type MessagePermissionKey = (typeof MESSAGE_PERMISSIONS)[number]
+
+/** Lo que deja de recibir quien se da de baja, dicho a la persona: qué es y qué incluye. */
+export interface UnsubscribeWords {
+  /** «los recordatorios de tus citas»: completa «Dejar de recibir…» y «Ya no recibirás…». */
+  what: string
+  detail: string
+  /** Lo que sigue llegando; null si la baja apaga todo lo que la clínica envía sola. */
+  keeps: string | null
+}
+
+/**
+ * Cómo se nombra cada tipo de mensaje cuando la persona se da de baja. La baja
+ * apaga el tipo del mensaje del que salió el enlace, y no los demás: la página
+ * dice cuál, sin hablar de autorizaciones ni de campañas (ADR 0030).
+ */
+export const UNSUBSCRIBE_WORDS: Record<MessagePermissionKey, UnsubscribeWords> = {
+  recordatorio: {
+    what: "los recordatorios de tus citas",
+    detail: "Son los recordatorios y avisos de tus citas y de tus controles.",
+    keeps: "Lo demás que te envía la clínica sigue igual.",
+  },
+  seguimiento: {
+    what: "los mensajes de seguimiento",
+    detail:
+      "Son los mensajes sobre un presupuesto pendiente, una cita a la que no pudiste venir o que se canceló, y una conversación por retomar.",
+    keeps: "Los recordatorios de tus citas siguen llegando.",
+  },
+  novedades: {
+    what: "las novedades y promociones",
+    detail: "Son los mensajes con las novedades y promociones de la clínica.",
+    keeps: "Los recordatorios de tus citas siguen llegando.",
+  },
+}
+
+/** Un enlace de baja que no viene de un mensaje concreto apaga los tres tipos. */
+const UNSUBSCRIBE_ALL_WORDS: UnsubscribeWords = {
+  what: "los mensajes automáticos de la clínica",
+  detail: "Son los recordatorios y avisos de tus citas, los mensajes de seguimiento y las novedades y promociones.",
+  keeps: null,
+}
+
+export function unsubscribeWords(purposes: readonly ConsentPurpose[]): UnsubscribeWords {
+  return purposes.length === 1 && purposes[0] ? UNSUBSCRIBE_WORDS[purposes[0]] : UNSUBSCRIBE_ALL_WORDS
+}
 
 export interface MessagePermission {
   purpose: MessagePermissionKey
@@ -2483,6 +2527,8 @@ export interface PublicLinkInfo {
   timeZone: string
   expired: boolean
   used: boolean
+  /** En una baja, lo que deja de recibir (`UNSUBSCRIBE_WORDS`); null en los enlaces de una cita. */
+  stops: UnsubscribeWords | null
 }
 
 /** Información mínima del enlace: nunca incluye paciente ni contacto. */
@@ -2520,7 +2566,27 @@ export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLi
       }).format(appt.startsAt)
     }
   }
-  return { purpose, when, timeZone, expired, used: link.usedAt !== null }
+  const stops = purpose === "baja" ? unsubscribeWords(await unsubscribePurposes(tx, link)) : null
+  return { purpose, when, timeZone, expired, used: link.usedAt !== null, stops }
+}
+
+/**
+ * Los tipos de mensaje que apaga un enlace de baja: el del mensaje del que salió
+ * (quien se da de baja de un seguimiento sigue recibiendo el recordatorio de su
+ * cita) o, si no viene de un mensaje concreto, los tres.
+ */
+async function unsubscribePurposes(
+  tx: Db,
+  link: typeof automationLinkToken.$inferSelect,
+): Promise<readonly ConsentPurpose[]> {
+  const [origin] = link.jobId
+    ? await tx
+        .select({ kind: automationJob.kind })
+        .from(automationJob)
+        .where(and(eq(automationJob.id, link.jobId), eq(automationJob.organizationId, link.organizationId)))
+        .limit(1)
+    : []
+  return origin ? [purposeOfKind(origin.kind)] : CONSENT_PURPOSES
 }
 
 async function useLinkToken(tx: Db, token: string, expected: LinkPurpose) {
@@ -2641,14 +2707,7 @@ export async function unsubscribeByToken(tx: Db, token: string): Promise<{ conta
   if (link.expiresAt.getTime() < Date.now())
     throw new ServiceError("LINK_EXPIRED", 409, "El enlace venció")
   if (!link.contactId) throw notFound("Contacto")
-  const [origin] = link.jobId
-    ? await tx
-        .select({ kind: automationJob.kind })
-        .from(automationJob)
-        .where(and(eq(automationJob.id, link.jobId), eq(automationJob.organizationId, link.organizationId)))
-        .limit(1)
-    : []
-  const purposes = origin ? [purposeOfKind(origin.kind)] : CONSENT_PURPOSES
+  const purposes = await unsubscribePurposes(tx, link)
   for (const purpose of purposes) {
     await setConsent(tx, link.organizationId, null, link.contactId, { purpose, granted: false, source: "baja" })
   }

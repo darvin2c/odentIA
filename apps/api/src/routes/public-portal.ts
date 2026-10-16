@@ -8,6 +8,7 @@ import {
   getPortalAppointments,
   getPortalDocumentUrl,
   getPortalRescheduleSlots,
+  getPortalSessionInfo,
   listPortalBudgets,
   listPortalDocuments,
   requirePortalSession,
@@ -252,20 +253,7 @@ export function createPublicPortalRoute(deps: {
     })
   })
 
-  app.get("/session", async (c) =>
-    portalCall(c, async (_tx, ctx) => ({
-      session: {
-        id: ctx.session.id,
-        patientId: ctx.session.patientId,
-        contactId: ctx.session.contactId,
-        scope: ctx.session.scope,
-        expiresAt: ctx.session.expiresAt,
-        grantId: ctx.session.grantId,
-        authMethod: ctx.session.authMethod,
-      },
-      patientName: ctx.patientName,
-    })),
-  )
+  app.get("/session", async (c) => portalCall(c, (tx, ctx) => getPortalSessionInfo(tx, ctx)))
 
   app.get("/appointments", async (c) => portalCall(c, (tx, ctx) => getPortalAppointments(tx, ctx)))
 

@@ -91,7 +91,8 @@ export function EncounterTreatments({
 
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Esta atención no tiene tratamientos vinculados. Puedes indicarlos en la pestaña Plan.
+          Esta atención no tiene tratamientos vinculados. Los tratamientos se indican en esta
+          atención, en su bloque «Plan de tratamiento».
         </p>
       ) : (
         <ul className="flex flex-col divide-y">

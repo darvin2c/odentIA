@@ -201,7 +201,8 @@ export function PatientPendingCard({
           coordination.budgetsAwaitingDecision.length === 1
             ? `Presupuesto «${coordination.budgetsAwaitingDecision[0].title}» sin decisión`
             : `${coordination.budgetsAwaitingDecision.length} presupuestos sin decisión`,
-        detail: "Presentado y pendiente de respuesta de quien decide.",
+        // Enviado o «lo está pensando»: la regla del servidor; un borrador nunca llega aquí.
+        detail: "Espera la respuesta de quien decide.",
         action: go("coordinacion", "Hacer seguimiento"),
       })
   }
@@ -219,7 +220,7 @@ export function PatientPendingCard({
   }
   if (canEditPatient) {
     const config = configQuery.data?.data
-    const gaps = config ? missingFiliation(config, detail.patient) : []
+    const gaps = config ? missingFiliation(config, detail.patient, detail.contacts) : []
     // Una ficha creada con lo mínimo (al reservar o desde el enlace) queda además
     // con la identidad por revisar: se dice en el mismo pendiente.
     const review = detail.patient.identityNeedsReview ? "Confirma apellidos y nombres." : ""
@@ -359,7 +360,8 @@ export function ClinicalSummaryTab({
         resolved.proposedBudgets.length === 1
           ? `Presupuesto «${resolved.proposedBudgets[0].title}» sin decisión`
           : `${resolved.proposedBudgets.length} presupuestos sin decisión`,
-      detail: "Presentado y pendiente de respuesta de quien decide.",
+      // Enviado o «lo está pensando»: la regla del servidor; un borrador nunca llega aquí.
+      detail: "Espera la respuesta de quien decide.",
       action: go("plan", "Ver presupuestos"),
     })
   const unscheduled = (followUpsQuery.data?.data ?? []).filter((row) => row.status === "pendiente")

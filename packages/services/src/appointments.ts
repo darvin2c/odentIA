@@ -929,7 +929,7 @@ export async function setAppointmentStatus(
       .returning({ id: appointment.id })
     if (!updated) throw notFound("Cita")
     await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, metadata)
-    // El paciente asistió: si el Administrador lo recuperó, cuenta la cita (ADR 0030).
+    // El paciente asistió: si el Administrador lo recuperó, cuenta la cita (ADR 0031).
     if (next === "atendida") await countRecoveredAppointment(tx, orgId, id, new Date())
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)

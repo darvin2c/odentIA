@@ -1,5 +1,5 @@
 /**
- * Tus cargos (ADR 0030, fase 4): cada cargo con sus líneas, la cuota, lo que
+ * Tus cargos (ADR 0031, fase 4): cada cargo con sus líneas, la cuota, lo que
  * pasó del crédito por agente, lo que cubrió el crédito y el impuesto. La
  * suma es exactamente lo que se vio en «Ver cada acción».
  */

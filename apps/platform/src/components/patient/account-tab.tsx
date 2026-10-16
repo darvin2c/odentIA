@@ -92,12 +92,6 @@ function budgetStateLabel(status: string): string {
   return "Espera respuesta"
 }
 
-/** Lo que el paciente todavía puede responder: presentado, o con algo «lo piensa». */
-function awaitsAnswer(budget: BudgetWithTotals): boolean {
-  if (budget.status === "presentado" || budget.status === "pospuesto") return true
-  return budget.status === "parcial" && budget.items.some((line) => line.decision === "pospuesto")
-}
-
 /** Sección de la cuenta: misma tarjeta y mismo título en todas. */
 function Section({
   title,
@@ -336,9 +330,9 @@ export function AccountTab({
   const accepted = budgetList.filter(
     (budget) => budget.status === "aceptado" || budget.status === "parcial",
   )
-  const waiting = budgetList.filter(
-    (budget) => budget.status === "presentado" || budget.status === "pospuesto",
-  )
+  // Espera respuesta según la regla del servidor (`awaitsAnswer`); lo aceptado en
+  // parte ya está arriba, aunque aún le quede algo por decidir.
+  const waiting = budgetList.filter((budget) => budget.awaitsAnswer && !accepted.includes(budget))
 
   // Quién puede responder un presupuesto: la propia persona o su representante legal vigente.
   const selfContact = patient.data?.data.contacts.find((item) => item.relationship === "self")
@@ -723,7 +717,7 @@ export function AccountTab({
                       </p>
                     )}
                     <div className="flex flex-wrap gap-2">
-                      {canDecide && awaitsAnswer(budget) ? (
+                      {canDecide && budget.awaitsAnswer ? (
                         <Button size="sm" onClick={() => openDecide(budget)}>
                           Anotar la respuesta
                         </Button>

@@ -10,7 +10,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { currentSaasPeriod, getSaasConsumption, microsToCents, type SaasConsumption } from "./saas-actions.js"
 
-/* ---------- Negociación por clínica (ADR 0030, tablero O2) ---------- */
+/* ---------- Negociación por clínica (ADR 0031, tablero O2) ---------- */
 
 function forbidden(message: string): ServiceError {
   return new ServiceError("FORBIDDEN", 403, message)

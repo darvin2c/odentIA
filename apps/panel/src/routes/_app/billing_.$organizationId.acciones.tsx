@@ -1,5 +1,5 @@
 /**
- * Cada acción de los agentes en el tramo que corre (ADR 0030, tablero C3):
+ * Cada acción de los agentes en el tramo que corre (ADR 0031, tablero C3):
  * la factura suma exactamente estas filas. Lo que no se cobra no aparece; lo
  * que se cuenta pero no suma (va dentro de una cita, cita anulada) lo dice
  * en su estado. Solo owner/admin, como el resto de Plan y pagos.

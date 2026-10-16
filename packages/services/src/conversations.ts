@@ -357,7 +357,7 @@ export async function ingestInbound(
   }
 
   // Nota de voz sin caption: transcribir a body (el agente lo lee como texto).
-  // Solo si el agente la va a leer (ADR 0030): con él apagado queda el audio
+  // Solo si el agente la va a leer (ADR 0031): con él apagado queda el audio
   // para el equipo y no se paga una transcripción que nadie usa.
   // Best-effort: si falla, body queda null y la ingesta no se pierde.
   if (

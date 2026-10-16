@@ -207,6 +207,8 @@ export async function seedClinicalForms(
               type: "texto",
               required: true,
               showIf: { field: "alergia", equals: true },
+              // Al finalizarlo, pasa a sus antecedentes como alergia sin confirmar.
+              definition: "AllergyIntolerance.code",
             },
             { id: "medicamentos", label: "¿Tomas algún medicamento? ¿Cuál y cuánto?", type: "texto_largo" },
             {

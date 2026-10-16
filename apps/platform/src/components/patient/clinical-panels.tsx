@@ -8,7 +8,7 @@
 
 import {
   ADMINISTRATION_ROUTES,
-  allergyConflicts,
+  allergyWarnings,
   DENTAL_MEDICATIONS,
   DOSAGE_FORMS,
 } from "@odentia/clinical"
@@ -22,6 +22,7 @@ import { apiFetch } from "../../lib/api"
 import {
   cancelFollowUpApi,
   cancelPrescriptionApi,
+  clinicDateTimeValue,
   completeFollowUpApi,
   createFollowUpApi,
   createPrescriptionApi,
@@ -34,6 +35,7 @@ import {
   followUpAppointmentLabel,
   formatDate,
   formatDateTime,
+  instantFromClinicValue,
   mutationMessage,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
@@ -55,15 +57,6 @@ function statusBadge(status: string): "default" | "secondary" | "success" | "des
   return "secondary"
 }
 
-function toIso(value: string): string {
-  return new Date(value).toISOString()
-}
-
-/** Valor para inputs `datetime-local` en hora local del navegador. */
-function localInputValue(date: Date): string {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
-}
 
 /** Controles longitudinales del paciente, acotables a un tratamiento o atención. */
 export function ControlesPanel({
@@ -119,7 +112,10 @@ export function ControlesPanel({
   const kind = itemId ? "tratamiento" : kindState
   const planItemId = itemId ?? planItemIdState
   const [title, setTitle] = useState("")
-  const [dueAt, setDueAt] = useState(localInputValue(new Date(Date.now() + 86_400_000)))
+  // La fecha prevista se escribe y se lee en la zona de la clínica, no la del navegador.
+  const [dueAt, setDueAt] = useState(() =>
+    clinicDateTimeValue(new Date(Date.now() + 86_400_000).toISOString()),
+  )
   const [instructions, setInstructions] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -135,7 +131,7 @@ export function ControlesPanel({
       createFollowUpApi(patientId, {
         kind,
         title: title.trim(),
-        dueAt: toIso(dueAt),
+        dueAt: instantFromClinicValue(dueAt) ?? "",
         instructions: instructions.trim() || null,
         planItemId: kind === "tratamiento" ? planItemId || null : null,
         originEncounterId: encounterId ?? null,
@@ -360,6 +356,10 @@ export function ControlesPanel({
           }
           if (!title.trim()) {
             setError("Indica el título del control.")
+            return
+          }
+          if (!instantFromClinicValue(dueAt)) {
+            setError("Indica la fecha prevista del control.")
             return
           }
           createMutation.mutate()
@@ -752,20 +752,18 @@ export function RecetasPanel({
   const [acknowledged, setAcknowledged] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [medications, setMedications] = useState<MedicationDraft[]>([emptyMedication()])
-  // Alergias registradas: el aviso aparece al escribir la DCI, antes de emitir.
+  // Alergias activas, también las declaradas sin confirmar: el aviso aparece al
+  // escribir la DCI, antes de emitir, con la misma regla que el servidor.
   const healthQuery = useQuery({
     queryKey: ["patient-health", patientId],
     queryFn: () => fetchPatientHealth(patientId),
     enabled: canRead && createOpen,
   })
-  const allergySubstances = (healthQuery.data?.data.allergies ?? [])
-    .filter((allergy) => allergy.isActive)
-    .map((allergy) => allergy.substance)
+  const activeAllergies = (healthQuery.data?.data.allergies ?? []).filter(
+    (allergy) => allergy.isActive,
+  )
   const conflicts = medications.flatMap((medication) =>
-    allergyConflicts(medication.genericName, allergySubstances).map(
-      (conflict) =>
-        `${medication.genericName}: alergia a ${conflict.substance} (${conflict.reason})`,
-    ),
+    allergyWarnings(medication.genericName, activeAllergies),
   )
   const [error, setError] = useState<string | null>(null)
   const createMutation = useMutation({
@@ -1085,7 +1083,7 @@ export function RecetasPanel({
               role="alert"
               className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
             >
-              <p className="font-medium">Alergia registrada</p>
+              <p className="font-medium">Aviso de alergia</p>
               <ul className="list-disc pl-5">
                 {conflicts.map((line) => (
                   <li key={line}>{line}</li>
@@ -1112,7 +1110,7 @@ export function RecetasPanel({
               id={`${uid}-rx-valid`}
               type="date"
               className="w-44"
-              min={new Date().toISOString().slice(0, 10)}
+              min={clinicDateTimeValue(new Date().toISOString()).slice(0, 10)}
               value={validUntil}
               onChange={(event) => setValidUntil(event.target.value)}
             />

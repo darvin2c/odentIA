@@ -31,7 +31,7 @@ function dateLabel(iso: string | null, locale: string, timeZone: string): string
   }
 }
 
-/** Aviso de cobro calculado por el servidor (ADR 0030, tablero C4). */
+/** Aviso de cobro calculado por el servidor (ADR 0031, tablero C4). */
 interface SaasAlert {
   family: "saldo_prueba" | "dias_prueba" | "credito" | "tope"
   level: "aviso" | "alarma" | "limite"

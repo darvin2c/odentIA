@@ -1,4 +1,4 @@
-# 0030 · Cobro por acción, con un solo plan que vuelve en crédito
+# 0031 · Cobro por acción, con un solo plan que vuelve en crédito
 
 Fecha: 2026-10-15 · Estado: aceptada e implementada en cuatro fases (medir, contar, plan y avisos, cobrar); las cifras se validan con clínicas piloto (#80)
 

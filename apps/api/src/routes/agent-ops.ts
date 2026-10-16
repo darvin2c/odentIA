@@ -348,7 +348,7 @@ const sandboxInput = z.object({
   /**
    * «Probar»: un turno de una conversación de prueba, sin hilo ni persona
    * real. No envía ni escribe; cuenta que la clínica probó a su agente y lo
-   * que gastó, dentro del tope de pruebas (ADR 0030).
+   * que gastó, dentro del tope de pruebas (ADR 0031).
    */
   app.post("/sandbox", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)

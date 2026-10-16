@@ -305,7 +305,7 @@ export const agentRunLedger = pgTable(
 )
 
 /**
- * De dónde sale un uso de IA (ADR 0030). `recepcion` son las corridas reales;
+ * De dónde sale un uso de IA (ADR 0031). `recepcion` son las corridas reales;
  * `probar`, `simulacion` y `vista_previa`, las pruebas desde la plataforma;
  * `practica_dictado`, el dictado de práctica; `administrador`, lo que se le
  * pide con palabras; `ya_aviso`, la comprobación antes de un seguimiento;

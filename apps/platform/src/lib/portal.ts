@@ -8,6 +8,7 @@ import type {
 } from "@simplewebauthn/browser"
 import { API_URL } from "./auth-client"
 import { ApiError, apiFetch } from "./api"
+import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 /** Alcance autorizado congelado en enlace/sesión (UX en español, claves estables). */
 export interface PortalScope {
@@ -93,6 +94,9 @@ export interface PortalSessionInfo {
     expiresAt: string
   }
   patientName: string
+  /** Formato y zona de la clínica: el portal dice sus fechas como en la clínica. Ausentes en respuestas antiguas. */
+  locale?: string
+  timeZone?: string
 }
 export interface PortalSlot {
   startsAt: string
@@ -117,6 +121,8 @@ export interface PortalAppointment {
   serviceName: string | null
   status: string
   branchName: string
+  /** Zona de la sede: la hora de la cita se dice en ella. Ausente en respuestas antiguas. */
+  timeZone?: string
   version: number
 }
 
@@ -401,16 +407,29 @@ export function formatPortalMoney(
   return "Importe no disponible"
 }
 
-/** Fecha y hora con el formato de la clínica o, si falta, el del dispositivo. */
-export function formatPortalDate(iso: string | null, locale?: string | null): string {
+/**
+ * Fecha y hora en el formato y la zona de la clínica (la de la sede, si se da),
+ * nunca en los del navegador: «vence el 20 oct, 10:00» es la hora de la clínica
+ * aunque el equipo o la persona estén en otra zona. Sin clínica conocida, los
+ * del dispositivo.
+ */
+export function formatPortalDate(
+  iso: string | null,
+  where: { locale?: string | null; timeZone?: string | null } = {},
+): string {
   if (!iso) return "—"
   const date = new Date(iso)
   if (!Number.isFinite(date.getTime())) return "—"
-  const options: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" }
+  const options: Intl.DateTimeFormatOptions = {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: where.timeZone?.trim() || activeOrgTimeZone(),
+  }
   try {
-    return date.toLocaleString(locale?.trim() || undefined, options)
+    return date.toLocaleString(where.locale?.trim() || activeOrgLocale(), options)
   } catch {
-    return date.toLocaleString(undefined, options)
+    // Formato o zona que este dispositivo no reconoce.
+    return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
   }
 }
 
@@ -475,8 +494,15 @@ export interface PortalSessionView {
   contactId: string
   scope: PortalScope
   expiresAt: string
+  /** Cerrada antes de vencer; ausente en respuestas antiguas en caché. */
+  revokedAt?: string | null
   grantId: string | null
   authMethod: PortalAuthMethod
+}
+
+/** Una sesión sirve mientras no venza ni se haya cerrado. */
+export function isPortalSessionActive(session: Pick<PortalSessionView, "expiresAt" | "revokedAt">, now = Date.now()): boolean {
+  return !session.revokedAt && new Date(session.expiresAt).getTime() > now
 }
 
 export interface PortalPasskeyInfo {

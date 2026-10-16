@@ -74,6 +74,11 @@ export interface RegistrationPerson {
 export interface RegistrationFormContext {
   kind: "generic" | "contact" | "conversation"
   contact?: RegistrationPerson
+  /**
+   * Público: quien abrió su enlace ya tiene su ficha. Registra siempre a otra
+   * persona y no se le ofrece registrarse a sí misma.
+   */
+  ownRecord?: boolean
 }
 
 export interface RegistrationFormBranch {
@@ -467,12 +472,19 @@ export function PatientRegistrationForm({
   const contact = context.contact
   const selfPatient = contact?.selfPatient ?? null
 
+  // Ya tiene su ficha: el registro público es siempre de otra persona.
+  const onlyOthers = mode === "public" && context.ownRecord === true
   const [initialForm] = useState(() => {
     const defaults = buildDefaults(mode, initialValues)
     if (selfPatient || defaultRecipient === "other") defaults.recipient = "other"
+    if (onlyOthers) defaults.answers.respondent = "representative"
     return defaults
   })
-  const [blankForm] = useState(() => buildDefaults(mode, undefined))
+  const [blankForm] = useState(() => {
+    const blank = buildDefaults(mode, undefined)
+    if (onlyOthers) blank.answers.respondent = "representative"
+    return blank
+  })
   const form = useForm({ defaultValues: initialForm })
 
   const [current, setCurrent] = useState(0)
@@ -760,7 +772,7 @@ export function PatientRegistrationForm({
                     )}
                   </div>
                 ) : null}
-                {pub ? (
+                {pub && !onlyOthers ? (
                   <div className="sm:col-span-2" data-reg-field="respondent">
                     <form.Field name="answers.respondent">
                       {(field) => (

@@ -2,10 +2,14 @@ import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
 import { API_URL } from "./auth-client"
 import { ApiError, apiFetch } from "./api"
 
-/** Contexto público resuelto por el servidor: genérico o conversación. */
+/**
+ * Contexto público resuelto por el servidor: genérico o conversación. Con
+ * `ownRecord`, quien abrió su enlace ya tiene su ficha y solo registra a otra
+ * persona (ausente en respuestas antiguas).
+ */
 export type PublicRegistrationContext =
   | { kind: "generic" }
-  | { kind: "conversation" }
+  | { kind: "conversation"; ownRecord?: boolean }
 
 export interface PublicRegistrationInfo {
   organization: { name: string; logo: string | null }

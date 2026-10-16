@@ -29,6 +29,7 @@ import {
 } from "./encounter-diagnoses.js"
 import { createEncounter } from "./encounters.js"
 import { createPatient, getPatient } from "./patients.js"
+import { createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -473,4 +474,100 @@ it("formularios: versión real al publicar, título congelado, tipos clínicos, 
   await expect(
     run((tx) => discardFormResponse(tx, "org_a", ACTOR, response.id, "x")),
   ).rejects.toMatchObject({ status: 409 })
+})
+
+it("la alergia declarada en el cuestionario pasa a antecedentes sin confirmar y la receta avisa", async () => {
+  const patient = await run((tx) => createPatient(tx, "org_a", ACTOR, { displayName: "Lucía Declara" }))
+  // Látex ya lo confirmó un profesional: lo declarado no lo repite ni lo cambia.
+  await run((tx) =>
+    savePatientHealth(tx, "org_a", ACTOR, patient.id, {
+      expectedRevision: 0,
+      reviewStatus: { allergies: "recorded", conditions: "unknown", medications: "unknown" },
+      allergies: [{ substance: "Látex", severity: "moderada", verification: "confirmada" }],
+      conditions: [],
+      medications: [],
+    }),
+  )
+  const fields = [
+    { id: "alergia", label: "¿Eres alérgica o alérgico a algo?", type: "booleano", required: true },
+    {
+      id: "alergia_cual",
+      label: "¿A qué y qué te pasó?",
+      type: "texto",
+      showIf: { field: "alergia", equals: true },
+      definition: "AllergyIntolerance.code",
+    },
+  ]
+  // Solo una respuesta de texto pasa a los antecedentes.
+  await expect(
+    run((tx) =>
+      createFormTemplate(tx, "org_a", ACTOR, {
+        title: "Mal marcado",
+        schema: { sections: [{ id: "s", title: "S", fields: [{ ...fields[0], definition: "AllergyIntolerance.code" }] }] },
+      }),
+    ),
+  ).rejects.toMatchObject({ status: 400 })
+  const template = await run(async (tx) => {
+    const draft = await createFormTemplate(tx, "org_a", ACTOR, {
+      title: "Antes de tu cita",
+      respondent: "portal",
+      schema: { sections: [{ id: "salud", title: "Salud", fields }] },
+    })
+    return publishFormTemplate(tx, "org_a", ACTOR, draft.id)
+  })
+  const response = await run((tx) =>
+    createFormResponse(tx, "org_a", ACTOR, {
+      templateId: template.id,
+      patientId: patient.id,
+      answers: { alergia: true, alergia_cual: "Penicilina: ronchas en la piel; látex: picazón" },
+    }),
+  )
+  // Mientras no se finaliza, nada pasa a los antecedentes.
+  expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(1)
+  await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, response.id))
+  const health = await run((tx) => getPatientHealth(tx, "org_a", patient.id))
+  expect(health.allergies).toHaveLength(2)
+  expect(health.allergies).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        substance: "Penicilina",
+        reaction: "ronchas en la piel",
+        verification: "no_confirmada",
+        severity: "desconocida",
+        isActive: true,
+      }),
+      expect.objectContaining({ substance: "Látex", verification: "confirmada", severity: "moderada" }),
+    ]),
+  )
+  // La revisión avanza: una edición abierta de Antecedentes recarga en vez de pisarlo.
+  expect(health.revision).toBe(2)
+  expect(health.reviewStatus.allergies).toBe("recorded")
+  // «Ninguna» no es una alergia, y repetir la penicilina no la duplica.
+  const again = await run((tx) =>
+    createFormResponse(tx, "org_a", ACTOR, {
+      templateId: template.id,
+      patientId: patient.id,
+      answers: { alergia: true, alergia_cual: "Ninguna.\npenicilina: ronchas" },
+    }),
+  )
+  await run((tx) => finalizeFormResponse(tx, "org_a", ACTOR, again.id))
+  expect((await run((tx) => getPatientHealth(tx, "org_a", patient.id))).allergies).toHaveLength(2)
+  // Al escribir amoxicilina, la receta avisa la penicilina y dice que es declarada.
+  await expect(
+    run((tx) =>
+      createPrescription(tx, "org_a", ACTOR, patient.id, {
+        items: [
+          {
+            genericName: "amoxicilina",
+            strength: "500 mg",
+            dosageForm: "cápsula",
+            dose: "1 cápsula",
+            route: "oral",
+            frequency: "Cada 8 horas",
+            duration: "7 días",
+          },
+        ],
+      }),
+    ),
+  ).rejects.toMatchObject({ code: "ALLERGY_CONFLICT", message: expect.stringMatching(/Penicilina, declarada y por confirmar/) })
 })

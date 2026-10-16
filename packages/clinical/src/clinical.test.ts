@@ -7,6 +7,7 @@ import {
   normalizePhone,
   phoneFormatError,
   allergyConflicts,
+  allergyWarnings,
   formatVitals,
   parseVitals,
   activeFindingsAsOf,
@@ -569,6 +570,20 @@ describe("alergias al prescribir", () => {
     expect(allergyConflicts("ibuprofeno", ["Aspirina"])[0]?.reason).toMatch(/cruzada/)
     expect(allergyConflicts("clindamicina", ["Penicilina"])).toEqual([])
     expect(allergyConflicts("paracetamol", ["Látex"])).toEqual([])
+  })
+
+  it("dice declarada la alergia sin confirmar y calla la descartada", () => {
+    expect(
+      allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "no_confirmada" }]),
+    ).toEqual([
+      expect.stringMatching(/^amoxicilina: alergia a Penicilina, declarada y por confirmar \(mismo grupo/),
+    ])
+    expect(
+      allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "confirmada" }])[0],
+    ).not.toMatch(/declarada/)
+    expect(
+      allergyWarnings("amoxicilina", [{ substance: "Penicilina", verification: "descartada" }]),
+    ).toEqual([])
   })
 })
 

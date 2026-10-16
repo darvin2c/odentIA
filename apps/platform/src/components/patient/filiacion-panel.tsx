@@ -97,7 +97,7 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
   })
   const age = ageLabel(p.birthDate)
   const edit = (section: FiliacionSectionKey) => (canWrite ? () => setEditing(section) : undefined)
-  const gaps = config.data ? missingFiliation(config.data.data, p) : []
+  const gaps = config.data ? missingFiliation(config.data.data, p, detail.contacts) : []
   const legacy = p.identityLegacy ? Object.values(p.identityLegacy).join(", ") : null
 
   return (

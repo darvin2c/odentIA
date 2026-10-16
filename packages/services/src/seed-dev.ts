@@ -1911,8 +1911,7 @@ await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
   specifications: "Odontograma inicial NTS 188-MINSA/DGIESP-2022: caries oclusal en 36 y 46.",
   observations:
     "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
-  examinerName: "Ana Torres",
-  registrationNumber: "COP 12345",
+  // Examinador y colegiatura salen del perfil de Ana (Ana Torres · COP 12345).
   signature: [
     [
       [5, 90],
@@ -2441,6 +2440,8 @@ await db.transaction((tx) =>
 await db.transaction((tx) =>
   updatePatient(tx, ORG_A, ANA_ID, patientIdByName.get("Miguel Torres")!, { isActive: false }),
 )
+// Rosa ya es paciente y pidió registrar a su hijo: su enlace solo le ofrece
+// registrar a otra persona («Enviar registro de un familiar»).
 await db.transaction((tx) =>
   createPatientRegistrationLink(tx, ORG_A, ANA_ID, {
     contactId: rosaContactId,
@@ -2709,7 +2710,7 @@ await db.transaction(async (tx) => {
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })
-// Lo que hicieron los agentes este mes (ADR 0030), para ver Plan y pagos y
+// Lo que hicieron los agentes este mes (ADR 0031), para ver Plan y pagos y
 // «Ver cada acción» con datos: conversaciones, una consulta y una cita, con
 // el precio base del plan de la semilla. Ejemplos; ningún agente los hizo.
 {
@@ -2754,7 +2755,7 @@ await db.transaction(async (tx) => {
     },
   ]).onConflictDoNothing()
 }
-// Uso de IA del mes para la ficha de la clínica en la administración (ADR 0030).
+// Uso de IA del mes para la ficha de la clínica en la administración (ADR 0031).
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no
 // salen de ningún proveedor. Jev queda sin costo: no tiene precio cargado.
 await db.insert(aiUsage).values([

@@ -15,6 +15,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { promotion as promotionTable } from "@odentia/db/schema/promotions"
 import { sumAcceptedCents } from "@odentia/clinical"
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { budgetAwaitsAnswer } from "./budget-awaiting.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
 import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
@@ -91,6 +92,8 @@ export type BudgetWithTotals = BudgetRow & {
   tariffTotalCents: number | null
   /** Rebaja total acordada (tarifa − final; null si algún precio es desconocido). */
   discountCents: number | null
+  /** Espera la respuesta de quien decide (`budgetAwaitsAnswer`): la pantalla no lo deduce del estado. */
+  awaitsAnswer: boolean
 }
 
 /** Quién actúa en la ruta: el servidor limita al odontólogo a su plan propio. */
@@ -204,7 +207,7 @@ function conflict(code: string, message: string): ServiceError {
 async function audit(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   action: string,
   entityId: string,
   metadata?: Record<string, unknown>,
@@ -361,6 +364,7 @@ function withTotals(budget: BudgetRow, items: BudgetLineWithStatus[]): BudgetWit
     tariffTotalCents,
     discountCents:
       totalCents == null || tariffTotalCents == null ? null : tariffTotalCents - totalCents,
+    awaitsAnswer: budgetAwaitsAnswer({ status: budget.status, items }),
   }
 }
 
@@ -1052,10 +1056,15 @@ export async function adjustBudgetLines(
 }
 
 
+/**
+ * `actorUserId` es quien del equipo anota la respuesta; `null` cuando decide la
+ * propia persona (el portal): el presupuesto no queda a nombre de nadie de la
+ * clínica y la auditoría lo anota a quien decidió (`contact:<id>`).
+ */
 export async function decideBudget(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   patientId: string,
   budgetId: string,
   input: DecideBudgetInput,
@@ -1075,6 +1084,7 @@ export async function decideBudget(
     .limit(1)
   if (!prev) throw notFound("Presupuesto")
   if (!opts.skipOwnPlan) {
+    if (actorUserId === null) throw new Error("Sin alguien del equipo, decideBudget exige skipOwnPlan")
     assertOwnPlan(await lockPlan(tx, orgId, patientId, prev.planId), actorUserId, opts.memberRole)
   } else {
     await lockPlan(tx, orgId, patientId, prev.planId)
@@ -1164,7 +1174,8 @@ export async function decideBudget(
   }).where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId),
     eq(treatmentBudget.patientId, patientId))).returning()
   if (!updated) throw notFound("Presupuesto")
-  await audit(tx, orgId, actorUserId, "budget.decision", budgetId, {
+  const auditActor = actorUserId ?? (representative ? `contact:${representative.id}` : null)
+  await audit(tx, orgId, auditActor, "budget.decision", budgetId, {
     patientId, status, acceptedCount, decisionContactId: representative?.id ?? null,
   })
   // Aceptarlo, aunque sea en parte, gana su oportunidad; rechazarlo la pierde.

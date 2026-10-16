@@ -307,6 +307,75 @@ it("menor con enlace contextual queda como guardian sin modificar el contacto", 
   expect(untouched.contact.phone).toBe("+51977000100")
 })
 
+it("quien ya tiene su ficha recibe su enlace solo para registrar a otra persona; registrarse a sí misma se rechaza en palabras", async () => {
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  const { person, threadId } = await makeContactWithConversation("org_a", "Madre Con Ficha")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, {
+      displayName: "Madre Con Ficha",
+      contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }],
+    }),
+  )
+  // El equipo puede enviárselo: es para un familiar.
+  const { token } = await makeLink("org_a", person.id, threadId)
+  const view = await withOrgContext(appDb, "org_a", (tx) => getPublicPatientRegistration(tx, "org_a", token))
+  expect(view.context).toEqual({ kind: "conversation", ownRecord: true })
+
+  // Para sí misma no: se le dice en palabras, sin otra ficha ni consumir el enlace.
+  const patientsBefore = await withOrgContext(appDb, "org_a", (tx) => listPatientsByContact(tx, "org_a", person.id))
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(
+        tx,
+        "org_a",
+        { kind: "public", token, entryPoint: "public_link" },
+        { submissionId: randomUUID(), formVersion: version, answers: adultQrAnswers("Segunda Ficha Propia", "+51977333010") },
+      ),
+    ),
+  ).rejects.toMatchObject({ code: "ALREADY_REGISTERED", status: 409 })
+  expect(await withOrgContext(appDb, "org_a", (tx) => listPatientsByContact(tx, "org_a", person.id))).toHaveLength(
+    patientsBefore.length,
+  )
+
+  // A su hijo sí, con ella como tutora.
+  const child = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(
+      tx,
+      "org_a",
+      { kind: "public", token, entryPoint: "public_link" },
+      {
+        submissionId: randomUUID(),
+        formVersion: version,
+        answers: {
+          demographics: { displayName: "Hijo De Madre Con Ficha", birthDate: MINOR_BIRTH, phone: "+51977333011" },
+          respondent: "representative",
+          representative: {
+            displayName: "Madre Con Ficha",
+            relationship: "guardian",
+            relationshipDetail: "Madre",
+            phone: "+51977000100",
+            docType: "DNI",
+            docNumber: "41526375",
+          },
+          health: emptyClinical(),
+          privacyAccepted: true,
+        },
+      },
+    ),
+  )
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", child.id))
+  expect(detail.contacts).toEqual(
+    expect.arrayContaining([expect.objectContaining({ contactId: person.id, relationship: "guardian" })]),
+  )
+
+  // Sin ficha propia, el mismo enlace se abre para registrarse.
+  const newcomer = await makeContactWithConversation("org_a", "Contacto Sin Ficha")
+  const open = await makeLink("org_a", newcomer.person.id, newcomer.threadId)
+  const openView = await withOrgContext(appDb, "org_a", (tx) => getPublicPatientRegistration(tx, "org_a", open.token))
+  expect(openView.context).toEqual({ kind: "conversation", ownRecord: false })
+})
+
 it("replay idéntico devuelve la misma ficha; payload distinto da 409", async () => {
   await publish("org_a")
   const replayVersion = await publishedVersion("org_a")
@@ -536,30 +605,12 @@ it("conflictos públicos neutros; internos específicos; sin cruce de tenant", a
     ),
   ).rejects.toMatchObject({ code: "DUPLICATE_DOCUMENT", status: 409 })
 
-  // Segundo self del mismo contacto por enlace público: neutro.
+  // Un segundo registro propio por enlace ya no es neutro: se dice en palabras
+  // (lo prueba «quien ya tiene su ficha recibe su enlace…»). Este contacto sirve
+  // abajo para el vínculo desde otra organización.
   const mother = await withOrgContext(appDb, "org_a", (tx) =>
     createContact(tx, "org_a", { displayName: "Madre Self Neutral" }),
   )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    createPatient(tx, "org_a", ACTOR, {
-      displayName: "Madre Self Neutral",
-      contacts: [{ contactId: mother.id, relationship: "self", isPreferred: true }],
-    }),
-  )
-  const motherThreadId = await makeThread("org_a", mother.id)
-  const selfLink = await withOrgContext(appDb, "org_a", (tx) =>
-    createPatientRegistrationLink(tx, "org_a", ACTOR, { contactId: mother.id, conversationId: motherThreadId }),
-  )
-  await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      registerPatient(
-        tx,
-        "org_a",
-        { kind: "public", token: selfLink.token, entryPoint: "public_link" },
-        { submissionId: randomUUID(), formVersion: neutralVersionA, answers: adultQrAnswers("Segunda Ficha Self", "+51977333000") },
-      ),
-    ),
-  ).rejects.toMatchObject({ code: "REGISTRATION_NOT_COMPLETED", status: 409 })
 
   // Token de otra organización no cruza el tenant.
   const foreign = await makeContactWithConversation("org_a", "Contacto Origen A")

@@ -19,10 +19,10 @@ import {
   fetchOrders,
   ORDER_STATUS_LABELS,
 } from "../../lib/clinical-forms"
-import { fetchPrescriptions, formatDate } from "../../lib/clinical-journey"
+import { fetchPrescriptions, fetchResponsibilities, formatDate } from "../../lib/clinical-journey"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import { documentCategoryLabel } from "../../lib/patient-overview"
-import type { PatientDocument } from "../../lib/patients"
+import { ageFrom, type PatientDocument, type PatientFull } from "../../lib/patients"
 
 type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento"
 type Tone = "success" | "warning" | "outline" | "secondary"
@@ -85,6 +85,16 @@ export function DocumentosPanel({
     queryKey: ["consents", patientId],
     queryFn: () => fetchConsents({ patientId }),
   })
+  // Quién firma un consentimiento pendiente: la persona o, si es menor, su
+  // representante legal. Son las mismas consultas que ya hizo la página.
+  const patient = useQuery({
+    queryKey: ["patient", patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+  })
+  const responsibilities = useQuery({
+    queryKey: ["responsibilities", patientId],
+    queryFn: () => fetchResponsibilities(patientId),
+  })
 
   const sources = [
     { name: "archivos", query: files },
@@ -101,8 +111,16 @@ export function DocumentosPanel({
   const templateTitle = new Map(
     (templates.data?.data ?? []).map((template) => [template.id, template.title]),
   )
+  // El PDF de un consentimiento firmado se guarda también como archivo: en esta
+  // lista ya está como consentimiento, así que no sale dos veces.
+  const consentPdfIds = new Set(
+    (consents.data?.data ?? []).flatMap((consent) =>
+      consent.pdfDocumentId ? [consent.pdfDocumentId] : [],
+    ),
+  )
+  const pendingSigner = signerWords(patient.data?.data, responsibilities.data?.data)
   const rows: Row[] = [
-    ...(files.data?.data ?? []).map(
+    ...(files.data?.data ?? []).filter((doc) => !consentPdfIds.has(doc.id)).map(
       (doc): Row => ({
         key: `archivo-${doc.id}`,
         kind: "archivo",
@@ -173,7 +191,9 @@ export function DocumentosPanel({
         title: consent.titleSnapshot,
         detail:
           consent.status === "pendiente"
-            ? `Falta la firma de ${consent.signerKind === "representante" ? "la persona representante" : "el paciente"}`
+            ? pendingSigner
+              ? `Falta la firma de ${pendingSigner}`
+              : "Falta la firma"
             : `Firma: ${consent.signerName}`,
         date: consent.signedAt ?? consent.createdAt,
         status: {
@@ -286,4 +306,29 @@ export function DocumentosPanel({
       {loading ? <p className="text-sm text-muted-foreground">Cargando el resto…</p> : null}
     </div>
   )
+}
+
+/**
+ * A quién le falta firmar, con su nombre: la propia persona si es mayor de
+ * edad o, si es menor, su representante legal vigente (la regla del servidor).
+ */
+function signerWords(
+  detail: PatientFull | undefined,
+  responsibilities: Array<{ isCurrent: boolean; kind: string; contact: { displayName: string } }> | undefined,
+): string | null {
+  if (!detail) return null
+  const age = ageFrom(detail.patient.birthDate)
+  const minor = age !== "" && Number(age) < 18
+  if (!minor) {
+    const first = (detail.patient.givenNames ?? detail.patient.displayName).trim().split(/\s+/)[0]
+    return first || detail.patient.displayName
+  }
+  const representatives = (responsibilities ?? []).filter(
+    (row) => row.isCurrent && row.kind === "representante_legal",
+  )
+  if (representatives.length === 1) {
+    const name = representatives[0]?.contact.displayName.trim().split(/\s+/)[0]
+    return name ? `${name}, su representante legal` : "su representante legal"
+  }
+  return "su representante legal"
 }

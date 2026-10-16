@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { documentText } from "./identity.js"
-import { DEFAULT_REGISTRATION_CONFIG, pendingRegistrationFields, registrationAnswersSchema, registrationConfigSchema, validateRegistrationAnswers, type RegistrationAnswers } from "./patient-registration.js"
+import { DEFAULT_REGISTRATION_CONFIG, missingFiliationFields, pendingRegistrationFields, registrationAnswersSchema, registrationConfigSchema, validateRegistrationAnswers, type RegistrationAnswers } from "./patient-registration.js"
 const config = { ...DEFAULT_REGISTRATION_CONFIG, enabled: true, privacyNotice: "Aviso de demostración" }
 const adult: RegistrationAnswers = {
   demographics: { displayName: "María Pérez", birthDate: "1990-03-12", phone: "+51999999999" },
@@ -28,6 +28,17 @@ describe("contrato de registro", () => {
     expect(validateRegistrationAnswers(saved, { ...minimal, demographics: { displayName: "Carmen" } }, { ...internal, scope: "essentials" })).toHaveProperty("demographics.givenNames")
     expect(validateRegistrationAnswers(saved, { ...minimal, demographics: { ...minimal.demographics, occupation: "Abogada" } }, { ...internal, scope: "essentials" })).toHaveProperty("demographics.occupation")
     expect(validateRegistrationAnswers(saved, { ...minimal, health: adult.health }, { ...internal, scope: "essentials" })).toHaveProperty("health")
+  })
+  it("el teléfono de quien habla por la persona cuenta como suyo, en el registro y en lo que falta de su ficha", () => {
+    const saved = { ...config, version: 1, fields: { ...config.fields, phone: "required" as const } }
+    const child: RegistrationAnswers = { demographics: { displayName: "Mateo Quispe", birthDate: "2020-03-01" }, respondent: "staff", privacyAccepted: false,
+      representative: { displayName: "Rosa Quispe", relationship: "guardian", relationshipDetail: "Madre", phone: "+51987654301", docType: "DNI", docNumber: "45678901" } }
+    expect(pendingRegistrationFields(saved, child).map((field) => field.key)).not.toContain("phone")
+    expect(missingFiliationFields(saved, child.demographics, { representativeContact: true }).map((field) => field.key)).not.toContain("phone")
+    expect(missingFiliationFields(saved, child.demographics, { representativeContact: false }).map((field) => field.key)).toContain("phone")
+    // Lo demás que la clínica pide sigue faltando, y el nombre nunca falta.
+    const withDocument = { ...saved, fields: { ...saved.fields, docType: "required" as const, docNumber: "required" as const } }
+    expect(missingFiliationFields(withDocument, child.demographics, { representativeContact: true }).map((field) => field.key)).toEqual(["docType", "docNumber"])
   })
   it("un documento se lee con la etiqueta del catálogo, nunca con su código", () => {
     expect(documentText("PASAPORTE", "AB1234567")).toBe("Pasaporte AB1234567")

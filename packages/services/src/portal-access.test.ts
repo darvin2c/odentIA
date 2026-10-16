@@ -17,13 +17,14 @@ import {
   listMyPortalGrants,
   listPortalGrants,
   listPortalRequests,
+  listPortalSessions,
   rejectPortalRequest,
   revokePortalGrant,
   selectPortalGrant,
   verifyPasskeyAuth,
   verifyPasskeyRegistration,
 } from "./portal-access.js"
-import { exchangePortalToken, issuePortalLink, requirePortalSession } from "./portal.js"
+import { exchangePortalToken, issuePortalLink, requirePortalSession, revokePortalSession } from "./portal.js"
 import { getPortalQuestionnaire, savePortalQuestionnaire } from "./portal-questionnaire.js"
 import {
   createFormTemplate,
@@ -623,4 +624,75 @@ it("cuestionario previo: lo responde quien tiene la sesión, se envía completo 
   expect(
     await withOrgContext(appDb, ORG, (tx) => finalizeFormResponse(tx, ORG, ACTOR, responses[0]!.id)),
   ).toMatchObject({ status: "finalizado" })
+})
+
+it("el código de 6 dígitos siempre activa el acceso; apagado, solo impide recuperarlo así", async () => {
+  const [created] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: "Paciente Portal Cuatro", patientNumber: 9204 })
+    .returning({ id: patient.id })
+  const patient4Id = created!.id
+  const policy = (assistedRecoveryEnabled: boolean) =>
+    withOrgContext(appDb, ORG, (tx) =>
+      upsertPortalPolicy(tx, ORG, ACTOR, {
+        enabled: true,
+        requestsEnabled: true,
+        publicRequestsEnabled: true,
+        channelRequestsEnabled: true,
+        autoApproveVerified: false,
+        allowedConnectionIds: [connectionId],
+        linkTtlMinutes: 4320,
+        sessionTtlHours: 48,
+        grantTtlDays: null,
+        allowedScope: { appointments: true, budgets: true, account: true, documents: true },
+        passkeysEnabled: true,
+        assistedRecoveryEnabled,
+      }),
+    )
+  await withOrgContext(appDb, ORG, async (tx) => {
+    await tx.insert(patientContact).values({ organizationId: ORG, patientId: patient4Id, contactId, relationship: "family", createdBy: ACTOR })
+    await createPortalGrant(tx, ORG, ACTOR, {
+      patientId: patient4Id,
+      contactId,
+      relationship: "family",
+      scope: { appointments: true },
+      verifiedMethod: "presencial_documento",
+      evidenceNote: "DNI revisado en recepción.",
+    })
+  })
+  await policy(false)
+  try {
+    // La primera vez entra con su código aunque la clínica no recupere accesos así.
+    const { raw } = await insertPendingLink(patient4Id)
+    const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
+    expect(opened.session.patientId).toBe(patient4Id)
+
+    // Volver a entrar con otro código es recuperarlo: el equipo no puede emitirlo
+    // y un enlace que ya salió tampoco sirve. Los dos lo dicen en palabras.
+    const issued = await withOrgContext(appDb, ORG, (tx) =>
+      issuePortalLink(
+        tx,
+        ORG,
+        ACTOR,
+        { patientId: patient4Id, contactId, conversationId, scope: { appointments: true } },
+        { linkUrl: (token) => `https://portal.test/a/${token}`, canShareFinance: false },
+      ),
+    ).then(() => null, (error: unknown) => error)
+    expect(issued).toMatchObject({ code: "PORTAL_RECOVERY_OFF", message: expect.stringContaining("quita su acceso") })
+    const { raw: again } = await insertPendingLink(patient4Id)
+    expect(
+      await errorCode(withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, again, { pin: "123456" }))),
+    ).toBe("PORTAL_RECOVERY_OFF")
+
+    // «Sesiones activas»: la sesión cerrada por el equipo llega con su cierre.
+    await withOrgContext(appDb, ORG, (tx) => revokePortalSession(tx, ORG, ACTOR, opened.session.id))
+    const sessions = await withOrgContext(appDb, ORG, (tx) => listPortalSessions(tx, ORG, { patientId: patient4Id }))
+    expect(sessions.find((row) => row.id === opened.session.id)?.revokedAt).toBeInstanceOf(Date)
+  } finally {
+    await policy(true)
+  }
+  // Con la recuperación encendida, el mismo enlace vuelve a servir.
+  const { raw: recovered } = await insertPendingLink(patient4Id)
+  const reopened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, recovered, { pin: "123456" }))
+  expect(reopened.session.revokedAt).toBeNull()
 })

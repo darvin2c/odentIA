@@ -536,6 +536,7 @@ it.each(["https://app.odentia.localhost", "https://app.odentia.localhost:4463"])
   expect(resolved.status).toBe(200)
   expect(((await resolved.json()) as { data: { context: unknown } }).data.context).toEqual({
     kind: "conversation",
+    ownRecord: false,
   })
 
   const answers = {
@@ -611,6 +612,66 @@ it.each(["https://app.odentia.localhost", "https://app.odentia.localhost:4463"])
     `/api/public/patient-registration/${SLUG_A}?token=${token}`,
   )
   expect(gone.status).toBe(404)
+})
+
+it("enlace contextual de quien ya tiene su ficha: se emite para un familiar y registrarse a sí misma da 409 en palabras", async () => {
+  const app = buildApp("link-own-record")
+  const person = await withOrgContext(appDb, ORG_A, (tx) =>
+    createContact(tx, ORG_A, { displayName: "Paciente Con Ficha" }, { userId: "u-reg-owner" }),
+  )
+  await withOrgContext(appDb, ORG_A, (tx) =>
+    createPatient(tx, ORG_A, "u-reg-owner", {
+      displayName: "Paciente Con Ficha",
+      contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }],
+    }),
+  )
+  const conn = await withOrgContext(appDb, ORG_A, (tx) =>
+    createConnection(
+      tx,
+      ORG_A,
+      KEY,
+      { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } },
+      { fetch, validateExternal: false },
+    ),
+  )
+  const externalId = `tg:${crypto.randomUUID()}`
+  const [identity] = await ownerDb.insert(contactIdentity).values({ organizationId: ORG_A, contactId: person.id, channel: "telegram", externalUserId: externalId }).returning()
+  const [thread] = await ownerDb
+    .insert(conversation)
+    .values({
+      organizationId: ORG_A,
+      contactId: person.id,
+      channelConnectionId: conn.id,
+      externalThreadId: externalId,
+      contactIdentityId: identity!.id,
+    })
+    .returning({ id: conversation.id })
+
+  const created = await app.request(`/api/contacts/${person.id}/registration-links`, {
+    method: "POST",
+    headers: authed("reception", SLUG_A),
+    body: JSON.stringify({ conversationId: thread!.id }),
+  })
+  expect(created.status).toBe(201)
+  const token = new URL(((await created.json()) as { data: { url: string } }).data.url).searchParams.get("token")!
+  const resolved = await app.request(`/api/public/patient-registration/${SLUG_A}?token=${token}`)
+  expect(((await resolved.json()) as { data: { context: unknown } }).data.context).toEqual({
+    kind: "conversation",
+    ownRecord: true,
+  })
+
+  // Registrarse a sí misma con su enlace: 409 en palabras, sin otra ficha.
+  const patientsBefore = await countPatients(ORG_A)
+  const refused = await publicPost(app, SLUG_A, {
+    submissionId: crypto.randomUUID(),
+    formVersion: publishedVersion,
+    entryPoint: "public_link",
+    token,
+    answers: adultQrAnswers("Segunda Ficha Propia"),
+  })
+  expect(refused.status).toBe(409)
+  expect(((await refused.json()) as { error: { code: string } }).error.code).toBe("ALREADY_REGISTERED")
+  expect(await countPatients(ORG_A)).toBe(patientsBefore)
 })
 
 it("tokens: inválido, desconocido u otra organización responden 404 uniforme", async () => {

@@ -20,6 +20,7 @@ import {
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
@@ -408,7 +409,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     budgetTitle: row.budgetTitle,
   }))
 
-  // Propuestas aparte: presupuestos presentados o en borrador con sus totales
+  // Propuestas aparte: los presupuestos que esperan respuesta (la única regla,
+  // `budgetAwaitsAnswerSql`; un borrador nunca cuenta) con sus totales
   // propuestos (nunca saldos ni deuda).
   const budgetRows = await tx
     .select()
@@ -417,7 +419,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       and(
         eq(treatmentBudget.organizationId, orgId),
         eq(treatmentBudget.patientId, patientId),
-        inArray(treatmentBudget.status, ["presentado", "borrador"]),
+        budgetAwaitsAnswerSql(treatmentBudget),
       ),
     )
     .orderBy(

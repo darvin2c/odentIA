@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { ADMINISTRATION_ROUTES, allergyConflicts, findMedication } from "@odentia/clinical"
+import { ADMINISTRATION_ROUTES, allergyWarnings, findMedication } from "@odentia/clinical"
 import {
   cie10Code,
   encounter,
@@ -148,10 +148,11 @@ export async function createPrescription(
       instructions: optional(item.instructions, "Las indicaciones", 2000),
     }
   })
-  // Alergias registradas del paciente frente a cada DCI: el aviso exige que la
-  // persona que prescribe lo confirme; nunca se prescribe a ciegas.
+  // Alergias activas del paciente frente a cada DCI, también las declaradas
+  // sin confirmar (cuestionario, registro): el aviso exige que la persona que
+  // prescribe lo confirme; nunca se prescribe a ciegas.
   const allergies = await tx
-    .select({ substance: patientAllergy.substance })
+    .select({ substance: patientAllergy.substance, verification: patientAllergy.verification })
     .from(patientAllergy)
     .where(
       and(
@@ -160,14 +161,9 @@ export async function createPrescription(
         eq(patientAllergy.isActive, true),
       ),
     )
-  const conflicts = items.flatMap((item) =>
-    allergyConflicts(
-      item.genericName,
-      allergies.map((a) => a.substance),
-    ).map((c) => `${item.genericName}: alergia a ${c.substance} (${c.reason})`),
-  )
+  const conflicts = items.flatMap((item) => allergyWarnings(item.genericName, allergies))
   if (conflicts.length > 0 && !input.acknowledgeAllergies)
-    throw new ServiceError("ALLERGY_CONFLICT", 409, `Alergia registrada: ${conflicts.join("; ")}`)
+    throw new ServiceError("ALLERGY_CONFLICT", 409, `Aviso de alergia: ${conflicts.join("; ")}`)
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const [counter] = await tx
     .insert(orgCounter)

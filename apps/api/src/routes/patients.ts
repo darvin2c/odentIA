@@ -31,6 +31,7 @@ import {
   getEncounterDetail,
   getLatestAnamnesis,
   getOdontogram,
+  getOpenEncounterRef,
   getPatient,
   getPatientDocument,
   getPatientHealth,
@@ -264,12 +265,12 @@ const odontogramInput = z
   })
   .strict()
 const voidInput = z.object({ reason: z.string().trim().min(1).max(2000) })
-const assessmentInput = z.object({
+// Quién firma no se escribe: examinador y colegiatura salen del perfil
+// profesional de quien firma. Un cuerpo que los trae se rechaza (`strict`).
+const assessmentInput = z.strictObject({
   purpose: z.enum(["initial", "new_findings", "completion", "reentry", "legal", "personal"]),
   specifications: z.string().trim().max(4000),
   observations: z.string().trim().max(4000),
-  examinerName: z.string().trim().min(1).max(200),
-  registrationNumber: z.string().trim().min(1).max(40),
   signature: z
     .array(
       z
@@ -293,7 +294,7 @@ const timelineQuery = listQuery.extend({
 const encounterCreateInput = z.object({
   // El motivo es obligatorio al abrir la atención (decisión de diseño).
   reason: z.string().trim().min(1).max(2000),
-  /** Cita que motiva la atención: hereda sede y profesional. */
+  /** Cita que motiva la atención; sin ella se une a la cita de hoy que siga en pie. */
   appointmentId: z.uuid().nullish(),
   branchId: z.uuid().nullish(),
   /** Profesional que atiende; por defecto quien abre la atención. */
@@ -1164,6 +1165,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getPatientSummary(tx, orgId, c.req.param("id"))),
+    )
+  })
+  // La página de la persona sabe si hay una atención en curso sin leer la
+  // historia: solo cuál es y quién la lleva, para quien puede atender. No es
+  // una lectura clínica (no deja traza en la bitácora).
+  app.get("/:id/open-encounter", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getOpenEncounterRef(tx, orgId, c.req.param("id"))),
     )
   })
   app.get("/:id/timeline", async (c) => {

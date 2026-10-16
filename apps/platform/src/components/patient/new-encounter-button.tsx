@@ -1,3 +1,4 @@
+import { canAccess } from "@odentia/auth/permissions"
 import {
   Button,
   Field,
@@ -10,15 +11,15 @@ import {
   Textarea,
 } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
-import type { Encounter, PatientFull, PatientSummary } from "../../lib/patients"
+import type { Encounter, PatientFull } from "../../lib/patients"
 
-/** Cita de agenda desde la que se atiende: fija sede y profesional. */
+/** Cita de agenda desde la que se atiende: fija la sede. */
 export interface AttendedAppointment {
   id: string
   dentistUserId: string
@@ -26,11 +27,20 @@ export interface AttendedAppointment {
   serviceName: string | null
 }
 
+/** La atención en curso de un paciente, sin nada de su historia: cuál es y quién la lleva. */
+interface OpenEncounterRef {
+  id: string
+  dentistUserId: string
+}
+
 /**
- * Nueva y reanudada abren el mismo espacio clínico. La apertura exige el
- * motivo de la visita y el profesional que atiende (por defecto quien abre);
- * la puede crear recepción o el propio médico. Desde la agenda («Atender»)
- * la atención queda vinculada a la cita, que se marca atendida al cerrar.
+ * Nueva y en curso abren el mismo espacio clínico. Con una atención en curso
+ * el botón la continúa («Continuar la atención»), así lo escrito no se pierde.
+ * La apertura exige el motivo de la visita y el profesional que atiende: por
+ * defecto quien pulsa, y solo se ofrece a quien escribe en la historia clínica.
+ * Sin cita, el servidor la une a la cita de hoy que siga en pie; desde la
+ * agenda («Atender») queda unida a esa cita, y un borrador del mismo día sin
+ * cita se une a ella. La cita se marca atendida al cerrar.
  */
 export function NewEncounterButton({
   patientId,
@@ -49,19 +59,36 @@ export function NewEncounterButton({
   const members = useOrgMembers()
   const sede = useActiveBranch()
   const queryClient = useQueryClient()
+  // Solo profesionales clínicos: nunca caja ni recepción (el servidor lo exige igual).
+  const professionals = members.filter((m) => canAccess(m.role, "clinical.write"))
+  const eligible = (userId: string | undefined) =>
+    Boolean(userId) && professionals.some((m) => m.userId === userId)
+  const defaultDentist = eligible(myUserId)
+    ? myUserId
+    : eligible(appointment?.dentistUserId)
+      ? (appointment?.dentistUserId ?? "")
+      : ""
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [reason, setReason] = useState(appointment?.reason ?? "")
-  const [dentistUserId, setDentistUserId] = useState(appointment?.dentistUserId ?? myUserId)
+  const [dentistUserId, setDentistUserId] = useState(defaultDentist)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  // Desde la agenda, el servidor continúa el borrador si es de esta visita.
+  const openQuery = useQuery({
+    queryKey: ["open-encounter", patientId],
+    queryFn: () =>
+      apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${patientId}/open-encounter`),
+    enabled: canWrite && !appointment && !openEncounterId,
+  })
+  const inProgressId = openEncounterId ?? openQuery.data?.data?.id ?? null
   const open = (id: string) =>
     void navigate({
       to: "/patients/$patientId/encounters/$encounterId",
       params: { patientId, encounterId: id },
     })
   const start = async () => {
-    if (saving || !reason.trim()) return
+    if (saving || !reason.trim() || !dentistUserId) return
     setSaving(true)
     setError(null)
     try {
@@ -81,6 +108,7 @@ export function NewEncounterButton({
         }),
       })
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
       open(result.data.id)
     } catch (err) {
       // Ya hay una atención abierta (del paciente o de esta cita): se retoma.
@@ -89,11 +117,11 @@ export function NewEncounterButton({
         (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")
       ) {
         try {
-          const summary = await apiFetch<{ data: PatientSummary }>(
-            `/api/patients/${patientId}/summary`,
+          const current = await apiFetch<{ data: OpenEncounterRef | null }>(
+            `/api/patients/${patientId}/open-encounter`,
           )
-          if (summary.data.openEncounterId) {
-            open(summary.data.openEncounterId)
+          if (current.data) {
+            open(current.data.id)
             return
           }
         } catch {
@@ -109,8 +137,8 @@ export function NewEncounterButton({
     }
   }
   if (!canWrite) return null
-  if (openEncounterId) {
-    return <Button onClick={() => open(openEncounterId)}>Reanudar atención</Button>
+  if (!appointment && inProgressId) {
+    return <Button onClick={() => open(inProgressId)}>Continuar la atención</Button>
   }
   return (
     <>
@@ -129,7 +157,7 @@ export function NewEncounterButton({
         description={
           appointment
             ? `Confirma el motivo con el paciente${appointment.serviceName ? ` (cita para ${appointment.serviceName})` : ""}. La atención se abre en curso y la cita se marca atendida al cerrarla.`
-            : "Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso."
+            : "Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso; si tiene una cita hoy, se une a ella y la cita se marca atendida al cerrarla."
         }
         onSubmit={(event) => {
           event.preventDefault()
@@ -139,7 +167,7 @@ export function NewEncounterButton({
         isDirty={reason.trim().length > 0}
         error={error}
         submitLabel="Abrir atención"
-        submitDisabled={!reason.trim() || saving}
+        submitDisabled={!reason.trim() || !dentistUserId || saving}
       >
         <Field>
           <FieldLabel htmlFor="new-encounter-reason">Motivo de la visita</FieldLabel>
@@ -158,7 +186,7 @@ export function NewEncounterButton({
           <FieldLabel htmlFor="new-encounter-dentist">Profesional que atiende</FieldLabel>
           <Select
             value={dentistUserId}
-            items={Object.fromEntries(members.map((m) => [m.userId, m.user.name]))}
+            items={Object.fromEntries(professionals.map((m) => [m.userId, m.user.name]))}
             onValueChange={(value) => {
               if (value) setDentistUserId(value)
             }}
@@ -167,7 +195,7 @@ export function NewEncounterButton({
               <SelectValue placeholder="Selecciona el profesional…" />
             </SelectTrigger>
             <SelectContent>
-              {members.map((m) => (
+              {professionals.map((m) => (
                 <SelectItem key={m.userId} value={m.userId}>
                   {m.user.name}
                 </SelectItem>

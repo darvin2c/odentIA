@@ -38,6 +38,11 @@ export interface FormFieldDef {
   help?: string | null
   /** Mostrar solo si otro campo anterior tiene ese valor. */
   showIf?: { field: string; equals: string | boolean } | null
+  /**
+   * Solo en texto: al finalizar, la respuesta pasa a los antecedentes
+   * («AllergyIntolerance.code»: alergias declaradas, sin confirmar).
+   */
+  definition?: "AllergyIntolerance.code" | null
 }
 
 export interface FormSectionDef {

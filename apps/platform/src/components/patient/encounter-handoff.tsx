@@ -109,7 +109,7 @@ export function EncounterHandoff({
       key: `control-${control.id}`,
       owner: "Recepción",
       title: `Reservar el control: ${control.title}`,
-      detail: `Corresponde el ${formatDate(control.dueAt)}. Recepción lo recibe en sus pendientes.`,
+      detail: `Corresponde el ${formatDate(control.dueAt)}. Falta reservarle la cita.`,
       tone: "warning",
       section: "controles",
       action: "Programar",
@@ -134,7 +134,8 @@ export function EncounterHandoff({
         proposed.length === 1
           ? `Seguimiento del presupuesto «${proposed[0].title}»`
           : `Seguimiento de ${proposed.length} presupuestos sin decisión`,
-      detail: "Presentado y pendiente de respuesta de quien decide.",
+      // Enviado o «lo está pensando»: la regla del servidor; un borrador nunca llega aquí.
+      detail: "Espera la respuesta de quien decide.",
       tone: "warning",
       section: "plan",
       action: "Ver presupuestos",

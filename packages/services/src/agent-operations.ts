@@ -2628,7 +2628,7 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
   if (input.usage?.length) {
     await recordAiUsage(tx, orgId, { origin: "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
   }
-  // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0030).
+  // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0031).
   if (input.status === "ok" && (input.llmCalls ?? 0) > 0 && input.conversationId) {
     await countConversationAction(tx, orgId, { conversationId: input.conversationId, at: input.startedAt })
   }
@@ -2700,7 +2700,7 @@ export interface AgentRunStats {
 /**
  * Métricas reales desde el libro (rango opcional ISO), para la clínica. El
  * costo de cada corrida no va: es lo que odentIA paga a los proveedores y lo
- * ve su administración (ADR 0030).
+ * ve su administración (ADR 0031).
  */
 export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: string; to?: string } = {}): Promise<AgentRunStats> {
   const conditions = [eq(agentRunLedger.organizationId, orgId)]
