@@ -277,7 +277,20 @@ export interface SaasActionRow {
   discountBps: number
   state: SaasActionState
   chargeId: string | null
+  /** De una cita recuperada: las conversaciones que llevaron a ella y ya se cobraron; se devuelven con la cita. */
+  refunds: SaasRefund[]
 }
+
+export interface SaasRefund {
+  actionId: string
+  occurredAt: Date
+  basePriceMicros: number
+  priceMicros: number
+}
+
+/** Lo que cuesta una acción en su tramo: la cita, menos lo que devuelve. */
+export const netMicros = (row: Pick<SaasActionRow, "priceMicros" | "refunds">): number =>
+  Math.max(0, (row.priceMicros ?? 0) - row.refunds.reduce((sum, refund) => sum + refund.priceMicros, 0))
 
 export interface SaasPeriod {
   start: Date
@@ -307,9 +320,13 @@ export async function currentSaasPeriod(tx: Db, orgId: string, now = new Date())
 
 /**
  * Las acciones de un tramo con su estado: del saldo de prueba o del crédito
- * hasta agotarlo, después por encima del crédito; la conversación que llevó
- * a una cita recuperada va dentro de ella; la cita cuya asistencia se
+ * hasta agotarlo, después por encima del crédito; la cita cuya asistencia se
  * deshizo queda anulada. Una sola definición para la pantalla y el cobro.
+ *
+ * La conversación que llevó a una cita recuperada se cobra en su tramo, como
+ * cualquiera; si la persona asiste, la cita la devuelve (`refunds`) y cuesta
+ * su precio menos esa conversación. Si aún no se cobró cuando se cuenta la
+ * cita (el mismo tramo), va dentro de ella y no se cobra.
  */
 export async function listPeriodActions(
   tx: Db,
@@ -366,18 +383,26 @@ export async function listPeriodActions(
         row.occurredAt >= cita.windowStart &&
         row.occurredAt <= (bookedAt.get(cita.appointmentId) ?? cita.occurredAt),
     )
+  const refunds = await refundsOf(
+    tx,
+    orgId,
+    rows.filter((row) => row.kind === "cita" && row.appointmentId !== null && attended.has(row.appointmentId)),
+  )
   let usedMicros = 0
   const creditMicros = period.creditCents * 10_000
   return rows.map((row) => {
     let state: SaasActionState
+    const own = refunds.get(row.id) ?? []
     if (row.kind === "cita" && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
-    else if (insideCita(row)) state = "dentro_de_cita"
+    // La que aún no se cobró va dentro de la cita; la ya cobrada se devuelve con ella.
+    else if (row.chargeId === null && insideCita(row)) state = "dentro_de_cita"
     else if (row.priceMicros === null) state = "sin_precio"
     else {
-      usedMicros += row.priceMicros
+      usedMicros += netMicros({ priceMicros: row.priceMicros, refunds: own })
       state = period.credit === "prueba" ? "prueba" : usedMicros <= creditMicros ? "credito" : "sobre_credito"
     }
     return {
+      refunds: state === "anulada" ? [] : own,
       id: row.id,
       kind: row.kind as SaasActionKind,
       occurredAt: row.occurredAt,
@@ -394,6 +419,60 @@ export async function listPeriodActions(
       chargeId: row.chargeId,
     }
   })
+}
+
+/**
+ * Las conversaciones ya cobradas que llevaron a cada una de estas citas
+ * recuperadas (atendidas): de esa persona, entre el mensaje del Administrador
+ * y la reserva, en cualquier tramo. Si dos citas cubren la misma
+ * conversación, la devuelve la primera que se contó: nunca dos veces.
+ */
+async function refundsOf(
+  tx: Db,
+  orgId: string,
+  citas: Array<{ id: string; contactId: string | null; chargeId: string | null }>,
+): Promise<Map<string, SaasRefund[]>> {
+  const result = new Map<string, SaasRefund[]>()
+  const contactIds = [...new Set(citas.map((cita) => cita.contactId).filter((id): id is string => id !== null))]
+  if (!contactIds.length) return result
+  const found = (await tx.execute(sql`
+    with cita as (
+      select s.id, s.contact_id, s.window_start, a.created_at as booked_at, s.occurred_at
+      from saas_action s
+      join appointment a on a.id = s.appointment_id and a.organization_id = s.organization_id
+      where s.organization_id = ${orgId} and s.kind = 'cita' and a.status = 'atendida' and s.window_start is not null
+        and s.contact_id in (${sql.join(contactIds.map((id) => sql`${id}`), sql`, `)})
+    )
+    select v.id, v.occurred_at, v.base_price_micros, v.price_micros, v.charge_id,
+      (select cita.id from cita
+        where cita.contact_id = v.contact_id and v.occurred_at >= cita.window_start and v.occurred_at <= cita.booked_at
+        order by cita.occurred_at, cita.id limit 1) as cita_id
+    from saas_action v
+    where v.organization_id = ${orgId} and v.kind = 'conversacion' and v.charge_id is not null and v.price_micros is not null
+      and v.contact_id in (${sql.join(contactIds.map((id) => sql`${id}`), sql`, `)})
+    order by v.occurred_at, v.id`)) as unknown as Array<{
+    id: string
+    occurred_at: Date | string
+    base_price_micros: string | number | null
+    price_micros: string | number
+    charge_id: string
+    cita_id: string | null
+  }>
+  const chargeOf = new Map(citas.map((cita) => [cita.id, cita.chargeId]))
+  for (const row of found) {
+    if (!row.cita_id || !chargeOf.has(row.cita_id)) continue
+    // Cobrada en el mismo cargo que su cita no pasa: lo que se cobra junto ya va dentro.
+    if (chargeOf.get(row.cita_id) === row.charge_id) continue
+    const list = result.get(row.cita_id) ?? []
+    list.push({
+      actionId: row.id,
+      occurredAt: asDate(row.occurred_at),
+      basePriceMicros: Number(row.base_price_micros ?? row.price_micros),
+      priceMicros: Number(row.price_micros),
+    })
+    result.set(row.cita_id, list)
+  }
+  return result
 }
 
 /** Citas recuperadas que aún esperan que el paciente asista: no se cobran todavía. */
@@ -424,6 +503,7 @@ export async function listPendingRecoveries(tx: Db, orgId: string): Promise<Saas
     discountBps: base === null ? 0 : pricing.discountBps,
     state: "esperando",
     chargeId: null,
+    refunds: [],
   }))
 }
 
@@ -443,6 +523,8 @@ export interface SaasConsumption {
   priced: boolean
   discountBps: number
   lines: SaasConsumptionLine[]
+  /** Conversaciones ya cobradas que devuelven las citas recuperadas del tramo (restadas de la línea de la cita). */
+  refunds: { count: number; amountCents: number }
   pendingRecoveries: number
   subtotalCents: number
   baseSubtotalCents: number
@@ -465,8 +547,11 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   const kinds: SaasActionKind[] = ["conversacion", "consulta", "cita"]
   const lines = kinds.map((kind) => {
     const ofKind = billable.filter((row) => row.kind === kind)
-    const price = ofKind.reduce((sum, row) => sum + (row.priceMicros ?? 0), 0)
-    const base = ofKind.reduce((sum, row) => sum + (row.basePriceMicros ?? 0), 0)
+    const price = ofKind.reduce((sum, row) => sum + netMicros(row), 0)
+    const base = ofKind.reduce(
+      (sum, row) => sum + Math.max(0, (row.basePriceMicros ?? 0) - row.refunds.reduce((total, refund) => total + refund.basePriceMicros, 0)),
+      0,
+    )
     const currentBase = pricing.base[kind]
     return {
       kind,
@@ -483,7 +568,7 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   let exhaustedAt: Date | null = null
   for (const row of billable) {
     if (row.priceMicros === null) continue
-    used += row.priceMicros
+    used += netMicros(row)
     if (exhaustedAt === null && creditMicros > 0 && used >= creditMicros) exhaustedAt = row.occurredAt
   }
   const elapsed = Math.min(1, Math.max(0, (now.getTime() - period.start.getTime()) / (period.end.getTime() - period.start.getTime())))
@@ -493,6 +578,10 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
     priced: kinds.some((kind) => pricing.base[kind] !== null),
     discountBps: pricing.discountBps,
     lines,
+    refunds: {
+      count: billable.reduce((sum, row) => sum + row.refunds.length, 0),
+      amountCents: microsToCents(billable.reduce((sum, row) => sum + (row.priceMicros ?? 0) - netMicros(row), 0)),
+    },
     pendingRecoveries: pending.length,
     subtotalCents,
     baseSubtotalCents: lines.reduce((sum, line) => sum + line.baseAmountCents, 0),

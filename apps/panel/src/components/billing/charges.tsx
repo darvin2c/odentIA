@@ -8,7 +8,7 @@ import { formatMicros, formatPlanMoney } from "./money"
 
 export interface ChargeLine {
   id: string
-  kind: "cuota" | "conversacion" | "consulta" | "cita" | "credito" | "impuesto"
+  kind: "cuota" | "conversacion" | "consulta" | "cita" | "devolucion" | "credito" | "impuesto"
   description: string
   quantity: number
   unitBaseMicros: number | null

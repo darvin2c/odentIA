@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { auditEvent } from "@odentia/db/schema/org"
 import { type SaasActionKind, saasAction, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
-import { listPeriodActions, microsToCents, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
+import { listPeriodActions, microsToCents, netMicros, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
 
 /* ---------- Cobrar (ADR 0031, fase 4) ---------- */
 
@@ -40,7 +40,8 @@ function chargeable(sub: typeof saasSubscription.$inferSelect): boolean {
  * del crédito y no se cobró aún, y lo que cubrió el crédito (a la vista,
  * sin importe). Mitad del tramo (quincenal): solo lo que ya pasó del
  * crédito. Las acciones quedan anotadas con su cargo: nada se cobra dos
- * veces. Las citas se cobran en el tramo en que el paciente asistió. Sin
+ * veces. Las citas se cobran en el tramo en que el paciente asistió y
+ * devuelven la conversación ya cobrada que llevó a ellas. Sin
  * nada que cobrar a mitad de tramo no se emite cargo. Con owner.
  */
 async function issueCycleCharge(
@@ -90,8 +91,19 @@ async function issueCycleCharge(
       sortOrder: sort++,
     })
   }
+  // La cita recuperada devuelve la conversación ya cobrada que llevó a ella.
+  const refunds = over.flatMap((row) => row.refunds)
+  if (refunds.length) {
+    lines.push({
+      kind: "devolucion",
+      description: `Devolución: ${refunds.length} ${refunds.length === 1 ? "conversación ya cobrada que llevó a una cita recuperada" : "conversaciones ya cobradas que llevaron a citas recuperadas"}`,
+      quantity: refunds.length,
+      amountCents: -microsToCents(over.reduce((sum, row) => sum + (row.priceMicros ?? 0) - netMicros(row), 0)),
+      sortOrder: sort++,
+    })
+  }
   if (covered.length) {
-    const value = microsToCents(covered.reduce((sum, row) => sum + (row.priceMicros ?? 0), 0))
+    const value = microsToCents(covered.reduce((sum, row) => sum + netMicros(row), 0))
     lines.push({
       kind: "credito",
       description: `${covered.length} ${covered.length === 1 ? "acción cubierta" : "acciones cubiertas"} por el crédito del mes (${(value / 100).toFixed(2)} ${plan.currency}): sin cargo`,

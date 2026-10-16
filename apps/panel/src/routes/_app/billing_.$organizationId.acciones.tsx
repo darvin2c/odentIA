@@ -11,6 +11,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { useMemo, useState } from "react"
 import { AGENT_OF, PriceWithDiscount, type SaasActionKind } from "../../components/billing/consumption"
+import { formatMicros } from "../../components/billing/money"
 import { accountOrganizationsQuery } from "../../lib/account-organizations"
 import { apiFetch } from "../../lib/api"
 import { tenantUrl } from "../../lib/host"
@@ -35,6 +36,8 @@ interface ActionRow {
   priceMicros: number | null
   discountBps: number
   state: ActionState
+  /** De una cita recuperada: las conversaciones ya cobradas que devuelve. */
+  refunds?: Array<{ actionId: string; occurredAt: string; priceMicros: number }>
 }
 
 interface ActionsPage {
@@ -115,6 +118,16 @@ function ActionsPage() {
                 {channel ? ` · ${channel}` : ""}
               </span>
               {row.original.detail}
+              {row.original.refunds?.length ? (
+                <span className="block text-xs text-muted-foreground">
+                  Devuelve {row.original.refunds.length === 1 ? "la conversación ya cobrada que llevó a ella" : `${row.original.refunds.length} conversaciones ya cobradas que llevaron a ella`} (
+                  {formatMicros(
+                    row.original.refunds.reduce((sum, refund) => sum + refund.priceMicros, 0),
+                    "USD",
+                  )}
+                  )
+                </span>
+              ) : null}
             </span>
           )
         },
