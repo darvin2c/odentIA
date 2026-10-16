@@ -29,6 +29,7 @@ import {
   useHeaderUtilities,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { DictationMobileBar, dictationMobileBarVisible, DictationPanel, DictationTranscript } from "./dictation-panel"
@@ -67,15 +68,14 @@ import { AttendingForNotice } from "../agenda/attending-for-notice"
 import { prepareConsents, type ConsentNeed } from "../../lib/encounter-documents"
 import { fetchConsents, type ConsentDocument } from "../../lib/clinical-forms"
 import { ageFrom } from "../../lib/patients"
-import { ControlesPanel } from "./clinical-panels"
 import { ConsentSigningScreen, useSignAs } from "./consent-signing"
 import { EncounterClosingDialog } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
+import { BudgetSendButton } from "./plan/budget-send"
 import { EncounterProcedures } from "./encounter-procedures"
-import { EncounterTreatments } from "./encounter-treatments"
 import { PatientClinicalStrip } from "./patient-header"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
@@ -118,7 +118,6 @@ type SectionKey =
   | "odontograma"
   | "procedimientos"
   | "plan"
-  | "controles"
   | "documentos"
   | "evolucion"
 
@@ -126,11 +125,11 @@ type SectionKey =
  * Bloque donde vive cada clase de sugerencia del dictado, y cómo se resume el
  * bloque cuando solo tiene sugerencias: sugerido no es registrado.
  */
-const SECTION_DICTATION: Partial<Record<SectionKey, { kind: DictationKind; onlySuggested?: string }>> = {
-  consulta: { kind: "nota" },
-  hallazgos: { kind: "diagnostico", onlySuggested: "Sin diagnósticos confirmados" },
-  plan: { kind: "plan", onlySuggested: "Sin indicaciones confirmadas" },
-  controles: { kind: "control" },
+const SECTION_DICTATION: Partial<Record<SectionKey, { kinds: DictationKind[]; onlySuggested?: string }>> = {
+  consulta: { kinds: ["nota"] },
+  hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
+  // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
+  plan: { kinds: ["plan", "control"], onlySuggested: "Sin indicaciones confirmadas" },
 }
 
 /** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */
@@ -307,6 +306,16 @@ function formatClock(iso: string): string {
 }
 
 /** Resumen económico del cierre: qué quedó por cobrar y qué no. */
+/** El presupuesto que quedó armado al firmar, con lo indicado en esta atención. */
+interface FinalizedBudget {
+  id: string
+  budgetNumber: number
+  itemCount: number
+  totalCents: number | null
+  currency: string
+  added: number
+}
+
 export interface FinalizeBilling {
   chargedCents: number
   currency: string | null
@@ -388,6 +397,9 @@ export function EncounterEditor({
   const [finalizing, setFinalizing] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
+  // El presupuesto que quedó armado al firmar (decisión 12): el cierre pregunta si enviarlo ya.
+  const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
+  const [budgetSent, setBudgetSent] = useState(false)
   // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
@@ -796,8 +808,8 @@ export function EncounterEditor({
   // Sugerencias que el odontólogo aún no confirmó ni descartó.
   const dictationPending = dictation.enabled ? dictation.pending : 0
   const dictationCount = (key: SectionKey): number => {
-    const kind = SECTION_DICTATION[key]?.kind
-    return kind && dictation.enabled ? dictation.suggestions.filter((item) => item.kind === kind).length : 0
+    const kinds = SECTION_DICTATION[key]?.kinds ?? []
+    return dictation.enabled ? dictation.suggestions.filter((item) => kinds.includes(item.kind)).length : 0
   }
 
   const editApptDate = (value: string) => {
@@ -895,7 +907,16 @@ export function EncounterEditor({
     if (!finalizedBilling) return
     const hadCharges = finalizedBilling.lines.some((line) => line.status === "charged")
     setFinalizedBilling(null)
+    setFinalizedBudget(null)
+    setBudgetSent(false)
     void onFinalized(hadCharges)
+  }
+  const navigate = useNavigate()
+  const canSendBudget = usePermission("budgets.send")
+  /** «Revisar antes»: el presupuesto en el Plan de la persona, abierto. */
+  const reviewBudget = (budgetId: string) => {
+    closeFinalized()
+    void navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "plan", budgetId } })
   }
 
   /**
@@ -936,6 +957,7 @@ export function EncounterEditor({
           charges: Array<{ id: string }>
           skippedCharges: Array<{ procedureId: string; reason: string }>
           billing: FinalizeBilling
+          budget: FinalizedBudget | null
         }
       }>(`/api/patients/${patientId}/encounters/${encounterId}/finalize`, {
         method: "POST",
@@ -946,6 +968,8 @@ export function EncounterEditor({
         }),
       })
       setConfirmOpen(false)
+      setBudgetSent(false)
+      setFinalizedBudget(result.data.budget ?? null)
       setFinalizedBilling(result.data.billing)
     } catch (err) {
       // Falla: se conserva el borrador intacto y se muestra el error real. El
@@ -1072,21 +1096,21 @@ export function EncounterEditor({
     },
     {
       key: "plan",
-      title: "Plan de tratamiento",
+      title: "Plan y controles",
       description:
-        "Indicaciones propuestas y tratamientos vinculados. Indicar no ejecuta ni cobra.",
+        "El plan en corto, lo hecho hoy y el próximo control. Indicar no ejecuta ni cobra.",
       summary:
-        detail.indicatedItems.length === 0 && detail.plannedItems.length === 0
-          ? "Sin indicaciones"
-          : `${detail.indicatedItems.length} indicación(es) · ${pendingTreatments} por ejecutar`,
-      empty: detail.indicatedItems.length === 0 && detail.plannedItems.length === 0,
-    },
-    {
-      key: "controles",
-      title: "Controles",
-      description: "Controles y mantenimientos indicados desde esta atención.",
-      summary: followUps.length === 0 ? "Sin controles" : `${followUps.length} control(es)`,
-      empty: followUps.length === 0,
+        [
+          detail.indicatedItems.length > 0 ? `${detail.indicatedItems.length} indicado(s) hoy` : "",
+          pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
+          followUps.length > 0 ? `${followUps.length} control(es)` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ") || "Sin indicaciones ni controles",
+      empty:
+        detail.indicatedItems.length === 0 &&
+        detail.plannedItems.length === 0 &&
+        followUps.length === 0,
     },
     {
       key: "documentos",
@@ -1636,42 +1660,28 @@ export function EncounterEditor({
       </div>
     ),
     procedimientos: (
-      <div className="flex flex-col gap-4">
-        <EncounterProcedures
-          patientId={patientId}
-          detail={detail}
-          disabled={locked}
-          beforeWrite={flush}
-          onChanged={handleChildChanged}
-          onPendingChange={handlePendingChange}
-          autoOpen={justAdded === "procedimientos"}
-        />
-        <EncounterTreatments
-          patientId={patientId}
-          encounterId={encounterId}
-          items={detail.plannedItems}
-          disabled={locked}
-          beforeWrite={flush}
-          onChanged={handleChildChanged}
-        />
-      </div>
+      <EncounterProcedures
+        patientId={patientId}
+        detail={detail}
+        disabled={locked}
+        beforeWrite={flush}
+        onChanged={handleChildChanged}
+        onPendingChange={handlePendingChange}
+        autoOpen={justAdded === "procedimientos"}
+      />
     ),
     plan: (
       <EncounterPlanPanel
         patientId={patientId}
         encounterId={encounterId}
+        plannedItems={detail.plannedItems}
+        indicatedItems={detail.indicatedItems}
+        attentionItems={attentionItems}
         disabled={locked}
+        autoOpen={justAdded === "plan"}
         beforeWrite={flush}
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
-      />
-    ),
-    controles: (
-      <ControlesPanel
-        patientId={patientId}
-        encounterId={encounterId}
-        encounterOnly
-        items={attentionItems}
       />
     ),
     documentos: (
@@ -1898,12 +1908,9 @@ export function EncounterEditor({
                   </Button>
                 ) : null}
               </div>
-              {SECTION_DICTATION[section.key] ? (
-                <DictationBlockSuggestions
-                  session={dictation}
-                  kind={SECTION_DICTATION[section.key]?.kind ?? "nota"}
-                />
-              ) : null}
+              {(SECTION_DICTATION[section.key]?.kinds ?? []).map((kind) => (
+                <DictationBlockSuggestions key={kind} session={dictation} kind={kind} />
+              ))}
               {/* Al registrar o indicar un servicio que lo pide, se propone sin abrir el bloque. */}
               {section.key === "documentos" && docs.toPrepare.length > 0 ? (
                 <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2">
@@ -2240,7 +2247,48 @@ export function EncounterEditor({
               ))}
             </ul>
           ) : null}
-          {/* Paso 3 de la fase 3: «¿Enviarle el presupuesto?» va aquí, después de lo que quedó por cobrar. */}
+          {/* Mismo paso de cierre: casi siempre la persona sigue ahí y conviene que se lo lleve. */}
+          {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget ? (
+            <section
+              aria-label="Presupuesto listo"
+              className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3"
+            >
+              <p className="text-sm">
+                Presupuesto listo:{" "}
+                {finalizedBudget.itemCount === 1
+                  ? "1 tratamiento"
+                  : `${finalizedBudget.itemCount} tratamientos`}
+                {finalizedBudget.totalCents != null && orgLocale
+                  ? ` por ${formatMoney(finalizedBudget.totalCents, finalizedBudget.currency, orgLocale)}`
+                  : ""}
+              </p>
+              {budgetSent ? (
+                <p role="status" className="text-sm font-medium">
+                  Enviado. Queda «Enviado · espera respuesta» en su Plan.
+                </p>
+              ) : (
+                <>
+                  <h3 className="text-sm font-semibold">¿Enviárselo a {firstNameOf(patient)} ahora?</h3>
+                  <div className="flex flex-wrap items-start gap-2">
+                    <BudgetSendButton
+                      patientId={patientId}
+                      budgetId={finalizedBudget.id}
+                      onSent={() => setBudgetSent(true)}
+                    />
+                    <Button type="button" variant="outline" onClick={() => reviewBudget(finalizedBudget.id)}>
+                      Revisar antes
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={closeFinalized}>
+                      Después
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Si nadie lo envía, mañana aparece en «Te espera» de recepción.
+                  </p>
+                </>
+              )}
+            </section>
+          ) : null}
           <DialogFooter>
             <Button type="button" onClick={closeFinalized}>
               Listo

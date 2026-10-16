@@ -236,17 +236,17 @@ export type MessageRoute =
   | { cause: AutomationCause; detail: string }
 
 /**
- * Decide la vía para escribirle a una persona. No envía nada. `spec` es el
- * mensaje con el texto vigente de la clínica: su plantilla es la que se busca
- * en la conexión. Nulo es un mensaje sin plantilla declarada: solo puede salir
- * como respuesta.
+ * Lo que decide la vía, leído sin abrir nada: correo de la persona, su
+ * WhatsApp, las conexiones de la clínica, si escribió en las últimas 24 horas
+ * y la plantilla del mensaje. Lo comparten `routeMessage` (que después abre el
+ * hilo) y `previewMessageRoute` (que solo dice por dónde saldría).
  */
-export async function routeMessage(
+async function routeFacts(
   tx: Db,
   orgId: string,
   contactId: string,
   spec: Pick<AutomationMessage, "template"> | null,
-): Promise<MessageRoute> {
+) {
   const [person] = await tx
     .select({ email: contact.email })
     .from(contact)
@@ -278,7 +278,7 @@ export async function routeMessage(
     .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
   const whatsapp = connections.find((row) => row.channel === "whatsapp")
   const mailbox = connections.find((row) => row.channel === "email")
-
+  let windowThreadId: string | null = null
   let template: TemplateItem | null = null
   if (identity && whatsapp) {
     const threads = await tx
@@ -304,43 +304,30 @@ export async function routeMessage(
       thread?.lastInboundAt &&
       Date.now() - thread.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS
     ) {
-      return { via: "respuesta", channel: "whatsapp", conversationId: thread.id }
-    }
-    template = spec ? await findTemplateByName(tx, orgId, whatsapp.id, spec.template) : null
-    if (template?.status === "aprobada") {
-      try {
-        const started = await startContactConversation(tx, orgId, null, contactId, {
-          identityId: identity.id,
-          connectionId: whatsapp.id,
-        })
-        return {
-          via: "plantilla",
-          channel: "whatsapp",
-          conversationId: started.id,
-          template: { name: template.name, language: template.language },
-        }
-      } catch (error) {
-        // Un hilo que no se puede abrir (historial ambiguo, persona archivada) no
-        // tumba el lote: se intenta el correo y, si no, se dice el motivo.
-        if (!(error instanceof ServiceError)) throw error
-      }
+      windowThreadId = thread.id
+    } else {
+      template = spec ? await findTemplateByName(tx, orgId, whatsapp.id, spec.template) : null
     }
   }
-
   const email = person?.email?.trim().toLowerCase()
-  // Por qué no se pudo abrir el hilo de correo, si la clínica sí tiene buzón:
-  // no es «sin conexión», y decirlo así manda a conectar lo que ya está.
-  let mailboxProblem: string | null = null
-  if (spec && mailbox && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    try {
-      const thread = await openEmailThread(tx, orgId, null, { contactId, email }, mailbox)
-      return { via: "correo", channel: "email", conversationId: thread.id }
-    } catch (error) {
-      if (!(error instanceof ServiceError)) throw error
-      mailboxProblem = error.message
-    }
+  return {
+    identity: identity ?? null,
+    whatsapp: whatsapp ?? null,
+    mailbox: mailbox ?? null,
+    windowThreadId,
+    template,
+    email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
+    rawEmail: email ?? null,
   }
-  if (!identity && !email) {
+}
+
+/** Por qué no se le puede escribir, con las palabras para el equipo. */
+function noRoute(
+  facts: Awaited<ReturnType<typeof routeFacts>>,
+  mailboxProblem: string | null,
+): { cause: AutomationCause; detail: string } {
+  const { identity, whatsapp, template } = facts
+  if (!identity && !facts.rawEmail) {
     return { cause: "sin_destino", detail: "La persona no tiene WhatsApp ni correo registrados" }
   }
   if (identity && whatsapp) {
@@ -361,4 +348,73 @@ export async function routeMessage(
       ? "La clínica no tiene WhatsApp conectado"
       : "La persona solo tiene correo y la clínica no tiene un correo conectado",
   }
+}
+
+/** Por dónde saldría el mensaje, sin abrir ni escribir nada: lo que la pantalla dice antes de enviar. */
+export type RoutePreview =
+  | { via: AutomationVia; channel: "whatsapp" | "email" }
+  | { cause: AutomationCause; detail: string }
+
+export async function previewMessageRoute(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  spec: Pick<AutomationMessage, "template"> | null,
+): Promise<RoutePreview> {
+  const facts = await routeFacts(tx, orgId, contactId, spec)
+  if (facts.windowThreadId) return { via: "respuesta", channel: "whatsapp" }
+  if (facts.identity && facts.whatsapp && facts.template?.status === "aprobada") return { via: "plantilla", channel: "whatsapp" }
+  if (spec && facts.mailbox && facts.email) return { via: "correo", channel: "email" }
+  return noRoute(facts, null)
+}
+
+/**
+ * Decide la vía para escribirle a una persona. No envía nada. `spec` es el
+ * mensaje con el texto vigente de la clínica: su plantilla es la que se busca
+ * en la conexión. Nulo es un mensaje sin plantilla declarada: solo puede salir
+ * como respuesta.
+ */
+export async function routeMessage(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  spec: Pick<AutomationMessage, "template"> | null,
+): Promise<MessageRoute> {
+  const facts = await routeFacts(tx, orgId, contactId, spec)
+  const { identity, whatsapp, mailbox, template } = facts
+  if (facts.windowThreadId) return { via: "respuesta", channel: "whatsapp", conversationId: facts.windowThreadId }
+  if (identity && whatsapp) {
+    if (template?.status === "aprobada") {
+      try {
+        const started = await startContactConversation(tx, orgId, null, contactId, {
+          identityId: identity.id,
+          connectionId: whatsapp.id,
+        })
+        return {
+          via: "plantilla",
+          channel: "whatsapp",
+          conversationId: started.id,
+          template: { name: template.name, language: template.language },
+        }
+      } catch (error) {
+        // Un hilo que no se puede abrir (historial ambiguo, persona archivada) no
+        // tumba el lote: se intenta el correo y, si no, se dice el motivo.
+        if (!(error instanceof ServiceError)) throw error
+      }
+    }
+  }
+
+  // Por qué no se pudo abrir el hilo de correo, si la clínica sí tiene buzón:
+  // no es «sin conexión», y decirlo así manda a conectar lo que ya está.
+  let mailboxProblem: string | null = null
+  if (spec && mailbox && facts.email) {
+    try {
+      const thread = await openEmailThread(tx, orgId, null, { contactId, email: facts.email }, mailbox)
+      return { via: "correo", channel: "email", conversationId: thread.id }
+    } catch (error) {
+      if (!(error instanceof ServiceError)) throw error
+      mailboxProblem = error.message
+    }
+  }
+  return noRoute(facts, mailboxProblem)
 }

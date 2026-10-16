@@ -15,7 +15,8 @@ import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./f
 import { listPlanItems } from "./plan.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
-const DISCARDED_DECISIONS = ["rechazado", "reemplazado"]
+// Lo que no aceptó, lo reemplazado y lo que estaba solo en una opción no elegida.
+const DISCARDED_DECISIONS = ["rechazado", "reemplazado", "no_elegida"]
 
 export interface CoordinationFollowUp {
   id: string

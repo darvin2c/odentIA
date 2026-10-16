@@ -707,10 +707,11 @@ it("plan: summary separa totales por moneda sin sumar distinto dinero", async ()
     { planId: mixedUsdPlan, encounterId: mixedCtx.encounterId },
     { serviceId: SVC_USD },
   )
+  // Un solo borrador por persona: el segundo se prepara cuando el primero ya salió.
   const mixedPen = await createBudget(app, mixed, mixedPenPlan, [penItem.id])
-  const mixedUsd = await createBudget(app, mixed, mixedUsdPlan, [usdItem.id])
   await deliverBudget(app, mixed, mixedPen)
   await decideBudget(app, mixed, mixedPen, [penItem.id])
+  const mixedUsd = await createBudget(app, mixed, mixedUsdPlan, [usdItem.id])
   await deliverBudget(app, mixed, mixedUsd)
   await decideBudget(app, mixed, mixedUsd, [usdItem.id])
 
@@ -835,15 +836,20 @@ it("plan: un histórico sin tarifa no se presenta como gratuito en el resumen", 
     sql`insert into "treatment_budget" ("organization_id", "patient_id", "plan_id", "budget_number", "title", "currency", "status") values ('org_a', ${patientId}, ${legacyPlanId}, 97, 'Histórico', 'PEN', 'borrador') returning "id"`,
   )) as unknown as Array<{ id: string }>
   const legacyBudgetId = budgetRow[0]!.id
+  // Todo presupuesto tiene al menos una opción, y cada línea es de una.
+  const optionRow = (await ownerDb.execute(
+    sql`insert into "treatment_budget_option" ("organization_id", "patient_id", "budget_id", "position", "is_recommended") values ('org_a', ${patientId}, ${legacyBudgetId}, 1, true) returning "id"`,
+  )) as unknown as Array<{ id: string }>
   const itemRow = (await ownerDb.execute(
     sql`insert into "treatment_plan_item" ("organization_id", "patient_id", "plan_id", "budget_id", "title", "price_cents", "currency", "scope", "status") values ('org_a', ${patientId}, ${legacyPlanId}, ${legacyBudgetId}, 'Tratamiento histórico', null, 'PEN', 'general', 'pendiente') returning "id"`,
   )) as unknown as Array<{ id: string }>
   await ownerDb.execute(
-    sql`insert into "treatment_budget_item" ("organization_id", "patient_id", "plan_id", "budget_id", "plan_item_id", "title", "currency", "decision") values ('org_a', ${patientId}, ${legacyPlanId}, ${legacyBudgetId}, ${itemRow[0]!.id}, 'Tratamiento histórico', 'PEN', 'sin_registro')`,
+    sql`insert into "treatment_budget_item" ("organization_id", "patient_id", "plan_id", "budget_id", "option_id", "plan_item_id", "title", "currency", "decision") values ('org_a', ${patientId}, ${legacyPlanId}, ${legacyBudgetId}, ${optionRow[0]!.id}, ${itemRow[0]!.id}, 'Tratamiento histórico', 'PEN', 'sin_registro')`,
   )
-  // El documento queda retirado como histórico (las líneas conservan su snapshot).
+  // El documento queda retirado (las líneas conservan su snapshot). `historico` ya
+  // no existe: la migración 0093 lo pasó a «Anulado».
   await ownerDb.execute(
-    sql`update "treatment_budget" set "status" = 'historico' where "id" = ${legacyBudgetId}`,
+    sql`update "treatment_budget" set "status" = 'cancelado' where "id" = ${legacyBudgetId}`,
   )
   const response = await app.request(`/patients/${patientId}/summary`)
   expect(response.status).toBe(200)
@@ -867,21 +873,24 @@ it("plan: el ítem vive en el plan; el presupuesto solo lo cotiza", async () => 
   const ctx = await setupPlan(app, patientId)
   const item = await addItem(app, patientId, ctx, { serviceId: SVC_LIMPIEZA, toothNumber: 36 })
 
-  // Cotizar dos veces el mismo ítem en borradores distintos produce un documento y un conflicto.
+  // Un solo borrador por persona (decisión 12): preparar otra vez el mismo ítem
+  // devuelve el mismo borrador, sin otra línea ni otro documento.
   const first = await postJson(app, `/patients/${patientId}/budgets`, {
     planId: ctx.planId,
     itemIds: [item.id],
   })
   expect(first.status).toBe(201)
+  const firstId = ((await first.json()) as { data: { id: string } }).data.id
   const second = await postJson(app, `/patients/${patientId}/budgets`, {
     planId: ctx.planId,
     itemIds: [item.id],
   })
-  expect(second.status).toBe(409)
-  expect(((await second.json()) as ErrorBody).error.code).toBe("ITEM_ALREADY_QUOTED")
+  expect(second.status).toBe(201)
+  const secondBody = (await second.json()) as { data: { id: string; items: unknown[] } }
+  expect(secondBody.data.id).toBe(firstId)
+  expect(secondBody.data.items).toHaveLength(1)
 
   // Tras cancelar, el ítem vuelve a ser elegible sin duplicarse.
-  const firstId = ((await first.json()) as { data: { id: string } }).data.id
   const cancel = await postJson(app, `/patients/${patientId}/budgets/${firstId}/cancel`, {})
   expect(cancel.status).toBe(200)
   const third = await postJson(app, `/patients/${patientId}/budgets`, {
@@ -891,12 +900,13 @@ it("plan: el ítem vive en el plan; el presupuesto solo lo cotiza", async () => 
   expect(third.status).toBe(201)
   const thirdBody = (await third.json()) as { data: { id: string } }
 
-  // Repetir la ejecución no crea un segundo procedimiento.
+  // Repetirlo no crea un segundo documento: es el mismo borrador.
   const fourth = await postJson(app, `/patients/${patientId}/budgets`, {
     planId: ctx.planId,
     itemIds: [item.id],
   })
-  expect(fourth.status).toBe(409)
+  expect(fourth.status).toBe(201)
+  expect(((await fourth.json()) as { data: { id: string } }).data.id).toBe(thirdBody.data.id)
 
   const detail = await app.request(`/patients/${patientId}/budgets/${thirdBody.data.id}`, {
     method: "GET",

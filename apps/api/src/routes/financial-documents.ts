@@ -27,9 +27,9 @@ function canReadBudget(role: string): boolean {
 }
 
 function canSendBudget(role: string): boolean {
-  // Estricto budgets.write: quien puede presupuestar envía; caja no (aunque
-  // tenga finance.write). El plan propio del odontólogo se valida en servicio.
-  return canAccess(role, "budgets.write")
+  // `budgets.send` (decisión 4): recepción y quien presupuesta lo envían; caja
+  // no (aunque tenga finance.write). Lo propio del odontólogo se valida en servicio.
+  return canAccess(role, "budgets.send")
 }
 
 /**
@@ -42,8 +42,8 @@ function canSendBudget(role: string): boolean {
  *   connectionId, message?, savePreferredChannel?, paper? } → 201 { conversationId, messageId,
  *   status: "queued" } (encolado, nunca entregado).
  * Permisos canónicos: ticket exige finance.read/write; budget exige
- * budgets.read/write. La titularidad (paciente de la org, destinatario
- * autorizado, plan propio del odontólogo) se valida en el servicio.
+ * budgets.read/send. La titularidad (paciente de la org, destinatario
+ * autorizado, lo propio del odontólogo) se valida en el servicio.
  */
 const documentType = z.enum(["ticket", "budget"])
 

@@ -46,6 +46,7 @@ import {
   parseReplyId,
 } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { answerBudgetButton } from "./budget-send.js"
 import { applyTemplateStatuses, type TemplateDeps } from "./channel-templates.js"
 import {
   currentAutomationMessageOf,
@@ -62,6 +63,7 @@ import { updateOpportunity } from "./opportunities.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
+import type { Storage } from "./storage.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -1324,8 +1326,7 @@ const BUDGET_STATUS_WORDS: Record<string, string> = {
   pospuesto: "pospuesto",
   sustituido: "reemplazado por otro",
   cancelado: "anulado",
-  borrador: "en borrador",
-  historico: "archivado",
+  borrador: "por enviar",
 }
 const CONTROL_STATUS_WORDS: Record<string, string> = {
   realizado: "hecho",
@@ -2782,6 +2783,8 @@ export async function handleAutomationReply(
   tx: Db,
   orgId: string,
   input: { conversationId: string; replyId: string | null | undefined },
+  /** Para «Ver y responder» de «Presupuesto listo», que deja el PDF en la conversación. */
+  deps?: { storage: Storage },
 ): Promise<boolean> {
   const reply = parseReplyId(input.replyId)
   if (!reply || reply.action === "responder") return false
@@ -2790,6 +2793,17 @@ export async function handleAutomationReply(
     .from(conversation)
     .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
+  // «Ver y responder»: su id lleva el presupuesto. Le llega el PDF; lo que
+  // responda lo sigue Recepción en la conversación.
+  if (reply.action === "presupuesto") {
+    if (!thread || !deps) return false
+    return answerBudgetButton(
+      tx,
+      orgId,
+      { conversationId: input.conversationId, contactId: thread.contactId, budgetId: reply.jobId },
+      deps,
+    )
+  }
   // La pregunta de novedades y promociones: su botón lleva la persona y solo vale en su conversación.
   if (reply.action === "permiso_si" || reply.action === "permiso_no") {
     if (!thread || thread.contactId !== reply.jobId) return false

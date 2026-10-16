@@ -38,6 +38,7 @@ import {
   getPatientSummary,
   getTimeline,
   getToothHistory,
+  getPlanNextStep,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
@@ -352,14 +353,13 @@ const planSiteFields = {
   quadrant: z.number().int().min(1).max(8).nullish(),
   arch: z.enum(["upper", "lower"]).nullish(),
 }
+// Sin plan, la indicación va al plan abierto de la persona (o nace uno): no se elige plan al indicar.
 const planCreateInput = z
   .object({
     serviceId: z.uuid(),
-    planId: z.uuid(),
+    planId: z.uuid().nullish(),
     sourceEncounterId: z.uuid(),
-    optionGroupId: z.uuid().nullish(),
     odontogramEntryId: z.uuid().nullish(),
-    isRecommended: z.boolean().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     phase: z.enum(TREATMENT_PHASES).nullish(),
@@ -404,7 +404,7 @@ const planPatchInput = z
 const planBatchInput = z
   .object({
     serviceId: z.uuid(),
-    planId: z.uuid(),
+    planId: z.uuid().nullish(),
     sourceEncounterId: z.uuid(),
     toothNumbers: z.array(z.number().int()).min(1).max(52),
     detail: z.string().max(4000).nullish(),
@@ -491,8 +491,13 @@ const FINANCIAL_DOCUMENTS_PREFIXES = ["/financial-documents", "/financial-docume
  */
 const COORDINATION_SUBPATH = "/coordination"
 
-/** Presupuestos: `budgets.read`/`.write`; la decisión usa `budgets.decide`. */
+/**
+ * Presupuestos: `budgets.read`/`.write`; la decisión usa `budgets.decide` y
+ * entregar o enviar, `budgets.send` (decisión 4: recepción envía y anota, no
+ * cambia precios).
+ */
 const BUDGET_SUBPATH = "/budgets"
+const BUDGET_SEND_SUFFIXES = ["/deliver", "/send"]
 
 /** Bitácora de consultas a la historia: la lee quien audita (`audit.read`). */
 const ACCESS_LOG_SUBPATH = "/access-log"
@@ -559,12 +564,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
               ? "budgets"
               : "patients"
     const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
-    // La decisión del presupuesto usa `budgets.decide` (caja decide sin
-    // clínica); el resto de mutaciones, `budgets.write`.
+    // La decisión del presupuesto usa `budgets.decide` (caja y recepción
+    // deciden sin clínica); entregarlo o enviarlo, `budgets.send`; el resto
+    // de mutaciones, `budgets.write`.
     const permission =
       domain === "budgets" && write && remainder.includes("/decision")
         ? "budgets.decide"
-        : `${domain}.${write ? "write" : "read"}`
+        : domain === "budgets" && write && BUDGET_SEND_SUFFIXES.some((suffix) => remainder.endsWith(suffix))
+          ? "budgets.send"
+          : `${domain}.${write ? "write" : "read"}`
     if (!canAccess(memberRole, permission)) {
       return c.json(
         errorBody(
@@ -760,6 +768,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updatePatient(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // --- «Qué sigue» del plan: frase y botón que decide el servidor (tablero 3) ---
+  // La leen quien atiende, recepción y caja: sin diagnósticos ni piezas, y el
+  // botón solo para quien puede hacerlo.
+  app.get("/:id/next-step", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
       ),
     )
   })

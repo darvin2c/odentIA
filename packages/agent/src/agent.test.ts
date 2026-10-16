@@ -2204,7 +2204,10 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(info.ledger).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
-      ["ampliar_herramientas", "buscar_en_la_clinica", "consultar_conocimiento", "request_human_handoff", "send_reply", "send_template", "ver_sedes_y_servicios"],
+      [
+        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "reenviar_presupuesto",
+        "request_human_handoff", "send_reply", "send_template", "ver_presupuesto", "ver_sedes_y_servicios",
+      ],
     )
 
     // Si el camino no alcanza, pide el resto y lo recibe en el paso siguiente.

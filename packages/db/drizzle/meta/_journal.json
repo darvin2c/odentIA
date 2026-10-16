@@ -652,6 +652,13 @@
       "when": 1792113996283,
       "tag": "0092_documentos_de_la_atencion",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1792113996284,
+      "tag": "0093_un_plan_una_seccion",
+      "breakpoints": true
     }
   ]
 }

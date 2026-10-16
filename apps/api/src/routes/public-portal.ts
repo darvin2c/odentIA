@@ -44,6 +44,8 @@ const decisionLineInput = z.strictObject({
   decision: z.enum(["aceptado", "rechazado", "pospuesto"]),
 })
 const decisionInput = z.strictObject({
+  // La opción que elige, si el presupuesto trae varias (decisión 13).
+  optionId: z.uuid().nullish(),
   decisions: z.array(decisionLineInput).min(1).max(200),
   decisionNote: z.string().trim().min(1).max(2000).nullish(),
 })

@@ -1,12 +1,13 @@
 /**
  * Cuenta del paciente: tres cifras (por cobrar, pagado, a favor), lo pendiente
- * por concepto, los cobros con su ticket y los presupuestos como documento
- * económico. Sin datos clínicos.
+ * por concepto y los cobros con su ticket. Sin datos clínicos. Los
+ * presupuestos están en la pestaña Plan, donde caja también anota la respuesta
+ * (ADR 0034).
  *
  * Desde aquí se cobra en un paso (CollectDrawer, en la caja de la sede activa),
- * se vuelve a ver un ticket para imprimirlo, enviarlo o anularlo, se devuelve
- * saldo a favor y caja anota la respuesta de un presupuesto. Dinero con
- * `@odentia/clinical`; formato y zona del perfil de la clínica.
+ * se vuelve a ver un ticket para imprimirlo, enviarlo o anularlo y se devuelve
+ * saldo a favor. Dinero con `@odentia/clinical`; formato y zona del perfil de
+ * la clínica.
  */
 import { documentText, formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
@@ -17,9 +18,6 @@ import {
   FieldDescription,
   FieldLabel,
   Input,
-  RadioGroup,
-  RadioGroupItem,
-  Skeleton,
   Textarea,
 } from "@odentia/ui"
 import { DetailDrawer, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitButton } from "@odentia/ui-patterns"
@@ -31,21 +29,12 @@ import {
   CollectDrawer,
   MoneyInput,
   parseMoneyOrNull,
-  patientNoun,
   PaymentMethodButtons,
 } from "../finance/collect-drawer"
 import { openServerPdf, TicketView, ticketDisplayNumber } from "../finance/ticket-view"
 import { ChoiceSelect } from "../ui/choice-select"
 import { apiFetch } from "../../lib/api"
 import { useActiveBranch } from "../../lib/active-branch"
-import {
-  budgetNumberLabel,
-  budgetPdfUrl,
-  decideBudgetApi,
-  fetchBudgets,
-  type BudgetWithTotals,
-} from "../../lib/budgets"
-import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage } from "../../lib/finance"
 import {
@@ -64,7 +53,7 @@ import {
   type RefundResult,
 } from "../../lib/finance-collect"
 import { useOrgEvents } from "../../lib/org-events"
-import { ageFrom, type PatientFull } from "../../lib/patients"
+import type { PatientFull } from "../../lib/patients"
 
 const MAX_REASON = 2000
 
@@ -75,22 +64,6 @@ const FINANCE_EVENT_KINDS = [
   "patient.account.updated",
   "encounter.finalized",
 ]
-
-type LineAnswer = "aceptado" | "pospuesto" | "rechazado"
-
-const ANSWERS: Array<{ value: LineAnswer; label: string }> = [
-  { value: "aceptado", label: "Acepta" },
-  { value: "pospuesto", label: "Lo piensa" },
-  { value: "rechazado", label: "No" },
-]
-
-/** Estado del presupuesto con palabras de caja. */
-function budgetStateLabel(status: string): string {
-  if (status === "aceptado") return "Aceptado"
-  if (status === "parcial") return "Aceptado en parte"
-  if (status === "pospuesto") return "Lo está pensando"
-  return "Espera respuesta"
-}
 
 /** Sección de la cuenta: misma tarjeta y mismo título en todas. */
 function Section({
@@ -108,25 +81,19 @@ function Section({
   )
 }
 
-/**
- * Cobros del paciente. `part` separa lo que va en cada pestaña de su página:
- * «Cobros» (saldo, pendiente, cobros y pagos) y, para quien no lee la
- * clínica, «Plan» con solo los presupuestos (caja registra su respuesta).
- */
+/** Cobros del paciente: saldo, pendiente, cobros y pagos. */
 export function AccountTab({
   patientId,
-  part = "todo",
 }: {
   patientId: string
-  part?: "todo" | "cuenta" | "presupuestos"
+  /** Se conserva por compatibilidad de enlaces: la cuenta ya no lleva presupuestos. */
+  part?: "cuenta"
 }): React.JSX.Element {
   const uid = useId()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const canRead = usePermission("finance.read")
   const canWrite = usePermission("finance.write")
-  const canBudgets = usePermission("budgets.read")
-  const canDecide = usePermission("budgets.decide")
   const sede = useActiveBranch()
   const profile = useOrgFinanceProfile()
 
@@ -142,10 +109,6 @@ export function AccountTab({
   const [refundMethod, setRefundMethod] = useState("")
   const [receipt, setReceipt] = useState<RefundResult | null>(null)
   const [adding, setAdding] = useState<{ description: string; amountText: string } | null>(null)
-  const [deciding, setDeciding] = useState<BudgetWithTotals | null>(null)
-  const [answers, setAnswers] = useState<Record<string, LineAnswer>>({})
-  const [deciderId, setDeciderId] = useState("")
-  const [deciderOpen, setDeciderOpen] = useState(false)
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
 
@@ -153,11 +116,6 @@ export function AccountTab({
     queryKey: ["patient-account3", patientId],
     queryFn: () => fetchPatientAccount3(patientId),
     enabled: canRead,
-  })
-  const budgets = useQuery({
-    queryKey: ["budgets", patientId],
-    queryFn: () => fetchBudgets(patientId),
-    enabled: canRead && canBudgets,
   })
   // La ficha ya cargó al paciente: misma clave, sin otra petición.
   const patient = useQuery({
@@ -169,11 +127,6 @@ export function AccountTab({
     queryKey: ["org-payment-methods"],
     queryFn: fetchPaymentMethods,
     enabled: canRead && canWrite,
-  })
-  const responsibilities = useQuery({
-    queryKey: ["responsibilities", patientId],
-    queryFn: () => fetchResponsibilities(patientId),
-    enabled: canRead && canDecide,
   })
   const ticketQuery = useQuery({
     queryKey: ["ticket-receipt", patientId, viewTicket?.ticketId],
@@ -200,7 +153,6 @@ export function AccountTab({
 
   useOrgEvents(FINANCE_EVENT_KINDS, () => {
     void queryClient.invalidateQueries({ queryKey: ["patient-account3", patientId] })
-    void queryClient.invalidateQueries({ queryKey: ["budgets", patientId] })
   })
 
   // Sede del cobro: la activa; con una sola sede, esa. Solo se pregunta si no hay ninguna.
@@ -232,24 +184,6 @@ export function AccountTab({
     onSuccess: () => {
       setAdding(null)
       setError(null)
-      invalidate()
-    },
-    onError: (err) => setError(financeErrorMessage(err)),
-  })
-
-  const decideMutation = useMutation({
-    mutationFn: (budget: BudgetWithTotals) =>
-      decideBudgetApi(patientId, budget.id, {
-        decisions: budget.items.map((line) => ({
-          planItemId: line.planItemId,
-          decision: answers[line.planItemId] ?? "pospuesto",
-        })),
-        decidedByContactId: deciderId || null,
-      }),
-    onSuccess: () => {
-      setDeciding(null)
-      setError(null)
-      void queryClient.invalidateQueries({ queryKey: ["budgets", patientId] })
       invalidate()
     },
     onError: (err) => setError(financeErrorMessage(err)),
@@ -309,7 +243,6 @@ export function AccountTab({
       : creditSources.length > 1
         ? `, de ${creditSources.length} cobros`
         : ""
-  const visits = data.visitasPorTratamiento ?? {}
   const pending = data.pendiente
   const orgRow = data.byCurrency.find((row) => row.currency === orgUnit)
   const orgFavor = orgRow?.aFavor ?? 0
@@ -325,30 +258,6 @@ export function AccountTab({
   const methodList = methods.data?.data ?? []
   const refundChoice = methodList.find((item) => item.id === refundMethod) ?? methodList[0] ?? null
   const refundCents = parseMoneyOrNull(refundAmount, orgUnit, locale)
-
-  const budgetList = budgets.data?.data ?? []
-  const accepted = budgetList.filter(
-    (budget) => budget.status === "aceptado" || budget.status === "parcial",
-  )
-  // Espera respuesta según la regla del servidor (`awaitsAnswer`); lo aceptado en
-  // parte ya está arriba, aunque aún le quede algo por decidir.
-  const waiting = budgetList.filter((budget) => budget.awaitsAnswer && !accepted.includes(budget))
-
-  // Quién puede responder un presupuesto: la propia persona o su representante legal vigente.
-  const selfContact = patient.data?.data.contacts.find((item) => item.relationship === "self")
-  const representatives = (responsibilities.data?.data ?? []).filter(
-    (row) => row.isCurrent && row.kind === "representante_legal",
-  )
-  const deciders = [
-    ...(selfContact
-      ? [{ id: selfContact.contactId, label: `${patientName}, ${patientNoun(person?.sex)}` }]
-      : []),
-    ...representatives.map((row) => ({
-      id: row.contactId,
-      label: `${row.contact.displayName}, representante legal`,
-    })),
-  ]
-  const decider = deciders.find((item) => item.id === deciderId) ?? null
 
   /** Ejecuta la acción si ya hay sede; si no, la pide una sola vez. */
   const withBranch = (action: "cobrar" | "devolver" | "agregar") => {
@@ -368,68 +277,14 @@ export function AccountTab({
     }
   }
 
-  const openDecide = (budget: BudgetWithTotals) => {
-    setAnswers(
-      Object.fromEntries(
-        budget.items.map((line) => [
-          line.planItemId,
-          line.decision === "aceptado" || line.decision === "rechazado" ? line.decision : "pospuesto",
-        ]),
-      ),
-    )
-    const age = ageFrom(person?.birthDate)
-    const minor = age !== "" && Number(age) < 18
-    setDeciderId(
-      budget.decisionContactId ??
-        (minor ? representatives[0]?.contactId : undefined) ??
-        selfContact?.contactId ??
-        representatives[0]?.contactId ??
-        "",
-    )
-    setDeciderOpen(false)
-    setError(null)
-    setDeciding(budget)
-  }
-
-  const viewBudget = async (budgetId: string) => {
-    if (pdfBusy) return
-    setPdfBusy(budgetId)
-    setPdfError(null)
-    try {
-      await openServerPdf(budgetPdfUrl(patientId, budgetId))
-    } catch (err) {
-      setPdfError(financeErrorMessage(err))
-    } finally {
-      setPdfBusy(null)
-    }
-  }
-
   const collectButton = (className?: string) => (
     <Button className={className} onClick={() => withBranch("cobrar")}>
       {orgOwed > 0 ? `Cobrar ${money(orgOwed)}` : "Cobrar un adelanto"}
     </Button>
   )
 
-  const decidingLines = deciding?.items ?? []
-  const decidingAccepted = decidingLines
-    .filter((line) => answers[line.planItemId] === "aceptado")
-    .reduce((sum, line) => sum + (line.lineTotalCents ?? line.priceCents ?? 0), 0)
-  const decidingCount = decidingLines.filter((line) => answers[line.planItemId] === "aceptado").length
-  const decidingOutcome =
-    decidingLines.length === 0
-      ? ""
-      : decidingCount === decidingLines.length
-        ? "Quedará como «Aceptado»."
-        : decidingCount > 0
-          ? "Quedará como «Aceptado en parte». Lo que piensa se puede responder después."
-          : decidingLines.some((line) => answers[line.planItemId] === "pospuesto")
-            ? "Quedará como «Lo está pensando». Se puede responder después."
-            : "Quedará como «No aceptado»."
-
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
-      {part !== "presupuestos" ? (
-        <>
       <section aria-label="Saldo" className="elevated rounded-xl border bg-card p-4 sm:p-6">
         <div className="flex flex-col gap-4">
           {balances.map((balance) => (
@@ -456,7 +311,7 @@ export function AccountTab({
             </div>
           ))}
         </div>
-        {error && !cobrarOpen && !refundOpen && !adding && !deciding ? (
+        {error && !cobrarOpen && !refundOpen && !adding ? (
           <p role="alert" className="mt-3 text-sm text-destructive">
             {error}
           </p>
@@ -625,126 +480,6 @@ export function AccountTab({
         </Section>
       ) : null}
 
-        </>
-      ) : null}
-
-      {canBudgets && part !== "cuenta" ? (
-        <Section title="Presupuestos">
-          {budgets.isPending ? (
-            <div className="flex flex-col gap-2" aria-busy="true">
-              <Skeleton className="h-5 w-1/2" />
-              <Skeleton className="h-16 w-full" />
-            </div>
-          ) : budgets.isError ? (
-            <ErrorState
-              title="No se pudieron consultar los presupuestos"
-              message={financeErrorMessage(budgets.error)}
-              onRetry={() => void budgets.refetch()}
-            />
-          ) : accepted.length === 0 && waiting.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No tiene presupuestos aceptados ni esperando respuesta.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {[...waiting, ...accepted].map((budget) => {
-                const isAccepted = budget.status === "aceptado" || budget.status === "parcial"
-                const acceptedLines = budget.items.filter((line) => line.decision === "aceptado")
-                const acceptedCents =
-                  budget.acceptedCents ??
-                  acceptedLines.reduce((sum, line) => sum + (line.lineTotalCents ?? line.priceCents ?? 0), 0)
-                // Por sesión cuenta cada visita atendida; lo demás, cuando el tratamiento se realizó.
-                const sessionLines = acceptedLines.filter((line) => line.billingMode === "session")
-                const doneCents = acceptedLines.reduce((sum, line) => {
-                  if (line.billingMode === "session") {
-                    const done = Math.min(visits[line.planItemId] ?? 0, line.sessionsPlanned ?? 1)
-                    return sum + done * (line.priceCents ?? 0)
-                  }
-                  return line.itemStatus === "realizado"
-                    ? sum + (line.lineTotalCents ?? line.priceCents ?? 0)
-                    : sum
-                }, 0)
-                const cur = budget.currency
-                return (
-                  <li key={budget.id} className="flex flex-col gap-2 rounded-xl border p-3 sm:p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="min-w-0 flex-1 break-words font-medium">
-                        {budgetNumberLabel(budget.budgetNumber)} · {budget.title}
-                      </p>
-                      <Badge variant={isAccepted ? "success" : "warning"}>
-                        {budgetStateLabel(budget.status)}
-                      </Badge>
-                    </div>
-                    {isAccepted ? (
-                      <>
-                        <dl className="flex flex-col gap-1 text-sm">
-                          <div className="flex justify-between gap-3">
-                            <dt className="text-muted-foreground">Aceptó</dt>
-                            <dd className="tabular-nums">
-                              {plain(acceptedCents, cur)}
-                              {budget.totalCents != null ? ` de ${plain(budget.totalCents, cur)}` : ""}
-                            </dd>
-                          </div>
-                          <div className="flex justify-between gap-3">
-                            <dt className="text-muted-foreground">Ya realizado</dt>
-                            <dd className="tabular-nums">{plain(doneCents, cur)}</dd>
-                          </div>
-                          <div className="flex justify-between gap-3">
-                            <dt className="text-muted-foreground">Por realizar</dt>
-                            <dd className="tabular-nums">
-                              {plain(Math.max(0, acceptedCents - doneCents), cur)}
-                            </dd>
-                          </div>
-                        </dl>
-                        {sessionLines.map((line) => (
-                          <p key={line.id} className="text-sm text-muted-foreground">
-                            {line.title}: {Math.min(visits[line.planItemId] ?? 0, line.sessionsPlanned ?? 1)}{" "}
-                            de {line.sessionsPlanned ?? 1} visitas atendidas.
-                          </p>
-                        ))}
-                        <p className="text-sm text-muted-foreground">
-                          Lo que falta realizar todavía no es deuda: se cobra cuando se atiende.
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        {budget.totalCents != null
-                          ? `Presupuestado ${money(budget.totalCents, cur)}. `
-                          : ""}
-                        {budget.status === "pospuesto"
-                          ? "Dijo que lo iba a pensar."
-                          : "Todavía no responde."}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      {canDecide && budget.awaitsAnswer ? (
-                        <Button size="sm" onClick={() => openDecide(budget)}>
-                          Anotar la respuesta
-                        </Button>
-                      ) : null}
-                      <SubmitButton
-                        size="sm"
-                        variant="outline"
-                        pending={pdfBusy === budget.id}
-                        disabled={pdfBusy !== null}
-                        onClick={() => void viewBudget(budget.id)}
-                      >
-                        Ver el presupuesto
-                      </SubmitButton>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          {pdfError ? (
-            <p role="alert" className="mt-2 text-sm text-destructive">
-              No se pudo abrir el presupuesto. {pdfError}
-            </p>
-          ) : null}
-        </Section>
-      ) : null}
-
       {canWrite ? (
         <div className="sticky bottom-3 z-10 sm:hidden">
           {collectButton("min-h-12 w-full shadow-lg")}
@@ -875,177 +610,6 @@ export function AccountTab({
             />
           </Field>
         </div>
-      </FormDrawer>
-
-      <FormDrawer
-        open={deciding !== null}
-        title={deciding ? budgetNumberLabel(deciding.budgetNumber) : "Presupuesto"}
-        headerContent={
-          <div className="flex flex-col">
-            <p className="font-heading text-lg font-semibold">
-              ¿Qué acepta {patientName || "el paciente"}?
-            </p>
-            <p className="text-sm text-muted-foreground">Marca la respuesta de cada tratamiento.</p>
-          </div>
-        }
-        error={deciding ? error : null}
-        isSubmitting={decideMutation.isPending}
-        submitLabel="Guardar la respuesta"
-        onClose={() => {
-          if (!decideMutation.isPending) {
-            setDeciding(null)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (deciding) decideMutation.mutate(deciding)
-        }}
-      >
-        {deciding ? (
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Responder todo igual">
-              {(
-                [
-                  ["aceptado", "Acepta todo"],
-                  ["pospuesto", "Lo va a pensar"],
-                  ["rechazado", "No acepta"],
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setAnswers((current) =>
-                      Object.fromEntries(
-                        deciding.items.map((line) => [
-                          line.planItemId,
-                          // Lo ya respondido no se reescribe.
-                          line.decision === "aceptado" || line.decision === "rechazado"
-                            ? (current[line.planItemId] ?? line.decision)
-                            : value,
-                        ]),
-                      ),
-                    )
-                  }
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-            <ul className="flex flex-col divide-y">
-              {deciding.items.map((line) => {
-                const locked = line.decision === "aceptado" || line.decision === "rechazado"
-                const lineId = `${uid}-linea-${line.id}`
-                const total = line.lineTotalCents ?? line.priceCents
-                return (
-                  <li key={line.id} className="flex flex-col gap-2 py-3">
-                    <div className="flex items-baseline justify-between gap-3 text-sm">
-                      <span id={lineId} className="min-w-0 break-words font-medium">
-                        {line.title}
-                      </span>
-                      <span className="shrink-0 tabular-nums">
-                        {total == null ? "Sin precio" : money(total, line.currency)}
-                      </span>
-                    </div>
-                    {line.promotionName ? (
-                      <p className="text-xs text-muted-foreground">Promoción: {line.promotionName}</p>
-                    ) : null}
-                    <RadioGroup
-                      aria-labelledby={lineId}
-                      className="grid-cols-3"
-                      value={answers[line.planItemId] ?? "pospuesto"}
-                      disabled={locked || decideMutation.isPending}
-                      onValueChange={(next) =>
-                        setAnswers((current) => ({ ...current, [line.planItemId]: next as LineAnswer }))
-                      }
-                    >
-                      {ANSWERS.map((option) => (
-                        <FieldLabel
-                          key={option.value}
-                          className={cn(
-                            "flex min-h-10 w-full cursor-pointer items-center gap-2 rounded-xl border px-2.5 text-sm font-normal",
-                            (answers[line.planItemId] ?? "pospuesto") === option.value &&
-                              "border-primary bg-primary-soft",
-                            locked && "cursor-default opacity-70",
-                          )}
-                        >
-                          <RadioGroupItem value={option.value} />
-                          {option.label}
-                        </FieldLabel>
-                      ))}
-                    </RadioGroup>
-                    {locked ? (
-                      <p className="text-xs text-muted-foreground">Ya lo respondió: no se cambia aquí.</p>
-                    ) : null}
-                  </li>
-                )
-              })}
-            </ul>
-            <dl className="flex flex-col gap-1 text-sm">
-              {deciding.totalCents != null ? (
-                <div className="flex justify-between gap-3">
-                  <dt className="text-muted-foreground">Presupuestado</dt>
-                  <dd className="tabular-nums">{money(deciding.totalCents, deciding.currency)}</dd>
-                </div>
-              ) : null}
-              <div className="flex justify-between gap-3 font-semibold">
-                <dt>Acepta</dt>
-                <dd className="tabular-nums">{money(decidingAccepted, deciding.currency)}</dd>
-              </div>
-            </dl>
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="min-w-0 break-words">
-                  {decider ? (
-                    <>
-                      Decide <strong className="font-semibold">{decider.label}</strong>
-                    </>
-                  ) : (
-                    "No hay registrado quién decide."
-                  )}
-                </span>
-                {deciders.length > 1 && !deciding.decisionContactId ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-expanded={deciderOpen}
-                    onClick={() => setDeciderOpen((value) => !value)}
-                  >
-                    Cambiar
-                  </Button>
-                ) : null}
-              </div>
-              {deciderOpen ? (
-                <RadioGroup
-                  aria-label="Quién decide"
-                  value={deciderId}
-                  onValueChange={(next) => {
-                    setDeciderId(String(next))
-                    setDeciderOpen(false)
-                  }}
-                >
-                  {deciders.map((option) => (
-                    <FieldLabel
-                      key={option.id}
-                      className={cn(
-                        "flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
-                        deciderId === option.id && "border-primary bg-primary-soft",
-                      )}
-                    >
-                      <RadioGroupItem value={option.id} />
-                      <span className="min-w-0 break-words">{option.label}</span>
-                    </FieldLabel>
-                  ))}
-                </RadioGroup>
-              ) : null}
-            </div>
-            <p className="text-sm text-muted-foreground">{decidingOutcome}</p>
-          </div>
-        ) : null}
       </FormDrawer>
 
       <FormDrawer

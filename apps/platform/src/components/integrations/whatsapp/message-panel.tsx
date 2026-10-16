@@ -166,6 +166,12 @@ function MessageView({
           correo si no tiene WhatsApp.
         </p>
       ) : null}
+      {item.origin === "plan" ? (
+        <p className="text-sm text-muted-foreground">
+          Por dónde sale: con el PDF del presupuesto si la persona escribió en las últimas 24 horas; con este mensaje
+          aprobado si no, y el PDF le llega al tocar «Ver y responder»; por correo, con el PDF, si no tiene WhatsApp.
+        </p>
+      ) : null}
       {item.origin === "cuenta" ? (
         <p className="text-sm text-muted-foreground">
           Se creó en la página de Meta: ahí se le cambia el texto y ahí se elimina.

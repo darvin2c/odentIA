@@ -428,9 +428,9 @@ export interface PlanItem {
   planId: string
   odontogramEntryId?: string | null
   budgetId: string | null
-  decision: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
+  decision: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado" | "no_elegida"
   /** Decisión clínica vigente del ítem: la indicación manda, el snapshot es evidencia. */
-  decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
+  decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado" | "no_elegida"
   /** Fase del plan (urgencia → mantenimiento) y orden de ejecución. */
   phase?: "urgencia" | "basica" | "quirurgica" | "rehabilitadora" | "mantenimiento"
   sortOrder?: number
@@ -441,9 +441,6 @@ export interface PlanItem {
   decidedByContactId: string | null
   decidedByName: string | null
   decisionNote: string | null
-  /** Alternativas excluyentes del mismo problema clínico. */
-  optionGroupId: string | null
-  isRecommended: boolean
   /** Indicación anterior que esta reemplaza tras una reevaluación. */
   supersedesItemId: string | null
   /** Motivo obligatorio al suspender o cancelar. */
@@ -484,6 +481,8 @@ export interface TreatmentPlanWithStatus {
   status: "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
   totalItems: number
   pendingItems: number
+  /** El plan abierto de la persona: recibe las indicaciones nuevas (uno por persona). */
+  isOpen: boolean
 }
 
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */

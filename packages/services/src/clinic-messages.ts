@@ -28,6 +28,7 @@ import {
   AUTOMATION_MESSAGES,
   type AutomationMessage,
   type AutomationMessageKey,
+  BUDGET_READY_MESSAGE_KEY,
   CATALOG_MESSAGE_KEYS,
   type CatalogMessageKey,
   catalogMessageOf,
@@ -64,10 +65,12 @@ import { findOrgLocale } from "./locale.js"
  * Los mensajes de WhatsApp de una clínica. Son suyos: viven en su cuenta,
  * vienen escritos por odentIA y cada clínica puede cambiarles el texto.
  *
- * - Diez vienen con odentIA: los nueve que envía el agente
+ * - Once vienen con odentIA: los nueve que envía el agente
  *   (`AUTOMATION_MESSAGES`: uno por línea que escribe y los tres avisos de
- *   «Recordar la cita» cuando la cita cambia) y «Retomar la conversación», que
- *   envía una persona desde la Bandeja. La clínica puede además crear los suyos para la Bandeja.
+ *   «Recordar la cita» cuando la cita cambia), «Retomar la conversación», que
+ *   envía una persona desde la Bandeja, y «Presupuesto listo», que sale al
+ *   entregar un presupuesto (desde Plan, el cierre de la atención o el agente).
+ *   La clínica puede además crear los suyos para la Bandeja.
  * - Un texto nuevo es otra versión, con otro nombre de plantilla, que se pide a
  *   WhatsApp. Mientras está en revisión, o si la rechazan, sigue saliendo la
  *   versión vigente: un cambio nunca deja a la clínica sin mensaje.
@@ -94,7 +97,8 @@ export const MESSAGE_BUTTON_MAX = 20
 /** Mensajes propios que una clínica puede tener a la vez. */
 export const OWN_MESSAGES_MAX = 20
 
-export type MessageOrigin = "agente" | "bandeja" | "clinica" | "cuenta"
+/** `plan`: «Presupuesto listo», que sale al entregar el presupuesto. */
+export type MessageOrigin = "agente" | "bandeja" | "plan" | "clinica" | "cuenta"
 /** El estado que da WhatsApp, o `sin_pedir` si todavía no se le pidió. */
 export type MessageStatus = TemplateStatus | "sin_pedir"
 
@@ -167,6 +171,7 @@ const NOTICE_TITLES: Record<string, string> = {
 
 function catalogTitle(key: CatalogMessageKey): string {
   if (key === RESUME_MESSAGE_KEY) return "Retomar la conversación"
+  if (key === BUDGET_READY_MESSAGE_KEY) return "Presupuesto listo"
   return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
@@ -179,7 +184,7 @@ function catalogDef(
   if (!spec) throw new Error(`Mensaje del catálogo desconocido: ${key}`)
   return {
     id: key,
-    origin: key === RESUME_MESSAGE_KEY ? "bandeja" : "agente",
+    origin: key === RESUME_MESSAGE_KEY ? "bandeja" : key === BUDGET_READY_MESSAGE_KEY ? "plan" : "agente",
     title: catalogTitle(key),
     catalog: spec,
     row,
@@ -335,6 +340,16 @@ async function currentTextOf(
     .limit(1)
   if (!version) return base
   return { template: version.templateName, ...positionalBody(version.body) }
+}
+
+/**
+ * Un mensaje del catálogo con el texto vigente de la clínica (plantilla,
+ * cuerpo y datos): de aquí salen la plantilla, la respuesta y el correo.
+ */
+export async function currentCatalogMessage(tx: Db, orgId: string, key: CatalogMessageKey): Promise<MessageSpec> {
+  const base = catalogMessageOf(key)
+  if (!base) throw new Error(`Mensaje del catálogo desconocido: ${key}`)
+  return { ...base, ...(await currentTextOf(tx, orgId, base)) }
 }
 
 /** Plantilla del texto vigente de un mensaje del catálogo en una conexión, en el estado que tenga. */
@@ -787,7 +802,7 @@ export interface ClinicMessageItem {
   id: string
   origin: MessageOrigin
   title: string
-  /** Cuándo sale; solo en los que envía el agente. */
+  /** Cuándo sale; en los que envía el agente y en «Presupuesto listo». */
   when: string | null
   /** Línea del Administrador que lo usa; `enabled`: prendida y con «el agente le escribe». */
   line: { key: string; title: string; enabled: boolean } | null
@@ -835,6 +850,8 @@ function buttonDoes(def: MessageDef, button: MessageButton): string {
       ? "Deja de recibir recordatorios; lo demás no cambia."
       : "Deja de recibir estos mensajes; lo demás no cambia."
   }
+  if (button.action === "presupuesto")
+    return "Le llega el PDF del presupuesto en la conversación y puede decir ahí qué acepta."
   if (button.asks === "cambiar") return "Recepción le busca otra fecha en la conversación."
   if (button.asks === "reservar") return "Recepción le ofrece horarios en la conversación."
   if (def.origin === "agente") return "Recepción sigue la conversación con la persona."
@@ -875,6 +892,8 @@ function meanwhileOf(
       ? "WhatsApp no aceptó el cambio: sigue saliendo el texto anterior."
       : "Tu cambio de texto está en revisión; sigue saliendo el anterior."
   }
+  if (def.origin === "plan")
+    return "Mientras tanto el presupuesto sale con su PDF a quien escribió en las últimas 24 horas, o por correo."
   if (def.origin !== "agente") return "Mientras tanto no se ofrece en la Bandeja."
   const people =
     waiting > 0
@@ -931,7 +950,9 @@ function itemOf(
     title: def.title,
     when: line
       ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule))
-      : null,
+      : def.origin === "plan"
+        ? "Al entregar un presupuesto: desde Plan, al cerrar la atención o cuando la persona lo pide por el chat."
+        : null,
     line: line
       ? { key: line.key, title: line.name, enabled: !!rule?.enabled && rule.agentPart }
       : null,
@@ -1544,7 +1565,8 @@ async function sendables(
   const options: Sendable[] = []
   for (const def of defs) {
     // Los que envía el agente piden los datos de una cita, un presupuesto o una oportunidad: no se envían a mano.
-    if (def.origin === "agente") continue
+    // «Presupuesto listo» sale al entregar el presupuesto, con su PDF, no desde la Bandeja.
+    if (def.origin === "agente" || def.origin === "plan") continue
     // «Retomar» continúa una consulta: solo donde la persona ya escribió.
     if (def.origin === "bandeja" && !wrote) continue
     const text = currentText(def)

@@ -119,6 +119,24 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
         offNote: "Apagada: no crea ni mueve oportunidades. Tu equipo las lleva.",
       },
       {
+        id: "presupuestos",
+        label: "Presupuestos",
+        description:
+          "Cuando la persona pide su presupuesto, le reenvía el que tu clínica ya preparó y entregó. Cuando responde qué acepta y qué deja para después, se lo repite y, con su sí, lo anota en el presupuesto. Nunca cambia precios ni arma un presupuesto.",
+        fixed: false,
+        tools: ["ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto"],
+        steps: [
+          "Comprueba que quien escribe pueda verlo: la persona, su representante o quien ella autorizó.",
+          "Si lo pide, le reenvía el último que tu clínica entregó, por WhatsApp o por correo; si es menor, le llega a su representante legal.",
+          "Si todavía no está listo o no hay por dónde enviarlo, se lo dice y te deja una tarea en recepción.",
+          "Si responde, le repite la lista (qué acepta, qué deja para después y cuánto suma) y le pide el sí.",
+          "Con su sí, anota la respuesta en el presupuesto.",
+        ],
+        whenOff:
+          "No reenvías presupuestos ni anotas respuestas a un presupuesto. Si la persona pide su presupuesto o responde a uno, deja una tarea con create_task (por ejemplo «Lucía pidió su presupuesto: enviarlo») y dile que el equipo se encargará.",
+        offNote: "Apagado: no reenvía presupuestos ni anota respuestas. Si la persona pide su presupuesto o responde a uno, te deja una tarea.",
+      },
+      {
         id: "ordenar",
         label: "Ordenar el caso",
         description: "Actualiza datos de contacto, pone etiquetas, deja tareas a tu equipo y recuerda las preferencias de cada persona. Lo ves y lo deshaces en la ficha.",
@@ -150,11 +168,13 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "leer_contexto_comercial",
       "ver_otros_canales",
     ],
-    sees: "La conversación y lo acordado. Agenda, servicios, precios y los medios de pago que acepta la clínica. El conocimiento de la clínica. Las citas y los datos de contacto de la persona; su saldo solo si la clínica lo autoriza.",
-    notSees: "Historia clínica ni caja.",
-    never: "Diagnosticar o recetar. Inventar precios, horarios o disponibilidad. Ver o mencionar la historia clínica.",
+    // Del presupuesto recibe lo mismo que la persona en su documento (tratamientos,
+    // pieza, precios y opciones), solo de lo ya entregado y de quien puede verlo.
+    sees: "La conversación y lo acordado. Agenda, servicios, precios y los medios de pago que acepta la clínica. El conocimiento de la clínica. Las citas y los datos de contacto de la persona; sus presupuestos ya entregados, como los recibe ella (tratamientos, pieza y precios); su saldo solo si la clínica lo autoriza.",
+    notSees: "Historia clínica (diagnósticos, notas ni odontograma) ni caja. Lo que lleva un presupuesto que tu clínica aún prepara.",
+    never: "Diagnosticar o recetar. Inventar precios, horarios o disponibilidad. Ver o mencionar la historia clínica. Cambiar un precio o armar un presupuesto.",
     confirms:
-      "El paciente, con su sí, antes de reservar, mover o cancelar una cita. Lo demás lo hace solo y se deshace en la ficha o en la oportunidad.",
+      "El paciente, con su sí, antes de reservar, mover o cancelar una cita y antes de anotar su respuesta a un presupuesto. Lo demás lo hace solo y se deshace en la ficha o en la oportunidad.",
     learnsFrom: "Las correcciones del equipo, como lecciones que alguien aprueba.",
   },
   asistente_clinico: {

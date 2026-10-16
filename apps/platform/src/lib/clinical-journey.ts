@@ -478,13 +478,6 @@ export interface JourneyBudgetLine {
   decision: string
 }
 
-/** Alternativas excluyentes del mismo problema clínico. */
-export interface JourneyOptionGroup {
-  id: string
-  title: string
-  alternatives: PlanItem[]
-}
-
 export interface TreatmentJourney {
   item: PlanItem
   plan: TreatmentPlan
@@ -493,7 +486,6 @@ export interface TreatmentJourney {
   originFinding: OdontogramEntry | null
   replacedBy: PlanItem[]
   supersedes: PlanItem | null
-  optionGroup: JourneyOptionGroup | null
   budgetHistory: Array<{ budget: JourneyBudget; line: JourneyBudgetLine }>
   procedures: Array<{ procedure: ProcedureItem; encounter: Encounter }>
   followUps: FollowUp[]
@@ -576,18 +568,6 @@ export function suspendTreatmentApi(
   })
 }
 
-/** Agrupa la indicación como alternativa del mismo problema clínico. */
-export function setItemAlternativeApi(
-  patientId: string,
-  itemId: string,
-  body: { optionGroupId: string | null; isRecommended?: boolean },
-): Promise<{ data: PlanItem }> {
-  return apiFetch<{ data: PlanItem }>(`${base(patientId)}/treatments/${itemId}/alternative`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
 /** Reactiva un tratamiento suspendido donde quedó: en curso si ya tenía sesiones. */
 export function resumeTreatmentApi(
   patientId: string,
@@ -630,17 +610,6 @@ export function reviseTreatmentApi(
     method: "POST",
     body: JSON.stringify(body),
   })
-}
-
-export function createOptionGroupApi(
-  patientId: string,
-  planId: string,
-  body: { title: string },
-): Promise<{ data: JourneyOptionGroup }> {
-  return apiFetch<{ data: JourneyOptionGroup }>(
-    `${base(patientId)}/plans/${planId}/option-groups`,
-    { method: "POST", body: JSON.stringify(body) },
-  )
 }
 
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */

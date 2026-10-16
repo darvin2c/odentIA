@@ -15,12 +15,14 @@ import {
   prescriptionItem,
   treatmentBudget,
   treatmentBudgetItem,
+  treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { valueOptionOf } from "./budgets.js"
 import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
@@ -30,7 +32,7 @@ import { requirePatient } from "./patients.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
-const RETIRED_BUDGETS = ["cancelado", "historico"] as const
+const RETIRED_BUDGETS = ["cancelado"] as const
 
 export interface AcceptedPendingItem {
   id: string
@@ -293,6 +295,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         eq(treatmentBudgetItem.planItemId, treatmentPlanItem.id),
         eq(treatmentBudgetItem.budgetId, treatmentPlanItem.budgetId),
         eq(treatmentBudgetItem.organizationId, treatmentPlanItem.organizationId),
+        // Con opciones, el tratamiento está una vez por opción: cuenta la línea aceptada.
+        eq(treatmentBudgetItem.decision, "aceptado"),
       ),
     )
     .innerJoin(
@@ -430,22 +434,43 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     .limit(6)
   let proposedBudgets: ProposedBudget[] = []
   if (budgetRows.length > 0) {
-    const items = await tx
-      .select({
-        budgetId: treatmentBudgetItem.budgetId,
-        priceCents: treatmentBudgetItem.priceCents,
-        currency: treatmentBudgetItem.currency,
-      })
-      .from(treatmentBudgetItem)
+    // Con varias opciones, el total propuesto es el de la que vale (la elegida
+    // o la recomendada): nunca la suma de las opciones.
+    const options = await tx
+      .select()
+      .from(treatmentBudgetOption)
       .where(
         and(
-          eq(treatmentBudgetItem.organizationId, orgId),
+          eq(treatmentBudgetOption.organizationId, orgId),
           inArray(
-            treatmentBudgetItem.budgetId,
+            treatmentBudgetOption.budgetId,
             budgetRows.map((b) => b.id),
           ),
         ),
       )
+      .orderBy(asc(treatmentBudgetOption.position))
+    const valued = new Set(
+      budgetRows.flatMap((b) => valueOptionOf(options.filter((o) => o.budgetId === b.id))?.id ?? []),
+    )
+    const items = (
+      await tx
+        .select({
+          budgetId: treatmentBudgetItem.budgetId,
+          optionId: treatmentBudgetItem.optionId,
+          priceCents: treatmentBudgetItem.priceCents,
+          currency: treatmentBudgetItem.currency,
+        })
+        .from(treatmentBudgetItem)
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            inArray(
+              treatmentBudgetItem.budgetId,
+              budgetRows.map((b) => b.id),
+            ),
+          ),
+        )
+    ).filter((item) => valued.has(item.optionId))
     const byBudget = new Map<string, typeof items>()
     for (const item of items) {
       const list = byBudget.get(item.budgetId) ?? []
@@ -962,7 +987,8 @@ export async function getTimeline(
       )) {
       const [line] = await tx
         .select({
-          total: sql<number>`count(*)::int`,
+          // Un tratamiento cuenta una vez aunque esté en varias opciones.
+          total: sql<number>`count(distinct ${treatmentBudgetItem.planItemId})::int`,
           currency: sql<string>`min(${treatmentBudgetItem.currency})`,
         })
         .from(treatmentBudgetItem)

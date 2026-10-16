@@ -33,6 +33,8 @@ function accessFor(role: string): WorkspaceAccess {
     // Quien escribe en la historia y hoy tiene citas propias ve «Mis pacientes de
     // hoy», también la dueña; el servicio mira si las tiene (ADR 0032).
     attends: canAccess(role, "clinical.write"),
+    // El presupuesto que nadie envió es de quien habla con la persona: envía y lleva el CRM (decisión 4).
+    sendsBudgets: canAccess(role, "budgets.send") && canAccess(role, "crm.read"),
   }
 }
 /**

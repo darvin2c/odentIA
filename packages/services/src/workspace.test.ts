@@ -386,9 +386,10 @@ it("los presupuestos que esperan respuesta: quien atiende solo ve los de sus pla
   const presentedAt = new Date(Date.now() - 9 * 86_400_000)
   for (const [index, createdBy] of [ana, luis].entries()) {
     const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: person!.id, title: "Plan", createdBy }).returning({ id: treatmentPlan.id })
+    // Lo propio del odontólogo es lo que preparó o indicó (ADR 0034), no el plan donde quedó.
     await ownerDb.insert(treatmentBudget).values([
-      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 1, title: "Presentado", currency: "PEN", status: "presentado", presentedAt: index === 0 ? presentedAt : new Date() },
-      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 2, title: "Aceptado", currency: "PEN", status: "aceptado", presentedAt },
+      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 1, title: "Presentado", currency: "PEN", status: "presentado", presentedAt: index === 0 ? presentedAt : new Date(), createdBy },
+      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 2, title: "Aceptado", currency: "PEN", status: "aceptado", presentedAt, createdBy },
     ])
   }
   const budgets = async (access: WorkspaceAccess, userId: string) =>

@@ -957,9 +957,9 @@ export const encounterProcedure = pgTable(
 )
 
 /** Plan clínico longitudinal del paciente: existe antes que cualquier
- * presupuesto y puede continuar en múltiples visitas. `originEncounterId`
- * solo se informa en planes heredados (legado); los planes nuevos nacen
- * desde una atención borrador pero no se cierran con ella. */
+ * presupuesto y puede continuar en múltiples visitas. Hay un plan abierto por
+ * persona (ADR 0034): la primera indicación lo crea solo y guarda en
+ * `originEncounterId` la atención donde nació; no se cierra con ella. */
 export const treatmentPlan = pgTable(
   "treatment_plan",
   {
@@ -977,31 +977,11 @@ export const treatmentPlan = pgTable(
   (table) => [index("treatment_plan_org_patient_idx").on(table.organizationId, table.patientId)],
 )
 
-/** Alternativas excluyentes para un mismo problema clínico. */
-export const treatmentOptionGroup = pgTable(
-  "treatment_option_group",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id, { onDelete: "cascade" }),
-    planId: uuid("plan_id")
-      .notNull()
-      .references(() => treatmentPlan.id),
-    title: text("title").notNull(),
-    createdBy: text("created_by").references(() => user.id),
-    ...timestamps,
-  },
-  (table) => [
-    index("treatment_option_group_org_patient_idx").on(table.organizationId, table.patientId),
-    index("treatment_option_group_org_plan_idx").on(table.organizationId, table.planId),
-  ],
-)
 /** Cabecera del documento económico: siempre pertenece a un plan clínico.
  * `status`/`acceptedByName`/`decisionNote` conservan la máquina de estados
  * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
- * no en un join mutable a la oferta vigente. */
+ * no en un join mutable a la oferta vigente. Un solo borrador por persona
+ * (salvo el de una revisión): crece con cada atención (decisión 12). */
 export const treatmentBudget = pgTable(
   "treatment_budget",
   {
@@ -1039,11 +1019,65 @@ export const treatmentBudget = pgTable(
     ),
     check(
       "treatment_budget_status_check",
-      sql`${table.status} IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido','historico')`,
+      sql`${table.status} IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido')`,
     ),
     check("treatment_budget_revision_check", sql`${table.revisionNumber} > 0`),
     index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
+    uniqueIndex("treatment_budget_org_id_uidx").on(table.organizationId, table.id),
+    // Un solo borrador por persona: el de una revisión va aparte (se elige al crearla).
+    uniqueIndex("treatment_budget_one_draft_uidx")
+      .on(table.organizationId, table.patientId)
+      .where(sql`status = 'borrador' AND supersedes_budget_id IS NULL`),
+  ],
+)
+
+/**
+ * Opción de un presupuesto (decisión 13): dos o tres caminos para lo mismo,
+ * cada uno con sus líneas y su propio total, nunca sumados. Todo presupuesto
+ * tiene al menos una; con una sola, la pantalla no habla de opciones. Una es la
+ * recomendada mientras se decide; al elegir, la elegida queda `elegida` y las
+ * demás `no_elegida`. La posición da la letra que ve la persona (1 = «A»).
+ */
+export const treatmentBudgetOption = pgTable(
+  "treatment_budget_option",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    budgetId: uuid("budget_id").notNull(),
+    position: smallint("position").notNull(),
+    isRecommended: boolean("is_recommended").notNull().default(false),
+    decision: text("decision").notNull().default("pendiente"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.budgetId],
+      foreignColumns: [treatmentBudget.organizationId, treatmentBudget.id],
+      name: "treatment_budget_option_budget_fk",
+    }),
+    uniqueIndex("treatment_budget_option_org_budget_id_uidx").on(
+      table.organizationId,
+      table.budgetId,
+      table.id,
+    ),
+    uniqueIndex("treatment_budget_option_position_uidx").on(table.budgetId, table.position),
+    uniqueIndex("treatment_budget_option_recommended_uidx")
+      .on(table.budgetId)
+      .where(sql`is_recommended`),
+    uniqueIndex("treatment_budget_option_chosen_uidx")
+      .on(table.budgetId)
+      .where(sql`decision = 'elegida'`),
+    index("treatment_budget_option_org_patient_idx").on(table.organizationId, table.patientId),
+    check("treatment_budget_option_position_check", sql`${table.position} BETWEEN 1 AND 3`),
+    check(
+      "treatment_budget_option_decision_check",
+      sql`${table.decision} IN ('pendiente','elegida','no_elegida')`,
+    ),
   ],
 )
 /** Indicación longitudinal: decisión vigente propia, propuesta y oferta snapshot.
@@ -1061,13 +1095,15 @@ export const treatmentPlanItem = pgTable(
       .references(() => treatmentPlan.id),
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
     budgetId: uuid("budget_id").references(() => treatmentBudget.id),
-    optionGroupId: uuid("option_group_id").references(() => treatmentOptionGroup.id),
     supersedesItemId: uuid("supersedes_item_id").references(
       (): AnyPgColumn => treatmentPlanItem.id,
     ),
     /** Hallazgo del odontograma que motivó la indicación (trazabilidad clínica explícita). */
     odontogramEntryId: uuid("odontogram_entry_id").references(() => odontogramEntry.id),
-    isRecommended: boolean("is_recommended").notNull().default(false),
+    /**
+     * Decisión vigente. `no_elegida`: el tratamiento solo estaba en una opción
+     * del presupuesto que la persona no eligió (decisión 13); no es un «no».
+     */
     decisionStatus: text("decision_status").notNull().default("pendiente"),
     decisionNote: text("decision_note"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -1117,13 +1153,20 @@ export const treatmentPlanItem = pgTable(
     ),
     check(
       "treatment_plan_item_decision_status_check",
-      sql`${table.decisionStatus} IN ('pendiente','aceptado','pospuesto','rechazado','reemplazado')`,
+      sql`${table.decisionStatus} IN ('pendiente','aceptado','pospuesto','rechazado','reemplazado','no_elegida')`,
+    ),
+    uniqueIndex("treatment_plan_item_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
     ),
   ],
 )
 /** Línea económica cotizada en un presupuesto: snapshot de lo realmente
- * cotizado (no un join mutable). UNIQUE(budgetId,planItemId). Append-only
- * tras entregar: solo `decision` cambia al decidir.
+ * cotizado (no un join mutable). Cada línea es de una opción del presupuesto
+ * (`optionId`); el mismo tratamiento puede estar en varias opciones, una vez
+ * en cada una: UNIQUE(optionId,planItemId). Append-only tras entregar: solo
+ * `decision` cambia al decidir (`no_elegida` en las opciones que no se eligieron).
  *
  * `priceCents` es el precio final acordado por unidad (total en modo
  * `treatment`, por sesión en modo `session`); `tariffPriceCents` congela la
@@ -1146,6 +1189,7 @@ export const treatmentBudgetItem = pgTable(
     budgetId: uuid("budget_id")
       .notNull()
       .references(() => treatmentBudget.id),
+    optionId: uuid("option_id").notNull(),
     planItemId: uuid("plan_item_id")
       .notNull()
       .references(() => treatmentPlanItem.id),
@@ -1176,7 +1220,17 @@ export const treatmentBudgetItem = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("treatment_budget_item_budget_plan_uidx").on(table.budgetId, table.planItemId),
+    uniqueIndex("treatment_budget_item_option_plan_uidx").on(table.optionId, table.planItemId),
+    // La opción es del mismo presupuesto y de la misma organización que la línea.
+    foreignKey({
+      columns: [table.organizationId, table.budgetId, table.optionId],
+      foreignColumns: [
+        treatmentBudgetOption.organizationId,
+        treatmentBudgetOption.budgetId,
+        treatmentBudgetOption.id,
+      ],
+      name: "treatment_budget_item_option_fk",
+    }),
     index("treatment_budget_item_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_budget_item_org_plan_idx").on(table.organizationId, table.planId),
@@ -1212,6 +1266,41 @@ export const encounterPlanItem = pgTable(
   (table) => [
     primaryKey({ columns: [table.encounterId, table.planItemId] }),
     index("encounter_plan_item_plan_item_idx").on(table.planItemId),
+  ],
+)
+
+/**
+ * Lo aceptado que se agendó (ADR 0034): la cita sabe qué tratamientos son y
+ * su atención los trae. Mismo paciente que la cita y que el tratamiento (claves
+ * compuestas); queda como historia aunque la cita se cancele.
+ */
+export const appointmentPlanItem = pgTable(
+  "appointment_plan_item",
+  {
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    appointmentId: uuid("appointment_id").notNull(),
+    planItemId: uuid("plan_item_id").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appointmentId, table.planItemId] }),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.appointmentId],
+      foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
+      name: "appointment_plan_item_appointment_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.planItemId],
+      foreignColumns: [
+        treatmentPlanItem.organizationId,
+        treatmentPlanItem.patientId,
+        treatmentPlanItem.id,
+      ],
+      name: "appointment_plan_item_plan_item_fk",
+    }),
+    index("appointment_plan_item_plan_item_idx").on(table.organizationId, table.planItemId),
   ],
 )
 

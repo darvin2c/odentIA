@@ -29,9 +29,8 @@ import { AccountTab } from "../../components/patient/account-tab"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
 import { AtencionesTab } from "../../components/patient/atenciones-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
-import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
+import { RecetasPanel } from "../../components/patient/clinical-panels"
 import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
-import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
 import { DocumentosPanel } from "../../components/patient/documentos-panel"
 import { FormulariosTab } from "../../components/patient/formularios-tab"
 import { HistoriaTab } from "../../components/patient/historia-tab"
@@ -40,7 +39,6 @@ import { OdontogramaTab } from "../../components/patient/odontograma-tab"
 import { OrdenesTab } from "../../components/patient/ordenes-tab"
 import { PersonHeader } from "../../components/patient/patient-header"
 import { PlanTab } from "../../components/patient/plan-tab"
-import { RecorridoClinicoTab } from "../../components/patient/recorrido-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { ClinicalSummaryTab } from "../../components/patient/resumen-tab"
 import { PersonChannels } from "../../components/person/person-channels"
@@ -197,7 +195,8 @@ function PersonPageRoute() {
       },
     })
   }
-  const openItem = (nextItemId: string) => openTab("recorrido", undefined, nextItemId)
+  // El recorrido de un tratamiento vive en Plan, al lado de sus fases (ADR 0034).
+  const openItem = (nextItemId: string) => openTab("plan", undefined, nextItemId)
 
   if (!can("patients.read") || (person && section === null))
     return (
@@ -302,8 +301,6 @@ function PersonPageRoute() {
             }
           />
         )
-      case "coordinacion":
-        return patientId ? <CoordinacionPanel patientId={patientId} /> : null
       case "clinico":
         return patientId ? <ClinicalSummaryTab patientId={patientId} onTabChange={openTab} /> : null
       case "odontograma":
@@ -316,44 +313,15 @@ function PersonPageRoute() {
             onOpenPlans={() => openTab("plan")}
           />
         ))
-      case "recorrido":
-        return patientId ? (
-          <RecorridoClinicoTab
-            patientId={patientId}
-            initialItemId={itemId}
-            onChangeItem={openItem}
-            onTabChange={(target, destination) =>
-              openTab(
-                target,
-                destination?.tooth,
-                destination?.itemId,
-                destination?.planId,
-                destination?.budgetId,
-              )
-            }
-          />
-        ) : null
       case "plan":
-        if (!patientId) return null
-        // Caja ve solo los presupuestos; el plan clínico es de quien lee la clínica.
-        return canClinical ? (
-          <PlanTab patientId={patientId} initialPlanId={planId} initialBudgetId={budgetId} />
-        ) : (
-          <AccountTab patientId={patientId} part="presupuestos" />
-        )
-      case "controles":
+        // Una sola sección para todos: cada rol ve lo suyo dentro (ADR 0034).
         return patientId ? (
-          <>
-            {itemFilterNotice("los controles", "controles")}
-            {withPlan((items) => (
-              <ControlesPanel
-                patientId={patientId}
-                itemId={itemId}
-                items={items}
-                encounterId={openEncounterId}
-              />
-            ))}
-          </>
+          <PlanTab
+            patientId={patientId}
+            initialPlanId={planId}
+            initialBudgetId={budgetId}
+            initialItemId={itemId}
+          />
         ) : null
       case "atenciones":
         return patientId ? <AtencionesTab patientId={patientId} /> : null

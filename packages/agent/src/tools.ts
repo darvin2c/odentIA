@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
@@ -9,7 +9,15 @@ import {
   addAgentCaseNote,
   addPersonFact,
   type AgentCaseProposal,
+  type AgentPatientBudgets,
+  budgetAnswerQuestion,
+  budgetLineWords,
+  budgetNumberText,
   buildAgentProposalKey,
+  getAgentPatientBudgets,
+  planBudgetAnswer,
+  proposalConfirmButtons,
+  resendBudgetByContact,
   confirmProposalByContact,
   answerGeneralPermission,
   confirmAppointmentByContact,
@@ -54,7 +62,7 @@ import {
   ServiceError,
   updateContact,
 } from "@odentia/services"
-import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder } from "@odentia/services"
+import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
 import { type AgentRoute, handoffFallbackNotice } from "./decision/route.js"
@@ -103,6 +111,10 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   // Escribe (confirma la cita), pero lo que devuelve es la cita tal como quedó:
   // con eso se comprueban la fecha y la hora que el agente le repite a la persona.
   confirmar_cita: { kind: "agenda", label: "Cita que confirmó la persona" },
+  // Los importes de un presupuesto que el agente repite salen de lo que la persona recibió.
+  ver_presupuesto: { kind: "persona", label: "Presupuestos que recibió la persona" },
+  // Propone (no anota), pero devuelve la lista con lo que suma lo aceptado: es lo que se le pregunta.
+  anotar_respuesta_presupuesto: { kind: "persona", label: "Respuesta al presupuesto por confirmar" },
 }
 
 /**
@@ -141,6 +153,9 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
   confirmar_cita: "Confirmó la cita que la persona dijo que no se perderá.",
   responder_permiso_mensajes: "Anotó si acepta mensajes de controles y novedades.",
+  ver_presupuesto: "Consultó los presupuestos que la persona recibió.",
+  reenviar_presupuesto: "Reenvió el presupuesto a la persona (o, si no estaba listo, dejó la tarea a recepción).",
+  anotar_respuesta_presupuesto: "Propuso anotar la respuesta al presupuesto; se anota con el sí de la persona.",
   enviar_enlace_cita: "Envió un enlace para que la persona elija su cita.",
   create_opportunity: "Propuso registrar una oportunidad.",
   update_followup: "Dejó la tarea de una oportunidad.",
@@ -206,6 +221,16 @@ export interface AgentToolCtx {
    * palabras. Solo ordena: los datos se leen de la base al responder.
    */
   embedder?: SearchEmbedder
+  /**
+   * Almacén de adjuntos: el presupuesto que se reenvía lleva su PDF. Sin él,
+   * reenviarlo deja la tarea a recepción en vez de enviarlo.
+   */
+  storage?: Storage
+  /**
+   * Propuesta de esta corrida que espera el sí de la persona a una lista (su
+   * respuesta a un presupuesto): la pregunta sale con los botones «Sí» y «No».
+   */
+  confirmButtonsFor?: string
   /**
    * Canal de la conversación (`whatsapp`, `telegram`…), para el formato del
    * texto. Lo resuelve `conversationChannel`; en una prueba se usa WhatsApp.
@@ -339,6 +364,61 @@ export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
       pending: "No se le pudo avisar que una persona del equipo continuará: escríbele tú.",
     }),
   ).catch(() => undefined)
+}
+
+/**
+ * Un identificador con forma de UUID que sale siempre igual de la misma clave:
+ * la clave de un envío (`requestId`) es un UUID y reentregar el mensaje no
+ * debe enviarlo dos veces.
+ */
+function stableUuid(key: string): string {
+  const hex = createHash("sha256").update(key).digest("hex")
+  const variant = ((Number.parseInt(hex.charAt(16), 16) & 0x3) | 0x8).toString(16)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+const BUDGET_LINE_DECISION: Record<string, string> = {
+  pendiente: "sin responder",
+  aceptado: "aceptado",
+  pospuesto: "lo dejó para después",
+  rechazado: "no lo aceptó",
+  no_elegida: "no elegida",
+}
+
+/**
+ * Lo que ve el agente de los presupuestos, como el documento de la persona:
+ * tratamiento, pieza y precio de cada línea, total por opción y lo ya
+ * respondido. Los ids van entre corchetes, para las herramientas.
+ */
+function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "locale">): string {
+  const lines = [
+    `Presupuestos de ${found.context.displayName} (vínculo ${found.context.relationship}), como los recibe la persona. Lo que va entre corchetes es solo para las herramientas: no lo escribas.`,
+  ]
+  if (!found.budgets.length) lines.push("No tiene presupuestos entregados.")
+  for (const budget of found.budgets) {
+    const money = (cents: number | null) => (cents == null ? "precio por definir" : formatOrgMoney(cents, budget.currency, zone))
+    lines.push(
+      `- Presupuesto ${budgetNumberText(budget.budgetNumber)}: ${budget.stateText}.${budget.answerable ? " Puede responderlo." : ""} [budgetId ${budget.budgetId}]`,
+    )
+    const several = budget.options.length > 1
+    for (const option of budget.options) {
+      const head = several
+        ? `  ${option.label}${option.isRecommended ? " (recomendada)" : ""}${option.decision === "elegida" ? " (la eligió)" : option.decision === "no_elegida" ? " (no elegida)" : ""}: total ${money(option.totalCents)} [optionId ${option.id}]`
+        : `  Total ${money(option.totalCents)}`
+      lines.push(head)
+      for (const line of option.lines) {
+        const price = line.sessions
+          ? `${money(line.lineTotalCents)}, ${line.sessions.count} sesiones de ${money(line.sessions.unitCents)}`
+          : money(line.lineTotalCents)
+        const promotion = line.promotionName ? `, con la promoción «${line.promotionName}»` : ""
+        lines.push(
+          `    · ${budgetLineWords(line)}: ${price}${promotion} — ${BUDGET_LINE_DECISION[line.decision] ?? line.decision} [planItemId ${line.planItemId}]`,
+        )
+      }
+    }
+  }
+  if (found.inPreparation) lines.push("Hay otro presupuesto que la clínica aún prepara: todavía no está listo y no se dice qué lleva.")
+  return lines.join("\n")
 }
 
 /**
@@ -513,7 +593,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const origin = ctx.evidence?.find((item) => item.source === check.source)
       basis.push({ kind: origin?.kind ?? "calculo", label: check.source })
     }
-    const messageId = proposal?.result?.["messageId"]
+    const messageId = proposal?.result?.messageId
     try {
       await inOrg((tx) =>
         recordAnswerTrace(tx, ctx.orgId, {
@@ -581,7 +661,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }
     return {
       verdict,
-      blocked: `${prefix}No enviado: ${missing} no figura en lo que consultaste ni en este contexto. Consulta la herramienta que corresponda (ver_sedes_y_servicios, consultar_conocimiento, buscar_huecos, ver_resumen_paciente) o quita ese dato, y vuelve a enviar la respuesta sola en su paso.`,
+      blocked: `${prefix}No enviado: ${missing} no figura en lo que consultaste ni en este contexto. Consulta la herramienta que corresponda (ver_sedes_y_servicios, consultar_conocimiento, buscar_huecos, ver_resumen_paciente, ver_presupuesto) o quita ese dato, y vuelve a enviar la respuesta sola en su paso.`,
     }
   }
 
@@ -600,7 +680,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // a outside_window. Lo que sí lanza (infra 429/5xx incluida) no
       // reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
       const sent: ProposalItem[] = []
-      const outcome = await propose("enviar_mensaje", { kind: "text", text }, "send_reply", undefined, (proposal) => {
+      // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
+      const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
+      const outcome = await propose("enviar_mensaje", { kind: "text", text, ...buttons }, "send_reply", undefined, (proposal) => {
         sent.push(proposal)
       })
       for (const proposal of sent) await traceAnswer(text, traceOutcome(proposal), verdict?.checks ?? [], proposal)
@@ -1193,6 +1275,150 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  /**
+   * Los presupuestos que la persona recibió, tal como los ve ella en su
+   * documento (tratamientos, pieza, precios y opciones), de un paciente que
+   * el interlocutor está autorizado a ver. Nunca diagnósticos ni notas.
+   */
+  const budgetsView = tool(
+    async ({ patientId }: { patientId: string }) => {
+      if (ctx.sandbox) return `${SANDBOX_PERSON} no tiene presupuestos entregados.`
+      let found: AgentPatientBudgets
+      try {
+        found = await inOrg((tx) => getAgentPatientBudgets(tx, ctx.orgId, ctx.contactId, patientId))
+      } catch (e) {
+        if (e instanceof ServiceError) {
+          return `No puedes ver los presupuestos de ese paciente (${e.message}). No des datos suyos: pregunta de quién habla o pasa el caso a una persona.`
+        }
+        throw e
+      }
+      return formatAgentBudgets(found, await orgZone())
+    },
+    {
+      name: "ver_presupuesto",
+      description:
+        "Los presupuestos que la clínica ya entregó a la persona (o a quien ella lleva), como los recibe ella: cada tratamiento con su pieza y su precio, las opciones y lo que ya respondió, con los ids para reenviar_presupuesto y anotar_respuesta_presupuesto. Nunca trae diagnósticos ni la historia clínica. Úsala antes de hablar de un presupuesto o de anotar lo que responde.",
+      schema: z.object({ patientId: z.string().uuid().describe("El paciente, de ver_contexto_paciente.") }),
+    },
+  )
+
+  /**
+   * La persona pide su presupuesto: se le reenvía el que la clínica ya preparó
+   * y entregó, por la operación de siempre. Si no está listo o no hay por dónde,
+   * queda una tarea a recepción y el agente recibe la frase para la persona.
+   */
+  const resendBudget = tool(
+    async ({ patientId, budgetId }: { patientId: string; budgetId?: string }) => {
+      if (ctx.sandbox || ctx.dryRun) {
+        return "[SIMULACIÓN] Se le reenviaría el último presupuesto que la clínica le entregó; si aún no estuviera listo, quedaría una tarea a recepción para enviárselo."
+      }
+      // Reentregar el mismo mensaje no lo envía ni deja la tarea dos veces.
+      const requestId = stableUuid(
+        buildAgentProposalKey({
+          conversationId: ctx.conversationId,
+          triggerId: ctx.triggerId,
+          tool: "reenviar_presupuesto",
+          payload: { patientId, budgetId: budgetId ?? null },
+        }),
+      )
+      let outcome: Awaited<ReturnType<typeof resendBudgetByContact>>
+      try {
+        outcome = await inOrg((tx) =>
+          resendBudgetByContact(
+            tx,
+            ctx.orgId,
+            { contactId: ctx.contactId, conversationId: ctx.conversationId, patientId, budgetId: budgetId ?? null, requestId },
+            { storage: ctx.storage ?? null, secretsKey: ctx.secretsKey },
+          ),
+        )
+      } catch (e) {
+        if (e instanceof ServiceError) {
+          return `No se pudo reenviar: ${e.message}. Si habla de otro presupuesto, míralo con ver_presupuesto; si no puede verlo, pasa el caso a una persona.`
+        }
+        throw e
+      }
+      const usted = ctx.treatment === "usted"
+      if (outcome.outcome === "enviado") {
+        const by = outcome.channel === "whatsapp" ? "WhatsApp" : "correo"
+        const where = outcome.here
+          ? outcome.via === "plantilla"
+            ? "aquí mismo (le llega el aviso «Presupuesto listo» y el documento al tocar «Ver y responder»)"
+            : "aquí mismo, con el documento"
+          : `por ${by}`
+        const who = outcome.toInterlocutor ? "" : ` a ${outcome.recipientName} (le llega a la persona o, si es menor, a su representante legal)`
+        return `Presupuesto ${budgetNumberText(outcome.budgetNumber)} reenviado${who} ${where}. Díselo en una línea con send_reply, sin repetir precios, y ofrécele ayuda si quiere responderlo.`
+      }
+      const said =
+        outcome.outcome === "no_listo"
+          ? usted
+            ? "Su presupuesto todavía no está listo. Ya le avisé al equipo para que se lo envíen apenas esté."
+            : "Tu presupuesto todavía no está listo. Ya le avisé al equipo para que te lo envíen apenas esté."
+          : outcome.outcome === "ninguno"
+            ? usted
+              ? "No encuentro un presupuesto listo para enviarle. Ya le avisé al equipo para que lo revise y le escriba."
+              : "No encuentro un presupuesto listo para enviarte. Ya le avisé al equipo para que lo revise y te escriba."
+            : usted
+              ? "No pude enviárselo por aquí. Ya le avisé al equipo para que se lo haga llegar."
+              : "No pude enviártelo por aquí. Ya le avisé al equipo para que te lo haga llegar."
+      const why =
+        outcome.outcome === "no_listo"
+          ? "El presupuesto todavía no está listo: la clínica lo está preparando. No lo envíes ni des precios de él."
+          : outcome.outcome === "ninguno"
+            ? "Ese paciente no tiene un presupuesto preparado."
+            : "No hubo por dónde enviarlo."
+      return `${why} Quedó una tarea a recepción para enviárselo. Díselo con send_reply, con estas palabras o parecidas: «${said}»`
+    },
+    {
+      name: "reenviar_presupuesto",
+      description:
+        "Reenvía a la persona el presupuesto que la clínica ya preparó y entregó, cuando ella lo pide por el chat. Sale por WhatsApp (o por correo) a la persona o, si el paciente es menor, a su representante legal. Nunca cambia precios ni arma uno. Si todavía no está listo o no hay por dónde enviarlo, deja una tarea a recepción y te devuelve la frase para decírselo.",
+      schema: operationAgentSchema("presupuesto.reenviar"),
+    },
+  )
+
+  /**
+   * La persona responde a su presupuesto por escrito. No se anota todavía: se
+   * propone la lista y se le pregunta; se anota con su sí (confirmar_propuesta).
+   */
+  const answerBudget = tool(
+    async (input: {
+      patientId: string
+      budgetId: string
+      optionId?: string
+      decisions: Array<{ planItemId: string; decision: "aceptado" | "pospuesto" | "rechazado" }>
+    }) => {
+      if (ctx.sandbox) return sandboxPropose("decidir_presupuesto", "Respuesta al presupuesto")
+      if (ctx.dryRun) return "[SIMULACIÓN] Se propondría anotar su respuesta al presupuesto; se anota solo con su sí."
+      let planned: Awaited<ReturnType<typeof planBudgetAnswer>>
+      try {
+        planned = await inOrg((tx) => planBudgetAnswer(tx, ctx.orgId, ctx.contactId, input))
+      } catch (e) {
+        if (e instanceof ServiceError) {
+          if (e.code === "DECISION_CONTACT_NOT_AUTHORIZED" || e.code === "NOT_FOUND") {
+            return `No se puede anotar (${e.message}): su respuesta la da la persona o su representante legal. Díselo con amabilidad y, si hace falta, pasa el caso a una persona.`
+          }
+          return `No se anotó nada: ${e.message}.`
+        }
+        throw e
+      }
+      const made: ProposalItem[] = []
+      const outcome = await propose("decidir_presupuesto", planned.payload, "anotar_respuesta_presupuesto", undefined, (proposal) => {
+        made.push(proposal)
+      })
+      const proposal = made[0]
+      if (proposal?.status !== "propuesta") return outcome
+      ctx.confirmButtonsFor = proposal.id
+      const question = budgetAnswerQuestion(planned.answer, await orgZone(), ctx.treatment ?? null)
+      return `Propuesta ${proposal.id} creada; todavía no se anotó nada. Pregúntale con send_reply, con estas palabras o parecidas (el mensaje lleva los botones Sí y No): «${question}» Cuando diga que sí, usa confirmar_propuesta con ese id. Si corrige algo, vuelve a llamar a esta herramienta con la lista corregida: reemplaza a esta.`
+    },
+    {
+      name: "anotar_respuesta_presupuesto",
+      description:
+        "Cuando la persona responde a su presupuesto por escrito («la 16 y la 26 ahora, la 36 después», «prefiero la opción de la corona»), prepara la lista para confirmarla con ella: no anota nada todavía. Con los ids de ver_presupuesto, una respuesta por cada tratamiento de la opción que eligió: aceptado, pospuesto si lo deja para después, o rechazado. Con varias opciones, indica optionId. Te devuelve la pregunta para pedirle el sí; con su sí, usa confirmar_propuesta.",
+      schema: operationAgentSchema("presupuesto.respuesta"),
+    },
+  )
+
   const confirmProposal = tool(
     async ({ proposalId }: { proposalId: string }) => {
       if (ctx.sandbox) {
@@ -1315,8 +1541,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const chosen = await chooseOpportunity(input.opportunityId)
       if ("message" in chosen) return chosen.message
       const payload: Record<string, unknown> = { opportunityId: chosen.id }
-      if (input.nextActionAt !== undefined) payload["nextActionAt"] = input.nextActionAt
-      if (input.nextActionNote !== undefined) payload["nextActionNote"] = input.nextActionNote
+      if (input.nextActionAt !== undefined) payload.nextActionAt = input.nextActionAt
+      if (input.nextActionNote !== undefined) payload.nextActionNote = input.nextActionNote
       return propose("actualizar_seguimiento", payload, "update_followup", input.reason)
     },
     {
@@ -1546,6 +1772,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     cancelAppointmentProposal,
     confirmAppointment,
     answerPermission,
+    budgetsView,
+    resendBudget,
+    answerBudget,
     confirmProposal,
     noteCase,
     rememberFact,

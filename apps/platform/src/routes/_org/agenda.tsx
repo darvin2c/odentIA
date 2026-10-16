@@ -96,6 +96,8 @@ import { useMyUserId, usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export const Route = createFileRoute("/_org/agenda")({
   validateSearch: (
     search: Record<string, unknown>,
@@ -104,6 +106,10 @@ export const Route = createFileRoute("/_org/agenda")({
     contactId?: string
     conversationId?: string
     appointmentId?: string
+    /** «Agendar» desde el Plan: tratamientos aceptados que trae la cita, separados por coma. */
+    planItems?: string
+    /** El servicio de esos tratamientos, si es uno solo. */
+    serviceId?: string
     /** Vista, fecha, sede y filtros: los lee `useListSearch`; aquí solo se tipan para los enlaces. */
     view?: string
     date?: string
@@ -117,9 +123,17 @@ export const Route = createFileRoute("/_org/agenda")({
     contactId: typeof search.contactId === "string" ? search.contactId : undefined,
     conversationId: typeof search.conversationId === "string" ? search.conversationId : undefined,
     appointmentId: typeof search.appointmentId === "string" ? search.appointmentId : undefined,
+    planItems: typeof search.planItems === "string" && search.planItems.length <= 1200 ? search.planItems : undefined,
+    serviceId: typeof search.serviceId === "string" && UUID_RE.test(search.serviceId) ? search.serviceId : undefined,
   }),
   component: AgendaPage,
 })
+
+/** Los tratamientos que llegan en la URL: solo identificadores válidos, sin repetir. */
+function planItemIdsOf(value: string | undefined): string[] {
+  if (!value) return []
+  return [...new Set(value.split(",").filter((id) => UUID_RE.test(id)))].slice(0, 20)
+}
 
 type AgendaView = "dia" | "semana" | "lista"
 type GroupMode = "professionals" | "chairs"
@@ -305,7 +319,14 @@ function AgendaPage() {
     if (requested.patientId && !requested.contactId && solo && resources && canWrite) {
       if (openedRequest.current === solo.id) return
       openedRequest.current = solo.id
-      setBooking({ patient: { id: solo.id, name: solo.displayName }, lockedPatient: true })
+      // «Agendar» desde el Plan trae también el servicio y los tratamientos aceptados.
+      const planItemIds = planItemIdsOf(requested.planItems)
+      setBooking({
+        patient: { id: solo.id, name: solo.displayName },
+        lockedPatient: true,
+        ...(requested.serviceId ? { serviceId: requested.serviceId } : {}),
+        ...(planItemIds.length > 0 ? { planItemIds } : {}),
+      })
       return
     }
     // Quien aún no es paciente: «Nueva cita» abre con su ficha mínima por crear, unida a ella.
@@ -343,6 +364,8 @@ function AgendaPage() {
     requested.contactId,
     requested.patientId,
     requested.conversationId,
+    requested.planItems,
+    requested.serviceId,
     patientLink,
     soloPatient.data,
     contextualPatient.data,
@@ -352,7 +375,13 @@ function AgendaPage() {
 
   const closeBooking = () => {
     if (booking?.lockedPatient) {
-      setParams({ patientId: undefined, contactId: undefined, conversationId: undefined })
+      setParams({
+        patientId: undefined,
+        contactId: undefined,
+        conversationId: undefined,
+        planItems: undefined,
+        serviceId: undefined,
+      })
     }
     setBooking(null)
   }

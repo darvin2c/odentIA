@@ -128,6 +128,8 @@ export interface PortalAppointment {
 
 export interface PortalBudgetLine {
   planItemId: string
+  /** La opción del presupuesto a la que pertenece la línea. */
+  optionId: string
   title: string
   scope: string | null
   toothNumber: number | null
@@ -168,6 +170,10 @@ export interface PortalBudget {
   decidedAt: string | null
   acceptedByName: string | null
   decisionNote: string | null
+  /** El estado con el nombre de siempre, del servidor. */
+  stateText: string
+  /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
+  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
   items: PortalBudgetLine[]
 }
 
@@ -313,7 +319,11 @@ export async function fetchPortalBudgets(sessionToken: string): Promise<PortalBu
 export async function decidePortalBudgetApi(
   sessionToken: string,
   budgetId: string,
-  input: { decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>; decisionNote?: string | null },
+  input: {
+    optionId?: string | null
+    decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
+    decisionNote?: string | null
+  },
 ): Promise<{ budget: PortalBudget; replay: boolean }> {
   const res = await portalFetch<{ data: { budget: PortalBudget; replay: boolean } }>(
     sessionToken,

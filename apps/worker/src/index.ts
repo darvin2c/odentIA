@@ -46,6 +46,8 @@ const embedder = embedderFromEnv(env)
 const agentRuntime: AgentRuntime = {
   checkpointer,
   publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+  // Reenviar un presupuesto lleva su PDF.
+  storage,
   ...(embedder ? { embedder } : {}),
   ...(env.AGENT_BURST_WINDOW_SECONDS > 0
     ? {

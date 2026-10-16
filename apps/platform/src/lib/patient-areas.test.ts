@@ -16,14 +16,12 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   const ids = (role: string, isPatient = true) =>
     visibleAreas(as(role), isPatient).map((area) => area.id)
 
-  it("recepción: resumen, conversaciones, citas y datos; ni clínica, ni plan, ni cobros", () => {
-    expect(ids("reception")).toEqual(["resumen", "conversaciones", "citas", "datos"])
+  it("recepción: resumen, conversaciones, citas, plan y datos; ni clínica ni cobros", () => {
+    expect(ids("reception")).toEqual(["resumen", "conversaciones", "citas", "plan", "datos"])
     expect(defaultSection(as("reception"))).toBe("resumen")
-    // Coordina el tratamiento sin leer la clínica.
-    expect(areaNav("citas", as("reception")).map((entry) => entry.label)).toEqual([
-      "Sus citas",
-      "Tratamiento",
-    ])
+    // Coordina el tratamiento en el mismo Plan, sin leer la clínica (ADR 0034).
+    expect(areaNav("citas", as("reception")).map((entry) => entry.label)).toEqual(["Sus citas"])
+    expect(resolveSection("plan", as("reception"))).toBe("plan")
   })
 
   it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
@@ -35,10 +33,10 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
       "plan",
       "datos",
     ])
-    // Quien lee la clínica tiene el plan completo: no ve la coordinación aparte.
-    expect(visibleSections(as("dentist")).map((section) => section.id)).not.toContain(
-      "coordinacion",
-    )
+    // Un solo Plan: ni la coordinación, ni Tratamientos, ni Controles aparte (ADR 0034).
+    const sections = visibleSections(as("dentist")).map((section) => section.id)
+    for (const retired of ["coordinacion", "recorrido", "controles"])
+      expect(sections).not.toContain(retired)
     // Ni canales ni portal: son del CRM y de quien edita la filiación.
     expect(areaNav("datos", as("dentist")).map((entry) => entry.label)).toEqual([
       "Datos personales",
@@ -92,6 +90,10 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("seguimiento")).toBe("conversaciones")
     expect(sectionFromSearch("odontograma")).toBe("odontograma")
     expect(sectionFromSearch("no-existe")).toBeUndefined()
+    // Tratamientos, Controles y la coordinación de recepción viven ahora en el Plan.
+    expect(sectionFromSearch("recorrido")).toBe("plan")
+    expect(sectionFromSearch("controles")).toBe("plan")
+    expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
   it("los documentos se agrupan en una sola entrada de Clínica", () => {
@@ -99,8 +101,6 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(entries.map((entry) => entry.label)).toEqual([
       "Resumen clínico",
       "Odontograma",
-      "Tratamientos",
-      "Controles",
       "Atenciones",
       "Historia",
       "Antecedentes",

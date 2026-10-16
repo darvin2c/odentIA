@@ -1,5 +1,5 @@
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
-import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
+import { Badge, Button, Input, Label, RadioGroup, RadioGroupItem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
 import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell, SCHEDULE_AGENDA_LABELS, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
@@ -75,7 +75,6 @@ const BUDGET_STATUS_LABEL: Record<string, string> = {
   pospuesto: "Lo estás pensando",
   cancelado: "Cancelado",
   sustituido: "Reemplazado por uno nuevo",
-  historico: "Histórico",
 }
 
 const DECISION_LABEL: Record<string, string> = {
@@ -84,6 +83,7 @@ const DECISION_LABEL: Record<string, string> = {
   pospuesto: "Lo pienso",
   pendiente: "Sin responder",
   reemplazado: "Reemplazado",
+  no_elegida: "No elegida",
 }
 
 function readStoredPortalSession(): string | null {
@@ -725,10 +725,23 @@ function BudgetsTab({ sessionToken }: { sessionToken: string }) {
 function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string; budget: PortalBudget; onDecided: () => void }) {
   const [decisions, setDecisions] = useState<Record<string, "aceptado" | "rechazado" | "pospuesto">>({})
   const [note, setNote] = useState("")
+  // Con varias opciones se elige una (decisión 13); la elegida ya no cambia. Las
+  // líneas que se muestran y se responden son las de la opción elegida o vista.
+  const several = budget.options.length > 1
+  const chosen = budget.options.find((option) => option.decision === "elegida") ?? null
+  const [pickedOptionId, setPickedOptionId] = useState<string | null>(null)
+  const viewedOption =
+    chosen ??
+    budget.options.find((option) => option.id === pickedOptionId) ??
+    budget.options.find((option) => option.isRecommended) ??
+    budget.options[0] ??
+    null
+  const lines = viewedOption ? budget.items.filter((item) => item.optionId === viewedOption.id) : budget.items
   const decideMutation = useMutation({
     mutationFn: () =>
       decidePortalBudgetApi(sessionToken, budget.id, {
-        decisions: budget.items.map((item) => ({
+        optionId: several ? (chosen?.id ?? pickedOptionId) : null,
+        decisions: lines.map((item) => ({
           planItemId: item.planItemId,
           decision: decisions[item.planItemId] ?? (item.decision === "aceptado" || item.decision === "rechazado" ? item.decision : "pospuesto"),
         })),
@@ -758,8 +771,45 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
         </Badge>
       </div>
       {budget.notes && <p className="mt-1 text-sm text-muted-foreground">{budget.notes}</p>}
+      {several && !chosen && decidable ? (
+        <fieldset className="mt-3 grid gap-2">
+          <legend className="mb-1 text-sm font-medium">La clínica te propone {budget.options.length} opciones: elige una</legend>
+          <RadioGroup
+            value={pickedOptionId ?? ""}
+            onValueChange={(value) => {
+              setPickedOptionId(typeof value === "string" && value ? value : null)
+              setDecisions({})
+            }}
+          >
+            {budget.options.map((option) => (
+              <Label key={option.id} className="flex items-start gap-3 rounded-lg border p-3 text-sm font-normal">
+                <RadioGroupItem value={option.id} className="mt-0.5" aria-label={option.label} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="font-medium">
+                    {option.label}
+                    {option.isRecommended ? " · la que recomienda tu odontólogo" : ""}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {budget.items
+                      .filter((item) => item.optionId === option.id)
+                      .map((item) => item.title)
+                      .join(" · ")}
+                  </span>
+                </span>
+                <span className="font-semibold whitespace-nowrap tabular-nums">
+                  {money(option.totalCents, budget.currency)}
+                </span>
+              </Label>
+            ))}
+          </RadioGroup>
+        </fieldset>
+      ) : several && viewedOption ? (
+        <p className="mt-3 text-sm font-medium">
+          {chosen ? `Elegiste la ${viewedOption.label}` : viewedOption.label}
+        </p>
+      ) : null}
       <ul className="mt-3 grid gap-3">
-        {budget.items.map((item) => {
+        {lines.map((item) => {
           const locked = item.decision === "aceptado" || item.decision === "rechazado"
           const perVisit = item.billingMode === "session"
           const lowered =
@@ -824,7 +874,7 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
         <div className="flex items-baseline gap-3">
           <dt className="flex-1 font-medium">Total</dt>
           <dd className="text-base font-semibold whitespace-nowrap tabular-nums">
-            {money(budget.totalCents, budget.currency)}
+            {money(several && viewedOption ? viewedOption.totalCents : budget.totalCents, budget.currency)}
           </dd>
         </div>
         {budget.decidedAt && budget.acceptedCents != null ? (
@@ -863,7 +913,11 @@ function BudgetCard({ sessionToken, budget, onDecided }: { sessionToken: string;
             <ErrorState title="No se pudo registrar tu decisión" message={portalErrorMessage(decideMutation.error)} />
           )}
           <div>
-            <SubmitButton pending={decideMutation.isPending} onClick={() => decideMutation.mutate()}>
+            <SubmitButton
+              pending={decideMutation.isPending}
+              disabled={several && !chosen && !pickedOptionId}
+              onClick={() => decideMutation.mutate()}
+            >
               Enviar mi decisión
             </SubmitButton>
           </div>

@@ -304,8 +304,14 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
     })
     expect(charge.status).toBe(403)
   }
-  expect((await get("reception", "/budgets")).status).toBe(403)
+  // Recepción lee el presupuesto como documento de la persona (decisión 4).
+  expect((await get("reception", "/budgets")).status).toBe(200)
   expect((await get("dentist", "/budgets")).status).toBe(200)
+  // «Qué sigue» del Plan: lo pide quien ve alguna parte del plan; quien solo
+  // tiene tareas, no.
+  expect((await get("reception", "/next-step")).status).toBe(200)
+  expect((await get("cashier", "/next-step")).status).toBe(200)
+  expect((await get("member", "/next-step")).status).toBe(403)
   // Coordinación: quien agenda la consulta sin leer la ficha; caja no.
   const coordination = await get("reception", "/coordination")
   expect(coordination.status).toBe(200)

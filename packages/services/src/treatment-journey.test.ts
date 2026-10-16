@@ -17,7 +17,6 @@ import { createFollowUp } from "./follow-ups.js"
 import { getPatientSummary, getTimeline } from "./patient-history.js"
 import {
   addPlanItem,
-  createOptionGroup,
   listPlanItems,
   revisePlanItem,
   setPlanItemStatus,
@@ -27,7 +26,7 @@ import { grantResponsibility, revokeResponsibility } from "./responsibilities.js
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { getTreatmentJourney } from "./treatment-journey.js"
 setupTestDb()
-it("traza alternativas, propuesta versionada, representante, sesiones y evidencia clínica", async () => {
+it("traza la propuesta versionada, el representante, las sesiones y la evidencia clínica", async () => {
   const f = await clinicalFixture()
   const [representative] = await ownerDb
     .insert(contact)
@@ -46,16 +45,12 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
       startsAt: "2020-01-01",
     }),
   )
-  const group = await f.run((tx) =>
-    createOptionGroup(tx, ...f.args, { planId: f.plan.id, title: "Alternativas" }),
-  )
   const indication = {
     planId: f.plan.id,
     serviceId: f.service.id,
     sourceEncounterId: f.encounter.id,
-    optionGroupId: group.id,
   }
-  const a = await f.run((tx) => addPlanItem(tx, ...f.args, { ...indication, isRecommended: true }))
+  const a = await f.run((tx) => addPlanItem(tx, ...f.args, indication))
   const b = await f.run((tx) => addPlanItem(tx, ...f.args, indication))
   // Trazabilidad clínica: la indicación puede responder a un hallazgo del odontograma.
   const [finding] = await ownerDb
@@ -107,7 +102,7 @@ it("traza alternativas, propuesta versionada, representante, sesiones y evidenci
   expect(decided.status).toBe("parcial")
   expect(
     (await f.run((tx) => listPlanItems(tx, "org_a", f.patient.id))).find((i) => i.id === b.id),
-  ).toMatchObject({ decisionStatus: "rechazado", decisionNote: "Alternativa no elegida" })
+  ).toMatchObject({ decisionStatus: "pospuesto" })
   const revision = await f.run((tx) =>
     reviseBudget(tx, ...f.args, budget.id, { itemIds: [a.id], reason: "Propuesta elegida" }),
   )

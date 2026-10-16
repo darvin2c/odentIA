@@ -80,9 +80,24 @@ export type WaitingRow =
   /** Personas a las que el agente no pudo escribir hoy, por motivo. */
   | { kind: "unreached"; total: number; byCause: Array<{ total: number; reason: string }> }
   | ({ kind: "budgets" } & WaitingBudgets)
+  /**
+   * Un presupuesto armado que nadie envió desde el día anterior (decisión 12):
+   * «Presupuesto de Lucía Fernández sin enviar · Enviar». Se va solo al enviarlo.
+   */
+  | {
+      kind: "unsentBudget"
+      id: string
+      patientId: string
+      patientName: string
+      since: string
+      itemCount: number
+      totalCents: number | null
+      currency: string
+      options: number
+    }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
   | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed"; count: number }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }
 export interface WorkspaceAppointment {
   id: string
   patientId: string

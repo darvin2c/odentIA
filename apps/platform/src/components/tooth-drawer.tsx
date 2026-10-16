@@ -28,7 +28,7 @@ import { FormDrawer, FormPanel } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../lib/api"
-import { createTreatmentPlanApi, fetchTreatmentPlans, planDecisionLabel } from "../lib/budgets"
+import { planDecisionLabel } from "../lib/budgets"
 import { timeAgo, usePermission } from "../lib/crm"
 import {
   type OdontogramEntry,
@@ -206,13 +206,8 @@ export function ToothDrawer({
   const [diagPending, setDiagPending] = useState(false)
   const [diagError, setDiagError] = useState<string | null>(null)
   const [diagErrors, setDiagErrors] = useState<string[]>([])
-  // Plan clínico destino de la indicación: obligatorio, sin creación silenciosa.
-  const [treatPlanId, setTreatPlanId] = useState("")
-  const [treatNewPlan, setTreatNewPlan] = useState(false)
-  const [treatPlanTitle, setTreatPlanTitle] = useState("Plan de tratamiento")
-  const [treatPlanPending, setTreatPlanPending] = useState(false)
-  const [treatPlanError, setTreatPlanError] = useState<string | null>(null)
-
+  // Sin elegir plan: la indicación va al plan abierto de la persona, que el
+  // servidor crea con la primera (ADR 0034).
   const [treatService, setTreatService] = useState<ServiceCatalogItem | null>(null)
   const [treatDetail, setTreatDetail] = useState("")
   const [treatCie, setTreatCie] = useState("")
@@ -227,7 +222,7 @@ export function ToothDrawer({
   const [voidPending, setVoidPending] = useState(false)
   const [voidError, setVoidError] = useState<string | null>(null)
 
-  const busy = diagPending || treatPending || voidPending || treatPlanPending
+  const busy = diagPending || treatPending || voidPending
   const fieldDisabled = !canMutate || disabled || busy
 
   const def = condition ? findingDefinition(condition) : undefined
@@ -416,50 +411,6 @@ export function ToothDrawer({
     queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
     enabled: canRead,
   })
-  // Planes del paciente como destino de la indicación.
-  const treatmentPlansQuery = useQuery({
-    queryKey: ["treatment-plans", patientId],
-    queryFn: () => fetchTreatmentPlans(patientId),
-    enabled: canRead,
-  })
-  const planOptions = useMemo(
-    () => treatmentPlansQuery.data?.data ?? [],
-    [treatmentPlansQuery.data],
-  )
-
-  // Alta explícita del plan desde el drawer (origen: la atención abierta).
-  // El alta de plan comparte el único formulario y su acción persistente.
-  const createTreatmentPlan = async () => {
-    if (!canMutate || disabled || busy || treatPlanPending) return
-    if (!encounterId) {
-      setTreatPlanError("Abre una atención en curso para crear el plan.")
-      return
-    }
-    const title = treatPlanTitle.trim()
-    if (!title) {
-      setTreatPlanError("Ingresa el título del nuevo plan.")
-      return
-    }
-    setTreatPlanPending(true)
-    onPendingChange?.(true)
-    setTreatPlanError(null)
-    try {
-      await beforeWrite?.()
-      const created = await createTreatmentPlanApi(patientId, {
-        title,
-        originEncounterId: encounterId,
-      })
-      await queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] })
-      setTreatPlanId(created.data.id)
-      setTreatNewPlan(false)
-      setTreatPlanTitle("Plan de tratamiento")
-    } catch (err) {
-      setTreatPlanError(mutationMessage(err, "No se pudo crear el plan."))
-    } finally {
-      setTreatPlanPending(false)
-      onPendingChange?.(false)
-    }
-  }
   const shownTeeth = multi && teeth.length > MAX_HEAD_TEETH ? teeth.slice(0, MAX_HEAD_TEETH) : teeth
   const hiddenCount = teeth.length - shownTeeth.length
   const title =
@@ -553,10 +504,6 @@ export function ToothDrawer({
       setTreatError("Selecciona un servicio del catálogo.")
       return
     }
-    if (!treatPlanId) {
-      setTreatError("Elige el plan clínico donde se indicará el tratamiento.")
-      return
-    }
     if (!encounterId) {
       setTreatError("Abre una atención en curso para indicar el tratamiento.")
       return
@@ -574,7 +521,6 @@ export function ToothDrawer({
         await apiFetch(`/api/patients/${patientId}/plan/items`, {
           method: "POST",
           body: JSON.stringify({
-            planId: treatPlanId,
             sourceEncounterId: encounterId,
             serviceId: treatService.id,
             toothNumber: singleTooth,
@@ -589,7 +535,6 @@ export function ToothDrawer({
         await apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan/items/batch`, {
           method: "POST",
           body: JSON.stringify({
-            planId: treatPlanId,
             sourceEncounterId: encounterId,
             serviceId: treatService.id,
             toothNumbers: teeth,
@@ -602,7 +547,6 @@ export function ToothDrawer({
       setTreatDetail("")
       setTreatCie("")
       setSourceFindingId("")
-      setTreatPlanId("")
       setSavedMessage("Tratamiento agregado al plan.")
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
@@ -610,6 +554,7 @@ export function ToothDrawer({
         queryClient.invalidateQueries({ queryKey: ["budgets", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["budget", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
+        queryClient.invalidateQueries({ queryKey: ["plan-next", patientId] }),
       ])
     } catch (err) {
       setTreatError(mutationMessage(err, "No se pudo guardar el tratamiento."))
@@ -659,11 +604,7 @@ export function ToothDrawer({
     onOpenChange(false)
   }
   const diagDirty = draftDirty
-  const treatDirty =
-    treatService !== null ||
-    treatDetail !== "" ||
-    treatCie !== "" ||
-    (treatNewPlan && treatPlanTitle !== "Plan de tratamiento")
+  const treatDirty = treatService !== null || treatDetail !== "" || treatCie !== ""
   const isDirty = canMutate && (diagDirty || treatDirty)
   useEffect(() => {
     onDirtyChange?.(isDirty)
@@ -673,9 +614,8 @@ export function ToothDrawer({
   useEffect(() => {
     if (!choosingFinding) detailHeading.current?.focus()
   }, [choosingFinding, condition])
-  const activeError = treatNewPlan
-    ? treatPlanError
-    : mode === "diagnosis"
+  const activeError =
+    mode === "diagnosis"
       ? (diagError ?? (diagErrors.length ? diagErrors.join(" ") : null))
       : treatError
   const faceEditing = canMutate && !disabled && !busy && !multi && scope === "surface" && !freehand
@@ -770,16 +710,14 @@ export function ToothDrawer({
 
   const canPlan =
     teeth.length > 0 && teeth.every((tooth) => entriesOf(tooth).some((entry) => !entry.voidedAt))
-  const submitLabel = treatNewPlan
-    ? "Crear y seleccionar"
-    : mode === "diagnosis"
+  const submitLabel =
+    mode === "diagnosis"
       ? `Registrar hallazgo${multi && !isGroup ? ` (${teeth.length})` : ""}`
       : `Agregar al plan${multi ? ` (${teeth.length})` : ""}`
   const submit = (event: React.FormEvent): void => {
     event.preventDefault()
     event.stopPropagation()
-    if (treatNewPlan) void createTreatmentPlan()
-    else if (mode === "diagnosis" && !choosingFinding) void submitDiagnosis(event)
+    if (mode === "diagnosis" && !choosingFinding) void submitDiagnosis(event)
     else if (mode === "treatment") void submitTreatment(event)
   }
   const headerContent = (
@@ -791,12 +729,9 @@ export function ToothDrawer({
           variant="ghost"
           className="min-h-11"
           disabled={fieldDisabled}
-          onClick={() => {
-            if (treatNewPlan) setTreatNewPlan(false)
-            else setMode("diagnosis")
-          }}
+          onClick={() => setMode("diagnosis")}
         >
-          {treatNewPlan ? "Volver al tratamiento" : "Volver a hallazgos"}
+          Volver a hallazgos
         </Button>
       ) : canMutate && canPlan && !draftDirty ? (
         <Button
@@ -1184,21 +1119,6 @@ export function ToothDrawer({
             </>
           )}
         </div>
-      ) : treatNewPlan ? (
-        <Field>
-          <FieldLabel htmlFor={`${uid}-treat-plan-title`}>Título del nuevo plan</FieldLabel>
-          <Input
-            id={`${uid}-treat-plan-title`}
-            className="min-h-11"
-            value={treatPlanTitle}
-            onChange={(event) => setTreatPlanTitle(event.currentTarget.value)}
-            maxLength={200}
-            disabled={fieldDisabled}
-          />
-          <p className="text-sm text-muted-foreground">
-            Al crearlo volverás al tratamiento con este plan seleccionado.
-          </p>
-        </Field>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {singleTooth != null && (
@@ -1230,64 +1150,11 @@ export function ToothDrawer({
               </ChoiceSelect>
             </Field>
           )}
-          <Field className="sm:col-span-2">
-            <FieldLabel htmlFor={`${uid}-treat-plan`}>Plan clínico (obligatorio)</FieldLabel>
-            <Select
-              items={Object.fromEntries(
-                planOptions.map((entry) => [entry.plan.id, entry.plan.title]),
-              )}
-              value={treatPlanId}
-              onValueChange={(v) => setTreatPlanId(v ?? "")}
-              disabled={fieldDisabled || treatNewPlan}
-            >
-              <SelectTrigger
-                className="min-h-11"
-                id={`${uid}-treat-plan`}
-                aria-label="Plan clínico destino"
-              >
-                <SelectValue
-                  placeholder={
-                    treatmentPlansQuery.isLoading ? "Cargando planes…" : "Elige el plan clínico…"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {planOptions.map((p) => (
-                  <SelectItem key={p.plan.id} value={p.plan.id}>
-                    {p.plan.title} · {p.status} ({p.pendingItems} pendientes)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {planOptions.length === 0 && !treatmentPlansQuery.isLoading ? (
-              <p className="text-xs text-muted-foreground">
-                Este paciente aún no tiene planes clínicos.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                La indicación nace en la atención abierta y vive en el plan, no en un presupuesto.
-              </p>
-            )}
-            {!encounterId ? (
-              <p role="note" className="text-xs text-muted-foreground">
-                Abre una atención en curso para indicar tratamientos desde aquí.
-              </p>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="mt-2 min-h-11 self-start"
-              disabled={fieldDisabled || !encounterId}
-              onClick={() => {
-                setTreatNewPlan(true)
-                setTreatPlanTitle("Plan de tratamiento")
-                setTreatPlanError(null)
-              }}
-            >
-              Crear plan clínico
-            </Button>
-          </Field>
+          {!encounterId ? (
+            <p role="note" className="text-xs text-muted-foreground sm:col-span-2">
+              Abre una atención en curso para indicar tratamientos desde aquí.
+            </p>
+          ) : null}
           <div className="sm:col-span-2">
             <ServicePicker
               value={treatService?.id ?? ""}

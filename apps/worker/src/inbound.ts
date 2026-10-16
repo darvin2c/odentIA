@@ -93,7 +93,12 @@ export async function processInbound(
       if (content.type === "text") {
         const handled = await tx
           .transaction((inner) =>
-            handleAutomationReply(inner, orgId, { conversationId: result.conversationId, replyId: content.replyId }),
+            handleAutomationReply(
+              inner,
+              orgId,
+              { conversationId: result.conversationId, replyId: content.replyId },
+              { storage: deps.storage },
+            ),
           )
           .catch((error: unknown) => {
             if (error instanceof ServiceError) return false

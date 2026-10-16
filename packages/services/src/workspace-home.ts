@@ -9,8 +9,9 @@
  *
  * El orden es fijo y sin puntajes: casos «Ahora», atenciones de días
  * anteriores sin cerrar de quien mira, citas que siguen sin confirmar tras el
- * primer recordatorio del agente, las personas a las que el
- * agente no pudo escribir, conversaciones sin responder, tareas vencidas, casos
+ * primer recordatorio del agente, los presupuestos armados que nadie envió
+ * desde el día anterior (para quien habla con la persona, decisión 12), las
+ * personas a las que el agente no pudo escribir, conversaciones sin responder, tareas vencidas, casos
  * «Hoy» y «Sin apuro», conversaciones que siguen abiertas con una persona a
  * cargo, la siguiente tarea con el resto resumido, los consentimientos que
  * una atención pidió y faltan publicar (para quien configura), lo que recomienda el
@@ -21,7 +22,7 @@
  */
 
 /** Tope de filas por tipo: lo demás se resume en una fila «y N más». */
-export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3 } as const
+export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3, unsentBudgets: 3 } as const
 
 export interface WaitingCase {
   id: string
@@ -68,6 +69,26 @@ export interface WaitingBudgets {
   total: number
   oldestPresentedAt: string | null
   items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
+}
+
+/**
+ * Un presupuesto que quedó armado al firmar la atención y nadie envió desde el
+ * día anterior: «Presupuesto de Lucía Fernández sin enviar · Enviar». Es la
+ * misma regla que «Qué sigue» del Plan (`unsentBudgetOf`); se va sola al
+ * enviarlo. Le sale a quien habla con la persona (decisión 4).
+ */
+export interface WaitingUnsentBudget {
+  /** El presupuesto. */
+  id: string
+  patientId: string
+  patientName: string
+  /** Desde cuándo está armado. */
+  since: string
+  /** Tratamientos de la opción que vale y su total (null si falta algún precio). */
+  itemCount: number
+  totalCents: number | null
+  currency: string
+  options: number
 }
 
 /** Una cita que sigue sin confirmar después del primer recordatorio del agente: hay que llamar. */
@@ -123,6 +144,7 @@ export type WaitingRow =
   | ({ kind: "consentToPublish" } & WaitingConsentToPublish)
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
+  | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
   | ({ kind: "unreached" } & WaitingUnreached)
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   | ({ kind: "stillOpen" } & WaitingStillOpen)
@@ -131,7 +153,7 @@ export type WaitingRow =
   | ({ kind: "advice" } & WaitingAdvice)
   | ({ kind: "budgets" } & WaitingBudgets)
   /** Lo que no cupo de un tipo, con su total. */
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed"; count: number }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }
 
 export interface WaitingParts {
   /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
@@ -140,6 +162,8 @@ export interface WaitingParts {
   staleEncounters?: WaitingStaleEncounter[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
+  /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
+  unsentBudgets?: { items: WaitingUnsentBudget[]; total: number } | null
   conversations: { waiting: number; oldestAt: string | null } | null
   stillOpen?: WaitingStillOpen | null
   /** Tareas vencidas, de la que venció antes a la más reciente. */
@@ -169,6 +193,14 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
     for (const item of shown) rows.push({ kind: "unconfirmed", ...item })
     const left = parts.unconfirmed.total - shown.length
     if (left > 0) rows.push({ kind: "more", of: "unconfirmed", count: left })
+  }
+
+  // Ningún borrador queda abandonado: el presupuesto que nadie envió le sale a quien habla con la persona.
+  if (parts.unsentBudgets && parts.unsentBudgets.total > 0) {
+    const shown = parts.unsentBudgets.items.slice(0, WAITING_LIMITS.unsentBudgets)
+    for (const item of shown) rows.push({ kind: "unsentBudget", ...item })
+    const left = parts.unsentBudgets.total - shown.length
+    if (left > 0) rows.push({ kind: "more", of: "unsentBudgets", count: left })
   }
 
   if (parts.unreached && parts.unreached.total > 0) rows.push({ kind: "unreached", ...parts.unreached })

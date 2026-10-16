@@ -1178,6 +1178,8 @@ export async function getPortalRescheduleSlots(
 
 export interface PortalBudgetLineView {
   planItemId: string
+  /** La opción de la línea (con una sola opción, la única). */
+  optionId: string
   title: string
   scope: string | null
   toothNumber: number | null
@@ -1221,6 +1223,10 @@ export interface PortalBudgetView {
   decidedAt: Date | null
   acceptedByName: string | null
   decisionNote: string | null
+  /** El estado con su nombre de siempre («Enviado · espera respuesta», «Aceptó 2 de 3»). */
+  stateText: string
+  /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
+  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
   items: PortalBudgetLineView[]
 }
 
@@ -1253,8 +1259,17 @@ function toPortalBudget(budget: BudgetWithTotals, locale: string | null): Portal
     decidedAt: budget.decidedAt,
     acceptedByName: budget.acceptedByName,
     decisionNote: budget.decisionNote,
+    stateText: budget.stateText,
+    options: budget.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      isRecommended: option.isRecommended,
+      decision: option.decision,
+      totalCents: option.totalCents,
+    })),
     items: budget.items.map((line) => ({
       planItemId: line.planItemId,
+      optionId: line.optionId,
       title: line.title,
       scope: line.scope,
       toothNumber: line.toothNumber,
@@ -1284,6 +1299,8 @@ export async function listPortalBudgets(tx: Db, ctx: PortalContext): Promise<Por
 }
 
 export interface DecidePortalBudgetInput {
+  /** La opción elegida; obligatoria si el presupuesto tiene más de una. */
+  optionId?: string | null
   decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
   decisionNote?: string | null
 }
@@ -1323,10 +1340,11 @@ export async function decidePortalBudget(
     // Decide la persona, no el equipo: el presupuesto no queda a nombre de nadie
     // de la clínica y la auditoría lo anota a su contacto.
     decided = await decideBudget(tx, ctx.orgId, null, ctx.session.patientId, budgetId, {
+      optionId: input.optionId ?? null,
       decisions: input.decisions,
       decidedByContactId: ctx.session.contactId,
       decisionNote: input.decisionNote ?? null,
-    }, { skipOwnPlan: true })
+    }, { skipOwnPlan: true, via: "portal" })
   } catch (error) {
     if (error instanceof ServiceError && error.code === "BUDGET_STATUS") {
       const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)

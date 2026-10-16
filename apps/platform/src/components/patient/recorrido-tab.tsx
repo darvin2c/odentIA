@@ -92,11 +92,14 @@ function siteLabel(item: PlanItem): string {
 export function RecorridoClinicoTab({
   patientId,
   initialItemId,
+  showPhases = true,
   onChangeItem,
   onTabChange,
 }: {
   patientId: string
   initialItemId?: string
+  /** `false`: solo el recorrido del tratamiento (la lista por fases ya está en el Plan). */
+  showPhases?: boolean
   onChangeItem: (itemId: string) => void
   onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
 }): React.JSX.Element {
@@ -384,7 +387,7 @@ export function RecorridoClinicoTab({
 
   const primaryLabel: Record<TreatmentNextAction, string> = {
     definir: "Continuar en la atención abierta",
-    presupuestar: "Ir a la propuesta",
+    presupuestar: "Ir al presupuesto",
     decidir: "Registrar la decisión",
     iniciar: "Iniciar sesión",
     reanudar: "Reanudar tratamiento",
@@ -395,16 +398,18 @@ export function RecorridoClinicoTab({
 
   return (
     <div className="flex flex-col gap-6">
-      <PlanPhases
-        patientId={patientId}
-        items={items}
-        journeys={summary?.treatmentJourneys ?? []}
-        selectedId={selectedId}
-        onSelect={(itemId) => {
-          setError(null)
-          onChangeItem(itemId)
-        }}
-      />
+      {showPhases ? (
+        <PlanPhases
+          patientId={patientId}
+          items={items}
+          journeys={summary?.treatmentJourneys ?? []}
+          selectedId={selectedId}
+          onSelect={(itemId) => {
+            setError(null)
+            onChangeItem(itemId)
+          }}
+        />
+      ) : null}
 
       {journey == null ? (
         <p className="text-sm text-muted-foreground">Cargando el recorrido del tratamiento…</p>
@@ -550,7 +555,7 @@ export function RecorridoClinicoTab({
                         })
                       }
                     >
-                      Abrir en Planes
+                      Ver el presupuesto
                     </Button>
                   </li>
                 ))}
@@ -565,7 +570,7 @@ export function RecorridoClinicoTab({
                     onTabChange("plan", { itemId: journey.item.id, planId: journey.plan.id })
                   }
                 >
-                  Preparar propuesta
+                  Ir al presupuesto
                 </Button>
               </div>
             ) : null}
@@ -584,36 +589,6 @@ export function RecorridoClinicoTab({
             </div>
             {journey.item.decisionNote ? (
               <p className="text-sm">{journey.item.decisionNote}</p>
-            ) : null}
-            {journey.optionGroup ? (
-              <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium">
-                  Alternativas: {journey.optionGroup.title}
-                </span>
-                <ul className="flex flex-col gap-1 text-sm">
-                  {journey.optionGroup.alternatives.map((alternative) => (
-                    <li key={alternative.id} className="flex flex-wrap items-center gap-2">
-                      <span>
-                        {alternative.title} · {planDecisionLabel(alternative.decisionStatus)} ·{" "}
-                        {planStatusLabel(alternative.status)}
-                      </span>
-                      {alternative.isRecommended ? (
-                        <Badge variant="secondary">Recomendada</Badge>
-                      ) : null}
-                      {alternative.id !== journey.item.id ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => onChangeItem(alternative.id)}
-                        >
-                          Ver esta alternativa
-                        </Button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
             ) : null}
             {journey.supersedes ? (
               <p className="text-sm text-muted-foreground">

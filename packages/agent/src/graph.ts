@@ -219,6 +219,9 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
     "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál.",
     "Si el último mensaje de la clínica en el hilo es la pregunta «¿Te podemos escribir también para avisarte de tus controles y novedades de la clínica?» y la persona responde sí o no, anótalo con responder_permiso_mensajes; no lo confundas con confirmar una cita.",
+    on("presupuestos")
+      ? "Si la persona pide su presupuesto, míralo con ver_presupuesto y reenvíaselo con reenviar_presupuesto: solo lo que la clínica ya entregó; si no está listo, la herramienta deja la tarea a recepción y te da la frase. Si responde qué acepta, qué deja para después o qué opción prefiere, usa anotar_respuesta_presupuesto con los ids de ver_presupuesto: te devuelve la pregunta para confirmar la lista; se anota solo con su sí, con confirmar_propuesta, y si corrige algo vuelves a llamarla con la lista corregida. Nunca cambias un precio ni armas un presupuesto."
+      : whenOff("presupuestos"),
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
@@ -688,7 +691,8 @@ export function compileAgentGraph(
     // Para reservar o cambiar una cita lo primero que el modelo pide es quién
     // es el paciente y qué citas tiene: llega ya consultado y se ahorra el paso.
     const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
-    const routeBlock = route ? [routeInstruction(route.path, prefetched?.text), toolCtx.routeHint].filter(Boolean).join("\n") || null : null
+    const budgets = tools.some((item) => item.name === "ver_presupuesto")
+    const routeBlock = route ? [routeInstruction(route.path, prefetched?.text, { budgets }), toolCtx.routeHint].filter(Boolean).join("\n") || null : null
     const nowLine = `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.

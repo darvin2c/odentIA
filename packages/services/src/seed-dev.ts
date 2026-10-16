@@ -49,9 +49,10 @@ import {
   prescription,
   prescriptionItem,
   serviceCatalog,
+  appointmentPlanItem,
   treatmentBudget,
   treatmentBudgetItem,
-  treatmentOptionGroup,
+  treatmentBudgetOption,
   treatmentPlan,
   treatmentPlanItem,
   treatmentTemplate,
@@ -76,7 +77,16 @@ import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
 import { createScheduleBlock } from "./availability.js"
-import { adjustBudgetLines, createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
+import {
+  addBudgetItems,
+  adjustBudgetLines,
+  createBudget,
+  decideBudget,
+  deliverBudget,
+  duplicateBudgetOption,
+  removeBudgetItems,
+  reviseBudget,
+} from "./budgets.js"
 import {
   addClinicalNote,
   addOdontogramEntries,
@@ -113,7 +123,7 @@ import { collectCharge, createCharge, refundCredit } from "./payments.js"
 import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { setConsent } from "./automation.js"
-import { addPlanItem, createOptionGroup, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
+import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { createPromotion } from "./promotions.js"
@@ -472,6 +482,8 @@ async function wipeSeed(): Promise<void> {
     .delete(patientDocumentContext)
     .where(inArray(patientDocumentContext.organizationId, SEED_ORGS))
   await db.delete(encounterPlanItem).where(inArray(encounterPlanItem.organizationId, SEED_ORGS))
+  // Lo agendado de un plan apunta a sus tratamientos: va antes que ellos.
+  await db.delete(appointmentPlanItem).where(inArray(appointmentPlanItem.organizationId, SEED_ORGS))
   await db.delete(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS))
   await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, SEED_ORGS))
   await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS))
@@ -488,11 +500,18 @@ async function wipeSeed(): Promise<void> {
     await tx.execute(
       sql`alter table treatment_budget_item enable trigger treatment_budget_item_guard_trigger`,
     )
+    // Las opciones de un presupuesto entregado tampoco se quitan en la aplicación.
+    await tx.execute(
+      sql`alter table treatment_budget_option disable trigger treatment_budget_option_guard_trigger`,
+    )
+    await tx
+      .delete(treatmentBudgetOption)
+      .where(inArray(treatmentBudgetOption.organizationId, SEED_ORGS))
+    await tx.execute(
+      sql`alter table treatment_budget_option enable trigger treatment_budget_option_guard_trigger`,
+    )
   })
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
-  await db
-    .delete(treatmentOptionGroup)
-    .where(inArray(treatmentOptionGroup.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
   await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
@@ -1952,27 +1971,41 @@ await correctDocumentContext(db, ORG_A, ANA_ID, rosaPatientId, docRx.id, {
   expectedVersion: 2,
   planItemId: obt36.id,
 })
-const opciones46 = await createOptionGroup(db, ORG_A, ANA_ID, rosaPatientId, {
-  planId: planRestaurador.id,
-  title: "Restauración definitiva pieza 46",
-})
-await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+// Dos opciones en un mismo presupuesto (decisión 13): la 46 se arregla con una
+// resina o con una corona, y Rosa elige una. La B nace como copia de la A y se
+// cambia lo que hace falta; cada una con su total, nunca sumadas. Queda enviado,
+// esperando que elija.
+const resinaOpcion46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("OBTURACION"),
   planId: planRestaurador.id,
   sourceEncounterId: evaluacion46.id,
-  optionGroupId: opciones46.id,
   toothNumber: 46,
-  detail: "Restauración con resina pieza 46 (alternativa conservadora)",
+  detail: "Restauración con resina pieza 46",
 })
-await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
+const coronaOpcion46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("CORONA"),
   planId: planRestaurador.id,
   sourceEncounterId: evaluacion46.id,
-  optionGroupId: opciones46.id,
-  isRecommended: true,
   toothNumber: 46,
-  detail: "Corona cerámica pieza 46 (alternativa recomendada)",
+  detail: "Corona cerámica pieza 46",
 })
+const opciones46 = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
+  planId: planRestaurador.id,
+  itemIds: [resinaOpcion46.id],
+  title: "Restauración definitiva pieza 46",
+  notes: "Dos caminos para la 46: elige uno.",
+})
+const conCorona = await duplicateBudgetOption(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, opciones46.options[0]!.id)
+const opcionB = conCorona.options[1]!.id
+await removeBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
+  itemIds: [resinaOpcion46.id],
+  optionId: opcionB,
+})
+await addBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
+  itemIds: [coronaOpcion46.id],
+  optionId: opcionB,
+})
+await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id)
 
 // El cierre clínico requiere atención finalizada, no una reserva retrospectiva.
 const controlObt = await createFollowUp(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2122,6 +2155,51 @@ const elenaBudget = await createBudget(db, ORG_A, ANA_ID, elenaPatientId, {
 await db.transaction((tx) => adjustBudgetLines(tx, ORG_A, ANA_ID, elenaPatientId, elenaBudget.id, {
   lines: [{ planItemId: elenaItem.id, priceCents: 10000, reason: "Precio acordado para la demostración" }],
 }))
+// Ningún borrador queda abandonado (decisión 12): el de Elena quedó armado ayer
+// y nadie lo envió, así que hoy le sale a recepción en «Te espera».
+await db.update(treatmentBudget).set({ createdAt: daysAgo(1) }).where(eq(treatmentBudget.id, elenaBudget.id))
+// «Armado» es cuando entró su último tratamiento: también ayer.
+await db.update(treatmentBudgetItem).set({ createdAt: daysAgo(1) }).where(eq(treatmentBudgetItem.budgetId, elenaBudget.id))
+
+// Lucía (tablero 3): la Dra. Ana encontró caries en la 16, la 26 y la 36 e
+// indicó una resina en cada una, S/ 180 por pieza. Al firmar la evaluación
+// quedó armado el presupuesto; se le envió y respondió «la 16 y la 26 ahora, la
+// 36 después» (Aceptó 2 de 3). Lo aceptado se agendó en su cita de hoy, que lo
+// trae a la atención.
+const luciaPatientId = patientIdByName.get("Lucía Fernández")!
+const luciaEval = await createEncounter(db, ORG_A, ANA_ID, luciaPatientId, {
+  reason: "Evaluación: molestia al masticar",
+  branchId: miraflores.id,
+})
+await addEncounterDiagnosis(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, {
+  cie10Code: "K02.1",
+  diagnosisType: "definitivo",
+})
+const luciaResinas: Record<number, string> = {}
+for (const tooth of [16, 26, 36]) {
+  const item = await addPlanItem(db, ORG_A, ANA_ID, luciaPatientId, {
+    serviceId: resinaCpmsA.id,
+    sourceEncounterId: luciaEval.id,
+    toothNumber: tooth,
+    surfaces: ["occlusal"],
+    diagnosisCode: "K02.1",
+  })
+  luciaResinas[tooth] = item.id
+}
+await updateEncounterDraft(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, {
+  evolution: "Caries oclusal en 16, 26 y 36; se indican resinas.",
+})
+const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
+if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")
+await deliverBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id)
+await decideBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id, {
+  decisions: [
+    { planItemId: luciaResinas[16]!, decision: "aceptado" },
+    { planItemId: luciaResinas[26]!, decision: "aceptado" },
+    { planItemId: luciaResinas[36]!, decision: "pospuesto" },
+  ],
+  decisionNote: "Respondió por WhatsApp: la 16 y la 26 ahora, la 36 después.",
+})
 
 // --- Volumen para paginación: 40 contactos+pacientes ---
 for (let i = 1; i <= 40; i++) {
@@ -2514,6 +2592,8 @@ const agendaSeed: Array<{
   end: string
   service: string
   status?: "programada" | "confirmada" | "atendida" | "no_asistio" | "cancelada"
+  /** Lo aceptado que se agenda con la cita (ADR 0034). */
+  planItemIds?: string[]
 }> = [
   {
     patient: "Rosa Quispe",
@@ -2551,7 +2631,9 @@ const agendaSeed: Array<{
     day: 0,
     start: "11:00",
     end: "11:30",
-    service: "LIMPIEZA",
+    service: "RESINA-CPMS",
+    // Sus resinas aceptadas: al atenderla, la atención las trae.
+    planItemIds: [luciaResinas[16]!, luciaResinas[26]!],
   },
   {
     patient: "Carmen Rojas",
@@ -2647,6 +2729,7 @@ for (const item of agendaSeed) {
     startsAt: lima(item.day, item.start),
     endsAt: lima(item.day, item.end),
     status: item.status ?? "programada",
+    ...(item.planItemIds ? { planItemIds: item.planItemIds } : {}),
   })
   reservedAt.set(`${item.patient}|${item.day}|${item.start}`, reserved.id)
   if (item.patient === "Rosa Quispe" && item.day === 1) {
@@ -2835,7 +2918,8 @@ async function summary(orgId: string, label: string): Promise<string> {
     "encounter",
     "task",
     "treatment_budget",
-    "treatment_option_group",
+    "treatment_budget_option",
+    "appointment_plan_item",
     "clinical_follow_up",
     "prescription",
     "patient_charge",

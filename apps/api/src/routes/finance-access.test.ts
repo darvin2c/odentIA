@@ -416,11 +416,12 @@ it("cuenta y cobro: reception/dentist 403, cashier cobra con ticket, tenancy", a
   expect(TicketData.parse(await collected.json()).data.ticket.id).toBeTruthy()
 })
 
-it("presupuestos: reception fuera, cashier decide sin escribir, dentist solo plan propio", async () => {
+it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier decide sin escribir; dentist solo lo propio", async () => {
   const listPath = `/patients/${PAT_A}/budgets`
   const detailPath = `/patients/${PAT_A}/budgets/${BUDGET1}`
-  expect((await buildApp("reception", RECEP).request(listPath)).status).toBe(403)
-  expect((await buildApp("reception", RECEP).request(detailPath)).status).toBe(403)
+  // Decisión 4: recepción lee el presupuesto como documento de la persona.
+  expect((await buildApp("reception", RECEP).request(listPath)).status).toBe(200)
+  expect((await buildApp("reception", RECEP).request(detailPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(listPath)).status).toBe(200)
   expect((await buildApp("cashier", CASH).request(detailPath)).status).toBe(200)
   expect((await buildApp("dentist", DENT1).request(listPath)).status).toBe(200)
@@ -439,26 +440,33 @@ it("presupuestos: reception fuera, cashier decide sin escribir, dentist solo pla
   const optionsPath = `/patients/${PAT_A}/financial-document-options?documentType=budget&documentId=${BUDGET1}`
   expect((await buildApp("dentist", DENT2).request(pdfPath)).status).toBe(403)
   expect((await buildApp("dentist", DENT2).request(optionsPath)).status).toBe(403)
-  expect((await buildApp("reception", RECEP).request(pdfPath)).status).toBe(403)
+  expect((await buildApp("reception", RECEP).request(pdfPath)).status).toBe(200)
+  // Enviar es `budgets.send`: recepción sí, caja no (caja solo lee y anota).
+  expect((await buildApp("reception", RECEP).request(optionsPath)).status).toBe(200)
+  const previewPath = `/patients/${PAT_A}/budgets/${BUDGET1}/send-preview`
+  expect((await buildApp("reception", RECEP).request(previewPath)).status).toBe(200)
+  expect((await buildApp("cashier", CASH).request(previewPath)).status).toBe(403)
   const ownPdf = await buildApp("dentist", DENT1).request(pdfPath)
   expect(ownPdf.status).toBe(200)
   expect(ownPdf.headers.get("content-type")).toBe("application/pdf")
   expect(Buffer.from(await ownPdf.arrayBuffer()).subarray(0, 5).toString("latin1")).toBe("%PDF-")
 
-  // Caja recibe el presupuesto como documento económico: precio y decisión,
-  // sin pieza, superficies ni códigos de procedimiento.
-  const forCashier = (await (await buildApp("cashier", CASH).request(detailPath)).json()) as {
-    data: { totalCents: number | null; items: Array<{ title: string; priceCents: number | null; toothNumber: number | null; surfaces: string[]; codings: unknown[] }> }
+  // Caja y recepción reciben el presupuesto como documento económico: precio y
+  // decisión, sin pieza, superficies ni códigos de procedimiento.
+  for (const [role, userId] of [["cashier", CASH], ["reception", RECEP]] as const) {
+    const economic = (await (await buildApp(role, userId).request(detailPath)).json()) as {
+      data: { totalCents: number | null; items: Array<{ title: string; priceCents: number | null; toothNumber: number | null; surfaces: string[]; codings: unknown[] }> }
+    }
+    expect(economic.data.items.length).toBeGreaterThan(0)
+    expect(economic.data.items.every((line) => line.title.length > 0 && line.priceCents !== null)).toBe(true)
+    expect(
+      economic.data.items.every(
+        (line) => line.toothNumber === null && line.surfaces.length === 0 && line.codings.length === 0,
+      ),
+    ).toBe(true)
   }
-  expect(forCashier.data.items.length).toBeGreaterThan(0)
-  expect(forCashier.data.items.every((line) => line.title.length > 0 && line.priceCents !== null)).toBe(true)
-  expect(
-    forCashier.data.items.every(
-      (line) => line.toothNumber === null && line.surfaces.length === 0 && line.codings.length === 0,
-    ),
-  ).toBe(true)
 
-  // Escritura: reception y cashier 403 con cuerpo válido; DENT2 403 sobre plan ajeno.
+  // Escritura (precios y tratamientos): reception y cashier 403 con cuerpo válido; DENT2 403 sobre plan ajeno.
   const createBody = { planId: PLAN_A, itemIds: [ITEM3] }
   expect((await postJson(buildApp("reception", RECEP), listPath, createBody)).status).toBe(403)
   expect((await postJson(buildApp("cashier", CASH), listPath, createBody)).status).toBe(403)
@@ -469,21 +477,21 @@ it("presupuestos: reception fuera, cashier decide sin escribir, dentist solo pla
   expect(own.status).toBe(201)
   const ownId = IdData.parse(await own.json()).data.id
 
-  // Decisión sobre presupuesto presentado (ITEM1): reception y plan ajeno 403.
+  // Decisión sobre presupuesto presentado (ITEM1): plan ajeno 403; recepción
+  // anota la respuesta (budgets.decide, decisión 4) con servicio real.
   const decisionPath = `/patients/${PAT_A}/budgets/${BUDGET1}/decision`
   const decisionBody = { decisions: [{ planItemId: ITEM1, decision: "aceptado" }] }
-  expect((await postJson(buildApp("reception", RECEP), decisionPath, decisionBody)).status).toBe(403)
   expect((await postJson(buildApp("dentist", DENT2), decisionPath, decisionBody)).status).toBe(403)
-  // Cashier decide sin clínica (budgets.decide) con servicio real.
-  expect((await postJson(buildApp("cashier", CASH), decisionPath, decisionBody)).status).toBe(200)
+  expect((await postJson(buildApp("reception", RECEP), decisionPath, decisionBody)).status).toBe(200)
 
-  // DENT1 decide su propio presupuesto de punta a punta vía API.
+  // DENT1 entrega su propio presupuesto (budgets.send); caja no entrega y anota la respuesta.
   const deliverPath = `/patients/${PAT_A}/budgets/${ownId}/deliver`
+  expect((await postJson(buildApp("cashier", CASH), deliverPath, {})).status).toBe(403)
   expect((await postJson(buildApp("dentist", DENT1), deliverPath, {})).status).toBe(200)
-  const ownDecision = await postJson(buildApp("dentist", DENT1), `/patients/${PAT_A}/budgets/${ownId}/decision`, {
+  const cashierDecision = await postJson(buildApp("cashier", CASH), `/patients/${PAT_A}/budgets/${ownId}/decision`, {
     decisions: [{ planItemId: ITEM3, decision: "aceptado" }],
   })
-  expect(ownDecision.status).toBe(200)
+  expect(cashierDecision.status).toBe(200)
 })
 
 it("comisiones: dentist propias sin ajenas ni resultado; cashier sin commissions.read; admin configura", async () => {

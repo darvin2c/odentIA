@@ -632,7 +632,7 @@ it("responsables: vigencia, duplicado y revocación con motivo", async () => {
   })
 })
 
-it("suspendido se reanuda y las alternativas se agrupan con recomendación", async () => {
+it("suspendido se reanuda; sin plan la indicación va al abierto y ya no hay alternativas", async () => {
   const { patientId, planId, itemId, encounterId } = await setupAcceptedItem()
 
   const suspended = await post(app, `/patients/${patientId}/treatments/${itemId}/suspend`, {
@@ -654,52 +654,24 @@ it("suspendido se reanuda y las alternativas se agrupan con recomendación", asy
   })
   expect(badResume.status).toBe(400)
 
-  // Alternativas: se agrupan después de indicarlas y solo una queda recomendada.
+  // Plan abierto implícito (ADR 0034): sin `planId`, la indicación va al plan abierto.
+  const second = await post(app, `/patients/${patientId}/plan/items`, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    sourceEncounterId: encounterId,
+    toothNumber: 46,
+  })
+  expect(second.status).toBe(201)
+  expect((await json<{ data: { planId: string } }>(second)).data.planId).toBe(planId)
+
+  // Las alternativas se retiraron: son opciones dentro del presupuesto (decisión 13).
   const group = await post(app, `/patients/${patientId}/plans/${planId}/option-groups`, {
     title: "Corona o resina",
   })
-  expect(group.status).toBe(201)
-  const groupId = (await json<{ data: { id: string } }>(group)).data.id
-  const second = await post(app, `/patients/${patientId}/plan/items`, {
-    planId,
-    serviceId: "c1111111-1111-4111-8111-111111111111",
-    sourceEncounterId: encounterId,
-    toothNumber: 36,
-  })
-  expect(second.status).toBe(201)
-  const secondId = (await json<{ data: { id: string } }>(second)).data.id
-
+  expect(group.status).toBe(404)
   const grouped = await post(app, `/patients/${patientId}/treatments/${itemId}/alternative`, {
-    optionGroupId: groupId,
-    isRecommended: true,
-  })
-  expect(grouped.status).toBe(200)
-  expect(
-    (await json<{ data: { optionGroupId: string; isRecommended: boolean } }>(grouped)).data,
-  ).toMatchObject({ optionGroupId: groupId, isRecommended: true })
-  const other = await post(app, `/patients/${patientId}/treatments/${secondId}/alternative`, {
-    optionGroupId: groupId,
-    isRecommended: true,
-  })
-  expect(other.status).toBe(200)
-  const journey = await app.request(`/patients/${patientId}/treatments/${itemId}/journey`)
-  const alternatives = (
-    await json<{
-      data: {
-        optionGroup: {
-          title: string
-          alternatives: Array<{ id: string; isRecommended: boolean }>
-        } | null
-      }
-    }>(journey)
-  ).data.optionGroup
-  expect(alternatives?.title).toBe("Corona o resina")
-  expect(alternatives?.alternatives.filter((a) => a.isRecommended)).toHaveLength(1)
-
-  const foreignGroup = await post(app, `/patients/${patientId}/treatments/${itemId}/alternative`, {
     optionGroupId: "11111111-1111-4111-8111-111111111111",
   })
-  expect(foreignGroup.status).toBe(404)
+  expect(grouped.status).toBe(404)
 })
 
 it("la historia declara el contexto de cada evento del recorrido", async () => {

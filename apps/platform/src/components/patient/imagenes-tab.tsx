@@ -1001,7 +1001,7 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Control</dt>
               <dd>
                 {doc.followUpId ? (
-                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "controles" }} className={linkButton}>
+                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "plan" }} className={linkButton}>
                     Ver controles
                   </Link>
                 ) : (

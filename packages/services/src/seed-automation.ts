@@ -42,7 +42,7 @@ export async function seedChannelTemplates(
       })
   }
 
-  // Los diez con los que viene la clínica, en estados distintos.
+  // Los once con los que viene la clínica, en estados distintos.
   const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date }> = {
     recordatorio_cita: { status: "aprobada", since: lastWeek },
     recordatorio_control: { status: "aprobada", since: lastWeek },
@@ -54,6 +54,8 @@ export async function seedChannelTemplates(
     aviso_cita_movida: { status: "aprobada", since: lastWeek },
     aviso_cita_cancelada: { status: "en_revision" },
     retomar_conversacion: { status: "aprobada", since: lastWeek },
+    // Aprobado: el presupuesto de la semilla puede salir pasadas las 24 horas.
+    presupuesto_listo: { status: "aprobada", since: lastWeek },
   }
   for (const key of CATALOG_MESSAGE_KEYS) {
     const spec = catalogMessageOf(key)

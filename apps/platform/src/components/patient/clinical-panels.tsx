@@ -67,10 +67,13 @@ export function ControlesPanel({
   encounterOnly = false,
   allowCreate = true,
   items,
+  heading = "Controles",
 }: {
   patientId: string
   itemId?: string
   encounterId?: string
+  /** «Próximo control» dentro de la atención; «Controles» en el Plan. */
+  heading?: string
   /** Muestra solo los controles de esta atención (ficha de la atención). */
   encounterOnly?: boolean
   /** La atención cerrada es inmutable: allí no se indica un control nuevo. */
@@ -194,7 +197,7 @@ export function ControlesPanel({
     <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Controles</div>
+          <h3 className="font-heading text-base font-medium">{heading}</h3>
           <p className="text-sm text-muted-foreground">
             Un control programado no equivale a un control realizado: se completa contra una
             atención finalizada y deja su resultado en la historia.
@@ -287,7 +290,7 @@ export function ControlesPanel({
                         setScheduling(row)
                       }}
                     >
-                      Programar control
+                      Reservar
                     </Button>
                   ) : null}
                   {row.status === "pendiente" || row.status === "programado" ? (
@@ -324,7 +327,7 @@ export function ControlesPanel({
               row.status === "pendiente" &&
               row.appointment?.status !== "atendida" ? (
                 <p className="text-sm text-muted-foreground">
-                  Para programar el control necesitas también permiso de escritura en agenda.
+                  Para reservar el control necesitas también permiso de escritura en agenda.
                 </p>
               ) : null}
             </li>

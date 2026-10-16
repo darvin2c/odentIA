@@ -62,8 +62,13 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
 
   // UI: programar el control reservando un hueco real del profesional.
   const patientPath = `/patients/${ids.patientId}`
-  await gotoHydrated(page, tenant(slug, `${patientPath}?tab=controles`))
-  await page.getByRole("button", { name: "Programar control" }).first().click()
+  // Los controles viven en el Plan, con «Reservar» (ADR 0034).
+  await gotoHydrated(page, tenant(slug, `${patientPath}?tab=plan`))
+  await page
+    .getByRole("region", { name: "Controles" })
+    .getByRole("button", { name: "Reservar", exact: true })
+    .first()
+    .click()
   const dialog = surface(page, { name: "Programar control" })
   // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.
   await expect(

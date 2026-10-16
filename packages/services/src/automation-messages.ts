@@ -20,7 +20,13 @@ import type { ConsentPurpose } from "@odentia/db/schema/automation"
  * a la pregunta del permiso general tras reservar: su id lleva la persona, no
  * un trabajo (`generalPermissionButtons`).
  */
-export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no"] as const
+/**
+ * «presupuesto» es «Ver y responder» de «Presupuesto listo»: su id lleva el
+ * presupuesto, y tocarlo deja el PDF en la conversación (la ventana de 24 horas
+ * queda abierta con el toque). Cuando exista el enlace personal (paso 6 de la
+ * fase 3), el botón será ese enlace.
+ */
+export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no", "presupuesto"] as const
 export type ReplyAction = (typeof REPLY_ACTIONS)[number]
 
 export interface MessageButton {
@@ -69,6 +75,7 @@ export const MESSAGE_VARIABLES = {
   cita_pasada: { label: "Fecha de la cita que no se dio", example: "lunes 12 de octubre" },
   control: { label: "Control pendiente", example: "Control de ortodoncia" },
   presupuesto: { label: "Título del presupuesto", example: "Ortodoncia" },
+  resumen_presupuesto: { label: "Tratamientos y total del presupuesto", example: "3 tratamientos por S/ 540" },
   oportunidad: { label: "Título de la oportunidad", example: "Ortodoncia" },
 } as const
 export type MessageVariable = keyof typeof MESSAGE_VARIABLES
@@ -226,12 +233,35 @@ export const RESUME_MESSAGE: MessageSpec = {
   buttons: [{ action: "responder", title: "Sí, continuemos" }],
 }
 
-/** Los mensajes con los que viene cada clínica: los que envía el agente y el de la Bandeja. */
-export const CATALOG_MESSAGE_KEYS = [...AUTOMATION_MESSAGE_KEYS, RESUME_MESSAGE_KEY] as const
+/**
+ * «Presupuesto listo» (paso 3 de la fase 3): lo envía quien entrega el
+ * presupuesto desde Plan o el cierre de la atención, y el agente cuando la
+ * persona se lo pide por el chat. Es parte del servicio: no pide permiso
+ * previo (ADR 0030) y deja de salir solo si se dio de baja de los mensajes de
+ * seguimiento. Por WhatsApp dentro de las 24 horas sale con el PDF; pasadas,
+ * con este mensaje aprobado, y «Ver y responder» deja el PDF al tocarlo. Por
+ * correo, con el PDF adjunto.
+ */
+export const BUDGET_READY_MESSAGE_KEY = "presupuesto_listo"
+export const BUDGET_READY_MESSAGE: MessageSpec = {
+  key: BUDGET_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_presupuesto_listo_v1",
+  body: "Hola, {{1}}. Tu presupuesto está listo: {{2}}. Puedes verlo y decirnos qué aceptas aquí.",
+  variables: ["persona", "resumen_presupuesto"],
+  buttons: [{ action: "presupuesto", title: "Ver y responder" }],
+}
+/** Asunto cuando «Presupuesto listo» sale por correo. */
+export const BUDGET_READY_SUBJECT = "Tu presupuesto está listo"
+
+/** Los mensajes con los que viene cada clínica: los que envía el agente, el de la Bandeja y el del presupuesto. */
+export const CATALOG_MESSAGE_KEYS = [...AUTOMATION_MESSAGE_KEYS, RESUME_MESSAGE_KEY, BUDGET_READY_MESSAGE_KEY] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
 export function catalogMessageOf(key: string): MessageSpec | null {
-  return key === RESUME_MESSAGE_KEY ? RESUME_MESSAGE : automationMessageOf(key)
+  if (key === RESUME_MESSAGE_KEY) return RESUME_MESSAGE
+  if (key === BUDGET_READY_MESSAGE_KEY) return BUDGET_READY_MESSAGE
+  return automationMessageOf(key)
 }
 
 /** Idioma de las plantillas: el de los textos del producto, sin variante de país. */

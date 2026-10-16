@@ -316,7 +316,6 @@ const STATUS_LABELS: Record<string, string> = {
   rechazado: "Rechazado",
   pospuesto: "Pospuesto",
   sustituido: "Sustituido",
-  historico: "Histórico",
   activo: "Vigente",
   anulado: "Anulado",
 }
@@ -342,11 +341,11 @@ function JourneyCard({
       case "plan":
         return {
           label: "Abrir recorrido",
-          search: { tab: "recorrido", itemId: item.planItemId ?? item.refId },
+          search: { tab: "plan", itemId: item.planItemId ?? item.refId },
         }
       case "budget":
         return {
-          label: "Ver la propuesta",
+          label: "Ver el presupuesto",
           search: {
             tab: "plan",
             ...(item.planId ? { planId: item.planId } : {}),
@@ -354,7 +353,7 @@ function JourneyCard({
           },
         }
       case "follow_up":
-        return { label: "Ver controles", search: { tab: "controles" } }
+        return { label: "Ver controles", search: { tab: "plan" } }
       case "prescription":
         return { label: "Ver recetas", search: { tab: "recetas" } }
       default:

@@ -32,7 +32,8 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
 import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { deliverBudget, requireOwnPlan } from "./budgets.js"
+import { budgetStateText } from "@odentia/clinical"
+import { deliverBudget, requireOwnBudget } from "./budgets.js"
 import {
   buildBudgetSnapshot,
   buildTicketSnapshot,
@@ -259,7 +260,13 @@ async function loadDocumentMeta(
     meta: {
       type: "budget",
       label: `Presupuesto N.º ${String(budget.budgetNumber).padStart(4, "0")}`,
-      statusLabel: budget.status === "borrador" ? "Borrador (se entrega al enviar)" : budget.status,
+      // El estado con su nombre de siempre; «Aceptó N de M» necesita las líneas: aquí basta «en parte».
+      statusLabel:
+        budget.status === "borrador"
+          ? "Por enviar (se entrega al enviarlo)"
+          : budget.status === "parcial"
+            ? "Aceptó una parte"
+            : budgetStateText({ status: budget.status, items: [] }),
       isDraft: budget.status === "borrador",
     },
     preferContactId: budget.decisionContactId,
@@ -504,8 +511,8 @@ async function deliverIfDraft(
   }
 }
 
-// Plan propio del odontólogo al enviar presupuestos ya entregados
-// (`deliverBudget` aplica la misma regla al entregar el borrador).
+// Lo propio del odontólogo al enviar presupuestos ya entregados: lo que él
+// indicó (`deliverBudget` aplica la misma regla al entregar el borrador).
 async function requireDentistOwnPlan(
   tx: Db,
   orgId: string,
@@ -514,7 +521,7 @@ async function requireDentistOwnPlan(
   budgetId: string,
 ): Promise<void> {
   const [head] = await tx
-    .select({ planId: treatmentBudget.planId })
+    .select({ id: treatmentBudget.id })
     .from(treatmentBudget)
     .where(
       and(
@@ -525,7 +532,7 @@ async function requireDentistOwnPlan(
     )
     .limit(1)
   if (!head) throw notFound("Presupuesto")
-  await requireOwnPlan(tx, orgId, head.planId, actorUserId, "dentist")
+  await requireOwnBudget(tx, orgId, budgetId, actorUserId, "dentist")
 }
 
 // --- Envío ----------------------------------------------------------------------
@@ -814,27 +821,32 @@ export async function requireDocumentConnection(
 export async function deliverDocumentPdf(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   input: {
     recipient: Pick<DocumentRecipient, "contactId" | "email" | "phone">
-    conn: UsableConnection
+    /** La conexión; sin ella, `conversationId` (el hilo que ya eligió la regla de envío). */
+    conn?: UsableConnection
+    /** El hilo ya elegido (`routeMessage`): no se busca otro. */
+    conversationId?: string
     pdf: Uint8Array
     filename: string
     caption: string
     /** Con otro correo el hilo es el de esa dirección. */
     exactAddress?: boolean
+    /** Quién lo deja en el hilo: una persona del equipo o el agente. */
+    senderKind?: "user" | "agent"
   },
   deps: SendDeps,
 ): Promise<{ conversationId: string; messageId: string }> {
   if (input.pdf.byteLength > 20 * 1024 * 1024) throw validation("El documento supera 20 MB: no se puede adjuntar")
-  const { id: conversationId } = await resolveConversation(
-    tx,
-    orgId,
-    actorUserId,
-    input.recipient,
-    input.conn,
-    input.exactAddress ?? false,
-  )
+  let conversationId = input.conversationId
+  if (!conversationId) {
+    if (!input.conn) throw validation("Elige el canal de envío")
+    if (!actorUserId) throw validation("Sin conversación elegida, el envío lo hace una persona del equipo")
+    conversationId = (
+      await resolveConversation(tx, orgId, actorUserId, input.recipient, input.conn, input.exactAddress ?? false)
+    ).id
+  }
   const ref = await deps.storage.putAttachment({
     orgId,
     conversationId,
@@ -842,10 +854,11 @@ export async function deliverDocumentPdf(
     contentType: "application/pdf",
     ext: "pdf",
   })
+  const senderKind = input.senderKind ?? (actorUserId ? "user" : "agent")
   const created = await sendOutbound(tx, orgId, {
     conversationId,
-    senderKind: "user",
-    senderUserId: actorUserId,
+    senderKind,
+    ...(senderKind === "user" && actorUserId ? { senderUserId: actorUserId } : {}),
     content: {
       type: "media",
       attachment: { ...ref, filename: asciiFilename(input.filename) },

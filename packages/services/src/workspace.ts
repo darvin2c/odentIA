@@ -24,6 +24,7 @@ import {
   type WaitingStillOpen,
   type WaitingTask,
   type WaitingUnconfirmed,
+  type WaitingUnsentBudget,
 } from "./workspace-home.js"
 
 export interface WorkspaceAccess {
@@ -44,6 +45,11 @@ export interface WorkspaceAccess {
   configure: boolean
   /** Quien atiende (odontólogo): solo sus citas, en todas las sedes, y los presupuestos de sus planes. */
   ownAppointments: boolean
+  /**
+   * Envía presupuestos y habla con la persona (`budgets.send` y el CRM):
+   * recepción y quien dirige. Le salen los presupuestos que nadie envió.
+   */
+  sendsBudgets?: boolean
   /**
    * Escribe en la historia clínica (`clinical.write`): si hoy tiene citas propias
    * ve «Mis pacientes de hoy», también si es la dueña, y sus atenciones de otro
@@ -517,12 +523,47 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
 }
 
+/**
+ * Presupuestos armados y sin enviar desde antes de hoy (en la zona de la
+ * clínica): el borrador de la persona con alguna línea. El total es el de la
+ * opción recomendada (la que vale mientras decide).
+ */
+async function waitingUnsentBudgets(
+  tx: Db,
+  orgId: string,
+  dayStart: SQL,
+): Promise<{ items: WaitingUnsentBudget[]; total: number }> {
+  const rows = await tx.execute<{ [K in keyof WaitingUnsentBudget]: WaitingUnsentBudget[K] } & { total: number }>(sql`
+    select b.id, b.patient_id as "patientId", p.display_name as "patientName", ${iso(sql`armado.at`)} as since,
+      (select count(distinct l.plan_item_id)::int from treatment_budget_item l
+        join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
+        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "itemCount",
+      (select case when bool_or(l.price_cents is null) then null else sum(l.price_cents *
+          case when l.billing_mode = 'session' then greatest(coalesce(l.sessions_planned, 1), 1) else 1 end)::int end
+        from treatment_budget_item l
+        join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
+        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "totalCents",
+      b.currency,
+      (select count(*)::int from treatment_budget_option o where o.organization_id = b.organization_id and o.budget_id = b.id) as options,
+      count(*) over ()::int as total
+    from treatment_budget b join patient p on p.id = b.patient_id and p.organization_id = ${orgId}
+    -- Armado cuando entró su último tratamiento: lo que creció hoy aún no espera.
+    cross join lateral (select max(l.created_at) as at from treatment_budget_item l
+      where l.organization_id = b.organization_id and l.budget_id = b.id) armado
+    where b.organization_id = ${orgId} and b.status = 'borrador' and b.supersedes_budget_id is null
+      and armado.at < ${dayStart}
+    order by armado.at, b.id limit ${WAITING_LIMITS.unsentBudgets}`)
+  return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+}
+
 /** Presupuestos que siguen esperando respuesta (`budgetAwaitsAnswerSql`); quien atiende, solo los de sus planes. */
 async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: boolean): Promise<WaitingBudgets> {
   const awaiting = budgetAwaitsAnswerSql({ id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` })
+  // Quien atiende ve los de lo que él indicó o preparó (el plan es uno por persona).
   const scope = sql`b.organization_id=${orgId} and ${awaiting}
-    and (not ${ownOnly} or exists (select 1 from treatment_plan tp
-      where tp.id=b.plan_id and tp.organization_id=${orgId} and tp.created_by=${userId}))`
+    and (not ${ownOnly} or b.created_by=${userId} or exists (select 1 from treatment_budget_item own_line
+      join treatment_plan_item own_item on own_item.id=own_line.plan_item_id and own_item.organization_id=own_line.organization_id
+      where own_line.organization_id=${orgId} and own_line.budget_id=b.id and own_item.created_by=${userId}))`
   const items = await tx.execute<WaitingBudgets["items"][number]>(sql`
     select b.id, b.patient_id as "patientId", p.display_name as "patientName", b.title,
       ${iso(sql`b.presented_at`)} as "presentedAt"
@@ -544,6 +585,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const { timezone, locale } = await workspaceZone(tx, orgId)
   const [day] = await tx.execute<{ date: string }>(sql`select to_char(now() at time zone ${timezone}, 'YYYY-MM-DD') as date`)
   const dayEnd = sql`((${day.date}::date + 1)::timestamp at time zone ${timezone})`
+  const dayStart = sql`((${day.date}::date)::timestamp at time zone ${timezone})`
   const needsBranch = access.appointments || access.finance
   const { branch, many } = needsBranch ? await homeBranch(tx, orgId, options.branchId) : { branch: null, many: false }
 
@@ -573,6 +615,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
+    // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).
+    unsentBudgets: access.sendsBudgets ? await waitingUnsentBudgets(tx, orgId, dayStart) : null,
     conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent) : null,
     stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,

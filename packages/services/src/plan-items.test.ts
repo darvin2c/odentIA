@@ -4,12 +4,12 @@ import { expect, it } from "vitest"
 import { addEncounterProcedure } from "./encounters.js"
 import {
   addPlanItem,
-  createOptionGroup,
   createTreatmentPlan,
   derivePlanStatus,
   listPlanItems,
+  listTreatmentPlans,
+  OPEN_PLAN_TITLE,
   revisePlanItem,
-  setPlanItemAlternative,
   setPlanItemStatus,
 } from "./plan.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -34,22 +34,13 @@ it("conserva dos sesiones, exige completar explícitamente y encadena revisiones
   const plan = await run((tx) =>
     createTreatmentPlan(tx, ...args, { title: "Plan", originEncounterId: first.id }),
   )
-  const group = await run((tx) =>
-    createOptionGroup(tx, ...args, { planId: plan.id, title: "Alternativas" }),
-  )
   const indication = {
     serviceId: service.id,
     planId: plan.id,
     sourceEncounterId: first.id,
-    optionGroupId: group.id,
-    isRecommended: true,
   }
   const item = await run((tx) => addPlanItem(tx, ...args, indication))
   const alternative = await run((tx) => addPlanItem(tx, ...args, indication))
-  expect(
-    (await run((tx) => listPlanItems(tx, "org_a", patient.id))).find((i) => i.id === item.id)
-      ?.isRecommended,
-  ).toBe(false)
   const [budget] = await ownerDb.execute<{ id: string }>(
     sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title,currency,status) values ('org_a',${patient.id},${plan.id},1,'Propuesta','PEN','aceptado') returning id`,
   )
@@ -107,7 +98,7 @@ it("no declara completado un plan mixto con indicaciones canceladas", () => {
   expect(derivePlanStatus(["realizado", "realizado"])).toBe("Completado")
 })
 
-it("reanuda un tratamiento suspendido y agrupa alternativas después de indicarlas", async () => {
+it("indica sin elegir plan: el plan abierto nace con la atención y recibe lo siguiente; reanuda un suspendido", async () => {
   await ownerDb.execute(
     sql`insert into "user" (id,name,email) values ('alt-actor','Clínico','alt@example.test')`,
   )
@@ -122,50 +113,15 @@ it("reanuda un tratamiento suspendido y agrupa alternativas después de indicarl
   )
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, "org_a", fn)
   const args = ["org_a", "alt-actor", patient.id] as const
-  const plan = await run((tx) =>
-    createTreatmentPlan(tx, ...args, {
-      title: "Plan con alternativas",
-      originEncounterId: encounter.id,
-    }),
-  )
-  const group = await run((tx) =>
-    createOptionGroup(tx, ...args, { planId: plan.id, title: "Corona o resina" }),
-  )
-  const indication = { serviceId: service.id, planId: plan.id, sourceEncounterId: encounter.id }
-  // Indicar sin agrupar es válido; agrupar y recomendar es un acto posterior explícito.
+  // Sin plan: la primera indicación abre el plan de la persona, con la atención como origen.
+  const indication = { serviceId: service.id, sourceEncounterId: encounter.id }
   const resina = await run((tx) => addPlanItem(tx, ...args, indication))
   const corona = await run((tx) => addPlanItem(tx, ...args, indication))
-  const agrupada = await run((tx) =>
-    setPlanItemAlternative(tx, ...args, resina.id, {
-      optionGroupId: group.id,
-      isRecommended: true,
-    }),
-  )
-  expect(agrupada).toMatchObject({ optionGroupId: group.id, isRecommended: true })
-  const otra = await run((tx) =>
-    setPlanItemAlternative(tx, ...args, corona.id, {
-      optionGroupId: group.id,
-      isRecommended: true,
-    }),
-  )
-  expect(otra.isRecommended).toBe(true)
-  // Marcar una recomendada desmarca la anterior: no hay dos recomendaciones vigentes.
-  expect(
-    (await run((tx) => listPlanItems(tx, "org_a", patient.id))).find((i) => i.id === resina.id)
-      ?.isRecommended,
-  ).toBe(false)
-  await expect(
-    run((tx) =>
-      setPlanItemAlternative(tx, ...args, resina.id, { optionGroupId: null, isRecommended: true }),
-    ),
-  ).rejects.toMatchObject({ code: "VALIDATION" })
-  await expect(
-    run((tx) =>
-      setPlanItemAlternative(tx, ...args, resina.id, {
-        optionGroupId: "11111111-1111-4111-8111-111111111111",
-      }),
-    ),
-  ).rejects.toMatchObject({ status: 404 })
+  expect(corona.planId).toBe(resina.planId)
+  const plans = await run((tx) => listTreatmentPlans(tx, "org_a", patient.id))
+  expect(plans).toHaveLength(1)
+  expect(plans[0]).toMatchObject({ isOpen: true, plan: { title: OPEN_PLAN_TITLE, originEncounterId: encounter.id } })
+  const plan = plans[0]!.plan
 
   // Suspender deja de ser un callejón sin salida: se reanuda donde quedó.
   const [budget] = await ownerDb.execute<{ id: string }>(
@@ -192,6 +148,6 @@ it("reanuda un tratamiento suspendido y agrupa alternativas después de indicarl
     }),
   )
   await expect(
-    run((tx) => setPlanItemAlternative(tx, ...args, resina.id, { optionGroupId: group.id })),
+    run((tx) => setPlanItemStatus(tx, ...args, resina.id, { status: "en_curso" })),
   ).rejects.toMatchObject({ code: "ITEM_CLOSED" })
 })

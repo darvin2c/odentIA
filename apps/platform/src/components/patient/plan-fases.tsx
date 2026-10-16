@@ -261,7 +261,7 @@ function PlanPhasesGroup({
                           aria-pressed={selected}
                           onClick={() => onSelect(item.id)}
                         >
-                          {selected ? "Abierto abajo" : "Ver"}
+                          {selected ? "Abierto" : "Ver"}
                         </Button>
                       </div>
                     </li>

@@ -51,7 +51,8 @@ function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
   if (row.kind === "stillOpen") return <TypeIcon icon={MessagesSquare} />
   if (row.kind === "advice") return <TypeIcon icon={Lightbulb} />
-  if (row.kind === "budgets" || row.kind === "consentToPublish") return <TypeIcon icon={FileText} />
+  if (row.kind === "budgets" || row.kind === "unsentBudget" || row.kind === "consentToPublish" || (row.kind === "more" && row.of === "unsentBudgets"))
+    return <TypeIcon icon={FileText} />
   return <TypeIcon icon={SquareCheckBig} />
 }
 
@@ -76,6 +77,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
     case "unconfirmed":
       return <Link to="/agenda" search={{ appointmentId: row.id }} {...props} />
+    case "unsentBudget":
+      // El Plan de la persona: «Qué sigue» ofrece «Enviar» y dice por dónde y a quién le llega.
+      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "plan", budgetId: row.id }} {...props} />
     case "consentToPublish":
       return <Link to="/settings/forms" search={{ tab: "consentimientos" }} {...props} />
     case "conversations":
@@ -89,6 +93,7 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
     case "more":
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
       if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
+      if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
       return <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
     default:
       return null

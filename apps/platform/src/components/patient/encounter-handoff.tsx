@@ -111,7 +111,7 @@ export function EncounterHandoff({
       title: `Reservar el control: ${control.title}`,
       detail: `Corresponde el ${formatDate(control.dueAt)}. Falta reservarle la cita.`,
       tone: "warning",
-      section: "controles",
+      section: "plan",
       action: "Programar",
     })
   for (const control of ownControls.filter(
@@ -123,7 +123,7 @@ export function EncounterHandoff({
       title: `Control con cita: ${control.title}`,
       detail: control.appointment ? formatDateTime(control.appointment.startsAt) : "",
       tone: "success",
-      section: "controles",
+      section: "plan",
       action: "Ver controles",
     })
   if (proposed.length > 0)

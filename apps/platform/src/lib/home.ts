@@ -4,6 +4,7 @@
  * las palabras de la pantalla. Ninguna regla de qué espera o qué se debe vive
  * en este archivo.
  */
+import { formatMoney } from "@odentia/clinical"
 import { AGENT_CASE_ROW, urgencyWord } from "./agent"
 import { channelLabel } from "./channels"
 import { timeAgo } from "./crm"
@@ -145,6 +146,17 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           : "Aún sin fecha de presentación",
         action: "Ver cuáles",
       }
+    case "unsentBudget":
+      return {
+        title: `Presupuesto de ${row.patientName} sin enviar`,
+        detail: joined([
+          `Armado ${daysAgo(row.since, context)}`,
+          plural(row.itemCount, "tratamiento", "tratamientos"),
+          row.totalCents != null ? formatMoney(row.totalCents, row.currency, context.locale) : null,
+          row.options > 1 ? `${row.options} opciones` : null,
+        ]),
+        action: "Enviar",
+      }
     case "consentToPublish":
       return {
         title: `Publicar el consentimiento de «${row.title}»`,
@@ -164,6 +176,13 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           title: row.count === 1 ? "1 cita más sin confirmar" : `${row.count} citas más sin confirmar`,
           detail: "Tras el recordatorio del agente",
           action: "Abrir la Agenda",
+        }
+      }
+      if (row.of === "unsentBudgets") {
+        return {
+          title: row.count === 1 ? "1 presupuesto más sin enviar" : `${row.count} presupuestos más sin enviar`,
+          detail: "Se envían desde el Plan de cada persona",
+          action: "Ver personas",
         }
       }
       return {
@@ -187,7 +206,7 @@ export function waitingOpenText(row: WaitingRow, context: HomeTextContext): stri
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
   if (row.kind === "more") return `more:${row.of}`

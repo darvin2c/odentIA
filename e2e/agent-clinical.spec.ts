@@ -115,8 +115,9 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
   await expect(block("Diagnóstico")).toContainText("Sin diagnósticos confirmados · 1 sugerencia")
   await expect(suggested("Plan de tratamiento")).toContainText("Endodoncia multirradicular · S/ 650.00")
-  await expect(block("Plan de tratamiento")).toContainText("Sin indicaciones confirmadas · 1 sugerencia")
-  await expect(suggested("Controles").getByRole("listitem")).toHaveCount(1)
+  // Indicaciones y controles se revisan en un solo bloque, «Plan y controles» (ADR 0034).
+  await expect(block("Plan y controles")).toContainText("Sin indicaciones confirmadas · 2 sugerencias")
+  await expect(block("Plan y controles").getByRole("list", { name: "Sugerencias del asistente: Controles" }).getByRole("listitem")).toHaveCount(1)
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // El cierre dice que el diagnóstico está sugerido, no registrado.
   const closing = page.getByRole("region", { name: "Cierre de la atención" })

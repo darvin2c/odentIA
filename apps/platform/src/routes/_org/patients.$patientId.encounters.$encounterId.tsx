@@ -99,6 +99,10 @@ function EncounterPage() {
         "prescriptions",
         "consents",
         "treatment-coordination",
+        // Al firmar queda armado el presupuesto con lo indicado (ADR 0034).
+        "budgets",
+        "plan-next",
+        "treatment-plans",
       ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
     )
   }

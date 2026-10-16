@@ -69,6 +69,18 @@ describe("textos de «Te espera»", () => {
     expect(waitingText({ ...stale, missing: [] }, context).detail).toMatch(/ · lista para firmar$/)
   })
 
+  it("un presupuesto armado que nadie envió dice de quién es, desde cuándo y cuánto: «Enviar»", () => {
+    const unsent: WaitingRow = {
+      kind: "unsentBudget", id: "b1", patientId: "p1", patientName: "Lucía Fernández",
+      since: "2026-10-11T20:00:00.000Z", itemCount: 3, totalCents: 54000, currency: "PEN", options: 1,
+    }
+    const text = waitingText(unsent, context)
+    expect(text).toMatchObject({ title: "Presupuesto de Lucía Fernández sin enviar", action: "Enviar" })
+    expect(text.detail).toMatch(/^Armado ayer · 3 tratamientos · S\/\s?540\.00$/)
+    expect(waitingText({ ...unsent, options: 2 }, context).detail).toMatch(/ · 2 opciones$/)
+    expect(waitingText({ kind: "more", of: "unsentBudgets", count: 2 }, context).title).toBe("2 presupuestos más sin enviar")
+  })
+
   it("el día se cuenta en la zona de la clínica, no en la del navegador", () => {
     // 03:00 UTC del 12 es todavía el 11 en Lima.
     expect(daysAgo("2026-10-12T03:00:00.000Z", context)).toBe("ayer")

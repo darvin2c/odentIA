@@ -21,7 +21,7 @@ import type { Db } from "@odentia/db"
 import { contact } from "@odentia/db/schema/crm"
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib"
 import { and, eq } from "drizzle-orm"
-import { type BudgetPrintLine, getBudgetPrintPayload } from "./budgets.js"
+import { type BudgetPrintLine, type BudgetPrintOption, getBudgetPrintPayload } from "./budgets.js"
 import { orgProfile } from "@odentia/db/schema/org"
 import { validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -516,6 +516,8 @@ export interface BudgetSnapshot {
   planTitle: string
   currency: string
   lines: BudgetPrintLine[]
+  /** Con más de una opción, cada una con su total (nunca sumadas); vacío con una sola. */
+  options: BudgetPrintOption[]
   subtotalCents: number | null
   totalCents: number | null
   notes: string | null
@@ -576,6 +578,7 @@ export async function buildBudgetSnapshot(
     planTitle: payload.planTitle,
     currency: payload.currency,
     lines: payload.lines,
+    options: payload.options,
     subtotalCents: payload.subtotalCents,
     totalCents: payload.totalCents,
     notes: payload.notes,
@@ -602,33 +605,55 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
       if (snap.professional) w.text(`Profesional: ${snap.professional}`, { size: 10 })
       w.text(`Plan: ${snap.planTitle}`, { size: 10 })
       w.gap(4)
-      w.rule()
-      w.row("Tratamiento", "Precio", { size: 9, bold: true, color: MUTED })
-      for (const line of snap.lines) {
-        const label = `${line.title}${line.detail ? `, ${line.detail}` : ""}`
-        w.row(label, money(line.listTotalCents), { size: 10 })
-        if (line.billingMode === "session") {
-          // Lo que se cobra por sesión: el paciente ve el total, pero la deuda
-          // nace visita a visita.
-          w.text(
-            `Se cobra por sesión: ${money(line.listUnitCents)} en cada visita · ${line.units} ${
-              line.units === 1 ? "visita prevista" : "visitas previstas"
-            }`,
-            { size: 9, color: MUTED },
-          )
+      /** Una opción (o el presupuesto entero): líneas, descuentos y su total. */
+      const block = (
+        lines: BudgetPrintLine[],
+        subtotalCents: number | null,
+        totalCents: number | null,
+        totalLabel: string,
+      ) => {
+        w.rule()
+        w.row("Tratamiento", "Precio", { size: 9, bold: true, color: MUTED })
+        for (const line of lines) {
+          const label = `${line.title}${line.detail ? `, ${line.detail}` : ""}`
+          w.row(label, money(line.listTotalCents), { size: 10 })
+          if (line.billingMode === "session") {
+            // Lo que se cobra por sesión: el paciente ve el total, pero la deuda
+            // nace visita a visita.
+            w.text(
+              `Se cobra por sesión: ${money(line.listUnitCents)} en cada visita · ${line.units} ${
+                line.units === 1 ? "visita prevista" : "visitas previstas"
+              }`,
+              { size: 9, color: MUTED },
+            )
+          }
         }
-      }
-      w.gap(4)
-      w.rule()
-      const discounts = snap.lines.filter((line) => (line.discountCents ?? 0) > 0)
-      if (discounts.length > 0) {
-        w.row("Subtotal", money(snap.subtotalCents), { size: 10 })
-        for (const line of discounts) {
-          const reason = line.promotionName ? `Promoción ${line.promotionName}` : "Descuento"
-          w.row(`${reason} en ${line.title}`, `− ${money(line.discountCents)}`, { size: 10 })
+        w.gap(4)
+        w.rule()
+        const discounts = lines.filter((line) => (line.discountCents ?? 0) > 0)
+        if (discounts.length > 0) {
+          w.row("Subtotal", money(subtotalCents), { size: 10 })
+          for (const line of discounts) {
+            const reason = line.promotionName ? `Promoción ${line.promotionName}` : "Descuento"
+            w.row(`${reason} en ${line.title}`, `− ${money(line.discountCents)}`, { size: 10 })
+          }
         }
+        w.row(totalLabel, money(totalCents), { size: 12, bold: true })
       }
-      w.row("TOTAL", money(snap.totalCents), { size: 12, bold: true })
+      if (snap.options.length > 1) {
+        // Dos o tres caminos para lo mismo (decisión 13): cada uno con su total;
+        // se elige uno, nunca se suman.
+        w.text(`Elige una de estas ${snap.options.length} opciones. Cada una tiene su propio total.`, { size: 10 })
+        for (const option of snap.options) {
+          w.gap(4)
+          const state =
+            option.decision === "elegida" ? " · elegida" : option.decision === "no_elegida" ? " · no elegida" : ""
+          w.text(`${option.label}${option.isRecommended ? " · recomendada" : ""}${state}`, { size: 11, bold: true })
+          block(option.lines, option.subtotalCents, option.totalCents, `TOTAL ${option.label.toUpperCase()}`)
+        }
+      } else {
+        block(snap.lines, snap.subtotalCents, snap.totalCents, "TOTAL")
+      }
       w.gap(6)
       w.text("Cómo se paga", { size: 10, bold: true })
       w.text(
@@ -641,7 +666,7 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
       }
       if (!snap.isDraft) {
         w.gap(6)
-        w.text("Acepto este presupuesto", { size: 10, bold: true })
+        w.text(snap.options.length > 1 ? "Acepto la opción ____" : "Acepto este presupuesto", { size: 10, bold: true })
         w.signature("Nombre y firma del paciente o su representante")
         w.signature("Fecha", 0.25)
       }

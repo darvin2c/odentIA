@@ -76,6 +76,23 @@ describe("mismas validaciones para la pantalla y para el agente", () => {
     }
   })
 
+  it("la respuesta a un presupuesto se valida igual en la pantalla y en el agente", () => {
+    const decisions = [{ planItemId: UUID, decision: "aceptado" }]
+    const route = operationBodySchema("presupuesto.respuesta")
+    expect(route.safeParse({ optionId: null, decisions, decidedByContactId: UUID, decisionNote: null }).success).toBe(true)
+    // La ruta rechaza lo que no se declara, una lista vacía y una respuesta fuera de la lista.
+    expect(route.safeParse({ decisions, patientId: UUID }).success).toBe(false)
+    expect(route.safeParse({ decisions: [] }).success).toBe(false)
+    expect(route.safeParse({ decisions: [{ planItemId: UUID, decision: "no_elegida" }] }).success).toBe(false)
+    expect(route.safeParse({ decisions: [{ planItemId: UUID, decision: "aceptado", nota: "x" }] }).success).toBe(false)
+    // El agente dice de qué presupuesto y qué responde; quién decidió lo pone el sistema y la nota, una persona.
+    expect(operationAgentFields("presupuesto.respuesta").map((field) => field.name)).toEqual(["patientId", "budgetId", "optionId", "decisions"])
+    const agent = operationAgentSchema("presupuesto.respuesta")
+    expect(agent.safeParse({ patientId: UUID, budgetId: UUID, decisions }).success).toBe(true)
+    expect(agent.safeParse({ patientId: UUID, budgetId: UUID, decisions: [{ planItemId: UUID, decision: "quizá" }] }).success).toBe(false)
+    expect(operationAgentFields("presupuesto.reenviar").map((field) => field.name)).toEqual(["patientId", "budgetId"])
+  })
+
   it("la pantalla puede vaciar un campo; la ruta rellena el valor por defecto", () => {
     const created = operationBodySchema("oportunidad.crear").safeParse({ contactId: UUID, title: "Ortodoncia", interestText: null })
     expect(created.success).toBe(true)

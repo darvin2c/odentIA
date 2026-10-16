@@ -24,7 +24,7 @@ import {
   planStatusLabel,
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
-import { useTreatmentCoordination } from "./coordinacion-panel"
+import { usePlanNextStep } from "./plan/plan-next"
 import { NewPatientTaskButton } from "./new-patient-task-button"
 import { ClinicalAlertsCard, OpenEncounterCard, RecentImagesCard } from "./resumen-clinico"
 
@@ -108,6 +108,7 @@ export function PatientPendingCard({
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
   const canAppointments = usePermission("appointments.read")
+  const canBudgets = usePermission("budgets.read")
   const canPatients = usePermission("patients.read")
   const canEditPatient = usePermission("patients.write")
   const canDecide = usePermission("agent.decide")
@@ -149,8 +150,9 @@ export function PatientPendingCard({
     enabled: canEditPatient && canConfig,
     retry: false,
   })
-  // Quien lee la clínica tiene estos pendientes con su detalle en su pestaña.
-  const coordinationQuery = useTreatmentCoordination(patientId, canAppointments && !canClinical)
+  // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Quien
+  // lee la clínica lo tiene en su pestaña con el detalle clínico.
+  const nextStepQuery = usePlanNextStep(patientId, (canAppointments || canBudgets) && !canClinical)
 
   const go = (section: PatientSectionId, label: string) => (
     <Button size="sm" variant="outline" onClick={() => onTabChange(section)}>
@@ -176,36 +178,14 @@ export function PatientPendingCard({
         </Link>
       ),
     })
-  const coordination = coordinationQuery.data?.data
-  if (coordination) {
-    const toBook = coordination.followUps.filter(
-      (control) =>
-        control.status === "pendiente" &&
-        control.appointment?.status !== "programada" &&
-        control.appointment?.status !== "confirmada",
-    )
-    if (toBook.length > 0)
-      pending.push({
-        id: "coordination-follow-ups",
-        title:
-          toBook.length === 1
-            ? `Control por reservar: ${toBook[0].title}`
-            : `${toBook.length} controles por reservar`,
-        detail: `Corresponde el ${formatDate(toBook[0].dueAt)}.`,
-        action: go("coordinacion", "Reservar"),
-      })
-    if (coordination.budgetsAwaitingDecision.length > 0)
-      pending.push({
-        id: "coordination-budgets",
-        title:
-          coordination.budgetsAwaitingDecision.length === 1
-            ? `Presupuesto «${coordination.budgetsAwaitingDecision[0].title}» sin decisión`
-            : `${coordination.budgetsAwaitingDecision.length} presupuestos sin decisión`,
-        // Enviado o «lo está pensando»: la regla del servidor; un borrador nunca llega aquí.
-        detail: "Espera la respuesta de quien decide.",
-        action: go("coordinacion", "Hacer seguimiento"),
-      })
-  }
+  const nextStep = nextStepQuery.data?.data
+  if (nextStep && nextStep.kind !== "ninguno")
+    pending.push({
+      id: "plan-next",
+      title: nextStep.text,
+      detail: nextStep.detail ?? "Lo que sigue en su plan de tratamiento.",
+      action: go("plan", "Ir al plan"),
+    })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
     if (balance.porCobrar > 0)
       pending.push({
@@ -373,14 +353,14 @@ export function ClinicalSummaryTab({
           ? `Control por programar: ${unscheduled[0].title}`
           : `${unscheduled.length} controles por programar`,
       detail: `Vence el ${formatDate(unscheduled[0].dueAt)}.`,
-      action: go("controles", "Programar"),
+      action: go("plan", "Programar"),
     })
   if (resolved.planPending.count > 0)
     pending.push({
       id: "plan-pending",
       title: `${resolved.planPending.count} tratamiento(s) aceptado(s) por ejecutar`,
       detail: "Aceptados por el paciente y aún sin realizar.",
-      action: go("recorrido", "Ver tratamientos"),
+      action: go("plan", "Ver tratamientos"),
     })
 
   const lastVisit = resolved.lastVisit ?? null
@@ -432,7 +412,7 @@ export function ClinicalSummaryTab({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => onTabChange("recorrido", undefined, row.item.id)}
+                      onClick={() => onTabChange("plan", undefined, row.item.id)}
                     >
                       Ver detalle
                     </Button>

@@ -26,6 +26,7 @@ import {
   type RecordRunInput,
   recordAgentRun,
   type SearchEmbedder,
+  type Storage,
   reportAgentNoReply,
   toolsDisabledBy,
 } from "@odentia/services"
@@ -77,6 +78,11 @@ export interface AgentRuntime {
   publicUrl?: { webURL: string; cookieDomain: string }
   /** Quien vectoriza para buscar por significado; sin él, se busca por palabras. */
   embedder?: SearchEmbedder
+  /**
+   * Almacén de adjuntos: reenviar un presupuesto lleva su PDF. Sin él, el agente
+   * no lo envía y deja la tarea a recepción.
+   */
+  storage?: Storage
   secretsKey: Buffer
   callbacks?: Callbacks
   /** Reloj de la corrida (pruebas); sin él, la hora real. */
@@ -451,6 +457,7 @@ async function attendAgentRun(
     toolCtx.emojis = cfg.emojis
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
+    if (runtime.storage) toolCtx.storage = runtime.storage
     runUsage = toolCtx.usage
     // Dinero (ADR 0031): sin saldo de prueba los agentes se pausan; con el tope
     // del mes alcanzado, Recepción no toma casos nuevos (quien ya conversa hoy

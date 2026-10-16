@@ -1,5 +1,5 @@
 import { assertTreatmentSite, parseVitals, VALID_FDI_TEETH } from "@odentia/clinical"
-import { readBillingModes } from "./budgets.js"
+import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -483,6 +483,8 @@ export async function createEncounter(
     fromAppointment = row
     const continued = await joinOpenDraft(tx, orgId, actorUserId, patientId, row)
     if (continued) {
+      // La cita que se agendó para lo aceptado trae sus tratamientos (ADR 0034).
+      await linkAppointmentItems(tx, orgId, patientId, row.id, continued.id)
       // Atender a quien nadie marcó: la llegada queda anotada a esta hora.
       await markArrivedOnAttend(tx, orgId, actorUserId, row.id)
       await notifyAppointmentChanged(tx, orgId)
@@ -545,8 +547,12 @@ export async function createEncounter(
   }
   // pertenencia/estado/decisión ocurre antes de crear la atención para que un
   // planItemIds inválido no deje un borrador vacío (409/404/422, sin DRAFT_OPEN).
+  // La cita que se agendó para lo aceptado trae sus tratamientos (ADR 0034).
+  const fromCita = fromAppointment ? await appointmentItemsToLink(tx, orgId, patientId, fromAppointment.id) : []
   const planItemIds = [
-    ...new Set((input.planItemIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0)),
+    ...new Set(
+      [...(input.planItemIds ?? []), ...fromCita].map((id) => id.trim()).filter((id) => id.length > 0),
+    ),
   ]
   if (planItemIds.length > 52) throw validation("planItemIds admite como máximo 52 tratamientos")
   const acceptedPlans =
@@ -623,6 +629,44 @@ type LinkablePlan = Pick<EncounterPlannedItemRow, "id" | "toothNumber">
  * programado, aceptado en su presupuesto (decision aceptado) y con presupuesto
  * vigente (no cancelado/histórico). No muta estados: solo habilita el vínculo.
  */
+/**
+ * Lo que se agendó con la cita (`appointment_plan_item`) y aún se puede traer a
+ * su atención: aceptado en su presupuesto vigente y sin terminar. Lo que ya no
+ * cumple (se completó o cambió de decisión) simplemente no se trae.
+ */
+async function appointmentItemsToLink(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  appointmentId: string,
+): Promise<string[]> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select i.id from appointment_plan_item ap
+      join treatment_plan_item i on i.id = ap.plan_item_id and i.organization_id = ap.organization_id
+      join treatment_budget b on b.id = i.budget_id and b.organization_id = i.organization_id
+    where ap.organization_id = ${orgId} and ap.patient_id = ${patientId} and ap.appointment_id = ${appointmentId}
+      and i.decision_status = 'aceptado' and i.status in ('pendiente','programado','en_curso')
+      and b.status in ('aceptado','parcial')
+    order by i.sort_order, i.id`)
+  return rows.map((row) => row.id)
+}
+
+/** Une a una atención ya abierta lo que se agendó con su cita. */
+async function linkAppointmentItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  appointmentId: string,
+  encounterId: string,
+): Promise<void> {
+  const ids = await appointmentItemsToLink(tx, orgId, patientId, appointmentId)
+  if (ids.length === 0) return
+  await tx
+    .insert(encounterPlanItem)
+    .values(ids.map((planItemId) => ({ organizationId: orgId, encounterId, planItemId })))
+    .onConflictDoNothing({ target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId] })
+}
+
 async function assertLinkablePlans(
   tx: Db,
   orgId: string,
@@ -1370,6 +1414,11 @@ export interface FinalizeEncounterResult {
   skippedCharges: SkippedCharge[]
   /** Resumen para el diálogo de cierre y caja (con moneda del primer cargo). */
   billing: { chargedCents: number; currency: string | null; lines: FinalizeBillingLine[] }
+  /**
+   * El presupuesto que quedó armado con lo indicado en esta atención (decisión
+   * 12): el cierre pregunta «¿Enviárselo ahora?». Nulo si no entró nada.
+   */
+  budget: AssembledBudget | null
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1785,12 +1834,16 @@ export async function finalizeEncounter(
     // Cuántos consentimientos quedaron sin firmar; el motivo vive en la atención.
     consentsUnsigned: closing.consents.length,
   })
+  // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
+  // borrador de la persona o nace uno. No se envía solo.
+  const budget = await assembleEncounterBudget(tx, orgId, actorUserId, patientId, encounterId)
   await notifyClose(tx, orgId, "encounter.finalized")
   await notifyClose(tx, orgId, "patient.account.updated")
   return {
     encounter: row,
     charges,
     skippedCharges,
+    budget,
     billing: {
       chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,

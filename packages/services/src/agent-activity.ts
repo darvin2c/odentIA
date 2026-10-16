@@ -37,6 +37,7 @@ const ACTION_TITLE: Record<string, string> = {
   crear_oportunidad: "Propuso crear una oportunidad",
   actualizar_seguimiento: "Propuso programar un seguimiento",
   cerrar_oportunidad: "Propuso cerrar una oportunidad",
+  decidir_presupuesto: "Propuso anotar la respuesta a un presupuesto",
 }
 
 /** Un envío ejecutado se cuenta como mensaje y se titula según su entrega real. */

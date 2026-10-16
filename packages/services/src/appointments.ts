@@ -14,7 +14,14 @@ import {
   scheduleChair,
 } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
-import { encounter, patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
+import {
+  appointmentPlanItem,
+  encounter,
+  patient,
+  patientContact,
+  serviceCatalog,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { scheduleBlock } from "@odentia/db/schema/availability"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
@@ -729,6 +736,36 @@ export interface CreateAppointmentInput {
    * avisa si «Recordar la cita» está prendida.
    */
   notice?: boolean
+  /**
+   * Tratamientos aceptados que se agendan con la cita («Agendar» desde el Plan,
+   * ADR 0034): la cita sabe qué son y su atención los trae. Del mismo paciente,
+   * aceptados y sin terminar.
+   */
+  planItemIds?: string[]
+}
+
+/** Los tratamientos que se agendan con una cita: aceptados, sin terminar y del mismo paciente. */
+async function requireSchedulableItems(tx: Db, orgId: string, patientId: string, ids: string[]): Promise<string[]> {
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+  if (unique.length === 0) return []
+  if (unique.length > 52) throw validation("Se agendan como máximo 52 tratamientos con una cita")
+  const rows = await tx
+    .select({ id: treatmentPlanItem.id, decision: treatmentPlanItem.decisionStatus, status: treatmentPlanItem.status })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        inArray(treatmentPlanItem.id, unique),
+      ),
+    )
+  if (rows.length !== unique.length) throw notFound("Tratamiento")
+  for (const row of rows) {
+    if (row.decision !== "aceptado") throw conflict("ITEM_NOT_ACCEPTED", "Solo se agenda lo que la persona aceptó")
+    if (!["pendiente", "programado", "en_curso"].includes(row.status))
+      throw conflict("ITEM_CLOSED", "Ese tratamiento ya no está por hacer")
+  }
+  return unique
 }
 
 export async function createAppointment(
@@ -760,6 +797,7 @@ export async function createAppointment(
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
   await requireAppointmentPatient(tx, orgId, input.patientId)
   await requireDentist(tx, orgId, input.dentistUserId)
+  const planItemIds = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
   if (input.conversationId) {
     const [linked] = await tx.select({ id: conversation.id }).from(conversation)
       .innerJoin(patientContact, and(
@@ -818,12 +856,24 @@ export async function createAppointment(
       })
       .returning({ id: appointment.id })
     if (!created) throw new Error("No se pudo crear la cita")
+    if (planItemIds.length > 0) {
+      await tx.insert(appointmentPlanItem).values(
+        planItemIds.map((planItemId) => ({
+          organizationId: orgId,
+          patientId: input.patientId,
+          appointmentId: created.id,
+          planItemId,
+          createdBy: actorUserId,
+        })),
+      )
+    }
     await audit(tx, orgId, actorUserId, "appointment.created", created.id, {
       patientId: input.patientId,
       dentistUserId: input.dentistUserId,
       chairId,
       startsAt: startsAt.toISOString(),
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
+      ...(planItemIds.length > 0 ? { planItemIds } : {}),
     })
     const notice =
       input.notice === false || !standing ? null : await enqueueAppointmentNotice(tx, orgId, created.id, "reservada")

@@ -44,20 +44,9 @@ export const PATIENT_SECTIONS = [
   {
     id: "citas",
     area: "citas",
-    // Distinto del nombre de la pestaña: con «Tratamiento» al lado, dos «Citas» confundirían.
     label: "Sus citas",
     permission: "appointments.read",
     patient: false,
-    group: null,
-  },
-  {
-    id: "coordinacion",
-    area: "citas",
-    label: "Tratamiento",
-    permission: "appointments.read",
-    // Quien lee la clínica ya tiene el plan completo en su pestaña.
-    unless: "clinical.read",
-    patient: true,
     group: null,
   },
   {
@@ -76,22 +65,7 @@ export const PATIENT_SECTIONS = [
     patient: true,
     group: null,
   },
-  {
-    id: "recorrido",
-    area: "clinica",
-    label: "Tratamientos",
-    permission: "clinical.read",
-    patient: true,
-    group: null,
-  },
-  {
-    id: "controles",
-    area: "clinica",
-    label: "Controles",
-    permission: "clinical.read",
-    patient: true,
-    group: null,
-  },
+
   {
     id: "atenciones",
     area: "clinica",
@@ -165,11 +139,14 @@ export const PATIENT_SECTIONS = [
     group: "documentos",
   },
   {
+    // Una sola sección, sin subpestañas (ADR 0034): «Qué sigue», tratamientos,
+    // presupuesto y controles. Cada rol ve lo suyo: quien lee la clínica, todo;
+    // recepción, los títulos y estados, el presupuesto como lo ve la persona y
+    // los controles; caja, el presupuesto y lo aceptado.
     id: "plan",
     area: "plan",
-    label: "Planes y presupuestos",
-    // Caja ve solo los presupuestos (`budgets.read`); el plan clínico es de quien lee la clínica.
-    permission: ["clinical.read", "budgets.read"],
+    label: "Plan",
+    permission: ["clinical.read", "budgets.read", "appointments.read"],
     patient: true,
     group: null,
   },
@@ -249,11 +226,15 @@ export type Can = (permission: string) => boolean
 /**
  * Secciones de la ficha anterior que ya no existen: su enlace guardado abre
  * la sección que hace ese trabajo ahora. «Actividad» repetía citas, historia y
- * conversaciones; «Seguimiento» era el «Contexto» de la Bandeja.
+ * conversaciones; «Seguimiento» era el «Contexto» de la Bandeja. Tratamientos,
+ * Controles y la coordinación de recepción viven ahora en Plan (ADR 0034).
  */
 const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
   actividad: "resumen",
   seguimiento: "conversaciones",
+  recorrido: "plan",
+  controles: "plan",
+  coordinacion: "plan",
 }
 
 /** La sección de un `?tab=`, también de los enlaces de la ficha anterior. */
@@ -276,7 +257,8 @@ export function visibleSections(can: Can, isPatient: PageOf = true): PatientSect
     if (section.patient && isPatient !== true) return false
     if (isPatient === "responsable" && section.area === "citas") return false
     const permission: string | readonly string[] | null = section.permission
-    const unless: string | undefined = "unless" in section ? section.unless : undefined
+    // Ninguna sección usa hoy `unless`; se conserva la regla para la próxima que lo necesite.
+    const unless = (section as { unless?: string }).unless
     if (unless && can(unless)) return false
     if (permission === null) return can("patients.read")
     return typeof permission === "string" ? can(permission) : permission.some(can)
