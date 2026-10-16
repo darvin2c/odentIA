@@ -272,9 +272,22 @@ export interface AgentPatientSummary {
     dentistName: string
   }>
   budgets: Array<{ number: number; title: string; status: string }>
+  /** Citas por venir que no caben en `upcomingAppointments`: se dicen con su número. */
+  moreAppointments: number
+  /** Presupuestos más antiguos que no caben en `budgets`. */
+  moreBudgets: number
   /** null = el interlocutor no tiene facultad económica. */
   balance: Array<{ currency: string; outstandingCents: number }> | null
 }
+
+/**
+ * Citas por venir que ve el agente de un paciente: todas las de una persona
+ * en la práctica (un tratamiento con controles mensuales tiene unas pocas). Si
+ * hay más, el resumen dice cuántas y desde qué fecha pedirlas.
+ */
+export const AGENT_APPOINTMENTS_SHOWN = 12
+/** Presupuestos (estado y número) en el resumen; los anteriores se cuentan. */
+export const AGENT_SUMMARY_BUDGETS_SHOWN = 5
 
 /**
  * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
@@ -288,9 +301,11 @@ export async function getAgentPatientSummary(
   orgId: string,
   contactId: string,
   patientId: string,
+  options: { from?: Date } = {},
 ): Promise<AgentPatientSummary> {
   const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
-  const now = new Date()
+  // Desde cuándo: por defecto ahora; el agente puede pedir las de más adelante.
+  const now = options.from && options.from.getTime() > Date.now() ? options.from : new Date()
   const appointments = await tx
     .select({
       appointmentId: appointment.id,
@@ -314,7 +329,7 @@ export async function getAgentPatientSummary(
       ),
     )
     .orderBy(asc(appointment.startsAt))
-    .limit(3)
+    .limit(AGENT_APPOINTMENTS_SHOWN + 1)
   const budgetRows = await tx
     .select({
       number: treatmentBudget.budgetNumber,
@@ -324,7 +339,30 @@ export async function getAgentPatientSummary(
     .from(treatmentBudget)
     .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
     .orderBy(desc(treatmentBudget.budgetNumber))
-    .limit(3)
+    .limit(AGENT_SUMMARY_BUDGETS_SHOWN + 1)
+  // Si algo no cupo, se cuenta entero: el agente dice «y N más», nunca calla.
+  const countMore = async (shown: number, rows: number, total: () => Promise<number>) => (rows > shown ? (await total()) - shown : 0)
+  const moreAppointments = await countMore(AGENT_APPOINTMENTS_SHOWN, appointments.length, async () => {
+    const [row] = await tx
+      .select({ total: count() })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.patientId, patientId),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          gte(appointment.startsAt, now),
+        ),
+      )
+    return row?.total ?? 0
+  })
+  const moreBudgets = await countMore(AGENT_SUMMARY_BUDGETS_SHOWN, budgetRows.length, async () => {
+    const [row] = await tx
+      .select({ total: count() })
+      .from(treatmentBudget)
+      .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
+    return row?.total ?? 0
+  })
   let balance: AgentPatientSummary["balance"] = null
   const maySeeBalance =
     context.authorization === "self" ||
@@ -337,7 +375,7 @@ export async function getAgentPatientSummary(
   }
   return {
     context,
-    upcomingAppointments: appointments.map((a) => ({
+    upcomingAppointments: appointments.slice(0, AGENT_APPOINTMENTS_SHOWN).map((a) => ({
       appointmentId: a.appointmentId,
       version: a.version,
       startsAt: a.startsAt.toISOString(),
@@ -347,7 +385,9 @@ export async function getAgentPatientSummary(
       branchTimezone: a.branchTimezone,
       dentistName: a.dentistName,
     })),
-    budgets: budgetRows,
+    budgets: budgetRows.slice(0, AGENT_SUMMARY_BUDGETS_SHOWN),
+    moreAppointments,
+    moreBudgets,
     balance,
   }
 }
@@ -582,8 +622,10 @@ export interface AgentBudgetView {
 
 export interface AgentPatientBudgets {
   context: AgentPatientContext
-  /** Los entregados, del más reciente al más antiguo (como mucho tres). */
+  /** Los entregados, del más reciente al más antiguo (como mucho `AGENT_BUDGETS_SHOWN`). */
   budgets: AgentBudgetView[]
+  /** Entregados más antiguos que no van: se dicen con su número. */
+  olderBudgets: number
   /** Hay uno que la clínica aún prepara: se dice que existe, nunca qué lleva. */
   inPreparation: boolean
 }
@@ -641,9 +683,11 @@ export async function getAgentPatientBudgets(
   const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
   const all = await listBudgets(tx, orgId, patientId)
   const newest = [...all].reverse()
+  const delivered = newest.filter((budget) => !BUDGET_NOT_DELIVERED.includes(budget.status))
   return {
     context,
-    budgets: newest.filter((budget) => !BUDGET_NOT_DELIVERED.includes(budget.status)).slice(0, AGENT_BUDGETS_SHOWN).map(agentBudgetView),
+    budgets: delivered.slice(0, AGENT_BUDGETS_SHOWN).map(agentBudgetView),
+    olderBudgets: Math.max(0, delivered.length - AGENT_BUDGETS_SHOWN),
     inPreparation: all.some((budget) => budget.status === "borrador"),
   }
 }

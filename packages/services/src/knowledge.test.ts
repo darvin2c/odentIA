@@ -189,10 +189,6 @@ describe("bloque de conocimiento del prompt", () => {
     refusedPaymentMethods: [],
     promotions: [],
     branches: [{ id: "b1", name: "Sede Centro", address: "Av. Larco 123", phone: null, mapsUrl: null, timezone: null }],
-    services: [
-      { id: "s1", name: "Limpieza", code: null, specialty: null, priceCents: 15000, currency: "PEN", durationMin: 45 },
-      { id: "s2", name: "Blanqueamiento", code: null, specialty: null, priceCents: 12000, currency: "USD", durationMin: null },
-    ],
   }
   const entry = (n: number, body: string, branchName: string | null = null): KnowledgeEntryItem => ({
     id: `e${n}`, kind: "faq", title: `Tema ${n}`, body, branchId: branchName ? "b1" : null, branchName,
@@ -200,14 +196,26 @@ describe("bloque de conocimiento del prompt", () => {
     version: 1, createdBy: null, createdAt: "", updatedAt: "",
   })
 
-  it("lleva todas las respuestas vigentes, no solo diez, y cada tarifa con su moneda", () => {
+  it("lleva todas las respuestas vigentes, no solo diez, y los servicios solo como los dice «Informar»", () => {
     const entries = Array.from({ length: 25 }, (_, i) => entry(i + 1, `Respuesta breve ${i + 1}.`))
     expect(knowledgeFitsPrompt(entries)).toBe(true)
-    const block = formatKnowledgeForPrompt(snapshot, [...entries, { ...entry(99, "No debe salir."), state: "vencida" }])
+    const block = formatKnowledgeForPrompt(snapshot, [...entries, { ...entry(99, "No debe salir."), state: "vencida" }], undefined, [
+      "Servicios y cómo decir su precio (cada importe con su moneda):",
+      "- Limpieza (id s1), 45 min: S/ 150.00",
+    ])
     for (let i = 1; i <= 25; i++) expect(block).toContain(`- Tema ${i}: Respuesta breve ${i}.`)
     expect(block).not.toContain("Tema 99")
-    expect(block).toMatch(/- Limpieza \(id [^)]+\): S\/\s150\.00 \(45 min\)/)
-    expect(block).toMatch(/- Blanqueamiento \(id [^)]+\): USD\s120\.00/)
+    expect(block).toContain("- Limpieza (id s1), 45 min: S/ 150.00")
+    // No hay otra lista de servicios con su tarifa cruda: sin las líneas de «Informar», ninguno.
+    expect(formatKnowledgeForPrompt(snapshot, [])).not.toContain("Servicios")
+  })
+
+  it("con «Informar» apagado no habla de medios de pago", () => {
+    const withMethods: ClinicInfoSnapshot = { ...snapshot, paymentMethods: [{ id: "m1", name: "Efectivo", typeCode: "10" }] }
+    const off = formatKnowledgeForPrompt(withMethods, [], undefined, [], { informs: false })
+    expect(off).not.toContain("Efectivo")
+    expect(off).not.toContain("medios de pago")
+    expect(formatKnowledgeForPrompt(withMethods, [])).toContain("Efectivo")
   })
 
   it("lleva los medios de pago activos en una sola línea, y que no se registraron si no hay ninguno", () => {
@@ -302,10 +310,17 @@ it("la lista dice qué respuesta tiene un cambio por aprobar y cuál salió de u
   expect(byId(learned.id)).toMatchObject({ pendingLessonId: null, learned: { uses: 9 } })
 })
 
-it("lo que toma de tus datos cuenta servicios activos con tarifa y sedes activas", async () => {
+it("lo que toma de tus datos cuenta los precios que el agente puede decir y las sedes activas", async () => {
   const before = await run((tx) => getKnowledgeDataSources(tx, ORG))
   await ownerDb.insert(serviceCatalog).values([
-    { organizationId: ORG, name: "Limpieza Fuentes", source: "custom", priceCents: 9000, currency: "PEN" },
+    // «Solo con evaluación»: tiene tarifa, pero el agente no la dice; no cuenta como precio.
+    { organizationId: ORG, name: "Implante Fuentes", source: "custom", priceCents: 300000, currency: "PEN", priceDisclosure: "evaluacion" },
+  ])
+  const onlyEvaluation = await run((tx) => getKnowledgeDataSources(tx, ORG))
+  expect(onlyEvaluation.pricedServices).toBe(before.pricedServices)
+  // «Lo básico: precios» sale de esta misma cuenta: un tarifario «Solo con evaluación» no la cubre.
+  await ownerDb.insert(serviceCatalog).values([
+    { organizationId: ORG, name: "Limpieza Fuentes", source: "custom", priceCents: 9000, currency: "PEN", priceDisclosure: "exacto" },
     { organizationId: ORG, name: "Evaluación Fuentes", source: "custom", priceCents: 0, currency: "PEN" },
     { organizationId: ORG, name: "Retirado Fuentes", source: "custom", priceCents: 5000, currency: "PEN", isActive: false },
   ])
@@ -316,7 +331,7 @@ it("lo que toma de tus datos cuenta servicios activos con tarifa y sedes activas
   ])
   expect(await run((tx) => getKnowledgeDataSources(tx, ORG))).toEqual({
     pricedServices: before.pricedServices + 1,
-    services: before.services + 2,
+    services: before.services + 3,
     branches: before.branches + 1,
   })
 })

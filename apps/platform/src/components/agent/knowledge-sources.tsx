@@ -18,8 +18,8 @@ export function KnowledgeSources({ sources }: { sources: Sources | null }) {
       title: "Servicios y precios",
       detail: sources
         ? sources.pricedServices === 0
-          ? "Ningún servicio con precio todavía"
-          : plural(sources.pricedServices, "servicio con precio", "servicios con precio")
+          ? "Ningún precio que el agente pueda decir todavía"
+          : plural(sources.pricedServices, "servicio con precio que dice el agente", "servicios con precio que dice el agente")
         : null,
       action: "Se editan en Servicios",
     },

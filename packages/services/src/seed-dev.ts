@@ -72,7 +72,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
@@ -154,7 +154,7 @@ import { seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { seedSaasBillingDemo } from "./seed-saas-billing.js"
-import { createService, updateService } from "./service-catalog.js"
+import { createService, quickAddServices, updateService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask, settleTask } from "./tasks.js"
 
@@ -1643,6 +1643,30 @@ for (const tpl of consultaTemplates) {
   }
   catalogA.push(await createService(db, ORG_A, ANA_ID, offer))
   await createService(db, ORG_B, CORA_ID, offer)
+}
+// Un tarifario de clínica mediana en Dental Smile (fase 4, tablero 1): más de
+// 100 servicios activos, muchos más de los 40 que caben en el prompt, para ver
+// el índice por especialidad, la búsqueda y el cambio en bloque de «Cómo dice
+// el precio». Las tres formas, por tercios; precios y duraciones deterministas.
+const libraryForSeed = await db
+  .select({ id: treatmentTemplate.id })
+  .from(treatmentTemplate)
+  .where(eq(treatmentTemplate.isActive, true))
+  .orderBy(asc(treatmentTemplate.key))
+  .limit(140)
+const ownedTemplates = new Set(catalogA.map((service) => service.templateId).filter(Boolean))
+const extraTemplates = libraryForSeed.filter((row) => !ownedTemplates.has(row.id)).slice(0, 96)
+if (extraTemplates.length < 90) throw new Error("La biblioteca tiene pocas prestaciones: ejecuta seed:procedures")
+for (const [index, priceDisclosure] of (["exacto", "desde", "evaluacion"] as const).entries()) {
+  const items = extraTemplates
+    .filter((_, position) => position % 3 === index)
+    .map((row, position) => ({
+      kind: "template" as const,
+      templateId: row.id,
+      priceCents: (6 + ((position * 7 + index * 5) % 60)) * 1000,
+      durationMin: 30 + (position % 4) * 15,
+    }))
+  catalogA.push(...(await quickAddServices(db, ORG_A, ANA_ID, items, { priceDisclosure })).created)
 }
 // Evaluación inicial (borrador) antes del plan: la indicación nace aquí y la
 // ejecución continúa en la misma atención (un solo borrador por paciente).

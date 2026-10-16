@@ -475,6 +475,12 @@ export interface AnswerCheck {
   ok: boolean
   /** Fuente donde se encontró; nulo si no está en lo consultado. */
   source: string | null
+  /**
+   * De qué servicio es el precio, cuando lo es (su nombre normalizado). Con
+   * esto se cuentan los servicios cuyo precio ya se dijo en la conversación:
+   * nunca más de tres (decisión 4 de la fase 4).
+   */
+  subject?: string
 }
 
 export const ANSWER_TRACE_OUTCOMES = ["enviada", "pendiente", "bloqueada", "fallida"] as const

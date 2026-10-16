@@ -8,9 +8,14 @@ import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import {
+  type AgentServiceInfo,
+  asksPriceOrAvailability,
+  CLINIC_SEARCH_LIMIT,
   formatAgentClinicData,
   formatAgentPrice,
+  formatClinicSearch,
   getAgentClinicData,
+  identifyAskedService,
   getBranchHours,
   listAgentProfessionals,
   listAgentServices,
@@ -22,6 +27,25 @@ import { createPromotion } from "./promotions.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
+
+/** Servicios inventados: alternan prótesis y endodoncia, con precio exacto. */
+function many(count: number): AgentServiceInfo[] {
+  return Array.from({ length: count }, (_, i) => ({
+    ...service(`Servicio ${i}`),
+    id: `s${i}`,
+    specialty: i % 2 === 0 ? "protesis" : "endodoncia",
+  }))
+}
+
+function service(name: string): AgentServiceInfo {
+  return {
+    id: `id-${name}`,
+    name,
+    specialty: null,
+    durationMin: null,
+    price: { disclosure: "exacto", priceCents: 100, currency: "PEN", evaluation: null },
+  }
+}
 
 /** Lo que sabe «Informar» y la búsqueda por significado (ADR 0021). */
 const ORG = "org_info"
@@ -105,31 +129,54 @@ describe("lo que sabe Informar", () => {
     expect(implant).not.toMatch(/3,000|3000/)
   })
 
-  it("una clínica chica entra entera en el prompt; una grande pide buscar", async () => {
+  it("una clínica chica entra entera en el prompt; una grande lleva su índice y pide buscar", async () => {
     const small = formatAgentClinicData(await run((tx) => getAgentClinicData(tx, ORG, true)), ZONE)
     expect(small.join("\n")).toContain("Limpieza dental")
     expect(small.join("\n")).toContain("sábado 09:00–14:00")
-    const big = formatAgentClinicData(
-      {
-        hours: [],
-        professionals: [],
-        promotions: [],
-        services: Array.from({ length: SERVICES_IN_PROMPT + 1 }, (_, i) => ({
-          id: `s${i}`,
-          name: `Servicio ${i}`,
-          specialty: null,
-          durationMin: null,
-          price: { disclosure: "exacto" as const, priceCents: 100, currency: "PEN", evaluation: null },
-        })),
-      },
+    const big = formatAgentClinicData({ hours: [], professionals: [], promotions: [], services: many(SERVICES_IN_PROMPT + 1), informs: true }, ZONE)
+    const text = big.join("\n")
+    expect(text).toContain(`la clínica tiene ${SERVICES_IN_PROMPT + 1} y aquí va solo su índice por especialidad, sin precios ni ids`)
+    expect(text).toContain("búscalo con buscar_en_la_clinica")
+    // El índice: «Especialidad: servicio, servicio…», sin precio ni id.
+    expect(text).toContain("- Prótesis: Servicio 0, Servicio 2,")
+    expect(text).toContain("- Endodoncia: Servicio 1, Servicio 3,")
+    expect(text).not.toMatch(/\(id s\d+\)/)
+    expect(text).not.toMatch(/S\/\s?1\.00/)
+    expect(text).not.toContain("Sin servicios publicados")
+    // Con «Informar» apagado van los horarios y, para agendar, los servicios sin precio.
+    const off = await run((tx) => getAgentClinicData(tx, ORG, false))
+    expect(off.hours).toHaveLength(1)
+    expect(off.promotions).toEqual([])
+    expect(off.professionals).toEqual([])
+    const offText = formatAgentClinicData(off, ZONE).join("\n")
+    expect(offText).toContain("Servicios, solo para agendar")
+    expect(offText).toMatch(/- Limpieza dental \(id [0-9a-f-]{36}\)/)
+    expect(offText).not.toMatch(/S\/\s?\d/)
+    // Nunca dice que no hay servicios cuando los hay: con Agendar también apagado, simplemente no los nombra.
+    expect(offText).not.toContain("Sin servicios publicados")
+    const neither = await run((tx) => getAgentClinicData(tx, ORG, false, false))
+    expect(neither.services).toEqual([])
+    expect(formatAgentClinicData(neither, ZONE).join("\n")).not.toContain("ervicios")
+  })
+
+  it("la búsqueda dice cuántos más coinciden; el servicio por el que pregunta se identifica solo sin empate", () => {
+    const services = many(CLINIC_SEARCH_LIMIT + 3)
+    const text = formatClinicSearch(
+      { services: services.slice(0, CLINIC_SEARCH_LIMIT), promotions: [], professionals: [], more: { services: 3, promotions: 0, professionals: 0 } },
       ZONE,
     )
-    expect(big.join("\n")).toContain("búscalo con buscar_en_la_clinica")
-    expect(big.join("\n")).not.toContain("Servicio 0")
-    // Con «Informar» apagado solo van los horarios.
-    const off = await run((tx) => getAgentClinicData(tx, ORG, false))
-    expect(off.services).toEqual([])
-    expect(off.hours).toHaveLength(1)
+    expect(text).toContain("Y 3 servicios más que también coinciden y no van aquí")
+    const catalog: AgentServiceInfo[] = [
+      service("Blanqueamiento dental"), service("Limpieza dental (profilaxis)"), service("Prótesis total superior"), service("Prótesis total inferior"),
+    ]
+    expect(identifyAskedService("¿cuánto cuesta el blanqueamiento?", catalog)?.name).toBe("Blanqueamiento dental")
+    expect(identifyAskedService("quiero una limpieza dental", catalog)?.name).toBe("Limpieza dental (profilaxis)")
+    // «Prótesis total» casa con dos: no hay uno solo, no se anota nada.
+    expect(identifyAskedService("cuánto sale una prótesis total", catalog)).toBeNull()
+    expect(identifyAskedService("hola, buenos días", catalog)).toBeNull()
+    expect(asksPriceOrAvailability("¿cuánto cuesta el blanqueamiento?")).toBe(true)
+    expect(asksPriceOrAvailability("¿tienen cita el viernes para limpieza?")).toBe(true)
+    expect(asksPriceOrAvailability("gracias por la atención")).toBe(false)
   })
 
   it("la promoción trae precio, condiciones y fin; vencida o futura no aparece", async () => {

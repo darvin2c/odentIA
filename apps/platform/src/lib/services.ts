@@ -312,14 +312,30 @@ export type QuickAddServiceBody = TemplateServiceBody | CustomServiceBody
  */
 export function quickAddServicesApi(
   items: QuickAddServiceBody[],
+  /** «¿Cómo dice el agente estos precios?»: una sola respuesta para todo lo que se agrega. */
+  priceDisclosure: PriceDisclosure,
 ): Promise<{ data: { created: ServiceCatalogItem[]; existing: ServiceCatalogItem[] } }> {
   return apiFetch<{ data: { created: ServiceCatalogItem[]; existing: ServiceCatalogItem[] } }>(
     "/api/services/batch",
     {
       method: "POST",
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, priceDisclosure }),
     },
   )
+}
+
+/** Cuántos servicios se cambian de una vez (lo mismo que acepta el servidor). */
+export const PRICE_DISCLOSURE_BATCH = 100
+
+/** «Cómo dice el precio» de varios servicios a la vez. */
+export function setServicesPriceDisclosureApi(
+  serviceIds: string[],
+  priceDisclosure: PriceDisclosure,
+): Promise<{ data: { updated: number } }> {
+  return apiFetch<{ data: { updated: number } }>("/api/services/price-disclosure", {
+    method: "POST",
+    body: JSON.stringify({ serviceIds, priceDisclosure }),
+  })
 }
 
 /** Concepto de «Más usados» con las plantillas de la biblioteca que lo resuelven. */

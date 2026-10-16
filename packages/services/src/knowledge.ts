@@ -14,16 +14,13 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { branchNotFound, notFound, validation } from "./errors.js"
-import { formatOrgMoney, getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
+import { getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
-import { listServices } from "./service-catalog.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
 
 const KINDS = ["faq", "info_sede", "politica"] as const
 const STATUSES = ["borrador", "publicada"] as const
 const MAX_LIMIT = 100
-/** Tope de respuestas vigentes que se cargan para el agente y la búsqueda. */
-const ACTIVE_LIMIT = 500
 const ASK_FORM_LIMIT = 20
 const ASK_FORM_CHARS = 120
 
@@ -468,8 +465,8 @@ export async function listActiveKnowledge(tx: Db, orgId: string): Promise<Knowle
         sql`(${agentKnowledgeEntry.validUntil} is null or ${agentKnowledgeEntry.validUntil} >= ${today})`,
       ),
     )
+    // Todas, sin tope: cuando no caben en el prompt va el índice y el texto se pide por su título.
     .orderBy(asc(agentKnowledgeEntry.createdAt), asc(agentKnowledgeEntry.id))
-    .limit(ACTIVE_LIMIT)
   return rows.map(({ entry, branchName }) => toItem(entry, today, branchName))
 }
 
@@ -558,8 +555,8 @@ export interface ClinicInfoSnapshot {
   timezone: string
   /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
   locale: string
+  /** Todas las sedes activas: son pocas y el agente necesita el id de cada una. */
   branches: Array<{ id: string; name: string; address: string | null; phone: string | null; mapsUrl: string | null; timezone: string | null }>
-  services: Array<{ id: string; name: string; code: string | null; specialty: string | null; priceCents: number; currency: string; durationMin: number | null }>
   paymentMethods: Array<{ id: string; name: string; typeCode: string }>
   /** Medios que la clínica desactivó: se dicen como no aceptados para que el agente no los ofrezca. */
   refusedPaymentMethods: string[]
@@ -596,8 +593,6 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     .from(branch)
     .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
     .orderBy(asc(branch.name), asc(branch.id))
-    .limit(20)
-  const { data } = await listServices(tx, orgId, { state: "active", limit: 50 })
   const allMethods = await listPaymentMethods(tx, orgId, { activeOnly: false })
   const methods = allMethods.filter((m) => m.isActive)
   const promos = await listClinicPromotionSummaries(tx, orgId)
@@ -606,15 +601,6 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
     timezone: profile?.timezone ?? NEUTRAL_TIMEZONE,
     locale: profile?.locale || NEUTRAL_LOCALE,
     branches: branchRows.map((b) => ({ ...b, address: b.address ?? null })),
-    services: data.map((s) => ({
-      id: s.id,
-      name: s.name,
-      code: s.code,
-      specialty: s.specialty,
-      priceCents: s.priceCents,
-      currency: s.currency,
-      durationMin: s.durationMin,
-    })),
     paymentMethods: methods.map((m) => ({ id: m.id, name: m.name, typeCode: m.typeCode })),
     refusedPaymentMethods: allMethods.filter((m) => !m.isActive).map((m) => m.name),
     promotions: promos.map((p) => ({ id: p.id, name: p.name, endsAt: p.endsAt ? p.endsAt.toISOString() : null })),
@@ -622,7 +608,11 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
 }
 
 export interface KnowledgeDataSources {
-  /** Servicios activos con tarifa mayor que cero: de ahí salen los precios que da el agente. */
+  /**
+   * Servicios activos con tarifa mayor que cero que el agente puede decir
+   * («Precio exacto» o «Desde»): de ahí salen los precios que da. Los de
+   * «Solo con evaluación» no cuentan, porque su número no le llega.
+   */
   pricedServices: number
   /** Servicios activos, con o sin costo. */
   services: number
@@ -638,7 +628,7 @@ export async function getKnowledgeDataSources(tx: Db, orgId: string): Promise<Kn
   const [services] = await tx
     .select({
       total: count(),
-      priced: sql<number>`count(*) filter (where ${serviceCatalog.priceCents} > 0)::int`,
+      priced: sql<number>`count(*) filter (where ${serviceCatalog.priceCents} > 0 and ${serviceCatalog.priceDisclosure} in ('exacto', 'desde'))::int`,
     })
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy")))
@@ -702,14 +692,17 @@ export function knowledgeFitsPrompt(entries: KnowledgeEntryItem[]): boolean {
 /**
  * Bloque de sistema con conocimiento vigente, catálogo y sedes. Es igual para
  * toda la clínica mientras nadie edite el conocimiento: `mode` lo decide la
- * organización (si caben todas o hay modelo de decisión), nunca el hilo.
+ * organización (si caben todas o hay modelo de decisión), nunca el hilo. Los
+ * servicios, promociones y profesionales son las líneas de «Informar»
+ * (`formatAgentClinicData`): no hay otra lista de servicios ni de tarifas.
+ * Con «Informar» apagado (`informs: false`) tampoco van los medios de pago.
  */
 export function formatKnowledgeForPrompt(
   snapshot: ClinicInfoSnapshot,
   entries: KnowledgeEntryItem[],
   mode?: KnowledgePromptMode,
-  /** Lo que sabe «Informar» (`formatAgentClinicData`): reemplaza la lista simple de servicios. */
-  clinicLines?: string[],
+  clinicLines: string[] = [],
+  options: { informs?: boolean } = {},
 ): string {
   const lines = [`Clínica: ${snapshot.clinicName}.`]
   if (snapshot.branches.length) {
@@ -721,20 +714,13 @@ export function formatKnowledgeForPrompt(
       lines.push(parts)
     }
   }
-  if (clinicLines) {
-    lines.push(...clinicLines)
-  } else if (snapshot.services.length) {
-    lines.push("Servicios y tarifas vigentes (cada importe con su moneda):")
-    for (const s of snapshot.services) {
-      const price = formatOrgMoney(s.priceCents, s.currency, snapshot)
-      lines.push(`- ${s.name} (id ${s.id}): ${price}${s.durationMin ? ` (${s.durationMin} min)` : ""}`)
-    }
-  } else {
-    lines.push("Sin servicios publicados: no des precios, ofrece derivar.")
-  }
+  lines.push(...clinicLines)
   // Los medios activos de caja, en una línea: viajan en cada turno para que
   // «¿aceptan …?» se responda con el dato del sistema y no con un texto escrito.
-  if (snapshot.paymentMethods.length) {
+  // Con «Informar» apagado no se informa de pagos (ADR 0021): nada que decir.
+  if (options.informs === false) {
+    // Sin medios ni la frase de que no se registraron: no se habla de pagos.
+  } else if (snapshot.paymentMethods.length) {
     lines.push(
       `Medios de pago que acepta la clínica (lista completa; ningún otro): ${snapshot.paymentMethods.map((m) => m.name).join(", ")}.`,
     )
@@ -792,11 +778,13 @@ export interface KnowledgeBasics {
 export async function getKnowledgeBasics(tx: Db, orgId: string): Promise<KnowledgeBasics> {
   const active = await listActiveKnowledge(tx, orgId)
   const snapshot = await getClinicInfoSnapshot(tx, orgId)
+  const sources = await getKnowledgeDataSources(tx, orgId)
   const fromData: Record<string, boolean> = {
     ubicacion: snapshot.branches.some((b) => Boolean(b.address?.trim())),
     telefono: snapshot.branches.some((b) => Boolean(b.phone?.trim())),
-    servicios: snapshot.services.length > 0,
-    precios: snapshot.services.some((s) => s.priceCents > 0),
+    servicios: sources.services > 0,
+    // Solo cuentan los precios que el agente puede decir: con todo «Solo con evaluación» no da ninguno.
+    precios: sources.pricedServices > 0,
     medios_pago: snapshot.paymentMethods.length > 0,
   }
   const items = KNOWLEDGE_BASICS.map((basic): KnowledgeBasicItem => {

@@ -1,6 +1,7 @@
 import {
   Badge,
   Button,
+  Checkbox,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -55,10 +56,12 @@ import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
+  PRICE_DISCLOSURE_BATCH,
   PRICE_DISCLOSURE_OPTIONS,
   PRICE_DISCLOSURE_TAG,
   type PriceDisclosure,
   createServiceApi,
+  setServicesPriceDisclosureApi,
   fetchServices,
   fetchTreatmentTemplate,
   fetchTreatmentTemplates,
@@ -144,6 +147,15 @@ function TarifarioPage() {
   /** Se cierra sin desmontar: el drawer necesita su salida y `MasterDetail` su colapso. */
   const [surfaceOpen, setSurfaceOpen] = useState(false)
   const [toggling, setToggling] = useState<ServiceCatalogItem | null>(null)
+  /**
+   * Servicios elegidos para cambiar a la vez «Cómo dice el precio» (decisión 5
+   * de la fase 4). Un filtro nuevo empieza sin nada elegido: lo elegido que
+   * deja de verse no se cambia a ciegas.
+   */
+  const [selected, setSelected] = useState<string[]>([])
+  useEffect(() => {
+    setSelected([])
+  }, [search, specialtyFilter, estadoFilter])
 
   const pagesQuery = useQuery({
     queryKey: ["services", "tarifario", search, specialtyFilter, estadoFilter],
@@ -191,6 +203,25 @@ function TarifarioPage() {
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [sortedRows])
 
+  const disclosureMutation = useMutation({
+    mutationFn: (priceDisclosure: PriceDisclosure) => setServicesPriceDisclosureApi(selected, priceDisclosure),
+    onSuccess: async (result, priceDisclosure) => {
+      const label = PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === priceDisclosure)?.label ?? priceDisclosure
+      const updated = result.data.updated
+      setSelected([])
+      await queryClient.invalidateQueries({ queryKey: ["services"] })
+      toast.success(
+        updated === 1
+          ? `Listo: el agente dice ese precio como «${label}».`
+          : `Listo: el agente dice esos ${updated} precios como «${label}».`,
+      )
+    },
+    onError: (error) => {
+      // Lo elegido se conserva para volver a intentarlo.
+      toast.error(error instanceof ApiError ? (error.shape.message ?? error.message) : error.message)
+    },
+  })
+
   const toggleMutation = useMutation({
     mutationFn: (service: ServiceCatalogItem) =>
       updateServiceApi(service.id, { isActive: !service.isActive }),
@@ -217,6 +248,47 @@ function TarifarioPage() {
 
   const columns = useMemo<ColumnDef<ServiceCatalogItem>[]>(
     () => [
+      ...(canManage
+        ? [
+            {
+              id: "select",
+              // La casilla de la cabecera elige los de su especialidad (cada grupo es su tabla).
+              header: ({ table }) => {
+                const ids = table.getCoreRowModel().rows.map((row) => row.original.id)
+                const all = ids.length > 0 && ids.every((id) => selected.includes(id))
+                return (
+                  <Checkbox
+                    checked={all}
+                    onCheckedChange={(value) =>
+                      setSelected((previous) =>
+                        value === true
+                          ? [...new Set([...previous, ...ids])].slice(0, PRICE_DISCLOSURE_BATCH)
+                          : previous.filter((id) => !ids.includes(id)),
+                      )
+                    }
+                    aria-label="Elegir todos los servicios de este grupo"
+                  />
+                )
+              },
+              meta: { view: { role: "select" } },
+              cell: ({ row }) => (
+                <Checkbox
+                  checked={selected.includes(row.original.id)}
+                  onCheckedChange={() =>
+                    setSelected((previous) =>
+                      previous.includes(row.original.id)
+                        ? previous.filter((id) => id !== row.original.id)
+                        : previous.length >= PRICE_DISCLOSURE_BATCH
+                          ? previous
+                          : [...previous, row.original.id],
+                    )
+                  }
+                  aria-label={`Elegir ${row.original.name}`}
+                />
+              ),
+            } satisfies ColumnDef<ServiceCatalogItem>,
+          ]
+        : []),
       {
         accessorKey: "name",
         header: "Servicio",
@@ -315,7 +387,7 @@ function TarifarioPage() {
           ) : null,
       },
     ],
-    [canManage, openOffer, profileLocale],
+    [canManage, openOffer, profileLocale, selected],
   )
 
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas" || sortParam !== ""
@@ -484,6 +556,47 @@ function TarifarioPage() {
           </div>
         )}
       </MasterDetail>
+
+      {canManage && selected.length > 0 ? (
+        <div
+          role="region"
+          aria-label="Servicios elegidos"
+          // Fija al pie, como la barra de «Agregar servicios»: encima de la barra de secciones en teléfono.
+          className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-border bg-card p-3 shadow-sm lg:bottom-0"
+        >
+          <p className="text-sm font-medium" role="status">
+            {selected.length === 1 ? "1 seleccionado" : `${selected.length} seleccionados`}
+            {selected.length >= PRICE_DISCLOSURE_BATCH ? ` · como mucho ${PRICE_DISCLOSURE_BATCH} a la vez` : ""}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value=""
+              disabled={disclosureMutation.isPending}
+              onValueChange={(value) => disclosureMutation.mutate(value as PriceDisclosure)}
+            >
+              <SelectTrigger className="min-h-11 w-auto" aria-label="Cómo dice el precio el agente">
+                <SelectValue placeholder="Cómo dice el precio" />
+              </SelectTrigger>
+              <SelectContent>
+                {PRICE_DISCLOSURE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-11"
+              disabled={disclosureMutation.isPending}
+              onClick={() => setSelected([])}
+            >
+              Quitar la selección
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Un solo contenedor montado a la vez: montar panel y drawer juntos
           duplicaría los id/htmlFor de los campos. */}

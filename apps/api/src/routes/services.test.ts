@@ -273,6 +273,44 @@ it("services: incorporar otra vez una plantilla conserva su tarifa configurada",
   expect(secondBody.data.existing[0]?.priceCents).toBe(18000)
 })
 
+it("services: «Cómo dice el precio» se elige al agregar y se cambia para varios a la vez; member 403", async () => {
+  const app = buildApp("owner")
+  const added = await app.request("/services/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      items: [
+        { kind: "custom", name: "Férula de descarga propia", specialty: "disfuncion", scope: "general", priceCents: 25000 },
+        { kind: "custom", name: "Guarda nocturna propia", specialty: "disfuncion", scope: "general", priceCents: 30000 },
+      ],
+      priceDisclosure: "exacto",
+    }),
+  })
+  expect(added.status).toBe(201)
+  const created = ((await added.json()) as { data: { created: Array<ServiceItem & { priceDisclosure: string }> } }).data.created
+  expect(created.map((row) => row.priceDisclosure)).toEqual(["exacto", "exacto"])
+  const ids = created.map((row) => row.id)
+  const changed = await app.request("/services/price-disclosure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceIds: ids, priceDisclosure: "desde" }),
+  })
+  expect(changed.status).toBe(200)
+  expect(await changed.json()).toEqual({ data: { updated: 2 } })
+  const denied = await buildApp("member").request("/services/price-disclosure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceIds: ids, priceDisclosure: "evaluacion" }),
+  })
+  expect(denied.status).toBe(403)
+  const invalid = await app.request("/services/price-disclosure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceIds: ids, priceDisclosure: "gratis" }),
+  })
+  expect(invalid.status).toBe(400)
+})
+
 it("services: state filtra activas e inactivas", async () => {
   const app = buildApp("owner")
   const created = await app.request("/services", {

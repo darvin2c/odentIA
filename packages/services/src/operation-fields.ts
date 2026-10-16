@@ -16,7 +16,12 @@ type FieldKind =
   /** Instante ISO 8601 con zona. */
   | { kind: "instant" }
   | { kind: "int"; min: number; max?: number }
-  | { kind: "enum"; values: readonly [string, ...string[]] }
+  /**
+   * Una opción de una lista. `agentValues`, si está, es la parte de la lista que
+   * el agente puede elegir (el equipo usa la lista entera): por ejemplo, el
+   * agente nunca cierra una oportunidad porque la persona dejó de responder.
+   */
+  | { kind: "enum"; values: readonly [string, ...string[]]; agentValues?: readonly [string, ...string[]] }
   /** Lista corta de textos (superficies de una pieza). */
   | { kind: "textList"; maxItems: number; maxLength: number }
   /** Lista corta de identificadores UUID (tratamientos de una cita). */
@@ -61,7 +66,7 @@ const reason = {
   kind: "text",
   max: 500,
   label: "Motivo de la propuesta",
-  description: "Por qué se propone, en una frase, para quien deba aprobarla.",
+  description: "Por qué lo hace, en una frase: queda en el historial para el equipo.",
   body: "none",
   agent: "fills",
 } as const satisfies OperationField
@@ -114,7 +119,7 @@ export const OPERATIONS = {
   "cita.confirmar": {
     label: "Confirmar una cita",
     fields: {
-      appointmentId: { kind: "uuid", label: "Cita", description: "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirma la única cita suya que espera confirmación.", body: "path", agent: "fills" },
+      appointmentId: { kind: "uuid", label: "Cita", description: "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirman, como con el botón, las citas del último recordatorio que recibió; si no hubo recordatorio, la única suya que espera confirmación.", body: "path", agent: "fills" },
     },
   },
   // Lo que la persona aceptó recibir. La pantalla elige el tipo y cómo lo dijo;
@@ -193,8 +198,10 @@ export const OPERATIONS = {
       reason: {
         kind: "enum",
         values: ["precio", "otra_clinica", "no_responde", "no_lo_necesita", "otro", "acepto"],
+        // «No responde» lo decide una persona del equipo: el agente solo cierra por lo que la persona dijo.
+        agentValues: ["precio", "otra_clinica", "no_lo_necesita", "otro", "acepto"],
         label: "Motivo",
-        description: "Perdida: precio, otra_clinica (eligió otra clínica), no_responde, no_lo_necesita (ya no lo necesita) u otro. Ganada: acepto.",
+        description: "Perdida: precio, otra_clinica (eligió otra clínica), no_lo_necesita (ya no lo necesita) u otro. Ganada: acepto.",
         body: "required",
         agent: "requires",
       },
@@ -217,7 +224,8 @@ export const OPERATIONS = {
       reason: { kind: "text", min: 1, max: 500, label: "Motivo", description: "Por qué hace falta una persona.", body: "required", agent: "requires" },
       summary: { kind: "text", min: 1, max: 2000, label: "Resumen", description: "Lo conversado y lo que falta, solo con hechos.", body: "required", agent: "requires" },
       priority: { kind: "enum", values: ["alta", "media", "baja"], default: "media", label: "Prioridad", description: "Alta si hay dolor, urgencia o una queja.", body: "optional", agent: "fills" },
-      assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "fills" },
+      // El agente no conoce los ids del equipo: lo deja en la cola y quien lo toma se lo asigna.
+      assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "person" },
       message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de que una persona continuará: después el agente ya no puede escribirle.", body: "none", agent: "fills" },
       asks: { kind: "text", min: 1, max: 400, label: "Qué pide", description: "Una frase con lo que la persona pide, con hechos que ella dijo. Para quien toma el caso; nunca un consejo clínico.", body: "none", agent: "fills" },
       pending: { kind: "text", min: 1, max: 400, label: "Lo que falta", description: "Lo que aún no se le preguntó o falta hacer para atenderla, en una frase. Vacío si no falta nada.", body: "none", agent: "fills" },
@@ -394,7 +402,7 @@ export function operationAgentSchema<O extends OperationId>(operation: O): z.Zod
   const shape: Record<string, z.ZodType> = {}
   for (const [name, field] of Object.entries(specOf(operation).fields)) {
     if (field.agent !== "requires" && field.agent !== "fills") continue
-    const schema = fieldSchema(field)
+    const schema = field.kind === "enum" && field.agentValues ? z.enum(field.agentValues) : fieldSchema(field)
     // La descripción va en el esquema final: el envoltorio opcional no hereda la del interior.
     shape[name] = (field.agent === "requires" ? schema : schema.optional()).describe(field.description)
   }
@@ -429,7 +437,6 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
   reenviar_presupuesto: "presupuesto.reenviar",
   anotar_respuesta_presupuesto: "presupuesto.respuesta",
   create_opportunity: "oportunidad.crear",
-  move_to_stage: "oportunidad.mover",
   close_opportunity: "oportunidad.cerrar",
   update_followup: "oportunidad.tarea",
   request_human_handoff: "derivacion.crear",

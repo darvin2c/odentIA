@@ -50,6 +50,8 @@ import {
   fetchMostUsedServices,
   fetchServices,
   fetchTreatmentTemplates,
+  PRICE_DISCLOSURE_OPTIONS,
+  type PriceDisclosure,
   type QuickAddServiceBody,
   quickAddServicesApi,
   SERVICE_PLACE_OPTIONS,
@@ -363,6 +365,14 @@ function AddServicesPage() {
     setOwnOpen(true)
   }, [])
 
+  /**
+   * «¿Cómo dice el agente estos precios?»: una sola pregunta para todo lo que
+   * se guarda, con «Precio exacto» marcado (decisión 5 de la fase 4). Después
+   * se cambia en Servicios, uno por uno o varios a la vez.
+   */
+  const [disclosure, setDisclosure] = useState<PriceDisclosure>("exacto")
+  const disclosureLabelId = useId()
+
   const saveMutation = useMutation({
     mutationFn: async (toSave: AddRow[]) => {
       if (!regional) throw new Error("Falta la moneda de la clínica")
@@ -380,7 +390,7 @@ function AddServicesPage() {
           durationMin: duration.minutes,
         })
       }
-      const result = await quickAddServicesApi(items)
+      const result = await quickAddServicesApi(items, disclosure)
       return { result, savedKeys: toSave.map((row) => row.key) }
     },
     onSuccess: async ({ result, savedKeys }) => {
@@ -770,6 +780,20 @@ function AddServicesPage() {
               // `lg` esa barra es un riel lateral y esta baja hasta el borde.
               className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-border bg-card p-3 shadow-sm lg:bottom-0"
             >
+              {chosen.length > 0 ? (
+                <div className="flex min-w-0 basis-full flex-col gap-1.5">
+                  <span id={disclosureLabelId} className="text-sm font-medium">
+                    ¿Cómo dice el agente estos precios?
+                  </span>
+                  <RadioChips
+                    value={disclosure}
+                    options={PRICE_DISCLOSURE_OPTIONS}
+                    onChange={setDisclosure}
+                    labelledBy={disclosureLabelId}
+                    disabled={saving}
+                  />
+                </div>
+              ) : null}
               <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
                 El nombre es el que verán caja y el paciente; se puede cambiar. El código oficial se
                 conserva.

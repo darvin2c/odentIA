@@ -38,8 +38,14 @@ import {
   getClinicInfoSnapshot,
   getOpportunity,
   getOrgLocale,
+  clinicSearchFoundNothing,
   formatAgentClinicData,
   formatClinicSearch,
+  GENERAL_PERMISSION_NO,
+  GENERAL_PERMISSION_QUESTION,
+  GENERAL_PERMISSION_YES,
+  listPricedSubjects,
+  PRICES_PER_CONVERSATION,
   formatOrgMoney,
   formatZoned,
   getAgentClinicData,
@@ -68,7 +74,7 @@ import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
 import { type AgentRoute, handoffFallbackNotice } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
-import { describeUnsupported, type Evidence, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -153,7 +159,7 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   cancelar_cita: "Propuso cancelar una cita.",
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
   confirmar_cita: "Confirmó la cita que la persona dijo que no se perderá.",
-  responder_permiso_mensajes: "Anotó si acepta mensajes de controles y novedades.",
+  responder_permiso_mensajes: "Anotó si acepta que le escriban novedades y promociones.",
   ver_presupuesto: "Consultó los presupuestos que la persona recibió.",
   reenviar_presupuesto: "Reenvió el presupuesto a la persona (o, si no estaba listo, dejó la tarea a recepción).",
   anotar_respuesta_presupuesto: "Propuso anotar la respuesta al presupuesto; se anota con el sí de la persona.",
@@ -162,7 +168,6 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   create_opportunity: "Propuso registrar una oportunidad.",
   update_followup: "Dejó la tarea de una oportunidad.",
   close_opportunity: "Propuso cerrar una oportunidad.",
-  move_to_stage: "Propuso mover una oportunidad de etapa.",
   add_tags: "Etiquetó el contacto.",
   update_contact: "Actualizó datos del contacto.",
   create_task: "Dejó una tarea a tu equipo.",
@@ -303,6 +308,8 @@ export interface AgentToolCtx {
   treatment?: "tu" | "usted" | null
   /** El agente se despidió y cerró la conversación en esta corrida. */
   closed?: boolean
+  /** En una prueba, los servicios cuyo precio ya dijo el agente (no hay traza que leer). */
+  pricedSubjects?: string[]
 }
 
 /**
@@ -418,6 +425,11 @@ function formatAgentBudgets(found: AgentPatientBudgets, zone: Pick<OrgLocale, "l
         )
       }
     }
+  }
+  if (found.olderBudgets > 0) {
+    lines.push(
+      `Y ${found.olderBudgets} ${found.olderBudgets === 1 ? "presupuesto anterior" : "presupuestos anteriores"} que no van aquí: si la persona habla de uno de ellos, no digas que no existe; pasa el caso a una persona.`,
+    )
   }
   if (found.inPreparation) lines.push("Hay otro presupuesto que la clínica aún prepara: todavía no está listo y no se dice qué lleva.")
   return lines.join("\n")
@@ -622,10 +634,42 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ? "pendiente"
         : "fallida"
 
+  // Las herramientas de este turno: lo que se le aconseja consultar sale de aquí, nunca de una lista fija.
+  let toolNames: ReadonlySet<string> = new Set()
+  const lookupsToTry = (): string => {
+    const names = ["buscar_en_la_clinica", "ver_sedes_y_servicios", "consultar_conocimiento", "buscar_huecos", "ver_resumen_paciente", "ver_presupuesto"].filter(
+      (name) => toolNames.has(name),
+    )
+    return names.length ? `Consulta la herramienta que corresponda (${names.join(", ")}) o quita ese dato` : "Quita ese dato"
+  }
+
+  /**
+   * «Hasta tres precios por conversación» (decisión 4 de la fase 4): cuenta
+   * los servicios cuyo precio ya dijo en esta atención (de su traza) y no deja
+   * salir uno nuevo pasado el tope. Repetir uno ya dicho sí sale.
+   */
+  const priceCap = async (verdict: ReplyVerdict): Promise<string | null> => {
+    const now = pricedSubjectsOf(verdict)
+    if (!now.length) return null
+    const before = ctx.dryRun
+      ? (ctx.pricedSubjects ?? [])
+      : await inOrg((tx) => listPricedSubjects(tx, ctx.orgId, ctx.conversationId)).catch(() => [] as string[])
+    const fresh = now.filter((subject) => !before.includes(subject))
+    if (!fresh.length || before.length + fresh.length <= PRICES_PER_CONVERSATION) {
+      if (ctx.dryRun) ctx.pricedSubjects = [...before, ...fresh]
+      return null
+    }
+    const left = Math.max(0, PRICES_PER_CONVERSATION - before.length)
+    return left === 0
+      ? `No enviado: en esta conversación ya diste el precio de ${PRICES_PER_CONVERSATION} servicios. No mandas el tarifario: no des el precio de otro servicio por aquí; ofrécele una evaluación, donde le dan un presupuesto a su medida, y vuelve a enviar la respuesta sola en su paso, sin ese precio.`
+      : `No enviado: en esta conversación solo puedes dar el precio de ${left} ${left === 1 ? "servicio más" : "servicios más"} (no mandas el tarifario). Responde el que más le interese y, para el resto, ofrécele una evaluación; vuelve a enviar la respuesta sola en su paso.`
+  }
+
   /**
    * Comprueba la respuesta antes de enviarla. Si trae un precio, fecha u hora
    * que no figura en lo consultado, no sale: el modelo recibe qué dato falta
-   * y puede consultarlo o quitarlo; a la segunda vez el caso pasa a una persona.
+   * y puede consultarlo o quitarlo; a la segunda vez el caso pasa a una persona. Pasado el tope de
+   * precios por conversación tampoco sale (`priceCap`).
    */
   const checkReply = async (text: string): Promise<{ verdict: ReplyVerdict | null; blocked: string | null }> => {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
@@ -643,7 +687,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         blocked: `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la clínica no acepta ${refused.join(", ")}. Di solo los medios de pago de la lista (o que ese no se acepta) y vuelve a enviar la respuesta sola en su paso.`,
       }
     }
-    if (verdict.ok) return { verdict, blocked: null }
+    if (verdict.ok) {
+      const capped = await priceCap(verdict)
+      if (!capped) return { verdict, blocked: null }
+      await traceAnswer(text, "bloqueada", verdict.checks, null)
+      return { verdict, blocked: `${ctx.dryRun ? "[SIMULACIÓN] " : ""}${capped}` }
+    }
     ctx.checkFailures = (ctx.checkFailures ?? 0) + 1
     const missing = describeUnsupported(verdict)
     const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
@@ -663,7 +712,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }
     return {
       verdict,
-      blocked: `${prefix}No enviado: ${missing} no figura en lo que consultaste ni en este contexto. Consulta la herramienta que corresponda (ver_sedes_y_servicios, consultar_conocimiento, buscar_huecos, ver_resumen_paciente, ver_presupuesto) o quita ese dato, y vuelve a enviar la respuesta sola en su paso.`,
+      blocked: `${prefix}No enviado: ${missing} no figura en lo que consultaste ni en este contexto. ${lookupsToTry()}, y vuelve a enviar la respuesta sola en su paso.`,
     }
   }
 
@@ -693,7 +742,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción (queda como propuesta si la política no es directa). Si devuelve outside_window, sigue su indicación.",
+        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción. Si devuelve outside_window, sigue su indicación.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -773,22 +822,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
-  const moveToStage = tool(
-    async ({ stageId, opportunityId }: { stageId: string; opportunityId?: string }) => {
-      if (ctx.sandbox) return sandboxPropose("mover_oportunidad", "Mover la oportunidad de etapa")
-      if (ctx.dryRun) return "[SIMULACIÓN] Se propondría mover la oportunidad de etapa."
-      const chosen = await chooseOpportunity(opportunityId)
-      if ("message" in chosen) return chosen.message
-      return propose("mover_oportunidad", { opportunityId: chosen.id, stageId }, "move_to_stage")
-    },
-    {
-      name: "move_to_stage",
-      description:
-        "Mueve una oportunidad abierta del contacto a otra etapa (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
-      schema: operationAgentSchema("oportunidad.mover"),
-    },
-  )
-
   const addTags = tool(
     async ({ tags }: { tags: string[] }) => {
       const contactId = ctx.contactId
@@ -823,7 +856,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
     {
       name: "update_contact",
-      description: "Actualiza nombre o campos personalizados del contacto.",
+      description:
+        "Actualiza los campos personalizados del contacto o el nombre de quien aún no es paciente (el nombre de un paciente lo cambia el equipo en su ficha).",
       schema: z.object({
         displayName: z.string().min(1).max(200).optional(),
         customFields: z.record(z.string(), z.unknown()).optional(),
@@ -842,6 +876,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ...(contactId ? { contactId } : {}),
           conversationId: ctx.conversationId,
           createdBy: "agent",
+          // Sin responsable, la tarea que deja el agente es de Recepción: si no, nadie de recepción la vería.
+          area: "recepcion",
           // Misma clave estable que las propuestas: reentregar el mensaje no duplica la tarea.
           idempotencyKey: buildAgentProposalKey({
             conversationId: ctx.conversationId,
@@ -851,23 +887,24 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           }),
         }),
       )
-      return `Tarea creada (id ${created.id}).`
+      return `Tarea creada para recepción (id ${created.id}).`
     },
     {
       name: "create_task",
-      description: "Crea una tarea de seguimiento (llamar, confirmar, etc.).",
+      description: "Deja una tarea a recepción (llamar, confirmar, enviar algo que pidió la persona).",
       schema: operationAgentSchema("tarea.crear"),
     },
   )
 
   const clinicInfo = tool(
     async () => {
-      // Con «Informar» apagado esta herramienta sigue para Agendar, pero solo con sedes y horarios:
-      // ni precios, ni promociones, ni profesionales, ni medios de pago.
+      // Con «Informar» apagado esta herramienta sigue para Agendar, pero solo con sedes, horarios y
+      // servicios sin precio: ni precios, ni promociones, ni profesionales, ni medios de pago.
       const informs = !(ctx.excludedTools ?? []).includes("buscar_en_la_clinica")
+      const books = !(ctx.excludedTools ?? []).includes("buscar_huecos")
       const { snapshot, data, zone } = await inOrg(async (tx) => ({
         snapshot: await getClinicInfoSnapshot(tx, ctx.orgId),
-        data: await getAgentClinicData(tx, ctx.orgId, informs),
+        data: await getAgentClinicData(tx, ctx.orgId, informs, books),
         zone: await getOrgLocale(tx, ctx.orgId),
       }))
       const lines = [`Clínica: ${snapshot.clinicName}.`]
@@ -925,6 +962,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           zone: await getOrgLocale(tx, ctx.orgId),
         }
       })
+      // Lo que no encontró queda a la vista de quien administra, como en consultar_conocimiento.
+      if (clinicSearchFoundNothing(result.found) && !ctx.dryRun) {
+        await inOrg((tx) =>
+          recordKnowledgeGap(tx, ctx.orgId, {
+            conversationId: ctx.conversationId,
+            triggerMessageId: ctx.triggerId,
+            question: ctx.lastInboundText?.trim() || texto,
+            query: texto,
+          }),
+        ).catch(() => null)
+      }
       return formatClinicSearch(result.found, result.zone)
     },
     {
@@ -1003,9 +1051,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const patientSummary = tool(
-    async ({ patientId }: { patientId: string }) => {
+    async ({ patientId, desde }: { patientId: string; desde?: string }) => {
       if (ctx.sandbox) return `Paciente: ${SANDBOX_PERSON} (vínculo self).\nSin citas próximas.\nSin saldo pendiente.`
-      const summary = await inOrg((tx) => getAgentPatientSummary(tx, ctx.orgId, ctx.contactId, patientId))
+      const from = desde ? new Date(`${desde}T00:00:00Z`) : undefined
+      const summary = await inOrg((tx) =>
+        getAgentPatientSummary(tx, ctx.orgId, ctx.contactId, patientId, from && !Number.isNaN(from.getTime()) ? { from } : {}),
+      )
       const zone = await orgZone()
       const lines = [`Paciente: ${summary.context.displayName} (vínculo ${summary.context.relationship}).`]
       if (!summary.upcomingAppointments.length) {
@@ -1017,8 +1068,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           `- Cita ${a.status} (id ${a.appointmentId}, versión ${a.version}) el ${cuando}, ${a.branchName} con ${a.dentistName}.`,
         )
       }
+      if (summary.moreAppointments > 0) {
+        const last = summary.upcomingAppointments[summary.upcomingAppointments.length - 1]
+        const after = last ? new Date(last.startsAt).toISOString().slice(0, 10) : null
+        lines.push(
+          `Y ${summary.moreAppointments} ${summary.moreAppointments === 1 ? "cita más" : "citas más"} después de estas: para verlas, vuelve a llamar con desde${after ? ` ${after}` : ""}. No digas que no tiene otra cita sin verlas.`,
+        )
+      }
       for (const b of summary.budgets) {
         lines.push(`- Presupuesto N°${b.number} ${b.title}: ${b.status}.`)
+      }
+      if (summary.moreBudgets > 0) {
+        lines.push(`Y ${summary.moreBudgets} ${summary.moreBudgets === 1 ? "presupuesto anterior" : "presupuestos anteriores"} que no van aquí.`)
       }
       if (summary.balance === null) {
         lines.push("Sin facultad para ver saldos: no los menciones ni los pidas.")
@@ -1036,8 +1097,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "ver_resumen_paciente",
       description:
-        "Próximas citas (con id y versión para reprogramar_cita/cancelar_cita) y estado de presupuestos del paciente verificado; saldo solo si el interlocutor tiene facultad económica. Nunca historia clínica.",
-      schema: z.object({ patientId: z.string().uuid() }),
+        "Próximas citas (con id y versión para reprogramar_cita/cancelar_cita) y estado de presupuestos del paciente verificado; saldo solo si el interlocutor tiene facultad económica. Si tiene más citas de las que caben, lo dice: pídelas con desde. Nunca historia clínica.",
+      schema: z.object({
+        patientId: z.string().uuid(),
+        desde: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional()
+          .describe("Solo las citas desde ese día (AAAA-MM-DD), cuando busca una cita más adelante o el resumen dijo que hay más."),
+      }),
     },
   )
 
@@ -1292,18 +1360,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const answerPermission = tool(
     async ({ granted }: { granted: boolean }) => {
-      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se anotaría su respuesta sobre los mensajes de controles y novedades."
+      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se anotaría su respuesta sobre las novedades y promociones."
       const outcome = await inOrg((tx) => answerGeneralPermission(tx, ctx.orgId, { conversationId: ctx.conversationId, granted }))
       if (outcome === "no_preguntado") return "No se le hizo esa pregunta: no hay nada que anotar. Sigue la conversación."
       if (outcome === "ya_respondio") return "Ya había respondido antes; no cambia nada. Sigue la conversación."
-      return granted
-        ? "Anotado: aceptó que le escribamos por sus controles y novedades. Agradéceselo en una línea con send_reply."
-        : "Anotado: no quiere mensajes de controles y novedades. Dile en una línea que solo le escribiremos por sus citas, con send_reply."
+      // La misma frase que el botón: lo que deja de recibir son las novedades y promociones, nada más (ADR 0030).
+      return `Anotado. Díselo con send_reply, con estas palabras: «${granted ? GENERAL_PERMISSION_YES : GENERAL_PERMISSION_NO}» No le digas que dejará de recibir otros mensajes: sus citas, controles y presupuestos le siguen llegando.`
     },
     {
       name: "responder_permiso_mensajes",
       description:
-        "Anota la respuesta de la persona a la pregunta que le hizo la clínica tras reservar: «¿Te podemos escribir también para avisarte de tus controles y novedades de la clínica?». Úsala solo si su último mensaje responde a esa pregunta (sí o no); nunca para confirmar una cita.",
+        `Anota la respuesta de la persona a la pregunta que le hizo la clínica tras reservar: «${GENERAL_PERMISSION_QUESTION}». Úsala solo si su último mensaje responde a esa pregunta (sí o no); nunca para confirmar una cita.`,
       schema: operationAgentSchema("mensajes.permiso"),
     },
   )
@@ -1559,7 +1626,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "create_opportunity",
       description:
-        "Registra un interés concreto de la persona (pidió un precio, un tratamiento o una evaluación) como oportunidad; nunca por un saludo. Nace en «Interesado» y, sin responsable, queda en Recepción. Si ya tiene abierta una del mismo tratamiento, sigue con esa en vez de crear otra.",
+        "Registra un interés concreto de la persona que no sea la pregunta por un servicio (eso lo anota el sistema solo): por ejemplo, una evaluación sin servicio definido. Nunca por un saludo. Nace en «Interesado» y, sin responsable, queda en Recepción. Si ya tiene abierta una del mismo interés, sigue con esa en vez de crear otra.",
       schema: operationAgentSchema("oportunidad.crear"),
     },
   )
@@ -1581,7 +1648,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "update_followup",
       description:
-        "Deja o cambia la tarea de una oportunidad del contacto: su próxima acción, una sola (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+        "Deja o cambia la tarea de una oportunidad del contacto: su próxima acción, una sola. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
       schema: operationAgentSchema("oportunidad.tarea"),
     },
   )
@@ -1773,16 +1840,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "request_human_handoff",
       description:
-        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja); sin assigneeUserId queda en la cola del equipo con plazo según prioridad. Apaga el agente y cierra el turno: pon en message el aviso breve para el interlocutor (por ejemplo, que una persona continuará la atención), porque después no podrás enviarle nada.",
+        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja): queda en la cola del equipo con plazo según prioridad. Apaga el agente y cierra el turno: pon en message el aviso breve para el interlocutor (por ejemplo, que una persona continuará la atención), porque después no podrás enviarle nada.",
       schema: operationAgentSchema("derivacion.crear"),
     },
   )
 
-  const tools = [
+  const all = [
     sendReply,
     farewellAndClose,
     sendTemplate,
-    moveToStage,
     createOpportunityTool,
     updateFollowup,
     closeOpportunityTool,
@@ -1814,10 +1880,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     rememberFact,
     requestHandoff,
   ]
-  return tools.filter(
+  const tools = all.filter(
     (candidate) =>
       !ctx.excludedTools?.includes(candidate.name) &&
       // Sin dirección pública configurada no hay página que abrir.
       (candidate.name !== "enviar_enlace_cita" || Boolean(ctx.publicUrl) || ctx.dryRun),
   )
+  toolNames = new Set(tools.map((candidate) => candidate.name))
+  return tools
 }

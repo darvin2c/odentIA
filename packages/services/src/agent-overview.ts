@@ -6,7 +6,7 @@ import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { countAgentModelRunsToday } from "./agent-operations.js"
 import { countLearningPending } from "./agent-learning.js"
 import { getAgentConfig } from "./agentConfig.js"
-import { countOpenKnowledgeGaps, getClinicInfoSnapshot, getKnowledgeBasics, listActiveKnowledge } from "./knowledge.js"
+import { countOpenKnowledgeGaps, getKnowledgeBasics, getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
 import { getOrgLocale } from "./locale.js"
 
 /* ---------- Resumen del agente: cómo va y qué necesita de la clínica ---------- */
@@ -175,7 +175,8 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
   const cfg = await getAgentConfig(tx, orgId)
   const zone = await getOrgLocale(tx, orgId)
   const basics = await getKnowledgeBasics(tx, orgId)
-  const snapshot = await getClinicInfoSnapshot(tx, orgId)
+  // Todos los servicios, sin el tope del prompt; con precio cuentan solo los que el agente puede decir.
+  const sources = await getKnowledgeDataSources(tx, orgId)
   const connections = await tx
     .selectDistinct({ channel: channelConnection.channel })
     .from(channelConnection)
@@ -208,8 +209,8 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
     provider: await providerProblem(tx, orgId),
     knows: {
       answers: (await listActiveKnowledge(tx, orgId)).length,
-      servicesWithPrice: snapshot.services.filter((service) => service.priceCents > 0).length,
-      branches: snapshot.branches.length,
+      servicesWithPrice: sources.pricedServices,
+      branches: sources.branches,
       basicsCovered: basics.covered,
       basicsTotal: basics.total,
     },

@@ -23,6 +23,24 @@ export const TREATMENT_SPECIALTIES = [
 ] as const
 export type TreatmentSpecialty = (typeof TREATMENT_SPECIALTIES)[number]
 
+/** Nombre de cada especialidad de la biblioteca, como lo lee una persona (el agente lo usa en su índice). */
+export const TREATMENT_SPECIALTY_NAMES: Record<TreatmentSpecialty, string> = {
+  diagnostico: "Diagnóstico",
+  prevencion: "Prevención",
+  restauradora: "Restauradora",
+  endodoncia: "Endodoncia",
+  periodoncia: "Periodoncia",
+  cirugia: "Cirugía",
+  protesis: "Prótesis",
+  implantologia: "Implantología",
+  ortodoncia: "Ortodoncia",
+  odontopediatria: "Odontopediatría",
+  estetica: "Estética",
+  disfuncion: "Disfunción",
+  anestesia: "Anestesia y sedación",
+  general: "Servicios odontológicos generales",
+}
+
 /**
  * Fases del plan de tratamiento odontológico, en el orden en que se ejecutan:
  * urgencia (dolor, infección, trauma), básica o higiénica (control de caries y

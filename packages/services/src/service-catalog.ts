@@ -810,7 +810,9 @@ export async function fromTemplates(
   orgId: string,
   actorUserId: string,
   items: FromTemplateItem[],
+  options: { priceDisclosure?: string | null } = {},
 ): Promise<FromTemplatesResult> {
+  const priceDisclosure = assertPriceDisclosure(options.priceDisclosure)
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
     throw validation("items debe tener entre 1 y 100 prestaciones con su precio")
   }
@@ -863,6 +865,7 @@ export async function fromTemplates(
         currency,
         durationMin: assertDuration(item.durationMin),
         billingMode: assertBillingMode(item.billingMode),
+        priceDisclosure,
         // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
         leavesFinding: libraryLeavesFinding(codingsOf.get(tpl.id) ?? [], tpl.scope),
         isActive: true,
@@ -876,6 +879,7 @@ export async function fromTemplates(
       fromLibrary: true,
       priceCents: row.priceCents,
       billingMode: row.billingMode,
+      priceDisclosure: row.priceDisclosure,
     })
   }
   return { created, existing: owned }
@@ -909,6 +913,13 @@ export async function quickAddServices(
   orgId: string,
   actorUserId: string,
   items: QuickAddServiceItem[],
+  /**
+   * «¿Cómo dice el agente estos precios?», una sola vez para todo lo que se
+   * agrega (decisión 5 de la fase 4). La pantalla la manda con «Precio
+   * exacto» marcado; sin indicarla, como cualquier servicio nuevo, «Solo con
+   * evaluación».
+   */
+  options: { priceDisclosure?: string | null } = {},
 ): Promise<FromTemplatesResult> {
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
     throw validation("items debe tener entre 1 y 100 servicios con su precio")
@@ -921,7 +932,7 @@ export async function quickAddServices(
   }
   const result: FromTemplatesResult =
     fromLibrary.length > 0
-      ? await fromTemplates(tx, orgId, actorUserId, fromLibrary)
+      ? await fromTemplates(tx, orgId, actorUserId, fromLibrary, options)
       : { created: [], existing: [] }
   for (const item of custom) {
     result.created.push(
@@ -932,12 +943,48 @@ export async function quickAddServices(
         priceCents: item.priceCents,
         billingMode: item.billingMode,
         durationMin: item.durationMin,
+        priceDisclosure: options.priceDisclosure,
         leavesFinding: item.leavesFinding ?? null,
         isActive: true,
       }),
     )
   }
   return result
+}
+
+/** Cuántos servicios se cambian de una vez: los que caben en una página de la lista. */
+export const PRICE_DISCLOSURE_BATCH = 100
+
+/**
+ * «Cómo dice el precio» de varios servicios a la vez (decisión 5 de la fase
+ * 4): solo cambia lo que el agente le dice a una persona; caja y presupuesto
+ * siguen con la tarifa. Todos los servicios deben ser de la clínica; si uno
+ * no lo es, no se cambia ninguno.
+ */
+export async function setServicesPriceDisclosure(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { serviceIds: string[]; priceDisclosure: string },
+): Promise<{ updated: number }> {
+  const ids = [...new Set(input.serviceIds)]
+  if (ids.length < 1 || ids.length > PRICE_DISCLOSURE_BATCH) {
+    throw validation(`Elige entre 1 y ${PRICE_DISCLOSURE_BATCH} servicios`)
+  }
+  const priceDisclosure = assertPriceDisclosure(input.priceDisclosure)
+  const owned = await tx
+    .select({ id: serviceCatalog.id })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, ids)))
+  if (owned.length !== ids.length) throw notFound("Servicio del catálogo")
+  await tx
+    .update(serviceCatalog)
+    .set({ priceDisclosure, updatedAt: new Date() })
+    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, ids)))
+  for (const id of ids) {
+    await audit(tx, orgId, actorUserId, "catalog.service_updated", id, { fields: ["priceDisclosure"], batch: true })
+  }
+  return { updated: ids.length }
 }
 
 /**

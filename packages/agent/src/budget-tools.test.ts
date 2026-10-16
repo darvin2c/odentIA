@@ -314,7 +314,11 @@ it("«Presupuestos» es una función de Recepción con sus tres herramientas, en
   expect(ROUTE_TOOLS.informacion).toEqual(expect.arrayContaining(BUDGET_TOOLS))
   for (const path of ["saludo", "cita", "cambio_cita", "clinico"] as const) expect(widenDescription(path)).toContain("presupuesto")
   expect(routeInstruction("informacion")).toContain("ver_presupuesto")
-  expect(routeInstruction("informacion", null, { budgets: false })).not.toContain("presupuesto")
+  // Con «Presupuestos» apagada no nombra sus herramientas: deja la tarea a recepción, si tiene create_task.
+  const off = routeInstruction("informacion", null, { budgets: false, tools: new Set(["send_reply", "create_task"]) })
+  expect(off).not.toContain("ver_presupuesto")
+  expect(off).toContain("create_task")
+  expect(routeInstruction("informacion", null, { budgets: false, tools: new Set(["send_reply"]) })).not.toContain("presupuesto")
   // «Sí, es correcto» a la pregunta de la lista es un sí; «No, la 36 también», no.
   expect(isAffirmative("Sí, es correcto")).toBe(true)
   expect(isAffirmative("Correcto")).toBe(true)

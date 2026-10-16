@@ -416,11 +416,8 @@ it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no rei
   const { conversationId, messageId } = await ingestText("tg:ag-toolerr", "evt-ag-toolerr", "Necesito ayuda")
   const model = new ScriptedModel((_messages, call) =>
     call === 1
-      ? toolCall(
-          "request_human_handoff",
-          { reason: "Pide ayuda", summary: "Pide ayuda", priority: "media", assigneeUserId: "no-es-miembro" },
-          "call-1",
-        )
+      ? // Un paciente que no es suyo: el servicio lo rechaza y la herramienta lanza.
+        toolCall("ver_resumen_paciente", { patientId: "00000000-0000-4000-8000-0000000000ff" }, "call-1")
       : toolCall("send_reply", { text: "Enseguida te ayudamos." }, "call-2"),
   )
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
@@ -428,11 +425,11 @@ it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no rei
   const second = model.seen[1] ?? []
   const last = second[second.length - 1]
   expect(last?.getType()).toBe("tool")
-  expect(String(last?.content)).toContain("El responsable no es miembro de la organización")
+  expect(String(last?.content)).toContain("Contacto activo vinculado al paciente")
   expect(await agentStatusOf(conversationId)).toBe("on")
   expect(await agentMessages(conversationId)).toEqual(["Enseguida te ayudamos."])
   expect(await ledgerRows(conversationId)).toEqual([
-    { status: "ok", llmCalls: 2, toolsUsed: ["request_human_handoff", "send_reply"] },
+    { status: "ok", llmCalls: 2, toolsUsed: ["ver_resumen_paciente", "send_reply"] },
   ])
 })
 
@@ -1783,7 +1780,7 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
   }
   const before = await all("tg:funciones-0", "evt-fn-0")
   expect(before.tools).toEqual(expect.arrayContaining(["buscar_huecos", "proponer_cita", "consultar_conocimiento", "create_opportunity"]))
-  expect(before.system).toContain("reserva con proponer_cita")
+  expect(before.system).toContain("Reserva con proponer_cita")
   await withOrgContext(appDb, "org_a", (tx) =>
     upsertAgentConfig(tx, "org_a", {
       disabledFunctions: ["agendar", "seguimiento"],
@@ -1796,9 +1793,12 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
     }
     // Lo que otra función encendida necesita, y lo fijo, se queda.
     expect(off.tools).toEqual(expect.arrayContaining(["ver_sedes_y_servicios", "consultar_conocimiento", "request_human_handoff", "anotar_caso", "send_reply"]))
-    expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat. Si piden una cita, envía el enlace de reserva")
+    // Sin dirección pública no hay enlace de reserva: no lo manda a enviarlo, le dice que pase el caso.
+    expect(off.tools).not.toContain("enviar_enlace_cita")
+    expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat: si piden una cita, moverla o cancelarla, pasa el caso a una persona.")
+    expect(off.system).not.toContain("buscar_huecos")
     expect(off.system).toContain("No creas ni cambias oportunidades ni sus tareas.")
-    expect(off.system).not.toContain("reserva con proponer_cita")
+    expect(off.system).not.toContain("Reserva con proponer_cita")
     expect(off.system).toContain("Indicación de la clínica para «Informar»: En ortodoncia, pregunta primero si ya tiene evaluación.")
     // Sin «Informar» tampoco recibe tarifas ni respuestas oficiales.
     const entry = await publishKnowledge({ title: "Función: horario", body: "Atendemos de 9 a 19." })
@@ -2192,13 +2192,15 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     const decisions = await withOrgContext(appDb, "org_a", (tx) =>
       tx.select({ point: agentDecisionLog.point, mode: agentDecisionLog.mode, outcome: agentDecisionLog.outcome, error: agentDecisionLog.error })
         .from(agentDecisionLog).where(eq(agentDecisionLog.conversationId, conversationId)))
-    return { conversationId, calls: model.seen.length, offered: model.offered, system: systemTextOf(model.seen[0] ?? []), decisions, ledger: await ledgerRows(conversationId) }
+    // El interés en un servicio (decisión 15) tiene su propia prueba: aquí solo cuenta el camino.
+    const routing = decisions.filter((item) => item.point !== "interest.v1")
+    return { conversationId, calls: model.seen.length, offered: model.offered, system: systemTextOf(model.seen[0] ?? []), decisions: routing, ledger: await ledgerRows(conversationId) }
   }
   try {
     // Información: el que escribe recibe el camino y resuelve en una sola llamada.
     const info = await turn("tg:camino-info", "evt-camino-info", "¿Cuánto cuesta una limpieza?")
     expect(info.system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: pide información.")
-    expect(info.system).toContain("Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas.")
+    expect(info.system).toContain("Si con eso basta, responde ahora con send_reply, en este mismo paso.")
     expect(info.decisions).toEqual([
       expect.objectContaining({ point: "route.v3", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
     ])

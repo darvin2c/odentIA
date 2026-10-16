@@ -38,6 +38,7 @@ import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decis
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
 import { compileAgentGraph } from "./graph.js"
+import { noteAskedInterest } from "./interest.js"
 import {
   createConfiguredChatModel,
   describeProviderProblem,
@@ -560,9 +561,26 @@ async function attendAgentRun(
       // con el mismo formato del canal y la misma comprobación.
       const clinic = await publicClinicName(db, orgId)
       const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
-      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
+      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")) })
     } else {
       await invokeGraph()
+      // Quien preguntó por un servicio concreto queda anotado como oportunidad
+      // en «Interesado» (decisión 15 de la fase 4): lo hace el sistema, no el
+      // modelo que escribe, y solo con «Oportunidades» encendida. Un saludo o
+      // una consulta clínica no son interés en un servicio. Nunca corta la corrida.
+      const interestOn = !cfg.disabledFunctions.includes("seguimiento")
+      const notInterest = toolCtx.route?.path === "saludo" || toolCtx.route?.path === "clinico"
+      if (interestOn && !notInterest && !toolCtx.handedOff && !toolCtx.dryRun && inboundMessageId !== null) {
+        await noteAskedInterest(db, orgId, {
+          contactId: toolCtx.contactId,
+          conversationId,
+          triggerMessageId: inboundMessageId,
+          said: burstTexts.join("\n"),
+          decision,
+        }).catch((error: unknown) => {
+          console.error(`agent: interés no anotado (${error instanceof Error ? error.message : String(error)})`)
+        })
+      }
       // Tras reservar en esta corrida, la pregunta del permiso general, una sola
       // vez por persona y después de la respuesta (ADR 0030). Texto y botones
       // fijos, sin modelo; si no puede salir, la corrida sigue igual.
@@ -896,7 +914,7 @@ export async function simulateAgentSandbox(
   if (toolCtx.route?.path === "fuera_de_tema") {
     const clinic = await publicClinicName(db, orgId)
     return {
-      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic),
+      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")),
       replied: true,
       toolsUsed: [],
       handedOff: false,

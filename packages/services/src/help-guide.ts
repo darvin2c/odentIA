@@ -146,6 +146,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       { q: "¿Por qué una oportunidad cambió de paso sola?", a: "Porque pasó algo real: al agendar su cita pasa a «Evaluación agendada», al presentarle el presupuesto a «Presupuesto enviado», y al aceptarlo (aunque sea en parte) se gana; al rechazarlo se pierde. La tarjeta y el historial dicen qué la movió." },
       { q: "¿Cómo cierro una oportunidad?", a: "Ábrela y pulsa «Ganada» o «Perdida» (o arrástrala a «Decidió»). Perdida pide el motivo: precio, eligió otra clínica, no responde, ya no lo necesita u otro." },
       { q: "¿Qué es «Recepción · sin persona asignada»?", a: "La oportunidad que creó el agente o que nadie lleva todavía es de Recepción. «Tomar» la deja a tu nombre, con su tarea." },
+      { q: "¿Por qué apareció una oportunidad que nadie creó?", a: "Con «Oportunidades» encendida en el agente, quien pregunta por el precio o la disponibilidad de un servicio concreto queda anotado en «Interesado», en Recepción. Si ya tenía una abierta de ese servicio se actualiza, y si ya aceptó un presupuesto con él no se anota nada." },
     ],
   },
   {
@@ -191,9 +192,11 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Servicios y precios",
     parent: "Gestión",
     purpose: "Lo que ofrece tu clínica y cuánto cuesta. De ahí salen los precios que ve el equipo, los presupuestos y lo que el agente puede decir.",
-    terms: ["precios", "tarifario", "tarifas", "servicios y tarifas", "tratamientos", "prestaciones", "catálogo", "cuánto cuesta", "lista de precios", "deja en la pieza"],
+    terms: ["precios", "tarifario", "tarifas", "servicios y tarifas", "tratamientos", "prestaciones", "catálogo", "cuánto cuesta", "lista de precios", "deja en la pieza", "cómo dice el precio", "precio exacto", "desde", "solo con evaluación"],
     writePermission: "settings.write",
     faqs: [
+      { q: "¿Cómo elijo qué precio dice el agente?", a: "Cada servicio dice su precio de una de tres formas: «Precio exacto», «Desde» (como mínimo, y el final se define en la evaluación) o «Solo con evaluación» (no dice ningún número y ofrece la evaluación). Al agregar servicios se pregunta una vez «¿Cómo dice el agente estos precios?», con «Precio exacto» marcado. Para cambiar varios a la vez, márcalos en la lista y elige «Cómo dice el precio». Caja y presupuesto usan siempre la tarifa." },
+      { q: "¿El agente manda la lista de precios?", a: "No. Responde el precio de los servicios por los que le preguntan, hasta tres distintos por conversación, y después ofrece una evaluación. Si la persona ya tiene un presupuesto, ese sí se lo reenvía." },
       { q: "¿Qué es «Deja en la pieza»?", a: "Lo que el servicio deja dibujado en el odontograma al completarse: la resina, una restauración de resina; la corona, su corona; la exodoncia, una pieza ausente. Solo aplica a servicios por pieza o por superficies, y lo que va en las caras pide un servicio por superficies. Los de la biblioteca ya lo traen; en uno propio lo eliges al crearlo o editarlo. En clínicas de Perú se elige también el material o el tipo, con su sigla; la causa de una ausencia se deduce al completarla." },
     ],
   },

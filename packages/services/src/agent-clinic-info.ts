@@ -6,6 +6,7 @@ import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availabi
 import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
+import { TREATMENT_SPECIALTY_NAMES, type TreatmentSpecialty } from "@odentia/clinical"
 import { normalizeForSearch } from "./knowledge.js"
 import { formatOrgMoney, type OrgLocale } from "./locale.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -20,6 +21,19 @@ import { listClinicPromotionSummaries } from "./promotions.js"
  * grande se consulta con `searchClinic`, que devuelve solo lo que coincide.
  */
 export const SERVICES_IN_PROMPT = 40
+/**
+ * Nombres que caben en el índice por especialidad de una clínica grande. Más
+ * allá se dice cuántos quedan fuera: el índice orienta, la búsqueda encuentra.
+ */
+export const SERVICES_IN_INDEX = 300
+/** Resultados de cada tipo que devuelve una búsqueda en la clínica; lo que pasa de ahí se cuenta. */
+export const CLINIC_SEARCH_LIMIT = 6
+/**
+ * Servicios cuyo precio dice el agente en una conversación (decisión 4 de la
+ * fase 4). Nunca manda el tarifario: responde lo que le preguntan y, pasado
+ * este número, ofrece la evaluación. Lo cuenta el código con lo que ya dijo.
+ */
+export const PRICES_PER_CONVERSATION = 3
 export const PROMOTIONS_IN_PROMPT = 10
 export const PROFESSIONALS_IN_PROMPT = 30
 /** Cuántos días hacia adelante se avisan los cierres de una sede. */
@@ -385,6 +399,8 @@ export interface ClinicSearchResult {
   services: AgentServiceInfo[]
   promotions: AgentPromotionInfo[]
   professionals: AgentProfessionalInfo[]
+  /** Lo que también coincidía y no cupo en la respuesta, por tipo: nunca un corte mudo. */
+  more: { services: number; promotions: number; professionals: number }
 }
 
 /** Palabras de la pregunta que cuentan: sin las muy cortas ni las de relleno. */
@@ -419,7 +435,7 @@ export async function searchClinic(
   query: string,
   options: { limit?: number; rankedServiceIds?: string[]; rankedPromotionIds?: string[]; rankedProfessionalIds?: string[] } = {},
 ): Promise<ClinicSearchResult> {
-  const limit = Math.min(Math.max(options.limit ?? 6, 1), 10)
+  const limit = Math.min(Math.max(options.limit ?? CLINIC_SEARCH_LIMIT, 1), 10)
   const services = await listAgentServices(tx, orgId)
   const promotions = await listAgentPromotions(tx, orgId)
   const professionals = await listAgentProfessionals(tx, orgId)
@@ -427,8 +443,15 @@ export async function searchClinic(
   const order = (ranked: string[] | undefined) => new Map((ranked ?? []).map((id, index) => [id, index]))
   const serviceRank = order(options.rankedServiceIds)
   const promoRank = order(options.rankedPromotionIds)
-  const pick = <T>(items: T[], idOf: (item: T) => string, textOf: (item: T) => string, ranked: Map<string, number>) =>
-    items
+  const more = { services: 0, promotions: 0, professionals: 0 }
+  const pick = <T>(
+    items: T[],
+    idOf: (item: T) => string,
+    textOf: (item: T) => string,
+    ranked: Map<string, number>,
+    kind: keyof typeof more,
+  ): T[] => {
+    const matched = items
       .map((item) => {
         const position = ranked.get(idOf(item))
         // Lo encontrado por significado va primero, en su orden; después, lo que coincide por palabras.
@@ -437,16 +460,18 @@ export async function searchClinic(
       })
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map((entry) => entry.item)
+    more[kind] = Math.max(0, matched.length - limit)
+    return matched.slice(0, limit).map((entry) => entry.item)
+  }
 
-  const matchedServices = pick(services, (s) => s.id, (s) => `${s.name} ${s.specialty ?? ""}`, serviceRank)
+  const matchedServices = pick(services, (s) => s.id, (s) => `${s.name} ${s.specialty ?? ""}`, serviceRank, "services")
   const matchedNames = new Set(matchedServices.map((s) => normalizeForSearch(s.name)))
   const matchedPromotions = pick(
     promotions,
     (p) => p.id,
     (p) => `${p.name} ${p.conditions ?? ""} ${p.items.map((item) => item.serviceName).join(" ")}`,
     promoRank,
+    "promotions",
   )
   // Una promoción de un servicio encontrado también viene, aunque su nombre no coincida.
   for (const promo of promotions) {
@@ -459,8 +484,35 @@ export async function searchClinic(
     (p) => p.id,
     (p) => `${p.name} ${p.specialties.join(" ")}`,
     order(options.rankedProfessionalIds),
+    "professionals",
   )
-  return { services: matchedServices, promotions: matchedPromotions, professionals: matchedProfessionals }
+  return { services: matchedServices, promotions: matchedPromotions, professionals: matchedProfessionals, more }
+}
+
+/**
+ * El servicio concreto por el que pregunta la persona, si lo hay: el que
+ * coincide con más palabras completas de su nombre, sin empate. Solo por
+ * palabras, a propósito: lo más parecido por significado siempre existe
+ * («cirugía de nariz» queda cerca de alguna cirugía) y no basta para decir
+ * que preguntó por ese servicio. Con empate («prótesis total» casa con la
+ * superior y con la inferior) no hay uno: nulo.
+ */
+export function identifyAskedService(query: string, services: AgentServiceInfo[]): AgentServiceInfo | null {
+  let best: AgentServiceInfo | null = null
+  let bestScore = 0
+  let tied = false
+  for (const service of services) {
+    const score = textScore(query, service.name)
+    if (score > bestScore) {
+      best = service
+      bestScore = score
+      tied = false
+    } else if (score === bestScore && score > 0) {
+      tied = true
+    }
+  }
+  // Al menos una palabra completa del nombre: un prefijo suelto no identifica.
+  return best && bestScore >= 2 && !tied ? best : null
 }
 
 /** Texto del resultado de una búsqueda para el modelo. */
@@ -481,6 +533,19 @@ export function formatClinicSearch(result: ClinicSearchResult, zone: Zone): stri
   // Lo encontrado por significado es lo más parecido, no lo pedido: medido en
   // eval:search, algo que la clínica no ofrece (cirugía de nariz) queda a la
   // misma distancia que una pregunta válida. Lo decide el modelo, con esta regla.
+  const left = [
+    result.more.services ? `${result.more.services} ${result.more.services === 1 ? "servicio" : "servicios"}` : null,
+    result.more.promotions ? `${result.more.promotions} ${result.more.promotions === 1 ? "promoción" : "promociones"}` : null,
+    result.more.professionals
+      ? `${result.more.professionals} ${result.more.professionals === 1 ? "profesional" : "profesionales"}`
+      : null,
+  ].filter((item): item is string => item !== null)
+  if (lines.length && left.length) {
+    const said = left.length > 1 ? `${left.slice(0, -1).join(", ")} y ${left[left.length - 1]}` : left[0]
+    lines.push(
+      `Y ${said} más que también coinciden y no van aquí: no digas que estos son todos; si la persona busca otro, vuelve a buscar con palabras más precisas.`,
+    )
+  }
   return lines.length
     ? [
         "Lo más parecido en la clínica a lo que se busca. Si nada de esto es lo que pide la persona, dile que la clínica no lo ofrece; no presentes otro servicio como si fuera lo pedido.",
@@ -489,31 +554,96 @@ export function formatClinicSearch(result: ClinicSearchResult, zone: Zone): stri
     : "No encontré nada que coincida en servicios, promociones ni profesionales de la clínica. No inventes: dilo y ofrece pasar el caso a una persona."
 }
 
+/**
+ * ¿Pregunta por el precio o por la disponibilidad? Es la regla simple de una
+ * clínica sin modelo de decisión para anotar el interés (decisión 15 de la
+ * fase 4), con las palabras con que se pregunta.
+ */
+const PRICE_OR_AVAILABILITY =
+  /(?<!\p{L})(?:cu[aá]nto|precios?|cuestan?|costos?|coste|valen?|salen?|tarifas?|cobran|presupuestos?|cotiza\p{L}*|disponib\p{L}*|horarios?|turnos?|citas?|agendar|reservar|atienden|tienen|hacen|hay)(?!\p{L})/iu
+
+export function asksPriceOrAvailability(text: string): boolean {
+  return PRICE_OR_AVAILABILITY.test(text)
+}
+
+/** ¿La búsqueda no encontró nada? Entonces la pregunta queda en «Preguntas sin respuesta». */
+export function clinicSearchFoundNothing(result: ClinicSearchResult): boolean {
+  return !result.services.length && !result.promotions.length && !result.professionals.length
+}
+
 /* ---------- El bloque de la clínica en el prompt ---------- */
 
 export interface AgentClinicData {
   hours: AgentBranchHours[]
   professionals: AgentProfessionalInfo[]
-  /** Hasta `SERVICES_IN_PROMPT + 1`: uno más dice que no caben y se buscan. */
+  /** Todos los servicios activos: los que caben van con su precio; si no, solo su nombre en el índice. */
   services: AgentServiceInfo[]
   promotions: AgentPromotionInfo[]
+  /**
+   * «Informar» encendido. Apagado, el agente no recibe precios, promociones ni
+   * profesionales (ADR 0021); los servicios llegan solo para agendar, con su
+   * nombre, id y duración.
+   */
+  informs: boolean
 }
 
-/** Lo que el bloque estable necesita; con «Informar» apagado, solo horarios. */
-export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean): Promise<AgentClinicData> {
+/** Cómo van los servicios en el bloque de la clínica: enteros, solo su índice o ninguno. */
+export type AgentServicesShown = "lista" | "indice" | "ninguno"
+
+export function agentServicesShown(data: Pick<AgentClinicData, "services">): AgentServicesShown {
+  if (!data.services.length) return "ninguno"
+  return data.services.length > SERVICES_IN_PROMPT ? "indice" : "lista"
+}
+
+/**
+ * Lo que el bloque estable necesita. Con «Informar» apagado, los horarios y,
+ * si agenda (`books`), los servicios sin precio; con las dos apagadas, solo
+ * los horarios.
+ */
+export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean, books = true): Promise<AgentClinicData> {
   const hours = await getBranchHours(tx, orgId)
-  if (!informs) return { hours, professionals: [], services: [], promotions: [] }
+  if (!informs) {
+    return { hours, professionals: [], services: books ? await listAgentServices(tx, orgId) : [], promotions: [], informs }
+  }
   return {
     hours,
     professionals: await listAgentProfessionals(tx, orgId),
-    services: await listAgentServices(tx, orgId, { limit: SERVICES_IN_PROMPT + 1 }),
+    services: await listAgentServices(tx, orgId),
     promotions: await listAgentPromotions(tx, orgId),
+    informs,
   }
 }
 
 /**
+ * Índice de una clínica grande: «Especialidad: servicio, servicio…», sin
+ * precio ni id, para que el agente sepa qué hay y lo busque. Lo que no cabe
+ * se cuenta.
+ */
+export function formatServiceIndex(services: AgentServiceInfo[]): string[] {
+  const groups = new Map<string, string[]>()
+  for (const service of services.slice(0, SERVICES_IN_INDEX)) {
+    const key = service.specialty ?? ""
+    const name = TREATMENT_SPECIALTY_NAMES[key as TreatmentSpecialty] ?? (key || "Otros")
+    const list = groups.get(name) ?? []
+    list.push(service.name)
+    groups.set(name, list)
+  }
+  const lines = [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "es"))
+    .map(([name, list]) => `- ${name}: ${list.join(", ")}.`)
+  const left = services.length - SERVICES_IN_INDEX
+  if (left > 0) lines.push(`- Y ${left} servicios más que no van en este índice: búscalos por su nombre.`)
+  return lines
+}
+
+function formatServiceForBooking(service: AgentServiceInfo): string {
+  return `- ${service.name} (id ${service.id})${service.durationMin ? `, ${service.durationMin} min` : ""}`
+}
+
+/**
  * Las líneas de la clínica para el prompt. Lo que cabe va entero; lo que no,
- * se anuncia con su cantidad y se pide a `buscar_en_la_clinica`.
+ * se anuncia con su cantidad y se pide a `buscar_en_la_clinica`. Cada línea
+ * dice lo que de verdad llega: nunca «sin servicios» si existen.
  */
 export function formatAgentClinicData(data: AgentClinicData, zone: Zone): string[] {
   const lines: string[] = []
@@ -521,11 +651,26 @@ export function formatAgentClinicData(data: AgentClinicData, zone: Zone): string
     lines.push("Horario de atención de cada sede (sale de los horarios del equipo):")
     for (const item of data.hours) lines.push(formatBranchHours(item, zone))
   }
-  if (data.services.length > SERVICES_IN_PROMPT) {
+  const shown = agentServicesShown(data)
+  if (!data.informs) {
+    // Solo para agendar: con «Informar» apagado no se habla de precios ni de qué incluye cada servicio.
+    if (shown === "lista") {
+      lines.push("Servicios, solo para agendar (con su id y su duración; no hablas de sus precios):")
+      for (const service of data.services) lines.push(formatServiceForBooking(service))
+    } else if (shown === "indice") {
+      lines.push(
+        `Servicios: la clínica tiene ${data.services.length}; aquí va solo su índice, para agendar (no hablas de sus precios). Sin el id del servicio, buscar_huecos usa la duración de una cita regular.`,
+      )
+      lines.push(...formatServiceIndex(data.services))
+    }
+    return lines
+  }
+  if (shown === "indice") {
     lines.push(
-      "Servicios: la clínica tiene muchos y no van aquí. Antes de hablar de un servicio o de su precio, búscalo con buscar_en_la_clinica.",
+      `Servicios: la clínica tiene ${data.services.length} y aquí va solo su índice por especialidad, sin precios ni ids. Antes de hablar de un servicio, de su precio o de su duración, búscalo con buscar_en_la_clinica: ahí están su id y cómo decir su precio. No digas que la clínica no hace algo sin haberlo buscado.`,
     )
-  } else if (data.services.length) {
+    lines.push(...formatServiceIndex(data.services))
+  } else if (shown === "lista") {
     lines.push("Servicios y cómo decir su precio (cada importe con su moneda):")
     for (const service of data.services) lines.push(formatAgentService(service, zone))
   } else {
@@ -538,7 +683,9 @@ export function formatAgentClinicData(data: AgentClinicData, zone: Zone): string
     for (const promo of data.promotions) lines.push(formatAgentPromotion(promo, zone))
   }
   if (data.professionals.length > PROFESSIONALS_IN_PROMPT) {
-    lines.push("Profesionales: búscalos por nombre o especialidad con buscar_en_la_clinica.")
+    lines.push(
+      `Profesionales: la clínica tiene ${data.professionals.length}; búscalos por nombre o especialidad con buscar_en_la_clinica.`,
+    )
   } else if (data.professionals.length) {
     lines.push("Profesionales, sus especialidades y qué días atienden en cada sede:")
     for (const item of data.professionals) lines.push(formatProfessional(item))

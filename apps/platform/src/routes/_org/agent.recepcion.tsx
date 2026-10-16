@@ -553,7 +553,7 @@ function ReceptionPage() {
             title="Qué sabe"
             hint="Solo responde con esto. Si el dato no está aquí, lo dice y pasa a una persona."
             phone={{
-              summary: `${count(knows.answers, "respuesta", "respuestas")} · ${count(knows.servicesWithPrice, "servicio con precio", "servicios con precio")} · ${count(knows.branches, "sede", "sedes")} · lo que recuerda de cada persona`,
+              summary: `${count(knows.answers, "respuesta", "respuestas")} · ${count(knows.servicesWithPrice, "precio que dice", "precios que dice")} · ${count(knows.branches, "sede", "sedes")} · lo que recuerda de cada persona`,
               to: canWrite ? "/agent/knowledge" : undefined,
             }}
             phoneExtra={gapNotice ? <div className="sm:hidden">{gapNotice}</div> : null}
@@ -569,7 +569,7 @@ function ReceptionPage() {
               <li>
                 <EntryRow
                   label="Servicios y precios"
-                  value={knows.servicesWithPrice === 0 ? "Ninguno con precio todavía" : `${knows.servicesWithPrice} con precio`}
+                  value={knows.servicesWithPrice === 0 ? "Ningún precio que pueda decir todavía" : `${knows.servicesWithPrice} con precio que puede decir`}
                   to="/services"
                 />
               </li>

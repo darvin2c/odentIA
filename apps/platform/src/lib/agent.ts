@@ -407,6 +407,8 @@ export interface LearningOverview {
   learned: LessonItem[]
   withdrawn: LessonItem[]
   cases: number
+  /** Cuántas reglas de un agente le llegan como mucho; pasado el tope, las más antiguas no le llegan. */
+  ruleLimit: number
 }
 
 export interface LessonPreview {

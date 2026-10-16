@@ -112,9 +112,10 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
         id: "seguimiento",
         label: "Oportunidades",
         description:
-          "Registra lo que la persona pide en concreto (un precio, un tratamiento, una evaluación) como oportunidad, sin repetir una abierta, y deja su tarea. La cierra como perdida solo si la persona lo dice claro, con un motivo de la lista. El historial de la oportunidad dice lo que hizo el agente; ahí lo ves y lo deshaces.",
+          "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, queda anotado como oportunidad en «Interesado», en Recepción, sin repetir una abierta. El agente también registra otros intereses concretos (una evaluación), deja su tarea y la cierra como perdida solo si la persona lo dice claro, con un motivo de la lista. Las etapas avanzan solas con lo que pasa. El historial de la oportunidad dice lo que hizo el agente; ahí lo ves y lo deshaces.",
         fixed: false,
-        tools: ["create_opportunity", "update_followup", "close_opportunity", "move_to_stage", "listar_oportunidades"],
+        // Mover de etapa no es del agente: las etapas avanzan solas (ADR 0028).
+        tools: ["create_opportunity", "update_followup", "close_opportunity", "listar_oportunidades"],
         whenOff: "No creas ni cambias oportunidades ni sus tareas.",
         offNote: "Apagada: no crea ni mueve oportunidades. Tu equipo las lleva.",
       },

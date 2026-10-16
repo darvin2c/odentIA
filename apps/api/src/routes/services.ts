@@ -6,7 +6,9 @@ import {
   listMostUsedServices,
   listServices,
   listTemplates,
+  PRICE_DISCLOSURE_BATCH,
   quickAddServices,
+  setServicesPriceDisclosure,
   updateService,
 } from "@odentia/services"
 import { Hono } from "hono"
@@ -124,6 +126,16 @@ const batchInput = z
       )
       .min(1)
       .max(100),
+    /** «¿Cómo dice el agente estos precios?»: una sola respuesta para todo lo que se agrega. */
+    priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
+  })
+  .strict()
+
+/** «Cómo dice el precio» de varios servicios a la vez. */
+const priceDisclosureInput = z
+  .object({
+    serviceIds: z.array(z.string().uuid()).min(1).max(PRICE_DISCLOSURE_BATCH),
+    priceDisclosure: z.enum(PRICE_DISCLOSURES),
   })
   .strict()
 
@@ -225,8 +237,20 @@ export function createServicesRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        quickAddServices(tx, orgId, userId, parsed.data.items),
+        quickAddServices(tx, orgId, userId, parsed.data.items, { priceDisclosure: parsed.data.priceDisclosure }),
       ),
+    )
+  })
+
+  app.post("/price-disclosure", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para editar prestaciones"), 403)
+    }
+    const parsed = priceDisclosureInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => setServicesPriceDisclosure(tx, orgId, userId, parsed.data)),
     )
   })
 
