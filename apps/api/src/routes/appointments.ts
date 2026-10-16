@@ -118,6 +118,8 @@ const availabilityQuery = z.object({
   to: z.iso.datetime({ offset: true }),
   // Al reprogramar: el hueco de esa cita cuenta como libre.
   ignoreAppointmentId: z.uuid().optional(),
+  // «Nueva cita» con servicio: solo quien lo atiende (ADR 0039).
+  serviceId: z.uuid().optional(),
 })
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })

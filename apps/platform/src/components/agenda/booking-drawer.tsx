@@ -16,7 +16,6 @@ import {
   hourLabel,
   normalizeCountry,
   PhoneInput,
-  ResourceSelect,
   type ScheduleColumn,
   type SchedulePreview,
   type ScheduleRangeValue,
@@ -24,12 +23,14 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
-import type { AgendaAppointment, AgendaServiceOption } from "../../lib/agenda"
+import type { AgendaAppointment } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
+import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
+import { ServiceSelect } from "../service-select"
 import { errorMessage, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 
@@ -153,11 +154,14 @@ export function BookingDrawer({
     (id) => coordinationQuery.data?.data.treatments.find((row) => row.id === id)?.title ?? null,
   )
   const [reason, setReason] = React.useState("")
-  const servicesQuery = useQuery({
-    queryKey: ["services", "agenda-picker"],
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
+  // El servicio elegido, también el que llega del Plan aunque no esté en la primera página del tarifario.
+  const serviceQuery = useQuery({
+    queryKey: ["services", "one", serviceId],
+    queryFn: () => fetchService(serviceId),
+    enabled: Boolean(serviceId),
+    staleTime: 60_000,
   })
-  const service = (servicesQuery.data?.data ?? []).find((item) => item.id === serviceId)
+  const service = serviceId ? serviceQuery.data?.data : undefined
   const duration = service?.durationMin ?? defaultMinutes
 
   // ----- Cuándo -----
@@ -171,6 +175,8 @@ export function BookingDrawer({
     date: seed.date,
     dentistUserId: seed.dentistUserId,
     startsAt: seed.startsAt,
+    // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
+    serviceId: serviceId || undefined,
   })
   const { shown, state, professional, chosenMinutes, nextFree, hoursThatDay, free } = when
 
@@ -542,24 +548,22 @@ export function BookingDrawer({
             </div>
           )}
 
-          <ResourceSelect
+          <ServiceSelect
             id="cita-servicio"
             label="Servicio (opcional)"
-            options={(servicesQuery.data?.data ?? []).map((item) => ({
-              id: item.id,
-              label: item.name,
-              detail: item.durationMin ? `${item.durationMin} min` : undefined,
-            }))}
             value={serviceId}
             onChange={(next) => {
-              setServiceId(next)
+              if (next) queryClient.setQueryData(["services", "one", next.id], { data: next })
+              setServiceId(next?.id ?? "")
               // Con servicio, el bloque toma lo que dura el servicio.
-              const minutes =
-                (servicesQuery.data?.data ?? []).find((item) => item.id === next)?.durationMin ??
-                defaultMinutes
-              when.resize(minutes)
+              when.resize(next?.durationMin ?? defaultMinutes)
             }}
           />
+          {when.attending ? (
+            <p role="status" className="-mt-2 text-xs text-muted-foreground">
+              {`Solo se ofrecen las horas de quien atiende ${when.attending.specialtyName}.`}
+            </p>
+          ) : null}
 
           <WhenFields when={when} />
 

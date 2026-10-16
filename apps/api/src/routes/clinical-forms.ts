@@ -37,8 +37,8 @@ import {
   listFormTemplates,
   listProfessionalProfiles,
   listProfessionalSpecialties,
-  listServiceSpecialties,
   listSpecialties,
+  listSpecialtiesOverview,
   listSpecialtyProfessionals,
   prepareEncounterConsents,
   publishConsentTemplate,
@@ -47,7 +47,7 @@ import {
   setConsentTemplateServices,
   setProfessionalProfile,
   setProfessionalSpecialties,
-  setServiceSpecialties,
+  setSpecialtyProfessionals,
   signConsentDocument,
   updateConsentTemplate,
   updateFormResponseDraft,
@@ -329,6 +329,17 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
+  // Configuración › Especialidades: quién atiende cada una y cuántos servicios tiene.
+  app.get("/specialties/overview", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canReadCatalog(memberRole) && !canAccess(memberRole, "settings.read")) {
+      return forbidden(c, "Sin acceso a las especialidades")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listSpecialtiesOverview(tx, orgId)),
+    )
+  })
+
   app.post("/specialties", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
@@ -373,6 +384,24 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listSpecialtyProfessionals(tx, orgId, c.req.param("id")),
+      ),
+    )
+  })
+
+  // «Elegir quién atiende»: la lista completa de una especialidad, de una vez.
+  app.put("/specialties/:id/professionals", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración asigna especialidades")
+    }
+    const parsed = z
+      .object({ userIds: z.array(z.string().min(1).max(200)).max(100) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setSpecialtyProfessionals(tx, orgId, userId, c.req.param("id"), parsed.data.userIds),
       ),
     )
   })
@@ -447,32 +476,6 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         setProfessionalProfile(tx, orgId, userId, target, parsed.data),
-      ),
-    )
-  })
-
-  app.get("/services/:serviceId/specialties", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canReadCatalog(memberRole)) return forbidden(c, "Sin acceso al catálogo")
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listServiceSpecialties(tx, orgId, c.req.param("serviceId")),
-      ),
-    )
-  })
-
-  app.put("/services/:serviceId/specialties", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "settings.write")) {
-      return forbidden(c, "Solo administración vincula prestaciones")
-    }
-    const parsed = z.object({ specialtyIds: uuidList(10) }).strict().safeParse(
-      await c.req.json().catch(() => null),
-    )
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setServiceSpecialties(tx, orgId, userId, c.req.param("serviceId"), parsed.data.specialtyIds),
       ),
     )
   })

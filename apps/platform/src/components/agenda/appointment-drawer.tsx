@@ -32,7 +32,6 @@ import * as React from "react"
 import {
   type AgendaAppointment,
   type AgendaResources,
-  type AgendaServiceOption,
   type AppointmentContext,
   type AppointmentStatus,
   professionalSaid,
@@ -50,6 +49,7 @@ import { useAppointmentArrival } from "./arrival"
 import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
+import { ServiceSelect } from "../service-select"
 
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
 
@@ -248,11 +248,6 @@ export function AppointmentDrawer({
     chairId: appointment.chairId,
     reason: appointment.reason ?? "",
   })
-  const servicesQuery = useQuery({
-    queryKey: ["services", "agenda-picker"],
-    enabled: mode === "edit",
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
-  })
   const dirty =
     mode === "edit" &&
     (draft.serviceId !== (appointment.serviceId ?? "") ||
@@ -349,15 +344,12 @@ export function AppointmentDrawer({
           </div>
         ) : mode === "edit" ? (
           <div className="grid gap-4">
-            <ResourceSelect
+            {/* El de la cita se ve aunque no esté en la primera página del tarifario. */}
+            <ServiceSelect
               id="cita-editar-servicio"
               label="Servicio (opcional)"
-              options={(servicesQuery.data?.data ?? []).map((service) => ({
-                id: service.id,
-                label: service.name,
-              }))}
               value={draft.serviceId}
-              onChange={(serviceId) => setDraft((current) => ({ ...current, serviceId }))}
+              onChange={(service) => setDraft((current) => ({ ...current, serviceId: service?.id ?? "" }))}
             />
             <ResourceSelect
               id="cita-editar-sillon"

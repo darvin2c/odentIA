@@ -30,6 +30,7 @@ import { getPatientMissingData, registerPatient } from "./patient-registration.j
 import { updatePatient } from "./patients.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { createService } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -176,10 +177,10 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
   )
   const args = [c.orgId, c.dentist, andrea.id] as const
   // Una resina propia que deja una restauración, sin variante: fuera de Perú es opcional.
-  const resin = await c.run((tx) =>
+  const resin = await c.run(async (tx) =>
     createService(tx, c.orgId, c.dentist, {
       name: "Resina compuesta",
-      specialty: "restauradora",
+      specialtyId: (await librarySpecialtyIds(tx, c.orgId, ["restauradora"])).get("restauradora")!,
       scope: "surfaces",
       priceCents: 180000,
       leavesFinding: { condition: "definitive_restoration" },

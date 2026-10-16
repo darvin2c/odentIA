@@ -10,6 +10,7 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
+  orgSpecialty,
   PRICE_DISCLOSURES,
   type PriceDisclosure,
   procedureCode,
@@ -20,6 +21,7 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
 import {
   currentCatalogRelease,
@@ -32,6 +34,8 @@ function conflict(code: string, message: string): ServiceError {
 }
 
 export type ServiceRow = typeof serviceCatalog.$inferSelect
+/** El servicio como lo lee una pantalla: con el nombre de su especialidad de la clínica. */
+export type ServiceListItem = ServiceRow & { specialtyName: string | null }
 export type TreatmentTemplateRow = typeof treatmentTemplate.$inferSelect
 
 
@@ -86,12 +90,19 @@ function assertName(name: string | null | undefined): string {
   return value
 }
 
-function assertSpecialty(specialty: string | null | undefined): TreatmentSpecialty {
+/** Clave de especialidad de la biblioteca: solo filtra la biblioteca, nunca el tarifario. */
+function assertLibrarySpecialty(specialty: string | null | undefined): TreatmentSpecialty {
   const value = (specialty ?? "").trim().toLowerCase()
   if (!(TREATMENT_SPECIALTIES as readonly string[]).includes(value)) {
     throw validation("specialty inválida: usa una especialidad de la biblioteca")
   }
   return value as TreatmentSpecialty
+}
+
+/** La especialidad de la clínica para un servicio propio: obligatoria. */
+async function assertServiceSpecialty(tx: Db, orgId: string, specialtyId: string | null | undefined): Promise<string> {
+  if (!specialtyId) throw validation("Elige la especialidad del servicio")
+  return requireOrgSpecialtyId(tx, orgId, specialtyId)
 }
 
 export const BILLING_MODES = ["treatment", "session"] as const
@@ -327,7 +338,7 @@ export async function listTemplates(
   ]
   const availableWhere = and(...baseConditions)
   if (query.specialty) {
-    baseConditions.push(eq(treatmentTemplate.specialty, assertSpecialty(query.specialty)))
+    baseConditions.push(eq(treatmentTemplate.specialty, assertLibrarySpecialty(query.specialty)))
   }
   const q = query.q?.trim()
   const searchCond = q
@@ -432,47 +443,102 @@ export async function listTemplates(
 
 export interface ListServicesQuery {
   q?: string
-  specialty?: string
+  /** Especialidad de la clínica (id). */
+  specialtyId?: string
   state?: string
+  /**
+   * Solo estos servicios, en cualquier estado: para nombrar lo ya elegido
+   * aunque no esté en la primera página ni siga activo.
+   */
+  ids?: string[]
   cursor?: string
   limit?: number
 }
 
+/** Columnas de la lista: el servicio y el nombre de su especialidad de la clínica. */
+const serviceListColumns = {
+  id: serviceCatalog.id,
+  organizationId: serviceCatalog.organizationId,
+  templateId: serviceCatalog.templateId,
+  source: serviceCatalog.source,
+  code: serviceCatalog.code,
+  name: serviceCatalog.name,
+  specialtyId: serviceCatalog.specialtyId,
+  specialtyName: orgSpecialty.name,
+  scope: serviceCatalog.scope,
+  priceCents: serviceCatalog.priceCents,
+  currency: serviceCatalog.currency,
+  durationMin: serviceCatalog.durationMin,
+  billingMode: serviceCatalog.billingMode,
+  priceDisclosure: serviceCatalog.priceDisclosure,
+  evaluationServiceId: serviceCatalog.evaluationServiceId,
+  leavesFinding: serviceCatalog.leavesFinding,
+  isActive: serviceCatalog.isActive,
+  createdAt: serviceCatalog.createdAt,
+  updatedAt: serviceCatalog.updatedAt,
+}
+
+const specialtyJoin = and(
+  eq(orgSpecialty.organizationId, serviceCatalog.organizationId),
+  eq(orgSpecialty.id, serviceCatalog.specialtyId),
+)
+
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * El tarifario por páginas, con el total de lo que coincide: una lista que
+ * puede crecer se busca o se pagina, y dice cuántos son (topes B1–B4 de la
+ * fase 4).
+ */
 export async function listServices(
   tx: Db,
   orgId: string,
   query: ListServicesQuery = {},
-): Promise<{ data: ServiceRow[]; nextCursor: string | null }> {
+): Promise<{ data: ServiceListItem[]; nextCursor: string | null; total: number }> {
   const limit = clampLimit(query.limit)
   const after = decodeCursor(query.cursor)
   const conditions = [eq(serviceCatalog.organizationId, orgId)]
-  if (query.specialty) {
-    conditions.push(eq(serviceCatalog.specialty, assertSpecialty(query.specialty)))
+  if (query.specialtyId) {
+    conditions.push(eq(serviceCatalog.specialtyId, await requireOrgSpecialtyId(tx, orgId, query.specialtyId)))
   }
-  const state = query.state ?? "active"
-  if (!(SERVICE_STATES as readonly string[]).includes(state)) {
-    throw validation("state debe ser active|inactive|legacy")
-  }
-  if (state === "active") {
-    conditions.push(eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy"))
-  } else if (state === "inactive") {
-    conditions.push(eq(serviceCatalog.isActive, false), ne(serviceCatalog.source, "legacy"))
+  if (query.ids) {
+    const ids = [...new Set(query.ids)]
+    if (ids.length === 0) return { data: [], nextCursor: null, total: 0 }
+    if (ids.length > MAX_LIMIT || ids.some((id) => !UUID_SHAPE.test(id))) {
+      throw validation("ids debe tener entre 1 y 100 identificadores de servicio")
+    }
+    conditions.push(inArray(serviceCatalog.id, ids))
   } else {
-    conditions.push(eq(serviceCatalog.source, "legacy"))
+    const state = query.state ?? "active"
+    if (!(SERVICE_STATES as readonly string[]).includes(state)) {
+      throw validation("state debe ser active|inactive|legacy")
+    }
+    if (state === "active") {
+      conditions.push(eq(serviceCatalog.isActive, true), ne(serviceCatalog.source, "legacy"))
+    } else if (state === "inactive") {
+      conditions.push(eq(serviceCatalog.isActive, false), ne(serviceCatalog.source, "legacy"))
+    } else {
+      conditions.push(eq(serviceCatalog.source, "legacy"))
+    }
   }
   const q = query.q?.trim()
   if (q) {
     const like = `%${q}%`
     conditions.push(or(ilike(serviceCatalog.name, like), ilike(serviceCatalog.code, like))!)
   }
+  const [counted] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(serviceCatalog)
+    .where(and(...conditions))
   if (after) {
     conditions.push(
       sql`("service_catalog"."name", "service_catalog"."id") > (${after.name}, ${after.id})`,
     )
   }
   const rows = await tx
-    .select()
+    .select(serviceListColumns)
     .from(serviceCatalog)
+    .leftJoin(orgSpecialty, specialtyJoin)
     .where(and(...conditions))
     .orderBy(asc(serviceCatalog.name), asc(serviceCatalog.id))
     .limit(limit + 1)
@@ -481,7 +547,21 @@ export async function listServices(
   return {
     data: page,
     nextCursor: rows.length > limit && last ? encodeCursor(last.name, last.id) : null,
+    total: counted?.total ?? 0,
   }
+}
+
+/** Un servicio de la clínica, en cualquier estado, con el nombre de su especialidad. */
+export async function getService(tx: Db, orgId: string, serviceId: string): Promise<ServiceListItem> {
+  if (!UUID_SHAPE.test(serviceId)) throw notFound("Servicio del catálogo")
+  const [row] = await tx
+    .select(serviceListColumns)
+    .from(serviceCatalog)
+    .leftJoin(orgSpecialty, specialtyJoin)
+    .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, serviceId)))
+    .limit(1)
+  if (!row) throw notFound("Servicio del catálogo")
+  return row
 }
 
 export async function requireService(
@@ -522,7 +602,11 @@ export async function requireServiceForIndication(
 export interface CreateServiceInput {
   templateId?: string | null
   name?: string | null
-  specialty?: string | null
+  /**
+   * Especialidad de la clínica. Obligatoria en un servicio propio; de la
+   * biblioteca, sin indicarla, la de la clínica con la clave de la plantilla.
+   */
+  specialtyId?: string | null
   scope?: string | null
   code?: string | null
   priceCents?: number | null
@@ -554,13 +638,9 @@ export async function createService(
     const tpl = await requireTemplate(tx, input.templateId)
     const codings = await resolveSingleTemplateCoding(tx, tpl.id)
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
-    if (
-      input.specialty !== undefined &&
-      input.specialty !== null &&
-      input.specialty !== tpl.specialty
-    ) {
-      throw validation("specialty debe coincidir con la plantilla (derivado, no editable)")
-    }
+    const specialtyId = input.specialtyId
+      ? await requireOrgSpecialtyId(tx, orgId, input.specialtyId)
+      : ((await librarySpecialtyIds(tx, orgId, [tpl.specialty])).get(tpl.specialty) ?? null)
     if (input.scope !== undefined && input.scope !== null && input.scope !== tpl.scope) {
       throw validation("scope debe coincidir con la plantilla (derivado, no editable)")
     }
@@ -570,7 +650,7 @@ export async function createService(
       source: "template",
       code: normalizeCode(input.code),
       name,
-      specialty: tpl.specialty,
+      specialtyId,
       scope: tpl.scope,
       priceCents: assertPrice(input.priceCents),
       currency,
@@ -592,7 +672,7 @@ export async function createService(
       source: "custom",
       code: normalizeCode(input.code),
       name: assertName(input.name),
-      specialty: assertSpecialty(input.specialty),
+      specialtyId: await assertServiceSpecialty(tx, orgId, input.specialtyId),
       scope,
       priceCents: assertPrice(input.priceCents),
       currency,
@@ -626,7 +706,8 @@ export async function createService(
 export interface UpdateServicePatch {
   templateId?: string | null
   name?: string
-  specialty?: string
+  /** La especialidad de la clínica: se elige en el formulario del servicio, también si viene de la biblioteca. */
+  specialtyId?: string
   scope?: string
   code?: string | null
   priceCents?: number | null
@@ -655,10 +736,12 @@ export async function updateService(
     if (patch.templateId === null) {
       // Independizar la oferta: definición propia completa, sin referencia clínica falsa.
       const name = patch.name !== undefined ? assertName(patch.name) : current.name
-      const specialty =
-        patch.specialty !== undefined ? assertSpecialty(patch.specialty) : current.specialty
+      const specialtyId =
+        patch.specialtyId !== undefined
+          ? await assertServiceSpecialty(tx, orgId, patch.specialtyId)
+          : current.specialtyId
       const scope = patch.scope !== undefined ? assertScope(patch.scope) : current.scope
-      if (!specialty || !scope) {
+      if (!specialtyId || !scope) {
         throw validation(
           "Para independizar la oferta envía su definición completa (nombre, especialidad y ámbito)",
         )
@@ -666,7 +749,7 @@ export async function updateService(
       set.templateId = null
       set.source = "custom"
       set.name = name
-      set.specialty = specialty
+      set.specialtyId = specialtyId
       set.scope = scope
       fields.push("templateId:null")
     } else {
@@ -677,25 +760,28 @@ export async function updateService(
         set.leavesFinding = libraryLeavesFinding(codings, tpl.scope)
         fields.push("leavesFinding")
       }
-      if (patch.specialty !== undefined && patch.specialty !== tpl.specialty) {
-        throw validation("specialty debe coincidir con la plantilla (derivado, no editable)")
-      }
       if (patch.scope !== undefined && patch.scope !== tpl.scope) {
         throw validation("scope debe coincidir con la plantilla (derivado, no editable)")
       }
       set.templateId = tpl.id
       set.source = "template"
-      set.specialty = tpl.specialty
+      // Vincular la biblioteca trae su especialidad, salvo que la clínica elija otra.
+      set.specialtyId =
+        patch.specialtyId !== undefined
+          ? await assertServiceSpecialty(tx, orgId, patch.specialtyId)
+          : ((await librarySpecialtyIds(tx, orgId, [tpl.specialty])).get(tpl.specialty) ?? current.specialtyId)
       set.scope = tpl.scope
       if (patch.name !== undefined) set.name = assertName(patch.name)
       fields.push("templateId")
     }
   } else if (current.source === "template") {
-    if (patch.specialty !== undefined || patch.scope !== undefined) {
-      throw validation(
-        "specialty/scope se derivan de la plantilla; para independizar envía templateId:null",
-      )
+    if (patch.scope !== undefined) {
+      throw validation("scope se deriva de la plantilla; para independizar envía templateId:null")
     }
+  }
+  if (patch.templateId === undefined && patch.specialtyId !== undefined) {
+    set.specialtyId = await assertServiceSpecialty(tx, orgId, patch.specialtyId)
+    fields.push("specialtyId")
   }
 
   if (patch.name !== undefined && patch.templateId === undefined) {
@@ -751,7 +837,6 @@ export async function updateService(
   }
 
   const resolvedSource = (set.source ?? current.source) as string
-  const resolvedSpecialty = (set.specialty ?? current.specialty) as string | null
   const resolvedScope = (set.scope ?? current.scope) as string | null
   const resolvedActive = set.isActive ?? current.isActive
   if (resolvedSource === "legacy") {
@@ -761,8 +846,8 @@ export async function updateService(
         "La prestación heredada debe vincularse a una plantilla o confirmarse como propia antes de reactivarse",
       )
     }
-  } else if (!resolvedSpecialty || !resolvedScope) {
-    throw validation("specialty y scope son obligatorios fuera del legado")
+  } else if (!resolvedScope) {
+    throw validation("scope es obligatorio fuera del legado")
   }
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
 
@@ -846,6 +931,12 @@ export async function fromTemplates(
   const ownedIds = new Set(owned.map((row) => row.templateId))
   // Moneda explícita de la clínica: la columna no tiene valor por defecto.
   const currency = await orgCurrency(tx, orgId)
+  // Cada prestación va a la especialidad de la clínica con la clave de la biblioteca.
+  const specialtyOf = await librarySpecialtyIds(
+    tx,
+    orgId,
+    templates.map((tpl) => tpl.specialty),
+  )
   const created: ServiceRow[] = []
   for (const item of items) {
     if (ownedIds.has(item.templateId)) continue
@@ -859,7 +950,7 @@ export async function fromTemplates(
         source: "template",
         code: null,
         name: item.name?.trim() ? assertName(item.name) : tpl.name,
-        specialty: tpl.specialty,
+        specialtyId: specialtyOf.get(tpl.specialty) ?? null,
         scope: tpl.scope,
         priceCents: assertPrice(item.priceCents),
         currency,
@@ -888,7 +979,8 @@ export async function fromTemplates(
 /** Servicio propio dentro de la carga rápida: sin plantilla ni código oficial. */
 export interface CustomServiceItem {
   name: string
-  specialty: string
+  /** Especialidad de la clínica. */
+  specialtyId: string
   scope: string
   /** Tarifa explícita en unidad menor; 0 = incluido sin costo. */
   priceCents: number
@@ -938,7 +1030,7 @@ export async function quickAddServices(
     result.created.push(
       await createService(tx, orgId, actorUserId, {
         name: item.name,
-        specialty: item.specialty,
+        specialtyId: item.specialtyId,
         scope: item.scope,
         priceCents: item.priceCents,
         billingMode: item.billingMode,

@@ -140,7 +140,7 @@ beforeAll(async () => {
   const service = async (name: string, priceCents: number) => {
     const [row] = await ownerDb
       .insert(serviceCatalog)
-      .values({ organizationId: ORG, name, specialty: "general", scope: "tooth", source: "custom", priceCents, currency: "PEN" })
+      .values({ organizationId: ORG, name, scope: "tooth", source: "custom", priceCents, currency: "PEN" })
       .returning({ id: serviceCatalog.id })
     return row!.id
   }

@@ -14,7 +14,7 @@ import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
@@ -76,7 +76,7 @@ import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
-import { createScheduleBlock } from "./availability.js"
+import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
 import {
   addBudgetItems,
   adjustBudgetLines,
@@ -138,7 +138,12 @@ import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { issuePersonalLink } from "./booking-links.js"
-import { createClinicalOrder, markConsentSentByLink, signConsentDocument } from "./clinical-forms.js"
+import {
+  createClinicalOrder,
+  markConsentSentByLink,
+  setProfessionalSpecialties,
+  signConsentDocument,
+} from "./clinical-forms.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
@@ -155,6 +160,7 @@ import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { seedSaasBillingDemo } from "./seed-saas-billing.js"
 import { createService, quickAddServices, updateService } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask, settleTask } from "./tasks.js"
 
@@ -323,7 +329,9 @@ const SEED_ORGS = [ORG_A, ORG_B]
 const ANA_ID = "seed-user-ana"
 const LUIS_ID = "seed-user-luis"
 const CORA_ID = "seed-user-cora"
-const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID]
+/** La endodoncista de Dental Smile (fase 4, tablero 2): atiende martes y jueves por la tarde. */
+const ROJAS_ID = "seed-user-rojas"
+const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -349,6 +357,7 @@ async function wipeSeed(): Promise<void> {
     "support_access_grant",
     "support_attachment",
     "support_message",
+    "support_notice",
     "support_case",
     "saas_notice",
     "saas_negotiation",
@@ -383,8 +392,6 @@ async function wipeSeed(): Promise<void> {
     "agent_person_fact",
     "agent_case_memory",
     "appointment_booking_link",
-    // Lo enviado a odentIA desde la Ayuda de desarrollo.
-    "help_request",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
@@ -403,8 +410,6 @@ async function wipeSeed(): Promise<void> {
     "clinical_form_template",
     "consent_template",
     "professional_specialty",
-    "service_specialty",
-    "org_specialty",
     "commission_settlement_line",
     "commission_settlement",
     "commission_rule",
@@ -522,6 +527,8 @@ async function wipeSeed(): Promise<void> {
   await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
+  // Los servicios apuntan a su especialidad: la lista de la clínica va después.
+  await db.execute(sql`delete from org_specialty where organization_id in (${ORG_A}, ${ORG_B})`)
   // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
   // sin cascada: sin borrarlo primero, la baja del usuario semilla falla por FK.
   // Se borra por organización **y** por actor: una corrida de e2e deja registros
@@ -705,10 +712,18 @@ await db.insert(user).values([
     email: "cora@odentia.dev",
     emailVerified: true,
   },
+  {
+    id: ROJAS_ID,
+    name: "Dra. Elena Rojas",
+    firstName: "Elena",
+    lastName: "Rojas",
+    email: "rojas@odentia.dev",
+    emailVerified: true,
+  },
 ])
 const passwordHash = await hashPassword(PASSWORD)
 await db.insert(account).values(
-  [ANA_ID, LUIS_ID, CORA_ID].map((userId) => ({
+  [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID].map((userId) => ({
     id: randomUUID(),
     accountId: userId,
     providerId: "credential",
@@ -722,6 +737,13 @@ await db.insert(member).values([
     id: randomUUID(),
     organizationId: ORG_A,
     userId: LUIS_ID,
+    role: "dentist",
+    createdAt: new Date(),
+  },
+  {
+    id: randomUUID(),
+    organizationId: ORG_A,
+    userId: ROJAS_ID,
     role: "dentist",
     createdAt: new Date(),
   },
@@ -751,6 +773,12 @@ await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
   specialtyRegistration: "RNE 1024",
 })
 await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_DENTIST, registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, ROJAS_ID, {
+  ...PERU_DENTIST,
+  signatureName: "Elena Rojas",
+  registrationNumber: "45678",
+  specialtyRegistration: "RNE 2048",
+})
 await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { ...PERU_DENTIST, registrationNumber: "34567" })
 await db.insert(orgProfile).values([
   {
@@ -1567,11 +1595,28 @@ const seedOffers: Array<{
     leavesFinding: { condition: "missing_tooth" },
   },
 ]
+// Cada clínica nace con las especialidades de la biblioteca (ADR 0039): el
+// servicio apunta a la suya por id.
+const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_SPECIALTIES)
+const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_SPECIALTIES)
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
-for (const offer of seedOffers) {
-  catalogA.push(await createService(db, ORG_A, ANA_ID, offer))
-  await createService(db, ORG_B, CORA_ID, offer)
+for (const { specialty, ...offer } of seedOffers) {
+  catalogA.push(await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }))
+  await createService(db, ORG_B, CORA_ID, { ...offer, specialtyId: specialtiesB.get(specialty) })
 }
+// Implantología sin nadie que la atienda (decisión 2 de la fase 4): la agenda
+// ofrece el implante a cualquiera y Especialidades lo avisa con «Elegir quién atiende».
+catalogA.push(
+  await createService(db, ORG_A, ANA_ID, {
+    code: "IMPLANTE",
+    name: "Implante dental de titanio",
+    specialtyId: specialtiesA.get("implantologia"),
+    scope: "tooth",
+    priceCents: 250000,
+    durationMin: 90,
+    priceDisclosure: "evaluacion",
+  }),
+)
 const serviceIdA = (code: string): string => {
   const found = catalogA.find((s) => s.code === code)
   if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
@@ -2629,6 +2674,13 @@ const domainSeed = {
 // Solo Miraflores lleva agenda: Surco se deja limpia (sin sillones, horarios ni ausencias)
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
 await db.transaction((tx) => seedAvailability(tx, domainSeed))
+// La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
+// (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
+await setProfessionalSchedule(db, ORG_A, ANA_ID, {
+  branchId: miraflores.id,
+  dentistUserId: ROJAS_ID,
+  rules: [2, 4].map((weekday) => ({ weekday, startMin: 14 * 60, endMin: 18 * 60 })),
+})
 const chairA = (index: number): string => {
   const chair = chairsMiraflores[index]
   if (!chair) throw new Error("Faltan sillones semilla")
@@ -2838,6 +2890,18 @@ for (const seed of [
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
+// Quién atiende qué (ADR 0039): la Dra. Rojas, Endodoncia; Ana, Cirugía oral
+// (la de la biblioteca, renombrada) y lo general; Luis, lo general.
+// Implantología queda sin nadie: la agenda ofrece a cualquiera y
+// Especialidades lo avisa.
+await db.transaction(async (tx) => {
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, ROJAS_ID, [specialtiesA.get("endodoncia")!])
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, ANA_ID, [
+    specialtiesA.get("cirugia")!,
+    specialtiesA.get("general")!,
+  ])
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, LUIS_ID, [specialtiesA.get("general")!])
+})
 // Firmado en papel (fase 3, paso 2B): la anestesia local de la exodoncia, con
 // la foto de la hoja firmada; el pendiente se cierra con método «papel».
 {

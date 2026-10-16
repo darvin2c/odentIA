@@ -27,6 +27,7 @@ import {
   secretsKeyFromEnv,
   sendOutbound,
   upsertAgentConfig,
+  librarySpecialtyIds,
 } from "@odentia/services"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -180,15 +181,20 @@ async function addServices(
     priceDisclosure: "exacto" | "desde" | "evaluacion"
   }>,
 ) {
+  // Cada servicio va a la especialidad de la clínica con esa clave de la biblioteca (ADR 0039).
+  const specialtyOf = await withOrgContext(appDb, ORG, (tx) =>
+    librarySpecialtyIds(tx, ORG, rows.map((row) => row.specialty)),
+  )
   await ownerDb
     .insert(serviceCatalog)
     .values(
-      rows.map((row) => ({
+      rows.map(({ specialty, ...row }) => ({
         organizationId: ORG,
         scope: "general",
         source: "custom",
         currency: "PEN",
         durationMin: 45,
+        specialtyId: specialtyOf.get(specialty) ?? null,
         ...row,
       })),
     )

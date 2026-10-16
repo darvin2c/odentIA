@@ -19,8 +19,10 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
     contacts: [],
   }, 201)
   const apiPath = `/api/patients/${patient.id}`
+  // La clínica nace con las especialidades de la biblioteca: el servicio apunta a la suya (ADR 0039).
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
   await call(page, "POST", "/api/services", org.slug, {
-    name: "Endodoncia multirradicular", specialty: "endodoncia", scope: "tooth", priceCents: 65000, currency: "PEN",
+    name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
   }, 201)
   const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Consulta" }, 201)
   await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {

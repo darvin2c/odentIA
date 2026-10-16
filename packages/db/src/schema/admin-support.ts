@@ -12,12 +12,12 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { organization, user } from "./auth.js"
-import { helpRequest } from "./workspace.js"
 
 /**
- * Casos de soporte de odentIA. Cada envío de la clínica (`help_request`) abre
- * o reutiliza su caso propio: los hilos son privados por organización y nunca
- * se mezclan entre clínicas. `organizationId` nulo = caso de acceso desde el
+ * Casos de soporte de odentIA: la única fuente de lo que una persona envía
+ * desde la Ayuda. Cada envío abre su caso, o se junta con el suyo que siga
+ * abierto: los hilos son privados por organización y nunca se mezclan entre
+ * clínicas. `organizationId` nulo = caso de acceso desde el
  * panel (sin clínica: problemas de entrada u onboarding).
  */
 export const supportCase = pgTable(
@@ -25,9 +25,6 @@ export const supportCase = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: text("organization_id").references(() => organization.id),
-    helpRequestId: uuid("help_request_id")
-      .references(() => helpRequest.id, { onDelete: "set null" })
-      .unique(),
     kind: text("kind").notNull().default("pregunta"),
     question: text("question").notNull(),
     detail: text("detail"),
@@ -218,6 +215,57 @@ export const supportAccessAudit = pgTable(
         supportAccessGrant.caseId,
         supportAccessGrant.organizationId,
       ],
+    }),
+  ],
+)
+
+/**
+ * Avisos por correo de un caso: a soporte cuando se abre o la clínica responde
+ * (`recipientUserId` nulo = el buzón de soporte, `SUPPORT_INBOX_EMAIL`) y a
+ * quien preguntó cuando soporte le responde y no lo vio. El correo solo avisa:
+ * no lleva el texto del caso. El aviso se guarda y se reclama antes de SMTP
+ * (pendiente → reclamado → enviado | incierto | omitido); un envío incierto no
+ * se reintenta. `dedupeKey` único impide dos correos por el mismo hecho. La
+ * aplicación solo los crea y lee: reclamar y cerrar es del worker (owner).
+ */
+export const supportNotice = pgTable(
+  "support_notice",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => supportCase.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id").references(() => organization.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").notNull(),
+    recipientUserId: text("recipient_user_id").references(() => user.id, { onDelete: "cascade" }),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    emailState: text("email_state").notNull().default("pendiente"),
+    emailedAt: timestamp("emailed_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("support_notice_case_idx").on(table.caseId, table.createdAt),
+    index("support_notice_state_idx").on(table.emailState, table.createdAt),
+    check(
+      "support_notice_kind_check",
+      sql`${table.kind} in ('caso_nuevo','clinica_respondio','respuesta','necesita_algo')`,
+    ),
+    check(
+      "support_notice_state_check",
+      sql`${table.emailState} in ('pendiente','reclamado','enviado','incierto','omitido')`,
+    ),
+    // A soporte van los avisos de la clínica; a la persona, los de soporte.
+    check(
+      "support_notice_recipient_check",
+      sql`(${table.kind} in ('caso_nuevo','clinica_respondio')) = (${table.recipientUserId} is null)`,
+    ),
+    foreignKey({
+      columns: [table.caseId, table.organizationId],
+      foreignColumns: [supportCase.id, supportCase.organizationId],
     }),
   ],
 )

@@ -9,7 +9,10 @@ export interface ServiceCatalogItem {
   source: "template" | "custom" | "legacy"
   code: string | null
   name: string
-  specialty: string | null
+  /** La especialidad de la clínica (una sola, ADR 0039). */
+  specialtyId: string | null
+  /** Su nombre en la clínica; llega en la lista y al pedir uno por id. */
+  specialtyName?: string | null
   scope: "general" | "tooth" | "surfaces" | "quadrant" | "arch" | null
   /** Toda prestación tiene tarifa explícita; 0 = incluida sin costo. */
   priceCents: number
@@ -56,40 +59,6 @@ export interface TreatmentTemplateCatalog {
   availableCount: number
 }
 
-export const TREATMENT_SPECIALTIES = [
-  "diagnostico",
-  "prevencion",
-  "restauradora",
-  "endodoncia",
-  "periodoncia",
-  "cirugia",
-  "protesis",
-  "implantologia",
-  "ortodoncia",
-  "odontopediatria",
-  "estetica",
-  "disfuncion",
-  "anestesia",
-  "general",
-] as const
-
-export const TREATMENT_SPECIALTY_LABELS: Record<string, string> = {
-  diagnostico: "Diagnóstico",
-  prevencion: "Prevención",
-  restauradora: "Restauradora",
-  endodoncia: "Endodoncia",
-  periodoncia: "Periodoncia",
-  cirugia: "Cirugía",
-  protesis: "Prótesis",
-  implantologia: "Implantología",
-  ortodoncia: "Ortodoncia",
-  odontopediatria: "Odontopediatría",
-  estetica: "Estética",
-  disfuncion: "Disfunción",
-  anestesia: "Anestesia y sedación",
-  general: "Servicios odontológicos generales",
-}
-
 export const TREATMENT_SCOPE_LABELS: Record<string, string> = {
   general: "General",
   tooth: "Por pieza",
@@ -97,15 +66,6 @@ export const TREATMENT_SCOPE_LABELS: Record<string, string> = {
   quadrant: "Por cuadrante",
   arch: "Por arcada",
 }
-
-/** Opciones del filtro de especialidad de tarifario y biblioteca. */
-export const SPECIALTY_FILTER_OPTIONS = [
-  { value: "todas", label: "Todas" },
-  ...TREATMENT_SPECIALTIES.map((specialty) => ({
-    value: specialty,
-    label: TREATMENT_SPECIALTY_LABELS[specialty] ?? specialty,
-  })),
-]
 
 /** Máximo entero admitido por la columna PG integer. */
 export const MAX_PRICE_CENTS = 2147483647
@@ -138,8 +98,11 @@ export function currencySymbol(currency: string, locale: string): string {
 
 export interface ServicesQuery {
   q?: string
-  specialty?: string
+  /** Especialidad de la clínica (id). */
+  specialtyId?: string
   state?: "active" | "inactive" | "legacy"
+  /** Solo estos servicios, en cualquier estado: para nombrar lo ya elegido. */
+  ids?: string[]
   cursor?: string
   limit?: number
 }
@@ -149,7 +112,9 @@ function toSearch(
 ): string {
   const search = new URLSearchParams()
   if (params.q) search.set("q", params.q)
-  if (params.specialty) search.set("specialty", params.specialty)
+  if ("specialty" in params && params.specialty) search.set("specialty", params.specialty)
+  if ("specialtyId" in params && params.specialtyId) search.set("specialtyId", params.specialtyId)
+  if ("ids" in params && params.ids?.length) search.set("ids", params.ids.join(","))
   if ("state" in params && params.state) search.set("state", params.state)
   if (params.cursor) search.set("cursor", params.cursor)
   if (params.limit) search.set("limit", String(params.limit))
@@ -157,13 +122,21 @@ function toSearch(
   return suffix ? `?${suffix}` : ""
 }
 
-/** Lista ofertas del tarifario con paginación por cursor estable. */
-export function fetchServices(
-  query: ServicesQuery = {},
-): Promise<{ data: ServiceCatalogItem[]; nextCursor: string | null }> {
-  return apiFetch<{ data: ServiceCatalogItem[]; nextCursor: string | null }>(
-    `/api/services${toSearch(query)}`,
-  )
+/** Una página del tarifario: lo que coincide, el cursor de la siguiente y cuántos son en total. */
+export interface ServicesPage {
+  data: ServiceCatalogItem[]
+  nextCursor: string | null
+  total: number
+}
+
+/** Lista ofertas del tarifario con paginación por cursor estable y el total de lo que coincide. */
+export function fetchServices(query: ServicesQuery = {}): Promise<ServicesPage> {
+  return apiFetch<ServicesPage>(`/api/services${toSearch(query)}`)
+}
+
+/** Un servicio por id, en cualquier estado: el que llega elegido aunque no esté en la primera página. */
+export function fetchService(id: string): Promise<{ data: ServiceCatalogItem }> {
+  return apiFetch<{ data: ServiceCatalogItem }>(`/api/services/${encodeURIComponent(id)}`)
 }
 
 /** Lista la biblioteca global de prestaciones (sin precios). */
@@ -196,7 +169,7 @@ export function fetchTreatmentTemplate(id: string): Promise<{ data: TreatmentTem
 export interface CreateServiceBody {
   templateId?: string | null
   name?: string | null
-  specialty?: string | null
+  specialtyId?: string | null
   scope?: string | null
   code?: string | null
   /** Obligatoria: 0 si la prestación va incluida sin costo. */
@@ -220,7 +193,7 @@ export function createServiceApi(body: CreateServiceBody): Promise<{ data: Servi
 export interface UpdateServiceBody {
   templateId?: string | null
   name?: string
-  specialty?: string
+  specialtyId?: string
   scope?: string
   code?: string | null
   priceCents?: number
@@ -296,7 +269,8 @@ export interface TemplateServiceBody {
 export interface CustomServiceBody {
   kind: "custom"
   name: string
-  specialty: string
+  /** Especialidad de la clínica. */
+  specialtyId: string
   scope: string
   priceCents: number
   billingMode?: BillingMode | null

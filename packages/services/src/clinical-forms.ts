@@ -28,7 +28,6 @@ import {
   consentTemplateService,
   orgSpecialty,
   professionalSpecialty,
-  serviceSpecialty,
 } from "@odentia/db/schema/clinical-forms"
 import { canAccess } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
@@ -372,52 +371,83 @@ export async function listSpecialtyProfessionals(
     )
 }
 
-export async function setServiceSpecialties(
+/**
+ * Quiénes atienden una especialidad, de una vez: la lista completa que sale
+ * del formulario de Especialidades («Elegir quién atiende»). Quien no está en
+ * la lista deja de atenderla; sus otras especialidades no cambian.
+ */
+export async function setSpecialtyProfessionals(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  serviceId: string,
-  specialtyIds: string[],
-): Promise<{ serviceId: string; specialtyIds: string[] }> {
-  const [service] = await tx
-    .select({ id: serviceCatalog.id })
-    .from(serviceCatalog)
-    .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
-    .limit(1)
-  if (!service) throw notFound("Prestación")
-  const unique = [...new Set(specialtyIds)]
-  if (unique.length > 10) throw validation("Máximo 10 especialidades por prestación")
-  for (const id of unique) await requireSpecialty(tx, orgId, id)
+  specialtyId: string,
+  userIds: string[],
+): Promise<{ specialtyId: string; userIds: string[] }> {
+  await requireSpecialty(tx, orgId, specialtyId)
+  const unique = [...new Set(userIds)]
+  if (unique.length > 100) throw validation("Máximo 100 profesionales por especialidad")
+  for (const userId of unique) await requireMemberUserId(tx, orgId, userId)
   await tx
-    .delete(serviceSpecialty)
+    .delete(professionalSpecialty)
     .where(
-      and(eq(serviceSpecialty.organizationId, orgId), eq(serviceSpecialty.serviceId, serviceId)),
+      and(
+        eq(professionalSpecialty.organizationId, orgId),
+        eq(professionalSpecialty.specialtyId, specialtyId),
+      ),
     )
   if (unique.length > 0) {
-    await tx.insert(serviceSpecialty).values(
-      unique.map((specialtyId) => ({ organizationId: orgId, specialtyId, serviceId })),
-    )
+    await tx
+      .insert(professionalSpecialty)
+      .values(unique.map((userId) => ({ organizationId: orgId, specialtyId, userId })))
   }
-  await audit(tx, orgId, actorUserId, "specialty.services", "service_catalog", serviceId, {
-    specialtyIds: unique,
+  await audit(tx, orgId, actorUserId, "specialty.attended_by", "org_specialty", specialtyId, {
+    userIds: unique,
   })
-  return { serviceId, specialtyIds: unique }
+  return { specialtyId, userIds: unique }
 }
 
-export async function listServiceSpecialties(
-  tx: Db,
-  orgId: string,
-  serviceId: string,
-): Promise<SpecialtyRow[]> {
-  const rows = await tx
-    .select({ specialty: orgSpecialty })
-    .from(serviceSpecialty)
-    .innerJoin(orgSpecialty, eq(serviceSpecialty.specialtyId, orgSpecialty.id))
+export interface SpecialtyOverview extends SpecialtyRow {
+  /** Quienes la atienden, por nombre. */
+  professionals: Array<{ userId: string; name: string }>
+  /** Servicios activos de la clínica con esta especialidad. */
+  serviceCount: number
+}
+
+/**
+ * Configuración › Especialidades: cada especialidad con quién la atiende y
+ * cuántos servicios activos tiene. Sin nadie que la atienda, la agenda ofrece
+ * esos servicios a cualquiera (decisión 2 de la fase 4): la pantalla lo avisa.
+ */
+export async function listSpecialtiesOverview(tx: Db, orgId: string): Promise<SpecialtyOverview[]> {
+  const specialties = await listSpecialties(tx, orgId)
+  if (specialties.length === 0) return []
+  const professionals = await tx
+    .select({ specialtyId: professionalSpecialty.specialtyId, userId: professionalSpecialty.userId, name: user.name })
+    .from(professionalSpecialty)
+    .innerJoin(user, eq(user.id, professionalSpecialty.userId))
+    // Solo quien sigue en la clínica.
+    .innerJoin(member, and(eq(member.userId, professionalSpecialty.userId), eq(member.organizationId, orgId)))
+    .where(eq(professionalSpecialty.organizationId, orgId))
+    .orderBy(asc(user.name))
+  const counts = await tx
+    .select({ specialtyId: serviceCatalog.specialtyId, count: sql<number>`count(*)::int` })
+    .from(serviceCatalog)
     .where(
-      and(eq(serviceSpecialty.organizationId, orgId), eq(serviceSpecialty.serviceId, serviceId)),
+      and(
+        eq(serviceCatalog.organizationId, orgId),
+        eq(serviceCatalog.isActive, true),
+        sql`${serviceCatalog.source} <> 'legacy'`,
+      ),
     )
-    .orderBy(asc(orgSpecialty.name))
-  return rows.map((r) => r.specialty)
+    .groupBy(serviceCatalog.specialtyId)
+  const countOf = new Map(counts.map((row) => [row.specialtyId, row.count]))
+  return specialties.map((specialty) => ({
+    ...specialty,
+    professionals: professionals
+      .filter((row) => row.specialtyId === specialty.id)
+      .map((row) => ({ userId: row.userId, name: row.name })),
+    serviceCount: countOf.get(specialty.id) ?? 0,
+  }))
 }
 
 // ---------------------------------------------------------------------------

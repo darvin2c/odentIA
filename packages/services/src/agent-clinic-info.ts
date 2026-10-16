@@ -1,12 +1,12 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
-import { type PriceDisclosure, serviceCatalog } from "@odentia/db/schema/clinical"
+import { professionalSpecialty } from "@odentia/db/schema/clinical-forms"
+import { orgSpecialty, type PriceDisclosure, serviceCatalog } from "@odentia/db/schema/clinical"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, isNull, lt, ne } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
-import { TREATMENT_SPECIALTY_NAMES, type TreatmentSpecialty } from "@odentia/clinical"
+import { createHash } from "node:crypto"
 import { normalizeForSearch } from "./knowledge.js"
 import { formatOrgMoney, type OrgLocale } from "./locale.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -52,7 +52,10 @@ export interface AgentPrice {
 export interface AgentServiceInfo {
   id: string
   name: string
+  /** La especialidad de la clínica, con su nombre (ADR 0039). */
   specialty: string | null
+  /** Su clave de la biblioteca: las palabras de la calle del índice van con ella. */
+  specialtyKey: string | null
   durationMin: number | null
   price: AgentPrice
 }
@@ -85,6 +88,11 @@ export interface AgentBranchHours {
 export interface AgentProfessionalInfo {
   /** Usuario del profesional: solo para encontrarlo, nunca se le dice al modelo. */
   id: string
+  /**
+   * Lo que sí se le dice al modelo: un identificador que solo sirve para
+   * pedir los huecos de esa persona en `buscar_huecos` (decisión 16).
+   */
+  ref: string
   name: string
   specialties: string[]
   where: Array<{ branchName: string; weekdays: number[] }>
@@ -169,6 +177,26 @@ export async function getBranchHours(tx: Db, orgId: string, now = new Date()): P
 }
 
 /**
+ * Identificador del profesional para el agente: no es su usuario y solo
+ * sirve para pedir sus huecos (`resolveProfessionalRef`). Estable por
+ * clínica, así vale entre turnos.
+ */
+export function professionalRef(orgId: string, userId: string): string {
+  return `pro-${createHash("sha256").update(`${orgId}:${userId}`).digest("hex").slice(0, 10)}`
+}
+
+/** El profesional con ese identificador, si tiene horario en la clínica; nulo si no es de nadie. */
+export async function resolveProfessionalRef(tx: Db, orgId: string, ref: string): Promise<string | null> {
+  const wanted = ref.trim()
+  if (!/^pro-[0-9a-f]{10}$/.test(wanted)) return null
+  const rows = await tx
+    .selectDistinct({ userId: professionalSchedule.dentistUserId })
+    .from(professionalSchedule)
+    .where(and(eq(professionalSchedule.organizationId, orgId), eq(professionalSchedule.isActive, true)))
+  return rows.find((row) => professionalRef(orgId, row.userId) === wanted)?.userId ?? null
+}
+
+/**
  * Quien atiende: los profesionales con horario activo, con sus especialidades
  * y en qué sede y qué días. Solo nombre y especialidad; nada más de la persona.
  */
@@ -204,6 +232,7 @@ export async function listAgentProfessionals(tx: Db, orgId: string): Promise<Age
     if (!item) {
       item = {
         id: row.userId,
+        ref: professionalRef(orgId, row.userId),
         name: row.name,
         specialties: specialties.filter((s) => s.userId === row.userId).map((s) => s.name),
         where: [],
@@ -240,7 +269,8 @@ export async function listAgentServices(
     .select({
       id: serviceCatalog.id,
       name: serviceCatalog.name,
-      specialty: serviceCatalog.specialty,
+      specialty: orgSpecialty.name,
+      specialtyKey: orgSpecialty.key,
       durationMin: serviceCatalog.durationMin,
       priceCents: serviceCatalog.priceCents,
       currency: serviceCatalog.currency,
@@ -253,6 +283,10 @@ export async function listAgentServices(
     })
     .from(serviceCatalog)
     .leftJoin(
+      orgSpecialty,
+      and(eq(orgSpecialty.organizationId, serviceCatalog.organizationId), eq(orgSpecialty.id, serviceCatalog.specialtyId)),
+    )
+    .leftJoin(
       evaluationService,
       and(eq(evaluationService.id, serviceCatalog.evaluationServiceId), eq(evaluationService.organizationId, orgId)),
     )
@@ -263,6 +297,7 @@ export async function listAgentServices(
     id: row.id,
     name: row.name,
     specialty: row.specialty,
+    specialtyKey: row.specialtyKey,
     durationMin: row.durationMin,
     price: {
       disclosure: row.disclosure as PriceDisclosure,
@@ -390,7 +425,7 @@ export function formatProfessional(item: AgentProfessionalInfo): string {
   const where = item.where
     .map((place) => `${place.branchName}: ${place.weekdays.map((day) => WEEKDAY_NAMES[day]).join(", ")}`)
     .join("; ")
-  return `- ${item.name}${specialties}. ${where}.`
+  return `- ${item.name}${specialties}. ${where}. [profesional ${item.ref}: solo para pedir sus horas; no lo escribas]`
 }
 
 /* ---------- Buscar en la clínica ---------- */
@@ -622,8 +657,8 @@ export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean
 export function formatServiceIndex(services: AgentServiceInfo[]): string[] {
   const groups = new Map<string, string[]>()
   for (const service of services.slice(0, SERVICES_IN_INDEX)) {
-    const key = service.specialty ?? ""
-    const name = TREATMENT_SPECIALTY_NAMES[key as TreatmentSpecialty] ?? (key || "Otros")
+    // El nombre que la clínica le da a su especialidad: el mismo que dice el profesional.
+    const name = service.specialty ?? "Otros"
     const list = groups.get(name) ?? []
     list.push(service.name)
     groups.set(name, list)

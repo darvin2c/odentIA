@@ -3,7 +3,6 @@ import { agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agen
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { helpRequest } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, gt } from "drizzle-orm"
 import { updateAdminSettings } from "./agent-admin.js"
 import { upsertAgentConfig } from "./agentConfig.js"
@@ -414,20 +413,4 @@ export async function seedAgent(
       },
     ])
     .onConflictDoNothing({ target: agentPersonFact.id })
-  // Ayuda: una pregunta que odentIA ya respondió; el botón de Ayuda muestra el aviso.
-  await tx
-    .insert(helpRequest)
-    .values({
-      id: "00000000-0000-4000-8000-00000000f501",
-      organizationId: orgId,
-      userId: ownerUserId,
-      question: "¿Cómo exporto mis pacientes a Excel?",
-      screen: "/patients",
-      role: "Propietario",
-      dedupeKey: "seed-exportar-pacientes",
-      status: "respondida",
-      answer: "Todavía no se puede exportar la lista de pacientes. Lo anotamos para una próxima versión.",
-      answeredAt: new Date(Date.now() - 86_400_000),
-    })
-    .onConflictDoNothing({ target: helpRequest.id })
 }

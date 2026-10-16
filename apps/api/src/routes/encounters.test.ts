@@ -310,10 +310,10 @@ beforeAll(async () => {
         on conflict ("code") do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values
-        ('c1111111-1111-4111-8111-111111111111', 'org_a', 'custom', 'CORONA', 'Corona cerámica', 'protesis', 'tooth', 90000, 'PEN', 60, true),
-        ('c4444444-4444-4444-8444-444444444444', 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'protesis', 'tooth', 1000, 'PEN', 30, false),
-        ('d5555555-5555-4555-8555-555555555555', 'org_b', 'custom', 'OTRO', 'Otro servicio', 'protesis', 'tooth', 999, 'PEN', 15, true)
+    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "duration_min", "is_active") values
+        ('c1111111-1111-4111-8111-111111111111', 'org_a', 'custom', 'CORONA', 'Corona cerámica', 'tooth', 90000, 'PEN', 60, true),
+        ('c4444444-4444-4444-8444-444444444444', 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'tooth', 1000, 'PEN', 30, false),
+        ('d5555555-5555-4555-8555-555555555555', 'org_b', 'custom', 'OTRO', 'Otro servicio', 'tooth', 999, 'PEN', 15, true)
         on conflict ("id") do nothing`,
   )
 }, 180_000)

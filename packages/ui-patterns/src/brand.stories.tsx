@@ -24,5 +24,5 @@ export const Temas: Story = {
 }
 
 export const Acceso: Story = {
-  render: () => <AuthSplit title="Inicia sesión" description="Accede a tu espacio de Odentia32"><label className="flex flex-col gap-2">Correo electrónico<input type="email" className="rounded-md border p-2" /></label></AuthSplit>,
+  render: () => <AuthSplit title="Inicia sesión" description="Accede a tu espacio de odentIA"><label className="flex flex-col gap-2">Correo electrónico<input type="email" className="rounded-md border p-2" /></label></AuthSplit>,
 }

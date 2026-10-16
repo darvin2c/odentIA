@@ -14,6 +14,7 @@ import { clinicalFixture } from "./clinical-test-fixture.js"
 import { getOpportunity, noteServiceInterest } from "./opportunities.js"
 import { addPlanItem } from "./plan.js"
 import { quickAddServices, setServicesPriceDisclosure } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -118,7 +119,6 @@ it("«Cómo dice el precio» se cambia para varios servicios a la vez, solo de l
       ["Uno", "Dos", "Tres"].map((name) => ({
         organizationId: "org_a",
         name: `Bloque ${name} ${f.actor.slice(0, 6)}`,
-        specialty: "general",
         scope: "general",
         source: "custom",
         priceCents: 10000,
@@ -177,7 +177,7 @@ it("«Cómo dice el precio» se cambia para varios servicios a la vez, solo de l
 it("lo que se agrega de una vez dice el precio como se eligió al agregarlo", async () => {
   const f = await clinicalFixture()
   const run = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
-  const added = await run((tx) =>
+  const added = await run(async (tx) =>
     quickAddServices(
       tx,
       "org_a",
@@ -186,7 +186,7 @@ it("lo que se agrega de una vez dice el precio como se eligió al agregarlo", as
         {
           kind: "custom",
           name: `Agregado ${f.actor.slice(0, 6)}`,
-          specialty: "general",
+          specialtyId: (await librarySpecialtyIds(tx, "org_a", ["general"])).get("general")!,
           scope: "general",
           priceCents: 9000,
         },
@@ -196,12 +196,12 @@ it("lo que se agrega de una vez dice el precio como se eligió al agregarlo", as
   )
   expect(added.created.map((row) => row.priceDisclosure)).toEqual(["exacto"])
   // Sin elegir, como cualquier servicio nuevo, nace «Solo con evaluación».
-  const plain = await run((tx) =>
+  const plain = await run(async (tx) =>
     quickAddServices(tx, "org_a", f.actor, [
       {
         kind: "custom",
         name: `Sin elegir ${f.actor.slice(0, 6)}`,
-        specialty: "general",
+        specialtyId: (await librarySpecialtyIds(tx, "org_a", ["general"])).get("general")!,
         scope: "general",
         priceCents: 9000,
       },

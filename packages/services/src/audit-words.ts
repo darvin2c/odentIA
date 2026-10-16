@@ -445,6 +445,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "specialty.create": say("Creó una especialidad"),
   "specialty.update": say("Cambió una especialidad"),
   "specialty.professionals": say("Cambió las especialidades de un profesional"),
+  "specialty.attended_by": say("Cambió quién atiende una especialidad"),
   "specialty.services": say("Cambió las especialidades de un servicio"),
   "form_template.create": say("Creó el borrador de una plantilla de formulario"),
   "form_template.update": say("Editó el borrador de una plantilla de formulario"),

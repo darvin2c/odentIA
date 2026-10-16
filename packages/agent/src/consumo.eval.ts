@@ -56,6 +56,7 @@ import {
   tickAutomations,
   updateAdminSettings,
   upsertAgentConfig,
+  librarySpecialtyIds,
 } from "@odentia/services"
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -324,19 +325,21 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
       rules: [2, 4].map((weekday) => ({ weekday, startMin: 15 * 60, endMin: 19 * 60 })),
     }))
   await inOrg(async (tx) => {
-    for (const service of [
+    // Cada servicio va a la especialidad de la clínica con esa clave de la biblioteca (ADR 0039).
+    const specialtyOf = await librarySpecialtyIds(tx, ORG, CATALOG.map(([key]) => key).concat(["diagnostico", "prevencion", "endodoncia", "estetica", "ortodoncia"]))
+    for (const { specialty, ...service } of [
       { name: "Consulta de evaluación", specialty: "diagnostico", scope: "general", priceCents: 5000, durationMin: 30 },
       { name: "Limpieza dental", specialty: "prevencion", scope: "general", priceCents: 12000, durationMin: 40 },
       { name: "Endodoncia (tratamiento de conducto)", specialty: "endodoncia", scope: "tooth", priceCents: 45000, durationMin: 60 },
       { name: "Blanqueamiento", specialty: "estetica", scope: "general", priceCents: 60000, durationMin: 60 },
       { name: "Control de ortodoncia", specialty: "ortodoncia", scope: "general", priceCents: 8000, durationMin: 20 },
-    ]) await createService(tx, ORG, owner, service)
+    ]) await createService(tx, ORG, owner, { ...service, specialtyId: specialtyOf.get(specialty) })
     if (BIG_CATALOG) {
       let price = 4000
       for (const [specialty, scope, names] of CATALOG) {
         for (const name of names) {
           price += 1500
-          await createService(tx, ORG, owner, { name, specialty, scope, priceCents: price, durationMin: 30 })
+          await createService(tx, ORG, owner, { name, specialtyId: specialtyOf.get(specialty), scope, priceCents: price, durationMin: 30 })
         }
       }
     }

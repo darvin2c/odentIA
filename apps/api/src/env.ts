@@ -16,6 +16,11 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASS: z.string().optional().default(""),
   SMTP_FROM: z.string().min(1),
+  /**
+   * Buzón de soporte de odentIA. Los avisos los envía el worker; aquí se
+   * valida igual para que una dirección mal escrita falle al arrancar.
+   */
+  SUPPORT_INBOX_EMAIL: z.union([z.literal(""), z.email()]).default(""),
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().min(1).default("auto"),
   S3_ACCESS_KEY: z.string().min(1),

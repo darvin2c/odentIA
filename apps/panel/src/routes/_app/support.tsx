@@ -9,6 +9,9 @@ import { accountOrganizationsQuery } from "../../lib/account-organizations"
 import { API_URL } from "../../lib/auth-client"
 
 export const Route = createFileRoute("/_app/support")({
+  // `?caso=<id>`: el enlace del aviso por correo abre ese caso.
+  validateSearch: (search: Record<string, unknown>): { caso?: string } =>
+    typeof search.caso === "string" && search.caso ? { caso: search.caso } : {},
   component: AccountSupportPage,
 })
 
@@ -167,7 +170,8 @@ function AccountGrantBox({
 
 function AccountSupportPage() {
   const queryClient = useQueryClient()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const linkedCase = Route.useSearch().caso ?? null
+  const [selectedId, setSelectedId] = useState<string | null>(linkedCase)
   const [question, setQuestion] = useState("")
   const [detailText, setDetailText] = useState("")
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})

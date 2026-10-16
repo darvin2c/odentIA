@@ -239,9 +239,9 @@ beforeAll(async () => {
       (${BRANCH_A}, ${ORG_A}, 'Miraflores'),
       (${BRANCH_B}, ${ORG_B}, 'Surco')`)
   await ownerDb.execute(sql`
-    insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "is_active") values
-      (${SVC_A}, ${ORG_A}, 'custom', 'FIN-ACC', 'Resina acceso', 'restauradora', 'tooth', 33000, 'PEN', true),
-      (${SVC_B}, ${ORG_B}, 'custom', 'FIN-ACC', 'Resina acceso', 'restauradora', 'general', 33000, 'PEN', true)`)
+    insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "is_active") values
+      (${SVC_A}, ${ORG_A}, 'custom', 'FIN-ACC', 'Resina acceso', 'tooth', 33000, 'PEN', true),
+      (${SVC_B}, ${ORG_B}, 'custom', 'FIN-ACC', 'Resina acceso', 'general', 33000, 'PEN', true)`)
   // Medios reales por servicio (no seed): efectivo, tarjeta y uno apagado.
   const cash = await withOrgContext(appDb, ORG_A, (tx) =>
     createPaymentMethod(tx, ORG_A, ADMIN, { name: "Efectivo", typeCode: "10" }),

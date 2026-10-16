@@ -5,8 +5,9 @@ import { professionalSchedule } from "@odentia/db/schema/availability"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
-import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
+import { helpAsk } from "@odentia/db/schema/workspace"
 import { and, count, eq, gte } from "drizzle-orm"
+import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
   type HelpTopic,
@@ -227,73 +228,32 @@ export async function describeHelpAttachments(
   }
 }
 
-export interface HelpRequestItem {
-  id: string
-  kind: "pregunta" | "problema"
-  question: string
-  screen: string
-  status: "abierta" | "respondida"
-  answer: string | null
-  answeredAt: string | null
-  seen: boolean
-  createdAt: string
-}
-
-/** Clave de agrupación de una pregunta: la reutiliza el caso de soporte vinculado al envío. */
+/** Clave de agrupación de una pregunta: la usa el caso de soporte para juntar envíos repetidos. */
 export const helpDedupeKeyOf = (question: string): string =>
   createHash("sha256").update(normalizeForSearch(question)).digest("hex").slice(0, 32)
 
-function toRequest(row: typeof helpRequest.$inferSelect): HelpRequestItem {
-  return {
-    id: row.id,
-    kind: row.kind as HelpRequestItem["kind"],
-    question: row.question,
-    screen: row.screen,
-    status: row.status as HelpRequestItem["status"],
-    answer: row.answer,
-    answeredAt: row.answeredAt?.toISOString() ?? null,
-    seen: row.seenAt !== null,
-    createdAt: row.createdAt.toISOString(),
-  }
-}
-
 /**
  * La persona decide enviar su pregunta (o un problema) a odentIA. Va su texto,
- * la pantalla, su rol y la versión; nada de pacientes. Enviar dos veces la
- * misma pregunta abierta no crea otra.
+ * la pantalla, su rol y la versión; nada de pacientes. Abre su caso de soporte,
+ * que es la única fuente: enviar dos veces la misma pregunta mientras su caso
+ * sigue abierto no crea otro, y repetirla después de resuelta abre uno nuevo.
  */
 export async function sendHelpRequest(
   tx: Db,
   orgId: string,
   asker: Pick<HelpAsker, "userId" | "roleLabel">,
   input: { question: unknown; screen: unknown; kind?: unknown; detail?: unknown; appVersion?: string | null },
-): Promise<HelpRequestItem> {
+): Promise<SupportCaseListItem & { reused: boolean }> {
   if (typeof input.question !== "string" || input.question.trim().length < 3) throw validation("Escribe lo que quieres preguntar")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
-  const kind = input.kind === "problema" ? "problema" : "pregunta"
-  const dedupeKey = helpDedupeKeyOf(question)
-  const [open] = await tx
-    .select()
-    .from(helpRequest)
-    .where(and(eq(helpRequest.organizationId, orgId), eq(helpRequest.userId, asker.userId), eq(helpRequest.dedupeKey, dedupeKey), eq(helpRequest.status, "abierta")))
-    .limit(1)
-  if (open) return toRequest(open)
-  const [row] = await tx
-    .insert(helpRequest)
-    .values({
-      organizationId: orgId,
-      userId: asker.userId,
-      kind,
-      question,
-      detail: typeof input.detail === "string" && input.detail.trim() ? input.detail.trim().slice(0, 500) : null,
-      screen: typeof input.screen === "string" ? input.screen.slice(0, 200) : "/",
-      role: asker.roleLabel,
-      appVersion: input.appVersion ?? null,
-      dedupeKey,
-    })
-    .returning()
-  if (!row) throw new Error("No se pudo enviar la pregunta")
-  return toRequest(row)
+  return openSupportCaseFromHelp(tx, orgId, {
+    userId: asker.userId,
+    kind: input.kind === "problema" ? "problema" : "pregunta",
+    question,
+    detail: typeof input.detail === "string" && input.detail.trim() ? input.detail.trim().slice(0, 500) : null,
+    screen: typeof input.screen === "string" ? input.screen.slice(0, 200) : "/",
+    role: asker.roleLabel,
+    appVersion: input.appVersion ?? null,
+    dedupeKey: helpDedupeKeyOf(question),
+  })
 }
-
-

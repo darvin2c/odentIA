@@ -8,6 +8,13 @@ const envSchema = z.object({
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
+  /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
+  ADMIN_URL: z.string().url(),
+  /**
+   * Buzón de soporte de odentIA: recibe «Caso nuevo» y «La clínica respondió».
+   * Vacío: esos avisos quedan pendientes (el caso sigue en la bandeja de Soporte).
+   */
+  SUPPORT_INBOX_EMAIL: z.union([z.literal(""), z.email()]).default(""),
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int(),
   SMTP_USER: z.string().default(""),

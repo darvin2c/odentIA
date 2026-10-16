@@ -39,7 +39,7 @@ import {
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ChevronDown, Plus, Tag } from "lucide-react"
@@ -47,9 +47,10 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useSta
 import { z } from "zod"
 import { conditionLabel, formatMoney, formatMoneyInput, parseMoney, variantLabel } from "@odentia/clinical"
 import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
-import { ChoiceSelect } from "../../components/ui/choice-select"
+import { ServiceSelect } from "../../components/service-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
+import { specialtyNameByKey, useClinicSpecialties } from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { PageDraftGuard } from "../../lib/page-draft-guard"
@@ -67,10 +68,7 @@ import {
   fetchTreatmentTemplates,
   type ServiceCatalogItem,
   SERVICE_PLACE_OPTIONS,
-  SPECIALTY_FILTER_OPTIONS,
   TREATMENT_SCOPE_LABELS,
-  TREATMENT_SPECIALTIES,
-  TREATMENT_SPECIALTY_LABELS,
   type TreatmentTemplateItem,
   updateServiceApi,
 } from "../../lib/services"
@@ -81,6 +79,11 @@ function FieldError({ errors }: { errors: unknown }) {
 }
 
 export const Route = createFileRoute("/_org/services/")({
+  /** Los filtros los lee `useListSearch`; aquí solo se tipa la especialidad para los enlaces (Especialidades abre la lista filtrada). */
+  validateSearch: (search: Record<string, unknown>): { especialidad?: string } => ({
+    ...search,
+    especialidad: typeof search.especialidad === "string" ? search.especialidad : undefined,
+  }),
   component: TarifarioPage,
 })
 
@@ -113,6 +116,9 @@ function stateLabel(state: string): string {
 }
 
 /* ------------------------------- Tarifario -------------------------------- */
+
+/** Servicios por página del tarifario: el resto llega con «Cargar más». */
+const TARIFARIO_PAGE = 100
 
 /** Oferta abierta en la superficie lateral del tarifario, o el alta de una nueva. */
 type EditorTarget = { kind: "offer"; id: string } | { kind: "create" }
@@ -157,19 +163,35 @@ function TarifarioPage() {
     setSelected([])
   }, [search, specialtyFilter, estadoFilter])
 
-  const pagesQuery = useQuery({
+  // Las especialidades de la clínica: el filtro y el formulario usan la misma lista (ADR 0039).
+  const specialtiesQuery = useClinicSpecialties({ enabled: canViewTariff })
+  const specialties = useMemo(() => specialtiesQuery.data?.data ?? [], [specialtiesQuery.data])
+  const specialtyOptions = useMemo(
+    () => [
+      { value: "todas", label: "Todas" },
+      ...specialties.map((item) => ({ value: item.id, label: item.name })),
+    ],
+    [specialties],
+  )
+
+  // El tarifario entero, por páginas y con su total: nunca un tope mudo (tope B1 de la fase 4).
+  const pagesQuery = useInfiniteQuery({
     queryKey: ["services", "tarifario", search, specialtyFilter, estadoFilter],
     enabled: canViewTariff,
-    queryFn: () =>
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
       fetchServices({
         q: search.trim() || undefined,
-        specialty: specialtyFilter === "todas" ? undefined : specialtyFilter,
+        specialtyId: specialtyFilter === "todas" ? undefined : specialtyFilter,
         state: estadoFilter as "active" | "inactive" | "legacy",
-        limit: 100,
+        limit: TARIFARIO_PAGE,
+        cursor: pageParam ?? undefined,
       }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
   })
 
-  const rows = useMemo(() => pagesQuery.data?.data ?? [], [pagesQuery.data])
+  const rows = useMemo(() => (pagesQuery.data?.pages ?? []).flatMap((page) => page.data), [pagesQuery.data])
+  const total = pagesQuery.data?.pages[0]?.total ?? 0
   /** Fila vigente de la oferta abierta: si el filtro la deja fuera, no hay detalle. */
   const editing =
     target?.kind === "offer" ? (rows.find((row) => row.id === target.id) ?? null) : null
@@ -192,15 +214,20 @@ function TarifarioPage() {
     })
   }, [rows, sortParam])
 
+  // Agrupado por la especialidad de la clínica, con su nombre.
   const groups = useMemo(() => {
-    const map = new Map<string, ServiceCatalogItem[]>()
+    const map = new Map<string, { label: string; rows: ServiceCatalogItem[] }>()
     for (const row of sortedRows) {
-      const key = row.source === "legacy" ? "legacy" : (row.specialty ?? "sin-especialidad")
-      const list = map.get(key) ?? []
-      list.push(row)
-      map.set(key, list)
+      const key = row.source === "legacy" ? "legacy" : (row.specialtyId ?? "sin-especialidad")
+      const label =
+        key === "legacy" ? "Pendientes de revisar" : (row.specialtyName ?? "Sin especialidad")
+      const group = map.get(key) ?? { label, rows: [] }
+      group.rows.push(row)
+      map.set(key, group)
     }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
+    return [...map.entries()].sort(([a, x], [b, y]) =>
+      a === "legacy" ? 1 : b === "legacy" ? -1 : x.label.localeCompare(y.label, "es"),
+    )
   }, [sortedRows])
 
   const disclosureMutation = useMutation({
@@ -492,7 +519,7 @@ function TarifarioPage() {
               key: "especialidad",
               label: "Especialidad",
               type: "select",
-              options: SPECIALTY_FILTER_OPTIONS,
+              options: specialtyOptions,
             },
             { key: "estado", label: "Estado", type: "select", options: STATE_OPTIONS },
           ]}
@@ -531,28 +558,39 @@ function TarifarioPage() {
           />
         ) : (
           <div className="flex min-w-0 flex-col gap-6">
-            {groups.map(([key, groupRows]) => (
-              <section
-                key={key}
-                aria-label={
-                  key === "legacy"
-                    ? "Pendientes de revisar"
-                    : (TREATMENT_SPECIALTY_LABELS[key] ?? key)
-                }
-              >
-                <h3 className="mb-2 text-sm font-semibold">
-                  {key === "legacy"
-                    ? "Pendientes de revisar"
-                    : (TREATMENT_SPECIALTY_LABELS[key] ?? "Sin especialidad")}
-                </h3>
+            {groups.map(([key, group]) => (
+              <section key={key} aria-label={group.label}>
+                <h3 className="mb-2 text-sm font-semibold">{group.label}</h3>
                 <GroupTable
-                  rows={groupRows}
+                  rows={group.rows}
                   columns={columns}
                   onSelect={openOffer}
                   activeId={activeOfferId}
                 />
               </section>
             ))}
+            {pagesQuery.isFetchNextPageError ? (
+              <p role="alert" className="text-sm text-destructive">
+                No se pudieron cargar más servicios; se conservan los cargados.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm text-muted-foreground" role="status">
+                {`Mostrando ${rows.length} de ${total} ${total === 1 ? "servicio" : "servicios"}`}
+              </p>
+              {pagesQuery.hasNextPage ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11 sm:min-h-8"
+                  disabled={pagesQuery.isFetchingNextPage}
+                  onClick={() => void pagesQuery.fetchNextPage()}
+                >
+                  {pagesQuery.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+                </Button>
+              ) : null}
+            </div>
           </div>
         )}
       </MasterDetail>
@@ -661,7 +699,7 @@ const offerSchema = z.object({
     },
     { message: "Duración: minutos enteros entre 1 y 1440" },
   ),
-  specialty: z.string().min(1, "Elige la especialidad"),
+  specialtyId: z.string().min(1, "Elige la especialidad"),
   scope: z.string().min(1, "Elige el ámbito"),
   billingMode: z.enum(["treatment", "session"]),
   priceDisclosure: z.enum(["exacto", "desde", "evaluacion"]),
@@ -679,7 +717,7 @@ const emptyOfferValues: OfferFormValues = {
   code: "",
   price: "",
   durationMin: "",
-  specialty: "",
+  specialtyId: "",
   scope: "",
   billingMode: "treatment",
   // Un servicio nuevo nace «solo con evaluación»: la clínica habilita el precio donde quiera.
@@ -697,7 +735,7 @@ function offerValues(offer: ServiceCatalogItem | null, locale: string): OfferFor
     code: offer.code ?? "",
     price: formatMoneyInput(offer.priceCents, offer.currency, locale),
     durationMin: offer.durationMin === null ? "" : String(offer.durationMin),
-    specialty: offer.specialty ?? "",
+    specialtyId: offer.specialtyId ?? "",
     scope: offer.scope ?? "",
     billingMode: offer.billingMode ?? "treatment",
     priceDisclosure: offer.priceDisclosure ?? "exacto",
@@ -818,12 +856,13 @@ function OfferEditor({
         leavesFinding: leavesFindingBody(values.leavesCondition, values.leavesVariant),
       }
       if (!offer) {
-        return createServiceApi({ ...body, specialty: values.specialty, scope: values.scope })
+        return createServiceApi({ ...body, specialtyId: values.specialtyId, scope: values.scope })
       }
       return updateServiceApi(offer.id, {
         ...body,
-        // Especialidad y ámbito de una oferta de la biblioteca vienen de su plantilla.
-        ...(isTemplate ? {} : { specialty: values.specialty, scope: values.scope }),
+        // La especialidad se elige siempre aquí; el ámbito de una oferta de la biblioteca viene de su plantilla.
+        ...(values.specialtyId ? { specialtyId: values.specialtyId } : {}),
+        ...(isTemplate ? {} : { scope: values.scope }),
         // Confirmar una heredada como propia la desvincula y la deja activa.
         ...(isLegacy ? { templateId: null, isActive: true } : {}),
       })
@@ -1012,11 +1051,7 @@ function OfferReadOnly({
         <DetailField label="Duración">
           {offer.durationMin === null ? null : `${offer.durationMin} min`}
         </DetailField>
-        <DetailField label="Especialidad">
-          {offer.specialty
-            ? (TREATMENT_SPECIALTY_LABELS[offer.specialty] ?? offer.specialty)
-            : null}
-        </DetailField>
+        <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
         <DetailField label="Ámbito">
           {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
         </DetailField>
@@ -1063,11 +1098,7 @@ function OfferDetails({
             {offer.durationMin === null ? null : `${offer.durationMin} min`}
           </DetailField>
           <DetailField label="Moneda">{offer.currency}</DetailField>
-          <DetailField label="Especialidad">
-            {offer.specialty
-              ? (TREATMENT_SPECIALTY_LABELS[offer.specialty] ?? offer.specialty)
-              : null}
-          </DetailField>
+          <DetailField label="Especialidad">{offer.specialtyName ?? null}</DetailField>
           <DetailField label="Ámbito">
             {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
           </DetailField>
@@ -1111,36 +1142,9 @@ function OfferFields({
           </Field>
         )}
       </form.Field>
-      {isTemplate ? (
-        <p className="text-xs text-muted-foreground">
-          La especialidad y el ámbito se derivan de la plantilla y no se editan aquí.
-        </p>
-      ) : null}
-      {allowSpecialtyScope ? (
-        <div className="grid grid-cols-2 gap-3">
-          <form.Field name="specialty" validators={{ onChange: offerSchema.shape.specialty }}>
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor={`${idPrefix}-esp`}>Especialidad</FieldLabel>
-                <Select
-                  value={field.state.value}
-                  onValueChange={(v) => field.handleChange(v ?? "")}
-                >
-                  <SelectTrigger id={`${idPrefix}-esp`}>
-                    <SelectValue placeholder="Elige" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TREATMENT_SPECIALTIES.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {TREATMENT_SPECIALTY_LABELS[s]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
-              </Field>
-            )}
-          </form.Field>
+      <div className="grid grid-cols-2 gap-3">
+        <OfferSpecialtyField form={form} idPrefix={idPrefix} current={offer} />
+        {allowSpecialtyScope ? (
           <form.Field name="scope" validators={{ onChange: offerSchema.shape.scope }}>
             {(field) => (
               <Field>
@@ -1164,8 +1168,14 @@ function OfferFields({
               </Field>
             )}
           </form.Field>
-        </div>
-      ) : null}
+        ) : (
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium">Dónde se hace</span>
+            <p className="text-sm">{offer?.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : "—"}</p>
+            <p className="text-xs text-muted-foreground">Viene de la biblioteca.</p>
+          </div>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <form.Field name="price" validators={{ onChange: offerSchema.shape.price }}>
           {(field) => (
@@ -1243,6 +1253,57 @@ function OfferFields({
         )}
       </form.Field>
     </>
+  )
+}
+
+/**
+ * La especialidad del servicio, una sola y de la lista de la clínica
+ * (decisiones 1 y 3 de la fase 4): de ella depende a quién ofrece la agenda.
+ * Una archivada que ya tenía el servicio se sigue viendo.
+ */
+function OfferSpecialtyField({
+  form,
+  idPrefix,
+  current,
+}: {
+  form: OfferForm
+  idPrefix: string
+  current: ServiceCatalogItem | null
+}) {
+  const specialtiesQuery = useClinicSpecialties()
+  const all = specialtiesQuery.data?.data ?? []
+  const options = all.filter((item) => item.isActive || item.id === current?.specialtyId)
+  return (
+    <form.Field name="specialtyId" validators={{ onChange: offerSchema.shape.specialtyId }}>
+      {(field) => (
+        <Field>
+          <FieldLabel htmlFor={`${idPrefix}-esp`}>Especialidad</FieldLabel>
+          <Select
+            value={field.state.value}
+            items={Object.fromEntries(options.map((item) => [item.id, item.name]))}
+            onValueChange={(v) => field.handleChange(v ?? "")}
+            disabled={specialtiesQuery.isPending}
+          >
+            <SelectTrigger id={`${idPrefix}-esp`}>
+              <SelectValue placeholder={specialtiesQuery.isPending ? "Cargando…" : "Elige"} />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <FieldError errors={fieldErrorMessages(field.state.meta.errors)} />
+          {specialtiesQuery.isError ? (
+            <p className="text-xs text-destructive">No se pudieron cargar las especialidades.</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">La agenda lo ofrece a quien atiende esta especialidad.</p>
+          )}
+        </Field>
+      )}
+    </form.Field>
   )
 }
 
@@ -1330,6 +1391,7 @@ function LegacyTemplateLink({
     setCursor(undefined)
     setPreviousCursors([])
   }
+  const specialties = useClinicSpecialties().data?.data ?? []
   const templatesQuery = useQuery({
     queryKey: ["services", "templates", "link", search, cursor],
     queryFn: () => fetchTreatmentTemplates({ q: search || undefined, limit: 10, cursor }),
@@ -1393,7 +1455,7 @@ function LegacyTemplateLink({
                             <span className="font-mono">{coding.code}</span> ·{" "}
                           </>
                         ) : null}
-                        {TREATMENT_SPECIALTY_LABELS[tpl.specialty] ?? tpl.specialty} ·{" "}
+                        {specialtyNameByKey(specialties, tpl.specialty)} ·{" "}
                         {TREATMENT_SCOPE_LABELS[tpl.scope] ?? tpl.scope}
                       </span>
                     </span>
@@ -1441,13 +1503,6 @@ function LegacyTemplateLink({
  */
 function PriceDisclosureFields({ form, idPrefix, offerId }: { form: OfferForm; idPrefix: string; offerId: string | null }) {
   const disclosure = useStore(form.store, (state) => state.values.priceDisclosure)
-  const evaluationsQuery = useQuery({
-    queryKey: ["services", "evaluation-options"],
-    queryFn: () => fetchServices({ state: "active", limit: 100 }),
-    enabled: disclosure !== "exacto",
-    staleTime: 60_000,
-  })
-  const evaluations = (evaluationsQuery.data?.data ?? []).filter((item) => item.id !== offerId)
   return (
     <fieldset className="flex flex-col gap-3 rounded-xl border p-3">
       <legend id={`${idPrefix}-precio-agente`} className="px-1 text-sm font-semibold">
@@ -1473,20 +1528,15 @@ function PriceDisclosureFields({ form, idPrefix, offerId }: { form: OfferForm; i
         <form.Field name="evaluationServiceId">
           {(field) => (
             <Field>
-              <FieldLabel htmlFor={`${idPrefix}-evaluacion`}>Evaluación que ofrece</FieldLabel>
-              <ChoiceSelect
+              {/* Busca en todo el tarifario: con más de 100 servicios ninguno queda fuera. */}
+              <ServiceSelect
                 id={`${idPrefix}-evaluacion`}
+                label="Evaluación que ofrece"
                 value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-                disabled={evaluationsQuery.isPending}
-              >
-                <option value="">Ninguna en particular: ofrece agendar una evaluación</option>
-                {evaluations.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </ChoiceSelect>
+                excludeId={offerId}
+                noneLabel="Ninguna en particular: ofrece agendar una evaluación"
+                onChange={(service) => field.handleChange(service?.id ?? "")}
+              />
             </Field>
           )}
         </form.Field>

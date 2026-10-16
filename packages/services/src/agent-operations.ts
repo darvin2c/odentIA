@@ -31,6 +31,7 @@ import { appointment } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
+import { resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
   getAppointment,
@@ -1029,6 +1030,11 @@ export interface FreeGapInput {
   durationMin?: number
   branchId?: string
   dentistUserId?: string
+  /**
+   * El identificador del profesional que recibe el agente (`professionalRef`):
+   * «quiero cita con la Dra. Rojas». Solo sirve para pedir sus huecos.
+   */
+  professionalRef?: string
   chairId?: string
   serviceId?: string
 }
@@ -1057,13 +1063,24 @@ export interface FreeGapResult {
   gaps: FreeGap[]
   truncated: boolean
   timeZone: string
+  /** Si el servicio tiene quien lo atienda en la sede: su especialidad y sus nombres. */
+  attending: { specialtyName: string; names: string[] } | null
+  /** Se pidió un profesional que no atiende ese servicio en la sede. */
+  professionalNotAttending: boolean
 }
+
+/** Huecos que ofrece el agente por profesional y día (decisión 16 de la fase 4). */
+export const GAPS_PER_PROFESSIONAL_PER_DAY = 2
+/** Huecos que caben en una respuesta de `buscar_huecos`. */
+export const GAPS_SHOWN = 20
 
 /**
  * Huecos libres según Agenda (`listAvailableSlots`): respeta horario semanal
- * del profesional, bloqueos y citas ocupantes. Sin horario configurado no hay
- * huecos (el agente debe decirlo, no inventarlos). Si `truncated`, acota el
- * rango o pagina por días.
+ * del profesional, bloqueos y citas ocupantes, y con servicio ofrece solo a
+ * quien lo atiende (la misma regla que recepción y el enlace). Dos huecos por
+ * profesional y día, ordenados por hora: una sola persona no se queda con la
+ * lista. Sin horario configurado no hay huecos (el agente debe decirlo, no
+ * inventarlos). Si `truncated`, acota el rango o pagina por días.
  */
 export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): Promise<FreeGapResult> {
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -1085,9 +1102,15 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
   if (durationMin !== undefined && (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480)) {
     throw validation("durationMin debe ser entero entre 10 y 480")
   }
-  const { slots, truncated, timeZone } = await listAvailableSlots(tx, orgId, {
+  let dentistUserId = input.dentistUserId
+  if (input.professionalRef?.trim()) {
+    const resolved = await resolveProfessionalRef(tx, orgId, input.professionalRef)
+    if (!resolved) throw validation("Ese profesional no existe en la clínica: usa el identificador de la lista de profesionales")
+    dentistUserId = resolved
+  }
+  const { slots, truncated, timeZone, attending } = await listAvailableSlots(tx, orgId, {
     branchId: input.branchId,
-    dentistUserId: input.dentistUserId,
+    dentistUserId,
     chairId: input.chairId,
     serviceId: input.serviceId,
     from: from.toISOString(),
@@ -1095,9 +1118,10 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
+    perDentistPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
   })
-  const shown = slots.slice(0, 20)
-  const ids = [...new Set(shown.map((s) => s.dentistUserId))]
+  const shown = slots.slice(0, GAPS_SHOWN)
+  const ids = [...new Set([...shown.map((s) => s.dentistUserId), ...(attending?.dentistUserIds ?? [])])]
   const names = ids.length
     ? new Map(
         (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids))).map((row) => [row.id, row.name]),
@@ -1111,8 +1135,15 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
       dentistName: names.get(s.dentistUserId) ?? null,
       chairId: s.chairId,
     })),
-    truncated: truncated || slots.length > 20,
+    truncated: truncated || slots.length > GAPS_SHOWN,
     timeZone,
+    attending: attending
+      ? {
+          specialtyName: attending.specialtyName,
+          names: attending.dentistUserIds.map((id) => names.get(id)).filter((name): name is string => Boolean(name)),
+        }
+      : null,
+    professionalNotAttending: Boolean(attending && dentistUserId && !attending.dentistUserIds.includes(dentistUserId)),
   }
 }
 

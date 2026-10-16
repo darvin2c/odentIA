@@ -106,7 +106,6 @@ export async function clinicalFixture() {
     .values({
       organizationId: "org_a",
       name: "Tratamiento propio",
-      specialty: "general",
       scope: "general",
       source: "custom",
       priceCents: 120000,

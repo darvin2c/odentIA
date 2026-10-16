@@ -3,12 +3,13 @@ import { scheduleChair } from "@odentia/db/schema/agenda"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { branch } from "@odentia/db/schema/org"
-import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
+import { supportCase } from "@odentia/db/schema/admin-support"
+import { helpAsk } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
-import { askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, helpDedupeKeyOf, rateHelp, sendHelpRequest } from "./help.js"
+import { askHelp, describeHelpAttachments, describeHelpScreen, HELP_DAILY_LIMIT, type HelpAsker, rateHelp, sendHelpRequest } from "./help.js"
 import type { AdminActor } from "./admin-core.js"
-import { ensureCaseForHelpRequest, getMySupportCase, listMySupportCases, markSupportCaseSeen, replyToSupportCase } from "./admin-support.js"
+import { getMySupportCase, listMySupportCases, markSupportCaseSeen, replyToSupportCase, setSupportCaseStatus } from "./admin-support.js"
 import { helpTopicForScreen, matchHelpTopics } from "./help-guide.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -148,27 +149,18 @@ describe("enviar a odentIA", () => {
     const staff: AdminActor = { userId: "help-staff", role: "support" }
     await ownerDb.insert(user).values([{ id: staff.userId, name: "Soporte odentIA", email: "soporte@help.test", emailVerified: true }])
     const question = "¿Cómo exporto mis pacientes a Excel?"
-    const mine = await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/patients", appVersion: "1.2.3" }))
-    expect(mine).toMatchObject({ kind: "pregunta", status: "abierta", answer: null, screen: "/patients" })
+    const myCase = await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/patients", appVersion: "1.2.3" }))
+    expect(myCase).toMatchObject({ kind: "pregunta", status: "abierto", reused: false })
     // Enviarla otra vez mientras sigue abierta no crea otra.
-    expect((await run((tx) => sendHelpRequest(tx, ORG, reception, { question: "  ¿como exporto mis pacientes a excel? ", screen: "/home" }))).id).toBe(mine.id)
-    const otherRequest = await run((tx) => sendHelpRequest(tx, OTHER, { userId: OTHER_USER, roleLabel: "Propietario" }, { question, screen: "/patients" }), OTHER)
+    const again = await run((tx) => sendHelpRequest(tx, ORG, reception, { question: "  ¿como exporto mis pacientes a excel? ", screen: "/home" }))
+    expect(again).toMatchObject({ id: myCase.id, reused: true })
+    const otherCase = await run((tx) => sendHelpRequest(tx, OTHER, { userId: OTHER_USER, roleLabel: "Propietario" }, { question, screen: "/patients" }), OTHER)
     await run((tx) => sendHelpRequest(tx, ORG, reception, { question: "La agenda no carga", screen: "/agenda", kind: "problema", detail: "HTTP 500" }))
-    const [stored] = await ownerDb.select().from(helpRequest).where(eq(helpRequest.id, mine.id))
-    expect(stored).toMatchObject({ role: "Recepción", appVersion: "1.2.3" })
+    // El caso es la única fuente: guarda lo que se envió con lo que se agrega solo.
+    const [stored] = await ownerDb.select().from(supportCase).where(eq(supportCase.id, myCase.id))
+    expect(stored).toMatchObject({ role: "Recepción", appVersion: "1.2.3", screen: "/patients", openedBy: USER })
 
     // Cada envío tiene su caso privado: la misma pregunta en otra clínica no comparte hilo.
-    const myCase = await run((tx) =>
-      ensureCaseForHelpRequest(tx, ORG, {
-        id: mine.id, userId: USER, kind: mine.kind, question: mine.question, detail: null,
-        screen: mine.screen, role: "Recepción", appVersion: "1.2.3", dedupeKey: helpDedupeKeyOf(mine.question),
-      }),
-    )
-    const otherCase = await run((tx) =>
-      ensureCaseForHelpRequest(tx, OTHER, {
-        id: otherRequest.id, userId: OTHER_USER, kind: otherRequest.kind, question: otherRequest.question, detail: null,
-        screen: otherRequest.screen, role: "Propietario", appVersion: null, dedupeKey: helpDedupeKeyOf(otherRequest.question),
-      }), OTHER)
     expect(otherCase.id).not.toBe(myCase.id)
     expect(myCase.unread).toBe(false)
 
@@ -182,5 +174,18 @@ describe("enviar a odentIA", () => {
     expect((await run((tx) => listMySupportCases(tx, ORG, USER))).find((item) => item.id === myCase.id)?.unread).toBe(false)
     // Sin texto no hay respuesta.
     await expect(replyToSupportCase(ownerDb, staff, myCase.id, " ")).rejects.toThrow(/Escribe el mensaje/)
+  })
+
+  it("la misma pregunta después de resuelta abre un caso nuevo; solo se junta con uno abierto", async () => {
+    const staff: AdminActor = { userId: "help-staff-2", role: "support" }
+    await ownerDb.insert(user).values([{ id: staff.userId, name: "Soporte 2", email: "soporte2@help.test", emailVerified: true }])
+    const question = "¿Puedo cambiar el color de la agenda?"
+    const first = await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/agenda" }))
+    await setSupportCaseStatus(ownerDb, staff, first.id, "resuelto")
+    const second = await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/agenda" }))
+    expect(second).toMatchObject({ status: "abierto", reused: false })
+    expect(second.id).not.toBe(first.id)
+    // Mientras el nuevo sigue abierto, repetirla se junta con él, no con el resuelto.
+    expect((await run((tx) => sendHelpRequest(tx, ORG, reception, { question, screen: "/agenda" }))).id).toBe(second.id)
   })
 })

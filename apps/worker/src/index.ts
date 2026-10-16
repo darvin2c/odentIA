@@ -13,6 +13,7 @@ import { createTranscriber } from "./transcribe.js"
 import { runAutomationTick } from "./automation.js"
 import { tickMailboxes } from "./mailboxes.js"
 import { runSaasBillingTick } from "./saas-billing.js"
+import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
@@ -183,6 +184,7 @@ queues.push({
 
 let nextSaasPoll = 0
 let nextAccountPoll = 0
+let nextSupportPoll = 0
 queues.push({
   name: "saas_billing",
   poll: async () => {
@@ -190,6 +192,21 @@ queues.push({
     nextSaasPoll = Date.now() + 60_000
     await runSaasBillingTick({ ownerDb, mailer })
     return true
+  },
+}, {
+  // Avisos por correo de los casos de soporte: a soporte y a quien preguntó.
+  name: "support_notices",
+  poll: async () => {
+    if (Date.now() < nextSupportPoll) return false
+    nextSupportPoll = Date.now() + 60_000
+    const result = await runSupportNoticesTick({
+      ownerDb,
+      mailer,
+      supportInbox: env.SUPPORT_INBOX_EMAIL,
+      adminUrl: env.ADMIN_URL,
+      webUrl: env.WEB_URL,
+    })
+    return result.mailed > 0
   },
 }, {
   name: "account_lifecycle",

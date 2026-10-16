@@ -1,10 +1,14 @@
 import type { Db } from "@odentia/db"
-import { supportAccessGrant, supportCase, supportMessage } from "@odentia/db/schema/admin-support"
+import { supportAccessGrant, supportCase, supportMessage, supportNotice } from "@odentia/db/schema/admin-support"
 
 /**
- * Semilla de soporte (dev, datos ficticios): un caso abierto con
- * conversación, nota interna y permiso revocado en historia, y un caso
- * resuelto. Idempotente por ids fijos; recibe org y usuarios existentes.
+ * Semilla de soporte (dev, datos ficticios): un caso en atención con una
+ * respuesta que la clínica aún no vio (el botón de Ayuda la cuenta), nota
+ * interna y permiso revocado en historia; un caso resuelto, y una pregunta
+ * recién enviada. Avisos por correo: los del caso en atención ya salieron
+ * («Caso nuevo» a soporte y «Soporte de odentIA respondió tu caso» a quien
+ * preguntó); el de la pregunta nueva está pendiente y lo envía el worker a
+ * Mailpit. Idempotente por ids fijos; recibe org y usuarios existentes.
  */
 export async function seedAdminSupport(
   db: Db,
@@ -13,6 +17,9 @@ export async function seedAdminSupport(
   const { organizationId, userId, staffUserId } = input
   const openCaseId = "00000000-0000-4000-8000-00000000c501"
   const resolvedCaseId = "00000000-0000-4000-8000-00000000c502"
+  const newCaseId = "00000000-0000-4000-8000-00000000c503"
+  const now = Date.now()
+  const answeredAt = new Date(now - 2 * 3_600_000)
   await db
     .insert(supportCase)
     .values([
@@ -28,6 +35,8 @@ export async function seedAdminSupport(
         status: "en_atencion",
         assigneeStaffId: staffUserId,
         openedBy: userId,
+        createdAt: new Date(now - 3 * 3_600_000),
+        lastPublicMessageAt: answeredAt,
       },
       {
         id: resolvedCaseId,
@@ -42,6 +51,18 @@ export async function seedAdminSupport(
         openedBy: userId,
         resolvedAt: new Date("2026-01-10T12:00:00Z"),
       },
+      {
+        id: newCaseId,
+        organizationId,
+        kind: "pregunta",
+        question: "¿Cómo exporto mis pacientes a Excel?",
+        screen: "/patients",
+        role: "Propietario",
+        appVersion: "0.0.0-dev",
+        dedupeKey: "seed-dedupe-exportar-pacientes",
+        status: "abierto",
+        openedBy: userId,
+      },
     ])
     .onConflictDoNothing({ target: supportCase.id })
   await db
@@ -54,6 +75,7 @@ export async function seedAdminSupport(
         authorKind: "staff",
         authorUserId: staffUserId,
         body: "Hola: se configuran en Configuración → Mensajes de la clínica, pestaña Recordatorios.",
+        createdAt: answeredAt,
       },
       {
         id: "00000000-0000-4000-8000-00000000c512",
@@ -89,4 +111,42 @@ export async function seedAdminSupport(
       revokedAt: new Date("2026-01-09T12:10:00Z"),
     })
     .onConflictDoNothing({ target: supportAccessGrant.id })
+
+  // Avisos por correo: dos ya enviados y uno pendiente. La clave del aviso a
+  // quien preguntó es la que usa el worker: no se vuelve a enviar.
+  await db
+    .insert(supportNotice)
+    .values([
+      {
+        id: "00000000-0000-4000-8000-00000000c541",
+        caseId: openCaseId,
+        organizationId,
+        kind: "caso_nuevo",
+        recipientUserId: null,
+        dedupeKey: `caso_nuevo:${openCaseId}`,
+        emailState: "enviado",
+        emailedAt: new Date(now - 3 * 3_600_000),
+        createdAt: new Date(now - 3 * 3_600_000),
+      },
+      {
+        id: "00000000-0000-4000-8000-00000000c542",
+        caseId: openCaseId,
+        organizationId,
+        kind: "respuesta",
+        recipientUserId: userId,
+        dedupeKey: `persona:${openCaseId}:${answeredAt.getTime()}`,
+        emailState: "enviado",
+        emailedAt: new Date(answeredAt.getTime() + 15 * 60_000),
+        createdAt: new Date(answeredAt.getTime() + 15 * 60_000),
+      },
+      {
+        id: "00000000-0000-4000-8000-00000000c543",
+        caseId: newCaseId,
+        organizationId,
+        kind: "caso_nuevo",
+        recipientUserId: null,
+        dedupeKey: `caso_nuevo:${newCaseId}`,
+      },
+    ])
+    .onConflictDoNothing()
 }

@@ -31,6 +31,7 @@ import {
 import { nextPatientNumber } from "./patients.js"
 import { addPlanItem, setPlanItemStatus } from "./plan.js"
 import { createService } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { drawTreatedFinding } from "./treated-findings.js"
@@ -230,10 +231,10 @@ it("«Firmar odontograma» firma con el perfil, solo para pedidos y reingreso, y
 it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", async () => {
   const f = await attending("org_a")
   const draft = await f.open()
-  const resin = await f.run((tx) =>
+  const resin = await f.run(async (tx) =>
     createService(tx, f.orgId, f.actor, {
       name: "Resina compuesta",
-      specialty: "restauradora",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["restauradora"])).get("restauradora")!,
       scope: "surfaces",
       priceCents: 18000,
       leavesFinding: { condition: "definitive_restoration", variant: "resin" },
@@ -241,10 +242,10 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   )
   // En Perú lo que deja se configura con su variante.
   await expect(
-    f.run((tx) =>
+    f.run(async (tx) =>
       createService(tx, f.orgId, f.actor, {
         name: "Corona",
-        specialty: "protesis",
+        specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["protesis"])).get("protesis")!,
         scope: "tooth",
         priceCents: 50000,
         leavesFinding: { condition: "crown" },
@@ -308,7 +309,6 @@ it("la exodoncia de un servicio directo deja la pieza ausente con su causa en Pe
     .values({
       organizationId: f.orgId,
       name: "Exodoncia simple",
-      specialty: "cirugia",
       scope: "tooth",
       source: "custom",
       priceCents: 9000,
@@ -342,7 +342,6 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
     .values({
       organizationId: f.orgId,
       name: "Resina compuesta",
-      specialty: "restauradora",
       scope: "surfaces",
       source: "custom",
       priceCents: 18000,

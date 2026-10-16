@@ -2,6 +2,7 @@ import { withOrgContext } from "@odentia/db"
 import { PRICE_DISCLOSURES } from "@odentia/db/schema/clinical"
 import {
   createService,
+  getService,
   getTemplate,
   listMostUsedServices,
   listServices,
@@ -32,8 +33,16 @@ const templatesQuery = z
 const offersQuery = z
   .object({
     q: z.string().max(200).optional(),
-    specialty: z.string().max(40).optional(),
+    /** Especialidad de la clínica (id). */
+    specialtyId: z.string().uuid().optional(),
     state: z.enum(["active", "inactive", "legacy"]).optional(),
+    /** Solo estos servicios, en cualquier estado (separados por coma): nombrar lo ya elegido. */
+    ids: z
+      .string()
+      .max(3800)
+      .transform((value) => value.split(",").map((id) => id.trim()).filter(Boolean))
+      .pipe(z.array(z.string().uuid()).min(1).max(100))
+      .optional(),
     cursor: z.string().max(500).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
   })
@@ -56,7 +65,7 @@ const createInput = z
   .object({
     templateId: z.string().uuid().nullish(),
     name: z.string().trim().min(1).max(200).nullish(),
-    specialty: z.string().trim().min(1).max(40).nullish(),
+    specialtyId: z.string().uuid().nullish(),
     scope: z.string().trim().min(1).max(20).nullish(),
     code: z.string().max(40).nullish(),
     priceCents: z.number().int().min(0).max(2147483647),
@@ -77,7 +86,7 @@ const patchInput = z
   .object({
     templateId: z.string().uuid().nullish(),
     name: z.string().trim().min(1).max(200).optional(),
-    specialty: z.string().trim().min(1).max(40).optional(),
+    specialtyId: z.string().uuid().optional(),
     scope: z.string().trim().min(1).max(20).optional(),
     code: z.string().max(40).nullish(),
     priceCents: z.number().int().min(0).max(2147483647).optional(),
@@ -114,7 +123,7 @@ const batchInput = z
             .object({
               kind: z.literal("custom"),
               name: z.string().trim().min(1).max(200),
-              specialty: z.string().trim().min(1).max(40),
+              specialtyId: z.string().uuid(),
               scope: z.string().trim().min(1).max(20),
               priceCents: z.number().int().min(0).max(2147483647),
               billingMode: z.enum(["treatment", "session"]).nullish(),
@@ -159,8 +168,9 @@ export function createServicesRoute(deps: CrmDeps) {
       const page = await withOrgContext(deps.db, orgId, (tx) =>
         listServices(tx, orgId, {
           q: parsed.data.q,
-          specialty: parsed.data.specialty,
+          specialtyId: parsed.data.specialtyId,
           state: parsed.data.state,
+          ids: parsed.data.ids,
           cursor: parsed.data.cursor,
           limit: parsed.data.limit,
         }),
@@ -225,6 +235,17 @@ export function createServicesRoute(deps: CrmDeps) {
     }
   })
 
+  // Un servicio por id, en cualquier estado: el que llega elegido aunque no esté en la primera página.
+  app.get("/:id{[0-9a-fA-F-]+}", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "catalog.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getService(tx, orgId, c.req.param("id"))),
+    )
+  })
+
   app.post("/batch", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
@@ -266,7 +287,7 @@ export function createServicesRoute(deps: CrmDeps) {
         createService(tx, orgId, userId, {
           templateId: parsed.data.templateId,
           name: parsed.data.name,
-          specialty: parsed.data.specialty,
+          specialtyId: parsed.data.specialtyId,
           scope: parsed.data.scope,
           code: parsed.data.code,
           priceCents: parsed.data.priceCents,
@@ -294,7 +315,7 @@ export function createServicesRoute(deps: CrmDeps) {
         updateService(tx, orgId, userId, c.req.param("id"), {
           templateId: parsed.data.templateId,
           name: parsed.data.name,
-          specialty: parsed.data.specialty,
+          specialtyId: parsed.data.specialtyId,
           scope: parsed.data.scope,
           code: parsed.data.code,
           priceCents: parsed.data.priceCents,

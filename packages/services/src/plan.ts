@@ -27,6 +27,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
+import { serviceSpecialtyOf } from "./specialties.js"
 import { readBillingModes } from "./budgets.js"
 import { drawTreatedFinding } from "./treated-findings.js"
 
@@ -714,7 +715,9 @@ export async function addPlanItem(
   const diagnosisCode = normalizeDiagnosisCode(input.diagnosisCode)
   if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
   const codings = await resolveServiceCodings(tx, service)
-  const phase = assertPhase(input.phase) ?? phaseForSpecialty(service.specialty)
+  // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
+  const phase =
+    assertPhase(input.phase) ?? phaseForSpecialty((await serviceSpecialtyOf(tx, orgId, service.specialtyId))?.key)
   const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
   const sortOrder = await nextSortOrder(tx, orgId, plan.id)
   const [row] = await tx
@@ -810,6 +813,7 @@ export async function addPlanItemsBatch(
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, service)
   const rows: PlanItemRow[] = []
+  const phase = phaseForSpecialty((await serviceSpecialtyOf(tx, orgId, service.specialtyId))?.key)
   let sortOrder = await nextSortOrder(tx, orgId, plan.id)
   for (const tooth of teeth) {
     const [row] = await tx
@@ -820,7 +824,7 @@ export async function addPlanItemsBatch(
         planId: plan.id,
         serviceId: service.id,
         budgetId: null,
-        phase: phaseForSpecialty(service.specialty),
+        phase,
         sortOrder: sortOrder++,
         toothNumber: tooth,
         scope,

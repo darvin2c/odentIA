@@ -18,6 +18,7 @@ import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
+import { enqueueSupportInboxNotice } from "./support-notices.js"
 
 /* ---------- Tipos ---------- */
 
@@ -236,7 +237,6 @@ function uniqueStrings(values: string[]): string[] {
 /* ---------- Lado clínica: el caso nace del envío (tx con RLS de la org) ---------- */
 
 export interface HelpRequestSeed {
-  id: string
   userId: string
   kind: SupportKind
   question: string
@@ -248,15 +248,16 @@ export interface HelpRequestSeed {
 }
 
 /**
- * Vincula un envío (`help_request`, que ya guardó el texto que la persona
- * decidió enviar) con su caso. Reutiliza el caso abierto del mismo dedupe de
- * la misma persona: enviar dos veces lo mismo no abre otro hilo.
+ * Abre el caso de lo que una persona decidió enviar desde la Ayuda: el caso es
+ * la única fuente. Se junta solo con el suyo del mismo texto que siga abierto
+ * (enviar dos veces lo mismo no abre otro hilo); una pregunta repetida después
+ * de resuelta abre un caso nuevo. Abrirlo deja el aviso a soporte.
  */
-export async function ensureCaseForHelpRequest(
+export async function openSupportCaseFromHelp(
   tx: Db,
   orgId: string,
   request: HelpRequestSeed,
-): Promise<SupportCaseListItem> {
+): Promise<SupportCaseListItem & { reused: boolean }> {
   const [open] = await tx
     .select()
     .from(supportCase)
@@ -268,21 +269,13 @@ export async function ensureCaseForHelpRequest(
         ne(supportCase.status, "resuelto"),
       ),
     )
+    .orderBy(desc(supportCase.createdAt))
     .limit(1)
-  if (open?.helpRequestId === request.id) return toListItem(open, 0)
-  if (open) {
-    const [updated] = await tx
-      .update(supportCase)
-      .set({ helpRequestId: request.id, updatedAt: new Date() })
-      .where(eq(supportCase.id, open.id))
-      .returning()
-    if (updated) return toListItem(updated, 0)
-  }
+  if (open) return { ...toListItem(open, 0), reused: true }
   const [row] = await tx
     .insert(supportCase)
     .values({
       organizationId: orgId,
-      helpRequestId: request.id,
       kind: request.kind,
       question: request.question.slice(0, 500),
       detail: request.detail,
@@ -294,7 +287,8 @@ export async function ensureCaseForHelpRequest(
     })
     .returning()
   if (!row) throw new Error("No se pudo abrir el caso")
-  return toListItem(row, 0)
+  await enqueueSupportInboxNotice(tx, { caseId: row.id, organizationId: orgId, kind: "caso_nuevo", sourceId: row.id })
+  return { ...toListItem(row, 0), reused: false }
 }
 
 function toListItem(
@@ -320,16 +314,48 @@ function toListItem(
   }
 }
 
-/** Casos propios de la persona en su clínica, del más reciente al más viejo. */
+/**
+ * Quién sigue un caso de la clínica: quien lo abrió. Si esa persona ya no está
+ * en la clínica, lo siguen su propietario y su administrador; nadie más.
+ */
+async function requireCaseReader(
+  tx: Db,
+  kase: typeof supportCase.$inferSelect,
+  orgId: string,
+  userId: string,
+): Promise<void> {
+  if (kase.openedBy === userId) return
+  if (!(await isOrgOwnerOrAdmin(tx, userId, orgId))) throw notFound("Caso")
+  const [opener] = await tx
+    .select({ id: member.id })
+    .from(member)
+    .where(and(eq(member.userId, kase.openedBy), eq(member.organizationId, orgId)))
+    .limit(1)
+  if (opener) throw notFound("Caso")
+}
+
+/**
+ * Casos que sigue la persona en su clínica, del más reciente al más viejo: los
+ * suyos y, si es propietaria o administradora, los de quien ya no está.
+ */
 export async function listMySupportCases(
   tx: Db,
   orgId: string,
   userId: string,
 ): Promise<SupportCaseListItem[]> {
+  const manager = await isOrgOwnerOrAdmin(tx, userId, orgId)
   const rows = await tx
     .select()
     .from(supportCase)
-    .where(and(eq(supportCase.organizationId, orgId), eq(supportCase.openedBy, userId)))
+    .where(
+      and(
+        eq(supportCase.organizationId, orgId),
+        manager
+          ? sql`(${supportCase.openedBy} = ${userId} or not exists (select 1 from ${member} m
+              where m.user_id = ${supportCase.openedBy} and m.organization_id = ${orgId}))`
+          : eq(supportCase.openedBy, userId),
+      ),
+    )
     .orderBy(desc(supportCase.updatedAt))
     .limit(50)
   return rows.map((row) => toListItem(row, 0))
@@ -344,7 +370,7 @@ export async function getMySupportCase(
 ): Promise<SupportCaseDetail> {
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
-  if (kase.openedBy !== userId) throw notFound("Caso")
+  await requireCaseReader(tx, kase, orgId, userId)
   const messages = await tx
     .select()
     .from(supportMessage)
@@ -416,7 +442,7 @@ export async function replyToMySupportCase(
   if (text.length > 4000) throw validation("La respuesta no puede superar 4000 caracteres")
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
-  if (kase.openedBy !== userId) throw notFound("Caso")
+  await requireCaseReader(tx, kase, orgId, userId)
   const reopening = kase.status === "resuelto"
   const [message] = await tx
     .insert(supportMessage)
@@ -429,6 +455,7 @@ export async function replyToMySupportCase(
     })
     .returning()
   if (!message) throw new Error("No se pudo enviar la respuesta")
+  await enqueueSupportInboxNotice(tx, { caseId: kase.id, organizationId: orgId, kind: "clinica_respondio", sourceId: message.id })
   const now = new Date()
   await tx
     .update(supportCase)
@@ -452,7 +479,7 @@ export async function reopenMySupportCase(
 ): Promise<void> {
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
-  if (kase.openedBy !== userId) throw notFound("Caso")
+  await requireCaseReader(tx, kase, orgId, userId)
   if (kase.status !== "resuelto") throw validation("El caso ya está abierto")
   await tx
     .update(supportCase)
@@ -478,7 +505,7 @@ export async function markSupportCaseSeen(
 ): Promise<void> {
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
-  if (kase.openedBy !== userId) throw notFound("Caso")
+  await requireCaseReader(tx, kase, orgId, userId)
   await tx.update(supportCase).set({ clientSeenAt: new Date() }).where(eq(supportCase.id, kase.id))
 }
 
@@ -494,7 +521,7 @@ export async function assertMySupportCaseWritable(
 ): Promise<typeof supportCase.$inferSelect> {
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
-  if (kase.openedBy !== userId) throw notFound("Caso")
+  await requireCaseReader(tx, kase, orgId, userId)
   requireWritableByClient(kase)
   return kase
 }
@@ -629,25 +656,28 @@ export async function createAccessSupportCase(
   }
   const question = input.question.trim().slice(0, 500)
   const dedupeKey = dedupeKeyOf(question)
-  const [row] = await db
-    .insert(supportCase)
-    .values({
-      organizationId: null,
-      kind: "acceso",
-      question,
-      detail:
-        typeof input.detail === "string" && input.detail.trim()
-          ? input.detail.trim().slice(0, 500)
-          : null,
-      screen: "/panel",
-      role: "Cuenta",
-      appVersion: input.appVersion ?? null,
-      dedupeKey,
-      openedBy: userId,
-    })
-    .returning()
-  if (!row) throw new Error("No se pudo abrir el caso")
-  return toListItem(row, 0)
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(supportCase)
+      .values({
+        organizationId: null,
+        kind: "acceso",
+        question,
+        detail:
+          typeof input.detail === "string" && input.detail.trim()
+            ? input.detail.trim().slice(0, 500)
+            : null,
+        screen: "/panel",
+        role: "Cuenta",
+        appVersion: input.appVersion ?? null,
+        dedupeKey,
+        openedBy: userId,
+      })
+      .returning()
+    if (!row) throw new Error("No se pudo abrir el caso")
+    await enqueueSupportInboxNotice(tx as Db, { caseId: row.id, organizationId: null, kind: "caso_nuevo", sourceId: row.id })
+    return toListItem(row, 0)
+  })
 }
 
 /** Todos los casos propios de la cuenta: de acceso y los abiertos en sus clínicas. */
@@ -717,6 +747,12 @@ export async function replyToAccountSupportCase(
     })
     .returning()
   if (!message) throw new Error("No se pudo enviar la respuesta")
+  await enqueueSupportInboxNotice(db, {
+    caseId: kase.id,
+    organizationId: kase.organizationId,
+    kind: "clinica_respondio",
+    sourceId: message.id,
+  })
   const now = new Date()
   await db
     .update(supportCase)
@@ -959,6 +995,9 @@ export async function setSupportCaseStatus(
 ): Promise<void> {
   const kase = await requireStaffCase(db, caseId)
   const leavingResolved = kase.status === "resuelto" && status !== "resuelto"
+  // Pasar a «Esperando a la clínica» le pide algo: cuenta como novedad sin
+  // leer en su lista y, si no lo ve, le llega «Soporte de odentIA necesita algo de ti».
+  const asksClinic = status === "esperando_clinica" && kase.status !== "esperando_clinica"
   await staffWrite(
     db,
     actor,
@@ -967,6 +1006,7 @@ export async function setSupportCaseStatus(
       status,
       resolvedAt: status === "resuelto" ? new Date() : null,
       reopenedCount: leavingResolved ? kase.reopenedCount + 1 : kase.reopenedCount,
+      ...(asksClinic ? { lastPublicMessageAt: new Date() } : {}),
     },
     "support.case.status",
   )
@@ -1319,7 +1359,7 @@ export async function clientSupportAttachmentUrl(
 ): Promise<string> {
   const [kase] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const row = requireCaseInOrg(kase, orgId)
-  if (row.openedBy !== userId) throw notFound("Caso")
+  await requireCaseReader(tx, row, orgId, userId)
   const [found] = await tx
     .select({ attachment: supportAttachment, internal: supportMessage.isInternal })
     .from(supportAttachment)
@@ -1367,7 +1407,12 @@ export async function canAccessSupportCase(
 ): Promise<boolean> {
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   if (!row || (row.organizationId ?? null) !== (orgId ?? null)) return false
-  return row.openedBy === userId
+  try {
+    await requireCaseReader(tx, row, orgId, userId)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Reabre un caso de acceso resuelto desde la cuenta (panel, sin clínica). */

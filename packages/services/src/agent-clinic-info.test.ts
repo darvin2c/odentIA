@@ -19,6 +19,7 @@ import {
   getBranchHours,
   listAgentProfessionals,
   listAgentServices,
+  resolveProfessionalRef,
   SERVICES_IN_PROMPT,
   searchClinic,
 } from "./agent-clinic-info.js"
@@ -33,7 +34,9 @@ function many(count: number): AgentServiceInfo[] {
   return Array.from({ length: count }, (_, i) => ({
     ...service(`Servicio ${i}`),
     id: `s${i}`,
-    specialty: i % 2 === 0 ? "protesis" : "endodoncia",
+    // El nombre que la clínica le da a su especialidad: el índice lo dice tal cual.
+    specialty: i % 2 === 0 ? "Prótesis" : "Endodoncia",
+    specialtyKey: i % 2 === 0 ? "protesis" : "endodoncia",
   }))
 }
 
@@ -42,6 +45,7 @@ function service(name: string): AgentServiceInfo {
     id: `id-${name}`,
     name,
     specialty: null,
+    specialtyKey: null,
     durationMin: null,
     price: { disclosure: "exacto", priceCents: 100, currency: "PEN", evaluation: null },
   }
@@ -74,17 +78,23 @@ beforeAll(async () => {
   ])
   const [specialty] = await ownerDb
     .insert(orgSpecialty)
-    .values({ organizationId: ORG, key: "ortodoncia", name: "Ortodoncia" })
+    // La de la biblioteca, renombrada por la clínica: el agente dice el nombre de la clínica.
+    .values({ organizationId: ORG, key: "ortodoncia", name: "Ortodoncia y frenillos" })
     .returning({ id: orgSpecialty.id })
   await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: specialty!.id, userId: dentist })
+  // Renombrada por la clínica: las palabras de la calle siguen con la clave de la biblioteca.
+  const [aesthetic] = await ownerDb
+    .insert(orgSpecialty)
+    .values({ organizationId: ORG, key: "estetica", name: "Sonrisa y estética" })
+    .returning({ id: orgSpecialty.id })
   const services = await ownerDb
     .insert(serviceCatalog)
     .values([
-      { organizationId: ORG, name: "Evaluación", specialty: "diagnostico", scope: "general", source: "custom", priceCents: 5000, currency: "PEN", priceDisclosure: "exacto" },
-      { organizationId: ORG, name: "Limpieza dental", specialty: "prevencion", scope: "general", source: "custom", priceCents: 12000, currency: "PEN", priceDisclosure: "exacto" },
-      { organizationId: ORG, name: "Ortodoncia con brackets", specialty: "ortodoncia", scope: "general", source: "custom", priceCents: 250000, currency: "PEN", priceDisclosure: "desde" },
-      { organizationId: ORG, name: "Implante dental", specialty: "implantes", scope: "tooth", source: "custom", priceCents: 300000, currency: "PEN", priceDisclosure: "evaluacion" },
-      { organizationId: ORG, name: "Blanqueamiento dental", specialty: "estetica", scope: "arch", source: "custom", priceCents: 50000, currency: "PEN", priceDisclosure: "exacto" },
+      { organizationId: ORG, name: "Evaluación", scope: "general", source: "custom", priceCents: 5000, currency: "PEN", priceDisclosure: "exacto" },
+      { organizationId: ORG, name: "Limpieza dental", scope: "general", source: "custom", priceCents: 12000, currency: "PEN", priceDisclosure: "exacto" },
+      { organizationId: ORG, name: "Ortodoncia con brackets", specialtyId: specialty!.id, scope: "general", source: "custom", priceCents: 250000, currency: "PEN", priceDisclosure: "desde" },
+      { organizationId: ORG, name: "Implante dental", scope: "tooth", source: "custom", priceCents: 300000, currency: "PEN", priceDisclosure: "evaluacion" },
+      { organizationId: ORG, name: "Blanqueamiento dental", specialtyId: aesthetic!.id, scope: "arch", source: "custom", priceCents: 50000, currency: "PEN", priceDisclosure: "exacto" },
     ])
     .returning({ id: serviceCatalog.id, name: serviceCatalog.name })
   for (const row of services) ids[row.name] = row.id
@@ -115,7 +125,21 @@ describe("lo que sabe Informar", () => {
 
   it("los profesionales con su especialidad y sus días; sin más datos de la persona", async () => {
     const pros = await run((tx) => listAgentProfessionals(tx, ORG))
-    expect(pros).toEqual([{ id: dentist, name: "Dra. Ríos", specialties: ["Ortodoncia"], where: [{ branchName: "Centro", weekdays: [1, 6] }] }])
+    expect(pros).toEqual([
+      {
+        id: dentist,
+        ref: expect.stringMatching(/^pro-[0-9a-f]{10}$/),
+        name: "Dra. Ríos",
+        specialties: ["Ortodoncia y frenillos"],
+        where: [{ branchName: "Centro", weekdays: [1, 6] }],
+      },
+    ])
+    // Lo que lee el modelo: su identificador solo para pedir sus huecos, nunca su usuario.
+    const line = formatAgentClinicData({ hours: [], professionals: pros, promotions: [], services: [], informs: true }, ZONE).join("\n")
+    expect(line).toContain(`profesional ${pros[0]!.ref}`)
+    expect(line).not.toContain(dentist)
+    expect(await run((tx) => resolveProfessionalRef(tx, ORG, pros[0]!.ref))).toBe(dentist)
+    expect(await run((tx) => resolveProfessionalRef(tx, ORG, "pro-0000000000"))).toBeNull()
   })
 
   it("cada precio se dice como la clínica lo eligió; con evaluación no llega ningún número", async () => {
@@ -124,6 +148,10 @@ describe("lo que sabe Informar", () => {
     expect(said("Limpieza dental")).toMatch(/^S\/\s?120\.00$/)
     expect(said("Ortodoncia con brackets")).toMatch(/^desde S\/\s?2,500\.00 \(es un mínimo/)
     expect(said("Ortodoncia con brackets")).toContain("Ofrece la evaluación: Evaluación")
+    // El servicio dice la especialidad de la clínica, con su nombre y su clave de la biblioteca.
+    const ortho = services.find((s) => s.name === "Ortodoncia con brackets")!
+    expect(ortho.specialty).toBe("Ortodoncia y frenillos")
+    expect(ortho.specialtyKey).toBe("ortodoncia")
     const implant = said("Implante dental")
     expect(implant).toContain("no digas ningún monto")
     expect(implant).not.toMatch(/3,000|3000/)
@@ -244,7 +272,7 @@ describe("búsqueda por significado", () => {
   it("el índice guarda solo texto descriptivo y se concilia con lo que cambia", async () => {
     await run((tx) => syncSearchItems(tx, ORG))
     const rows = await run((tx) => tx.select().from(agentSearchItem).where(eq(agentSearchItem.organizationId, ORG)))
-    expect(rows.some((row) => row.kind === "servicio" && row.text.startsWith("Servicio de la clínica: Blanqueamiento dental.") && row.text.includes("apariencia de la sonrisa"))).toBe(true)
+    expect(rows.some((row) => row.kind === "servicio" && row.text.startsWith("Servicio de la clínica: Blanqueamiento dental. Especialidad: Sonrisa y estética.") && row.text.includes("apariencia de la sonrisa"))).toBe(true)
     // Nunca precios en el texto.
     expect(rows.every((row) => !/\d{3,}/.test(row.text))).toBe(true)
     await ownerDb.update(serviceCatalog).set({ isActive: false }).where(eq(serviceCatalog.id, ids["Implante dental"]!))

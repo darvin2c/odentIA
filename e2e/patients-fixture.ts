@@ -68,9 +68,11 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
     conditions: [],
     medications: [],
   })
+  // La clínica nace con las especialidades de la biblioteca: el servicio apunta a la suya (ADR 0039).
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", slug)
   const service = await call<{ id: string }>(page, "POST", "/api/services", slug, {
     name: "Endodoncia unirradicular",
-    specialty: "endodoncia",
+    specialtyId: specialties.find((item) => item.key === "endodoncia")!.id,
     scope: "tooth",
     priceCents: 45000,
     currency: "PEN",

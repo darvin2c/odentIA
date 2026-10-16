@@ -7,11 +7,9 @@ import {
   clientSupportAttachmentUrl,
   describeHelpAttachments,
   describeHelpScreen,
-  ensureCaseForHelpRequest,
   getMySupportCase,
   grantSupportAccess,
   type HelpAsker,
-  helpDedupeKeyOf,
   listActiveSupportGrants,
   listMySupportCases,
   markSupportCaseSeen,
@@ -96,29 +94,18 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
 
   /**
    * La persona decide enviar su pregunta a odentIA: es lo único que sale con
-   * su texto. El envío abre (o reutiliza) su caso privado de soporte.
+   * su texto. El envío abre su caso privado de soporte (o se junta con el suyo
+   * que siga abierto) y deja el aviso por correo a soporte.
    */
   app.post("/requests", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = requestInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const input = parsed.data
     const asker = askerOf(userId, memberRole)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const request = await sendHelpRequest(tx, orgId, asker, { ...input, appVersion: deps.appVersion ?? null })
-        const kase = await ensureCaseForHelpRequest(tx, orgId, {
-          id: request.id,
-          userId,
-          kind: request.kind,
-          question: request.question,
-          detail: typeof input.detail === "string" ? input.detail : null,
-          screen: request.screen,
-          role: asker.roleLabel,
-          appVersion: deps.appVersion ?? null,
-          dedupeKey: helpDedupeKeyOf(request.question),
-        })
-        return { ...request, caseId: kase.id }
+        const kase = await sendHelpRequest(tx, orgId, asker, { ...parsed.data, appVersion: deps.appVersion ?? null })
+        return { ...kase, caseId: kase.id }
       }),
     )
   })

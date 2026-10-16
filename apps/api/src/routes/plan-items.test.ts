@@ -123,13 +123,13 @@ beforeAll(async () => {
         on conflict ("code") do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values
-        (${SVC_CONSULTA}, 'org_a', 'custom', 'CONSULTA', 'Consulta', 'diagnostico', 'general', 5000, 'PEN', 30, true),
-        (${SVC_LIMPIEZA}, 'org_a', 'custom', 'LIMPIEZA', 'Limpieza dental', 'prevencion', 'tooth', 12000, 'PEN', 45, true),
-        (${SVC_ENDO}, 'org_a', 'custom', 'ENDODONCIA', 'Endodoncia', 'endodoncia', 'tooth', 45000, 'PEN', 90, true),
-        (${SVC_USD}, 'org_a', 'custom', 'IMPLANTE', 'Implante', 'implantologia', 'general', 50000, 'USD', 60, true),
-        (${SVC_INACTIVO}, 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'prevencion', 'tooth', 1000, 'PEN', 30, false),
-        (${SVC_OTRA_ORG}, 'org_b', 'custom', 'OTRO', 'Otro servicio', 'prevencion', 'tooth', 999, 'PEN', 15, true)
+    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "duration_min", "is_active") values
+        (${SVC_CONSULTA}, 'org_a', 'custom', 'CONSULTA', 'Consulta', 'general', 5000, 'PEN', 30, true),
+        (${SVC_LIMPIEZA}, 'org_a', 'custom', 'LIMPIEZA', 'Limpieza dental', 'tooth', 12000, 'PEN', 45, true),
+        (${SVC_ENDO}, 'org_a', 'custom', 'ENDODONCIA', 'Endodoncia', 'tooth', 45000, 'PEN', 90, true),
+        (${SVC_USD}, 'org_a', 'custom', 'IMPLANTE', 'Implante', 'general', 50000, 'USD', 60, true),
+        (${SVC_INACTIVO}, 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'tooth', 1000, 'PEN', 30, false),
+        (${SVC_OTRA_ORG}, 'org_b', 'custom', 'OTRO', 'Otro servicio', 'tooth', 999, 'PEN', 15, true)
         on conflict ("id") do nothing`,
   )
 }, 180_000)

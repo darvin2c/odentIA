@@ -17,7 +17,7 @@ import { organization } from "better-auth/plugins"
 import { twoFactor } from "better-auth/plugins"
 
 export const auth = betterAuth({
-  appName: "Odentia32",
+  appName: "odentIA",
   secret: "introspection-only",
   // El adapter nunca se usa: el CLI solo lee opciones/plugins.
   database: drizzleAdapter({} as never, { provider: "pg" }),

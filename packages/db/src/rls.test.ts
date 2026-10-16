@@ -269,8 +269,8 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await ownerDb.execute(sql`update treatment_budget set status = 'presentado' where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'`)
   await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number)
     values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`)
-  await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents,currency)
-    values ('org_a','custom','RESTAURACION','Restauración','restauradora','tooth',10000,'PEN')`)
+  await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,scope,price_cents,currency)
+    values ('org_a','custom','RESTAURACION','Restauración','tooth',10000,'PEN')`)
   await ownerDb.execute(sql`insert into encounter_procedure (organization_id,encounter_id,description)
     values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Restauración realizada')`)
   for (const table of [
@@ -291,7 +291,7 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await expect(
     withOrgContext(appDb, "org_b", (tx) =>
       tx.execute(
-        sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents,currency) values ('org_a','custom','INTRUSO','Ajeno','restauradora','tooth',1,'PEN')`,
+        sql`insert into service_catalog (organization_id,source,code,name,scope,price_cents,currency) values ('org_a','custom','INTRUSO','Ajeno','tooth',1,'PEN')`,
       ),
     ),
   ).rejects.toThrow()

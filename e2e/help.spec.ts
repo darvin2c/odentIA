@@ -1,6 +1,6 @@
 import { member } from "@odentia/db/schema/auth"
-import { helpAsk, helpRequest } from "@odentia/db/schema/workspace"
-import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
+import { helpAsk } from "@odentia/db/schema/workspace"
+import { supportCase, supportMessage, supportNotice } from "@odentia/db/schema/admin-support"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant, tenantPattern } from "./env"
@@ -64,9 +64,13 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect(unknown.getByRole("button", { name: "No, gracias" })).toBeVisible()
   await info.attach("ayuda-no-sabe", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await unknown.getByRole("button", { name: "Enviar a odentIA" }).click()
+  await expect(unknown.getByRole("status")).toHaveText('Enviado. Te respondemos aquí, en "Tus casos con soporte". Si no lo ves, te avisamos por correo.')
   await expect.poll(async () => await call<Array<{ question: string; status: string }>>(page, "GET", "/api/help/cases", org.slug))
     .toEqual([expect.objectContaining({ question: UNKNOWN, status: "abierto" })])
   const sent = await call<Array<{ id: string; question: string; status: string }>>(page, "GET", "/api/help/cases", org.slug)
+  // Soporte se entera: queda el aviso por correo «Caso nuevo», que envía el worker.
+  expect((await fixtureDb.select().from(supportNotice).where(eq(supportNotice.caseId, sent[0]!.id))).map((row) => [row.kind, row.recipientUserId, row.emailState]))
+    .toEqual([["caso_nuevo", null, "pendiente"]])
   // La Ayuda no guarda lo que se le pregunta: solo la pantalla, el tema y si sirvió.
   const logged = await fixtureDb.select().from(helpAsk).where(eq(helpAsk.organizationId, org.id))
   expect(logged.map((row) => [row.screen, row.topicId, row.helpful])).toEqual([
@@ -107,9 +111,9 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const problem = help.getByRole("region", { name: "Reportar un problema" })
   await problem.getByLabel("Qué pasó").fill("La lista de pacientes se queda cargando")
   await problem.getByRole("button", { name: "Enviar a odentIA" }).click()
-  await expect.poll(async () => await fixtureDb.select({ question: helpRequest.question }).from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema"))))
+  await expect.poll(async () => await fixtureDb.select({ question: supportCase.question }).from(supportCase).where(and(eq(supportCase.organizationId, org.id), eq(supportCase.kind, "problema"))))
     .toEqual([{ question: "La lista de pacientes se queda cargando" }])
-  const reported = await fixtureDb.select().from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema")))
+  const reported = await fixtureDb.select().from(supportCase).where(and(eq(supportCase.organizationId, org.id), eq(supportCase.kind, "problema")))
   expect(reported.map((row) => [row.question, row.screen, row.role, row.detail])).toEqual([["La lista de pacientes se queda cargando", "/people", "Propietario", null]])
 
   // --- Teléfono: el mismo botón y la hoja de ayuda, sin desbordes ---

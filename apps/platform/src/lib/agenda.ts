@@ -222,6 +222,8 @@ export interface AgendaAvailability {
   /** Tramos en que cada profesional puede recibir una cita: su horario menos lo ocupado. */
   free: { dentistUserId: string; startsAt: string; endsAt: string }[]
   blocks: ScheduleBlock[]
+  /** Con servicio: si alguien lo atiende en la sede, solo esas personas (ADR 0039). */
+  attending?: { specialtyName: string; dentistUserIds: string[] } | null
 }
 
 /** Persona encontrada al buscar una cita, con sus próximas citas en pie. */

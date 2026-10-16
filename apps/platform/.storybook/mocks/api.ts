@@ -256,7 +256,8 @@ const services = [
     source: "template" as const,
     code: "LIMPIEZA",
     name: "Limpieza dental (profilaxis)",
-    specialty: "prevencion",
+    specialtyId: "esp-prevencion",
+    specialtyName: "Prevención",
     scope: "general" as const,
     priceCents: 12000,
     currency: "PEN",
@@ -269,7 +270,8 @@ const services = [
     source: "template" as const,
     code: "ENDO",
     name: "Endodoncia unirradicular",
-    specialty: "endodoncia",
+    specialtyId: "esp-endodoncia",
+    specialtyName: "Endodoncia",
     scope: "tooth" as const,
     priceCents: 48000,
     currency: "PEN",
@@ -282,7 +284,8 @@ const services = [
     source: "template" as const,
     code: "RESINA",
     name: "Restauración con resina compuesta",
-    specialty: "restauradora",
+    specialtyId: "esp-restauradora",
+    specialtyName: "Restauradora",
     scope: "surfaces" as const,
     priceCents: 19000,
     currency: "PEN",
@@ -560,15 +563,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (segments[1] === "services" && method === "GET") {
     const q = (query.get("q") ?? "").toLowerCase()
-    const specialty = query.get("specialty")
+    const specialtyId = query.get("specialtyId")
     const rows = services.filter(
       (service) =>
         (!q ||
           service.name.toLowerCase().includes(q) ||
           (service.code ?? "").toLowerCase().includes(q)) &&
-        (!specialty || service.specialty === specialty),
+        (!specialtyId || service.specialtyId === specialtyId),
     )
-    return json({ data: rows, nextCursor: null }) as T
+    return json({ data: rows, nextCursor: null, total: rows.length }) as T
   }
 
   // Perfil profesional propio: con él se firma la evaluación del odontograma.

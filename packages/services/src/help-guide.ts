@@ -274,9 +274,13 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     path: "/settings/specialties",
     title: "Especialidades",
     parent: SETTINGS,
-    purpose: "Las especialidades que atiende tu clínica; ordenan los servicios y el plan de tratamiento.",
-    terms: ["ortodoncia", "endodoncia", "áreas", "tipos de tratamiento"],
+    purpose: "Las especialidades de tu clínica y quién atiende cada una. Nacen con las de la biblioteca y puedes renombrarlas. La agenda ofrece cada servicio solo a quien atiende su especialidad; la especialidad de un servicio se elige en Servicios y precios.",
+    terms: ["ortodoncia", "endodoncia", "áreas", "tipos de tratamiento", "quién atiende", "especialista", "nadie atiende"],
     writePermission: "settings.write",
+    faqs: [
+      { q: "¿A quién ofrece la agenda un servicio?", a: "A quien atiende su especialidad y tiene horario en esa sede: en la agenda, en el enlace de reserva y en lo que ofrece el agente. Si nadie la atiende, se ofrece a cualquiera y esta pantalla lo avisa con «Elegir quién atiende»." },
+      { q: "¿Dónde cambio la especialidad de un servicio?", a: "En Servicios y precios, al editar el servicio. Cada servicio tiene una sola especialidad. Aquí, el número de servicios de cada una te lleva a esa lista ya filtrada." },
+    ],
   },
   {
     id: "formularios",

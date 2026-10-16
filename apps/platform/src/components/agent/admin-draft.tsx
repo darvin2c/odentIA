@@ -37,7 +37,8 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
         method: "POST",
         body: JSON.stringify({ question: request.slice(0, 500), screen: "/agent/administrador", kind: "pregunta", detail: "Pedido al Administrador que todavía no sabe hacer" }),
       }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["help-requests"] }),
+    // La misma lista de «Tus casos con soporte» en Ayuda: el caso aparece enseguida.
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["support-cases"] }),
   })
   const ask = useMutation({
     retry: false,

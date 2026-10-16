@@ -903,6 +903,32 @@ export const treatmentTemplateCode = pgTable(
   ],
 )
 
+/**
+ * Especialidad de la clínica (p. ej. «Endodoncia»): la única lista de
+ * especialidades (ADR 0039). Nace con las de la biblioteca
+ * (`LIBRARY_SPECIALTIES`, misma clave) y la clínica la renombra, archiva o
+ * amplía. El servicio apunta a una; quien la atiende va en
+ * `professional_specialty`.
+ */
+export const orgSpecialty = pgTable(
+  "org_specialty",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    /** Clave estable por organización: la de la biblioteca o la que sale del nombre. */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("org_specialty_org_key_uidx").on(table.organizationId, table.key),
+    uniqueIndex("org_specialty_org_id_uidx").on(table.organizationId, table.id),
+    index("org_specialty_org_active_idx").on(table.organizationId, table.isActive),
+  ],
+)
+
 /** Oferta organizacional de tratamientos y tarifas (recurso /services). */
 export const serviceCatalog = pgTable(
   "service_catalog",
@@ -913,7 +939,11 @@ export const serviceCatalog = pgTable(
     source: text("source").notNull().default("custom"),
     code: text("code"),
     name: text("name").notNull(),
-    specialty: text("specialty"),
+    /**
+     * La especialidad de la clínica, una sola (decisión 3 de la fase 4). La
+     * agenda ofrece el servicio a quien la atiende. Del legado puede faltar.
+     */
+    specialtyId: uuid("specialty_id"),
     scope: text("scope"),
     // Todo servicio tiene tarifa explícita (>= 0; 0 = incluido sin costo).
     priceCents: integer("price_cents").notNull(),
@@ -944,7 +974,12 @@ export const serviceCatalog = pgTable(
       .on(table.organizationId, table.code)
       .where(sql`"code" IS NOT NULL`),
     index("service_catalog_org_active_idx").on(table.organizationId, table.isActive),
-    index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialty),
+    index("service_catalog_org_specialty_idx").on(table.organizationId, table.specialtyId),
+    foreignKey({
+      name: "service_catalog_specialty_fk",
+      columns: [table.organizationId, table.specialtyId],
+      foreignColumns: [orgSpecialty.organizationId, orgSpecialty.id],
+    }),
     index("service_catalog_template_idx").on(table.templateId),
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
     check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),

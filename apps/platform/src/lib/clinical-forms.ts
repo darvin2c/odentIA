@@ -1,7 +1,11 @@
 import type { ConsentSections } from "@odentia/clinical"
+import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 
-/** Especialidad creada por la organización (sin catálogo fijo). */
+/**
+ * Especialidad de la clínica: la única lista (ADR 0039). Nace con las de la
+ * biblioteca y la clínica la renombra, archiva o amplía.
+ */
 export interface Specialty {
   id: string
   organizationId: string
@@ -237,6 +241,31 @@ export function fetchSpecialties(query: { q?: string; activeOnly?: boolean } = {
   )
 }
 
+/**
+ * Las especialidades de la clínica, para elegirlas o nombrarlas en cualquier
+ * pantalla (Servicios, la biblioteca, el buscador de tratamientos). La lista
+ * es una sola: la de Configuración › Especialidades.
+ */
+export function useClinicSpecialties(options: { activeOnly?: boolean; enabled?: boolean } = {}) {
+  const activeOnly = options.activeOnly ?? false
+  return useQuery({
+    queryKey: ["specialties", { activeOnly }],
+    queryFn: () => fetchSpecialties({ activeOnly }),
+    enabled: options.enabled ?? true,
+    staleTime: 60_000,
+    retry: 1,
+  })
+}
+
+/**
+ * El nombre que la clínica le da a una especialidad de la biblioteca (por su
+ * clave): así la biblioteca dice «Rehabilitación oral» si la clínica renombró
+ * «Prótesis». Sin la de la clínica, la clave tal cual.
+ */
+export function specialtyNameByKey(specialties: readonly Specialty[], key: string): string {
+  return specialties.find((item) => item.key === key)?.name ?? key
+}
+
 export function createSpecialty(body: { key?: string; name: string; description?: string | null }) {
   return post<Specialty>(`${BASE}/specialties`, body)
 }
@@ -269,15 +298,21 @@ export function saveProfessionalSpecialties(userId: string, specialtyIds: string
   )
 }
 
-export function fetchServiceSpecialties(serviceId: string) {
-  return apiFetch<{ data: Specialty[] }>(`${BASE}/services/${serviceId}/specialties`)
+/** Cada especialidad con quién la atiende y cuántos servicios activos tiene. */
+export interface SpecialtyOverview extends Specialty {
+  professionals: Array<{ userId: string; name: string }>
+  serviceCount: number
 }
 
-export function saveServiceSpecialties(serviceId: string, specialtyIds: string[]) {
-  return put<{ serviceId: string; specialtyIds: string[] }>(
-    `${BASE}/services/${serviceId}/specialties`,
-    { specialtyIds },
-  )
+export function fetchSpecialtiesOverview() {
+  return apiFetch<{ data: SpecialtyOverview[] }>(`${BASE}/specialties/overview`)
+}
+
+/** «Elegir quién atiende»: la lista completa de una especialidad, de una vez. */
+export function saveSpecialtyProfessionals(specialtyId: string, userIds: string[]) {
+  return put<{ specialtyId: string; userIds: string[] }>(`${BASE}/specialties/${specialtyId}/professionals`, {
+    userIds,
+  })
 }
 
 // --- Plantillas de formulario ---

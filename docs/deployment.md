@@ -77,6 +77,10 @@ del caller. SMTP local de desarrollo, como Mailpit en 1025, sigue sin TLS.
 No desactivar la validación de certificados para corregir la conexión. Autenticar
 contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el correo.
 
+`SUPPORT_INBOX_EMAIL` es el buzón de soporte de odentIA: el worker le envía
+«Caso nuevo» y «La clínica respondió», con el botón a Soporte en `ADMIN_URL`.
+Vacío, esos avisos quedan pendientes y el caso sigue en la bandeja de Soporte.
+
 ## CI y despliegue automático
 
 `.github/workflows/ci.yml` instala dependencias con el lockfile, ejecuta typecheck,

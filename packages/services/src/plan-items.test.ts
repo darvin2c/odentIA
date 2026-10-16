@@ -24,7 +24,7 @@ it("conserva dos sesiones, exige completar explícitamente y encadena revisiones
     sql`insert into patient (organization_id,display_name,patient_number) values ('org_a','Paciente clínico',1) returning id`,
   )
   const [service] = await ownerDb.execute<{ id: string }>(
-    sql`insert into service_catalog (organization_id,name,specialty,scope,source,price_cents,currency) values ('org_a','Tratamiento','general','general','custom',120000,'PEN') returning id`,
+    sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Tratamiento','general','custom',120000,'PEN') returning id`,
   )
   const [first] = await ownerDb.execute<{ id: string }>(
     sql`insert into encounter (organization_id,patient_id,dentist_user_id) values ('org_a',${patient.id},'clinical-actor') returning id`,
@@ -106,7 +106,7 @@ it("indica sin elegir plan: el plan abierto nace con la atención y recibe lo si
     sql`insert into patient (organization_id,display_name,patient_number) values ('org_a','Paciente alternativas',2) returning id`,
   )
   const [service] = await ownerDb.execute<{ id: string }>(
-    sql`insert into service_catalog (organization_id,name,specialty,scope,source,price_cents,currency) values ('org_a','Obturación','general','general','custom',90000,'PEN') returning id`,
+    sql`insert into service_catalog (organization_id,name,scope,source,price_cents,currency) values ('org_a','Obturación','general','custom',90000,'PEN') returning id`,
   )
   const [encounter] = await ownerDb.execute<{ id: string }>(
     sql`insert into encounter (organization_id,patient_id,dentist_user_id) values ('org_a',${patient.id},'alt-actor') returning id`,

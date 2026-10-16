@@ -55,7 +55,7 @@ export function createAuth({
   ownerDb,
 }: CreateAuthOptions) {
   return betterAuth({
-    appName: "Odentia32",
+    appName: "odentIA",
     secret,
     baseURL,
     database: drizzleAdapter(db, { provider: "pg" }),
