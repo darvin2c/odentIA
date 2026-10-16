@@ -128,6 +128,11 @@ export interface ImagenesTabProps {
   disabled?: boolean
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
+  /** Desde Documentos, «Nuevo ▾ › Imagen o archivo» abre el envío sin otro clic. */
+  openUpload?: boolean
+  onUploadHandled?: () => void
+  /** En Documentos el envío lo abre «Nuevo ▾»: la galería no repite su botón. */
+  showUploadButton?: boolean
 }
 
 export function ImagenesTab({
@@ -140,6 +145,9 @@ export function ImagenesTab({
   disabled,
   beforeWrite,
   onPendingChange,
+  openUpload = false,
+  onUploadHandled,
+  showUploadButton = true,
 }: ImagenesTabProps) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
@@ -156,6 +164,11 @@ export function ImagenesTab({
   useEffect(() => {
     if (initialTooth != null) setTeeth([initialTooth])
   }, [initialTooth])
+  useEffect(() => {
+    if (!openUpload) return
+    setUploadOpen(true)
+    onUploadHandled?.()
+  }, [openUpload, onUploadHandled])
 
   // Los retirados no están en la galería; se consultan aparte con su motivo.
   const showRetired = listSearch.get("estado") === "retirados"
@@ -383,7 +396,7 @@ export function ImagenesTab({
           <h2 className="text-sm font-semibold">
             {showRetired ? "Archivos retirados" : "Imágenes y archivos"} ({filtered.length})
           </h2>
-          {!readOnly && canWrite && (
+          {!readOnly && canWrite && showUploadButton && (
             <Button size="sm" disabled={disabled} onClick={() => setUploadOpen(true)}>
               Subir imagen o documento
             </Button>
@@ -906,7 +919,7 @@ function DocumentViewer({
                 </dd>
                 {doc.reportStatus === "pendiente" && (
                   <p className="pt-1 text-xs text-muted-foreground">
-                    El informe se escribe en la atención, en «Exámenes auxiliares».
+                    El informe va como resultado de su orden o en la evolución de la atención.
                   </p>
                 )}
               </div>

@@ -10,6 +10,12 @@ import {
   Button,
   ButtonGroup,
   buttonVariants,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
   Field,
   FieldLabel,
   Select,
@@ -22,7 +28,7 @@ import {
 } from "@odentia/ui"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { FileText, Image as ImageIcon } from "lucide-react"
+import { ClipboardList, FileText, Image as ImageIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { timeAgo } from "../../lib/crm"
@@ -31,6 +37,7 @@ import { statusLabel, type TimelineItem, timelineTypeLabel } from "../../lib/pat
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import { DocumentOpenButton, useDocumentUrl } from "./document-open-button"
 import { EncounterHistoryCard } from "./encounter-history-card"
+import { NewEncounterButton } from "./new-encounter-button"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 const ALL_TEETH = "all"
@@ -46,35 +53,31 @@ interface TimelinePage {
   timezone: string
   locale: string
 }
-type FeedFilter =
-  | "todo"
-  | "encounter"
-  | "note"
-  | "anamnesis"
-  | "rx"
-  | "foto"
-  | "odontogram"
-  | "plan"
-  | "budget"
-  | "follow_up"
-  | "prescription"
+/**
+ * Historia es «qué pasó y cuándo» (ADR 0035): los papeles salen como hechos
+ * («firmó», «se pidió»), sin filtro propio; para buscarlos está Documentos.
+ */
+type FeedFilter = "todo" | "encounter" | "plan" | "note"
 
-const FILTERS: Array<{ value: FeedFilter; label: string; dot?: string }> = [
-  { value: "todo", label: "Todo" },
-  { value: "encounter", label: "Atenciones", dot: "bg-blue-500" },
-  { value: "note", label: "Notas", dot: "bg-violet-500" },
-  { value: "anamnesis", label: "Anamnesis", dot: "bg-teal-500" },
-  { value: "rx", label: "RX", dot: "bg-sky-500" },
-  { value: "foto", label: "Fotos", dot: "bg-emerald-500" },
-  { value: "odontogram", label: "Odontograma", dot: "bg-amber-500" },
-  { value: "plan", label: "Tratamientos", dot: "bg-indigo-500" },
-  { value: "budget", label: "Presupuestos", dot: "bg-fuchsia-500" },
-  { value: "follow_up", label: "Controles", dot: "bg-lime-500" },
-  { value: "prescription", label: "Recetas", dot: "bg-rose-500" },
+const FILTERS: Array<{ value: FeedFilter; label: string; types: string }> = [
+  {
+    value: "todo",
+    label: "Todo",
+    types:
+      "encounter,note,odontogram,anamnesis,document,plan,budget,follow_up,prescription,consent,order,form",
+  },
+  { value: "encounter", label: "Atenciones", types: "encounter" },
+  { value: "plan", label: "Plan", types: "plan,budget,follow_up" },
+  { value: "note", label: "Notas clínicas", types: "note" },
 ]
 
-/** Tipos que viajan al endpoint: un solo tipo, o todos los del recorrido. */
-const JOURNEY_FILTERS: FeedFilter[] = ["plan", "budget", "follow_up", "prescription"]
+/** El filtro de Documentos donde está cada papel de la historia. */
+const DOCUMENT_FILTER_OF: Partial<Record<TimelineItem["type"], string>> = {
+  prescription: "recetas",
+  consent: "consentimientos",
+  order: "ordenes",
+  form: "formularios",
+}
 
 type GroupMode = "dia" | "atencion"
 
@@ -354,8 +357,6 @@ function JourneyCard({
         }
       case "follow_up":
         return { label: "Ver controles", search: { tab: "plan" } }
-      case "prescription":
-        return { label: "Ver recetas", search: { tab: "recetas" } }
       default:
         return null
     }
@@ -405,7 +406,76 @@ function JourneyCard({
   )
 }
 
-/** Historia clínica unificada: atenciones finalizadas, notas, anamnesis, documentos, odontograma y recorrido. */
+/**
+ * Un papel como hecho de la historia: «Firmó el consentimiento…», «Se pidió…»,
+ * «Se completó el formulario…» o la receta emitida. El papel en sí se abre en
+ * Documentos.
+ */
+function FactCard({
+  patientId,
+  item,
+  timezone,
+  locale,
+}: {
+  patientId: string
+  item: TimelineItem
+  timezone: string
+  locale: string | undefined
+}) {
+  const filter = DOCUMENT_FILTER_OF[item.type]
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 elevated rounded-xl border bg-card px-6 py-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <CardHeaderRow
+          badge={timelineTypeLabel(item.type)}
+          createdAt={item.createdAt}
+          timezone={timezone}
+          locale={locale}
+        />
+        <p className="text-sm font-medium">{item.title}</p>
+        {item.detail ? <p className="text-sm text-muted-foreground">{item.detail}</p> : null}
+      </div>
+      {filter ? (
+        <Link
+          to="/patients/$patientId"
+          params={{ patientId }}
+          search={{ tab: "documentos", tipo: filter } as { tab: "documentos" }}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          Ver en Documentos
+        </Link>
+      ) : null}
+    </div>
+  )
+}
+
+/** Atención anulada: queda en la historia con su motivo, sin su contenido. */
+function VoidedEncounterCard({
+  item,
+  timezone,
+  locale,
+}: {
+  item: TimelineItem
+  timezone: string
+  locale: string | undefined
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border border-dashed px-6 py-4">
+      <CardHeaderRow
+        badge="Atención anulada"
+        context={item.title}
+        createdAt={item.createdAt}
+        timezone={timezone}
+        locale={locale}
+      />
+      <p className="text-sm text-muted-foreground">
+        Motivo: {item.voidReason ?? "sin registrar"}
+      </p>
+    </div>
+  )
+}
+
+/** Historia clínica unificada: atenciones (también las anuladas), notas, anamnesis, papeles, odontograma y plan. */
 export function Timeline({ patientId, initialTooth, onOdontogramSelect }: TimelineProps) {
   const [filter, setFilter] = useState<FeedFilter>("todo")
   const [mode, setMode] = useState<GroupMode>("dia")
@@ -420,25 +490,15 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
     if (initialTooth != null) setTooth(String(initialTooth))
   }, [initialTooth])
 
-  const types =
-    filter === "encounter" || filter === "note" || filter === "odontogram" || filter === "anamnesis"
-      ? filter
-      : JOURNEY_FILTERS.includes(filter)
-        ? filter
-        : filter === "rx" || filter === "foto"
-          ? "document"
-          : "encounter,note,odontogram,anamnesis,document,plan,budget,follow_up,prescription"
-  const documentCategory =
-    filter === "rx" ? "radiografia" : filter === "foto" ? "foto_clinica" : undefined
+  const types = FILTERS.find((option) => option.value === filter)?.types ?? FILTERS[0].types
   const toothNumber = tooth === ALL_TEETH ? undefined : Number(tooth)
 
   const feed = useInfiniteQuery({
-    queryKey: ["timeline", patientId, types, toothNumber, documentCategory, order],
+    queryKey: ["timeline", patientId, types, toothNumber, order],
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams()
       if (types) params.set("types", types)
       if (toothNumber != null) params.set("toothNumber", String(toothNumber))
-      if (documentCategory) params.set("documentCategory", documentCategory)
       if (order !== "desc") params.set("order", order)
       if (pageParam) params.set("cursor", pageParam)
       const query = params.toString()
@@ -519,14 +579,7 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
                 aria-pressed={filter === option.value}
                 onClick={() => setFilter(option.value)}
               >
-                {option.dot ? (
-                  <span className="flex items-center gap-1.5">
-                    <span aria-hidden="true" className={`size-1.5 rounded-full ${option.dot}`} />
-                    {option.label}
-                  </span>
-                ) : (
-                  option.label
-                )}
+                {option.label}
               </Button>
             ))}
           </ButtonGroup>
@@ -619,11 +672,23 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
       ) : null}
 
       {!feed.isPending && !feed.isError && items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {hasActiveFilter
-            ? "Sin eventos para los filtros seleccionados."
-            : "Sin eventos en la historia clínica."}
-        </p>
+        hasActiveFilter && filter !== "encounter" ? (
+          <p className="text-sm text-muted-foreground">Sin hechos para los filtros elegidos.</p>
+        ) : (
+          // Vacío con su acción (ADR 0035): la historia empieza con una atención.
+          <Empty className="rounded-lg border border-dashed border-border bg-surface p-8">
+            <EmptyHeader>
+              <EmptyMedia variant="icon" aria-hidden>
+                <ClipboardList />
+              </EmptyMedia>
+              <EmptyTitle>Todavía no tiene atenciones</EmptyTitle>
+              <EmptyDescription>Lo que pasa en cada atención queda aquí, con su fecha.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <NewEncounterButton patientId={patientId} />
+            </EmptyContent>
+          </Empty>
+        )
       ) : null}
 
       {groups.map(([key, group]) => (
@@ -640,8 +705,21 @@ export function Timeline({ patientId, initialTooth, onOdontogramSelect }: Timeli
             <time dateTime={group.sample}>{group.heading}</time>
           </h3>
           {group.items.map((item) =>
-            item.type === "encounter" ? (
+            item.type === "encounter" && item.status === "anulada" ? (
+              <VoidedEncounterCard key={item.id} item={item} timezone={timezone} locale={locale} />
+            ) : item.type === "encounter" ? (
               <EncounterHistoryCard key={item.id} patientId={patientId} item={item} />
+            ) : item.type === "prescription" ||
+              item.type === "consent" ||
+              item.type === "order" ||
+              item.type === "form" ? (
+              <FactCard
+                key={item.id}
+                patientId={patientId}
+                item={item}
+                timezone={timezone}
+                locale={locale}
+              />
             ) : item.type === "note" ? (
               <NoteCard key={item.id} item={item} timezone={timezone} locale={locale} />
             ) : item.type === "odontogram" ? (

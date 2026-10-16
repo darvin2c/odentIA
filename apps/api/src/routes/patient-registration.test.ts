@@ -5,7 +5,7 @@ import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
-import { patient, patientContact, patientRegistration } from "@odentia/db/schema/clinical"
+import { patient, patientContact, patientDataConsent, patientRegistration } from "@odentia/db/schema/clinical"
 import {
   createConnection,
   createContact,
@@ -394,8 +394,20 @@ it("QR público: crea paciente real sin cuenta, sin contacto y sin revisión", a
   expect(row!.healthReviewedBy).toBeNull()
   // La declaración persiste (revisión 1) sin marcar revisión profesional.
   expect(row!.healthRevision).toBe(1)
-  expect(row!.dataConsentAt).not.toBeNull()
-  expect(row!.dataConsentBy).toBeNull()
+  // El consentimiento queda como fila de «Datos y consentimiento», por versión
+  // del aviso, sin autor del equipo: lo dio la persona en el formulario.
+  const consents = await ownerDb
+    .select()
+    .from(patientDataConsent)
+    .where(eq(patientDataConsent.patientId, snapshots[0]!.patientId))
+  expect(consents).toHaveLength(1)
+  expect(consents[0]).toMatchObject({
+    organizationId: ORG_A,
+    channel: "formulario_publico",
+    recordedBy: null,
+    revokedAt: null,
+  })
+  expect(consents[0]!.purposes).toContain("atencion")
 
   const links = await ownerDb
     .select()

@@ -8,7 +8,7 @@ import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { updateContact } from "./contacts.js"
 import { grantDataConsent, listDataConsents, revokeDataConsent } from "./data-consents.js"
-import { getPatient, updatePatient } from "./patients.js"
+import { updatePatient } from "./patients.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -133,9 +133,10 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
     { purpose: "seguimiento", granted: null },
     { purpose: "novedades", granted: false, source: "revocacion_datos" },
   ])
-  expect(
-    (await f.run((tx) => getPatient(tx, "org_a", f.patient.id))).patient.dataConsentAt,
-  ).not.toBeNull()
+  // Revocar no borra la historia: el consentimiento sigue, con quién lo revocó.
+  expect(await f.run((tx) => listDataConsents(tx, "org_a", f.patient.id))).toEqual([
+    expect.objectContaining({ id: granted.id, revokedAt: expect.any(Date), revokedBy: f.actor }),
+  ])
 })
 
 it("antecedentes: gravedad ausente es desconocida, familiares por parentesco y ASA", async () => {

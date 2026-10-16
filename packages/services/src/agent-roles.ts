@@ -187,7 +187,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
     // Solo lo que ya está construido. El odontograma por voz y las recetas llegan después:
     // mientras no existan, no figuran como funciones.
     functions: [
-      { id: "nota", label: "Consulta y evolución", description: "Motivo, enfermedad actual, evolución, indicaciones y siguiente paso.", fixed: true, tools: [] },
+      { id: "nota", label: "Consulta y evolución", description: "Motivo, enfermedad actual, evolución, indicaciones y pronóstico.", fixed: true, tools: [] },
       { id: "diagnostico", label: "Diagnóstico", description: "Registra el código CIE-10 que nombró el odontólogo, con su pieza.", fixed: true, tools: [] },
       { id: "plan", label: "Plan de tratamiento", description: "Busca cada prestación dictada en los servicios de la clínica; si no hay una sola, la elige el odontólogo.", fixed: true, tools: [] },
       { id: "controles", label: "Controles", description: "Deja sugerido el próximo control.", fixed: true, tools: [] },

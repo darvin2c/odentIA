@@ -605,10 +605,20 @@ it("responsables: vigencia, duplicado y revocación con motivo", async () => {
   // Un contacto no vinculado al paciente no puede recibir roles.
   const outsider = await post(app, `/patients/${patientId}/responsibilities`, {
     contactId: "99999999-9999-4999-8999-999999999999",
-    kind: "acompanante",
+    kind: "autorizado_informacion",
     startsAt,
   })
   expect(outsider.status).toBe(404)
+
+  // «Acompañante» ya no es una responsabilidad: quien solo acompaña es una
+  // persona vinculada.
+  const companion = await post(app, `/patients/${patientId}/responsibilities`, {
+    contactId,
+    kind: "acompanante",
+    startsAt,
+  })
+  expect(companion.status).toBe(400)
+  expect((await json<ErrorBody>(companion)).error.code).toBe("VALIDATION")
 
   const list = await app.request(`/patients/${patientId}/responsibilities`)
   const rows = await json<{ data: Array<{ isCurrent: boolean; contactId: string }> }>(list)

@@ -183,7 +183,7 @@ export function DeclarationStateSelect({
   )
 }
 
-/** Estado de revisión clínica Sin determinar/Ausencia/Registrados (ficha interna). */
+/** Estado de revisión clínica: no se le preguntó, niega o registrados (ficha interna). */
 export function ReviewStateSelect({
   id,
   value,

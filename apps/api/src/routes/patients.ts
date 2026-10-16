@@ -142,7 +142,6 @@ const createInput = z.strictObject({
 const patchInput = z.object({
   ...filiation,
   isActive: z.boolean().optional(),
-  dataConsent: z.boolean().optional(),
   /** Recepción confirma el nombre separado tras la migración. */
   identityConfirmed: z.boolean().optional(),
 })
@@ -218,7 +217,6 @@ const healthSaveInput = z
       })
       .strict()
       .optional(),
-    dataConsent: z.literal(true).optional(),
     bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
   })
   .strict()
@@ -309,7 +307,6 @@ const encounterCreateInput = z.object({
 const encounterPatchInput = z.object({
   ...operationBodyShape("atencion.nota"),
   branchId: z.uuid().nullish(),
-  nextAppointmentAt: z.iso.datetime({ offset: true }).nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
   examination: z
     .object({

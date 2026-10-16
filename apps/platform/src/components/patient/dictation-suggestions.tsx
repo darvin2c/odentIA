@@ -142,9 +142,7 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, Array<{ key: string; labe
     { key: "illnessDuration", label: "Tiempo de enfermedad" },
     { key: "evolution", label: "Evolución", long: true },
     { key: "indications", label: "Indicaciones", long: true },
-    { key: "nextStep", label: "Siguiente paso", long: true },
     { key: "prognosis", label: "Pronóstico" },
-    { key: "auxiliaryExams", label: "Exámenes auxiliares", long: true },
   ],
   diagnostico: [
     { key: "cie10Code", label: "Código CIE-10" },

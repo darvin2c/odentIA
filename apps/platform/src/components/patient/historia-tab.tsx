@@ -8,15 +8,17 @@ export interface HistoriaTabProps {
 }
 
 /**
- * Historia clínica: visor cronológico de solo lectura (atenciones
- * finalizadas, notas, anamnesis, documentos y odontograma).
- * La atención se inicia desde la cabecera de la ficha; aquí no hay acción de
- * "nueva atención" para evitar duplicar vías de apertura.
+ * Historia, «qué pasó y cuándo» (ADR 0035): visor cronológico de solo lectura
+ * con las atenciones (también las anuladas, con su motivo), las notas
+ * clínicas, la anamnesis, el odontograma, el plan y los papeles como hechos.
+ * La atención se inicia desde la cabecera de la página; aquí solo la ofrece el
+ * vacío.
  */
 export function HistoriaTab({ patientId, initialTooth, onOdontogramSelect }: HistoriaTabProps) {
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">Qué pasó y cuándo</p>
         <QuickNoteDrawer patientId={patientId} />
       </div>
       <Timeline

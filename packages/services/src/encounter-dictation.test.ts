@@ -156,7 +156,7 @@ describe("dictado en la atención", () => {
     const [badControl, kept] = await fx.run((tx) =>
       saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
         { kind: "control", payload: { title: "Control", dueAt: new Date(Date.now() + 86_400_000).toISOString(), instructions: "x".repeat(2000) } },
-        { kind: "nota", payload: { nextStep: "Tomar radiografía" } },
+        { kind: "nota", payload: { indications: "Tomar radiografía" } },
       ]),
     )
     // Vaciar un campo al editar lo quita de la sugerencia, que sigue lista.

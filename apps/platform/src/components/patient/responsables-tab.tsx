@@ -1,6 +1,7 @@
 /**
- * Responsables del paciente: quién representa, autoriza información, responde
- * económicamente o acompaña, con vigencia y documento de respaldo.
+ * Responsables del paciente: quién representa, autoriza información o responde
+ * económicamente, con vigencia y documento de respaldo. Quien solo acompaña va
+ * en «Personas vinculadas», no aquí.
  *
  * La persona se elige con el buscador de personas de la aplicación; si aún no
  * está vinculada al paciente, se vincula en el mismo paso (tutor si es menor,

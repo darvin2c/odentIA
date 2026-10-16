@@ -6,7 +6,7 @@ import { and, asc, eq, isNull, lte, gte, or } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 
-export const RESPONSIBILITY_KINDS = ["representante_legal", "autorizado_informacion", "responsable_economico", "acompanante"] as const
+export const RESPONSIBILITY_KINDS = ["representante_legal", "autorizado_informacion", "responsable_economico"] as const
 
 function validDate(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw validation("Fecha inválida: usa AAAA-MM-DD")

@@ -1,7 +1,7 @@
 import { formatMoney } from "@odentia/clinical"
 import { Alert, AlertDescription, AlertTitle, Button, buttonVariants } from "@odentia/ui"
 import { internationalText } from "@odentia/ui-patterns"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -22,10 +22,26 @@ import {
   usePatientAppointments,
 } from "../../lib/patient-appointments"
 import type { PatientSectionId } from "../../lib/patient-areas"
-import { ageFrom, hcLabel, type PatientFull } from "../../lib/patients"
+import {
+  ageFrom,
+  fetchPatientHealth,
+  hcLabel,
+  type PatientFull,
+  type PatientSummary,
+} from "../../lib/patients"
+import { QueryErrorState } from "../../lib/query-error"
 import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
 import { TaskDrawer } from "../crm/task-drawer"
 import { CreatePatientDrawer } from "../patient/create-patient-drawer"
+import { NewEncounterButton } from "../patient/new-encounter-button"
+import { useScheduleAccepted } from "../patient/plan/plan-budgets"
+import { PlanNextCard } from "../patient/plan/plan-next"
+import {
+  ClinicalAlertsCard,
+  LastVisitCard,
+  OpenEncounterCard,
+  UpcomingCard,
+} from "../patient/resumen-clinico"
 import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
@@ -57,16 +73,29 @@ export function usePersonConversations(personId: string) {
  * vistazo —teléfono, alergias, próxima cita, saldo, conversación y
  * oportunidad—, «Falta registrarla como paciente» si aún no lo es, sus
  * pendientes, sus notas y lo que recuerda el agente. Cada dato se pide con su
- * permiso; lo clínico está en su pestaña.
+ * permiso.
+ *
+ * Para quien lee la clínica es el Resumen clínico (ADR 0035): arriba la
+ * atención en curso y cuatro tarjetas —alergias y alertas, «Qué sigue» del
+ * plan, última atención y próxima cita—; recepción y caja ven el de siempre.
  */
 export function PersonSummary({
   person,
   detail,
+  summary,
   onSection,
 }: {
   person: PersonPage
   detail?: PatientFull
-  onSection: (section: PatientSectionId) => void
+  /** El resumen clínico que pidió la página: solo para quien lee la historia. */
+  summary?: UseQueryResult<{ data: PatientSummary }>
+  onSection: (
+    section: PatientSectionId,
+    tooth?: number,
+    itemId?: string,
+    planId?: string,
+    budgetId?: string,
+  ) => void
 }) {
   const patientId = person.patient?.id ?? null
   const can = useCan()
@@ -86,6 +115,13 @@ export function PersonSummary({
   const queryClient = useQueryClient()
   const [sendingLink, setSendingLink] = useState(false)
 
+  const clinical = Boolean(summary && patientId)
+  const health = useQuery({
+    queryKey: ["patient-health", patientId],
+    queryFn: () => fetchPatientHealth(patientId ?? ""),
+    enabled: clinical,
+  })
+  const schedule = useScheduleAccepted(patientId ?? "")
   const appointments = usePatientAppointments(
     patientId ?? "none",
     canAppointments && Boolean(patientId),
@@ -127,8 +163,79 @@ export function PersonSummary({
   // Sin teléfono propio, el de quien habla por ella (la preferida primero, como la entrega el servidor).
   const spokenPhone = phoneText ? null : (person.spokenForBy.find((other) => other.phone) ?? null)
 
+  const phoneLine = phoneText
+    ? `Teléfono ${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
+    : spokenPhone?.phone
+      ? `Teléfono de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
+      : "Sin teléfono"
+  const clinicalData = summary?.data?.data
+  // Lo que ya dicen las cuatro tarjetas clínicas no se repite en los datos de abajo.
+  const showFacts =
+    !clinical ||
+    person.responsibleFor.length > 0 ||
+    ((canChats || canCrm) && person.channels.length > 0) ||
+    canFinance ||
+    canChats ||
+    canCrm
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
+      {clinical && patientId ? (
+        <>
+          {clinicalData?.openEncounter ? (
+            <OpenEncounterCard patientId={patientId} encounter={clinicalData.openEncounter} />
+          ) : null}
+          <div className="grid min-w-0 gap-4 md:grid-cols-2">
+            {health.isError ? (
+              <QueryErrorState error={health.error} onRetry={() => void health.refetch()} />
+            ) : (
+              <ClinicalAlertsCard
+                health={health.data?.data ?? null}
+                onAntecedentes={() => onSection("antecedentes")}
+              />
+            )}
+            <PlanNextCard
+              patientId={patientId}
+              onAction={(step) => {
+                if (!step.action) return
+                if ((step.kind === "agendar" || step.kind === "continuar") && step.action.planItemIds)
+                  schedule(step.action.planItemIds, step.action.serviceId ?? null)
+                else onSection("plan", undefined, undefined, undefined, step.action.budgetId)
+              }}
+            />
+            {clinicalData ? (
+              <LastVisitCard
+                patientId={patientId}
+                summary={clinicalData}
+                attend={
+                  person.archived ? null : (
+                    <NewEncounterButton
+                      patientId={patientId}
+                      openEncounterId={clinicalData.openEncounterId}
+                      variant="outline"
+                      size="sm"
+                    />
+                  )
+                }
+              />
+            ) : summary?.isError ? (
+              <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />
+            ) : (
+              <SummaryCard title="Última atención">
+                <p className="text-sm text-muted-foreground">Consultando…</p>
+              </SummaryCard>
+            )}
+            <UpcomingCard
+              patientId={patientId}
+              upcoming={upcoming}
+              loading={canAppointments && appointments.isPending}
+              failed={!canAppointments || appointments.isError}
+              phone={phoneLine}
+            />
+          </div>
+        </>
+      ) : null}
+      {showFacts ? (
       <section aria-label="Resumen" className="elevated rounded-xl border bg-card p-6">
         <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
           {person.responsibleFor.length > 0 ? (
@@ -157,6 +264,7 @@ export function PersonSummary({
               </span>
             </Fact>
           ) : null}
+          {clinical ? null : (
           <Fact label="Teléfono">
             {phoneText
               ? `${phoneText}${person.channels.includes("whatsapp") ? " · WhatsApp" : ""}`
@@ -164,19 +272,20 @@ export function PersonSummary({
                 ? `el de ${spokenPhone.displayName} (${relationshipText(spokenPhone.relationship, spokenPhone.relationshipDetail).toLowerCase()}) · ${internationalText(spokenPhone.phone)}`
                 : "Sin teléfono"}
           </Fact>
+          )}
           {(canChats || canCrm) && person.channels.length > 0 ? (
             <Fact label="Canales">
               {person.channels.map((channel) => channelLabel(channel)).join(", ")}
             </Fact>
           ) : null}
-          {patientId && canAlerts && detail ? (
+          {patientId && canAlerts && detail && !clinical ? (
             <Fact label="Alergias">
               {allergies.length === 0
                 ? "Sin alergias registradas"
                 : allergies.map((allergy) => allergy.substance).join(", ")}
             </Fact>
           ) : null}
-          {canAppointments ? (
+          {canAppointments && !clinical ? (
             <Fact label="Próxima cita">
               {!patientId
                 ? "Ninguna"
@@ -253,6 +362,7 @@ export function PersonSummary({
           ) : null}
         </dl>
       </section>
+      ) : null}
 
       {person.kind === "por_registrar" && !person.archived ? (
         <Alert>
@@ -287,7 +397,12 @@ export function PersonSummary({
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
           {patientId && detail ? (
-            <PatientPendingCard patientId={patientId} detail={detail} onTabChange={onSection} />
+            <PatientPendingCard
+              patientId={patientId}
+              detail={detail}
+              clinical={clinical ? { summary: clinicalData, health: health.data?.data } : undefined}
+              onTabChange={onSection}
+            />
           ) : !patientId && canTasks && canCrm ? (
             <SummaryCard
               title="Pendientes"

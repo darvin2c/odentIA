@@ -20,17 +20,17 @@ export const PATIENT_AREAS = [
 ] as const
 export type PatientAreaId = (typeof PATIENT_AREAS)[number]["id"]
 
-/** Agrupa en una sola entrada de navegación lo que la atención emite o adjunta. */
-export const DOCUMENTS_GROUP = { id: "documentos", label: "Documentos" } as const
-
 export const PATIENT_SECTIONS = [
   {
+    // Para quien lee la clínica (odontólogo, propietario, administrador) el
+    // Resumen ya es el clínico: alergias, «Qué sigue», última atención y
+    // próxima cita (decisión 1 de la fase 3, ADR 0035). Recepción y caja ven
+    // el de siempre.
     id: "resumen",
     area: "resumen",
     label: "Resumen",
     permission: null,
     patient: false,
-    group: null,
   },
   {
     id: "conversaciones",
@@ -39,7 +39,6 @@ export const PATIENT_SECTIONS = [
     // Odontología lee conversaciones sin el CRM: ve las suyas, no las oportunidades.
     permission: ["conversations.read", "crm.read"],
     patient: false,
-    group: null,
   },
   {
     id: "citas",
@@ -47,15 +46,15 @@ export const PATIENT_SECTIONS = [
     label: "Sus citas",
     permission: "appointments.read",
     patient: false,
-    group: null,
   },
+  // Clínica en cuatro secciones (ADR 0035): Antecedentes, Odontograma,
+  // Historia («qué pasó y cuándo») y Documentos («buscar un papel»).
   {
-    id: "clinico",
+    id: "antecedentes",
     area: "clinica",
-    label: "Resumen clínico",
+    label: "Antecedentes",
     permission: "clinical.read",
     patient: true,
-    group: null,
   },
   {
     id: "odontograma",
@@ -63,16 +62,6 @@ export const PATIENT_SECTIONS = [
     label: "Odontograma",
     permission: "clinical.read",
     patient: true,
-    group: null,
-  },
-
-  {
-    id: "atenciones",
-    area: "clinica",
-    label: "Atenciones",
-    permission: "clinical.read",
-    patient: true,
-    group: null,
   },
   {
     id: "historia",
@@ -80,63 +69,13 @@ export const PATIENT_SECTIONS = [
     label: "Historia",
     permission: "clinical.read",
     patient: true,
-    group: null,
-  },
-  {
-    id: "antecedentes",
-    area: "clinica",
-    label: "Antecedentes",
-    permission: "clinical.read",
-    patient: true,
-    group: null,
   },
   {
     id: "documentos",
     area: "clinica",
-    label: "Todos",
+    label: "Documentos",
     permission: "clinical.read",
     patient: true,
-    group: "documentos",
-  },
-  {
-    id: "imagenes",
-    area: "clinica",
-    label: "Imágenes y archivos",
-    permission: "clinical.read",
-    patient: true,
-    group: "documentos",
-  },
-  {
-    id: "recetas",
-    area: "clinica",
-    label: "Recetas",
-    permission: "clinical.read",
-    patient: true,
-    group: "documentos",
-  },
-  {
-    id: "ordenes",
-    area: "clinica",
-    label: "Órdenes",
-    permission: "clinical.read",
-    patient: true,
-    group: "documentos",
-  },
-  {
-    id: "formularios",
-    area: "clinica",
-    label: "Formularios",
-    permission: "clinical.read",
-    patient: true,
-    group: "documentos",
-  },
-  {
-    id: "consentimientos",
-    area: "clinica",
-    label: "Consentimientos",
-    permission: "clinical.read",
-    patient: true,
-    group: "documentos",
   },
   {
     // Una sola sección, sin subpestañas (ADR 0034): «Qué sigue», tratamientos,
@@ -148,7 +87,6 @@ export const PATIENT_SECTIONS = [
     label: "Plan",
     permission: ["clinical.read", "budgets.read", "appointments.read"],
     patient: true,
-    group: null,
   },
   {
     id: "cuenta",
@@ -156,7 +94,6 @@ export const PATIENT_SECTIONS = [
     label: "Cobros",
     permission: "finance.read",
     patient: true,
-    group: null,
   },
   {
     id: "filiacion",
@@ -164,7 +101,6 @@ export const PATIENT_SECTIONS = [
     label: "Datos personales",
     permission: "patients.read",
     patient: false,
-    group: null,
   },
   {
     id: "contactos",
@@ -172,7 +108,6 @@ export const PATIENT_SECTIONS = [
     label: "Personas vinculadas",
     permission: "patients.read",
     patient: false,
-    group: null,
   },
   {
     id: "canales",
@@ -180,7 +115,6 @@ export const PATIENT_SECTIONS = [
     label: "Canales",
     permission: "crm.read",
     patient: false,
-    group: null,
   },
   {
     id: "responsables",
@@ -188,7 +122,6 @@ export const PATIENT_SECTIONS = [
     label: "Responsables",
     permission: "patients.read",
     patient: true,
-    group: null,
   },
   {
     id: "portal",
@@ -196,7 +129,6 @@ export const PATIENT_SECTIONS = [
     label: "Acceso al portal",
     permission: "patients.write",
     patient: true,
-    group: null,
   },
   {
     id: "accesos",
@@ -204,7 +136,6 @@ export const PATIENT_SECTIONS = [
     label: "Consultas a la historia",
     permission: "audit.read",
     patient: true,
-    group: null,
   },
 ] as const satisfies ReadonlyArray<{
   id: string
@@ -216,7 +147,6 @@ export const PATIENT_SECTIONS = [
   unless?: string
   /** Necesita la historia clínica: aparece cuando la persona ya es paciente. */
   patient: boolean
-  group: typeof DOCUMENTS_GROUP.id | null
 }>
 
 export type PatientSection = (typeof PATIENT_SECTIONS)[number]
@@ -227,7 +157,9 @@ export type Can = (permission: string) => boolean
  * Secciones de la ficha anterior que ya no existen: su enlace guardado abre
  * la sección que hace ese trabajo ahora. «Actividad» repetía citas, historia y
  * conversaciones; «Seguimiento» era el «Contexto» de la Bandeja. Tratamientos,
- * Controles y la coordinación de recepción viven ahora en Plan (ADR 0034).
+ * Controles y la coordinación de recepción viven ahora en Plan (ADR 0034). El
+ * «Resumen clínico» es el Resumen de quien atiende; Atenciones está dentro de
+ * Historia, y cada tipo de papel es un filtro de Documentos (ADR 0035).
  */
 const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
   actividad: "resumen",
@@ -235,6 +167,31 @@ const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
   recorrido: "plan",
   controles: "plan",
   coordinacion: "plan",
+  clinico: "resumen",
+  atenciones: "historia",
+  imagenes: "documentos",
+  recetas: "documentos",
+  ordenes: "documentos",
+  formularios: "documentos",
+  consentimientos: "documentos",
+}
+
+/**
+ * Filtros de Documentos («buscar un papel»): lo que requiere acción y cada
+ * tipo de papel. Van en `?tipo=`; sin filtro se ven todos.
+ */
+export const DOCUMENT_FILTERS = [
+  { id: "requieren", label: "Requieren acción" },
+  { id: "recetas", label: "Recetas" },
+  { id: "ordenes", label: "Órdenes" },
+  { id: "consentimientos", label: "Consentimientos" },
+  { id: "formularios", label: "Formularios" },
+  { id: "imagenes", label: "Imágenes" },
+] as const
+export type DocumentFilter = (typeof DOCUMENT_FILTERS)[number]["id"]
+
+export function isDocumentFilter(value: unknown): value is DocumentFilter {
+  return DOCUMENT_FILTERS.some((filter) => filter.id === value)
 }
 
 /** La sección de un `?tab=`, también de los enlaces de la ficha anterior. */
@@ -242,6 +199,15 @@ export function sectionFromSearch(value: unknown): PatientSectionId | undefined 
   if (typeof value !== "string") return undefined
   if (isPatientSectionId(value)) return value
   return RETIRED_SECTIONS[value]
+}
+
+/**
+ * El filtro de Documentos de un enlace: `?tipo=` o, en un enlace de la ficha
+ * anterior, la pestaña de ese tipo (`?tab=recetas` abre Documentos › Recetas).
+ */
+export function documentFilterFromSearch(tab: unknown, tipo: unknown): DocumentFilter | undefined {
+  if (isDocumentFilter(tipo)) return tipo
+  return isDocumentFilter(tab) ? tab : undefined
 }
 
 /**
@@ -276,14 +242,20 @@ export function sectionOf(id: PatientSectionId): PatientSection {
 }
 
 /**
- * Sección de entrada según el trabajo del rol: quien solo cobra abre los
- * cobros del paciente; el resto, el resumen. Lo clínico queda a un clic, en
- * su pestaña: abrir la página no es leer la historia.
+ * Sección de entrada según el trabajo del rol (ADR 0035): quien solo cobra
+ * abre los cobros del paciente; el resto, el Resumen. Para quien lee la
+ * clínica ese Resumen es el clínico: abrir la página es una lectura clínica y
+ * queda en «Consultas a la historia». Para recepción y caja no lo es.
  */
 export function defaultSection(can: Can, isPatient: PageOf = true): PatientSectionId {
   if (isPatient === true && can("finance.read") && !can("clinical.read") && !can("patients.write"))
     return "cuenta"
   return "resumen"
+}
+
+/** El Resumen de la persona es el clínico para quien lee la historia y ella ya es paciente. */
+export function clinicalSummaryFor(can: Can, isPatient: PageOf = true): boolean {
+  return isPatient === true && can("clinical.read")
 }
 
 /** La sección pedida si el rol puede verla; si no, su entrada por defecto o la primera visible. */
@@ -300,35 +272,16 @@ export function resolveSection(
 }
 
 export interface AreaNavEntry {
-  /** Id de sección o de grupo: valor de la pestaña de segundo nivel. */
-  value: string
+  /** Id de la sección: valor de la pestaña de segundo nivel. */
+  value: PatientSectionId
   label: string
-  /** Sección que se abre al elegir la entrada. */
-  target: PatientSectionId
-  /** Secciones del grupo; vacío cuando la entrada es una sección simple. */
-  members: PatientSection[]
 }
 
-/** Entradas de segundo nivel de una pestaña: secciones simples y grupos colapsados en una. */
+/** Entradas de segundo nivel de una pestaña: sus secciones visibles. */
 export function areaNav(area: PatientAreaId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
-  const entries: AreaNavEntry[] = []
-  for (const section of visibleSections(can, isPatient)) {
-    if (section.area !== area) continue
-    if (section.group === null) {
-      entries.push({ value: section.id, label: section.label, target: section.id, members: [] })
-      continue
-    }
-    const group = entries.find((entry) => entry.value === section.group)
-    if (group) group.members.push(section)
-    else
-      entries.push({
-        value: DOCUMENTS_GROUP.id,
-        label: DOCUMENTS_GROUP.label,
-        target: section.id,
-        members: [section],
-      })
-  }
-  return entries
+  return visibleSections(can, isPatient)
+    .filter((section) => section.area === area)
+    .map((section) => ({ value: section.id, label: section.label }))
 }
 
 /** Pestañas con al menos una sección visible y la sección que abre cada una. */

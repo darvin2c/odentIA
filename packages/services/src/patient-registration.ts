@@ -856,10 +856,6 @@ export async function registerPatient(
         channel: isPublic ? "formulario_publico" : "presencial",
       })
     }
-    await tx
-      .update(patient)
-      .set({ dataConsentAt: new Date(), dataConsentBy: actorUserId, updatedAt: new Date() })
-      .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
     await tx.insert(patientDataConsent).values({
       organizationId: orgId,
       patientId: created.id,

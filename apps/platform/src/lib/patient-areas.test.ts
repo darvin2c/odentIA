@@ -2,7 +2,9 @@ import { canAccess } from "@odentia/auth/permissions"
 import { describe, expect, it } from "vitest"
 import {
   areaNav,
+  clinicalSummaryFor,
   defaultSection,
+  documentFilterFromSearch,
   resolveSection,
   sectionFromSearch,
   suggestedDentition,
@@ -96,26 +98,42 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("los documentos se agrupan en una sola entrada de Clínica", () => {
-    const entries = areaNav("clinica", as("dentist"))
-    expect(entries.map((entry) => entry.label)).toEqual([
-      "Resumen clínico",
-      "Odontograma",
-      "Atenciones",
-      "Historia",
+  it("Clínica en cuatro secciones; el odontólogo ve 11 y el propietario 15 (ADR 0035)", () => {
+    expect(areaNav("clinica", as("dentist")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
+      "Odontograma",
+      "Historia",
       "Documentos",
     ])
-    const documents = entries.at(-1)
-    expect(documents?.target).toBe("documentos")
-    expect(documents?.members.map((section) => section.id)).toEqual([
-      "documentos",
-      "imagenes",
-      "recetas",
-      "ordenes",
-      "formularios",
-      "consentimientos",
-    ])
+    expect(visibleSections(as("dentist"))).toHaveLength(11)
+    expect(visibleSections(as("owner"))).toHaveLength(15)
+    // Recepción y caja no cambian.
+    expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
+    expect(visibleSections(as("cashier")).map((section) => section.area)).not.toContain("clinica")
+  })
+
+  it("quien lee la clínica entra por el Resumen clínico; recepción por su Resumen y caja por Cobros", () => {
+    for (const role of ["dentist", "owner", "admin"]) {
+      expect(defaultSection(as(role))).toBe("resumen")
+      expect(clinicalSummaryFor(as(role))).toBe(true)
+    }
+    expect(clinicalSummaryFor(as("reception"))).toBe(false)
+    expect(clinicalSummaryFor(as("cashier"))).toBe(false)
+    expect(defaultSection(as("cashier"))).toBe("cuenta")
+    // Quien aún no es paciente no tiene historia: su Resumen no es clínico.
+    expect(clinicalSummaryFor(as("dentist"), false)).toBe(false)
+  })
+
+  it("las secciones retiradas de Clínica abren la que hace ese trabajo", () => {
+    expect(sectionFromSearch("clinico")).toBe("resumen")
+    expect(sectionFromSearch("atenciones")).toBe("historia")
+    for (const kind of ["imagenes", "recetas", "ordenes", "formularios", "consentimientos"]) {
+      expect(sectionFromSearch(kind)).toBe("documentos")
+      // El tipo de papel pasa a ser el filtro de Documentos.
+      expect(documentFilterFromSearch(kind, undefined)).toBe(kind)
+    }
+    expect(documentFilterFromSearch("documentos", "requieren")).toBe("requieren")
+    expect(documentFilterFromSearch("documentos", "otro")).toBeUndefined()
   })
 })
 

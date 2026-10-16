@@ -5,6 +5,7 @@ import { apiFetch } from "../../lib/api"
 import type { OdontogramState, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { OdontogramStudio } from "../odontogram-studio"
+import { NewEncounterButton } from "./new-encounter-button"
 import { PlanLinkedPanel } from "./plan-linked-panel"
 
 /**
@@ -60,7 +61,7 @@ export function OdontogramaTab({
   if (chart.isError)
     return <QueryErrorState error={chart.error} onRetry={() => void chart.refetch()} />
 
-  return (
+  const studio = (
     <OdontogramStudio
       patientId={patientId}
       state={chart.data.data}
@@ -86,5 +87,16 @@ export function OdontogramaTab({
         )
       }
     />
+  )
+  // Sin hallazgos, el vacío dice dónde se registran y lleva a atender (ADR 0035).
+  if (chart.data.data.history.length > 0) return studio
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed p-4">
+        <p className="text-sm">Sin hallazgos. Se registran dentro de una atención</p>
+        <NewEncounterButton patientId={patientId} variant="outline" size="sm" />
+      </div>
+      {studio}
+    </div>
   )
 }

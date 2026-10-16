@@ -85,8 +85,9 @@ export function treatmentSiteLabel(site: {
   if (site.scope === "quadrant" && site.quadrant != null) return `Cuadrante ${site.quadrant}`
   if (site.scope === "arch" && site.arch === "upper") return "Arcada superior"
   if (site.scope === "arch" && site.arch === "lower") return "Arcada inferior"
-  // La vista económica (caja, recepción) no recibe la pieza: no se dice «General».
-  if ((site.scope === "tooth" || site.scope === "surfaces") && site.toothNumber == null) return ""
+  // La vista económica (caja) no recibe el sitio: no se dice «General».
+  if (site.scope === "tooth" || site.scope === "surfaces" || site.scope === "quadrant" || site.scope === "arch")
+    return ""
   return "General"
 }
 

@@ -20,9 +20,9 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, HeartPulse } from "lucide-react"
 import type { ReactNode } from "react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -36,6 +36,7 @@ import {
   fetchPatientHealth,
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
+  hasHealthInfo,
   isHealthReviewPending,
   type Medication,
   type PatientFull,
@@ -279,7 +280,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const [familyHistory, setFamilyHistory] = useState<FamilyDraft[]>([])
   const [interview, setInterview] = useState<AnamnesisAnswers>({})
   const [interviewDirty, setInterviewDirty] = useState(false)
-  const [consent, setConsent] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
@@ -296,7 +296,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const health = healthQuery.data?.data ?? null
   const versions = useMemo(() => historyQuery.data?.data ?? [], [historyQuery.data])
   const latestVersion = health?.latestAnamnesis?.version ?? 0
-  const consentedAt = patientQuery.data?.data.patient.dataConsentAt ?? null
 
   useEffect(() => {
     if (health && !dirtyRef.current) {
@@ -366,7 +365,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         ...(interviewDirty
           ? { anamnesis: { expectedVersion: latestVersion, answers: sanitizeInterview(interview) } }
           : {}),
-        ...(consent && !consentedAt ? { dataConsent: true as const } : {}),
       })
     },
     onSuccess: async () => {
@@ -520,6 +518,8 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const submitLabel =
     pendingReview && !dirty && !interviewDirty ? "Revisar y guardar" : "Guardar antecedentes"
   const saving = !canWrite || saveMutation.isPending
+  // Nunca se preguntó: el vacío lo dice y lleva a registrarlo (ADR 0035).
+  const unasked = !hasHealthInfo(health) && !dirty && !interviewDirty
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -554,7 +554,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
               Ver declaración original
             </Button>
           ) : null}
-          {canWrite ? (
+          {canWrite && !unasked ? (
             <Button type="button" onClick={() => setDrawerOpen(true)}>
               {submitLabel === "Revisar y guardar"
                 ? "Revisar antecedentes"
@@ -597,14 +597,24 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         </p>
       ) : null}
 
-      <AntecedentesSummary
-        allergies={allergies}
-        conditions={conditions}
-        medications={medications}
-        review={review}
-        bloodGroup={bloodGroup}
-        pendingReview={pendingReview}
-      />
+      {unasked ? (
+        <EmptyState
+          icon={HeartPulse}
+          title="Aún no se le preguntó"
+          description="Alergias: no preguntado. Alergias, enfermedades y medicación se registran juntas; «no preguntado» no es lo mismo que «niega»."
+          actionLabel={canWrite ? "Registrar antecedentes" : undefined}
+          onAction={canWrite ? () => setDrawerOpen(true) : undefined}
+        />
+      ) : (
+        <AntecedentesSummary
+          allergies={allergies}
+          conditions={conditions}
+          medications={medications}
+          review={review}
+          bloodGroup={bloodGroup}
+          pendingReview={pendingReview}
+        />
+      )}
 
       <FormDrawer
         open={drawerOpen}
@@ -1190,40 +1200,6 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                   </dl>
                 </div>
               ) : null}
-            </div>
-          </section>
-
-          <section
-            aria-label="Consentimiento de datos"
-            className="flex flex-col gap-4 elevated rounded-xl border bg-card p-4 sm:p-6"
-          >
-            <div className="flex flex-col gap-1.5">
-              <h3 className="font-heading text-base font-medium">Consentimiento de datos</h3>
-            </div>
-            <div>
-              {consentedAt ? (
-                <p className="text-sm text-muted-foreground">
-                  Consentimiento de datos registrado
-                  {consentedAt ? ` el ${new Date(consentedAt).toLocaleDateString(activeOrgLocale())}` : ""}.
-                  No se modifica al completar salud.
-                </p>
-              ) : (
-                <div className="flex items-start gap-2">
-                  <Checkbox
-                    id={fid("consent")}
-                    checked={consent}
-                    disabled={!canWrite}
-                    onCheckedChange={(c: boolean) => {
-                      setConsent(c === true)
-                      markDirty()
-                    }}
-                  />
-                  <label htmlFor={fid("consent")} className="text-sm">
-                    El paciente autoriza el tratamiento de sus datos clínicos. Se registra una sola
-                    vez.
-                  </label>
-                </div>
-              )}
             </div>
           </section>
         </div>

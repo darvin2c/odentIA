@@ -380,7 +380,6 @@ export const RESPONSIBILITY_KINDS = [
   "representante_legal",
   "autorizado_informacion",
   "responsable_economico",
-  "acompanante",
 ] as const
 export type ResponsibilityKind = (typeof RESPONSIBILITY_KINDS)[number]
 
@@ -388,7 +387,6 @@ export const RESPONSIBILITY_KIND_LABELS: Record<ResponsibilityKind, string> = {
   representante_legal: "Representante legal",
   autorizado_informacion: "Autorizado para información",
   responsable_economico: "Responsable económico",
-  acompanante: "Acompañante",
 }
 
 /** Responsabilidad de un contacto vinculado, con vigencia e historial. */

@@ -549,14 +549,17 @@ export function ControlesPanel({
   )
 }
 
-function PrescriptionEntry({
+export function PrescriptionEntry({
   patientId,
   prescription,
   items,
+  defaultOpen = false,
 }: {
   patientId: string
   prescription: Prescription
   items?: PlanItem[]
+  /** Abierta al mostrarse sola (Documentos la abre al lado). */
+  defaultOpen?: boolean
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("clinical.write")
@@ -585,7 +588,7 @@ function PrescriptionEntry({
   const rows = detail.data?.data.items ?? prescription.items ?? []
   const planItem = items?.find((item) => item.id === prescription.planItemId) ?? null
   return (
-    <details className="rounded-md border p-4">
+    <details className="rounded-md border p-4" open={defaultOpen}>
       <summary className="cursor-pointer text-sm font-medium">
         Receta N.º {prescription.prescriptionNumber} ·{" "}
         {PRESCRIPTION_STATUS_LABELS[prescription.status] ?? prescription.status} ·{" "}

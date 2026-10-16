@@ -107,21 +107,27 @@ const budgetLinesInput = z
   .strict()
 
 /**
- * Quien no lee la parte clínica (caja) recibe el presupuesto como documento
- * económico: tratamiento, precio, decisión y estado, sin pieza, superficies,
- * cuadrante, arcada ni códigos de procedimiento. La frontera se aplica aquí,
- * en el servidor, no ocultando columnas en la pantalla.
+ * Quien no lee la parte clínica no recibe la ficha dentro del presupuesto. La
+ * frontera se aplica aquí, en el servidor, no ocultando columnas en la
+ * pantalla:
+ * - recepción (`budgets.send`, decisión 4 de la fase 3) lo ve como lo recibe
+ *   la persona en su hoja y en el portal: cada tratamiento con su sitio
+ *   («Resina · pieza 16», un cuadrante, una arcada), precio, decisión y
+ *   estado; sin superficies ni códigos de procedimiento;
+ * - caja, como documento económico: tratamiento, precio, decisión y estado,
+ *   sin pieza, superficies, cuadrante, arcada ni códigos.
  */
 function economicView<T extends { items: BudgetLineWithStatus[] }>(memberRole: string, budget: T): T {
   if (canAccess(memberRole, "clinical.read")) return budget
+  const asPerson = canAccess(memberRole, "budgets.send")
   return {
     ...budget,
     items: budget.items.map((line) => ({
       ...line,
-      toothNumber: null,
+      toothNumber: asPerson ? line.toothNumber : null,
       surfaces: [],
-      quadrant: null,
-      arch: null,
+      quadrant: asPerson ? line.quadrant : null,
+      arch: asPerson ? line.arch : null,
       codings: [],
     })),
   }

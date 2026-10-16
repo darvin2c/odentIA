@@ -281,9 +281,6 @@ export function DemoDetailBody() {
           <DetailField label="Indicaciones">
             Evitar alimentos duros por 48 horas. Cepillado normal con pasta fluorada.
           </DetailField>
-          <DetailField label="Paso siguiente">
-            Control de restauración y evaluación de pieza 17.
-          </DetailField>
         </DetailList>
       </DetailSection>
     </>

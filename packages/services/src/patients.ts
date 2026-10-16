@@ -573,8 +573,6 @@ export interface UpdatePatientPatch {
   referralSource?: string | null
   registeredBranchId?: string | null
   isActive?: boolean
-  /** true registra el consentimiento (fecha+autor); false se ignora. */
-  dataConsent?: boolean
 }
 
 async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Promise<void> {
@@ -642,7 +640,7 @@ export async function updatePatient(
   const personId = await patientPersonId(tx, orgId, id)
   if (personId) await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")
   const current = await requirePatient(tx, orgId, id)
-  const { registeredBranchId: _branch, isActive: _active, dataConsent: _consent, identityConfirmed: _confirmed, ...demographicPatch } = patch
+  const { registeredBranchId: _branch, isActive: _active, identityConfirmed: _confirmed, ...demographicPatch } = patch
   const demographics = Object.fromEntries(Object.keys(demographicsSchema.shape).map(key => [key, current[key as keyof PatientRow]]))
   const countryCode = await findOrgCountry(tx, orgId)
   const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId), countryCode)
@@ -682,11 +680,6 @@ export async function updatePatient(
     if (patch[key] !== undefined) (set as Record<string, unknown>)[key] = patch[key] as unknown
   }
   if (patch.identityConfirmed === true) set.identityNeedsReview = false
-  // Consentimiento: write-once. dataConsent:false se ignora.
-  if (patch.dataConsent === true && !current.dataConsentAt) {
-    set.dataConsentAt = new Date()
-    set.dataConsentBy = actorUserId
-  }
   const touched = Object.keys(set).filter((k) => k !== "updatedAt")
   try {
     const [updated] = await tx

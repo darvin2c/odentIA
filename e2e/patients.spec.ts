@@ -57,10 +57,17 @@ test("paciente: ficha inicial y hallazgo visibles en el recorrido", async ({ own
   await expect(page.getByText(/HC-\d{6}/).first()).toBeVisible()
   await expect(page.getByText("Alergia severa: Penicilina")).toBeVisible()
 
-  // El resumen abre con lo pendiente; lo clínico vive en su pestaña.
+  // Para quien atiende el Resumen es el clínico (ADR 0035): alergias y alertas,
+  // «Qué sigue», última atención y próxima cita, más lo pendiente.
+  await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Última atención" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Próxima cita" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Pendientes" })).toBeVisible()
+  // Clínica en cuatro secciones.
   await openSection(page, "Clínica")
-  await expect(page.getByRole("heading", { name: "Alertas clínicas" })).toBeVisible()
+  await expect(
+    page.getByRole("tablist", { name: "Secciones de Clínica" }).getByRole("tab"),
+  ).toHaveText(["Antecedentes", "Odontograma", "Historia", "Documentos"])
   await openSection(page, "Odontograma")
   await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
@@ -213,8 +220,10 @@ test("paciente: receta vinculada al tratamiento y anulación", async ({ owner })
   const patientPath = `/patients/${ids.patientId}`
 
   await gotoHydrated(page, tenant(owner.org.slug, patientPath))
-  await openSection(page, "Clínica", "Documentos", "Recetas")
-  await page.getByRole("button", { name: "Emitir receta" }).click()
+  // Documentos: «Nuevo ▾» abre directo el formulario de la receta.
+  await openSection(page, "Clínica", "Documentos")
+  await page.getByRole("button", { name: "Nuevo", exact: true }).first().click()
+  await page.getByRole("menuitem", { name: "Receta", exact: true }).click()
   const prescription = surface(page, { name: "Emitir receta" })
   await chooseOption(prescription.getByLabel("Tratamiento", { exact: true }), ids.itemId)
   await prescription.getByLabel("DCI (denominación común)", { exact: true }).fill("ibuprofeno")
@@ -225,11 +234,9 @@ test("paciente: receta vinculada al tratamiento y anulación", async ({ owner })
   await prescription.getByLabel("Duración", { exact: true }).fill("3 días")
   await prescription.getByRole("button", { name: "Emitir receta", exact: true }).click()
   await expect(page.getByText(/Receta N.º 1/).first()).toBeVisible()
-  await page
-    .getByText(/Receta N.º 1/)
-    .first()
-    .click()
-  await page.getByRole("button", { name: "Anular receta" }).click()
+  // La fila se abre al lado, con lo que se puede hacer con ella.
+  await page.getByRole("button", { name: /Receta N.º 1/ }).first().click()
+  await surface(page, { name: "Receta N.º 1" }).getByRole("button", { name: "Anular receta" }).click()
   const cancel = surface(page, { name: "Anular receta" })
   await cancel.getByLabel("Motivo de anulación", { exact: true }).fill("Alergia registrada")
   await cancel.getByRole("button", { name: "Anular receta", exact: true }).click()
@@ -448,6 +455,11 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       .set({ role })
       .where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))
 
+    // Qué roles leen la historia al abrir la página: solo quien la lee (ADR 0035).
+    const summaryReads: string[] = []
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/patients/${ids.patientId}/summary`)) summaryReads.push(request.url())
+    })
     await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
     await expect(page.getByRole("heading", { name: "Lucía Quispe" })).toBeVisible()
     await expect(page.getByText("Menor de edad", { exact: true })).toBeVisible()
@@ -476,9 +488,10 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       expect(chats.status).toBe(200)
       expect(notes.status).toBe(200)
       await expect(page.locator("a", { hasText: "Reservar cita" }).first()).toBeVisible()
-      await expect(page.getByRole("button", { name: "Nueva atención" })).toHaveCount(0)
       // Recepción marca «Llegó»; «Atender» es de quien escribe en la historia.
-      await expect(page.getByRole("button", { name: "Atender", exact: true })).toHaveCount(0)
+      await expect(page.getByRole("button", { name: /^Atender/ })).toHaveCount(0)
+      // Su Resumen no es clínico: abrir la página no lee la historia (ADR 0035).
+      expect(summaryReads).toEqual([])
       await openSection(page, "Citas")
       await expect(page.getByText("Sin citas", { exact: true })).toBeVisible()
       await openSection(page, "Datos")
@@ -492,10 +505,12 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       await openSection(page, "Conversaciones")
       await expect(page.getByRole("heading", { name: "Conversaciones" })).toBeVisible()
       await expect(page.getByText("Todavía no ha escrito", { exact: true })).toBeVisible()
-      // Lo clínico está a un clic, en su pestaña; el odontograma, en la dentición de su edad.
-      await openSection(page, "Clínica")
-      await expect(page.getByRole("heading", { name: "Alertas clínicas" })).toBeVisible()
-      await openSection(page, "Odontograma")
+      // Su Resumen es el clínico: abrir la página ya es una lectura de la historia (ADR 0035).
+      expect(summaryReads.length).toBeGreaterThan(0)
+      await openSection(page, "Resumen")
+      await expect(page.getByRole("heading", { name: "Alergias y alertas" })).toBeVisible()
+      // El odontograma, en la dentición de su edad.
+      await openSection(page, "Clínica", "Odontograma")
       await expect(page.getByRole("heading", { name: "Odontograma", exact: true })).toBeVisible()
       await expect(page.getByRole("heading", { name: "Plan de tratamiento" })).toBeVisible()
       await expect(page.getByRole("button", { name: "Mixta", exact: true })).toHaveAttribute(
@@ -507,7 +522,8 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       await expect(allergy).toBeVisible()
       expect(health.status).toBe(200)
       expect(account.status).toBe(403)
-      await expect(page.getByRole("button", { name: "Nueva atención" })).toBeVisible()
+      // El botón de atender, en la cabecera desde cualquier pestaña.
+      await expect(page.getByRole("button", { name: "Atender", exact: true }).first()).toBeVisible()
     }
     if (role === "cashier") {
       await expect(areas).toHaveText(["Resumen", "Plan", "Cobros", "Datos"])
@@ -516,6 +532,7 @@ for (const role of ["reception", "dentist", "cashier"] as const) {
       expect(health.status).toBe(403)
       expect(account.status).toBe(200)
       expect(chats.status).toBe(403)
+      expect(summaryReads).toEqual([])
       const detail = await call<{ activeAllergies: unknown[] }>(page, "GET", apiPath, slug)
       expect(detail.activeAllergies).toEqual([])
       // En Plan, caja ve el presupuesto y lo aceptado; ni tratamientos ni controles.
@@ -596,7 +613,7 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
   await expect(page.getByText("Por confirmar", { exact: true }).first()).toBeVisible()
 })
 
-test("documentos: un solo índice cronológico que abre la gestión de cada tipo", async ({ owner }) => {
+test("documentos: una sola lista para buscar un papel, con sus filtros y cada fila al lado", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
   await setupAggregation(owner, ids)
   const { page } = owner
@@ -604,14 +621,22 @@ test("documentos: un solo índice cronológico que abre la gestión de cada tipo
   await openSection(page, "Clínica", "Documentos")
   await expect(page).toHaveURL(/tab=documentos/)
   await expect(page.getByText("Receta N.º 1")).toBeVisible()
-  await expect(page.getByText("Anulada", { exact: true })).toBeVisible()
-  // Nada pendiente de firma, resultado o cierre: el filtro no ofrece resultados vacíos.
-  await expect(page.getByRole("button", { name: "Requieren acción (0)" })).toBeDisabled()
+  await expect(page.getByText("Anulada", { exact: true }).first()).toBeVisible()
+  // Nada pendiente de firma, resultado o cierre: «Requieren acción» lo dice con su número.
+  await expect(page.getByRole("button", { name: "Requieren acción · 0" })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("documentos.png"), fullPage: true })
-  // Cada fila abre su panel de gestión.
-  await page.getByRole("button", { name: "Abrir en recetas" }).click()
-  await expect(page).toHaveURL(/tab=recetas/)
-  await expect(page.getByRole("button", { name: "Emitir receta" })).toBeVisible()
+  // Un filtro por tipo, en la URL; la fila se abre al lado.
+  await page.getByRole("button", { name: "Recetas", exact: true }).click()
+  await expect(page).toHaveURL(/tipo=recetas/)
+  await page.getByRole("button", { name: /Receta N.º 1/ }).first().click()
+  await expect(surface(page, { name: "Receta N.º 1" })).toBeVisible()
+  // Un enlace guardado a la pestaña anterior abre Documentos con ese filtro.
+  await gotoHydrated(page, tenant(owner.org.slug, `/patients/${ids.patientId}?tab=recetas`))
+  await expect(page).toHaveURL(/tab=documentos/)
+  await expect(page).toHaveURL(/tipo=recetas/)
+  // «Atenciones» vive ahora en Historia.
+  await gotoHydrated(page, tenant(owner.org.slug, `/patients/${ids.patientId}?tab=atenciones`))
+  await expect(page).toHaveURL(/tab=historia/)
 })
 test("una persona, una página: la misma dirección, sus datos con las reglas de la ficha y sus vínculos", async ({ owner }) => {
   const ids = await buildClinicalBase(owner)
@@ -669,15 +694,8 @@ test("una persona, una página: la misma dirección, sus datos con las reglas de
   ).toBe(true)
   await page.setViewportSize({ width: 1280, height: 720 })
 
-  // Abrir la página, sus datos y sus conversaciones no es una lectura clínica: no deja traza.
-  await openSection(page, "Datos", "Consultas a la historia")
-  await expect(page.getByText("Sin consultas registradas", { exact: true })).toBeVisible()
-  // Abrir Clínica sí la deja, y quien audita ve quién consultó la historia.
-  const clinicalRead = page.waitForResponse(
-    (response) => response.url().includes(`/api/patients/${ids.patientId}/summary`) && response.ok(),
-  )
-  await openSection(page, "Clínica")
-  await clinicalRead
+  // Para quien lee la clínica, abrir la página ya es una lectura de la historia
+  // (ADR 0035, que precisa el 0029): quien audita ve quién la consultó.
   await openSection(page, "Datos", "Consultas a la historia")
   await expect(page.getByRole("heading", { name: "Consultas a la historia clínica" })).toBeVisible()
   await expect(page.getByRole("cell", { name: "Ana Pruebas" }).first()).toBeVisible()

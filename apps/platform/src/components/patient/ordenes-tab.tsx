@@ -13,8 +13,8 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, LoadingState, RowActions } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { FormDrawer, RowActions } from "@odentia/ui-patterns"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { ApiError } from "../../lib/api"
@@ -23,116 +23,18 @@ import {
   type ClinicalOrder,
   type ClinicalOrderKind,
   createOrder,
-  fetchOrders,
   fetchSpecialties,
   ORDER_KIND_LABELS,
   ORDER_KIND_TITLES,
   ORDER_STATUS_LABELS,
 } from "../../lib/clinical-forms"
-import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
+import { useMyUserId, useOrgMembers } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { Cie10Search } from "./cie10-search"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 
 const errorMessage = (e: unknown, fallback = "No se pudo completar la acción") =>
   e instanceof ApiError ? (e.shape.message ?? fallback) : e instanceof Error ? e.message : fallback
-
-/**
- * Órdenes de imagen, laboratorio y derivación: para quién, el diagnóstico que
- * la motiva, su hoja para imprimir o enviar, el resultado subido a la propia
- * orden y la cancelación con motivo. Una derivación a un colega de la clínica
- * le deja la tarea.
- */
-export function OrdenesTab({
-  patientId,
-  encounterId,
-}: {
-  patientId: string
-  encounterId?: string
-}): React.JSX.Element {
-  const queryClient = useQueryClient()
-  const canRead = usePermission("clinical.read")
-  const canWrite = usePermission("clinical.write")
-  const [kindFilter, setKindFilter] = useState("")
-  const [drawerOpen, setDrawerOpen] = useState(false)
-
-  const listQuery = useQuery({
-    queryKey: ["clinical-orders", patientId, kindFilter],
-    queryFn: () => fetchOrders({ patientId, ...(kindFilter ? { kind: kindFilter } : {}) }),
-    enabled: canRead,
-  })
-  const orders = listQuery.data?.data ?? []
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: ["clinical-orders", patientId] })
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-base font-semibold">Órdenes clínicas</h2>
-          <p className="text-sm text-muted-foreground">
-            Imagen, laboratorio y derivaciones, con su hoja para imprimir o enviar y su resultado.
-          </p>
-        </div>
-        {canWrite ? (
-          <Button type="button" onClick={() => setDrawerOpen(true)}>
-            Nueva orden
-          </Button>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Select
-          items={{ todas: "Todas", imagen: "Imagen", laboratorio: "Laboratorio", interconsulta: "Derivación" }}
-          value={kindFilter || "todas"}
-          onValueChange={(v: string | null) => setKindFilter(v === "todas" ? "" : (v ?? ""))}
-        >
-          <SelectTrigger className="w-56" aria-label="Filtrar por tipo">
-            <SelectValue placeholder="Todas" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas</SelectItem>
-            <SelectItem value="imagen">Imagen</SelectItem>
-            <SelectItem value="laboratorio">Laboratorio</SelectItem>
-            <SelectItem value="interconsulta">Derivación</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {listQuery.isLoading ? (
-        <LoadingState message="Cargando órdenes…" />
-      ) : listQuery.isError ? (
-        <ErrorState message="No se pudieron cargar las órdenes" onRetry={() => void listQuery.refetch()} />
-      ) : orders.length === 0 ? (
-        <EmptyState
-          title="Sin órdenes"
-          description="Pide una imagen, un examen de laboratorio o deriva a un colega o a otro profesional."
-          actionLabel={canWrite ? "Nueva orden" : undefined}
-          onAction={canWrite ? () => setDrawerOpen(true) : undefined}
-        />
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {orders.map((order) => (
-            <li key={order.id} className="rounded-md border p-3">
-              <OrderRow order={order} canWrite={canWrite} onChanged={invalidate} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {drawerOpen ? (
-        <NewOrderDrawer
-          open
-          patientId={patientId}
-          encounterId={encounterId}
-          onClose={() => setDrawerOpen(false)}
-          onCreated={() => {
-            setDrawerOpen(false)
-            invalidate()
-          }}
-        />
-      ) : null}
-    </div>
-  )
-}
 
 function statusVariant(status: ClinicalOrder["status"]): "default" | "secondary" | "success" | "destructive" {
   if (status === "completado") return "success"
@@ -226,7 +128,7 @@ export function OrderRow({
 }
 
 /** El resultado se sube a la propia orden: el archivo, el texto o ambos. */
-function OrderResultDrawer({
+export function OrderResultDrawer({
   order,
   onClose,
   onSaved,

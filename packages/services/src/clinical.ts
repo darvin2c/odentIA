@@ -209,7 +209,6 @@ export interface SavePatientHealthInput {
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
   anamnesis?: { expectedVersion: number; answers: Record<string, unknown> }
-  dataConsent?: true
   bloodGroup?: BloodGroup | null
   /** Reemplaza los antecedentes familiares cuando se envía. */
   familyHistory?: FamilyHistoryInput[]
@@ -676,7 +675,6 @@ async function persistPatientHealth(
     .select({
       revision: patient.healthRevision,
       reviewStatus: patient.healthReviewStatus,
-      dataConsentAt: patient.dataConsentAt,
     })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -816,9 +814,6 @@ async function persistPatientHealth(
     }
     interviewBaseVersion = latest?.version ?? 0
     interviewChanged = !latest || canonicalJson(latest.answers) !== canonicalJson(interviewAnswers)
-  }
-  if (input.dataConsent !== undefined && input.dataConsent !== true) {
-    throw validation("dataConsent solo admite true explícito")
   }
   // Un código CIE-10 inexistente se rechaza antes de escribir nada.
   for (const row of conditions) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
@@ -987,7 +982,6 @@ async function persistPatientHealth(
   }
   if (input.asaClass !== undefined && input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
     throw validation("Clase ASA inválida (I–VI)")
-  const setConsent = input.dataConsent === true && !locked.dataConsentAt
   await tx
     .update(patient)
     .set({
@@ -997,7 +991,6 @@ async function persistPatientHealth(
       healthReviewedAt: context.kind === "staff" ? new Date() : null,
       healthReviewedBy: context.kind === "staff" ? context.userId : null,
       ...(input.bloodGroup !== undefined ? { bloodGroup: input.bloodGroup } : {}),
-      ...(setConsent ? { dataConsentAt: new Date(), dataConsentBy: actorUserId } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -1017,7 +1010,6 @@ async function persistPatientHealth(
         medications: medications.length,
       },
       newInterviewVersion: newVersion,
-      dataConsent: setConsent,
     },
   )
   return getPatientHealth(tx, orgId, patientId)

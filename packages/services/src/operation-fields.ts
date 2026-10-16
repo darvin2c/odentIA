@@ -239,9 +239,7 @@ export const OPERATIONS = {
       illnessDuration: { kind: "text", max: 200, label: "Tiempo de enfermedad", description: "Desde cuándo, tal como se dijo (por ejemplo, «una semana»).", body: "optional", nullable: true, agent: "fills" },
       evolution: { kind: "text", max: 10000, label: "Evolución", description: "Lo que se hizo en esta atención y cómo respondió el paciente.", body: "optional", nullable: true, agent: "fills" },
       indications: { kind: "text", max: 4000, label: "Indicaciones", description: "Lo que se le indica al paciente para después de la atención.", body: "optional", nullable: true, agent: "fills" },
-      nextStep: { kind: "text", max: 2000, label: "Siguiente paso", description: "Qué toca en la próxima atención.", body: "optional", nullable: true, agent: "fills" },
       prognosis: { kind: "text", max: 2000, label: "Pronóstico", description: "El pronóstico que dijo el odontólogo.", body: "optional", nullable: true, agent: "fills" },
-      auxiliaryExams: { kind: "text", max: 4000, label: "Exámenes auxiliares", description: "Exámenes pedidos o con resultado.", body: "optional", nullable: true, agent: "fills" },
     },
   },
   "atencion.diagnostico": {

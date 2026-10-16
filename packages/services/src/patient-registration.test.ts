@@ -7,6 +7,7 @@ import { getCaseBrief } from "./agent-case-brief.js"
 import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, getContact } from "./contacts.js"
+import { listDataConsents } from "./data-consents.js"
 import {
   createPatient,
   findPatientDuplicates,
@@ -225,11 +226,15 @@ it("QR adulto con penicilina y O+: ficha sin revisión, sin vínculo automático
   expect(health.reviewedBy).toBeNull()
   expect(health.revision).toBe(1)
 
-  const refreshed = await withOrgContext(appDb, "org_a", (tx) =>
-    getPatient(tx, "org_a", created.id),
+  // El consentimiento queda en «Datos y consentimiento», por versión del aviso:
+  // lo dio la persona en el formulario, sin nadie del equipo.
+  const consents = await withOrgContext(appDb, "org_a", (tx) =>
+    listDataConsents(tx, "org_a", created.id),
   )
-  expect(refreshed.patient.dataConsentAt).not.toBeNull()
-  expect(refreshed.patient.dataConsentBy).toBeNull()
+  expect(consents).toEqual([
+    expect.objectContaining({ noticeVersion: qrVersion, channel: "formulario_publico", recordedBy: null, revokedAt: null }),
+  ])
+  expect(consents[0]!.purposes).toContain("atencion")
   // El contacto preexistente sigue sin pacientes vinculados.
   const linked = await withOrgContext(appDb, "org_a", (tx) =>
     listPatientsByContact(tx, "org_a", existing.id),

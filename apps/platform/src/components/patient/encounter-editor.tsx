@@ -94,8 +94,6 @@ type DraftKey =
   | "reason"
   | "evolution"
   | "indications"
-  | "nextStep"
-  | "nextAppointmentAt"
   | "teeth"
   | "examination"
 
@@ -103,7 +101,7 @@ type DraftKey =
 type SaveState = "saved" | "pending" | "saving" | "error" | "offline"
 
 /** Campos de texto de la nota normativa que se guardan tal cual (vacío = null). */
-type NoteKey = "presentIllness" | "illnessDuration" | "prognosis" | "auxiliaryExams"
+type NoteKey = "presentIllness" | "illnessDuration" | "prognosis"
 
 /**
  * Bloques que la atención puede llegar a tener. No son pasos: la consulta nace
@@ -154,9 +152,6 @@ interface DraftValues extends Record<NoteKey, string> {
   reason: string
   evolution: string
   indications: string
-  nextStep: string
-  apptDate: string
-  apptTime: string
   teeth: number[]
   examination: ExaminationDraft | null
 }
@@ -166,8 +161,6 @@ interface DraftPatch extends Partial<Record<NoteKey, string | null>> {
   reason?: string | null
   evolution?: string | null
   indications?: string | null
-  nextStep?: string | null
-  nextAppointmentAt?: string | null
   teeth?: number[]
   examination?: {
     extraoral?: Record<string, string>
@@ -180,43 +173,10 @@ const AUTOSAVE_MS = 800
 const MAX_REASON = 2000
 const MAX_EVOLUTION = 10000
 const MAX_INDICATIONS = 4000
-const MAX_NEXT_STEP = 2000
-const APPT_INCOMPLETE = "Completa fecha y hora de la revisión sugerida, o limpia ambas."
 
 /** Sin red: el navegador lo dice o la petición ni siquiera llegó. */
 function isOffline(err: unknown): boolean {
   return (typeof navigator !== "undefined" && navigator.onLine === false) || err instanceof TypeError
-}
-
-// Fecha y hora de la revisión sugerida, en la zona de la clínica (no la del navegador).
-function toLocalDate(iso: string | null): string {
-  if (!iso || Number.isNaN(Date.parse(iso))) return ""
-  return clinicDateTimeValue(iso).slice(0, 10)
-}
-
-function toLocalTime(iso: string | null): string {
-  if (!iso || Number.isNaN(Date.parse(iso))) return ""
-  return clinicDateTimeValue(iso).slice(11, 16)
-}
-
-/** La cita solo se serializa con fecha+hora válidas, o null si ambas están vacías. */
-function serializeAppt(
-  date: string,
-  time: string,
-): { ok: true; value: string | null } | { ok: false } {
-  if (!date && !time) return { ok: true, value: null }
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
-  const timeMatch = /^(\d{2}):(\d{2})$/.exec(time)
-  if (!dateMatch || !timeMatch) return { ok: false }
-  const year = Number(dateMatch[1])
-  const month = Number(dateMatch[2])
-  const day = Number(dateMatch[3])
-  const check = new Date(Date.UTC(year, month - 1, day))
-  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
-    return { ok: false }
-  }
-  const value = instantFromClinicValue(`${date}T${time}`)
-  return value ? { ok: true, value } : { ok: false }
 }
 
 function sortTeeth(teeth: number[]): number[] {
@@ -371,17 +331,13 @@ export function EncounterEditor({
     presentIllness: encounter.presentIllness ?? "",
     illnessDuration: encounter.illnessDuration ?? "",
     prognosis: encounter.prognosis ?? "",
-    auxiliaryExams: encounter.auxiliaryExams ?? "",
   }))
   const [vitals, setVitals] = useState<Record<string, string>>(() => vitalsDraft(encounter.vitals))
   const parsed = parseVitals(vitals)
   const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
   const [evolution, setEvolution] = useState(encounter.evolution ?? "")
   const [indications, setIndications] = useState(encounter.indications ?? "")
-  const [nextStep, setNextStep] = useState(encounter.nextStep ?? "")
   const [teeth, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
-  const [apptDate, setApptDate] = useState(() => toLocalDate(encounter.nextAppointmentAt))
-  const [apptTime, setApptTime] = useState(() => toLocalTime(encounter.nextAppointmentAt))
   const [examination, setExamination] = useState<ExaminationDraft | null>(() =>
     toExaminationDraft(encounter.examination),
   )
@@ -391,7 +347,6 @@ export function EncounterEditor({
 
   const [saveState, setSaveState] = useState<SaveState>("saved")
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [apptError, setApptError] = useState<string | null>(null)
   const [childCount, setChildCount] = useState(0)
   const [explicitSaving, setExplicitSaving] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
@@ -455,14 +410,10 @@ export function EncounterEditor({
     presentIllness: encounter.presentIllness ?? "",
     illnessDuration: encounter.illnessDuration ?? "",
     prognosis: encounter.prognosis ?? "",
-    auxiliaryExams: encounter.auxiliaryExams ?? "",
     vitals: vitalsDraft(encounter.vitals),
     reason: encounter.reason ?? "",
     evolution: encounter.evolution ?? "",
     indications: encounter.indications ?? "",
-    nextStep: encounter.nextStep ?? "",
-    apptDate: toLocalDate(encounter.nextAppointmentAt),
-    apptTime: toLocalTime(encounter.nextAppointmentAt),
     teeth: sortTeeth(detail.teeth),
     examination: toExaminationDraft(encounter.examination),
   })
@@ -546,7 +497,6 @@ export function EncounterEditor({
         case "presentIllness":
         case "illnessDuration":
         case "prognosis":
-        case "auxiliaryExams":
           body[key] = values[key].trim() === "" ? null : values[key]
           break
         case "vitals": {
@@ -567,9 +517,6 @@ export function EncounterEditor({
           break
         case "indications":
           body.indications = values.indications === "" ? null : values.indications
-          break
-        case "nextStep":
-          body.nextStep = values.nextStep === "" ? null : values.nextStep
           break
         case "teeth":
           body.teeth = [...values.teeth]
@@ -595,11 +542,6 @@ export function EncounterEditor({
             extraoral || intraoral || higieneOral ? { extraoral, intraoral, higieneOral } : null
           break
         }
-        case "nextAppointmentAt": {
-          const serialized = serializeAppt(values.apptDate, values.apptTime)
-          if (serialized.ok) body.nextAppointmentAt = serialized.value
-          break
-        }
       }
     }
     return body
@@ -613,19 +555,8 @@ export function EncounterEditor({
         if (mountedRef.current) setSaveState("saving")
         for (;;) {
           if (dirtyRef.current.size === 0) break
-          const keys = [...dirtyRef.current]
+          const sendable = [...dirtyRef.current]
           dirtyRef.current.clear()
-          const sendable = keys.filter((key) => {
-            if (
-              key === "nextAppointmentAt" &&
-              !serializeAppt(valuesRef.current.apptDate, valuesRef.current.apptTime).ok
-            ) {
-              dirtyRef.current.add(key)
-              return false
-            }
-            return true
-          })
-          if (sendable.length === 0) break
           for (const key of sendable) inflightRef.current.add(key)
           try {
             const saved = await apiFetch<{ data: Encounter }>(
@@ -672,26 +603,12 @@ export function EncounterEditor({
     return run
   }
 
-  const hasSendableDirty = (): boolean => {
-    for (const key of dirtyRef.current) {
-      if (key !== "nextAppointmentAt") return true
-      if (serializeAppt(valuesRef.current.apptDate, valuesRef.current.apptTime).ok) return true
-    }
-    return false
-  }
-
   /** Barrera de escritura: la consumen hijos, guardado, finalizar y volver. */
   const flush = async (): Promise<void> => {
     clearTimer()
     for (;;) {
       await drain()
-      if (!hasSendableDirty()) {
-        if (dirtyRef.current.has("nextAppointmentAt")) {
-          if (mountedRef.current) setApptError(APPT_INCOMPLETE)
-          throw new Error(APPT_INCOMPLETE)
-        }
-        return
-      }
+      if (dirtyRef.current.size === 0) return
     }
   }
 
@@ -766,11 +683,6 @@ export function EncounterEditor({
     setExamination(next)
     markEdited("examination")
   }
-  const editNextStep = (value: string) => {
-    valuesRef.current.nextStep = value
-    setNextStep(value)
-    markEdited("nextStep")
-  }
   /**
    * Una sugerencia del dictado ya confirmada: el servidor la guardó con la
    * operación de siempre y aquí se refleja. Los textos de la nota pasan por los
@@ -785,9 +697,7 @@ export function EncounterEditor({
       if (evolutionText !== null) editEvolution(evolutionText)
       const indicationsText = text("indications")
       if (indicationsText !== null) editIndications(indicationsText)
-      const nextStepText = text("nextStep")
-      if (nextStepText !== null) editNextStep(nextStepText)
-      for (const key of ["presentIllness", "illnessDuration", "prognosis", "auxiliaryExams"] as NoteKey[]) {
+      for (const key of ["presentIllness", "illnessDuration", "prognosis"] as NoteKey[]) {
         const value = text(key)
         if (value !== null) editNote(key, value)
       }
@@ -812,35 +722,9 @@ export function EncounterEditor({
     return dictation.enabled ? dictation.suggestions.filter((item) => kinds.includes(item.kind)).length : 0
   }
 
-  const editApptDate = (value: string) => {
-    valuesRef.current.apptDate = value
-    setApptDate(value)
-    setApptError(null)
-    markEdited("nextAppointmentAt")
-  }
-
-  const editApptTime = (value: string) => {
-    valuesRef.current.apptTime = value
-    setApptTime(value)
-    setApptError(null)
-    markEdited("nextAppointmentAt")
-  }
-
-  const apptBlocked = (): boolean => {
-    const values = valuesRef.current
-    if (!values.apptDate && !values.apptTime) return false
-    return !serializeAppt(values.apptDate, values.apptTime).ok
-  }
-
   /** Control de página: guarda el borrador (flush + refresh) sin formulario. */
   const handleSaveDraft = async () => {
     if (explicitSaving || finalizing || childCountRef.current > 0) return
-    if (apptBlocked()) {
-      setApptError(APPT_INCOMPLETE)
-      setOpenSection("evolucion")
-      return
-    }
-    setApptError(null)
     setExplicitSaving(true)
     try {
       await flush()
@@ -939,13 +823,6 @@ export function EncounterEditor({
 
   const handleConfirmFinalize = async () => {
     if (finalizing || childCountRef.current > 0) return
-    if (apptBlocked()) {
-      setApptError(APPT_INCOMPLETE)
-      setConfirmOpen(false)
-      setOpenSection("evolucion")
-      return
-    }
-    setApptError(null)
     setFinalizing(true)
     try {
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
@@ -1132,12 +1009,12 @@ export function EncounterEditor({
     {
       key: "evolucion",
       title: "Evolución, pronóstico e indicaciones",
-      description: "Pronóstico, evolución (obligatoria para cerrar), indicaciones y seguimiento.",
+      description: "Pronóstico, evolución (obligatoria para cerrar) e indicaciones.",
       summary:
-        evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === ""
+        evolution.trim() === "" && indications.trim() === ""
           ? "Sin evolución registrada"
           : "Evolución registrada",
-      empty: evolution.trim() === "" && indications.trim() === "" && nextStep.trim() === "",
+      empty: evolution.trim() === "" && indications.trim() === "",
     },
   ]
 
@@ -1528,14 +1405,6 @@ export function EncounterEditor({
   const evolucionBody = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        {/* Los exámenes auxiliares se piden como orden (bloque Documentos); lo
-            que se escribió antes en texto libre se sigue leyendo. */}
-        {notes.auxiliaryExams.trim() ? (
-          <div className="flex flex-col gap-1 text-sm">
-            <p className="text-xs font-medium text-muted-foreground">Exámenes auxiliares (escritos antes)</p>
-            <p className="whitespace-pre-wrap">{notes.auxiliaryExams}</p>
-          </div>
-        ) : null}
         <Field>
           <FieldLabel htmlFor={`${uid}-prognosis`}>Pronóstico</FieldLabel>
           <Textarea
@@ -1571,48 +1440,6 @@ export function EncounterEditor({
             onChange={(event) => editIndications(event.target.value)}
           />
         </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-next-step`}>Paso siguiente</FieldLabel>
-          <Textarea
-            id={`${uid}-next-step`}
-            rows={2}
-            value={nextStep}
-            disabled={locked}
-            maxLength={MAX_NEXT_STEP}
-            placeholder="Paso siguiente del tratamiento…"
-            onChange={(event) => editNextStep(event.target.value)}
-          />
-        </Field>
-        <div className="flex flex-wrap gap-3">
-          <Field className="min-w-40 flex-1">
-            <FieldLabel htmlFor={`${uid}-appt-date`}>Fecha de revisión sugerida</FieldLabel>
-            <Input
-              id={`${uid}-appt-date`}
-              type="date"
-              value={apptDate}
-              disabled={locked}
-              onChange={(event) => editApptDate(event.target.value)}
-            />
-          </Field>
-          <Field className="min-w-40 flex-1">
-            <FieldLabel htmlFor={`${uid}-appt-time`}>Hora de revisión sugerida</FieldLabel>
-            <Input
-              id={`${uid}-appt-time`}
-              type="time"
-              value={apptTime}
-              disabled={locked}
-              onChange={(event) => editApptTime(event.target.value)}
-            />
-          </Field>
-        </div>
-        {apptError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {apptError}
-          </p>
-        ) : null}
-        <p className="text-xs text-muted-foreground">
-          Seguimiento recomendado; no reserva una cita. Guarda fecha y hora juntas o limpia ambas.
-        </p>
       </div>
     </div>
   )

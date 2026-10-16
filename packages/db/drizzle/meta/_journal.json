@@ -659,6 +659,13 @@
       "when": 1792113996284,
       "tag": "0093_un_plan_una_seccion",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1792113996285,
+      "tag": "0094_la_ficha_en_cuatro_secciones",
+      "breakpoints": true
     }
   ]
 }

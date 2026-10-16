@@ -240,7 +240,7 @@ beforeAll(async () => {
       (${BRANCH_B}, ${ORG_B}, 'Surco')`)
   await ownerDb.execute(sql`
     insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "is_active") values
-      (${SVC_A}, ${ORG_A}, 'custom', 'FIN-ACC', 'Resina acceso', 'restauradora', 'general', 33000, 'PEN', true),
+      (${SVC_A}, ${ORG_A}, 'custom', 'FIN-ACC', 'Resina acceso', 'restauradora', 'tooth', 33000, 'PEN', true),
       (${SVC_B}, ${ORG_B}, 'custom', 'FIN-ACC', 'Resina acceso', 'restauradora', 'general', 33000, 'PEN', true)`)
   // Medios reales por servicio (no seed): efectivo, tarjeta y uno apagado.
   const cash = await withOrgContext(appDb, ORG_A, (tx) =>
@@ -283,6 +283,8 @@ beforeAll(async () => {
         serviceId: SVC_A,
         planId: PLAN_A,
         sourceEncounterId: encounter.id,
+        // Una resina por pieza: recepción ve la pieza, caja no.
+        toothNumber: [16, 26, 36][i],
       }),
     )
     itemIds.push(item.id)
@@ -451,20 +453,23 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect(ownPdf.headers.get("content-type")).toBe("application/pdf")
   expect(Buffer.from(await ownPdf.arrayBuffer()).subarray(0, 5).toString("latin1")).toBe("%PDF-")
 
-  // Caja y recepción reciben el presupuesto como documento económico: precio y
-  // decisión, sin pieza, superficies ni códigos de procedimiento.
-  for (const [role, userId] of [["cashier", CASH], ["reception", RECEP]] as const) {
-    const economic = (await (await buildApp(role, userId).request(detailPath)).json()) as {
-      data: { totalCents: number | null; items: Array<{ title: string; priceCents: number | null; toothNumber: number | null; surfaces: string[]; codings: unknown[] }> }
+  // Recepción lo ve como lo recibe la persona: el tratamiento con su pieza
+  // («Resina · pieza 16»). Caja, como documento económico, sin pieza. Ninguna
+  // recibe superficies ni códigos de procedimiento.
+  type Line = { title: string; priceCents: number | null; toothNumber: number | null; surfaces: string[]; codings: unknown[] }
+  for (const [role, userId, tooth] of [["cashier", CASH, null], ["reception", RECEP, 16]] as const) {
+    const view = (await (await buildApp(role, userId).request(detailPath)).json()) as {
+      data: { totalCents: number | null; items: Line[] }
     }
-    expect(economic.data.items.length).toBeGreaterThan(0)
-    expect(economic.data.items.every((line) => line.title.length > 0 && line.priceCents !== null)).toBe(true)
-    expect(
-      economic.data.items.every(
-        (line) => line.toothNumber === null && line.surfaces.length === 0 && line.codings.length === 0,
-      ),
-    ).toBe(true)
+    expect(view.data.items.length).toBeGreaterThan(0)
+    expect(view.data.items.every((line) => line.title.length > 0 && line.priceCents !== null)).toBe(true)
+    expect(view.data.items.map((line) => line.toothNumber)).toEqual([tooth])
+    expect(view.data.items.every((line) => line.surfaces.length === 0 && line.codings.length === 0)).toBe(true)
   }
+  const listed = (await (await buildApp("reception", RECEP).request(listPath)).json()) as {
+    data: Array<{ id: string; items: Line[] }>
+  }
+  expect(listed.data.find((budget) => budget.id === BUDGET1)?.items.map((line) => line.toothNumber)).toEqual([16])
 
   // Escritura (precios y tratamientos): reception y cashier 403 con cuerpo válido; DENT2 403 sobre plan ajeno.
   const createBody = { planId: PLAN_A, itemIds: [ITEM3] }

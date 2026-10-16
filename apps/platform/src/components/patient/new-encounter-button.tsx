@@ -19,7 +19,7 @@ import { useActiveBranch } from "../../lib/active-branch"
 import { type AgendaAppointment, invalidateAppointmentQueries, professionalSaid } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
-import { activeOrgTimeZone } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import type { Encounter, PatientFull } from "../../lib/patients"
 
 /** Cita de agenda desde la que se atiende: fija la sede y dice de quién es. */
@@ -83,6 +83,15 @@ export function useAttendAppointment() {
   })
 }
 
+/** La hora de la cita en la zona de la clínica, «10:00». */
+function clockOf(iso: string): string {
+  return new Date(iso).toLocaleTimeString(activeOrgLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
 /** La cita de hoy que se puede atender (sigue en pie), de la que llegó primero o la más cercana a la hora. */
 function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppointment | null {
   const timeZone = activeOrgTimeZone()
@@ -112,10 +121,11 @@ function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppoint
 }
 
 /**
- * Nueva y en curso abren el mismo espacio clínico. Con una atención en curso
- * el botón la continúa («Continuar la atención»), así lo escrito no se pierde.
- * Con una cita hoy (o desde la cita) es «Atender»: un clic, sin formulario.
- * Sin cita, «Nueva atención» pide el motivo de la visita y el profesional que
+ * El botón de atender, el mismo en la cabecera de la página (desde cualquier
+ * pestaña) y en los vacíos que lo piden (ADR 0035). Un solo nombre por caso:
+ * con una atención en curso, «Continuar la atención» (lo escrito no se
+ * pierde); con una cita hoy, «Atender (10:00)»: un clic, sin formulario; sin
+ * cita, «Atender», que pide el motivo de la visita y el profesional que
  * atiende (por defecto quien pulsa). Solo se ofrece a quien escribe en la
  * historia clínica. La cita se marca atendida al cerrar.
  */
@@ -124,12 +134,17 @@ export function NewEncounterButton({
   openEncounterId,
   initialPlanItemIds,
   appointment,
+  variant = "default",
+  size = "default",
 }: {
   patientId: string
   detail?: PatientFull
   openEncounterId?: string | null
   initialPlanItemIds?: string[]
   appointment?: AttendedAppointment
+  /** En un vacío («Todavía no tiene atenciones») va como acción secundaria. */
+  variant?: "default" | "outline"
+  size?: "default" | "sm"
 }) {
   const canWrite = usePermission("clinical.write")
   const canSeeAgenda = usePermission("appointments.read")
@@ -208,30 +223,43 @@ export function NewEncounterButton({
   }
   if (!canWrite) return null
   if (!appointment && inProgressId) {
-    return <Button onClick={() => open(inProgressId)}>Continuar la atención</Button>
+    return (
+      <Button variant={variant} size={size} onClick={() => open(inProgressId)}>
+        Continuar la atención
+      </Button>
+    )
   }
   if (visit) {
+    // La hora de la cita de hoy dice cuál se atiende: «Atender (10:00)».
+    const at = !appointment && todayVisit ? clockOf(todayVisit.startsAt) : null
     return (
-      <SubmitButton pending={attend.isPending} onClick={() => attend.mutate({ patientId, appointment: visit })}>
-        Atender
+      <SubmitButton
+        variant={variant}
+        size={size}
+        pending={attend.isPending}
+        onClick={() => attend.mutate({ patientId, appointment: visit })}
+      >
+        {at ? `Atender (${at})` : "Atender"}
       </SubmitButton>
     )
   }
   return (
     <>
       <Button
+        variant={variant}
+        size={size}
         onClick={() => {
           setError(null)
           setDrawerOpen(true)
         }}
       >
-        Nueva atención
+        Atender
       </Button>
       <FormDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title="Nueva atención"
-        description="Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso."
+        title="Atender sin cita"
+        description="Escribe por qué viene y quién lo atiende. La atención se abre en curso."
         onSubmit={(event) => {
           event.preventDefault()
           void start()
@@ -239,7 +267,7 @@ export function NewEncounterButton({
         isSubmitting={saving}
         isDirty={reason.trim().length > 0}
         error={error}
-        submitLabel="Abrir atención"
+        submitLabel="Atender"
         submitDisabled={!reason.trim() || !dentistUserId || saving}
       >
         <Field>

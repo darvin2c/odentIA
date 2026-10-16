@@ -282,6 +282,24 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     (await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, encounterId))).encounter
       .signerRegistration,
   ).toBe("COP 54321")
+  // También en la base, con la guarda vigente tras la última migración: lo
+  // firmado no se reescribe ni sin pasar por el servicio; lo que no es historia
+  // (la marca de actualización) sí se toca.
+  await expect(
+    ownerDb.update(encounter).set({ evolution: "Reescrita" }).where(eq(encounter.id, encounterId)),
+  ).rejects.toMatchObject({ cause: { code: "23514", constraint_name: "encounter_finalized_immutable" } })
+  // La guarda cubre toda la nota: enfermedad actual, tiempo, funciones vitales y pronóstico.
+  for (const change of [
+    { presentIllness: "Reescrita" },
+    { illnessDuration: "Reescrita" },
+    { vitals: { pulso: 1 } },
+    { prognosis: "Reescrito" },
+  ]) {
+    await expect(
+      ownerDb.update(encounter).set(change).where(eq(encounter.id, encounterId)),
+    ).rejects.toMatchObject({ cause: { code: "23514", constraint_name: "encounter_finalized_immutable" } })
+  }
+  await ownerDb.update(encounter).set({ updatedAt: new Date() }).where(eq(encounter.id, encounterId))
 })
 
 it("la atención nace de la cita y al cerrarse la deja atendida con su control realizado", async () => {

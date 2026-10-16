@@ -77,8 +77,6 @@ export const patient = pgTable(
     insuranceType: text("insurance_type"),
     insuranceDetail: text("insurance_detail"),
     referralSource: text("referral_source"),
-    dataConsentAt: timestamp("data_consent_at", { withTimezone: true }),
-    dataConsentBy: text("data_consent_by").references(() => user.id),
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
     /** Revisión de antecedentes (agregado transaccional de salud). */
     healthRevision: integer("health_revision").notNull().default(0),
@@ -618,12 +616,8 @@ export const encounter = pgTable(
     vitals: jsonb("vitals"),
     evolution: text("evolution"),
     indications: text("indications"),
-    nextStep: text("next_step"),
     prognosis: text("prognosis"),
-    /** Exámenes auxiliares solicitados o con resultado. */
-    auxiliaryExams: text("auxiliary_exams"),
     examination: jsonb("examination"),
-    nextAppointmentAt: timestamp("next_appointment_at", { withTimezone: true }),
     /** Hora de inicio declarada (por defecto, al abrir). */
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     /** Hora de fin declarada al cerrar. */
@@ -1823,7 +1817,7 @@ export const patientResponsibility = pgTable(
       .where(sql`${table.revokedAt} IS NULL`),
     check(
       "patient_responsibility_kind_check",
-      sql`${table.kind} IN ('representante_legal','autorizado_informacion','responsable_economico','acompanante')`,
+      sql`${table.kind} IN ('representante_legal','autorizado_informacion','responsable_economico')`,
     ),
     check(
       "patient_responsibility_dates_check",

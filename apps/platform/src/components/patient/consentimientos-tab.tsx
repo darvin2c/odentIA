@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   buttonVariants,
   Field,
@@ -15,28 +14,23 @@ import {
 } from "@odentia/ui"
 import {
   ConfirmDialog,
-  EmptyState,
-  ErrorState,
   FormDrawer,
   LoadingState,
 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
-  CONSENT_STATUS_LABELS,
   type ConsentDocument,
   cancelConsent,
   consentSignatureWords,
   createConsent,
   fetchConsentHistory,
-  fetchConsents,
   fetchConsentTemplates,
   generateConsentPdf,
   revokeConsent,
 } from "../../lib/clinical-forms"
-import { usePermission } from "../../lib/crm"
 import { Cie10Search } from "./cie10-search"
 import { ConsentSheet } from "./consent-sheet"
 import { ConsentSigningScreen, PaperSignDrawer, useSignerChoices } from "./consent-signing"
@@ -48,140 +42,12 @@ const errorMessage = (e: unknown) =>
     ? (e.shape.message ?? "No se pudo completar la acción")
     : "No se pudo completar la acción"
 
-const STATUS_TONE: Record<
-  ConsentDocument["status"],
-  "default" | "secondary" | "destructive" | "outline"
-> = {
-  pendiente: "secondary",
-  firmado: "default",
-  revocado: "destructive",
-  anulado: "outline",
-}
-
 const EVENT_LABELS: Record<string, string> = {
   pendiente: "Creado (pendiente de firma)",
   informado: "Informado por el profesional",
   firmado: "Firmado",
   revocado: "Revocado",
   anulado: "Anulado",
-}
-
-/**
- * Consentimientos informados por procedimiento: plantilla estructurada,
- * firma de la propia persona o de su representante legal vigente y del
- * profesional que informa, PDF con huella, anulación de pendientes y
- * revocación firmada. Sin firma certificada ni firma digital.
- */
-export function ConsentimientosTab({
-  patientId,
-  encounterId,
-  planItemId,
-}: {
-  patientId: string
-  encounterId?: string
-  planItemId?: string
-}): React.JSX.Element {
-  const queryClient = useQueryClient()
-  const canRead = usePermission("clinical.read")
-  const canWrite = usePermission("clinical.write")
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  const listQuery = useQuery({
-    queryKey: ["consents", patientId],
-    queryFn: () => fetchConsents({ patientId }),
-    enabled: canRead,
-  })
-  const documents = listQuery.data?.data ?? []
-  const invalidate = async () => {
-    await Promise.all(
-      [
-        ["consents", patientId],
-        ["patient-summary", patientId],
-        ["patient-documents", patientId],
-      ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-    )
-  }
-
-  return (
-    <section aria-labelledby="consents-title" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 id="consents-title" className="text-base font-semibold">
-            Consentimientos informados
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Por procedimiento, con la firma de quien puede decidir y del profesional que informa.
-          </p>
-        </div>
-        {canWrite ? (
-          <Button type="button" onClick={() => setDrawerOpen(true)}>
-            Nuevo consentimiento
-          </Button>
-        ) : null}
-      </div>
-      {listQuery.isPending ? (
-        <LoadingState message="Cargando consentimientos…" />
-      ) : listQuery.isError ? (
-        <ErrorState
-          message="No se pudieron cargar los consentimientos"
-          onRetry={() => void listQuery.refetch()}
-        />
-      ) : documents.length === 0 ? (
-        <EmptyState
-          title="Sin consentimientos"
-          description="Genera el primero desde una plantilla publicada, indicando el procedimiento."
-        />
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {documents.map((document) => {
-            const open = selectedId === document.id
-            return (
-              <li key={document.id} className="rounded-md border">
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  className="flex w-full flex-wrap items-center justify-between gap-2 p-3 text-left"
-                  onClick={() => setSelectedId(open ? null : document.id)}
-                >
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium">{document.titleSnapshot}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {document.procedureRef ? `${document.procedureRef} · ` : ""}
-                      {new Date(document.signedAt ?? document.createdAt).toLocaleDateString(
-                        activeOrgLocale(),
-                        {
-                          dateStyle: "medium",
-                        },
-                      )}
-                    </span>
-                  </span>
-                  <Badge variant={STATUS_TONE[document.status]}>
-                    {CONSENT_STATUS_LABELS[document.status]}
-                  </Badge>
-                </button>
-                {open ? (
-                  <ConsentDetail document={document} canWrite={canWrite} onChanged={invalidate} />
-                ) : null}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      <NewConsentDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        patientId={patientId}
-        encounterId={encounterId}
-        planItemId={planItemId}
-        onCreated={async (id) => {
-          setDrawerOpen(false)
-          setSelectedId(id)
-          await invalidate()
-        }}
-      />
-    </section>
-  )
 }
 
 export function NewConsentDrawer({
@@ -309,7 +175,7 @@ export function NewConsentDrawer({
   )
 }
 
-function ConsentDetail({
+export function ConsentDetail({
   document,
   canWrite,
   onChanged,

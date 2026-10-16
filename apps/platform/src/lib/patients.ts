@@ -45,7 +45,6 @@ export interface Patient {
   referralSource?: string | null
   registeredBranchId?: string | null
   isActive: boolean
-  dataConsentAt?: string | null
   createdAt: string
   updatedAt?: string
 }
@@ -152,7 +151,6 @@ export interface SaveHealthInput {
   familyHistory?: FamilyHistoryItem[]
   asaClass?: string | null
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
-  dataConsent?: true
 }
 
 export interface PatientHealth {
@@ -208,7 +206,7 @@ export const CONDITION_STATUS_LABELS: Record<string, string> = {
 }
 
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
-  unknown: "Sin determinar",
+  unknown: "No se le preguntó",
   none: "Niega antecedentes de este tipo",
   recorded: "Registrados",
 }
@@ -239,7 +237,7 @@ export function hasHealthInfo(health: PatientHealth | null | undefined): boolean
 
 /**
  * Declaración pendiente de revisión profesional: hay información pero nunca se
- * marcó revisor/fecha. Distinto de «Sin determinar» (contenido desconocido).
+ * marcó revisor/fecha. Distinto de «No se le preguntó» (contenido desconocido).
  */
 export function isHealthReviewPending(health: PatientHealth | null | undefined): boolean {
   return hasHealthInfo(health) && !health?.reviewedAt
@@ -361,18 +359,15 @@ export interface Encounter {
   /** Cita que motivó la atención, si la hubo. */
   appointmentId?: string | null
   reason: string | null
-  /** Nota normativa: enfermedad actual, signos vitales, pronóstico y exámenes. */
+  /** Nota normativa: enfermedad actual, signos vitales y pronóstico. */
   presentIllness?: string | null
   illnessDuration?: string | null
   vitals?: Record<string, number> | null
   prognosis?: string | null
-  auxiliaryExams?: string | null
   /** Por qué se cerró con un consentimiento sin firmar («Seguir sin él»). */
   consentSkipReason?: string | null
   evolution: string | null
   indications: string | null
-  nextStep: string | null
-  nextAppointmentAt: string | null
   finalizedAt: string | null
   examination?: {
     extraoral?: Record<string, string>
@@ -512,6 +507,9 @@ export type TimelineType =
   | "budget"
   | "follow_up"
   | "prescription"
+  | "consent"
+  | "order"
+  | "form"
 
 /** Evento de la historia clínica unificada. Fechas como ISO string. */
 export interface TimelineItem {
@@ -531,8 +529,6 @@ export interface TimelineItem {
   status?: string
   procedures?: string[]
   documentsCount?: number
-  nextStep?: string | null
-  nextAppointmentAt?: string | null
   indications?: string | null
   diagnoses?: string[]
   plannedItems: Array<
@@ -551,6 +547,8 @@ export interface TimelineItem {
   decision?: string | null
   /** Vencimiento de un control, para leerlo aquí mismo. */
   dueAt?: string | null
+  /** Motivo de una atención anulada: la historia la muestra con él. */
+  voidReason?: string | null
 }
 
 export interface PlanPendingTotal {
@@ -564,8 +562,6 @@ export interface PatientLastVisit {
   reason: string | null
   evolution: string | null
   indications: string | null
-  nextStep: string | null
-  nextAppointmentAt: string | null
   finalizedAt: string | null
   teeth: number[]
   procedures: Array<Pick<ProcedureItem, "description" | "toothNumber" | "diagnosisCode">>
@@ -634,7 +630,6 @@ export interface PatientSummary {
   openEncounter?: OpenEncounterBrief | null
   /** Consentimientos emitidos y aún sin firmar. */
   pendingConsents?: Array<{ id: string; title: string }>
-  nextAppointmentAt: string | null
   treatmentJourneys: TreatmentJourneySummary[]
   planPending: {
     count: number
@@ -828,6 +823,12 @@ export function timelineTypeLabel(type: string): string {
       return "Control"
     case "prescription":
       return "Receta"
+    case "consent":
+      return "Consentimiento"
+    case "order":
+      return "Orden"
+    case "form":
+      return "Formulario"
     default:
       return type
   }

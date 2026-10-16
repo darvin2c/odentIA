@@ -89,9 +89,6 @@ export interface UpdateEncounterDraftPatch {
   reason?: string | null
   evolution?: string | null
   indications?: string | null
-  nextStep?: string | null
-  /** ISO-8601; null la limpia; undefined = sin cambio. */
-  nextAppointmentAt?: string | null
   /** Reemplaza el set completo de piezas (vacío = sin piezas). */
   teeth?: number[]
   /** Examen clínico de la atención (extraoral/intraoral/higieneOral); null lo limpia. */
@@ -102,7 +99,6 @@ export interface UpdateEncounterDraftPatch {
   /** Signos vitales (claves de @odentia/clinical); null los limpia. */
   vitals?: Record<string, unknown> | null
   prognosis?: string | null
-  auxiliaryExams?: string | null
 }
 
 export interface ExaminationInput {
@@ -161,12 +157,10 @@ const TEXT_LIMITS = {
   reason: 2000,
   evolution: 10000,
   indications: 5000,
-  nextStep: 2000,
   procedureDescription: 2000,
   presentIllness: 4000,
   illnessDuration: 200,
   prognosis: 2000,
-  auxiliaryExams: 4000,
 } as const
 
 const FDI_SET: ReadonlySet<number> = new Set(VALID_FDI_TEETH)
@@ -1017,22 +1011,10 @@ export async function updateEncounterDraft(
     set.evolution = cleanText(patch.evolution, "evolution", TEXT_LIMITS.evolution)
   if (patch.indications !== undefined)
     set.indications = cleanText(patch.indications, "indications", TEXT_LIMITS.indications)
-  if (patch.nextStep !== undefined)
-    set.nextStep = cleanText(patch.nextStep, "nextStep", TEXT_LIMITS.nextStep)
-  if (patch.nextAppointmentAt !== undefined) {
-    if (patch.nextAppointmentAt === null) {
-      set.nextAppointmentAt = null
-    } else {
-      const d = new Date(patch.nextAppointmentAt)
-      if (Number.isNaN(d.getTime()))
-        throw validation("nextAppointmentAt debe ser una fecha ISO válida")
-      set.nextAppointmentAt = d
-    }
-  }
   const teeth = patch.teeth === undefined ? undefined : dedupeTeeth(patch.teeth)
   if (patch.examination !== undefined)
     set.examination = patch.examination === null ? null : assertExamination(patch.examination)
-  for (const key of ["presentIllness", "illnessDuration", "prognosis", "auxiliaryExams"] as const) {
+  for (const key of ["presentIllness", "illnessDuration", "prognosis"] as const) {
     if (patch[key] !== undefined) set[key] = cleanText(patch[key], key, TEXT_LIMITS[key])
   }
   if (patch.vitals !== undefined) {
@@ -1502,8 +1484,9 @@ const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
 
 /**
  * Mínimo para cerrar (ADR 0003): motivo, un diagnóstico CIE-10 con tipo,
- * evolución y firma con colegiatura. Funciones vitales, exámenes auxiliares y
- * pronóstico quedan opcionales: documentar una consulta no obliga a inventar.
+ * evolución y firma con colegiatura. Funciones vitales y pronóstico quedan
+ * opcionales (los exámenes auxiliares son órdenes de la atención): documentar
+ * una consulta no obliga a inventar.
  */
 export async function checkEncounterClosing(
   tx: Db,

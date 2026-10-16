@@ -108,6 +108,7 @@ import {
   createEncounter,
   finalizeEncounter,
   updateEncounterDraft,
+  voidEncounter,
 } from "./encounters.js"
 import { createFieldDef } from "./fields.js"
 import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "./follow-ups.js"
@@ -135,7 +136,7 @@ import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
-import { signConsentDocument } from "./clinical-forms.js"
+import { createClinicalOrder, signConsentDocument } from "./clinical-forms.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
@@ -1918,12 +1919,10 @@ const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
 await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
   reason: "Subida al paciente equivocado",
 })
-// Cierre con datos útiles: evolución, indicaciones y siguiente paso.
+// Cierre con datos útiles: evolución e indicaciones. Lo que sigue lo dice el plan.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   evolution: "Obturación de pieza 36 sin complicaciones; endodoncia de 46 programada.",
   indications: "Higiene con cepillo suave, control en 7 días; acudir si hay dolor.",
-  nextStep: "Endodoncia pieza 46 en próxima cita.",
-  nextAppointmentAt: tomorrowIso(),
 })
 // Solo el aceptado se realiza; conserva el vínculo atención-plan.
 await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
@@ -2167,6 +2166,13 @@ await db.update(treatmentBudgetItem).set({ createdAt: daysAgo(1) }).where(eq(tre
 // 36 después» (Aceptó 2 de 3). Lo aceptado se agendó en su cita de hoy, que lo
 // trae a la atención.
 const luciaPatientId = patientIdByName.get("Lucía Fernández")!
+// Su Historia (tablero 1, ADR 0035) muestra también una atención anulada con su
+// motivo y la radiografía que se pidió en la evaluación, como hechos.
+const luciaPorError = await createEncounter(db, ORG_A, ANA_ID, luciaPatientId, {
+  reason: "Consulta",
+  branchId: miraflores.id,
+})
+await voidEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaPorError.id, { reason: "Abierta por error" })
 const luciaEval = await createEncounter(db, ORG_A, ANA_ID, luciaPatientId, {
   reason: "Evaluación: molestia al masticar",
   branchId: miraflores.id,
@@ -2188,6 +2194,14 @@ for (const tooth of [16, 26, 36]) {
 }
 await updateEncounterDraft(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, {
   evolution: "Caries oclusal en 16, 26 y 36; se indican resinas.",
+})
+await createClinicalOrder(db, ORG_A, ANA_ID, {
+  kind: "imagen",
+  patientId: luciaPatientId,
+  encounterId: luciaEval.id,
+  title: "Radiografía panorámica",
+  recipient: "Centro de imágenes",
+  diagnosisCode: "K02.1",
 })
 const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
 if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")

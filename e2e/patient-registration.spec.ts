@@ -106,8 +106,6 @@ interface PatientDetail {
     id: string
     displayName: string
     bloodGroup: string | null
-    dataConsentAt: string | null
-    dataConsentBy: string | null
     healthReviewedAt: string | null
     healthReviewedBy: string | null
   }
@@ -236,8 +234,15 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   expect(detail.patient.bloodGroup).toBe("O+")
   expect(detail.patient.healthReviewedAt).toBeNull()
   expect(detail.patient.healthReviewedBy).toBeNull()
-  expect(detail.patient.dataConsentAt).not.toBeNull()
-  expect(detail.patient.dataConsentBy).toBeNull()
+  // El consentimiento queda en «Datos y consentimiento», por versión del aviso:
+  // lo dio la persona en el formulario, sin nadie del equipo.
+  const consents = await call<
+    { channel: string; recordedBy: string | null; purposes: string[]; revokedAt: string | null }[]
+  >(page, "GET", `/api/patients/${created.id}/data-consents`, org.slug)
+  expect(consents).toEqual([
+    expect.objectContaining({ channel: "formulario_publico", recordedBy: null, revokedAt: null }),
+  ])
+  expect(consents[0]?.purposes).toContain("atencion")
   expect(detail.activeAllergies).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ substance: "Penicilina", severity: "severa" }),

@@ -24,6 +24,8 @@ interface Step {
   detail: string
   tone: "warning" | "success"
   section: PatientSectionId
+  /** Documentos abre en «Requieren acción». */
+  pending?: boolean
   action: string
 }
 
@@ -101,7 +103,8 @@ export function EncounterHandoff({
       title: `Consentimiento sin firmar: ${consent.titleSnapshot}`,
       detail: "Debe firmarlo el paciente o su representante legal vigente.",
       tone: "warning",
-      section: "consentimientos",
+      section: "documentos",
+      pending: true,
       action: "Recabar firma",
     })
   for (const control of ownControls.filter((row) => row.status === "pendiente"))
@@ -157,11 +160,11 @@ export function EncounterHandoff({
     (canClinical && (followUps.isPending || prescriptions.isPending || consents.isPending)) ||
     (canFinance && account.isPending)
 
-  const linkTo = (section: PatientSectionId, label: string): ReactNode => (
+  const linkTo = (section: PatientSectionId, label: string, pending?: boolean): ReactNode => (
     <Link
       to="/patients/$patientId"
       params={{ patientId }}
-      search={{ tab: section }}
+      search={pending ? { tab: section, tipo: "requieren" } : { tab: section }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
       {label}
@@ -207,7 +210,7 @@ export function EncounterHandoff({
                   <span className="text-sm text-muted-foreground">{step.detail}</span>
                 ) : null}
               </div>
-              {linkTo(step.section, step.action)}
+              {linkTo(step.section, step.action, step.pending)}
             </li>
           ))}
         </ul>

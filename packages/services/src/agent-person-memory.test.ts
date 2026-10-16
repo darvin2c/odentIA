@@ -485,7 +485,6 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       displayName: "Carla Núñez Prado", docType: "DNI", docNumber: "45678912", phone: "+51987654321",
       birthDate: null, sex: null, identityNeedsReview: true,
     })
-    expect(ficha!.dataConsentAt).not.toBeNull()
     // Mismo consentimiento y misma procedencia que cualquier registro: versión del aviso, enlace consumido y conversación.
     const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, registered.id))
     expect(consents.map((row) => [row.noticeVersion, row.noticeText, row.channel, row.grantedByName])).toEqual([
