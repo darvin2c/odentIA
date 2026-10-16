@@ -524,19 +524,43 @@ async function initialSync(
   return { events, nextCursor: profile.historyId }
 }
 
+/** Mensajes añadidos de un registro del historial, sin los que envió o redactó la clínica. */
+function addedIdsOf(record: Record<string, unknown>): string[] {
+  const added = record["messagesAdded"]
+  if (!Array.isArray(added)) return []
+  const ids: string[] = []
+  for (const entry of added) {
+    const message = asRecord(asRecord(entry)?.["message"])
+    const id = message?.["id"]
+    if (typeof id !== "string" || id.length === 0) continue
+    // Los propios se descartan antes del tope para que no le quiten sitio a
+    // los de pacientes (gmailMessageToEvents los vuelve a filtrar igual).
+    const labels = message?.["labelIds"]
+    if (Array.isArray(labels) && (labels.includes("SENT") || labels.includes("DRAFT"))) continue
+    ids.push(id)
+  }
+  return ids
+}
+
 /**
- * Lee cambios desde el cursor y avanza SOLO con el historyId devuelto por
- * Google tras procesar todas las páginas. Si el checkpoint caducó lanza
- * GmailResyncRequired (el worker hace sync inicial sin perder ingesta).
+ * Lee cambios desde el cursor sin perder ninguno. Cada vuelta procesa
+ * registros completos del historial hasta juntar POLL_MAX_MESSAGES; si quedan
+ * más, el cursor es el id del último registro procesado (history.list
+ * devuelve los registros posteriores a startHistoryId) y la próxima vuelta
+ * sigue desde ahí. Solo al llegar al final avanza al historyId del buzón.
+ * Releer un registro no duplica: el worker deduplica por id de mensaje.
+ * Si el checkpoint caducó lanza GmailResyncRequired (el worker resincroniza).
  */
 export async function pollGmailMailbox(
   input: GmailPollInput,
   deps: ChannelAdapterDeps,
 ): Promise<GmailPollResult> {
   if (!input.cursor) return initialSync(input, deps)
-  const addedIds: string[] = []
+  const seen = new Set<string>()
+  const events: NormalizedInbound[] = []
+  let processed = 0
+  let lastRecordId: string | null = null
   let pageToken: string | undefined
-  let historyId = input.cursor
   for (;;) {
     const params = new URLSearchParams({
       startHistoryId: input.cursor,
@@ -548,28 +572,37 @@ export async function pollGmailMailbox(
     if (status >= 400) throw new Error(gmailApiError("history.list", status, json))
     const page = asRecord(json)
     const rawHistory = page?.["history"]
-    if (Array.isArray(rawHistory)) {
-      for (const item of rawHistory) {
-        const added = asRecord(item)?.["messagesAdded"]
-        if (!Array.isArray(added)) continue
-        for (const entry of added) {
-          const id = asRecord(asRecord(entry)?.["message"])?.["id"]
-          if (typeof id === "string" && id.length > 0) addedIds.push(id)
-        }
+    for (const item of Array.isArray(rawHistory) ? rawHistory : []) {
+      const record = asRecord(item)
+      if (!record) continue
+      // Tope alcanzado: se corta antes de este registro y se reanuda desde el
+      // último procesado. Sin id procesado aún no hay desde dónde reanudar,
+      // así que se sigue (nunca se adelanta el cursor sobre lo no leído).
+      if (processed >= POLL_MAX_MESSAGES && lastRecordId) {
+        return { events, nextCursor: lastRecordId }
       }
+      for (const id of addedIdsOf(record)) {
+        if (seen.has(id)) continue
+        seen.add(id)
+        processed += 1
+        const full = await getFullMessage(input.accessToken, id, deps)
+        if (full) events.push(...gmailMessageToEvents(full, input.emailAddress))
+      }
+      const recordId = record["id"]
+      if (typeof recordId === "string" && recordId.length > 0) lastRecordId = recordId
     }
-    const nextHistory = page?.["historyId"]
-    if (typeof nextHistory === "string") historyId = nextHistory
     const next = page?.["nextPageToken"]
-    if (typeof next !== "string") break
-    pageToken = next
+    if (typeof next === "string") {
+      pageToken = next
+      continue
+    }
+    // Historial leído hasta el final: el cursor pasa al historyId del buzón.
+    const historyId = page?.["historyId"]
+    return {
+      events,
+      nextCursor: typeof historyId === "string" ? historyId : (lastRecordId ?? input.cursor),
+    }
   }
-  const events: NormalizedInbound[] = []
-  for (const id of addedIds.slice(0, POLL_MAX_MESSAGES)) {
-    const full = await getFullMessage(input.accessToken, id, deps)
-    if (full) events.push(...gmailMessageToEvents(full, input.emailAddress))
-  }
-  return { events, nextCursor: historyId }
 }
 
 /* ------------------------- Envío con hilo ------------------------- */
