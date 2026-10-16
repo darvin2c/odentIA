@@ -753,6 +753,7 @@ it("recorrido: hallazgo de origen, sesiones y saldo del tratamiento; aislado por
     condition: "caries",
     surfaces: ["occlusal"],
     details: { variant: "dentin" },
+    encounterId,
   })
   expect(finding.status).toBe(201)
   const findings = (await json<{ data: Array<{ id: string }> }>(finding)).data

@@ -1,3 +1,4 @@
+import { SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -32,6 +33,8 @@ import {
   type Prescription,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { fetchSignedOdontograms } from "../../lib/odontogram"
+import { useClinicalProfile } from "../../lib/org"
 import { DOCUMENT_FILTERS, type DocumentFilter } from "../../lib/patient-areas"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { ageFrom, type PatientDocument, type PatientFull, type PlanItem } from "../../lib/patients"
@@ -44,7 +47,7 @@ import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
 import { ImagenesTab } from "./imagenes-tab"
 import { NewOrderDrawer, OrderResultDrawer, OrderRow } from "./ordenes-tab"
 
-type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento"
+type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "odontograma"
 type Tone = "success" | "warning" | "outline" | "secondary"
 
 /** El filtro de tipo de cada papel (las imágenes tienen su galería). */
@@ -54,6 +57,7 @@ const FILTER_OF_KIND: Record<Kind, DocumentFilter> = {
   orden: "ordenes",
   formulario: "formularios",
   consentimiento: "consentimientos",
+  odontograma: "odontogramas",
 }
 
 /** «Nuevo ▾»: abre directo el formulario de creación de cada papel. */
@@ -70,6 +74,7 @@ type RowAction =
   | { type: "firmar"; consent: ConsentDocument }
   | { type: "resultado"; order: ClinicalOrder }
   | { type: "imprimir"; prescriptionId: string }
+  | { type: "imprimir-odontograma"; assessmentId: string }
   | { type: "completar" }
   | { type: "ver" }
 
@@ -90,6 +95,7 @@ interface Row {
     | { kind: "receta"; prescription: Prescription }
     | { kind: "formulario"; response: FormResponse }
     | { kind: "archivo"; document: PatientDocument }
+    | { kind: "odontograma"; assessmentId: string }
 }
 
 const IMAGE_CATEGORIES = new Set(["radiografia", "foto_clinica"])
@@ -120,6 +126,8 @@ export function DocumentosSection({
 }) {
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
+  // El odontograma firmado es de las clínicas de Perú (NTS 188; ADR 0036).
+  const signsOdontogram = useClinicalProfile().odontogram?.signedOdontogram === true
   const [menuOpen, setMenuOpen] = useState(false)
   const [creating, setCreating] = useState<Exclude<NewDocumentKind, "archivo"> | null>(null)
   const [uploadRequested, setUploadRequested] = useState(false)
@@ -147,6 +155,11 @@ export function DocumentosSection({
   const consents = useQuery({
     queryKey: ["consents", patientId],
     queryFn: () => fetchConsents({ patientId }),
+  })
+  const odontograms = useQuery({
+    queryKey: ["odontogram-assessments", patientId],
+    queryFn: () => fetchSignedOdontograms(patientId),
+    enabled: signsOdontogram,
   })
   // Quién firma un consentimiento pendiente: la persona o, si es menor, su
   // representante legal. Son las mismas consultas que ya hizo la página.
@@ -179,6 +192,7 @@ export function DocumentosSection({
         ["clinical-orders", patientId],
         ["form-responses", patientId],
         ["consents", patientId],
+        ["odontogram-assessments", patientId],
         ["patient-summary", patientId],
         ["timeline", patientId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
@@ -221,6 +235,7 @@ export function DocumentosSection({
     { name: "órdenes", query: orders },
     { name: "formularios", query: forms },
     { name: "consentimientos", query: consents },
+    ...(signsOdontogram ? [{ name: "odontogramas", query: odontograms }] : []),
   ]
   const allPending = sources.every((source) => source.query.isPending)
   const failed = sources.filter((source) => source.query.isError)
@@ -340,6 +355,20 @@ export function DocumentosSection({
         open: { kind: "consentimiento", consent },
       }),
     ),
+    // El odontograma firmado: se ve e imprime con el gráfico de la norma.
+    ...(signsOdontogram ? (odontograms.data?.data ?? []) : []).map(
+      (item): Row => ({
+        key: `odontograma-${item.id}`,
+        kind: "odontograma",
+        title: `Odontograma firmado · ${SIGNED_ODONTOGRAM_PURPOSE_LABELS[item.purpose]}`,
+        detail: `${item.examinerName} · ${item.registrationNumber}`,
+        date: item.createdAt,
+        status: null,
+        needsAction: false,
+        action: { type: "imprimir-odontograma", assessmentId: item.id },
+        open: { kind: "odontograma", assessmentId: item.id },
+      }),
+    ),
   ].sort((a, b) => b.date.localeCompare(a.date))
 
   const pendingCount = rows.filter((row) => row.needsAction).length
@@ -367,6 +396,17 @@ export function DocumentosSection({
           <Link
             to="/patients/$patientId/prescriptions/$prescriptionId/print"
             params={{ patientId, prescriptionId: action.prescriptionId }}
+            target="_blank"
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            Imprimir
+          </Link>
+        )
+      case "imprimir-odontograma":
+        return (
+          <Link
+            to="/patients/$patientId/odontogram/$assessmentId/print"
+            params={{ patientId, assessmentId: action.assessmentId }}
             target="_blank"
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
@@ -404,7 +444,7 @@ export function DocumentosSection({
   const chips = (
     <fieldset className="m-0 flex max-w-full min-w-0 flex-wrap gap-2 border-0 p-0">
       <legend className="sr-only">Filtrar documentos</legend>
-      {DOCUMENT_FILTERS.map((option) => {
+      {DOCUMENT_FILTERS.filter((option) => option.id !== "odontogramas" || signsOdontogram).map((option) => {
         const active = filter === option.id
         return (
           <Button
@@ -489,8 +529,9 @@ export function DocumentosSection({
                   key={row.key}
                   className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
                 >
-                  {row.open.kind === "archivo" ? (
-                    // Un archivo se abre con su botón (la galería o el visor).
+                  {row.open.kind === "archivo" || row.open.kind === "odontograma" ? (
+                    // Un archivo se abre con su botón (la galería o el visor); el
+                    // odontograma firmado, con su hoja.
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span className="break-words font-medium">{row.title}</span>
                       <span className="break-words text-muted-foreground">
@@ -636,7 +677,7 @@ function OpenedDocument({
     queryFn: () => fetchOrders({ patientId }),
     enabled: opened?.kind === "orden",
   })
-  if (!opened || opened.kind === "archivo") return null
+  if (!opened || opened.kind === "archivo" || opened.kind === "odontograma") return null
   const title =
     opened.kind === "consentimiento"
       ? opened.consent.titleSnapshot

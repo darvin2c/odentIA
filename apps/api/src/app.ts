@@ -58,7 +58,6 @@ import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
-import { createUbigeoRoute } from "./routes/ubigeo.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
@@ -105,7 +104,6 @@ const branchInput = z.object({
   department: z.string().max(80).nullish(),
   province: z.string().max(80).nullish(),
   district: z.string().max(80).nullish(),
-  ubigeo: z.string().length(6).nullish(),
   phone: z.string().max(30).nullish(),
   email: z.string().email().nullish(),
   mapsUrl: z.string().url().nullish(),
@@ -657,7 +655,6 @@ export function createApp(deps: AppDeps) {
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
   guarded.route("/cie10", createCie10Route(crmDeps))
-  guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))

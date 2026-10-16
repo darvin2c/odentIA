@@ -28,6 +28,7 @@ import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
 import { readBillingModes } from "./budgets.js"
+import { drawTreatedFinding } from "./treated-findings.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
@@ -1145,6 +1146,10 @@ export async function setPlanItemStatus(
     reason,
     encounterId: input.encounterId,
   })
+  // Lo tratado queda dibujado: lo que su servicio deja en la pieza (la resina,
+  // una restauración) se registra en esta atención, una sola vez.
+  if (input.status === "realizado" && input.encounterId)
+    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, updated)
   return { ...updated, decision: updated.decisionStatus as PlanItemDecision }
 }
 

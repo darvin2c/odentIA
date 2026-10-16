@@ -265,6 +265,7 @@ export function CreatePatientDrawer({
       config={config}
       today={today}
       defaultCountry={countryCode}
+      countryCode={profile.data?.countryCode ?? null}
       context={contact ? { kind: "contact", contact } : { kind: "generic" }}
       branches={branchesQuery.data?.data}
       initialValues={

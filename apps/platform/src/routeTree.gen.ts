@@ -71,7 +71,9 @@ import { Route as OrgSettingsIntegrationsModelRouteImport } from './routes/_org/
 import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_org/settings.integrations.webchat'
 import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
+import { Route as OrgPatientsPatientIdOdontogramPrintRouteImport } from './routes/_org/patients.$patientId.odontogram.print'
 import { Route as OrgPatientsPatientIdConsentsConsentIdPrintRouteImport } from './routes/_org/patients.$patientId.consents.$consentId.print'
+import { Route as OrgPatientsPatientIdOdontogramAssessmentIdPrintRouteImport } from './routes/_org/patients.$patientId.odontogram.$assessmentId.print'
 import { Route as OrgPatientsPatientIdOrdersOrderIdPrintRouteImport } from './routes/_org/patients.$patientId.orders.$orderId.print'
 import { Route as OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRouteImport } from './routes/_org/patients.$patientId.prescriptions.$prescriptionId.print'
 
@@ -394,10 +396,22 @@ const OrgPatientsPatientIdEncountersEncounterIdRoute =
     path: '/encounters/$encounterId',
     getParentRoute: () => OrgPatientsPatientIdRoute,
   } as any)
+const OrgPatientsPatientIdOdontogramPrintRoute =
+  OrgPatientsPatientIdOdontogramPrintRouteImport.update({
+    id: '/odontogram/print',
+    path: '/odontogram/print',
+    getParentRoute: () => OrgPatientsPatientIdRoute,
+  } as any)
 const OrgPatientsPatientIdConsentsConsentIdPrintRoute =
   OrgPatientsPatientIdConsentsConsentIdPrintRouteImport.update({
     id: '/consents/$consentId/print',
     path: '/consents/$consentId/print',
+    getParentRoute: () => OrgPatientsPatientIdRoute,
+  } as any)
+const OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute =
+  OrgPatientsPatientIdOdontogramAssessmentIdPrintRouteImport.update({
+    id: '/odontogram/$assessmentId/print',
+    path: '/odontogram/$assessmentId/print',
     getParentRoute: () => OrgPatientsPatientIdRoute,
   } as any)
 const OrgPatientsPatientIdOrdersOrderIdPrintRoute =
@@ -475,7 +489,9 @@ export interface FileRoutesByFullPath {
   '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
   '/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  '/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/patients/$patientId/odontogram/$assessmentId/print': typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
   '/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
@@ -539,7 +555,9 @@ export interface FileRoutesByTo {
   '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
   '/settings/integrations': typeof OrgSettingsIntegrationsIndexRoute
   '/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  '/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
   '/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/patients/$patientId/odontogram/$assessmentId/print': typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
   '/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   '/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
@@ -607,7 +625,9 @@ export interface FileRoutesById {
   '/_org/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
   '/_org/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
   '/_org/patients/$patientId/encounters/$encounterId': typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  '/_org/patients/$patientId/odontogram/print': typeof OrgPatientsPatientIdOdontogramPrintRoute
   '/_org/patients/$patientId/consents/$consentId/print': typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  '/_org/patients/$patientId/odontogram/$assessmentId/print': typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
   '/_org/patients/$patientId/orders/$orderId/print': typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   '/_org/patients/$patientId/prescriptions/$prescriptionId/print': typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
@@ -675,7 +695,9 @@ export interface FileRouteTypes {
     | '/settings/integrations/whatsapp'
     | '/settings/integrations/'
     | '/patients/$patientId/encounters/$encounterId'
+    | '/patients/$patientId/odontogram/print'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/odontogram/$assessmentId/print'
     | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesByTo: FileRoutesByTo
@@ -739,7 +761,9 @@ export interface FileRouteTypes {
     | '/settings/integrations/whatsapp'
     | '/settings/integrations'
     | '/patients/$patientId/encounters/$encounterId'
+    | '/patients/$patientId/odontogram/print'
     | '/patients/$patientId/consents/$consentId/print'
+    | '/patients/$patientId/odontogram/$assessmentId/print'
     | '/patients/$patientId/orders/$orderId/print'
     | '/patients/$patientId/prescriptions/$prescriptionId/print'
   id:
@@ -806,7 +830,9 @@ export interface FileRouteTypes {
     | '/_org/settings/integrations/whatsapp'
     | '/_org/settings/integrations/'
     | '/_org/patients/$patientId/encounters/$encounterId'
+    | '/_org/patients/$patientId/odontogram/print'
     | '/_org/patients/$patientId/consents/$consentId/print'
+    | '/_org/patients/$patientId/odontogram/$assessmentId/print'
     | '/_org/patients/$patientId/orders/$orderId/print'
     | '/_org/patients/$patientId/prescriptions/$prescriptionId/print'
   fileRoutesById: FileRoutesById
@@ -1258,11 +1284,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRouteImport
       parentRoute: typeof OrgPatientsPatientIdRoute
     }
+    '/_org/patients/$patientId/odontogram/print': {
+      id: '/_org/patients/$patientId/odontogram/print'
+      path: '/odontogram/print'
+      fullPath: '/patients/$patientId/odontogram/print'
+      preLoaderRoute: typeof OrgPatientsPatientIdOdontogramPrintRouteImport
+      parentRoute: typeof OrgPatientsPatientIdRoute
+    }
     '/_org/patients/$patientId/consents/$consentId/print': {
       id: '/_org/patients/$patientId/consents/$consentId/print'
       path: '/consents/$consentId/print'
       fullPath: '/patients/$patientId/consents/$consentId/print'
       preLoaderRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRouteImport
+      parentRoute: typeof OrgPatientsPatientIdRoute
+    }
+    '/_org/patients/$patientId/odontogram/$assessmentId/print': {
+      id: '/_org/patients/$patientId/odontogram/$assessmentId/print'
+      path: '/odontogram/$assessmentId/print'
+      fullPath: '/patients/$patientId/odontogram/$assessmentId/print'
+      preLoaderRoute: typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRouteImport
       parentRoute: typeof OrgPatientsPatientIdRoute
     }
     '/_org/patients/$patientId/orders/$orderId/print': {
@@ -1362,7 +1402,9 @@ const OrgSettingsRouteWithChildren = OrgSettingsRoute._addFileChildren(
 
 interface OrgPatientsPatientIdRouteChildren {
   OrgPatientsPatientIdEncountersEncounterIdRoute: typeof OrgPatientsPatientIdEncountersEncounterIdRoute
+  OrgPatientsPatientIdOdontogramPrintRoute: typeof OrgPatientsPatientIdOdontogramPrintRoute
   OrgPatientsPatientIdConsentsConsentIdPrintRoute: typeof OrgPatientsPatientIdConsentsConsentIdPrintRoute
+  OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute: typeof OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute
   OrgPatientsPatientIdOrdersOrderIdPrintRoute: typeof OrgPatientsPatientIdOrdersOrderIdPrintRoute
   OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute: typeof OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute
 }
@@ -1370,8 +1412,12 @@ interface OrgPatientsPatientIdRouteChildren {
 const OrgPatientsPatientIdRouteChildren: OrgPatientsPatientIdRouteChildren = {
   OrgPatientsPatientIdEncountersEncounterIdRoute:
     OrgPatientsPatientIdEncountersEncounterIdRoute,
+  OrgPatientsPatientIdOdontogramPrintRoute:
+    OrgPatientsPatientIdOdontogramPrintRoute,
   OrgPatientsPatientIdConsentsConsentIdPrintRoute:
     OrgPatientsPatientIdConsentsConsentIdPrintRoute,
+  OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute:
+    OrgPatientsPatientIdOdontogramAssessmentIdPrintRoute,
   OrgPatientsPatientIdOrdersOrderIdPrintRoute:
     OrgPatientsPatientIdOrdersOrderIdPrintRoute,
   OrgPatientsPatientIdPrescriptionsPrescriptionIdPrintRoute:

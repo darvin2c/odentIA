@@ -347,6 +347,30 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       return json({ data: entry }) as T
     }
 
+    // El panel de la pieza: hallazgo (con su diagnóstico y tratamiento) en una sola llamada.
+    if (rest === "odontogram/findings" && method === "POST") {
+      const teeth = (body.toothNumbers as number[] | undefined) ?? []
+      const surfaces = (body.surfaces as string[] | undefined) ?? []
+      const diagnosis = body.diagnosis as { cie10Code?: string } | null | undefined
+      const created: OdontogramEntry[] = teeth.flatMap((toothNumber) =>
+        (surfaces.length ? surfaces : [null]).map((surface) => ({
+          id: nextId("entry"),
+          toothNumber,
+          surface,
+          condition: String(body.condition),
+          status: "recorded",
+          diagnosisCode: diagnosis?.cie10Code ?? null,
+          note: (body.note as string | null) ?? null,
+          encounterId: (body.encounterId as string | null) ?? null,
+          details: (body.details as OdontogramEntry["details"]) ?? {},
+          needsReview: false,
+          createdAt: new Date().toISOString(),
+        })),
+      )
+      entries = [...created, ...entries]
+      return json({ data: { entries: created, diagnoses: [], planItems: [] } }) as T
+    }
+
     const voidMatch = /^odontogram\/entries\/([^/]+)\/void$/.exec(rest)
     if (voidMatch && method === "POST") {
       const id = voidMatch[1]
@@ -374,14 +398,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         patientNumber: 123,
         authorUserId: "demo-user",
         createdAt: new Date().toISOString(),
-        purpose: "initial",
+        purpose: (body.purpose as OdontogramAssessment["purpose"]) ?? "personal",
         standard: "NTS 188-MINSA/DGIESP-2022",
         specifications: String(body.specifications ?? ""),
         observations: String(body.observations ?? ""),
-        // Como el servidor: quién firma sale del perfil profesional, no del cuerpo.
+        // Como el servidor: quién firma sale del perfil profesional, sin trazo.
         examinerName: "Ana Torres",
+        examinerTitle: "Cirujano dentista",
         registrationNumber: "COP 12345",
-        signature: (body.signature as number[][][]) ?? [],
+        encounterId: null,
         entries: entries.filter((entry) => !entry.voidedAt),
       } as OdontogramAssessment
       assessments.unshift(assessment)

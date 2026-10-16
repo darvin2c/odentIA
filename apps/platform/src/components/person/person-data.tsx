@@ -1,4 +1,3 @@
-import { documentText } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Input } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, internationalText, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -10,13 +9,10 @@ import { activeOrgLocale } from "../../lib/locale"
 import { sexLabel } from "../../lib/patient-overview"
 import type { PatientFull } from "../../lib/patients"
 import type { PersonPage } from "../../lib/people"
+import { documentLine } from "../../lib/person-data"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { FiliacionPanel } from "../patient/filiacion-panel"
-import {
-  COUNTRY_LABELS,
-  FiliacionSectionDrawer,
-  type FiliacionSectionKey,
-} from "../patient/filiacion-section-drawer"
+import { FiliacionSectionDrawer, type FiliacionSectionKey } from "../patient/filiacion-section-drawer"
 import { MessagePermissionsSection } from "../patient/message-permissions-section"
 import { TagsInput } from "../patient/tags-input"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -106,16 +102,12 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <Card title="Identidad" onEdit={edit("identidad")}>
           <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Item label="Apellido paterno">{person.paternalSurname}</Item>
-            <Item label="Apellido materno">{person.maternalSurname}</Item>
             <Item label="Nombres">
               {person.givenNames ?? (person.paternalSurname ? null : person.displayName)}
             </Item>
-            <Item label="Documento">
-              {person.docNumber
-                ? `${documentText(person.docType, person.docNumber)}${person.docCountry ? ` · ${COUNTRY_LABELS[person.docCountry] ?? person.docCountry}` : ""}`
-                : null}
-            </Item>
+            <Item label="Primer apellido">{person.paternalSurname}</Item>
+            <Item label="Segundo apellido">{person.maternalSurname}</Item>
+            <Item label="Documento">{documentLine(person.docType, person.docNumber, person.docCountry)}</Item>
             <Item label="Nacimiento">{born}</Item>
             <Item label="Sexo">{person.sex ? sexLabel(person.sex) : null}</Item>
           </dl>

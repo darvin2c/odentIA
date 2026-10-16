@@ -11,7 +11,6 @@ import {
   text,
   timestamp,
   uuid,
-  varchar,
 } from "drizzle-orm/pg-core"
 import { organization } from "./auth.js"
 
@@ -72,7 +71,6 @@ export const branch = pgTable("branch", {
   department: text("department"),
   province: text("province"),
   district: text("district"),
-  ubigeo: varchar("ubigeo", { length: 6 }),
   phone: text("phone"),
   email: text("email"),
   mapsUrl: text("maps_url"),

@@ -497,7 +497,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect((await ownerDb.select().from(auditEvent).where(eq(auditEvent.entityId, registered.id))).map((row) => row.action)).toContain("patient.created")
     // Lo que la clínica exige y no se pidió queda dicho en el caso.
     const pendingNote = (await run((tx) => getCaseBrief(tx, ORG, nuevo.conversationId))).known.map((item) => item.text).join(" ")
-    expect(pendingNote).toContain("Falta en la clínica: confirmar apellidos y nombres, fecha de nacimiento, sexo.")
+    expect(pendingNote).toContain("Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento, sexo.")
 
     // Ya es paciente: el mismo enlace reserva, y no vuelve a pedir datos.
     const after = await run((tx) => getBookingLinkView(tx, ORG, link.token))

@@ -9,7 +9,7 @@
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
  */
-import { formatMoney, surfacesForTooth } from "@odentia/clinical"
+import { conditionLabel, formatMoney, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -416,8 +416,8 @@ function IndicationForm({
               <SelectContent>
                 {findings.map((entry) => (
                   <SelectItem key={entry.id} value={entry.id}>
-                    {entry.condition}
-                    {entry.surface ? ` · ${entry.surface}` : ""}
+                    {conditionLabel(entry.condition)}
+                    {entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -468,7 +468,7 @@ function IndicationForm({
                   disabled={blocked}
                   onCheckedChange={() => toggleSurface(surface)}
                 />
-                {surface}
+                {surfaceLabel(surface)}
               </FieldLabel>
             ))}
           </div>

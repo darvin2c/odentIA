@@ -848,6 +848,8 @@ export function EncounterEditor({
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedBilling(result.data.billing)
+      // En Perú, el cierre que cambió el gráfico firmó el odontograma.
+      void queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
     } catch (err) {
       // Falla: se conserva el borrador intacto y se muestra el error real. El
       // estado del guardado lo deja `drain` si lo que falló fue guardar.
@@ -1982,6 +1984,7 @@ export function EncounterEditor({
         signAs={signAs.text}
         who={signer}
         consents={unsignedConsents}
+        odontogram={closingQuery.data?.data.odontogram ?? null}
         startedAt={encounter.startedAt}
         endTime={endTime}
         onEndTime={setEndTime}

@@ -25,7 +25,14 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAccess } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
-import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import {
+  type ClosingOdontogram,
+  closingOdontogramOf,
+  listEncounterDocuments,
+  type OdontogramAssessmentRow,
+  type PatientDocumentWithContext,
+  signClosingOdontogram,
+} from "./clinical.js"
 import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import {
@@ -48,6 +55,7 @@ import {
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
 import { countConsultationAction } from "./saas-actions.js"
+import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect
@@ -1364,6 +1372,14 @@ export async function addEncounterProcedure(
         procedureId: row.id,
       },
     )
+    // Lo tratado queda dibujado: el servicio directo nace realizado.
+    await drawTreatedFinding(tx, orgId, actorUserId, patientId, encounterId, {
+      id: directPlanItemId,
+      serviceId,
+      toothNumber,
+      surfaces,
+      odontogramEntryId: input.odontogramEntryId ?? null,
+    })
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -1401,6 +1417,11 @@ export interface FinalizeEncounterResult {
    * 12): el cierre pregunta «¿Enviárselo ahora?». Nulo si no entró nada.
    */
   budget: AssembledBudget | null
+  /**
+   * El odontograma que firmó este cierre (solo en clínicas de Perú, si la
+   * atención cambió el gráfico), con su momento deducido.
+   */
+  odontogram: Pick<OdontogramAssessmentRow, "id" | "purpose"> | null
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1473,6 +1494,12 @@ export interface ClosingCheck {
    * decir por qué.
    */
   consents: ConsentNeed[]
+  /**
+   * En clínicas de Perú, el odontograma que este cierre firmará (su momento y
+   * lo que cambió), o null si la atención no cambió el gráfico o la clínica no
+   * firma odontogramas.
+   */
+  odontogram: ClosingOdontogram | null
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1521,7 +1548,8 @@ export async function checkEncounterClosing(
   const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
     (need) => need.status !== "firmado",
   )
-  return { ready: missing.length === 0, missing, consents }
+  const odontogram = await closingOdontogramOf(tx, orgId, row.patientId, row.id)
+  return { ready: missing.length === 0, missing, consents, odontogram }
 }
 
 export async function getEncounterClosing(
@@ -1626,6 +1654,9 @@ export async function finalizeEncounter(
     .returning()
   if (!row) throw notFound("Atención")
   await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, now)
+  // En Perú, la atención que cambió el gráfico firma el odontograma con el
+  // mismo perfil y en el mismo paso (NTS 188, 5.3 y 5.10).
+  const odontogram = await signClosingOdontogram(tx, orgId, actorUserId, patientId, encounterId, signature)
   if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
   // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0031).
   await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
@@ -1827,6 +1858,7 @@ export async function finalizeEncounter(
     charges,
     skippedCharges,
     budget,
+    odontogram: odontogram ? { id: odontogram.id, purpose: odontogram.purpose } : null,
     billing: {
       chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
@@ -2051,6 +2083,9 @@ async function voidProcedureRow(
           })
           .where(eq(treatmentPlanItem.id, item.id))
       }
+      // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
+      if (direct || item.status === "realizado")
+        await voidLeftFindings(tx, orgId, actorUserId, patientId, encounterId, item.id, reason, at)
     }
   }
   await audit(

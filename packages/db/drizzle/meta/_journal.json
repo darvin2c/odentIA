@@ -666,6 +666,13 @@
       "when": 1792113996285,
       "tag": "0094_la_ficha_en_cuatro_secciones",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792113996286,
+      "tag": "0095_lo_de_cada_pais",
+      "breakpoints": true
     }
   ]
 }

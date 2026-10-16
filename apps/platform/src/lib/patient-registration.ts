@@ -15,6 +15,8 @@ export interface PublicRegistrationInfo {
   organization: { name: string; logo: string | null }
   config: RegistrationConfig
   today: string
+  /** País de la clínica: de él dependen documentos, seguros y regiones (ADR 0036). */
+  countryCode: string | null
   context: PublicRegistrationContext
 }
 

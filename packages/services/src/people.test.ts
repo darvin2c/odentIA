@@ -181,7 +181,7 @@ describe("un solo formulario de datos, con las reglas de la ficha", () => {
           docNumber: "AB123456",
         }),
       ),
-    ).rejects.toMatchObject({ status: 400, message: "Indica el país que emitió el documento" })
+    ).rejects.toMatchObject({ status: 400, message: "Elige el país que emitió el documento" })
     await c.run((tx) =>
       updatePersonIdentity(tx, c.orgId, { userId: c.actor }, person.id, {
         docType: "PASAPORTE",

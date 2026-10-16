@@ -229,6 +229,12 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "organization" ("id", "name", "slug", "created_at") values (${ORG_B}, 'Clínica Norte', ${SLUG_B}, now())`,
   )
+  // Clínicas de Perú: el DNI es uno de sus documentos (ADR 0036). Sin país, el núcleo no lo ofrece.
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+        values (${ORG_A}, 'Clínica Sonrisa', 'PE', 'PEN', 'America/Lima', 'es-PE'), (${ORG_B}, 'Clínica Norte', 'PE', 'PEN', 'America/Lima', 'es-PE')
+        on conflict do nothing`,
+  )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-reg-owner', 'Dueña', 'owner-reg@test.dev'), ('u-reg-member', 'Miembro', 'member-reg@test.dev'), ('u-reg-reception', 'Recepción', 'reception-reg@test.dev'), ('u-reg-other', 'Otra', 'other-reg@test.dev') on conflict do nothing`,
   )

@@ -1,20 +1,20 @@
-import type { RegistrationConfig } from "@odentia/clinical"
 import { formatMoney } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { AgentMark, EmptyState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { formatDate } from "../../lib/clinical-journey"
-import { type TaskItem, useCan, usePermission } from "../../lib/crm"
+import { type TaskItem, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useOrgProfile } from "../../lib/org"
 import type { PatientSectionId } from "../../lib/patient-areas"
 import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patients"
-import { filiationGapsText, isHealthReviewPending, missingFiliation } from "../../lib/patients"
+import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
+import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { usePlanNextStep } from "./plan/plan-next"
 import { NewPatientTaskButton } from "./new-patient-task-button"
 
@@ -108,8 +108,8 @@ export function PatientPendingCard({
   const canDecide = usePermission("agent.decide")
   const canReadAgent = usePermission("agent.read")
   const canTasks = usePermission("tasks.read")
-  const can = useCan()
-  const canConfig = can("crm.read") || can("settings.read")
+  // «Completar» abre el cajón con solo lo que falta, sin salir del Resumen.
+  const [completing, setCompleting] = useState<FiliacionSectionKey | null>(null)
 
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -133,15 +133,6 @@ export function PatientPendingCard({
     queryKey: ["patient-tasks", patientId],
     queryFn: () => apiFetch<{ data: TaskItem[] }>(`/api/tasks?status=open&patientId=${patientId}`),
     enabled: canTasks && canPatients,
-    retry: false,
-  })
-  const configQuery = useQuery({
-    queryKey: ["patient-registration-config"],
-    queryFn: () =>
-      apiFetch<{ data: RegistrationConfig; meta: { today: string } }>(
-        "/api/patient-registration/config",
-      ),
-    enabled: canEditPatient && canConfig,
     retry: false,
   })
   // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Quien
@@ -209,31 +200,25 @@ export function PatientPendingCard({
       })
   }
   if (canEditPatient) {
-    const config = configQuery.data?.data
-    const gaps = config ? missingFiliation(config, detail.patient, detail.contacts) : []
-    // Una ficha creada con lo mínimo (al reservar o desde el enlace) queda además
-    // con la identidad por revisar: se dice en el mismo pendiente.
-    const review = detail.patient.identityNeedsReview ? "Confirma apellidos y nombres." : ""
+    // «Faltan datos para atenderla»: lo calcula el servidor (la misma regla que
+    // la Agenda y la nota del caso). Una ficha creada con lo mínimo queda además
+    // con los apellidos por confirmar: guardar en «Completar» los confirma.
+    const gaps = detail.missingData ?? []
+    const review = detail.patient.identityNeedsReview ? "Confirma sus apellidos." : ""
     if (gaps.length > 0 || review)
       pending.push({
         id: "filiacion",
-        title: gaps.length > 0 ? "Faltan datos que la clínica pide" : "Identidad por revisar",
-        detail: [
-          gaps.length > 0
-            ? `${filiationGapsText(gaps).charAt(0).toUpperCase()}${filiationGapsText(gaps).slice(1)}.`
-            : "",
-          review,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        action: go("filiacion", "Completar"),
-      })
-    if (!detail.contacts.some((link) => link.phone || link.email))
-      pending.push({
-        id: "contacts",
-        title: "Sin datos de contacto",
-        detail: "Ni la persona ni quienes hablan por ella tienen teléfono o correo registrados.",
-        action: go("filiacion", "Completar"),
+        title: gaps.length > 0 ? "Faltan datos para atenderla" : "Apellidos por confirmar",
+        detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
+        action: (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCompleting(gaps.length > 0 ? "completar" : "identidad")}
+          >
+            Completar
+          </Button>
+        ),
       })
   }
   for (const task of tasksQuery.data?.data ?? [])
@@ -255,6 +240,16 @@ export function PatientPendingCard({
   return (
     <SummaryCard title="Pendientes" action={<NewPatientTaskButton patientId={patientId} />}>
       <PendingList pending={pending} />
+      {completing ? (
+        <FiliacionSectionDrawer
+          key={completing}
+          patient={detail.patient}
+          section={completing}
+          missing={detail.missingData ?? []}
+          open
+          onClose={() => setCompleting(null)}
+        />
+      ) : null}
     </SummaryCard>
   )
 }

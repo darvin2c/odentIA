@@ -1,4 +1,6 @@
+import { conditionLabel, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -18,6 +20,23 @@ import {
 import { useId } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
+import type { ClosingOdontogram } from "../../lib/encounters"
+
+/** «16, 26 y 36». */
+function teethWords(teeth: number[]): string {
+  if (teeth.length <= 1) return teeth.join("")
+  return `${teeth.slice(0, -1).join(", ")} y ${teeth.at(-1)}`
+}
+
+/** «Hallazgos: lesión de caries dental en 16, 26 y 36». */
+function findingsLine(odontogram: ClosingOdontogram): string | null {
+  if (odontogram.findings.length === 0) return null
+  const parts = odontogram.findings.map((group) => {
+    const label = conditionLabel(group.condition)
+    return `${label.charAt(0).toLowerCase()}${label.slice(1)} en ${teethWords(group.teeth)}`
+  })
+  return `Hallazgos: ${parts.join("; ")}`
+}
 
 /** Horas de fin posibles: de 5 en 5 minutos, desde el inicio hasta ahora, en la zona de la clínica. */
 export function endTimeOptions(startedAt: string | null | undefined, now = new Date()): string[] {
@@ -60,15 +79,16 @@ function consentLine(need: ConsentNeed, who: string): { title: string; detail: s
 
 /**
  * Un solo cierre (decisión 3): con quién se firma, el consentimiento sin firmar
- * (firmarlo ahora o seguir sin él diciendo por qué), la hora de fin y, después
- * de firmar, lo que quedó por cobrar. El paso 3 suma aquí «¿Enviarle el
- * presupuesto?» (`after`).
+ * (firmarlo ahora o seguir sin él diciendo por qué), en clínicas de Perú el
+ * odontograma que queda firmado con su momento (fase 3, paso 5), la hora de
+ * fin y, después de firmar, lo que quedó por cobrar.
  */
 export function EncounterClosingDialog({
   open,
   signAs,
   who,
   consents,
+  odontogram = null,
   startedAt,
   endTime,
   onEndTime,
@@ -88,6 +108,8 @@ export function EncounterClosingDialog({
   /** Primer nombre de quien firma el consentimiento. */
   who: string
   consents: ConsentNeed[]
+  /** En clínicas de Perú, el odontograma que firmará este cierre. */
+  odontogram?: ClosingOdontogram | null
   startedAt: string | null | undefined
   /** «HH:MM»; vacío = ahora. */
   endTime: string
@@ -127,6 +149,19 @@ export function EncounterClosingDialog({
             <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
             <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
           </div>
+          {odontogram ? (
+            <div className="flex items-start gap-3 rounded-lg border p-3">
+              <Badge variant="outline">{odontogram.shortName}</Badge>
+              <div className="flex min-w-0 flex-col">
+                <span className="font-medium">
+                  El odontograma queda firmado como «{SIGNED_ODONTOGRAM_PURPOSE_LABELS[odontogram.purpose]}»
+                </span>
+                {findingsLine(odontogram) ? (
+                  <span className="text-xs text-muted-foreground">{findingsLine(odontogram)}</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {consents.map((need) => {
             const line = consentLine(need, who)
             return (

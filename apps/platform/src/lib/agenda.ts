@@ -152,6 +152,8 @@ export interface AppointmentContext {
   person: { contactId: string; name: string; phone: string | null; relationship: string } | null
   origin: { source: string; conversationId: string | null; channel: string | null; at: string }
   confirmation: { askAt: string | null; askedAt: string | null } | null
+  /** «Faltan datos para atenderla», del servidor; null para quien no edita los datos. */
+  missingData: Array<{ key: string; label: string }> | null
 }
 
 export interface AgendaResources {

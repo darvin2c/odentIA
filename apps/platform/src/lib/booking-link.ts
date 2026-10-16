@@ -80,6 +80,8 @@ export interface BookingRegistrationForm {
   today: string
   /** El celular de la conversación, solo si el sistema lo conoce (WhatsApp). */
   phone: string | null
+  /** País de la clínica: de él dependen los documentos que se ofrecen (ADR 0036). */
+  countryCode: string | null
 }
 
 /** Lo que hace falta para pedir sus datos a quien aún no es paciente. */

@@ -281,6 +281,13 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   expect(context.person).toMatchObject({ name: "Paciente API", relationship: "self" })
   expect(context.origin).toMatchObject({ source: "recepcion", conversationId: null })
   expect(context.confirmation).toBeNull()
+  // «Faltan datos para atenderla» lo calcula el servidor con la regla de la
+  // página (aquí, sin fecha de nacimiento ni apellidos) y solo lo recibe quien
+  // edita sus datos: el odontólogo ve la cita sin el aviso.
+  const missing = (context as unknown as { missingData: Array<{ key: string }> | null }).missingData
+  expect(missing?.map((datum) => datum.key)).toContain("birthDate")
+  const forDentist = await buildApp("dentist").request(`/appointments/${cita.id}/context`)
+  expect(((await forDentist.json()) as { data: { missingData: unknown } }).data.missingData).toBeNull()
   // Caja no ve la agenda: tampoco lo que dice la cita de la persona.
   expect((await buildApp("cashier").request(`/appointments/${cita.id}/context`)).status).toBe(403)
   await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "cancelada" }) })

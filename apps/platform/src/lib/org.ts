@@ -1,3 +1,4 @@
+import { type ClinicalCountryProfile, clinicalProfileFor } from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 
@@ -80,6 +81,16 @@ export function useOrgProfile() {
     queryFn: fetchOrgProfile,
     staleTime: 5 * 60_000,
   })
+}
+
+/**
+ * Lo que vale en las clínicas del país de esta (ADR 0036): documentos, seguro,
+ * dirección y odontograma. Mientras carga, o sin país, el núcleo internacional:
+ * nunca se muestra lo de un país que la clínica no eligió.
+ */
+export function useClinicalProfile(): ClinicalCountryProfile {
+  const profile = useOrgProfile()
+  return clinicalProfileFor(profile.data?.countryCode)
 }
 
 /** Lo que el servidor propone para un país (moneda, formato, zona y papel). */

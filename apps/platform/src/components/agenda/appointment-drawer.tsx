@@ -42,6 +42,7 @@ import {
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
+import { filiationGapsText } from "../../lib/patients"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
 import { useAppointmentArrival } from "./arrival"
@@ -501,6 +502,22 @@ export function AppointmentDrawer({
                 <DetailField label="Teléfono">
                   {context.person.phone ? internationalText(context.person.phone) : "Sin teléfono"}
                   {context.person.relationship !== "self" ? ` · de ${context.person.name}` : ""}
+                </DetailField>
+              ) : null}
+              {context?.missingData && context.missingData.length > 0 ? (
+                <DetailField label="Datos">
+                  {/* La misma regla y frase que su página: lo calcula el servidor. */}
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    Faltan datos para atenderla: {filiationGapsText(context.missingData).toLowerCase()}
+                    <Link
+                      to="/patients/$patientId"
+                      params={{ patientId: appointment.patientId }}
+                      search={{ tab: "filiacion" }}
+                      className="font-semibold text-primary hover:underline"
+                    >
+                      Completar
+                    </Link>
+                  </span>
                 </DetailField>
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>

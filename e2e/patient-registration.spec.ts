@@ -536,7 +536,7 @@ test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerl
   try {
     await gotoHydrated(gone, linkUrl)
     await expect(gone.getByText("Enlace no disponible", { exact: true }).first()).toBeVisible()
-    await expect(gone.getByLabel(/^Apellido paterno/)).toHaveCount(0)
+    await expect(gone.getByLabel(/^Primer apellido/)).toHaveCount(0)
   } finally {
     await goneContext.close()
   }
@@ -672,10 +672,10 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
   const linked = await fixtureDb.select({ patientId: patientContact.patientId, relationship: patientContact.relationship }).from(patientContact).where(eq(patientContact.contactId, conversation.contact.id))
   expect(linked).toEqual([{ patientId: rows[0]!.patientId, relationship: "self" }])
 
-  // Recepción ve en su página que quedó con lo esencial: faltan datos que la clínica pide.
+  // Recepción ve en su página que quedó con lo esencial: faltan datos para atenderla.
   const detail = await getPatientDetail(page, org.slug, rows[0]!.patientId)
   expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: true })
   await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
-  await expect(page.getByText("Faltan datos que la clínica pide").first()).toBeVisible()
+  await expect(page.getByText("Faltan datos para atenderla").first()).toBeVisible()
   await info.attach("reserva-ficha-incompleta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })

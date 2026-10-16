@@ -36,6 +36,7 @@ import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Library, Plus } from "lucide-react"
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
@@ -873,6 +874,9 @@ function OwnServiceDrawer({
   const [billingMode, setBillingMode] = useState<BillingMode>("treatment")
   const [price, setPrice] = useState("")
   const [durationMin, setDurationMin] = useState("")
+  // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
+  const [leavesCondition, setLeavesCondition] = useState("")
+  const [leavesVariant, setLeavesVariant] = useState("")
   const [submitted, setSubmitted] = useState(false)
 
   const nameIssue = checkName(name)
@@ -892,7 +896,8 @@ function OwnServiceDrawer({
     scope !== "general" ||
     billingMode !== "treatment" ||
     price !== "" ||
-    durationMin !== ""
+    durationMin !== "" ||
+    leavesCondition !== ""
 
   const saveMutation = useMutation({
     mutationFn: (priceCents: number) =>
@@ -903,6 +908,7 @@ function OwnServiceDrawer({
         priceCents,
         billingMode,
         durationMin: duration.minutes,
+        leavesFinding: leavesFindingBody(leavesCondition, leavesVariant),
       }),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["services"] })
@@ -966,12 +972,27 @@ function OwnServiceDrawer({
           labelledBy={`${id}-donde`}
           value={scope}
           options={SERVICE_PLACE_OPTIONS}
-          onChange={setScope}
+          onChange={(next) => {
+            setScope(next)
+            // Lo que deja en la pieza depende de dónde se hace.
+            setLeavesCondition("")
+            setLeavesVariant("")
+          }}
         />
         <p className="text-xs text-muted-foreground">
           Así la atención sabe qué pedir al registrarlo.
         </p>
       </Field>
+      <LeavesFindingField
+        idPrefix={id}
+        scope={scope}
+        condition={leavesCondition}
+        variant={leavesVariant}
+        onChange={(nextCondition, nextVariant) => {
+          setLeavesCondition(nextCondition)
+          setLeavesVariant(nextVariant)
+        }}
+      />
       <Field>
         <span id={`${id}-cobro`} className="text-sm font-medium">
           Cómo se cobra

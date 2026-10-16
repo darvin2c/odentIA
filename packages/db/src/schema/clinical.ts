@@ -42,12 +42,15 @@ export const patient = pgTable(
     givenNames: text("given_names"),
     paternalSurname: text("paternal_surname"),
     maternalSurname: text("maternal_surname"),
-    /** El nombre se separó por heurística al migrar: recepción debe confirmarlo. */
+    /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
     identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
-    /** Valores anteriores que no encajaron en un catálogo (nunca se descartan). */
-    identityLegacy: jsonb("identity_legacy"),
     bloodGroup: text("blood_group").$type<BloodGroup>(),
     patientNumber: integer("patient_number").notNull(),
+    /**
+     * Tipo de documento: qué tipos se ofrecen lo dice el país de la clínica
+     * (`clinicalProfileFor`) y lo valida el servicio; la base no fija una lista
+     * nacional. El documento es único junto con su país emisor.
+     */
     docType: text("doc_type"),
     docNumber: text("doc_number"),
     /** País emisor del documento y nacionalidad (ISO 3166-1 alfa-2). */
@@ -58,9 +61,10 @@ export const patient = pgTable(
     phone: text("phone"),
     email: text("email"),
     avatarStorageKey: text("avatar_storage_key"),
-    /** Ubigeo INEI del lugar de nacimiento y del domicilio. */
-    birthPlaceUbigeo: char("birth_place_ubigeo", { length: 6 }),
-    addressUbigeo: char("address_ubigeo", { length: 6 }),
+    /** Lugar de nacimiento: país (ISO 3166-1 alfa-2) y ciudad o localidad escrita. */
+    birthCountry: char("birth_country", { length: 2 }),
+    birthPlace: text("birth_place"),
+    /** Referencia del domicilio («frente al parque»): solo en clínicas de Perú. */
     addressReference: text("address_reference"),
     insurerName: text("insurer_name"),
     affiliationNumber: text("affiliation_number"),
@@ -70,12 +74,26 @@ export const patient = pgTable(
     maritalStatus: text("marital_status"),
     educationLevel: text("education_level"),
     occupation: text("occupation"),
+    /**
+     * Domicilio internacional (HL7 FHIR Address): calle y número en `address`,
+     * localidad (`city`), nivel intermedio (`district`, la provincia en Perú),
+     * región (`state`: código ISO 3166-2 si el país tiene lista, o escrita),
+     * código postal y país (ISO 3166-1 alfa-2).
+     */
     address: text("address"),
+    addressCity: text("address_city"),
+    addressDistrict: text("address_district"),
+    addressRegion: text("address_region"),
+    addressPostalCode: text("address_postal_code"),
+    addressCountry: char("address_country", { length: 2 }),
+    /** «Procedencia»: dato censal que solo se pide en clínicas de Perú. */
     origin: text("origin"),
     emergencyContactName: text("emergency_contact_name"),
     emergencyContactPhone: text("emergency_contact_phone"),
+    /** Tipo general del seguro (`INSURANCE_TYPES`), igual en todos los países. */
     insuranceType: text("insurance_type"),
-    insuranceDetail: text("insurance_detail"),
+    /** Régimen con nombre propio del país (SIS, EsSalud, EPS en Perú), si lo tiene. */
+    insuranceScheme: text("insurance_scheme"),
     referralSource: text("referral_source"),
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
     /** Revisión de antecedentes (agregado transaccional de salud). */
@@ -95,8 +113,16 @@ export const patient = pgTable(
       sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`,
     ),
     check(
-      "patient_doc_type_check",
-      sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
+      "patient_insurance_type_check",
+      sql`${table.insuranceType} IS NULL OR ${table.insuranceType} IN ('PUBLICO','PRIVADO','PARTICULAR','OTRO')`,
+    ),
+    check(
+      "patient_insurance_scheme_check",
+      sql`${table.insuranceScheme} IS NULL OR (${table.insuranceType} IS NOT NULL AND char_length(${table.insuranceScheme}) BETWEEN 1 AND 20)`,
+    ),
+    check(
+      "patient_address_lengths_check",
+      sql`(${table.addressCity} IS NULL OR char_length(${table.addressCity}) BETWEEN 1 AND 100) AND (${table.addressDistrict} IS NULL OR char_length(${table.addressDistrict}) BETWEEN 1 AND 100) AND (${table.addressRegion} IS NULL OR char_length(${table.addressRegion}) BETWEEN 1 AND 100) AND (${table.addressPostalCode} IS NULL OR char_length(${table.addressPostalCode}) BETWEEN 1 AND 20) AND (${table.birthPlace} IS NULL OR char_length(${table.birthPlace}) BETWEEN 1 AND 200)`,
     ),
     // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
     check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
@@ -113,8 +139,9 @@ export const patient = pgTable(
       sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,
     ),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
+    // NULLS NOT DISTINCT en la migración 0095: sin país emisor tampoco se repite.
     uniqueIndex("patient_org_doc_uidx")
-      .on(table.organizationId, table.docType, table.docNumber)
+      .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
       .where(sql`"doc_number" IS NOT NULL`),
   ],
 )
@@ -539,6 +566,14 @@ export const odontogramEntry = pgTable(
     resolvedByPlanItemId: uuid("resolved_by_plan_item_id").references(
       (): AnyPgColumn => treatmentPlanItem.id,
     ),
+    /**
+     * Lo tratado queda dibujado: el tratamiento completado que dejó este
+     * hallazgo en la pieza (la resina deja una restauración), según lo que su
+     * servicio dice que deja (`service_catalog.leaves_finding`).
+     */
+    leftByPlanItemId: uuid("left_by_plan_item_id").references(
+      (): AnyPgColumn => treatmentPlanItem.id,
+    ),
     createdBy: text("created_by").references(() => user.id),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
@@ -553,11 +588,14 @@ export const odontogramEntry = pgTable(
 )
 
 /**
- * Acta de odontograma NTS 188: snapshot inmutable de los hallazgos activos al
- * sellar, con firma manuscrita capturada (trazos normalizados 0..100, NO se
- * afirma firma digital certificada), datos del examinador y propósito.
- * Append-only sin updatedAt; la inmutabilidad es regla de servicio y REVOKE
- * a nivel DB. El snapshot `entries` siempre lo calcula el servidor.
+ * Odontograma firmado (solo en clínicas de un país con odontograma oficial:
+ * NTS 188 en Perú; ADR 0036): instantánea inmutable de los hallazgos activos
+ * al firmar, con la firma del perfil profesional de quien firma (nombre,
+ * título y colegiatura; sin trazo) y su momento. El que sale al cerrar una
+ * atención la nombra (`encounterId`, uno por atención); el del botón
+ * «Firmar odontograma» (judicial, personal, reingreso) no. Guarda su norma:
+ * cambiar el país de la clínica no la reescribe. Append-only sin updatedAt;
+ * REVOKE a nivel DB. El snapshot `entries` siempre lo calcula el servidor.
  */
 export const odontogramAssessment = pgTable(
   "odontogram_assessment",
@@ -574,17 +612,23 @@ export const odontogramAssessment = pgTable(
     specifications: text("specifications").notNull(),
     observations: text("observations").notNull(),
     examinerName: text("examiner_name").notNull(),
+    examinerTitle: text("examiner_title").notNull(),
+    /** Colegio y número, como se imprime: «COP 12345». */
     registrationNumber: text("registration_number").notNull(),
     patientName: text("patient_name").notNull(),
     patientNumber: integer("patient_number").notNull(),
-    signature: jsonb("signature").notNull(),
-    signatureKind: text("signature_kind").notNull().default("captured_handwritten"),
     entries: jsonb("entries").notNull(),
-    standard: text("standard").notNull().default("NTS 188-MINSA/DGIESP-2022"),
+    /** Norma con la que se firmó; sin valor por defecto: la pone el servicio. */
+    standard: text("standard").notNull(),
+    /** Atención cuyo cierre lo firmó; null en el botón «Firmar odontograma». */
+    encounterId: uuid("encounter_id").references((): AnyPgColumn => encounter.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("odontogram_assessment_org_patient_idx").on(table.organizationId, table.patientId),
+    uniqueIndex("odontogram_assessment_encounter_uidx")
+      .on(table.encounterId)
+      .where(sql`"encounter_id" IS NOT NULL`),
   ],
 )
 
@@ -878,6 +922,13 @@ export const serviceCatalog = pgTable(
     priceDisclosure: text("price_disclosure").notNull().default("evaluacion"),
     /** La evaluación que ofrece el agente cuando el precio no es exacto. */
     evaluationServiceId: uuid("evaluation_service_id").references((): AnyPgColumn => serviceCatalog.id),
+    /**
+     * Qué deja en la pieza al completarse (hallazgo del odontograma y, si
+     * corresponde, su variante): la resina, una restauración; la exodoncia, una
+     * pieza ausente. null = no deja nada dibujado. odentIA lo pone en los
+     * servicios de su biblioteca; en un servicio propio se elige al crearlo.
+     */
+    leavesFinding: jsonb("leaves_finding").$type<{ condition: string; variant?: string }>(),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
@@ -891,6 +942,10 @@ export const serviceCatalog = pgTable(
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
     check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),
     check("service_catalog_price_disclosure_check", sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`),
+    check(
+      "service_catalog_leaves_finding_check",
+      sql`${table.leavesFinding} IS NULL OR (jsonb_typeof(${table.leavesFinding}) = 'object' AND jsonb_typeof(${table.leavesFinding} -> 'condition') = 'string')`,
+    ),
   ],
 )
 
@@ -1340,24 +1395,6 @@ export const cie10Code = pgTable("cie10_code", {
   code: text("code").primaryKey(),
   description: text("description").notNull(),
 })
-
-/**
- * Ubigeo del INEI (departamento, provincia y distrito). Catálogo global sin
- * organización ni RLS, como CIE-10: se carga desde la fuente oficial.
- */
-export const ubigeo = pgTable(
-  "ubigeo",
-  {
-    code: char("code", { length: 6 }).primaryKey(),
-    department: text("department").notNull(),
-    province: text("province"),
-    district: text("district"),
-  },
-  (table) => [
-    check("ubigeo_code_check", sql`${table.code} ~ '^[0-9]{6}$'`),
-    index("ubigeo_department_idx").on(table.department),
-  ],
-)
 
 /**
  * Consentimiento para el tratamiento de datos personales (Ley 29733): por

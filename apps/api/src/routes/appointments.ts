@@ -8,6 +8,7 @@ import {
   getAgendaAvailability,
   getAppointment,
   getAppointmentContext,
+  getPatientMissingData,
   getProfessionalSchedule,
   listAppointments,
   listChairs,
@@ -369,8 +370,18 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "appointments.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
     }
+    // «Faltan datos para atenderla»: la misma regla del servidor que la página
+    // de la persona, solo para quien edita sus datos.
+    const canEditPerson = canAccess(memberRole, "patients.write")
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getAppointmentContext(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const context = await getAppointmentContext(tx, orgId, c.req.param("id"))
+        const { patientId } = await getAppointment(tx, orgId, c.req.param("id"))
+        return {
+          ...context,
+          missingData: canEditPerson ? await getPatientMissingData(tx, orgId, patientId) : null,
+        }
+      }),
     )
   })
 

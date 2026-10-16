@@ -322,9 +322,10 @@ it("aísla hallazgos y evaluaciones por tenant y conserva sus originales", async
   )
   await ownerDb.execute(sql`insert into odontogram_entry (organization_id,patient_id,tooth_number,condition,status,details,needs_review)
     values ('org_a','99999999-9999-9999-9999-999999999999',16,'caries','recorded','{"variant":"enamel"}',false)`)
+  // Firmado con el perfil (sin trazo) y con su norma escrita: no hay valor por defecto (ADR 0036).
   await ownerDb.execute(sql`insert into odontogram_assessment
-    (organization_id,patient_id,author_user_id,purpose,specifications,observations,examiner_name,registration_number,patient_name,patient_number,signature,entries)
-    values ('org_a','99999999-9999-9999-9999-999999999999','rls-odonto','initial','Acta inicial','Sin observaciones','Odonto','COP 1','Paciente Ana',1,'[[[5,90],[20,70]]]','[]')`)
+    (organization_id,patient_id,author_user_id,purpose,specifications,observations,examiner_name,examiner_title,registration_number,patient_name,patient_number,entries,standard)
+    values ('org_a','99999999-9999-9999-9999-999999999999','rls-odonto','initial','Acta inicial','Sin observaciones','Odonto','Cirujano dentista','COP 1','Paciente Ana',1,'[]','NTS 188-MINSA/DGIESP-2022')`)
   const assessmentQuery = sql`select id from odontogram_assessment`
   expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(assessmentQuery))).toHaveLength(1)
   expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(assessmentQuery))).toHaveLength(0)

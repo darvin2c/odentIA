@@ -1,5 +1,10 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
-import { activeFindingsAsOf, type FindingDetails, missingFiliationFields, type RegistrationConfig } from "@odentia/clinical"
+import {
+  activeFindingsAsOf,
+  type FindingDetails,
+  type MissingPersonDatum,
+  type SignedOdontogramPurpose,
+} from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
 
@@ -15,14 +20,20 @@ export interface Patient {
   paternalSurname?: string | null
   maternalSurname?: string | null
   identityNeedsReview?: boolean
-  identityLegacy?: Record<string, string> | null
   bloodGroup?: BloodGroup | null
   docType?: string | null
   docNumber?: string | null
   docCountry?: string | null
   nationality?: string | null
-  birthPlaceUbigeo?: string | null
-  addressUbigeo?: string | null
+  /** Lugar de nacimiento: país (ISO 3166-1 alfa-2) y ciudad escrita. */
+  birthCountry?: string | null
+  birthPlace?: string | null
+  /** Domicilio internacional: calle en `address`; región ISO 3166-2 si el país tiene lista. */
+  addressCity?: string | null
+  addressDistrict?: string | null
+  addressRegion?: string | null
+  addressPostalCode?: string | null
+  addressCountry?: string | null
   addressReference?: string | null
   insurerName?: string | null
   affiliationNumber?: string | null
@@ -40,8 +51,9 @@ export interface Patient {
   origin?: string | null
   emergencyContactName?: string | null
   emergencyContactPhone?: string | null
+  /** Tipo general del seguro y, si lo tiene, su régimen con nombre propio del país. */
   insuranceType?: string | null
-  insuranceDetail?: string | null
+  insuranceScheme?: string | null
   referralSource?: string | null
   registeredBranchId?: string | null
   isActive: boolean
@@ -316,6 +328,10 @@ export interface OdontogramEntry {
   voidedAt?: string | null
   voidedBy?: string | null
   voidReason?: string | null
+  /** Tratado: deja de estar vigente desde entonces (sigue en la evolución). */
+  resolvedAt?: string | null
+  /** Lo tratado queda dibujado: el tratamiento completado que dejó este hallazgo. */
+  leftByPlanItemId?: string | null
 }
 
 export type ToothState = {
@@ -330,6 +346,11 @@ export interface OdontogramState {
   history: OdontogramEntry[]
 }
 
+/**
+ * Odontograma firmado (solo en clínicas de Perú; ADR 0036): instantánea de los
+ * hallazgos con la firma del perfil de quien firmó (sin trazo) y su momento.
+ * El que firmó el cierre de una atención la nombra (`encounterId`).
+ */
 export interface OdontogramAssessment {
   id: string
   patientId: string
@@ -337,13 +358,15 @@ export interface OdontogramAssessment {
   patientNumber: number
   authorUserId: string
   createdAt: string
-  purpose: "initial" | "new_findings" | "completion" | "reentry" | "legal" | "personal"
+  purpose: SignedOdontogramPurpose
   standard: string
   specifications: string
   observations: string
   examinerName: string
+  examinerTitle: string
+  /** Colegio y número, como se imprime: «COP 12345». */
   registrationNumber: string
-  signature: number[][][]
+  encounterId: string | null
   entries: OdontogramEntry[]
 }
 
@@ -728,6 +751,11 @@ export interface PatientFull {
   activeAllergies: Allergy[]
   activeConditions: Condition[]
   currentMedications: Medication[]
+  /**
+   * «Faltan datos para atenderla», calculado en el servidor (decisión 10 de la
+   * fase 3); null para quien no edita los datos (odontólogo, caja).
+   */
+  missingData: MissingPersonDatum[] | null
 }
 
 /** Etiqueta de historia clínica: HC-000123 (padding 6). */
@@ -884,28 +912,18 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
   }>(`/api/patients/${patientId}/anamnesis/history`)
 }
 
-/** «fecha de nacimiento, sexo y documento»: el tipo y el número de documento se dicen juntos. */
-export function filiationGapsText(gaps: string[]): string {
-  const words = [...new Set(gaps.map((gap) => (/documento/.test(gap) ? "documento" : gap)))]
-  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
-}
-
 /**
- * Lo que le falta a la filiación: los datos que «Registro de pacientes» marca
- * como obligatorios y la ficha no tiene. Un solo criterio para el Resumen y
- * para Datos personales, el mismo del registro (`missingFiliationFields`): el
- * teléfono o el correo de quien habla por la persona cuentan como suyos. La
- * clínica decide qué es obligatorio, no la pantalla.
+ * «Fecha de nacimiento, sexo y documento»: lo que falta, como lo entrega el
+ * servidor, en una frase; el tipo y el número de documento se dicen juntos.
  */
-export function missingFiliation(
-  config: Pick<RegistrationConfig, "fields">,
-  patient: Patient,
-  contacts: ReadonlyArray<Pick<PatientContactLink, "relationship" | "isActive" | "phone" | "email">>,
-): string[] {
-  const representativeContact = contacts.some(
-    (link) => link.relationship !== "self" && link.isActive && !!(link.phone || link.email),
-  )
-  return missingFiliationFields(config, patient as unknown as Record<string, unknown>, {
-    representativeContact,
-  }).map((field) => field.label.toLowerCase())
+export function filiationGapsText(gaps: ReadonlyArray<Pick<MissingPersonDatum, "label"> & { key: string }>): string {
+  const words = [
+    ...new Set(
+      gaps.map((gap) =>
+        gap.key === "docType" || gap.key === "docNumber" ? "documento" : gap.label.toLowerCase(),
+      ),
+    ),
+  ]
+  const text = words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : ""
 }

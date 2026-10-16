@@ -31,14 +31,17 @@ import {
   getEncounterDetail,
   getLatestAnamnesis,
   getOdontogram,
+  getOdontogramPrint,
   getOpenEncounterRef,
   getPatient,
+  getPatientMissingData,
   getPatientDocument,
   getPatientHealth,
   getPatientSummary,
   getTimeline,
   getToothHistory,
   getPlanNextStep,
+  getSignedOdontogramPrint,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
@@ -57,6 +60,7 @@ import {
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
   registerPatient,
+  registerToothFinding,
   makeImageThumbnail,
   registerPatientDocument,
   retirePatientDocument,
@@ -252,6 +256,7 @@ const findingDetailsInput = z
     observations: z.string().max(2000).optional(),
   })
   .catchall(z.unknown())
+// Los hallazgos se registran dentro de una atención: sin ella, 400.
 const odontogramInput = z
   .object({
     toothNumber: z.number().int(),
@@ -260,25 +265,38 @@ const odontogramInput = z
     details: findingDetailsInput.optional(),
     note: z.string().max(2000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
-    encounterId: z.uuid().optional(),
+    encounterId: z.uuid(),
+  })
+  .strict()
+// El panel de la pieza: hallazgo, diagnóstico CIE-10 con su tipo y
+// tratamiento en una sola operación (`registerToothFinding`).
+const toothFindingInput = z
+  .object({
+    encounterId: z.uuid(),
+    toothNumbers: z.array(z.number().int()).min(1).max(52),
+    condition: z.string().trim().min(1).max(80),
+    surfaces: z.array(odontogramSurface).max(8).default([]),
+    details: findingDetailsInput.optional(),
+    note: z.string().max(2000).nullish(),
+    diagnosis: z
+      .object({ cie10Code: z.string().trim().min(1).max(10), diagnosisType: z.string().max(20) })
+      .strict()
+      .nullish(),
+    treatment: z
+      .object({ serviceId: z.uuid(), detail: z.string().max(4000).nullish() })
+      .strict()
+      .nullish(),
   })
   .strict()
 const voidInput = z.object({ reason: z.string().trim().min(1).max(2000) })
-// Quién firma no se escribe: examinador y colegiatura salen del perfil
-// profesional de quien firma. Un cuerpo que los trae se rechaza (`strict`).
+// «Firmar odontograma» (solo en clínicas de Perú): quién firma no se escribe y
+// no hay trazo; nombre, título y colegiatura salen del perfil de quien firma.
+// Un cuerpo que los trae se rechaza (`strict`). El servicio admite aquí solo
+// lo judicial, lo personal y el reingreso.
 const assessmentInput = z.strictObject({
   purpose: z.enum(["initial", "new_findings", "completion", "reentry", "legal", "personal"]),
-  specifications: z.string().trim().max(4000),
-  observations: z.string().trim().max(4000),
-  signature: z
-    .array(
-      z
-        .array(z.tuple([z.number(), z.number()]))
-        .min(2)
-        .max(500),
-    )
-    .min(1)
-    .max(50),
+  specifications: z.string().trim().max(4000).nullish(),
+  observations: z.string().trim().max(4000).nullish(),
 })
 const timelineQuery = listQuery.extend({
   types: z
@@ -643,6 +661,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         birthDate: z.iso.date().optional(),
         docType: z.string().max(20).optional(),
         docNumber: z.string().max(20).optional(),
+        // El documento se compara con su país emisor (ADR 0036).
+        docCountry: z.string().length(2).optional(),
         phone: z.string().max(50).optional(),
       })
       .safeParse(c.req.query())
@@ -687,9 +707,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // el registro solo viajan cuando se piden (`?clinical=1`, desde Clínica o
     // la atención), y solo esa lectura deja traza en la bitácora.
     const clinical = clinicalRead && c.req.query("clinical") === "1"
+    // «Faltan datos para atenderla» lo calcula el servidor y solo lo recibe
+    // quien edita los datos (recepción, propietario, administrador): odontólogo
+    // y caja ven los datos sin el aviso (decisión 10 de la fase 3).
+    const canEdit = canAccess(memberRole, "patients.write")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const full = await getPatient(tx, orgId, c.req.param("id"))
+        const base = await getPatient(tx, orgId, c.req.param("id"))
+        const full = {
+          ...base,
+          missingData: canEdit ? await getPatientMissingData(tx, orgId, c.req.param("id")) : null,
+        }
         if (clinical) return full
         // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
         // lo declaró y sus datos de contacto), sin la salud declarada: así la
@@ -905,6 +933,24 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
+  // Panel de la pieza: «Registrar y agregar al plan», todo o nada.
+  app.post("/:id/odontogram/findings", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = toothFindingInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        registerToothFinding(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  // Hoja neutra para imprimir (donde el odontograma no se firma).
+  app.get("/:id/odontogram/print", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getOdontogramPrint(tx, orgId, c.req.param("id"))),
+    )
+  })
   app.post("/:id/odontogram/entries/:entryId/void", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = voidInput.safeParse(await c.req.json().catch(() => null))
@@ -944,6 +990,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listOdontogramAssessments(tx, orgId, c.req.param("id")),
+      ),
+    )
+  })
+  // Un odontograma firmado para ver e imprimir (gráfico de la norma, en negro).
+  app.get("/:id/odontogram/assessments/:assessmentId/print", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const assessmentId = z.uuid().safeParse(c.req.param("assessmentId"))
+    if (!assessmentId.success) return validationError(c, assessmentId.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getSignedOdontogramPrint(tx, orgId, c.req.param("id"), assessmentId.data),
       ),
     )
   })

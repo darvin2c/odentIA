@@ -306,17 +306,14 @@ export const contact = pgTable("contact", {
   ...timestamps,
 }, table => [
   uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id),
-  // El documento identifica a una sola persona por organización.
+  // El documento, junto con su país emisor, identifica a una sola persona por
+  // organización (NULLS NOT DISTINCT en la migración 0095).
   uniqueIndex("contact_org_doc_uidx")
-    .on(table.organizationId, table.docType, table.docNumber)
+    .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
     .where(sql`"doc_number" IS NOT NULL`),
   check(
     "contact_preferred_channel_check",
     sql`${table.preferredChannel} IS NULL OR ${table.preferredChannel} IN ('email','whatsapp','telegram','messenger','instagram')`,
-  ),
-  check(
-    "contact_doc_type_check",
-    sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
   ),
   // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
   check("contact_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),

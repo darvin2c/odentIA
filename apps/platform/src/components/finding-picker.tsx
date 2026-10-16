@@ -3,6 +3,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "
 import { common, EmptyState, normalizeSearchText } from "@odentia/ui-patterns"
 import { Search, SearchX, X } from "lucide-react"
 import { useId, useState } from "react"
+import { useOdontogramNotation } from "./odontogram-notation"
 import { ToothSVG } from "./tooth-svg"
 
 // Ejemplos exclusivamente visuales: solo el código elegido sale del selector.
@@ -44,6 +45,7 @@ export function FindingPicker({
   disabled?: boolean
 }) {
   const id = useId()
+  const official = useOdontogramNotation()
   const [search, setSearch] = useState("")
   const query = normalizeSearchText(search.trim())
   const visible = examples.filter(({ finding }) =>
@@ -115,8 +117,8 @@ export function FindingPicker({
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        Simbología NTS 188. Imágenes ilustrativas: el estado, la variante y las superficies se
-        eligen a continuación.
+        {official ? `Simbología ${official.shortName}. ` : ""}Imágenes ilustrativas: el estado, el
+        detalle y las superficies se eligen a continuación.
       </p>
     </fieldset>
   )

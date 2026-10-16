@@ -1,9 +1,9 @@
 import {
+  type ClinicalCountryProfile,
+  clinicalProfileFor,
   CONTACT_RELATIONSHIP_LABELS,
   composeDisplayName,
   DOC_TYPE_LABELS,
-  FOREIGN_DOC_TYPES,
-  IDENTITY_DOC_TYPES,
   type IdentityDocType,
   isMinor,
   isRealDate,
@@ -39,6 +39,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, type InputHTMLAttributes, useState } from "react"
 import { ApiError } from "../lib/api"
 import { fetchBookingRegistrationForm, submitBookingRegistration } from "../lib/booking-link"
+import { asksDocumentCountry, countryChoices } from "../lib/person-data"
+import { SearchSelect } from "./settings/search-select"
 
 type Relationship = "guardian" | "family" | "other"
 const RELATIONSHIPS: readonly Relationship[] = ["guardian", "family", "other"]
@@ -47,7 +49,8 @@ const RELATIONSHIPS: readonly Relationship[] = ["guardian", "family", "other"]
 interface PersonDraft {
   givenNames: string
   surnames: string
-  docType: IdentityDocType
+  /** Vacío mientras no se elija: vale el primero de los que se usan en el país de la clínica. */
+  docType: IdentityDocType | ""
   docNumber: string
   docCountry: string
 }
@@ -71,8 +74,8 @@ export interface BookingDataDraft {
 }
 
 export function emptyBookingDataDraft(): BookingDataDraft {
-  // El primer tipo del catálogo de documentos, no uno fijo de esta pantalla.
-  const person = (): PersonDraft => ({ givenNames: "", surnames: "", docType: IDENTITY_DOC_TYPES[0], docNumber: "", docCountry: "" })
+  // El primer tipo de documento del país de la clínica, no uno fijo de esta pantalla.
+  const person = (): PersonDraft => ({ givenNames: "", surnames: "", docType: "", docNumber: "", docCountry: "" })
   return {
     me: person(),
     phone: null,
@@ -105,14 +108,19 @@ const FIELD_ORDER: readonly FieldKey[] = [
 ]
 type Errors = Partial<Record<FieldKey, string>>
 const fieldId = (key: string) => `reserva-datos-${key.replace(".", "-")}`
-const isForeign = (person: PersonDraft) => FOREIGN_DOC_TYPES.includes(person.docType)
+/** El tipo elegido o, sin elegir, el primero de los que se usan en el país de la clínica. */
+const docTypeOf = (profile: ClinicalCountryProfile, person: PersonDraft): IdentityDocType =>
+  person.docType || profile.documentTypes[0]!.code
+/** El país que lo emitió se pregunta solo si hace falta (`asksDocumentCountry`). */
+const asksCountry = (profile: ClinicalCountryProfile, person: PersonDraft) =>
+  asksDocumentCountry(profile, docTypeOf(profile, person))
 
 /**
  * Las respuestas del registro de pacientes que salen de este formulario corto:
  * solo los datos esenciales. Si la cita es para otra persona, ella es la
  * paciente y quien escribe queda como su responsable, con su celular.
  */
-function buildAnswers(draft: BookingDataDraft, phone: string | null, minor: boolean): RegistrationAnswers {
+function buildAnswers(profile: ClinicalCountryProfile, draft: BookingDataDraft, phone: string | null, minor: boolean): RegistrationAnswers {
   const forOther = draft.who === "representative"
   const patient = forOther ? draft.other : draft.me
   const givenNames = patient.givenNames.trim()
@@ -124,9 +132,9 @@ function buildAnswers(draft: BookingDataDraft, phone: string | null, minor: bool
       givenNames,
       paternalSurname,
       ...(maternalSurname ? { maternalSurname } : {}),
-      docType: patient.docType,
+      docType: docTypeOf(profile, patient),
       docNumber: patient.docNumber.trim(),
-      ...(isForeign(patient) ? { docCountry: patient.docCountry.trim().toUpperCase() } : {}),
+      ...(asksCountry(profile, patient) && patient.docCountry ? { docCountry: patient.docCountry } : {}),
       ...(forOther ? { birthDate: draft.otherBirthDate } : { phone: phone ?? "" }),
     },
     respondent: forOther ? "representative" : "patient",
@@ -139,9 +147,9 @@ function buildAnswers(draft: BookingDataDraft, phone: string | null, minor: bool
             ...(phone ? { phone } : {}),
             ...(myDocNumber
               ? {
-                  docType: draft.me.docType,
+                  docType: docTypeOf(profile, draft.me),
                   docNumber: myDocNumber,
-                  ...(isForeign(draft.me) && draft.me.docCountry.trim() ? { docCountry: draft.me.docCountry.trim().toUpperCase() } : {}),
+                  ...(asksCountry(profile, draft.me) && draft.me.docCountry ? { docCountry: draft.me.docCountry } : {}),
                 }
               : {}),
           },
@@ -185,15 +193,17 @@ function TextField({
   )
 }
 
-/** Nombres, apellidos y documento de una persona. Los tipos de documento salen del catálogo del sistema. */
+/** Nombres, apellidos y documento de una persona. Los tipos de documento son los del país de la clínica. */
 function PersonFields({
   scope,
+  profile,
   person,
   errors,
   mine,
   onChange,
 }: {
   scope: "me" | "other"
+  profile: ClinicalCountryProfile
   person: PersonDraft
   errors: Errors
   /** Los datos son de quien escribe: el navegador puede proponerlos. */
@@ -202,7 +212,10 @@ function PersonFields({
 }) {
   const typeId = fieldId(`${scope}.docType`)
   const numberId = fieldId(`${scope}.docNumber`)
+  const countryId = fieldId(`${scope}.docCountry`)
   const numberError = errors[`${scope}.docNumber`]
+  const countryError = errors[`${scope}.docCountry`]
+  const docType = docTypeOf(profile, person)
   return (
     <>
       <TextField
@@ -227,18 +240,18 @@ function PersonFields({
         <Field>
           <FieldLabel htmlFor={typeId}>Documento</FieldLabel>
           <Select<IdentityDocType>
-            value={person.docType}
+            value={docType}
             onValueChange={(next) => {
               if (next) onChange({ docType: next }, "docNumber", "docCountry")
             }}
           >
             <SelectTrigger id={typeId} aria-label="Tipo de documento" className="min-h-11 w-full min-w-0">
-              <SelectValue>{DOC_TYPE_LABELS[person.docType]}</SelectValue>
+              <SelectValue>{DOC_TYPE_LABELS[docType]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {IDENTITY_DOC_TYPES.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {DOC_TYPE_LABELS[type]}
+              {profile.documentTypes.map(({ code }) => (
+                <SelectItem key={code} value={code}>
+                  {DOC_TYPE_LABELS[code]}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -263,17 +276,21 @@ function PersonFields({
           </FieldError>
         ) : null}
       </div>
-      {isForeign(person) ? (
-        <TextField
-          name={`${scope}.docCountry`}
-          label="País que emitió el documento"
-          hint="Código de dos letras, por ejemplo VE."
-          autoComplete="off"
-          maxLength={2}
-          value={person.docCountry}
-          error={errors[`${scope}.docCountry`]}
-          onChange={(docCountry) => onChange({ docCountry: docCountry.toUpperCase() }, "docCountry")}
-        />
+      {asksCountry(profile, person) ? (
+        <Field>
+          <FieldLabel htmlFor={countryId}>País que emitió el documento</FieldLabel>
+          <SearchSelect
+            id={countryId}
+            label="País que emitió el documento"
+            placeholder="Buscar país…"
+            value={person.docCountry}
+            options={countryChoices(profile.country)}
+            invalid={Boolean(countryError)}
+            aria-describedby={countryError ? `${countryId}-error` : undefined}
+            onChange={(docCountry) => onChange({ docCountry }, "docCountry")}
+          />
+          {countryError ? <FieldError id={`${countryId}-error`}>{countryError}</FieldError> : null}
+        </Field>
       ) : null}
     </>
   )
@@ -333,6 +350,7 @@ export function BookingDataForm({
     return <ErrorState title="No pudimos abrir tus datos" message="Vuelve a intentarlo en un momento o escríbenos por el chat." onRetry={() => void infoQuery.refetch()} />
   }
   const info = infoQuery.data.data
+  const profile = clinicalProfileFor(info.countryCode)
   const forOther = draft.who === "representative"
   const minor = forOther && isRealDate(draft.otherBirthDate) && isMinor(draft.otherBirthDate, info.today)
   // El celular solo se propone si el sistema lo conoce de verdad; lo que la persona escriba manda.
@@ -351,7 +369,7 @@ export function BookingDataForm({
 
   /** Las reglas son las del registro de pacientes; aquí solo se reparten por campo y se dicen con las palabras de la pantalla. */
   const validate = (answers: RegistrationAnswers): Errors => {
-    const found = validateRegistrationAnswers(info.config, answers, { mode: "public", today: info.today, scope: "essentials" })
+    const found = validateRegistrationAnswers(info.config, answers, { mode: "public", today: info.today, scope: "essentials", countryCode: info.countryCode })
     const next: Errors = {}
     const put = (key: FieldKey, message: string | undefined) => {
       if (message && !next[key]) next[key] = message
@@ -383,7 +401,7 @@ export function BookingDataForm({
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (busy) return
-    const answers = buildAnswers(draft, phone, minor)
+    const answers = buildAnswers(profile, draft, phone, minor)
     const found = validate(answers)
     setErrors(found)
     setSubmitError(null)
@@ -422,7 +440,7 @@ export function BookingDataForm({
 
   return (
     <form onSubmit={(event) => void submit(event)} noValidate className="flex flex-col gap-4">
-      <PersonFields scope="me" person={draft.me} errors={errors} mine onChange={setPerson("me")} />
+      <PersonFields scope="me" profile={profile} person={draft.me} errors={errors} mine onChange={setPerson("me")} />
 
       <Field>
         <FieldLabel htmlFor={phoneId}>Celular</FieldLabel>
@@ -484,7 +502,7 @@ export function BookingDataForm({
           <FieldLegend variant="label" className="mb-0">
             La persona que se va a atender
           </FieldLegend>
-          <PersonFields scope="other" person={draft.other} errors={errors} mine={false} onChange={setPerson("other")} />
+          <PersonFields scope="other" profile={profile} person={draft.other} errors={errors} mine={false} onChange={setPerson("other")} />
           {/* Mismo control que el registro de pacientes: una fecha de nacimiento se escribe, no se busca mes a mes. */}
           <TextField
             name="otherBirthDate"

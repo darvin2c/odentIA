@@ -1,15 +1,14 @@
 import {
-  conditionLabel,
   type FindingDetails,
-  findingAbbreviation,
   findingColor,
-  findingDefinition,
+  type OdontogramStandardProfile,
   surfaceLabel,
   surfacesForTooth,
   toothTypeOf,
 } from "@odentia/clinical"
 import { useId, useRef, useState } from "react"
 import type { OdontogramEntry } from "../lib/patients"
+import { findingWords, useOdontogramNotation } from "./odontogram-notation"
 
 // Colores clínicos normativos (rojo/azul de la NTS 188). La selección de la UI
 // usa violeta (ring) y nunca rellena la corona, para no confundirse con un hallazgo.
@@ -156,29 +155,17 @@ function paintOf(entry: OdontogramEntry): string | null {
   return null
 }
 
-function abbreviationOf(entry: OdontogramEntry): string {
-  try {
-    return findingAbbreviation(entry) ?? ""
-  } catch {
-    return ""
-  }
-}
-
-/** Línea de cabecera accesible por hallazgo: sigla oficial + etiqueta + variante. */
-function entryLine(entry: OdontogramEntry, toothNumber: number): string {
-  const details = detailsOf(entry)
-  const label = conditionLabel(entry.condition)
-  let variantLabel = ""
-  try {
-    const def = findingDefinition(entry.condition)
-    const variant = def?.variants?.find((v) => v.value === details.variant)
-    if (variant) variantLabel = ` (${variant.label})`
-  } catch {
-    variantLabel = ""
-  }
+/**
+ * Línea de cabecera accesible por hallazgo: la etiqueta y su variante, con la
+ * sigla oficial solo en clínicas de un país con odontograma oficial (Perú).
+ */
+function entryLine(
+  entry: OdontogramEntry,
+  _toothNumber: number,
+  official: OdontogramStandardProfile | null,
+): string {
   const scope = entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""
-  const abbr = abbreviationOf(entry)
-  const head = abbr ? `${abbr} · ${label}${variantLabel}` : `${label}${variantLabel}`
+  const head = findingWords(official, { condition: entry.condition, details: detailsOf(entry) })
   if (entry.needsReview) return `Registro previo · requiere revisión — ${head}${scope}`
   if (!paintOf(entry)) return `${head}${scope} · dato pendiente`
   return `${head}${scope}`
@@ -549,6 +536,7 @@ function ToothCanvas({
   rotatedOnArch = false,
 }: ToothCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const official = useOdontogramNotation()
   const [live, setLive] = useState<number[][] | null>(null)
   const drawingRef = useRef(false)
   const liveRef = useRef<number[][]>([])
@@ -756,7 +744,7 @@ function ToothCanvas({
                 role="button"
                 tabIndex={0}
                 aria-label={`Superficie ${surfaceLabel(zone.surface)} de la pieza ${toothNumber}${
-                  winner ? `: ${entryLine(winner, toothNumber)}` : ": sin hallazgos"
+                  winner ? `: ${entryLine(winner, toothNumber, official)}` : ": sin hallazgos"
                 }`}
                 aria-disabled={disabled || undefined}
                 onClick={(e) => handlePaint(zone.surface, e)}
@@ -874,10 +862,11 @@ export function ToothSVG({
   drawingEnabled = false,
 }: ToothSVGProps) {
   const clipId = useId()
+  const official = useOdontogramNotation()
   const quadrant = Math.trunc(toothNumber / 10)
   const upper = quadrant === 1 || quadrant === 2 || quadrant === 5 || quadrant === 6
 
-  const lines = entries.map((entry) => entryLine(entry, toothNumber))
+  const lines = entries.map((entry) => entryLine(entry, toothNumber, official))
   const title = `Pieza ${toothNumber} — ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}`
   const pieceLabel = `Pieza ${toothNumber}: ${lines.length > 0 ? lines.join("; ") : "sin hallazgos"}. Seleccionar pieza.`
   const editLabel = `Edición de la pieza ${toothNumber}: superficies pintables y dibujo libre de la forma observada.`

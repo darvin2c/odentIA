@@ -85,9 +85,10 @@ export const professionalProfile = pgTable(
       .references(() => user.id),
     /** Nombre con el que firma; si falta se usa el de la cuenta. */
     signatureName: text("signature_name"),
-    professionalTitle: text("professional_title").notNull().default("Cirujano dentista"),
+    /** Título y colegio dependen del país y la profesión: sin valor por defecto. */
+    professionalTitle: text("professional_title").notNull(),
     /** Colegio profesional que emite la colegiatura (COP en Perú). */
-    registrationBody: text("registration_body").notNull().default("COP"),
+    registrationBody: text("registration_body").notNull(),
     registrationNumber: text("registration_number"),
     /** Registro nacional de especialista, cuando corresponde. */
     specialtyRegistration: text("specialty_registration"),

@@ -187,6 +187,8 @@ export const DOCUMENT_FILTERS = [
   { id: "consentimientos", label: "Consentimientos" },
   { id: "formularios", label: "Formularios" },
   { id: "imagenes", label: "Imágenes" },
+  // Solo en clínicas de Perú, donde el odontograma se firma (ADR 0036).
+  { id: "odontogramas", label: "Odontogramas" },
 ] as const
 export type DocumentFilter = (typeof DOCUMENT_FILTERS)[number]["id"]
 

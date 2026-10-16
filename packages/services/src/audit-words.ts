@@ -241,7 +241,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "odontogram.entry_added": say("Anotó un hallazgo en el odontograma"),
   "odontogram.entry_voided": say("Anuló un hallazgo del odontograma"),
   "odontogram.entry_resolved": say("Marcó como resuelto un hallazgo del odontograma"),
-  "odontogram.assessment_sealed": say("Firmó la evaluación del odontograma"),
+  "odontogram.assessment_sealed": say("Firmó el odontograma"),
   "odontogram.legacy_reviewed": say("Revisó un odontograma anterior"),
   "plan.created": say("Creó un plan de tratamiento"),
   "plan.item_added": say("Añadió un tratamiento al plan"),

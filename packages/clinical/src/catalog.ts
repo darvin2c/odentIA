@@ -1,6 +1,10 @@
 /**
- * NTS 188-MINSA/DGIESP-2022: hallazgos 6.1.1–6.1.38 y observaciones 5.15.
- * Fuente: RM 559-2022-MINSA. La numeración dental corresponde a ISO 3950.
+ * Hallazgos del odontograma con la nomenclatura de la NTS 188-MINSA/DGIESP-2022
+ * (6.1.1–6.1.38 y observaciones 5.15; RM 559-2022-MINSA) y numeración FDI
+ * (ISO 3950). La nomenclatura vale en cualquier país; las siglas y la
+ * variante obligatoria solo en clínicas de Perú (`clinicalProfileFor`,
+ * ADR 0036). Fuera de Perú la variante se pide por su nombre clínico
+ * (`variantName`) y es opcional.
  */
 import type { FindingDefinition } from "./types.js"
 
@@ -29,6 +33,7 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "tooth",
     color: "quality",
     symbol: "Cuadrado que bordea la corona clínica más sigla del tipo en el recuadro",
+    variantName: "Material",
     variants: [
       { value: "metal", label: "Corona metálica", abbreviation: "CM" },
       { value: "fenestrated", label: "Corona fenestrada", abbreviation: "CF" },
@@ -52,6 +57,7 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "surface",
     color: "red",
     symbol: "Sigla del defecto en el recuadro de la superficie dentaria",
+    variantName: "Tipo de defecto",
     variants: [
       { value: "opacity", label: "Opacidades del esmalte", abbreviation: "O" },
       { value: "pigmentation", label: "Pigmentación del esmalte", abbreviation: "PE" },
@@ -151,6 +157,7 @@ export const FINDINGS: readonly FindingDefinition[] = [
     color: "red",
     symbol:
       "Dibujo de la lesión según la forma observada, pintado de rojo, más sigla en el recuadro",
+    variantName: "Profundidad",
     variants: [
       { value: "white_spot", label: "Mancha blanca", abbreviation: "MB" },
       { value: "enamel", label: "Lesión de caries a nivel del esmalte", abbreviation: "CE" },
@@ -193,6 +200,7 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "tooth",
     color: "blue",
     symbol: "Aspa azul sobre el gráfico más sigla en el recuadro",
+    variantName: "Causa de la ausencia",
     variants: [
       { value: "unerupted", label: "Diente no erupcionado", abbreviation: "DNE" },
       {
@@ -311,6 +319,7 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "surface",
     color: "quality",
     symbol: "Restauración acorde a la forma observada, totalmente pintada, más sigla del material",
+    variantName: "Material",
     variants: [
       { value: "amalgam", label: "Amalgama dental", abbreviation: "AM" },
       { value: "resin", label: "Resina", abbreviation: "R" },
@@ -351,6 +360,7 @@ export const FINDINGS: readonly FindingDefinition[] = [
     scope: "tooth",
     color: "quality",
     symbol: "Línea recta vertical más sigla TC o PC en el recuadro",
+    variantName: "Tratamiento",
     variants: [
       { value: "root_canal", label: "Tratamiento de conductos", abbreviation: "TC" },
       { value: "pulpectomy", label: "Pulpectomía", abbreviation: "PC" },
@@ -393,6 +403,12 @@ const LEGACY_LABELS: Record<string, string> = {
   extraction_indicated: "Extracción indicada (plan previo)",
   legacy_prosthesis: "Prótesis no especificada (registro previo)",
   legacy_restoration: "Restauración no especificada (registro previo)",
+}
+
+/** Etiqueta de la variante registrada («Resina»), o undefined si no hay o no se conoce. */
+export function variantLabel(condition: string, variant: string | null | undefined): string | undefined {
+  if (!variant) return undefined
+  return findingDefinition(condition)?.variants?.find((item) => item.value === variant)?.label
 }
 
 /** Etiqueta española del hallazgo; el código desconocido se devuelve tal cual, nunca "Otro". */

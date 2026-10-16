@@ -600,7 +600,7 @@ describe("identidad estándar", () => {
     expect(normalizePhone("+58 412 1234567")).toBe("+584121234567")
     expect(normalizePhone("4567890")).toBeNull()
     expect(normalizePhone("5491122334455")).toBe("+5491122334455")
-    expect(identityDocumentError("DNI", "123")).toMatch(/8 dígitos/)
+    expect(identityDocumentError("DNI", "123")).toBe("El DNI tiene 8 números; faltan 5")
     expect(identityDocumentError("CE", "001234567")).toBeNull()
     expect(
       composeDisplayName({

@@ -151,6 +151,7 @@ function PublicRegistrationPage() {
         mode="public"
         config={info.config}
         today={info.today}
+        countryCode={info.countryCode ?? null}
         context={{ kind: contextKind, ownRecord }}
         initialValues={retainedDraft}
         onSubmit={async (draft) => {

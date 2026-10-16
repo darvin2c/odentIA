@@ -17,6 +17,20 @@ export interface ClosingCheck {
    * cerrar sin ellos pide decir por qué (`consentSkipReason`).
    */
   consents: ConsentNeed[]
+  /**
+   * En clínicas de Perú, el odontograma que firmará este cierre (su momento y
+   * lo que cambió en la atención); null si no cambió el gráfico o la clínica
+   * no firma odontogramas.
+   */
+  odontogram: ClosingOdontogram | null
+}
+
+/** El odontograma firmado que deja el cierre (solo en clínicas de Perú, NTS 188). */
+export interface ClosingOdontogram {
+  purpose: "initial" | "new_findings" | "completion"
+  standard: string
+  shortName: string
+  findings: Array<{ condition: string; teeth: number[] }>
 }
 
 /** Texto de cada requisito pendiente, en el orden de la historia clínica. */

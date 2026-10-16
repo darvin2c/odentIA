@@ -100,12 +100,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
 /**
  * Llena el nombre separado del registro (ADR 0004): la primera palabra son
- * los nombres y el resto el apellido paterno; el nombre visible se compone.
+ * los nombres y el resto el primer apellido; el nombre visible se compone.
  */
 export async function fillPatientNames(scope: Page | Locator, fullName: string) {
   const [given, ...rest] = fullName.trim().split(/\s+/)
   await scope.getByLabel(/^Nombres/).fill(given ?? "")
-  await scope.getByLabel(/^Apellido paterno/).fill(rest.join(" "))
+  await scope.getByLabel(/^Primer apellido/).fill(rest.join(" "))
 }
 
 /**

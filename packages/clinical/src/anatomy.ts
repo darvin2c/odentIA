@@ -1,8 +1,9 @@
-/** Anatomía FDI y superficies. Copia canónica: los consumidores importan de aquí. */
+/**
+ * Anatomía FDI (ISO 3950) y superficies. Copia canónica: los consumidores
+ * importan de aquí. La norma del odontograma no vive aquí: depende del país
+ * de la clínica (`clinicalProfileFor(...).odontogram`, ADR 0036).
+ */
 import type { Surface, ToothType } from "./types.js"
-
-/** Norma del odontograma. */
-export const ODONTOGRAM_STANDARD = "NTS 188-MINSA/DGIESP-2022"
 
 /** Piezas FDI permanentes 11-18, 21-28, 31-38, 41-48. */
 export const FDI_ADULT: readonly number[] = [

@@ -1,6 +1,4 @@
 import {
-  DOC_TYPE_LABELS,
-  IDENTITY_DOC_TYPES,
   SEX_CODES,
   SEX_LABELS,
   UUID_RE,
@@ -27,23 +25,9 @@ import { type InputHTMLAttributes, useId } from "react"
  * estos mismos límites; la creación añade el flujo de contacto.
  */
 
-export const DOC_TYPE_OPTIONS = [
-  { value: "", label: "—" },
-  ...IDENTITY_DOC_TYPES.map((value) => ({ value, label: DOC_TYPE_LABELS[value] })),
-] as const
-
 export const SEX_OPTIONS = [
   { value: "", label: "—" },
   ...SEX_CODES.map((value) => ({ value, label: SEX_LABELS[value] })),
-] as const
-
-export const INSURANCE_OPTIONS = [
-  { value: "", label: "—" },
-  { value: "PARTICULAR", label: "Particular" },
-  { value: "SIS", label: "SIS" },
-  { value: "ESSALUD", label: "EsSalud" },
-  { value: "EPS", label: "EPS" },
-  { value: "OTRO", label: "Otro" },
 ] as const
 
 export interface DemographicsValues {
@@ -62,7 +46,6 @@ export interface DemographicsValues {
   emergencyContactName: string
   emergencyContactPhone: string
   insuranceType: string
-  insuranceDetail: string
   referralSource: string
   registeredBranchId: string
 }
@@ -83,7 +66,6 @@ export const emptyDemographics: DemographicsValues = {
   emergencyContactName: "",
   emergencyContactPhone: "",
   insuranceType: "",
-  insuranceDetail: "",
   referralSource: "",
   registeredBranchId: "",
 }

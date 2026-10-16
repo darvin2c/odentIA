@@ -12,7 +12,7 @@ import { createProposal } from "./agent-operations.js"
 import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listAvailableSlots } from "./availability.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
 
@@ -389,6 +389,8 @@ export interface BookingLinkRegistrationForm {
   today: string
   /** El celular de la conversación, si es de WhatsApp; `null` si no se conoce. */
   phone: string | null
+  /** País de la clínica (ISO 3166-1 alfa-2): de él dependen los documentos que se ofrecen (ADR 0036). */
+  countryCode: string | null
 }
 
 /**
@@ -402,7 +404,12 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
   if ((await patientOf(tx, orgId, link)) !== null) throw alreadyPatient()
   const config = await getPatientRegistrationConfig(tx, orgId)
   if (!config.enabled) throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "La clínica no tiene activo el registro de pacientes en línea")
-  return { config, today: await patientOrganizationToday(tx, orgId), phone: await conversationPhone(tx, orgId, link) }
+  return {
+    config,
+    today: await patientOrganizationToday(tx, orgId),
+    phone: await conversationPhone(tx, orgId, link),
+    countryCode: await findOrgCountry(tx, orgId),
+  }
 }
 
 /**

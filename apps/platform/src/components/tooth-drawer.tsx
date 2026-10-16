@@ -1,10 +1,9 @@
 import {
-  conditionLabel as clinicalConditionLabel,
   surfaceLabel as clinicalSurfaceLabel,
   type FindingDetails,
   type FindingInput,
-  findingAbbreviation,
   findingDefinition,
+  formatMoney,
   surfacesForTooth,
   toothNameOf,
   toothTypeOf,
@@ -28,25 +27,25 @@ import { FormDrawer, FormPanel } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../lib/api"
-import { planDecisionLabel } from "../lib/budgets"
+import { fetchTreatmentPlans, planDecisionLabel } from "../lib/budgets"
 import { timeAgo, usePermission } from "../lib/crm"
+import { useOrgProfile } from "../lib/org"
 import {
+  DIAGNOSIS_TYPE_LABELS,
   type OdontogramEntry,
   type PatientDocument,
   type PlanItem,
   planStatusLabel,
-  statusLabel,
   toothTypeLabel,
 } from "../lib/patients"
-import { formatMoney } from "@odentia/clinical"
-import { type ServiceCatalogItem } from "../lib/services"
-import { useOrgProfile } from "../lib/org"
+import type { ServiceCatalogItem } from "../lib/services"
 import { FindingPicker } from "./finding-picker"
+import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
 import { Cie10Search } from "./patient/cie10-search"
+import { NewEncounterButton } from "./patient/new-encounter-button"
 import { ServicePicker } from "./patient/service-picker"
 import { ToothHistory } from "./patient/tooth-history"
 import { ToothSVG } from "./tooth-svg"
-import { ChoiceSelect } from "./ui/choice-select"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -69,12 +68,15 @@ const DIRECTION_LABELS: Record<string, string> = {
 /** Posiciones normativas de ubicación anormal (coexisten M/D/V/P/L). */
 const ABNORMAL_POSITIONS: readonly string[] = ["mesial", "distal", "buccal", "palatal", "lingual"]
 
-/** Pistas normativas donde `specifications` lleva material o clasificación. */
+/** Pistas donde `specifications` lleva material o clasificación. */
 const SPECIFICATION_HINTS: Record<string, string> = {
   temporary_crown: "Indica el material de la corona temporal.",
   enamel_development_defect: "Si es fluorosis, indica su clasificación.",
   pathological_mobility: "Indica la clasificación del grado de movilidad.",
 }
+
+/** Lo que se planifica desde la pieza es de la pieza o de sus caras. */
+const TOOTH_SCOPES: readonly string[] = ["tooth", "surfaces"]
 
 /**
  * Etiqueta original del registro migrado, disponible en `legacyData` (objeto
@@ -90,8 +92,6 @@ function originalLegacyText(entry: OdontogramEntry): string | null {
   return `Registro original: ${condition}${surface}`
 }
 
-type FormMode = "diagnosis" | "treatment"
-
 interface PlanQueryState {
   data?: { data: PlanItem[] }
   isPending: boolean
@@ -104,12 +104,6 @@ interface DocsQueryState {
   isError: boolean
 }
 
-function entryTime(entry: OdontogramEntry): number {
-  if (!entry.createdAt) return 0
-  const t = new Date(entry.createdAt).getTime()
-  return Number.isNaN(t) ? 0 : t
-}
-
 function mutationMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     if (err.shape.message) return err.shape.message
@@ -117,16 +111,14 @@ function mutationMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
 }
 
-/** Sigla oficial del hallazgo; null si el código no es normativo vigente. */
-function abbreviationOf(condition: string, details?: FindingDetails): string | null {
-  try {
-    if (!findingDefinition(condition)) return null
-    return findingAbbreviation({ condition, details })
-  } catch {
-    return null
-  }
-}
-
+/**
+ * El panel de la pieza (fase 3, tablero 4): su estado y, dentro de una
+ * atención, un solo formulario con el hallazgo, su diagnóstico CIE-10 con el
+ * tipo (que es el diagnóstico de la atención) y el tratamiento, que va al plan
+ * abierto de la persona. «Registrar y agregar al plan» lo deja todo junto, o
+ * nada (`registerToothFinding`). Fuera de una atención el odontograma se
+ * consulta y «Atender» está a un clic.
+ */
 export function ToothDrawer({
   patientId,
   teeth,
@@ -148,6 +140,7 @@ export function ToothDrawer({
   teeth: number[]
   entriesOf: (tooth: number) => OdontogramEntry[]
   historyOf: (tooth: number) => OdontogramEntry[]
+  /** Atención en borrador: sin ella el panel solo consulta. */
   encounterId?: string
   readOnly?: boolean
   /** Bloqueo externo (p. ej. guardado en curso del llamador): deshabilita el formulario. */
@@ -167,10 +160,11 @@ export function ToothDrawer({
   const queryClient = useQueryClient()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
+  const official = useOdontogramNotation()
   // Formato de la clínica para la tarifa vigente (moneda del catálogo).
-  const profile = useOrgProfile()
-  const orgLocale = profile.data?.locale
-  const canMutate = !readOnly && canWrite
+  const orgLocale = useOrgProfile().data?.locale
+  // Los hallazgos se registran dentro de una atención (fase 3, paso 5).
+  const canMutate = !readOnly && canWrite && Boolean(encounterId)
   const uid = useId()
   const multi = teeth.length > 1
   const [tooth] = teeth
@@ -181,7 +175,6 @@ export function ToothDrawer({
     [singleTooth],
   )
 
-  const [mode, setMode] = useState<FormMode>("diagnosis")
   const [choosingFinding, setChoosingFinding] = useState(true)
   const [savedMessage, setSavedMessage] = useState("")
 
@@ -200,29 +193,24 @@ export function ToothDrawer({
   const [clinicallyObserved, setClinicallyObserved] = useState(false)
   const [specifications, setSpecifications] = useState("")
   const [observations, setObservations] = useState("")
+  const [note, setNote] = useState("")
+  // Diagnóstico de la atención: el CIE-10 del hallazgo con su tipo.
   const [diagnosisCode, setDiagnosisCode] = useState("")
   const [diagnosisDescription, setDiagnosisDescription] = useState("")
-  const [note, setNote] = useState("")
-  const [diagPending, setDiagPending] = useState(false)
-  const [diagError, setDiagError] = useState<string | null>(null)
-  const [diagErrors, setDiagErrors] = useState<string[]>([])
-  // Sin elegir plan: la indicación va al plan abierto de la persona, que el
-  // servidor crea con la primera (ADR 0034).
+  const [diagnosisType, setDiagnosisType] = useState("")
+  // Tratamiento: va al plan abierto de la persona, que nace con el primero (ADR 0034).
   const [treatService, setTreatService] = useState<ServiceCatalogItem | null>(null)
   const [treatDetail, setTreatDetail] = useState("")
-  const [treatCie, setTreatCie] = useState("")
-  const [treatPending, setTreatPending] = useState(false)
-  const [treatError, setTreatError] = useState<string | null>(null)
-  const [sourceFindingId, setSourceFindingId] = useState("")
-  const sourceFindings =
-    singleTooth == null ? [] : entriesOf(singleTooth).filter((entry) => !entry.voidedAt)
+  const [pending, setPending] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [formErrors, setFormErrors] = useState<string[]>([])
 
   const [voiding, setVoiding] = useState<{ id: string; label: string } | null>(null)
   const [voidReason, setVoidReason] = useState("")
   const [voidPending, setVoidPending] = useState(false)
   const [voidError, setVoidError] = useState<string | null>(null)
 
-  const busy = diagPending || treatPending || voidPending
+  const busy = pending || voidPending
   const fieldDisabled = !canMutate || disabled || busy
 
   const def = condition ? findingDefinition(condition) : undefined
@@ -298,9 +286,12 @@ export function ToothDrawer({
     specifications !== "" ||
     observations !== "" ||
     diagnosisCode !== "" ||
-    note !== ""
+    diagnosisType !== "" ||
+    note !== "" ||
+    treatService !== null ||
+    treatDetail !== ""
 
-  const draftAbbreviation = draftDirty && def ? abbreviationOf(condition, draftDetails) : null
+  const draftWords = draftDirty && def ? findingWords(official, { condition, details: draftDetails }) : null
 
   /**
    * Vista previa viva: el borrador viaja con superficies normativas en inglés
@@ -313,16 +304,12 @@ export function ToothDrawer({
     const base = entriesOf(toothNumber)
     if (!canMutate || !draftDirty || !def || !teeth.includes(toothNumber)) return base
     const draftSurfaces = !multi && scope === "surface" && surfaces.length > 0 ? surfaces : [null]
-    const code = diagnosisCode.trim()
-    const noteText = note.trim()
     const draft: OdontogramEntry = {
       id: `draft-${toothNumber}`,
       toothNumber,
       condition,
       surface: null,
       status: "recorded",
-      ...(code ? { diagnosisCode: code } : {}),
-      ...(noteText ? { note: noteText } : {}),
       details: draftDetails,
     }
     return [
@@ -352,9 +339,8 @@ export function ToothDrawer({
     )
   }
 
-  const resetDraft = () => {
+  const resetDetails = () => {
     setFreehand(false)
-    setCondition("")
     setVariant("")
     setQuality("")
     setDirection("")
@@ -366,10 +352,19 @@ export function ToothDrawer({
     setClinicallyObserved(false)
     setSpecifications("")
     setObservations("")
+    setFormErrors([])
+    setFormError(null)
+  }
+
+  const resetDraft = () => {
+    resetDetails()
+    setCondition("")
     setDiagnosisCode("")
     setDiagnosisDescription("")
+    setDiagnosisType("")
     setNote("")
-    setDiagErrors([])
+    setTreatService(null)
+    setTreatDetail("")
   }
 
   const selectCondition = (value: string | null | undefined) => {
@@ -377,27 +372,11 @@ export function ToothDrawer({
       setChoosingFinding(false)
       return
     }
+    // El detalle depende del hallazgo: nada de otra definición sobrevive.
+    resetDetails()
     setCondition(value ?? "")
     setChoosingFinding(false)
     setSavedMessage("")
-    setFreehand(false)
-    // El detalle depende del hallazgo: nada de otra definición sobrevive.
-    setVariant("")
-    setQuality("")
-    setDirection("")
-    setGrade("")
-    setPositions([])
-    setSurfaces([])
-    setAbutments([])
-    setDrawing([])
-    setClinicallyObserved(false)
-    setSpecifications("")
-    setObservations("")
-    setDiagErrors([])
-    setDiagnosisCode("")
-    setDiagnosisDescription("")
-    setNote("")
-    setDiagError(null)
   }
 
   const planQuery = useQuery({
@@ -405,6 +384,12 @@ export function ToothDrawer({
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
     enabled: canRead,
   })
+  const plansQuery = useQuery({
+    queryKey: ["treatment-plans", patientId],
+    queryFn: () => fetchTreatmentPlans(patientId),
+    enabled: canRead && canMutate,
+  })
+  const hasOpenPlan = (plansQuery.data?.data ?? []).some((row) => row.isOpen)
 
   const docsQuery = useQuery({
     queryKey: ["patient-documents", patientId],
@@ -425,141 +410,86 @@ export function ToothDrawer({
       : "El registro se aplicará a cada pieza seleccionada."
     : undefined
 
-  const submitDiagnosis = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!canMutate || disabled || busy || teeth.length === 0) return
-    setDiagError(null)
-    setDiagErrors([])
+  const submitFinding = async () => {
+    if (!canMutate || disabled || busy || teeth.length === 0 || !encounterId) return
+    setFormError(null)
+    setFormErrors([])
     if (!def) {
-      setDiagErrors(["Selecciona el hallazgo a registrar."])
+      setFormErrors(["Selecciona el hallazgo a registrar."])
       return
     }
     // La evidencia observada solo vale marcada explícitamente por el clínico.
     if (def.requiresEvidence && !clinicallyObserved) {
-      setDiagErrors(["Confirma que observaste clínicamente este hallazgo antes de registrarlo."])
+      setFormErrors(["Confirma que observaste clínicamente este hallazgo antes de registrarlo."])
       return
     }
     const code = diagnosisCode.trim()
-    const noteText = note.trim()
-    const targets = isGroup ? [teeth[0]] : [...teeth]
-    const inputs: FindingInput[] = targets.map((toothNumber) => {
-      const input: FindingInput = { toothNumber, condition }
-      // Las caras solo se registran con una sola pieza (contrato aprobado).
-      if (!isGroup && !multi && scope === "surface" && surfaces.length > 0) {
-        input.surfaces = [...surfaces]
-      }
-      if (Object.keys(draftDetails).length > 0) input.details = draftDetails
-      if (code) input.diagnosisCode = code
-      if (noteText) input.note = noteText
-      if (encounterId) input.encounterId = encounterId
-      return input
-    })
+    if (code && !diagnosisType) {
+      setFormErrors(["Elige el tipo del diagnóstico: presuntivo, definitivo o repetido."])
+      return
+    }
+    if (treatService && !TOOTH_SCOPES.includes(treatService.scope ?? "")) {
+      setFormErrors([
+        `«${treatService.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles».`,
+      ])
+      return
+    }
+    // La misma regla del país que aplica el servidor, antes de enviar.
+    const targets = isGroup ? [teeth[0]!] : [...teeth]
     const failures: string[] = []
-    for (const input of inputs) {
-      let messages: string[]
-      try {
-        messages = validateFinding(input)
-      } catch {
-        failures.push(
-          `Pieza ${input.toothNumber}: no se pudo validar el hallazgo. Inténtalo de nuevo.`,
-        )
-        continue
-      }
-      for (const message of messages) {
-        failures.push(inputs.length > 1 ? `Pieza ${input.toothNumber}: ${message}` : message)
+    for (const toothNumber of targets) {
+      const input: FindingInput = { toothNumber, condition, details: draftDetails }
+      if (!isGroup && !multi && scope === "surface" && surfaces.length > 0) input.surfaces = [...surfaces]
+      for (const message of validateFinding(input, { strictVariants: official?.strictVariants ?? false })) {
+        failures.push(targets.length > 1 ? `Pieza ${toothNumber}: ${message}` : message)
       }
     }
     if (failures.length > 0) {
-      setDiagErrors(failures)
+      setFormErrors(failures)
       return
     }
-    setDiagPending(true)
+    setPending(true)
     onPendingChange?.(true)
     try {
       await beforeWrite?.()
-      await Promise.all(
-        inputs.map((input) =>
-          apiFetch(`/api/patients/${patientId}/odontogram/entries`, {
-            method: "POST",
-            body: JSON.stringify(input),
-          }),
-        ),
-      )
+      await apiFetch(`/api/patients/${patientId}/odontogram/findings`, {
+        method: "POST",
+        body: JSON.stringify({
+          encounterId,
+          toothNumbers: teeth,
+          condition,
+          // Las caras solo se registran con una sola pieza.
+          surfaces: !isGroup && !multi && scope === "surface" ? surfaces : [],
+          ...(Object.keys(draftDetails).length > 0 ? { details: draftDetails } : {}),
+          note: note.trim() || null,
+          diagnosis: code ? { cie10Code: code, diagnosisType } : null,
+          treatment: treatService ? { serviceId: treatService.id, detail: treatDetail.trim() || null } : null,
+        }),
+      })
+      const planned = treatService !== null
       resetDraft()
       await onChanged()
+      await Promise.all(
+        [
+          "plan-items",
+          "treatment-plans",
+          "treatment-plan",
+          "budgets",
+          "budget",
+          "patient-summary",
+          "plan-next",
+          "encounter",
+          "encounter-closing",
+        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
       setChoosingFinding(true)
-      setSavedMessage("Hallazgo registrado en el odontograma.")
+      setSavedMessage(
+        planned ? "Hallazgo registrado y tratamiento agregado al plan." : "Hallazgo registrado en el odontograma.",
+      )
     } catch (err) {
-      setDiagError(mutationMessage(err, "No se pudo registrar el diagnóstico."))
+      setFormError(mutationMessage(err, "No se pudo registrar el hallazgo."))
     } finally {
-      setDiagPending(false)
-      onPendingChange?.(false)
-    }
-  }
-
-  const submitTreatment = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!canMutate || disabled || busy || teeth.length === 0) return
-    if (!treatService) {
-      setTreatError("Selecciona un servicio del catálogo.")
-      return
-    }
-    if (!encounterId) {
-      setTreatError("Abre una atención en curso para indicar el tratamiento.")
-      return
-    }
-    setTreatPending(true)
-    onPendingChange?.(true)
-    setTreatError(null)
-    try {
-      await beforeWrite?.()
-      const cieCode = treatCie.trim()
-      if (singleTooth != null) {
-        const finding = sourceFindings.find((entry) => entry.id === sourceFindingId)
-        if (sourceFindingId && !finding)
-          throw new Error("El hallazgo cambió; vuelve a seleccionarlo.")
-        await apiFetch(`/api/patients/${patientId}/plan/items`, {
-          method: "POST",
-          body: JSON.stringify({
-            sourceEncounterId: encounterId,
-            serviceId: treatService.id,
-            toothNumber: singleTooth,
-            odontogramEntryId: finding?.id ?? null,
-            surfaces:
-              treatService.scope === "surfaces" && finding?.surface ? [finding.surface] : null,
-            detail: treatDetail.trim() || null,
-            diagnosisCode: cieCode || null,
-          }),
-        })
-      } else {
-        await apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan/items/batch`, {
-          method: "POST",
-          body: JSON.stringify({
-            sourceEncounterId: encounterId,
-            serviceId: treatService.id,
-            toothNumbers: teeth,
-            detail: treatDetail.trim() || null,
-            diagnosisCode: cieCode || null,
-          }),
-        })
-      }
-      setTreatService(null)
-      setTreatDetail("")
-      setTreatCie("")
-      setSourceFindingId("")
-      setSavedMessage("Tratamiento agregado al plan.")
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
-        queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
-        queryClient.invalidateQueries({ queryKey: ["budgets", patientId] }),
-        queryClient.invalidateQueries({ queryKey: ["budget", patientId] }),
-        queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
-        queryClient.invalidateQueries({ queryKey: ["plan-next", patientId] }),
-      ])
-    } catch (err) {
-      setTreatError(mutationMessage(err, "No se pudo guardar el tratamiento."))
-    } finally {
-      setTreatPending(false)
+      setPending(false)
       onPendingChange?.(false)
     }
   }
@@ -603,9 +533,7 @@ export function ToothDrawer({
     if (busy) return
     onOpenChange(false)
   }
-  const diagDirty = draftDirty
-  const treatDirty = treatService !== null || treatDetail !== "" || treatCie !== ""
-  const isDirty = canMutate && (diagDirty || treatDirty)
+  const isDirty = canMutate && draftDirty
   useEffect(() => {
     onDirtyChange?.(isDirty)
     return () => onDirtyChange?.(false)
@@ -614,10 +542,7 @@ export function ToothDrawer({
   useEffect(() => {
     if (!choosingFinding) detailHeading.current?.focus()
   }, [choosingFinding, condition])
-  const activeError =
-    mode === "diagnosis"
-      ? (diagError ?? (diagErrors.length ? diagErrors.join(" ") : null))
-      : treatError
+  const activeError = formError ?? (formErrors.length ? formErrors.join(" ") : null)
   const faceEditing = canMutate && !disabled && !busy && !multi && scope === "surface" && !freehand
   // El trazo se dibuja sobre la vista previa con el Renderer (contrato final):
   // una sola pieza, sin puentes. El borrador lo controla este drawer.
@@ -631,7 +556,7 @@ export function ToothDrawer({
         {canMutate && draftDirty && def && (
           <Badge variant="outline" aria-live="polite">
             En edición · vista previa no guardada
-            {draftAbbreviation ? ` · ${draftAbbreviation}` : ""}
+            {draftWords ? ` · ${draftWords}` : ""}
           </Badge>
         )}
         <div>
@@ -708,47 +633,19 @@ export function ToothDrawer({
       </div>
     )
 
-  const canPlan =
-    teeth.length > 0 && teeth.every((tooth) => entriesOf(tooth).some((entry) => !entry.voidedAt))
-  const submitLabel =
-    mode === "diagnosis"
-      ? `Registrar hallazgo${multi && !isGroup ? ` (${teeth.length})` : ""}`
-      : `Agregar al plan${multi ? ` (${teeth.length})` : ""}`
+  const submitLabel = treatService
+    ? "Registrar y agregar al plan"
+    : `Registrar hallazgo${multi && !isGroup ? ` (${teeth.length})` : ""}`
   const submit = (event: React.FormEvent): void => {
     event.preventDefault()
     event.stopPropagation()
-    if (mode === "diagnosis" && !choosingFinding) void submitDiagnosis(event)
-    else if (mode === "treatment") void submitTreatment(event)
+    if (!choosingFinding) void submitFinding()
   }
-  const headerContent = (
+  const headerContent = historical ? (
     <div className="flex flex-wrap items-center gap-2 pt-2">
-      {historical && <Badge variant="outline">Solo lectura · estado histórico</Badge>}
-      {mode === "treatment" ? (
-        <Button
-          type="button"
-          variant="ghost"
-          className="min-h-11"
-          disabled={fieldDisabled}
-          onClick={() => setMode("diagnosis")}
-        >
-          Volver a hallazgos
-        </Button>
-      ) : canMutate && canPlan && !draftDirty ? (
-        <Button
-          type="button"
-          variant="outline"
-          className="min-h-11"
-          disabled={fieldDisabled}
-          onClick={() => {
-            setSavedMessage("")
-            setMode("treatment")
-          }}
-        >
-          Indicar tratamiento
-        </Button>
-      ) : null}
+      <Badge variant="outline">Solo lectura · estado histórico</Badge>
     </div>
-  )
+  ) : null
   const toothContexts = (
     <div className="flex flex-col gap-3 pt-2">
       {teeth.map((toothNumber) => (
@@ -760,6 +657,7 @@ export function ToothDrawer({
           history={historyOf(toothNumber)}
           planQuery={planQuery}
           docsQuery={docsQuery}
+          encounterId={encounterId}
           canMutate={canMutate && !disabled && !busy}
           voidPending={voidPending}
           defaultOpen
@@ -775,8 +673,7 @@ export function ToothDrawer({
   // Al elegir una sola pieza, primero su estado (hallazgos, plan, imágenes,
   // historial) y después el registro. Mientras se edita, el contexto baja y se
   // pliega para no competir con el formulario.
-  const contextFirst =
-    !multi && !draftDirty && (!canMutate || (mode === "diagnosis" && choosingFinding))
+  const contextFirst = !multi && !draftDirty && (!canMutate || choosingFinding)
   const body = (
     <div className="flex flex-col gap-5">
       {savedMessage && (
@@ -787,430 +684,427 @@ export function ToothDrawer({
       {contextFirst ? toothContexts : null}
 
       {!canMutate ? (
-        <p className="text-sm text-muted-foreground">
-          {historical || readOnly
-            ? "Solo lectura: no se pueden registrar cambios."
-            : "No tienes permiso para registrar cambios en estas piezas."}
-        </p>
-      ) : mode === "diagnosis" ? (
+        historical || readOnly || !canWrite ? (
+          <p className="text-sm text-muted-foreground">
+            {historical || readOnly
+              ? "Solo lectura: no se pueden registrar cambios."
+              : "No tienes permiso para registrar cambios en estas piezas."}
+          </p>
+        ) : (
+          // Desde la ficha el odontograma se consulta: lo nuevo se registra atendiendo.
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed p-4">
+            <p className="text-sm">Los hallazgos se registran dentro de una atención</p>
+            <NewEncounterButton patientId={patientId} variant="outline" size="sm" />
+          </div>
+        )
+      ) : choosingFinding ? (
+        <FindingPicker value={condition} onChange={selectCondition} disabled={fieldDisabled} />
+      ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {choosingFinding ? (
-            <div className="sm:col-span-2">
-              <FindingPicker
-                value={condition}
-                onChange={selectCondition}
+          <section aria-labelledby={`${uid}-hallazgo`} className="flex flex-col gap-4 sm:col-span-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3
+                id={`${uid}-hallazgo`}
+                tabIndex={-1}
+                ref={detailHeading}
+                className="text-base font-semibold outline-none"
+              >
+                Hallazgo · {def?.label}
+              </h3>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11"
+                disabled={fieldDisabled}
+                onClick={() => setChoosingFinding(true)}
+              >
+                Cambiar hallazgo
+              </Button>
+            </div>
+            {previewContent}
+          </section>
+
+          {def?.variants?.length ? (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-variant`}>{variantFieldLabel(official, condition)}</FieldLabel>
+              <Select
+                value={variant}
+                items={Object.fromEntries(
+                  def.variants.map((v) => [
+                    v.value,
+                    official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label,
+                  ]),
+                )}
+                onValueChange={(v) => setVariant(v ?? "")}
+              >
+                <SelectTrigger
+                  className="min-h-11"
+                  id={`${uid}-variant`}
+                  aria-label={variantFieldLabel(official, condition)}
+                  disabled={fieldDisabled}
+                >
+                  <SelectValue placeholder="Elige…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {def.variants.map((v) => (
+                    <SelectItem key={v.value} value={v.value}>
+                      {official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : null}
+
+          {def?.color === "quality" ? (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-quality`}>Estado</FieldLabel>
+              <Select
+                value={quality}
+                items={QUALITY_LABELS}
+                onValueChange={(v) => setQuality(v ?? "")}
+              >
+                <SelectTrigger
+                  className="min-h-11"
+                  id={`${uid}-quality`}
+                  aria-label="Estado"
+                  disabled={fieldDisabled}
+                >
+                  <SelectValue placeholder="Elige el estado…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(QUALITY_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : null}
+
+          {showDirection && (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-direction`}>Dirección de rotación</FieldLabel>
+              <Select
+                value={direction}
+                items={DIRECTION_LABELS}
+                onValueChange={(v) => setDirection(v ?? "")}
+              >
+                <SelectTrigger
+                  className="min-h-11"
+                  id={`${uid}-direction`}
+                  aria-label="Dirección de rotación"
+                  disabled={fieldDisabled}
+                >
+                  <SelectValue placeholder="Selecciona la dirección…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(DIRECTION_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+
+          {showGrade && (
+            <Field>
+              <FieldLabel htmlFor={`${uid}-grade`}>Grado de movilidad</FieldLabel>
+              <Input
+                id={`${uid}-grade`}
+                value={grade}
+                onChange={(e) => setGrade(e.currentTarget.value)}
+                placeholder="1, 2, 3…"
+                inputMode="numeric"
                 disabled={fieldDisabled}
               />
+              <p className="text-xs text-muted-foreground">Solo grados patológicos (nunca M0).</p>
+            </Field>
+          )}
+
+          {isGroup && (
+            <div className="sm:col-span-2">
+              <p className="text-xs text-muted-foreground">
+                Se registrará una sola vez e incluirá las piezas: {teeth.join(", ")}.
+              </p>
             </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-2 sm:col-span-2">
-                <h3
-                  tabIndex={-1}
-                  ref={detailHeading}
-                  className="text-base font-semibold outline-none"
-                >
-                  {def?.label}
-                </h3>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="min-h-11"
-                  disabled={fieldDisabled}
-                  onClick={() => setChoosingFinding(true)}
-                >
-                  Cambiar hallazgo
-                </Button>
-              </div>
-              <div className="sm:col-span-2">{previewContent}</div>
+          )}
 
-              {def?.variants?.length ? (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-variant`}>Variante</FieldLabel>
-                  <Select
-                    value={variant}
-                    items={Object.fromEntries(def.variants.map((v) => [v.value, v.label]))}
-                    onValueChange={(v) => setVariant(v ?? "")}
-                  >
-                    <SelectTrigger
-                      className="min-h-11"
-                      id={`${uid}-variant`}
-                      aria-label="Variante"
-                      disabled={fieldDisabled}
-                    >
-                      <SelectValue placeholder="Selecciona la variante…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {def.variants.map((v) => (
-                        <SelectItem key={v.value} value={v.value}>
-                          {v.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              ) : null}
-
-              {def?.color === "quality" ? (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-quality`}>Calidad</FieldLabel>
-                  <Select
-                    value={quality}
-                    items={QUALITY_LABELS}
-                    onValueChange={(v) => setQuality(v ?? "")}
-                  >
-                    <SelectTrigger
-                      className="min-h-11"
-                      id={`${uid}-quality`}
-                      aria-label="Calidad"
-                      disabled={fieldDisabled}
-                    >
-                      <SelectValue placeholder="Selecciona la calidad…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(QUALITY_LABELS).map(([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              ) : null}
-
-              {showDirection && (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-direction`}>Dirección de rotación</FieldLabel>
-                  <Select
-                    value={direction}
-                    items={DIRECTION_LABELS}
-                    onValueChange={(v) => setDirection(v ?? "")}
-                  >
-                    <SelectTrigger
-                      className="min-h-11"
-                      id={`${uid}-direction`}
-                      aria-label="Dirección de rotación"
-                      disabled={fieldDisabled}
-                    >
-                      <SelectValue placeholder="Selecciona la dirección…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(DIRECTION_LABELS).map(([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              )}
-
-              {showGrade && (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-grade`}>Grado de movilidad</FieldLabel>
-                  <Input
-                    id={`${uid}-grade`}
-                    value={grade}
-                    onChange={(e) => setGrade(e.currentTarget.value)}
-                    placeholder="1, 2, 3…"
-                    inputMode="numeric"
-                    disabled={fieldDisabled}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Solo grados patológicos (nunca M0).
-                  </p>
-                </Field>
-              )}
-
-              {isGroup && (
-                <div className="sm:col-span-2">
-                  <p className="text-xs text-muted-foreground">
-                    Se registrará una sola vez e incluirá las piezas: {teeth.join(", ")}.
-                  </p>
-                </div>
-              )}
-
-              {showAbutments && (
-                <fieldset className="flex flex-col gap-2 sm:col-span-2">
-                  <legend className="text-xs font-medium">Piezas pilar del tramo</legend>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {teeth.map((toothNumber) => (
-                      <label
-                        key={toothNumber}
-                        htmlFor={`${uid}-abutment-${toothNumber}`}
-                        className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-                      >
-                        <Checkbox
-                          id={`${uid}-abutment-${toothNumber}`}
-                          checked={abutments.includes(toothNumber)}
-                          disabled={fieldDisabled}
-                          onCheckedChange={() => toggleAbutment(toothNumber)}
-                        />
-                        Pieza {toothNumber}
-                      </label>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Marca las piezas pilar del tramo (puentes sobre pilares).
-                  </p>
-                </fieldset>
-              )}
-
-              {showPositions && (
-                <fieldset className="flex flex-col gap-2 sm:col-span-2">
-                  <legend className="text-xs font-medium">Posiciones (coexisten M/D/V/P/L)</legend>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {ABNORMAL_POSITIONS.map((position) => (
-                      <label
-                        key={position}
-                        htmlFor={`${uid}-position-${position}`}
-                        className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-                      >
-                        <Checkbox
-                          id={`${uid}-position-${position}`}
-                          checked={positions.includes(position)}
-                          disabled={fieldDisabled}
-                          onCheckedChange={() => togglePosition(position)}
-                        />
-                        {clinicalSurfaceLabel(position)}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              )}
-
-              <div className="sm:col-span-2">
-                {scope === "surface" && multi ? (
-                  <p className="text-xs text-muted-foreground">
-                    Selecciona una sola pieza para registrar por superficie. El diagnóstico sin
-                    superficies se replica a las {teeth.length} piezas.
-                  </p>
-                ) : showSurfaces ? (
-                  <fieldset className="flex flex-col gap-2">
-                    <legend className="text-xs font-medium">
-                      Superficies comprometidas (o traza la forma observada)
-                    </legend>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {allowedSurfaces.map((s) => (
-                        <label
-                          key={s}
-                          htmlFor={`${uid}-surface-${s}`}
-                          className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-                        >
-                          <Checkbox
-                            id={`${uid}-surface-${s}`}
-                            checked={surfaces.includes(s)}
-                            disabled={fieldDisabled}
-                            onCheckedChange={() => toggleSurface(s)}
-                          />
-                          {clinicalSurfaceLabel(s)}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                ) : null}
-              </div>
-
-              {showDrawing && (
-                <div className="flex flex-col gap-2 sm:col-span-2">
-                  <span className="text-xs font-medium">
-                    Registro gráfico{def?.requiresDrawing ? " (obligatorio)" : ""}
-                  </span>
-                  {multi ? (
-                    <p className="text-xs text-muted-foreground">
-                      Selecciona una sola pieza para dibujar el trazo sobre su vista previa.
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Dibuja el trazo observado sobre la vista previa de la pieza
-                      {drawing.length > 0
-                        ? ` (${drawing.length} ${drawing.length === 1 ? "trazo" : "trazos"}).`
-                        : "."}
-                    </p>
-                  )}
-                  {(def?.requiresEvidence || def?.requiresDrawing) && (
-                    <p className="text-xs text-muted-foreground">
-                      Este hallazgo requiere evidencia: selecciona superficies o registra el trazo
-                      observado.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {def?.requiresEvidence && (
-                <div className="sm:col-span-2">
+          {showAbutments && (
+            <fieldset className="flex flex-col gap-2 sm:col-span-2">
+              <legend className="text-xs font-medium">Piezas pilar del tramo</legend>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {teeth.map((toothNumber) => (
                   <label
-                    htmlFor={`${uid}-observed`}
+                    key={toothNumber}
+                    htmlFor={`${uid}-abutment-${toothNumber}`}
                     className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
                   >
                     <Checkbox
-                      id={`${uid}-observed`}
-                      checked={clinicallyObserved}
+                      id={`${uid}-abutment-${toothNumber}`}
+                      checked={abutments.includes(toothNumber)}
                       disabled={fieldDisabled}
-                      onCheckedChange={() => setClinicallyObserved((prev) => !prev)}
+                      onCheckedChange={() => toggleAbutment(toothNumber)}
                     />
-                    Observé clínicamente este hallazgo (obligatorio)
+                    Pieza {toothNumber}
                   </label>
-                </div>
-              )}
-
-              <Field className="sm:col-span-2">
-                <FieldLabel htmlFor={`${uid}-specifications`}>Especificaciones</FieldLabel>
-                <Textarea
-                  id={`${uid}-specifications`}
-                  value={specifications}
-                  disabled={fieldDisabled}
-                  maxLength={2000}
-                  placeholder="Material, clasificación u otra especificación normativa…"
-                  onChange={(event) => setSpecifications(event.target.value)}
-                />
-                {SPECIFICATION_HINTS[condition] && (
-                  <p className="text-xs text-muted-foreground">{SPECIFICATION_HINTS[condition]}</p>
-                )}
-              </Field>
-
-              {showObservations && (
-                <Field className="sm:col-span-2">
-                  <FieldLabel htmlFor={`${uid}-observations`}>Observaciones</FieldLabel>
-                  <Textarea
-                    id={`${uid}-observations`}
-                    value={observations}
-                    disabled={fieldDisabled}
-                    maxLength={2000}
-                    placeholder="Observación clínica de la pieza…"
-                    onChange={(event) => setObservations(event.target.value)}
-                  />
-                </Field>
-              )}
-
-              <details className="sm:col-span-2">
-                <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
-                  Diagnóstico CIE-10 y nota (opcional)
-                </summary>
-                <div className="flex flex-col gap-4 pt-2">
-                  <div className="sm:col-span-2">
-                    <Cie10Search
-                      value={diagnosisCode}
-                      label="Diagnóstico CIE-10 (opcional)"
-                      disabled={fieldDisabled}
-                      onChange={(code, description) => {
-                        setDiagnosisCode(code)
-                        setDiagnosisDescription(description)
-                      }}
-                    />
-                    {diagnosisDescription && (
-                      <p className="mt-1 text-xs text-muted-foreground">{diagnosisDescription}</p>
-                    )}
-                  </div>
-
-                  <Field className="sm:col-span-2">
-                    <FieldLabel htmlFor={`${uid}-note`}>Nota (opcional)</FieldLabel>
-                    <Textarea
-                      id={`${uid}-note`}
-                      value={note}
-                      disabled={fieldDisabled}
-                      maxLength={500}
-                      placeholder="Detalle clínico del hallazgo…"
-                      onChange={(event) => setNote(event.target.value)}
-                    />
-                  </Field>
-                </div>
-              </details>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {singleTooth != null && (
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-source-finding`}>
-                Problema que motiva el tratamiento
-              </FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-source-finding`}
-                
-                disabled={fieldDisabled}
-                value={sourceFindingId}
-                onChange={(event) => {
-                  setSourceFindingId(event.target.value)
-                  setTreatCie(
-                    sourceFindings.find((entry) => entry.id === event.target.value)
-                      ?.diagnosisCode ?? "",
-                  )
-                }}
-              >
-                <option value="">Sin hallazgo vinculado</option>
-                {sourceFindings.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {clinicalConditionLabel(entry.condition)}
-                    {entry.surface ? ` · ${clinicalSurfaceLabel(entry.surface)}` : ""}
-                    {entry.note ? ` · ${entry.note}` : ""}
-                  </option>
                 ))}
-              </ChoiceSelect>
-            </Field>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Marca las piezas pilar del tramo (puentes sobre pilares).
+              </p>
+            </fieldset>
           )}
-          {!encounterId ? (
-            <p role="note" className="text-xs text-muted-foreground sm:col-span-2">
-              Abre una atención en curso para indicar tratamientos desde aquí.
-            </p>
-          ) : null}
+
+          {showPositions && (
+            <fieldset className="flex flex-col gap-2 sm:col-span-2">
+              <legend className="text-xs font-medium">Posiciones (coexisten M/D/V/P/L)</legend>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {ABNORMAL_POSITIONS.map((position) => (
+                  <label
+                    key={position}
+                    htmlFor={`${uid}-position-${position}`}
+                    className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
+                  >
+                    <Checkbox
+                      id={`${uid}-position-${position}`}
+                      checked={positions.includes(position)}
+                      disabled={fieldDisabled}
+                      onCheckedChange={() => togglePosition(position)}
+                    />
+                    {clinicalSurfaceLabel(position)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
           <div className="sm:col-span-2">
-            <ServicePicker
-              value={treatService?.id ?? ""}
-              onChange={setTreatService}
-              disabled={fieldDisabled}
-            />
+            {scope === "surface" && multi ? (
+              <p className="text-xs text-muted-foreground">
+                Selecciona una sola pieza para registrar por superficie. El hallazgo sin
+                superficies se replica a las {teeth.length} piezas.
+              </p>
+            ) : showSurfaces ? (
+              <fieldset className="flex flex-col gap-2">
+                <legend className="text-xs font-medium">
+                  Superficies comprometidas (o traza la forma observada)
+                </legend>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {allowedSurfaces.map((s) => (
+                    <label
+                      key={s}
+                      htmlFor={`${uid}-surface-${s}`}
+                      className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
+                    >
+                      <Checkbox
+                        id={`${uid}-surface-${s}`}
+                        checked={surfaces.includes(s)}
+                        disabled={fieldDisabled}
+                        onCheckedChange={() => toggleSurface(s)}
+                      />
+                      {clinicalSurfaceLabel(s)}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            ) : null}
           </div>
-          {treatService && (
-            <div className="rounded-lg border bg-muted/30 p-4 sm:col-span-2" aria-live="polite">
-              <p className="text-sm">
-                {teeth.length} pieza{multi ? "s" : ""} ×{" "}
-                {orgLocale ? formatMoney(treatService.priceCents, treatService.currency, orgLocale) : "…"}
-              </p>
-              <p className="mt-1 text-xl font-semibold tabular-nums">
-                {orgLocale
-                  ? formatMoney(treatService.priceCents * teeth.length, treatService.currency, orgLocale)
-                  : "…"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Se indicará el tratamiento en el plan con el precio vigente. Proponerlo no equivale
-                a aceptarlo, ejecutarlo ni cobrarlo.
-              </p>
+
+          {showDrawing && (
+            <div className="flex flex-col gap-2 sm:col-span-2">
+              <span className="text-xs font-medium">
+                Registro gráfico{def?.requiresDrawing ? " (obligatorio)" : ""}
+              </span>
+              {multi ? (
+                <p className="text-xs text-muted-foreground">
+                  Selecciona una sola pieza para dibujar el trazo sobre su vista previa.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Dibuja el trazo observado sobre la vista previa de la pieza
+                  {drawing.length > 0
+                    ? ` (${drawing.length} ${drawing.length === 1 ? "trazo" : "trazos"}).`
+                    : "."}
+                </p>
+              )}
             </div>
           )}
-          <Field className="sm:col-span-2">
-            <FieldLabel htmlFor={`${uid}-treat-detail`}>Detalle</FieldLabel>
-            <Textarea
-              id={`${uid}-treat-detail`}
-              value={treatDetail}
-              onChange={(e) => setTreatDetail(e.currentTarget.value)}
-              placeholder="Detalle del tratamiento propuesto"
-              rows={3}
-              maxLength={4000}
+
+          {def?.requiresEvidence && (
+            <div className="sm:col-span-2">
+              <label
+                htmlFor={`${uid}-observed`}
+                className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
+              >
+                <Checkbox
+                  id={`${uid}-observed`}
+                  checked={clinicallyObserved}
+                  disabled={fieldDisabled}
+                  onCheckedChange={() => setClinicallyObserved((prev) => !prev)}
+                />
+                Observé clínicamente este hallazgo (obligatorio)
+              </label>
+            </div>
+          )}
+
+          {(SPECIFICATION_HINTS[condition] || def?.code === "temporary_crown" || specifications) && (
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor={`${uid}-specifications`}>Especificaciones</FieldLabel>
+              <Textarea
+                id={`${uid}-specifications`}
+                value={specifications}
+                disabled={fieldDisabled}
+                maxLength={2000}
+                placeholder="Material, clasificación u otra especificación…"
+                onChange={(event) => setSpecifications(event.target.value)}
+              />
+              {SPECIFICATION_HINTS[condition] && (
+                <p className="text-xs text-muted-foreground">{SPECIFICATION_HINTS[condition]}</p>
+              )}
+            </Field>
+          )}
+
+          {showObservations && (
+            <Field className="sm:col-span-2">
+              <FieldLabel htmlFor={`${uid}-observations`}>Observaciones</FieldLabel>
+              <Textarea
+                id={`${uid}-observations`}
+                value={observations}
+                disabled={fieldDisabled}
+                maxLength={2000}
+                placeholder="Observación clínica de la pieza…"
+                onChange={(event) => setObservations(event.target.value)}
+              />
+            </Field>
+          )}
+
+          <section
+            aria-label="Diagnóstico"
+            className="flex flex-col gap-3 border-t pt-4 sm:col-span-2"
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+              <div>
+                <Cie10Search
+                  value={diagnosisCode}
+                  label="Diagnóstico"
+                  disabled={fieldDisabled}
+                  onChange={(code, text) => {
+                    setDiagnosisCode(code)
+                    setDiagnosisDescription(text)
+                  }}
+                />
+                {diagnosisDescription && (
+                  <p className="mt-1 text-xs text-muted-foreground">{diagnosisDescription}</p>
+                )}
+              </div>
+              <Field>
+                <FieldLabel htmlFor={`${uid}-dx-type`}>Tipo</FieldLabel>
+                <Select
+                  value={diagnosisType}
+                  items={DIAGNOSIS_TYPE_LABELS}
+                  onValueChange={(v) => setDiagnosisType(v ?? "")}
+                >
+                  <SelectTrigger
+                    className="min-h-11"
+                    id={`${uid}-dx-type`}
+                    disabled={fieldDisabled || !diagnosisCode}
+                  >
+                    <SelectValue placeholder="Elige…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DIAGNOSIS_TYPE_LABELS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <p className="text-xs text-muted-foreground">Cuenta como diagnóstico de esta atención</p>
+          </section>
+
+          <section aria-label="Tratamiento" className="flex flex-col gap-3 border-t pt-4 sm:col-span-2">
+            <ServicePicker
+              value={treatService?.id ?? ""}
+              label="Tratamiento"
+              onChange={(service) => setTreatService(service)}
               disabled={fieldDisabled}
+            />
+            {treatService ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm" aria-live="polite">
+                <span>
+                  {treatService.name}
+                  {orgLocale
+                    ? ` · ${formatMoney(treatService.priceCents, treatService.currency, orgLocale)}`
+                    : ""}
+                  {multi && !isGroup ? ` × ${teeth.length} piezas` : ""}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={fieldDisabled}
+                  onClick={() => {
+                    setTreatService(null)
+                    setTreatDetail("")
+                  }}
+                >
+                  Quitar
+                </Button>
+              </div>
+            ) : null}
+            <p className="text-xs text-muted-foreground">
+              {treatService
+                ? hasOpenPlan
+                  ? "Se agrega a su plan, que ya está abierto"
+                  : "Abre su plan con este tratamiento"
+                : "Opcional: lo que propones hacer va al plan, aparte de lo observado"}
+            </p>
+            {treatService ? (
+              <Field>
+                <FieldLabel htmlFor={`${uid}-treat-detail`}>Detalle (opcional)</FieldLabel>
+                <Textarea
+                  id={`${uid}-treat-detail`}
+                  value={treatDetail}
+                  onChange={(e) => setTreatDetail(e.currentTarget.value)}
+                  rows={2}
+                  maxLength={4000}
+                  disabled={fieldDisabled}
+                />
+              </Field>
+            ) : null}
+          </section>
+
+          <Field className="sm:col-span-2">
+            <FieldLabel htmlFor={`${uid}-note`}>Nota (opcional)</FieldLabel>
+            <Textarea
+              id={`${uid}-note`}
+              value={note}
+              disabled={fieldDisabled}
+              maxLength={500}
+              rows={2}
+              placeholder="Detalle clínico del hallazgo…"
+              onChange={(event) => setNote(event.target.value)}
             />
           </Field>
-          <div className="sm:col-span-2">
-            <Cie10Search
-              value={treatCie}
-              onChange={(code) => setTreatCie(code)}
-              label="Diagnóstico CIE-10 (opcional)"
-              disabled={fieldDisabled}
-            />
-          </div>
         </div>
       )}
       {contextFirst ? null : (
         <details>
           <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
-            Historial y contexto de las piezas
+            Estado y contexto de las piezas
           </summary>
           {toothContexts}
         </details>
       )}
     </div>
   )
+  const hideSubmit = !canMutate || teeth.length === 0 || choosingFinding
   return (
     <>
       {inline ? (
@@ -1219,7 +1113,7 @@ export function ToothDrawer({
           title={title}
           description={description}
           headerContent={headerContent}
-          hideSubmit={!canMutate || teeth.length === 0 || (mode === "diagnosis" && choosingFinding)}
+          hideSubmit={hideSubmit}
           onSubmit={submit}
           isDirty={isDirty}
           isSubmitting={busy}
@@ -1237,7 +1131,7 @@ export function ToothDrawer({
           title={title}
           description={description}
           headerContent={headerContent}
-          hideSubmit={!canMutate || teeth.length === 0 || (mode === "diagnosis" && choosingFinding)}
+          hideSubmit={hideSubmit}
           className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(42rem,calc(100vw-2rem))] data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem)] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem)]"
           onSubmit={submit}
           isDirty={isDirty}
@@ -1292,6 +1186,11 @@ export function ToothDrawer({
   )
 }
 
+/**
+ * Lo que tiene la pieza: su estado actual (lo registrado en esta atención se
+ * anula aquí con motivo), su plan, su historia y sus imágenes. La evolución del
+ * odontograma, con lo anulado, es una sola y vive junto al gráfico.
+ */
 function ToothContext({
   patientId,
   toothNumber,
@@ -1299,6 +1198,7 @@ function ToothContext({
   history,
   planQuery,
   docsQuery,
+  encounterId,
   canMutate,
   voidPending,
   defaultOpen,
@@ -1310,19 +1210,13 @@ function ToothContext({
   history: OdontogramEntry[]
   planQuery: PlanQueryState
   docsQuery: DocsQueryState
+  encounterId?: string
   canMutate: boolean
   voidPending: boolean
   defaultOpen: boolean
   onVoid: (id: string, label: string) => void
 }): React.JSX.Element {
-  const sortedHistory = [...history].sort((a, b) => entryTime(b) - entryTime(a))
-
-  const affectedSurfaces = Array.from(
-    new Set(entries.map((e) => e.surface).filter((s): s is string => s != null)),
-  )
-  const currentDiagnoses = Array.from(
-    new Set(entries.map((e) => e.diagnosisCode).filter((c): c is string => c != null && c !== "")),
-  )
+  const official = useOdontogramNotation()
   const needsReview = entries.filter((e) => e.needsReview)
 
   const toothPlan = (planQuery.data?.data ?? []).filter((item) => item.toothNumber === toothNumber)
@@ -1355,64 +1249,60 @@ function ToothContext({
           {entries.length === 0 ? (
             <p className="text-sm text-muted-foreground">Sin hallazgos vigentes en esta pieza.</p>
           ) : (
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-1.5">
-                {entries.map((entry) => {
-                  const abbreviation = abbreviationOf(entry.condition, entry.details)
-                  return (
-                    <Badge key={entry.id} variant={entry.needsReview ? "outline" : undefined}>
-                      {abbreviation ? `${abbreviation} · ` : ""}
-                      {clinicalConditionLabel(entry.condition)}
-                    </Badge>
-                  )
-                })}
-                {entries
-                  .filter((entry) => entry.note || entry.encounterId)
-                  .map((entry) => (
-                    <div key={entry.id} className="text-sm">
-                      {entry.note && <p>{entry.note}</p>}
-                      {entry.encounterId && (
-                        <a
-                          className="text-xs underline"
-                          href={`/patients/${patientId}/encounters/${entry.encounterId}`}
-                        >
-                          Evaluación de origen
-                          {entry.createdAt ? ` · ${timeAgo(entry.createdAt)}` : ""}
-                        </a>
-                      )}
-                    </div>
-                  ))}
-              </div>
-              {affectedSurfaces.length > 0 && (
-                <div className="flex flex-wrap gap-1.5" aria-label="Superficies afectadas">
-                  {affectedSurfaces.map((s) => (
-                    <Badge key={s} variant="outline">
-                      {clinicalSurfaceLabel(s)}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-              {currentDiagnoses.length > 0 && (
-                <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  CIE-10:
-                  {currentDiagnoses.map((code) => (
-                    <Badge key={code} variant="outline">
-                      {code}
-                    </Badge>
-                  ))}
-                </p>
-              )}
-              {needsReview.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {needsReview.length}{" "}
-                  {needsReview.length === 1
-                    ? "registro anterior migrado requiere"
-                    : "registros anteriores migrados requieren"}{" "}
-                  revisión clínica: se muestran en el historial, fuera del dibujo normativo.
-                </p>
-              )}
-            </div>
+            <ul className="flex flex-col gap-1.5">
+              {entries.map((entry) => {
+                const words = findingWords(official, entry)
+                // Solo lo registrado en la atención en curso se corrige aquí.
+                const ownedHere = canMutate && !!encounterId && entry.encounterId === encounterId
+                return (
+                  <li
+                    key={entry.id}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2 py-1.5 text-sm"
+                  >
+                    <span className="min-w-0 flex-1">
+                      {words}
+                      {entry.surface ? ` · ${clinicalSurfaceLabel(entry.surface)}` : ""}
+                      {entry.diagnosisCode ? ` · CIE-10 ${entry.diagnosisCode}` : ""}
+                    </span>
+                    {entry.needsReview ? <Badge variant="outline">Requiere revisión</Badge> : null}
+                    {entry.leftByPlanItemId ? <Badge variant="outline">Lo dejó un tratamiento</Badge> : null}
+                    {entry.createdAt ? (
+                      <span className="text-xs text-muted-foreground">{timeAgo(entry.createdAt)}</span>
+                    ) : null}
+                    {ownedHere ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        disabled={voidPending}
+                        onClick={() => onVoid(entry.id, `pieza ${toothNumber} (${findingWords(official, entry)})`)}
+                      >
+                        Anular
+                      </Button>
+                    ) : null}
+                    {entry.note ? <p className="w-full text-muted-foreground">{entry.note}</p> : null}
+                    {entry.needsReview && originalLegacyText(entry) ? (
+                      <p className="w-full text-xs text-muted-foreground">{originalLegacyText(entry)}.</p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
           )}
+          {needsReview.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {needsReview.length}{" "}
+              {needsReview.length === 1
+                ? "registro anterior migrado requiere"
+                : "registros anteriores migrados requieren"}{" "}
+              revisión clínica: se muestran en la evolución, fuera del dibujo.
+            </p>
+          )}
+          {history.some((entry) => entry.status === "voided") ? (
+            <p className="text-xs text-muted-foreground">
+              Lo anulado de esta pieza sigue en la evolución, con su motivo.
+            </p>
+          ) : null}
         </section>
 
         <section aria-label={`Plan de la pieza ${toothNumber}`} className="flex flex-col gap-2">
@@ -1447,10 +1337,10 @@ function ToothContext({
                         {item.odontogramEntryId && (
                           <p className="w-full text-xs">
                             Hallazgo de origen:{" "}
-                            {clinicalConditionLabel(
-                              history.find((entry) => entry.id === item.odontogramEntryId)
-                                ?.condition ?? "",
-                            ) || "Consultar registro de origen"}
+                            {(() => {
+                              const origin = history.find((entry) => entry.id === item.odontogramEntryId)
+                              return origin ? findingWords(official, origin) : "Consultar registro de origen"
+                            })()}
                           </p>
                         )}
                         {item.sourceEncounterId && (
@@ -1521,125 +1411,6 @@ function ToothContext({
               {toothOtherDocs.map((doc) => (
                 <ToothDocLink key={doc.id} patientId={patientId} doc={doc} />
               ))}
-            </ul>
-          )}
-        </section>
-
-        <section
-          aria-label={`Historial de la pieza ${toothNumber}`}
-          className="flex flex-col gap-2"
-        >
-          <h4 className="text-sm font-medium">Hallazgos del odontograma (con correcciones)</h4>
-          {sortedHistory.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sin entradas registradas.</p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {sortedHistory.map((entry) => {
-                const voided = entry.status === "voided"
-                const abbreviation = abbreviationOf(entry.condition, entry.details)
-                const detailBits: string[] = []
-                const variantLabel = entry.details?.variant
-                  ? findingDefinition(entry.condition)?.variants?.find(
-                      (v) => v.value === entry.details?.variant,
-                    )?.label
-                  : undefined
-                if (variantLabel) detailBits.push(variantLabel)
-                if (entry.details?.quality && QUALITY_LABELS[entry.details.quality]) {
-                  detailBits.push(QUALITY_LABELS[entry.details.quality])
-                }
-                if (entry.details?.grade != null) detailBits.push(`Grado ${entry.details.grade}`)
-                if (entry.details?.direction && DIRECTION_LABELS[entry.details.direction]) {
-                  detailBits.push(DIRECTION_LABELS[entry.details.direction])
-                }
-                if (entry.details?.positions?.length) {
-                  detailBits.push(
-                    entry.details.positions.map((p) => clinicalSurfaceLabel(p)).join("/"),
-                  )
-                }
-                if (entry.details?.relatedTeeth?.length) {
-                  detailBits.push(`Piezas ${entry.details.relatedTeeth.join(", ")}`)
-                }
-                if (entry.details?.abutmentTeeth?.length) {
-                  detailBits.push(`Pilares ${entry.details.abutmentTeeth.join(", ")}`)
-                }
-                if (entry.details?.specifications) detailBits.push(entry.details.specifications)
-                if (entry.details?.observations) detailBits.push(entry.details.observations)
-                if (entry.details?.drawing?.length) {
-                  detailBits.push(
-                    `${entry.details.drawing.length} ${entry.details.drawing.length === 1 ? "trazo" : "trazos"}`,
-                  )
-                }
-                return (
-                  <li
-                    key={entry.id}
-                    className={`flex flex-col gap-1 rounded-md border px-2 py-1 text-sm ${
-                      voided ? "text-muted-foreground" : ""
-                    }`}
-                  >
-                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span className={voided ? "line-through" : ""}>
-                        {abbreviation ? `${abbreviation} · ` : ""}
-                        {clinicalConditionLabel(entry.condition)}
-                        {entry.surface ? ` (${clinicalSurfaceLabel(entry.surface)})` : ""} ·{" "}
-                        {statusLabel(entry.status)}
-                      </span>
-                      {entry.needsReview && <Badge variant="outline">Requiere revisión</Badge>}
-                      {entry.diagnosisCode && (
-                        <Badge variant="outline" className={voided ? "line-through" : ""}>
-                          {entry.diagnosisCode}
-                        </Badge>
-                      )}
-                      {entry.createdAt && (
-                        <span className="text-xs text-muted-foreground">
-                          {timeAgo(entry.createdAt)}
-                        </span>
-                      )}
-                      {voided ? (
-                        <span className="text-xs">
-                          (anulada{entry.voidReason ? `: ${entry.voidReason}` : ""})
-                        </span>
-                      ) : (
-                        canMutate && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            className="ml-auto"
-                            disabled={voidPending}
-                            onClick={() =>
-                              onVoid(
-                                entry.id,
-                                `pieza ${toothNumber} (${clinicalConditionLabel(entry.condition)})`,
-                              )
-                            }
-                          >
-                            Anular
-                          </Button>
-                        )
-                      )}
-                    </span>
-                    {entry.needsReview && (
-                      <span className="text-xs text-muted-foreground">
-                        Registro anterior migrado sin variante normativa: consérvalo como
-                        antecedente y registra el hallazgo vigente con el formulario.
-                        {originalLegacyText(entry) ? ` ${originalLegacyText(entry)}.` : ""}
-                      </span>
-                    )}
-                    {entry.note && (
-                      <span className={`text-muted-foreground ${voided ? "line-through" : ""}`}>
-                        — {entry.note}
-                      </span>
-                    )}
-                    {detailBits.length > 0 && (
-                      <span
-                        className={`text-xs text-muted-foreground ${voided ? "line-through" : ""}`}
-                      >
-                        {detailBits.join(" · ")}
-                      </span>
-                    )}
-                  </li>
-                )
-              })}
             </ul>
           )}
         </section>

@@ -136,6 +136,7 @@ import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
+import { registerToothFinding } from "./tooth-panel.js"
 import { createClinicalOrder, signConsentDocument } from "./clinical-forms.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
@@ -780,13 +781,15 @@ const [miraflores] = await db
   .insert(branch)
   .values([
     // Miraflores hereda la zona de la organización (`timezone` en null).
-    { organizationId: ORG_A, name: "Sede Miraflores", ubigeo: "150122" },
+    { organizationId: ORG_A, name: "Sede Miraflores", department: "Lima", province: "Lima", district: "Miraflores" },
     // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin sillones
     // ni horarios: es la sede limpia para probar la configuración desde cero.
     {
       organizationId: ORG_A,
       name: "Sede Surco",
-      ubigeo: "150140",
+      department: "Lima",
+      province: "Lima",
+      district: "Santiago de Surco",
       phone: "+51987655001",
       timezone: "America/Lima",
     },
@@ -1346,14 +1349,21 @@ for (const p of PATIENTS_A) {
           maritalStatus: "casado",
           educationLevel: "superior_universitaria_completa",
           occupation: "Docente",
-          birthPlaceUbigeo: "080000",
+          birthCountry: "PE",
+          birthPlace: "Cusco",
+          // Dirección internacional con lo de Perú: departamento de la lista
+          // (ISO 3166-2:PE), provincia, distrito y referencia.
           address: "Jr. Las Begonias 120, dpto. 302",
-          addressUbigeo: "150000",
+          addressCity: "Miraflores",
+          addressDistrict: "Lima",
+          addressRegion: "PE-LMA",
           addressReference: "Frente al parque Kennedy",
           emergencyContactName: "Carlos Paredes",
           emergencyContactRelationship: "conyuge",
           emergencyContactPhone: "+51912345678",
-          insuranceType: "EPS",
+          // EPS: régimen con nombre propio en Perú, de tipo general «Privado».
+          insuranceType: "PRIVADO",
+          insuranceScheme: "EPS",
           insurerName: "Pacífico EPS",
           affiliationNumber: "EPS-00987123",
         }
@@ -1474,6 +1484,8 @@ const seedOffers: Array<{
   billingMode?: "treatment" | "session"
   /** Cómo dice el precio el agente: la semilla muestra las tres formas (ADR 0021). */
   priceDisclosure: "exacto" | "desde" | "evaluacion"
+  /** Qué deja en la pieza al completarse: lo tratado queda dibujado (fase 3, paso 5). */
+  leavesFinding?: { condition: string; variant?: string }
 }> = [
   {
     code: "EVALUACION",
@@ -1501,6 +1513,7 @@ const seedOffers: Array<{
     priceCents: 45000,
     durationMin: 90,
     priceDisclosure: "desde",
+    leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
   },
   {
     code: "CORONA",
@@ -1510,6 +1523,7 @@ const seedOffers: Array<{
     priceCents: 90000,
     durationMin: 60,
     priceDisclosure: "evaluacion",
+    leavesFinding: { condition: "crown", variant: "metal_free" },
   },
   {
     code: "BLANQUEAMIENTO",
@@ -1548,6 +1562,8 @@ const seedOffers: Array<{
     priceCents: 15000,
     durationMin: 45,
     priceDisclosure: "desde",
+    // La causa (DEX o DAO) se deduce al completarla, por lo que la motivó.
+    leavesFinding: { condition: "missing_tooth" },
   },
 ]
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
@@ -1758,6 +1774,7 @@ const wear = await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId, {
   toothNumber: 26,
   condition: "tooth_wear",
   surfaces: ["buccal"],
+  encounterId: draft.id,
 })
 const wearId = wear[0]?.id
 if (!wearId) throw new Error("No se pudo crear la entrada de odontograma de la pieza 26")
@@ -1935,23 +1952,14 @@ const cierreRosa = await finalizeEncounter(db, ORG_A, ANA_ID, rosaPatientId, dra
 await addEncounterAddendum(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   text: "Adenda demo: la paciente toleró bien la obturación; sin sangrado posterior.",
 })
+// El cierre de su evaluación firmó solo el odontograma «Inicio del plan de
+// tratamiento» (clínica de Perú, NTS 188); el botón «Firmar odontograma» queda
+// para lo judicial, lo personal y el reingreso: Rosa pidió una copia firmada.
+if (cierreRosa.odontogram?.purpose !== "initial")
+  throw new Error("El cierre de Rosa debía firmar el odontograma de inicio del plan")
 await createOdontogramAssessment(db, ORG_A, ANA_ID, rosaPatientId, {
-  purpose: "initial",
-  specifications: "Odontograma inicial NTS 188-MINSA/DGIESP-2022: caries oclusal en 36 y 46.",
-  observations:
-    "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
-  // Examinador y colegiatura salen del perfil de Ana (Ana Torres · COP 12345).
-  signature: [
-    [
-      [5, 90],
-      [20, 70],
-      [40, 75],
-    ],
-    [
-      [60, 80],
-      [75, 65],
-    ],
-  ],
+  purpose: "personal",
+  observations: "Copia firmada que pidió la paciente para su seguro.",
 })
 await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Control post-obturación: sin dolor, oclusión estable. Pendiente endodoncia pieza 46.",
@@ -2177,20 +2185,20 @@ const luciaEval = await createEncounter(db, ORG_A, ANA_ID, luciaPatientId, {
   reason: "Evaluación: molestia al masticar",
   branchId: miraflores.id,
 })
-await addEncounterDiagnosis(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, {
-  cie10Code: "K02.1",
-  diagnosisType: "definitivo",
-})
+// Panel de la pieza (tablero 4): hallazgo, su CIE-10 (que es el diagnóstico de
+// la atención) y la resina, que va a su plan abierto, en un solo paso por pieza.
 const luciaResinas: Record<number, string> = {}
 for (const tooth of [16, 26, 36]) {
-  const item = await addPlanItem(db, ORG_A, ANA_ID, luciaPatientId, {
-    serviceId: resinaCpmsA.id,
-    sourceEncounterId: luciaEval.id,
-    toothNumber: tooth,
+  const panel = await registerToothFinding(db, ORG_A, ANA_ID, luciaPatientId, {
+    encounterId: luciaEval.id,
+    toothNumbers: [tooth],
+    condition: "caries",
     surfaces: ["occlusal"],
-    diagnosisCode: "K02.1",
+    details: { variant: "dentin" },
+    diagnosis: { cie10Code: "K02.1", diagnosisType: "definitivo" },
+    treatment: { serviceId: resinaCpmsA.id },
   })
-  luciaResinas[tooth] = item.id
+  luciaResinas[tooth] = panel.planItems[0]!.id
 }
 await updateEncounterDraft(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id, {
   evolution: "Caries oclusal en 16, 26 y 36; se indican resinas.",
@@ -2205,6 +2213,9 @@ await createClinicalOrder(db, ORG_A, ANA_ID, {
 })
 const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
 if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")
+// Al firmar, el odontograma quedó firmado como «Inicio del plan de tratamiento».
+if (cierreLucia.odontogram?.purpose !== "initial")
+  throw new Error("La evaluación de Lucía debía firmar el odontograma de inicio del plan")
 await deliverBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id)
 await decideBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id, {
   decisions: [
@@ -2300,6 +2311,18 @@ const registrationConfig = await db.transaction((tx) =>
     enabled: true,
     fields: {
       ...DEFAULT_REGISTRATION_CONFIG.fields,
+      // Como en el lienzo (tablero 5): la clínica pide además el documento; a
+      // quien se registró con lo mínimo le sale «Faltan datos para atenderla».
+      docType: "required",
+      docNumber: "required",
+      insuranceType: "optional",
+      emergencyContactName: "optional",
+      emergencyContactPhone: "optional",
+      maritalStatus: "optional",
+      educationLevel: "optional",
+      occupation: "optional",
+      origin: "optional",
+      referralSource: "optional",
       "dental.ultimaVisita": "optional",
       "dental.experienciaPrevia": "optional",
       "dental.ansiedadDental": "optional",
@@ -2397,6 +2420,9 @@ const pedro = await db.transaction((tx) =>
           givenNames: "Pedro",
           paternalSurname: "Quispe",
           birthDate: "2016-05-20",
+          // La clínica pide el documento: el DNI del menor.
+          docType: "DNI",
+          docNumber: "78901234",
         },
         respondent: "representative",
         // El alta del menor registra a su representante legal (con documento)
@@ -2443,6 +2469,8 @@ await db.transaction((tx) =>
           paternalSurname: "Salas",
           birthDate: "2017-08-12",
           sex: "F",
+          docType: "DNI",
+          docNumber: "79012345",
         },
         respondent: "representative",
         representative: {
@@ -2515,6 +2543,8 @@ await db.transaction((tx) =>
           displayName: "Valeria Quispe · QR demo",
           birthDate: "1998-04-10",
           phone: SHARED_PHONE,
+          docType: "DNI",
+          docNumber: "45678920",
         },
         respondent: "patient",
         privacyAccepted: true,

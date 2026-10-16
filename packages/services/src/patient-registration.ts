@@ -1,7 +1,11 @@
 import {
+  clinicalProfileFor,
   DEFAULT_REGISTRATION_CONFIG,
+  documentIssuerCountry,
   isMinor,
   isRealDate,
+  missingPersonData,
+  type MissingPersonDatum,
   normalizePhone,
   pendingRegistrationFields,
   registrationAnswersSchema,
@@ -166,6 +170,37 @@ export async function getPatientRegistrationConfig(
     .where(eq(patientRegistrationConfig.organizationId, orgId))
     .limit(1)
   return row ? rowToConfig(row) : cloneDefaultConfig()
+}
+
+/**
+ * «Faltan datos para atenderla» de una ficha (decisión 10 de la fase 3): lo
+ * necesario para atender más lo que «Registro de pacientes» marca
+ * obligatorio, con la regla de `missingPersonData`. Se calcula aquí, en el
+ * servidor, para la página de la persona; el teléfono o el correo de quien
+ * habla por ella (un vínculo activo que no es ella) cuentan como suyos.
+ */
+export async function getPatientMissingData(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<MissingPersonDatum[]> {
+  const row = await requirePatient(tx, orgId, patientId)
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const [spokesperson] = await tx
+    .select({ id: contact.id })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+        sql`${patientContact.relationship} <> 'self'`,
+        eq(contact.isActive, true),
+        sql`(${contact.phone} is not null or ${contact.email} is not null)`,
+      ),
+    )
+    .limit(1)
+  return missingPersonData(config, row as unknown as Record<string, unknown>, { representativeContact: !!spokesperson })
 }
 
 export interface SaveRegistrationConfigInput {
@@ -349,7 +384,7 @@ export async function getPublicPatientRegistration(
   tx: Db,
   orgId: string,
   token?: string,
-): Promise<{ config: RegistrationConfig; today: string; context: PublicRegistrationContext }> {
+): Promise<{ config: RegistrationConfig; today: string; countryCode: string | null; context: PublicRegistrationContext }> {
   await advisoryShared(tx, `patient-registration-config:${orgId}`)
   const [config] = await tx
     .select()
@@ -359,8 +394,10 @@ export async function getPublicPatientRegistration(
     .for("share")
   if (!config || !config.enabled) throw unavailable()
   const today = await patientOrganizationToday(tx, orgId)
+  // El país de la clínica: de él dependen los documentos, seguros y regiones del formulario (ADR 0036).
+  const countryCode = await findOrgCountry(tx, orgId)
   // Token vacío o inválido nunca cae al formulario genérico.
-  if (token === undefined) return { config: rowToConfig(config), today, context: { kind: "generic" } }
+  if (token === undefined) return { config: rowToConfig(config), today, countryCode, context: { kind: "generic" } }
   const [link] = await tx
     .select()
     .from(patientRegistrationLink)
@@ -394,6 +431,7 @@ export async function getPublicPatientRegistration(
   return {
     config: rowToConfig(config),
     today,
+    countryCode,
     context: { kind: "conversation", ownRecord: await hasOwnRecord(tx, orgId, link.contactId) },
   }
 }
@@ -487,8 +525,11 @@ async function lockTokenRow(tx: Db, orgId: string, token: string): Promise<Resol
  * aún falta. Es corta: si la lista no cabe, dice cuántos más faltan en vez de cortarse.
  */
 function pendingRegistrationNote(who: string, config: RegistrationConfig, answers: RegistrationAnswers): string {
-  const pending = pendingRegistrationFields(config, answers).map((field) => field.label.toLowerCase())
-  const head = `${who}. Falta en la clínica: confirmar apellidos y nombres`
+  // La misma regla y las mismas palabras que el aviso de su página
+  // («Faltan datos para atenderla»); tipo y número se dicen «documento».
+  const pending = [...new Set(pendingRegistrationFields(config, answers).map((field) =>
+    field.key === "docType" || field.key === "docNumber" ? "documento" : field.label.toLowerCase()))]
+  const head = `${who}. Faltan datos para atenderla: confirmar apellidos y nombres`
   const named: string[] = []
   for (const label of pending) {
     const rest = pending.length - named.length - 1
@@ -810,7 +851,10 @@ export async function registerPatient(
           email: rep.email || null,
           docType: rep.docType ?? null,
           docNumber: rep.docNumber || null,
-          docCountry: rep.docCountry?.toUpperCase() || null,
+          // El documento con su país emisor, como el de la persona.
+          docCountry: rep.docNumber
+            ? documentIssuerCountry(clinicalProfileFor(countryCode), rep.docType, rep.docCountry)
+            : null,
         })
         .returning({ id: contact.id })
       if (!person) throw new Error("No se pudo crear al representante")

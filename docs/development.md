@@ -10,12 +10,11 @@ cp infra/dev/.env.example infra/dev/.env
 pnpm install
 pnpm --filter @odentia/db migrate
 pnpm --filter @odentia/db seed:cie10
-pnpm --filter @odentia/db seed:ubigeo
 pnpm --filter @odentia/db seed:procedures
 pnpm db:seed
 ```
 
-`seed:cie10` carga por defecto el capítulo de cavidad bucal (K00–K14). El catálogo oficial completo se carga con `CIE10_FILE=<csv> CIE10_SHA256=<hash publicado>`: el archivo se rechaza si su hash no coincide. `seed:ubigeo` sigue el mismo patrón: por defecto los 25 departamentos del INEI y, con `UBIGEO_FILE` y `UBIGEO_SHA256`, provincias y distritos de la publicación oficial.
+`seed:cie10` carga por defecto el capítulo de cavidad bucal (K00–K14). El catálogo oficial completo se carga con `CIE10_FILE=<csv> CIE10_SHA256=<hash publicado>`: el archivo se rechaza si su hash no coincide.
 
 `.env` con finales LF: CRLF rompe su carga en sh. Los scripts tsx de db/services cargan `infra/dev/.env` con `--env-file-if-exists`; variables existentes tienen prioridad. Semilla manual determinista/idempotente, no para tests/CI.
 

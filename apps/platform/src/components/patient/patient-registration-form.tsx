@@ -11,17 +11,17 @@
 
 import {
   type BloodGroup,
+  type ClinicalCountryProfile,
+  clinicalProfileFor,
   CONTACT_RELATIONSHIP_LABELS,
   composeDisplayName,
   type DeclarationState,
   type DOC_TYPES,
   EDUCATION_LEVEL_LABELS,
   EDUCATION_LEVELS,
-  FOREIGN_DOC_TYPES,
   type HealthAllergyDeclaration,
   type HealthConditionDeclaration,
   type HealthMedicationDeclaration,
-  type INSURANCE_TYPES,
   isMinor,
   isRealDate,
   MARITAL_STATUS_LABELS,
@@ -32,6 +32,7 @@ import {
   type RegistrationDemographics,
   type RegistrationFieldKey,
   type RegistrationRespondent,
+  registrationFieldAsked,
   SEX_LABELS,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
@@ -55,8 +56,18 @@ import {
 import { useForm } from "@tanstack/react-form"
 import { useEffect, useRef, useState } from "react"
 import {
-  DOC_TYPE_OPTIONS,
-  INSURANCE_OPTIONS,
+  addressLine,
+  asksDocumentCountry,
+  countryChoices,
+  documentChoices,
+  documentLine,
+  insuranceChoiceOf,
+  insuranceChoices,
+  insuranceFromChoice,
+  insuranceText,
+} from "../../lib/person-data"
+import { SearchSelect } from "../settings/search-select"
+import {
   SEX_OPTIONS,
   SectionCard,
   SelectRow,
@@ -119,6 +130,12 @@ export interface PatientRegistrationFormProps {
    * interna. En el formulario público (sin sesión) queda el de partida.
    */
   defaultCountry?: CountryCode
+  /**
+   * País de la clínica (ISO 3166-1 alfa-2): de él dependen los documentos,
+   * seguros, regiones y la procedencia que se piden (ADR 0036). Sin él, el
+   * núcleo internacional.
+   */
+  countryCode?: string | null
   onSubmit: (draft: RegistrationSubmitDraft) => Promise<void>
   children: (view: RegistrationFormView) => React.ReactNode
 }
@@ -144,7 +161,6 @@ const CONTACTO_KEYS = [
   "emergencyContactName",
   "emergencyContactPhone",
   "insuranceType",
-  "insuranceDetail",
   "referralSource",
 ] as const
 const SALUD_KEYS = ["bloodGroup", "allergies", "conditions", "medications"] as const
@@ -158,7 +174,6 @@ type RepresentativeValue = NonNullable<RegistrationAnswers["representative"]>
 type HealthValue = NonNullable<RegistrationAnswers["health"]>
 type DocTypeValue = (typeof DOC_TYPES)[number] | ""
 type SexValue = "M" | "F" | "I" | "D" | ""
-type InsuranceValue = (typeof INSURANCE_TYPES)[number] | ""
 
 interface RegistrationFormValues {
   answers: Omit<RegistrationAnswers, "representative" | "health"> & {
@@ -169,12 +184,15 @@ interface RegistrationFormValues {
   registeredBranchId: string
 }
 
-const EMPTY_REPRESENTATIVE: RepresentativeValue = {
-  displayName: "",
-  relationship: "guardian",
-  relationshipDetail: "",
-  docType: "DNI",
-  docNumber: "",
+/** El representante empieza con el primer documento que se usa en el país de la clínica. */
+function emptyRepresentative(profile: ClinicalCountryProfile): RepresentativeValue {
+  return {
+    displayName: "",
+    relationship: "guardian",
+    relationshipDetail: "",
+    docType: profile.documentTypes[0]!.code,
+    docNumber: "",
+  }
 }
 
 const MARITAL_OPTIONS = [
@@ -212,6 +230,7 @@ function withoutUndefined<T extends Record<string, unknown>>(value: T | undefine
 function buildDefaults(
   mode: RegistrationFormMode,
   initialValues: Partial<RegistrationAnswers> | undefined,
+  profile: ClinicalCountryProfile,
 ): RegistrationFormValues {
   const initialDemographics = withoutUndefined(initialValues?.demographics)
   const initialRepresentative = withoutUndefined(initialValues?.representative)
@@ -238,6 +257,12 @@ function buildDefaults(
         phone: "",
         email: "",
         address: "",
+        addressCity: "",
+        addressDistrict: "",
+        addressRegion: "",
+        addressPostalCode: "",
+        addressCountry: "",
+        addressReference: "",
         maritalStatus: "",
         educationLevel: "",
         occupation: "",
@@ -245,12 +270,12 @@ function buildDefaults(
         emergencyContactName: "",
         emergencyContactPhone: "",
         insuranceType: "",
-        insuranceDetail: "",
+        insuranceScheme: "",
         referralSource: "",
         ...initialDemographics,
       } as RegistrationDemographics,
       respondent: respondent as RegistrationRespondent,
-      representative: { ...EMPTY_REPRESENTATIVE, ...initialRepresentative },
+      representative: { ...emptyRepresentative(profile), ...initialRepresentative },
       health: {
         ...emptyHealth(),
         ...withoutUndefined({
@@ -295,17 +320,33 @@ function buildAnswers(
   options: {
     mode: RegistrationFormMode
     config: RegistrationConfig
+    countryCode: string | null
     hasContact: boolean
     minor: boolean
     needsRepresentative: boolean
   },
 ): RegistrationAnswers {
-  const { mode, config, minor, needsRepresentative } = options
+  const { mode, config, countryCode, minor, needsRepresentative } = options
   const pub = mode === "public" || mode === "preview"
+  const profile = clinicalProfileFor(countryCode)
   const demographics = values.answers.demographics
   const keptDemographics: Record<string, unknown> = {}
+  // Cada dato va con el campo del registro que lo pide: la dirección completa
+  // con «Dirección», el régimen con «Seguro». Lo que no se pide no viaja.
+  const owner: Record<string, RegistrationFieldKey> = {
+    addressCity: "address",
+    addressDistrict: "address",
+    addressRegion: "address",
+    addressPostalCode: "address",
+    addressCountry: "address",
+    addressReference: "address",
+    insuranceScheme: "insuranceType",
+  }
   for (const [key, raw] of Object.entries(demographics)) {
-    if (pub && config.fields[key as RegistrationFieldKey] === "hidden") continue
+    const field = (owner[key] ?? key) as RegistrationFieldKey
+    if (pub && config.fields[field] !== undefined && !registrationFieldAsked(config, field, countryCode)) continue
+    if (key === "origin" && !profile.origin) continue
+    if (key === "docCountry" && !asksDocumentCountry(profile, demographics.docType)) continue
     keptDemographics[key] = typeof raw === "string" ? raw.trim() : (raw ?? "")
   }
   const representative = values.answers.representative
@@ -346,8 +387,11 @@ function buildAnswers(
           ...(trim(representative.email) ? { email: trim(representative.email) } : {}),
           ...(trim(representative.docNumber)
             ? {
-                docType: representative.docType ?? "DNI",
+                docType: representative.docType ?? profile.documentTypes[0]!.code,
                 docNumber: trim(representative.docNumber),
+                ...(asksDocumentCountry(profile, representative.docType) && representative.docCountry
+                  ? { docCountry: representative.docCountry }
+                  : {}),
               }
             : {}),
         }
@@ -465,9 +509,12 @@ export function PatientRegistrationForm({
   initialValues,
   defaultRecipient,
   defaultCountry = DEFAULT_COUNTRY,
+  countryCode = null,
   onSubmit,
   children,
 }: PatientRegistrationFormProps): React.JSX.Element {
+  const profile = clinicalProfileFor(countryCode)
+  const countries = countryChoices(profile.country)
   const hasContact = context.kind !== "generic" && Boolean(context.contact)
   const contact = context.contact
   const selfPatient = contact?.selfPatient ?? null
@@ -475,13 +522,13 @@ export function PatientRegistrationForm({
   // Ya tiene su ficha: el registro público es siempre de otra persona.
   const onlyOthers = mode === "public" && context.ownRecord === true
   const [initialForm] = useState(() => {
-    const defaults = buildDefaults(mode, initialValues)
+    const defaults = buildDefaults(mode, initialValues, profile)
     if (selfPatient || defaultRecipient === "other") defaults.recipient = "other"
     if (onlyOthers) defaults.answers.respondent = "representative"
     return defaults
   })
   const [blankForm] = useState(() => {
-    const blank = buildDefaults(mode, undefined)
+    const blank = buildDefaults(mode, undefined, profile)
     if (onlyOthers) blank.answers.respondent = "representative"
     return blank
   })
@@ -517,6 +564,7 @@ export function PatientRegistrationForm({
     const answers = buildAnswers(values, {
       mode,
       config,
+      countryCode,
       hasContact,
       minor: status.minor,
       needsRepresentative: status.needed,
@@ -524,6 +572,7 @@ export function PatientRegistrationForm({
     const found = validateRegistrationAnswers(config, answers, {
       mode: mode === "preview" ? "public" : mode,
       today,
+      countryCode: countryCode ?? null,
     })
     // El campo emite E.164: si hay un teléfono escrito, tiene que ser un número
     // real de su país (el servidor sigue aceptando texto, esto es la pantalla).
@@ -576,8 +625,11 @@ export function PatientRegistrationForm({
           mode,
           hasContact,
         )
+        // «Procedencia» solo en clínicas de Perú; lo demás, como lo pide el registro.
         const visible = (key: RegistrationFieldKey): boolean =>
-          mode === "internal" || config.fields[key] !== "hidden"
+          mode === "internal"
+            ? key !== "origin" || profile.origin
+            : registrationFieldAsked(config, key, countryCode)
         const steps: StepId[] = ["datos"]
         if (mode === "internal" || status.needed || CONTACTO_KEYS.some((key) => visible(key))) {
           steps.push("contacto")
@@ -590,8 +642,9 @@ export function PatientRegistrationForm({
         const safeCurrent = Math.min(current, steps.length - 1)
         const step = steps[safeCurrent]
         const last = steps.length - 1
+        // «Teléfono o correo»: basta uno de los dos, así que ninguno lleva asterisco.
         const required = (key: RegistrationFieldKey): boolean =>
-          mode === "internal" ? key === "displayName" : config.fields[key] === "required"
+          mode === "internal" ? key === "displayName" : key !== "phone" && config.fields[key] === "required"
         const label = (text: string, key: RegistrationFieldKey): string =>
           required(key) ? `${text} *` : text
 
@@ -646,6 +699,7 @@ export function PatientRegistrationForm({
           const answers = buildAnswers(values, {
             mode,
             config,
+            countryCode,
             hasContact,
             minor: statusNow.minor,
             needsRepresentative: statusNow.needed,
@@ -802,9 +856,9 @@ export function PatientRegistrationForm({
                   <>
                     {(
                       [
-                        ["paternalSurname", "Apellido paterno"],
-                        ["maternalSurname", "Apellido materno"],
                         ["givenNames", "Nombres"],
+                        ["paternalSurname", "Primer apellido"],
+                        ["maternalSurname", "Segundo apellido"],
                       ] as const
                     ).map(([key, text]) => (
                       <div key={key} data-reg-field="demographics.displayName" className="min-w-0">
@@ -867,7 +921,7 @@ export function PatientRegistrationForm({
                           label={label("Tipo de documento", "docType")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.docType"]}
-                          options={DOC_TYPE_OPTIONS}
+                          options={[{ value: "", label: "—" }, ...documentChoices(profile, field.state.value)]}
                           onChange={(next) => {
                             field.handleChange(next as DocTypeValue)
                             clearError("demographics.docType")
@@ -899,19 +953,27 @@ export function PatientRegistrationForm({
                 {visible("docNumber") ? (
                   <form.Subscribe selector={(state) => state.values.answers.demographics.docType}>
                     {(docType) =>
-                      docType && FOREIGN_DOC_TYPES.includes(docType as never) ? (
+                      asksDocumentCountry(profile, docType) ? (
                         <div data-reg-field="demographics.docCountry" className="min-w-0">
                           <form.Field name="answers.demographics.docCountry">
                             {(field) => (
                               <TextRow
-                                label="País emisor (código ISO, p. ej. VE) *"
-                                value={field.state.value ?? ""}
+                                label="País que lo emitió *"
                                 error={errors["demographics.docCountry"]}
-                                inputProps={{ "aria-label": "País emisor", maxLength: 2 }}
-                                onChange={(next) => {
-                                  field.handleChange(next.toUpperCase())
-                                  clearError("demographics.docCountry")
-                                }}
+                                renderControl={(id) => (
+                                  <SearchSelect
+                                    id={id}
+                                    label="País que lo emitió"
+                                    placeholder="Buscar país…"
+                                    value={field.state.value ?? ""}
+                                    options={countries}
+                                    invalid={Boolean(errors["demographics.docCountry"])}
+                                    onChange={(next) => {
+                                      field.handleChange(next)
+                                      clearError("demographics.docCountry")
+                                    }}
+                                  />
+                                )}
                               />
                             )}
                           </form.Field>
@@ -1016,14 +1078,44 @@ export function PatientRegistrationForm({
                           {(field) => (
                             <SelectRow
                               label="Documento del representante *"
-                              value={field.state.value ?? "DNI"}
+                              value={field.state.value ?? profile.documentTypes[0]!.code}
                               error={errors["representative.docType"]}
-                              options={DOC_TYPE_OPTIONS.filter((option) => option.value !== "")}
+                              options={documentChoices(profile, field.state.value)}
                               onChange={(next) => field.handleChange(next as never)}
                             />
                           )}
                         </form.Field>
                       </div>
+                      <form.Subscribe selector={(state) => state.values.answers.representative.docType}>
+                        {(repDocType) =>
+                          asksDocumentCountry(profile, repDocType) ? (
+                            <div data-reg-field="representative.docCountry" className="min-w-0">
+                              <form.Field name="answers.representative.docCountry">
+                                {(field) => (
+                                  <TextRow
+                                    label="País que emitió su documento *"
+                                    error={errors["representative.docCountry"]}
+                                    renderControl={(id) => (
+                                      <SearchSelect
+                                        id={id}
+                                        label="País que emitió su documento"
+                                        placeholder="Buscar país…"
+                                        value={field.state.value ?? ""}
+                                        options={countries}
+                                        invalid={Boolean(errors["representative.docCountry"])}
+                                        onChange={(next) => {
+                                          field.handleChange(next)
+                                          clearError("representative.docCountry")
+                                        }}
+                                      />
+                                    )}
+                                  />
+                                )}
+                              </form.Field>
+                            </div>
+                          ) : null
+                        }
+                      </form.Subscribe>
                       <div data-reg-field="representative.docNumber" className="min-w-0">
                         <form.Field name="answers.representative.docNumber">
                           {(field) => (
@@ -1134,10 +1226,10 @@ export function PatientRegistrationForm({
                     <form.Field name="answers.demographics.address">
                       {(field) => (
                         <TextRow
-                          label={label("Dirección", "address")}
+                          label={label("Dirección: calle y número", "address")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.address"]}
-                          inputProps={{ "aria-label": "Dirección" }}
+                          inputProps={{ "aria-label": "Dirección: calle y número" }}
                           onChange={(next) => {
                             field.handleChange(next)
                             clearError("demographics.address")
@@ -1146,6 +1238,130 @@ export function PatientRegistrationForm({
                       )}
                     </form.Field>
                   </div>
+                ) : null}
+                {visible("address") ? (
+                  <>
+                    {/* La dirección internacional, con los nombres del país de la clínica. */}
+                    {(
+                      [
+                        ["addressCity", profile.address.cityLabel, 100],
+                        ...(profile.address.districtLabel
+                          ? ([["addressDistrict", profile.address.districtLabel, 100]] as const)
+                          : []),
+                      ] as const
+                    ).map(([key, text, max]) => (
+                      <div key={key} data-reg-field={`demographics.${key}`} className="min-w-0">
+                        <form.Field name={`answers.demographics.${key}`}>
+                          {(field) => (
+                            <TextRow
+                              label={text}
+                              value={field.state.value ?? ""}
+                              error={errors[`demographics.${key}`]}
+                              inputProps={{ "aria-label": text, maxLength: max }}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError(`demographics.${key}`)
+                              }}
+                            />
+                          )}
+                        </form.Field>
+                      </div>
+                    ))}
+                    <div data-reg-field="demographics.addressRegion" className="min-w-0">
+                      <form.Field name="answers.demographics.addressRegion">
+                        {(field) =>
+                          profile.address.regions ? (
+                            <SelectRow
+                              label={profile.address.regionLabel}
+                              value={field.state.value ?? ""}
+                              error={errors["demographics.addressRegion"]}
+                              options={[
+                                { value: "", label: "—" },
+                                ...profile.address.regions.map((region) => ({
+                                  value: region.code,
+                                  label: region.label,
+                                })),
+                              ]}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError("demographics.addressRegion")
+                              }}
+                            />
+                          ) : (
+                            <TextRow
+                              label={profile.address.regionLabel}
+                              value={field.state.value ?? ""}
+                              error={errors["demographics.addressRegion"]}
+                              inputProps={{ "aria-label": profile.address.regionLabel, maxLength: 100 }}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError("demographics.addressRegion")
+                              }}
+                            />
+                          )
+                        }
+                      </form.Field>
+                    </div>
+                    {profile.address.postalCode ? (
+                      <div data-reg-field="demographics.addressPostalCode" className="min-w-0">
+                        <form.Field name="answers.demographics.addressPostalCode">
+                          {(field) => (
+                            <TextRow
+                              label="Código postal"
+                              value={field.state.value ?? ""}
+                              error={errors["demographics.addressPostalCode"]}
+                              inputProps={{ "aria-label": "Código postal", maxLength: 20 }}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError("demographics.addressPostalCode")
+                              }}
+                            />
+                          )}
+                        </form.Field>
+                      </div>
+                    ) : null}
+                    <div data-reg-field="demographics.addressCountry" className="min-w-0">
+                      <form.Field name="answers.demographics.addressCountry">
+                        {(field) => (
+                          <TextRow
+                            label="País"
+                            error={errors["demographics.addressCountry"]}
+                            renderControl={(id) => (
+                              <SearchSelect
+                                id={id}
+                                label="País"
+                                placeholder="Buscar país…"
+                                value={field.state.value || profile.country || ""}
+                                options={countries}
+                                onChange={(next) => {
+                                  field.handleChange(next)
+                                  clearError("demographics.addressCountry")
+                                }}
+                              />
+                            )}
+                          />
+                        )}
+                      </form.Field>
+                    </div>
+                    {profile.address.reference ? (
+                      <div data-reg-field="demographics.addressReference" className="min-w-0">
+                        <form.Field name="answers.demographics.addressReference">
+                          {(field) => (
+                            <TextRow
+                              label="Referencia"
+                              value={field.state.value ?? ""}
+                              error={errors["demographics.addressReference"]}
+                              inputProps={{ "aria-label": "Referencia del domicilio", maxLength: 300 }}
+                              onChange={(next) => {
+                                field.handleChange(next)
+                                clearError("demographics.addressReference")
+                              }}
+                            />
+                          )}
+                        </form.Field>
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
                 {visible("maritalStatus") ? (
                   <div data-reg-field="demographics.maritalStatus" className="min-w-0">
@@ -1170,7 +1386,7 @@ export function PatientRegistrationForm({
                     <form.Field name="answers.demographics.educationLevel">
                       {(field) => (
                         <SelectRow
-                          label={label("Grado de instrucción", "educationLevel")}
+                          label={label("Nivel educativo", "educationLevel")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.educationLevel"]}
                           options={EDUCATION_OPTIONS}
@@ -1262,39 +1478,28 @@ export function PatientRegistrationForm({
                 ) : null}
                 {visible("insuranceType") ? (
                   <div data-reg-field="demographics.insuranceType" className="min-w-0">
-                    <form.Field name="answers.demographics.insuranceType">
-                      {(field) => (
-                        <SelectRow
-                          label={label("Seguro", "insuranceType")}
-                          value={field.state.value ?? ""}
-                          error={errors["demographics.insuranceType"]}
-                          options={INSURANCE_OPTIONS}
-                          onChange={(next) => {
-                            field.handleChange(next as InsuranceValue)
-                            clearError("demographics.insuranceType")
-                            clearError("demographics.insuranceDetail")
-                          }}
-                        />
+                    <form.Subscribe selector={(state) => state.values.answers.demographics.insuranceScheme}>
+                      {(scheme) => (
+                        <form.Field name="answers.demographics.insuranceType">
+                          {(field) => (
+                            <SelectRow
+                              label={label("Seguro", "insuranceType")}
+                              value={insuranceChoiceOf(field.state.value, scheme)}
+                              error={errors["demographics.insuranceType"] ?? errors["demographics.insuranceScheme"]}
+                              options={[{ value: "", label: "—" }, ...insuranceChoices(profile)]}
+                              onChange={(next) => {
+                                // Una sola lista: el tipo general y, si lo tiene, el régimen del país.
+                                const chosen = insuranceFromChoice(profile, next)
+                                field.handleChange((chosen.insuranceType ?? "") as never)
+                                form.setFieldValue("answers.demographics.insuranceScheme", chosen.insuranceScheme ?? "")
+                                clearError("demographics.insuranceType")
+                                clearError("demographics.insuranceScheme")
+                              }}
+                            />
+                          )}
+                        </form.Field>
                       )}
-                    </form.Field>
-                  </div>
-                ) : null}
-                {visible("insuranceDetail") ? (
-                  <div data-reg-field="demographics.insuranceDetail" className="min-w-0">
-                    <form.Field name="answers.demographics.insuranceDetail">
-                      {(field) => (
-                        <TextRow
-                          label={label("Detalle del seguro", "insuranceDetail")}
-                          value={field.state.value ?? ""}
-                          error={errors["demographics.insuranceDetail"]}
-                          inputProps={{ "aria-label": "Detalle del seguro" }}
-                          onChange={(next) => {
-                            field.handleChange(next)
-                            clearError("demographics.insuranceDetail")
-                          }}
-                        />
-                      )}
-                    </form.Field>
+                    </form.Subscribe>
                   </div>
                 ) : null}
                 {visible("referralSource") ? (
@@ -1302,7 +1507,7 @@ export function PatientRegistrationForm({
                     <form.Field name="answers.demographics.referralSource">
                       {(field) => (
                         <TextRow
-                          label={label("Referencia", "referralSource")}
+                          label={label("Cómo nos conoció", "referralSource")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.referralSource"]}
                           inputProps={{ "aria-label": "Cómo nos conoció" }}
@@ -1449,6 +1654,7 @@ export function PatientRegistrationForm({
                 today={today}
                 mode={mode}
                 config={config}
+                countryCode={countryCode}
                 contactName={contact?.displayName}
                 branches={branches}
               />
@@ -1573,6 +1779,7 @@ function ReviewSummary({
   today,
   mode,
   config,
+  countryCode,
   contactName,
   branches,
 }: {
@@ -1580,6 +1787,7 @@ function ReviewSummary({
   today: string
   mode: RegistrationFormMode
   config: RegistrationConfig
+  countryCode: string | null
   contactName: string | undefined
   branches: RegistrationFormBranch[] | undefined
 }): React.JSX.Element {
@@ -1594,26 +1802,25 @@ function ReviewSummary({
   const answers = buildAnswers(values, {
     mode,
     config,
+    countryCode,
     hasContact: contactName !== undefined,
     minor: status.minor,
     needsRepresentative: status.needed,
   })
+  const profile = clinicalProfileFor(countryCode)
   const demographics = answers.demographics
   const health = answers.health
   const rows: Array<[string, string]> = [
     ["Nombre", trim(demographics.displayName) || "—"],
     ["Nacimiento", trim(demographics.birthDate) || "—"],
-    [
-      "Documento",
-      [trim(demographics.docType), trim(demographics.docNumber)].filter(Boolean).join(" ") || "—",
-    ],
+    ["Documento", documentLine(demographics.docType, trim(demographics.docNumber), demographics.docCountry) ?? "—"],
     [
       "Sexo",
       demographics.sex ? (SEX_LABELS[demographics.sex as keyof typeof SEX_LABELS] ?? "—") : "—",
     ],
     ["Teléfono", trim(demographics.phone) || "—"],
     ["Correo", trim(demographics.email) || "—"],
-    ["Dirección", trim(demographics.address) || "—"],
+    ["Dirección", addressLine(profile, demographics) ?? "—"],
     [
       "Estado civil",
       demographics.maritalStatus
@@ -1621,26 +1828,21 @@ function ReviewSummary({
         : "—",
     ],
     [
-      "Grado de instrucción",
+      "Nivel educativo",
       demographics.educationLevel
         ? EDUCATION_LEVEL_LABELS[demographics.educationLevel as keyof typeof EDUCATION_LEVEL_LABELS]
         : "—",
     ],
     ["Ocupación", trim(demographics.occupation) || "—"],
-    ["Procedencia", trim(demographics.origin) || "—"],
+    ...(profile.origin ? ([["Procedencia", trim(demographics.origin) || "—"]] as Array<[string, string]>) : []),
     [
       "Contacto de emergencia",
       [trim(demographics.emergencyContactName), trim(demographics.emergencyContactPhone)]
         .filter(Boolean)
         .join(" · ") || "—",
     ],
-    [
-      "Seguro",
-      [trim(demographics.insuranceType), trim(demographics.insuranceDetail)]
-        .filter(Boolean)
-        .join(" · ") || "—",
-    ],
-    ["Referencia", trim(demographics.referralSource) || "—"],
+    ["Seguro", insuranceText(profile, demographics.insuranceType, demographics.insuranceScheme) ?? "—"],
+    ["Cómo nos conoció", trim(demographics.referralSource) || "—"],
   ]
   if (answers.representative) {
     rows.push(
