@@ -37,3 +37,22 @@ export function majorToCents(text: string, currency: string): number | null {
 export function centsToMajor(cents: number, currency: string): string {
   return String(cents / 10 ** currencyDigits(currency))
 }
+
+/** Precio por acción en millonésimas: hasta tres decimales (USD 0,425). */
+export function formatMicros(micros: number, currency: string, locale = "es-PE"): string {
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 3,
+    }).format(micros / 1_000_000)
+  } catch {
+    return `${micros / 1_000_000} ${currency}`
+  }
+}
+
+/** «10 %» desde puntos básicos. */
+export function formatBps(bps: number, locale = "es-PE"): string {
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bps / 100)} %`
+}

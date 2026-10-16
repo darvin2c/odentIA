@@ -78,8 +78,35 @@ const FICTIONAL_METHODS = [
   },
 ] as const
 
+/**
+ * El plan de la ADR 0030 para probar el cobro por acción: USD 29 que vuelven
+ * en crédito, precio base por acción y prueba de USD 50 y 30 días. Es el plan
+ * por defecto de la semilla; en producción lo configura administración.
+ */
+const ACTION_PLAN = {
+  code: "odentia-ficticio",
+  name: "Plan odentIA (ficticio)",
+  description: "Ejemplo ficticio del cobro por acción; no contratar.",
+  currency: "USD",
+  priceCents: 2900,
+  billingPeriod: "mensual",
+  sortOrder: 0,
+  creditCents: 2900,
+  conversationMicros: 500_000,
+  consultationMicros: 400_000,
+  recoveryMicros: 4_000_000,
+  maxDiscountBps: 6000,
+  sellerDiscountBps: 1000,
+  trialCreditCents: 5000,
+  trialDays: 30,
+  trialMaxCreditCents: 13000,
+  trialMaxDays: 60,
+  isDefault: true,
+} as const
+
 /** Catálogo ficticio (no pisa lo editado: solo inserta lo ausente). */
 export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods: number }> {
+  await db.insert(saasPlan).values(ACTION_PLAN).onConflictDoNothing({ target: saasPlan.code })
   for (const plan of FICTIONAL_PLANS) {
     await db
       .insert(saasPlan)
@@ -107,7 +134,7 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
       })
       .onConflictDoNothing({ target: saasPaymentMethod.code })
   }
-  return { plans: FICTIONAL_PLANS.length, methods: FICTIONAL_METHODS.length }
+  return { plans: FICTIONAL_PLANS.length + 1, methods: FICTIONAL_METHODS.length }
 }
 
 const DEMO_ACTOR = "seed-saas-demo"

@@ -6,10 +6,11 @@
 import { Button } from "@odentia/ui"
 import { EmptyState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { ReceiptForm, type ReceiptCharge, type ReceiptMethod } from "../../components/billing/receipt-form"
 import { SubscriptionStatusCard, type BillingSummary } from "../../components/billing/subscription-status"
+import { ConsumptionCard, type Consumption } from "../../components/billing/consumption"
 import { formatPlanMoney } from "../../components/billing/money"
 import { apiFetch, ApiError } from "../../lib/api"
 
@@ -59,6 +60,15 @@ function BillingPage() {
     queryFn: () =>
       apiFetch<{ data: BillingSummary }>(
         `/api/account/billing/subscription?orgId=${encodeURIComponent(organizationId)}`,
+      ).then((res) => res.data),
+    retry: false,
+  })
+  const navigate = useNavigate()
+  const consumption = useQuery({
+    queryKey: ["billing", organizationId, "consumption"],
+    queryFn: () =>
+      apiFetch<{ data: Consumption }>(
+        `/api/account/billing/consumption?orgId=${encodeURIComponent(organizationId)}`,
       ).then((res) => res.data),
     retry: false,
   })
@@ -144,6 +154,17 @@ function BillingPage() {
       <PageHeader title="Plan y pagos" subtitle="Tu suscripción, cargos y comprobantes" />
       {planMessage ? <p className="text-sm text-muted-foreground">{planMessage}</p> : null}
       <SubscriptionStatusCard summary={summary} />
+      {consumption.isPending ? (
+        <LoadingState message="Cargando lo que hicieron tus agentes…" />
+      ) : consumption.isError ? (
+        <p className="text-sm text-muted-foreground">No se pudo cargar lo que hicieron tus agentes. Reintenta en un momento.</p>
+      ) : (
+        <ConsumptionCard
+          data={consumption.data}
+          exempt={summary.isDemo}
+          onShowActions={() => void navigate({ to: "/billing/$organizationId/acciones", params: { organizationId } })}
+        />
+      )}
 
       <section aria-labelledby="planes" className="flex flex-col gap-2">
         <h2 id="planes" className="text-base font-semibold">

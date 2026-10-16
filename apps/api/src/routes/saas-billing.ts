@@ -20,7 +20,11 @@ import {
   createSaasCharge,
   createSaasPlan,
   decideSaasAccess,
+  currentSaasPeriod,
   getOrganizationBillingSummary,
+  getSaasConsumption,
+  listPendingRecoveries,
+  listPeriodActions,
   getSaasReceiptUrl,
   getSaasSubscription,
   getSaasUsage30d,
@@ -839,6 +843,57 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
       withOrgContext(deps.db, orgId, (tx) => listSaasPlans(tx, { currency: parsed.data.currency })),
     )
   })
+  // C2: lo que hicieron los agentes en el tramo que corre, con sus precios (ADR 0030).
+  app.get("/consumption", async (c) => {
+    const orgId = c.req.query("orgId")
+    if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
+    const membership = await accountOwnerOrAdmin(deps, c, orgId)
+    if (!membership)
+      return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve el consumo"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getSaasConsumption(tx, orgId)),
+    )
+  })
+
+  // C3: cada acción del tramo con su estado; las citas que esperan asistencia al final.
+  app.get("/actions", async (c) => {
+    const orgId = c.req.query("orgId")
+    if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
+    const membership = await accountOwnerOrAdmin(deps, c, orgId)
+    if (!membership)
+      return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve el consumo"), 403)
+    const parsed = z
+      .object({
+        orgId: z.string(),
+        kind: z.enum(["conversacion", "consulta", "cita"]).optional(),
+        state: z.enum(["esperando"]).optional(),
+        limit: z.coerce.number().int().min(1).max(100).default(50),
+        offset: z.coerce.number().int().min(0).default(0),
+      })
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const query = parsed.data
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const period = await currentSaasPeriod(tx, orgId)
+        const pending = await listPendingRecoveries(tx, orgId)
+        // Lo que no se cobra (anulado o dentro de una cita) se dice en su fila, no se esconde.
+        const rows =
+          query.state === "esperando"
+            ? pending
+            : [...(await listPeriodActions(tx, orgId, period)).reverse(), ...pending].filter(
+                (row) => !query.kind || row.kind === query.kind,
+              )
+        return {
+          period: { start: period.start, end: period.end, credit: period.credit },
+          total: rows.length,
+          pending: pending.length,
+          items: rows.slice(query.offset, query.offset + query.limit),
+        }
+      }),
+    )
+  })
+
   // Medios que configuró administración (con instrucciones reales de pago).
   app.get("/methods", async (c) => {
     const orgId = c.req.query("orgId")

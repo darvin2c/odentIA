@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
-import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
@@ -335,7 +335,7 @@ async function wipeSeed(): Promise<void> {
     "support_message",
     "support_case",
     "saas_notice",
-    "saas_usage_daily",
+    "saas_action",
     "portal_challenge",
     "portal_passkey",
     "portal_verification",
@@ -2610,6 +2610,51 @@ await db.transaction(async (tx) => {
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })
+// Lo que hicieron los agentes este mes (ADR 0030), para ver Plan y pagos y
+// «Ver cada acción» con datos: conversaciones, una consulta y una cita, con
+// el precio base del plan de la semilla. Ejemplos; ningún agente los hizo.
+{
+  const people = [...contactIdByName.values()].slice(0, 6)
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
+  await db.insert(saasAction).values([
+    ...people.map((contactId, index) => ({
+      organizationId: ORG_A,
+      kind: "conversacion",
+      occurredAt: hoursAgo(6 + index * 30),
+      contactId,
+      channel: index % 2 === 0 ? "whatsapp" : "instagram",
+      detail: `Atendió una conversación por ${index % 2 === 0 ? "WhatsApp" : "Instagram"}`,
+      currency: "USD",
+      basePriceMicros: 500_000,
+      priceMicros: 500_000,
+      dedupeKey: `semilla:conversacion:${index}`,
+    })),
+    {
+      organizationId: ORG_A,
+      kind: "consulta",
+      occurredAt: hoursAgo(20),
+      contactId: people[0] ?? null,
+      detail: "Ordenó la consulta dictada por Ana Torres",
+      currency: "USD",
+      basePriceMicros: 400_000,
+      priceMicros: 400_000,
+      dedupeKey: "semilla:consulta:0",
+    },
+    {
+      organizationId: ORG_A,
+      kind: "cita",
+      occurredAt: hoursAgo(50),
+      contactId: people[1] ?? null,
+      channel: "enlace",
+      windowStart: hoursAgo(120),
+      detail: "Volvió tras «Seguir un presupuesto» y reservó desde el enlace",
+      currency: "USD",
+      basePriceMicros: 4_000_000,
+      priceMicros: 4_000_000,
+      dedupeKey: "semilla:cita:0",
+    },
+  ]).onConflictDoNothing()
+}
 // Uso de IA del mes para la ficha de la clínica en la administración (ADR 0030).
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no
 // salen de ningún proveedor. Jev queda sin costo: no tiene precio cargado.

@@ -44,6 +44,7 @@ import {
   setAgentStatus,
 } from "./conversations.js"
 import { type AiUsageEntry, knownCostMicros, recordAiUsage } from "./ai-usage.js"
+import { countConversationAction } from "./saas-actions.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
   closeOpportunity,
@@ -2506,6 +2507,10 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
   })
   if (input.usage?.length) {
     await recordAiUsage(tx, orgId, { origin: "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
+  }
+  // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0030).
+  if (input.status === "ok" && (input.llmCalls ?? 0) > 0 && input.conversationId) {
+    await countConversationAction(tx, orgId, { conversationId: input.conversationId, at: input.startedAt })
   }
   // La fila se escribe después de los efectos de la corrida: sin este aviso
   // la supervisión no se entera de las que no envían ni cambian el hilo.
