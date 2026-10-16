@@ -12,7 +12,7 @@ La suscripción de hoy (`saas_plan`) cobra una cuota fija por plan con topes de 
 - **Se cobra por acción, cuando hay un resultado que la clínica reconoce:**
   - Conversación de Recepción, una por persona cada 24 horas (la atención de la ADR 0024): USD 0,50. Es la parte baja de los agentes de atención internacionales, que cobran entre USD 0,50 y 2 por conversación o resolución.
   - Consulta dictada y confirmada por el odontólogo (ADR 0012): USD 0,40. El borrador descartado no se cobra.
-  - Cita recuperada: reservada dentro de los 7 días siguientes a un mensaje del Administrador, en su conversación o desde su enlace (ADR 0014 y 0023), y atendida: USD 4. Si salió de una conversación, la conversación queda dentro.
+  - Cita recuperada: reservada dentro de los 7 días siguientes a un mensaje del Administrador, en su conversación o desde su enlace (ADR 0014 y 0023), y atendida: USD 4. Si salió de una conversación, la conversación queda dentro, aunque la cita se cuente en otro tramo: mientras la cita sigue en pie la conversación espera (no se cobra ni gasta crédito); si no se da, se cobra en el primer tramo que se cierre después, una sola vez.
   - Recordatorios, avisos al equipo y el sistema no se cobran aparte.
 - **Descuentos solo en las acciones, nunca en la cuota,** y siempre junto al precio base. El vendedor da hasta 10 %; la administración de odentIA, hasta el precio mínimo (60 % menos: USD 0,20 por conversación). Ningún precio queda por debajo del doble de su peor costo, y el servidor lo comprueba.
 - **Las cifras se configuran en la administración** (cuota, crédito, precio base, precio mínimo y cuánto descuenta el vendedor), sin tocar código y sin reescribir cargos ya emitidos.
