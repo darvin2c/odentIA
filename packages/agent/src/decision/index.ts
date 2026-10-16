@@ -1,3 +1,4 @@
+import { reportAiUse } from "../ai-usage.js"
 import { createConfiguredChatModel, type LlmSpec } from "../llm.js"
 import { createBaselineDecisionModel } from "./baseline.js"
 import { createFakeDecisionModel } from "./fake.js"
@@ -33,6 +34,32 @@ const DEFAULT_TIMEOUT_MS = 5_000
  * dev/e2e siguen deterministas. Los comerciales exigen clave de plataforma.
  */
 export async function createDecisionModel(
+  provider: DecisionProvider,
+  platform: PlatformDecisions,
+  chat: LlmSpec,
+): Promise<DecisionModel | null> {
+  const model = await buildDecisionModel(provider, platform, chat)
+  return model && model.provider !== "fake" ? metered(model) : model
+}
+
+/** Cada respuesta queda anotada en la operación medida con lo que reportó el proveedor. */
+function metered(model: DecisionModel): DecisionModel {
+  return {
+    ...model,
+    async decide(state, questions, opts) {
+      const result = await model.decide(state, questions, opts)
+      reportAiUse({
+        provider: model.provider,
+        model: result.model,
+        inputTokens: result.usage?.inputTokens ?? null,
+        outputTokens: result.usage?.outputTokens ?? null,
+      })
+      return result
+    },
+  }
+}
+
+async function buildDecisionModel(
   provider: DecisionProvider,
   platform: PlatformDecisions,
   chat: LlmSpec,

@@ -6,10 +6,14 @@
 import { Button } from "@odentia/ui"
 import { EmptyState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { ReceiptForm, type ReceiptCharge, type ReceiptMethod } from "../../components/billing/receipt-form"
 import { SubscriptionStatusCard, type BillingSummary } from "../../components/billing/subscription-status"
+import { ConsumptionCard, type Consumption } from "../../components/billing/consumption"
+import { type OfferPlan, PlanOffer } from "../../components/billing/plan-offer"
+import { SpendCapDrawer } from "../../components/billing/spend-cap"
+import { ChargesList, type ChargeLine } from "../../components/billing/charges"
 import { formatPlanMoney } from "../../components/billing/money"
 import { apiFetch, ApiError } from "../../lib/api"
 
@@ -17,18 +21,15 @@ export const Route = createFileRoute("/_app/billing/$organizationId")({
   component: BillingPage,
 })
 
-interface Plan {
-  code: string
-  name: string
-  currency: string
-  priceCents: number
-  billingPeriod: string
-}
+type Plan = OfferPlan
 
 interface Charge extends ReceiptCharge {
+  planName: string
   periodStart: string
   periodEnd: string
+  paidCents: number
   dueAt: string | null
+  lines?: ChargeLine[]
 }
 
 interface Payment {
@@ -53,12 +54,22 @@ function BillingPage() {
   const { organizationId } = Route.useParams()
   const queryClient = useQueryClient()
   const [planMessage, setPlanMessage] = useState<string | null>(null)
+  const [capOpen, setCapOpen] = useState(false)
 
   const subscription = useQuery({
     queryKey: ["billing", organizationId, "subscription"],
     queryFn: () =>
       apiFetch<{ data: BillingSummary }>(
         `/api/account/billing/subscription?orgId=${encodeURIComponent(organizationId)}`,
+      ).then((res) => res.data),
+    retry: false,
+  })
+  const navigate = useNavigate()
+  const consumption = useQuery({
+    queryKey: ["billing", organizationId, "consumption"],
+    queryFn: () =>
+      apiFetch<{ data: Consumption }>(
+        `/api/account/billing/consumption?orgId=${encodeURIComponent(organizationId)}`,
       ).then((res) => res.data),
     retry: false,
   })
@@ -97,6 +108,11 @@ function BillingPage() {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["billing", organizationId] })
+  }
+
+  const saveCap = async (capCents: number | null) => {
+    await apiFetch(`/api/account/billing/spend-cap`, { method: "POST", body: JSON.stringify({ orgId: organizationId, capCents }) })
+    refresh()
   }
 
   const choosePlan = useMutation({
@@ -144,6 +160,30 @@ function BillingPage() {
       <PageHeader title="Plan y pagos" subtitle="Tu suscripción, cargos y comprobantes" />
       {planMessage ? <p className="text-sm text-muted-foreground">{planMessage}</p> : null}
       <SubscriptionStatusCard summary={summary} />
+      {consumption.isPending ? (
+        <LoadingState message="Cargando lo que hicieron tus agentes…" />
+      ) : consumption.isError ? (
+        <p className="text-sm text-muted-foreground">No se pudo cargar lo que hicieron tus agentes. Reintenta en un momento.</p>
+      ) : (
+        <ConsumptionCard
+          data={consumption.data}
+          exempt={summary.isDemo}
+          onShowActions={() => void navigate({ to: "/billing/$organizationId/acciones", params: { organizationId } })}
+          onChangeCap={summary.isDemo ? undefined : () => setCapOpen(true)}
+        />
+      )}
+      {consumption.data ? (
+        <SpendCapDrawer
+          open={capOpen}
+          currency={consumption.data.currency ?? "USD"}
+          currentCents={consumption.data.spendCapCents ?? null}
+          projectedOverCents={
+            consumption.data.projectedCents !== null ? Math.max(0, consumption.data.projectedCents - consumption.data.creditCents) : null
+          }
+          onClose={() => setCapOpen(false)}
+          onSave={saveCap}
+        />
+      ) : null}
 
       <section aria-labelledby="planes" className="flex flex-col gap-2">
         <h2 id="planes" className="text-base font-semibold">
@@ -156,32 +196,33 @@ function BillingPage() {
         ) : plans.data.length === 0 ? (
           <p className="text-sm text-muted-foreground">Aún no hay planes publicados.</p>
         ) : (
-          <ul className="flex flex-col gap-2">
-            {plans.data.map((plan) => {
-              const current = summary.plan?.code === plan.code
-              return (
-                <li
-                  key={plan.code}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
-                >
-                  <div className="min-w-0 flex-1 basis-56">
-                    <p className="text-sm font-medium">
-                      {plan.name} {current ? <span className="text-muted-foreground">(actual)</span> : null}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{plan.billingPeriod}</p>
-                  </div>
-                  <p className="text-sm font-semibold tabular-nums">
-                    {formatPlanMoney(plan.priceCents, plan.currency)}
-                  </p>
-                  {!current ? (
-                    <Button size="sm" variant="outline" onClick={() => choosePlan.mutate(plan.code)}>
-                      Elegir
-                    </Button>
-                  ) : null}
-                </li>
-              )
-            })}
-          </ul>
+          <div className="flex flex-col gap-3">
+            {plans.data.map((plan) => (
+              <PlanOffer
+                key={plan.code}
+                plan={plan}
+                current={summary.plan?.code === plan.code}
+                trialing={summary.status === "prueba"}
+                consumption={consumption.data ?? null}
+                taxLabel={consumption.data?.tax?.label ?? null}
+                busy={choosePlan.isPending && choosePlan.variables === plan.code}
+                onActivate={() => choosePlan.mutate(plan.code)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="cargos" className="flex flex-col gap-2">
+        <h2 id="cargos" className="text-base font-semibold">
+          Tus cargos
+        </h2>
+        {charges.isPending ? (
+          <LoadingState message="Cargando cargos…" />
+        ) : charges.isError ? (
+          <p className="text-sm text-muted-foreground">No se pudieron cargar los cargos.</p>
+        ) : (
+          <ChargesList charges={charges.data} />
         )}
       </section>
 

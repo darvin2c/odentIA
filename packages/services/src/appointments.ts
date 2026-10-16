@@ -39,6 +39,7 @@ import {
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
+import { countRecoveredAppointment } from "./saas-actions.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -928,6 +929,8 @@ export async function setAppointmentStatus(
       .returning({ id: appointment.id })
     if (!updated) throw notFound("Cita")
     await audit(tx, orgId, actorUserId, `appointment.status_${next}`, id, metadata)
+    // El paciente asistió: si el Administrador lo recuperó, cuenta la cita (ADR 0030).
+    if (next === "atendida") await countRecoveredAppointment(tx, orgId, id, new Date())
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
     const notice =

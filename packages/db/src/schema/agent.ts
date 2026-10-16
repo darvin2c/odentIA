@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm"
 import {
+  bigint,
   check,
   customType,
   date,
@@ -285,7 +286,10 @@ export const agentRunLedger = pgTable(
     outputTokens: integer("output_tokens"),
     /** Parte de `input_tokens` servida desde la caché del proveedor. */
     cachedInputTokens: integer("cached_input_tokens"),
+    /** Parte de `input_tokens` que se escribió en la caché (Anthropic la cobra aparte). */
+    cacheWriteTokens: integer("cache_write_tokens"),
     llmCalls: integer("llm_calls"),
+    /** Millonésimas de USD: la suma de las filas de `ai_usage` de la corrida. */
     costMicros: integer("cost_micros"),
     toolsUsed: text("tools_used").array().notNull().default(sql`'{}'`),
     error: text("error"),
@@ -297,6 +301,63 @@ export const agentRunLedger = pgTable(
       "agent_run_ledger_status_check",
       sql`${table.status} in ('ok','handoff','error','omitida','sin_respuesta')`,
     ),
+  ],
+)
+
+/**
+ * De dónde sale un uso de IA (ADR 0030). `recepcion` son las corridas reales;
+ * `probar`, `simulacion` y `vista_previa`, las pruebas desde la plataforma;
+ * `practica_dictado`, el dictado de práctica; `administrador`, lo que se le
+ * pide con palabras; `ya_aviso`, la comprobación antes de un seguimiento;
+ * `vectores`, el índice de la búsqueda por significado.
+ */
+export const AI_USAGE_ORIGINS = [
+  "recepcion",
+  "probar",
+  "simulacion",
+  "vista_previa",
+  "dictado",
+  "practica_dictado",
+  "administrador",
+  "ya_aviso",
+  "vectores",
+  "transcripcion",
+] as const
+export type AiUsageOrigin = (typeof AI_USAGE_ORIGINS)[number]
+
+/**
+ * Uso de IA por organización y origen (append-only): una fila por proveedor y
+ * modelo de cada operación, con lo que el proveedor reportó. Los tokens son
+ * null si el proveedor no los entregó; el costo, en millonésimas de USD, es
+ * null si además no hay precio conocido para ese modelo: nunca se estima.
+ */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    origin: text("origin").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    calls: integer("calls").notNull().default(1),
+    /** Entrada total, incluida la servida o escrita en caché. */
+    inputTokens: integer("input_tokens"),
+    cachedInputTokens: integer("cached_input_tokens"),
+    cacheWriteTokens: integer("cache_write_tokens"),
+    outputTokens: integer("output_tokens"),
+    audioSeconds: integer("audio_seconds"),
+    costMicros: bigint("cost_micros", { mode: "number" }),
+    conversationId: uuid("conversation_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("ai_usage_org_idx").on(table.organizationId, table.createdAt),
+    check(
+      "ai_usage_origin_check",
+      sql`${table.origin} in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion')`,
+    ),
+    check("ai_usage_calls_check", sql`${table.calls} >= 1`),
+    check("ai_usage_cost_check", sql`${table.costMicros} is null or ${table.costMicros} >= 0`),
   ],
 )
 

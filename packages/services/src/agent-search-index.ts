@@ -218,8 +218,13 @@ export async function refreshAgentSearch(
   ownerDb: Db,
   appDb: Db,
   embedder: SearchEmbedder,
-  options: { maxBatchesPerOrg?: number } = {},
+  options: {
+    maxBatchesPerOrg?: number
+    /** Envuelve cada llamada al proveedor de una clínica: así queda su uso con origen `vectores`. */
+    meter?: <T>(orgId: string, run: () => Promise<T>) => Promise<T>
+  } = {},
 ): Promise<{ orgs: number; embedded: number; failed: number }> {
+  const meter = options.meter ?? (<T>(_orgId: string, run: () => Promise<T>) => run())
   const orgs = await ownerDb.select({ id: organization.id }).from(organization)
   let embedded = 0
   let failed = 0
@@ -238,7 +243,7 @@ export async function refreshAgentSearch(
       if (!items.length) break
       let vectors: number[][]
       try {
-        vectors = await embedder.embed(items.map((item) => item.text))
+        vectors = await meter(org.id, () => embedder.embed(items.map((item) => item.text)))
       } catch {
         failed += items.length
         break

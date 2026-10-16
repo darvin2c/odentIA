@@ -4,6 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowRight } from "lucide-react"
 import { z } from "zod"
 import { api } from "../../lib/api"
+import { TodayBilling } from "../../components/today-billing"
 
 export const Route = createFileRoute("/_app/")({ component: AdminHome })
 const overviewSchema = z.object({
@@ -55,6 +56,7 @@ function AdminHome() {
           ))}
         </ul>
       )}
+      <TodayBilling />
     </PageShell>
   )
 }

@@ -43,6 +43,8 @@ import {
   sendTemplateOutbound,
   setAgentStatus,
 } from "./conversations.js"
+import { type AiUsageEntry, knownCostMicros, recordAiUsage } from "./ai-usage.js"
+import { countConversationAction } from "./saas-actions.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import {
   CHOOSABLE_LOST_REASONS,
@@ -2588,10 +2590,16 @@ export interface RecordRunInput {
   outputTokens?: number | null
   /** Parte de la entrada servida desde caché; solo si el proveedor la entrega. */
   cachedInputTokens?: number | null
+  /** Parte de la entrada escrita en la caché; solo si el proveedor la entrega. */
+  cacheWriteTokens?: number | null
   /** Llamadas al modelo hechas en la corrida. */
   llmCalls?: number | null
-  /** Solo si el proveedor lo entrega, en micro-unidades enteras. */
-  costMicros?: number | null
+  /**
+   * Lo que la corrida gastó en cada proveedor (modelo que escribe, modelo de
+   * decisión, vectores): queda en `ai_usage` con origen `recepcion` y su
+   * suma es el costo de la fila, en millonésimas de USD.
+   */
+  usage?: readonly AiUsageEntry[]
   toolsUsed?: string[]
   error?: string | null
 }
@@ -2611,11 +2619,19 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
     inputTokens: cleanInt(input.inputTokens),
     outputTokens: cleanInt(input.outputTokens),
     cachedInputTokens: cleanInt(input.cachedInputTokens),
+    cacheWriteTokens: cleanInt(input.cacheWriteTokens),
     llmCalls: cleanInt(input.llmCalls),
-    costMicros: cleanInt(input.costMicros),
+    costMicros: cleanInt(knownCostMicros(input.usage ?? [])),
     toolsUsed: (input.toolsUsed ?? []).filter((t) => typeof t === "string").slice(0, 30),
     error: input.error?.slice(0, 500) ?? null,
   })
+  if (input.usage?.length) {
+    await recordAiUsage(tx, orgId, { origin: "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
+  }
+  // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0030).
+  if (input.status === "ok" && (input.llmCalls ?? 0) > 0 && input.conversationId) {
+    await countConversationAction(tx, orgId, { conversationId: input.conversationId, at: input.startedAt })
+  }
   // La fila se escribe después de los efectos de la corrida: sin este aviso
   // la supervisión no se entera de las que no envían ni cambian el hilo.
   await notify(tx, { orgId, kind: "agent.run.recorded", at: new Date().toISOString() })
@@ -2652,7 +2668,6 @@ export async function listAgentRuns(
     outputTokens: r.outputTokens,
     cachedInputTokens: r.cachedInputTokens,
     llmCalls: r.llmCalls,
-    costMicros: r.costMicros,
     toolsUsed: r.toolsUsed,
     error: r.error,
   }))
@@ -2673,7 +2688,6 @@ export interface AgentRunStats {
    * denominador del gasto por conversación (llamadas y tokens entre este valor).
    */
   conversationsWithLlmCalls: number
-  totalCostMicros: number | null
   topTools: Array<{ tool: string; uses: number }>
   /**
    * Llamadas al modelo que escribe según el camino que eligió el modelo de
@@ -2683,7 +2697,11 @@ export interface AgentRunStats {
   byRoute: Array<{ path: string; runs: number; avgLlmCalls: number | null; avgInputTokens: number | null }>
 }
 
-/** Métricas reales desde el libro (rango opcional ISO). */
+/**
+ * Métricas reales desde el libro (rango opcional ISO), para la clínica. El
+ * costo de cada corrida no va: es lo que odentIA paga a los proveedores y lo
+ * ve su administración (ADR 0030).
+ */
 export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: string; to?: string } = {}): Promise<AgentRunStats> {
   const conditions = [eq(agentRunLedger.organizationId, orgId)]
   if (input.from) {
@@ -2707,7 +2725,6 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
       llmCalls: sum(agentRunLedger.llmCalls),
       runsWithLlmCalls: count(agentRunLedger.llmCalls),
       conversationsWithLlmCalls: sql<number>`count(distinct ${agentRunLedger.conversationId}) filter (where ${agentRunLedger.llmCalls} > 0)`,
-      cost: sum(agentRunLedger.costMicros),
     })
     .from(agentRunLedger)
     .where(where)
@@ -2754,7 +2771,6 @@ export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: st
     totalLlmCalls: toNum(totals?.llmCalls),
     runsWithLlmCalls: Number(totals?.runsWithLlmCalls ?? 0),
     conversationsWithLlmCalls: Number(totals?.conversationsWithLlmCalls ?? 0),
-    totalCostMicros: toNum(totals?.cost),
     topTools: (toolRows as unknown as Array<{ tool: string; uses: number }>).map((r) => ({
       tool: r.tool,
       uses: Number(r.uses),

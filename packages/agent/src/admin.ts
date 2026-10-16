@@ -1,5 +1,6 @@
 import { type Db, withOrgContext } from "@odentia/db"
 import { type AdminDecider, getAgentConfig, type TickDeps } from "@odentia/services"
+import { meterAiUse } from "./ai-usage.js"
 import { createDecisionModel, DecisionError, type DecisionModel, type DecisionQuestion, type PlatformDecisions } from "./decision/index.js"
 import { type PlatformLlm, resolveLlmSpec } from "./llm.js"
 
@@ -87,11 +88,12 @@ export const ALREADY_TOLD_QUESTION: DecisionQuestion = {
  * escribe como siempre.
  */
 export function createAlreadyTold(db: Db, deps: AdminModelDeps): NonNullable<TickDeps["alreadyTold"]> {
-  return async (orgId, input) => {
-    const model = await createAdminDecisionModel(db, deps, orgId)
-    if (!model) return false
-    const result = await model.decide(alreadyToldState(input), [ALREADY_TOLD_QUESTION])
-    const answer = result.answers.find((item) => item.id === "ya_aviso")
-    return answer?.kind === "yesno" && answer.probability >= ALREADY_TOLD_MIN
-  }
+  return (orgId, input) =>
+    meterAiUse(db, orgId, "ya_aviso", async () => {
+      const model = await createAdminDecisionModel(db, deps, orgId)
+      if (!model) return false
+      const result = await model.decide(alreadyToldState(input), [ALREADY_TOLD_QUESTION])
+      const answer = result.answers.find((item) => item.id === "ya_aviso")
+      return answer?.kind === "yesno" && answer.probability >= ALREADY_TOLD_MIN
+    })
 }

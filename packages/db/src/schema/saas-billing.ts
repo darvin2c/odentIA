@@ -1,9 +1,9 @@
 import { sql } from "drizzle-orm"
 import {
+  bigint,
   boolean,
   char,
   check,
-  date,
   foreignKey,
   index,
   integer,
@@ -27,7 +27,7 @@ import { orgFk, timestamps } from "./crm.js"
  * - Tablas de tenant (con organization_id + RLS `org_isolation`):
  *   `saas_subscription`, `saas_charge`, `saas_payment`,
  *   `saas_seller_commission`, `saas_commission_adjustment`, `saas_notice`,
- *   `saas_usage_daily`.
+ *   `saas_action`.
  * - Dinero siempre en enteros de la unidad menor con moneda ISO 4217
  *   congelada por fila. Nada de precios bancarios ni pasarelas: la cobranza
  *   es manual con comprobante privado en Storage.
@@ -72,10 +72,42 @@ export const saasPlan = pgTable(
     maxSeats: integer("max_seats"),
     isActive: boolean("is_active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Cobro por acción (ADR 0030). Lo que la cuota devuelve como crédito para
+     * los agentes cada mes, en la unidad menor de `currency`.
+     */
+    creditCents: integer("credit_cents").notNull().default(0),
+    /** Precio base de cada acción en millonésimas de `currency`; null = el plan no cobra esa acción. */
+    conversationMicros: bigint("conversation_micros", { mode: "number" }),
+    consultationMicros: bigint("consultation_micros", { mode: "number" }),
+    recoveryMicros: bigint("recovery_micros", { mode: "number" }),
+    /** Descuento máximo sobre el precio base (precio mínimo) y lo que el vendedor da sin aprobación. */
+    maxDiscountBps: integer("max_discount_bps").notNull().default(6000),
+    sellerDiscountBps: integer("seller_discount_bps").notNull().default(1000),
+    /** Prueba: saldo de regalo y días por defecto, y hasta dónde se negocia con aprobación. */
+    trialCreditCents: integer("trial_credit_cents").notNull().default(0),
+    trialDays: integer("trial_days").notNull().default(30),
+    trialMaxCreditCents: integer("trial_max_credit_cents").notNull().default(0),
+    trialMaxDays: integer("trial_max_days").notNull().default(60),
+    /** El plan con que se cuenta y se prueba si la clínica aún no eligió uno. Uno como mucho. */
+    isDefault: boolean("is_default").notNull().default(false),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("saas_plan_code_uidx").on(table.code),
+    uniqueIndex("saas_plan_default_uidx").on(table.isDefault).where(sql`${table.isDefault}`),
+    check(
+      "saas_plan_action_check",
+      sql`${table.creditCents} >= 0 AND coalesce(${table.conversationMicros}, 0) >= 0 AND coalesce(${table.consultationMicros}, 0) >= 0 AND coalesce(${table.recoveryMicros}, 0) >= 0`,
+    ),
+    check(
+      "saas_plan_discount_check",
+      sql`${table.maxDiscountBps} BETWEEN 0 AND 9000 AND ${table.sellerDiscountBps} BETWEEN 0 AND ${table.maxDiscountBps}`,
+    ),
+    check(
+      "saas_plan_trial_check",
+      sql`${table.trialCreditCents} >= 0 AND ${table.trialDays} BETWEEN 1 AND 365 AND ${table.trialMaxCreditCents} >= ${table.trialCreditCents} AND ${table.trialMaxDays} >= ${table.trialDays}`,
+    ),
     index("saas_plan_currency_active_idx").on(table.currency, table.isActive),
     check("saas_plan_price_check", sql`${table.priceCents} >= 0`),
     check("saas_plan_currency_check", sql`${table.currency} ~ '^[A-Z]{3}$'`),
@@ -161,10 +193,26 @@ export const saasSubscription = pgTable(
     sellerStartedAt: timestamp("seller_started_at", { withTimezone: true }),
     sellerEndedAt: timestamp("seller_ended_at", { withTimezone: true }),
     billingEmail: text("billing_email"),
+    /** Descuento negociado sobre el precio base de cada acción (ADR 0030); la cuota no tiene descuento. */
+    discountBps: integer("discount_bps").notNull().default(0),
+    /** Prueba negociada para esta clínica; null = la del plan. */
+    trialCreditCents: integer("trial_credit_cents"),
+    trialDays: integer("trial_days"),
+    /** Lo máximo que la clínica paga al mes por encima del crédito; al llegar, los casos nuevos pasan al equipo. */
+    spendCapCents: integer("spend_cap_cents"),
+    /** Cada cuánto se factura lo que pasa del crédito: `mensual` o `quincenal`. */
+    billingCycle: text("billing_cycle").notNull().default("mensual"),
+    /** Día en que la clínica activó el plan: su mes empieza ese día. */
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("saas_subscription_status_idx").on(table.status),
+    check("saas_subscription_discount_check", sql`${table.discountBps} BETWEEN 0 AND 9000`),
+    check(
+      "saas_subscription_terms_check",
+      sql`(${table.trialCreditCents} IS NULL OR ${table.trialCreditCents} >= 0) AND (${table.trialDays} IS NULL OR ${table.trialDays} BETWEEN 1 AND 365) AND (${table.spendCapCents} IS NULL OR ${table.spendCapCents} >= 0) AND ${table.billingCycle} IN ('mensual','quincenal')`,
+    ),
     index("saas_subscription_period_end_idx").on(table.currentPeriodEnd),
     check(
       "saas_subscription_status_check",
@@ -191,6 +239,10 @@ export const saasCharge = pgTable(
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
     paidCents: integer("paid_cents").notNull().default(0),
+    /** Cargo del cobro por acción: lo que suman sus líneas sin impuesto, y el impuesto. Manual: null y 0. */
+    subtotalCents: integer("subtotal_cents"),
+    taxCents: integer("tax_cents").notNull().default(0),
+    taxLabel: text("tax_label"),
     status: text("status").notNull().default("pendiente"),
     dueAt: timestamp("due_at", { withTimezone: true }),
     createdBy: text("created_by").references(() => user.id),
@@ -413,16 +465,133 @@ export const saasNotice = pgTable(
   ],
 )
 
-/** Uso agregado diario (conteos reales desde `agent_run_ledger`). */
-export const saasUsageDaily = pgTable(
-  "saas_usage_daily",
+/**
+ * Negociación por clínica que pide aprobación (ADR 0030): un descuento por
+ * encima de lo que da el vendedor o una prueba más larga o con más saldo que
+ * la del plan. La pide soporte o el vendedor; la decide la administración.
+ * Solo owner (rutas admin) la escribe.
+ */
+export const saasNegotiation = pgTable(
+  "saas_negotiation",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    day: date("day").notNull(),
-    agentRuns: integer("agent_runs").notNull().default(0),
-    llmCalls: integer("llm_calls").notNull().default(0),
+    kind: text("kind").notNull(),
+    /** Descuento en puntos básicos, o saldo (centavos) y días de prueba. */
+    discountBps: integer("discount_bps"),
+    trialCreditCents: integer("trial_credit_cents"),
+    trialDays: integer("trial_days"),
+    note: text("note"),
+    status: text("status").notNull().default("pendiente"),
+    requestedBy: text("requested_by").references(() => user.id),
+    decidedBy: text("decided_by").references(() => user.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [uniqueIndex("saas_usage_org_day_uidx").on(table.organizationId, table.day)],
+  (table) => [
+    index("saas_negotiation_org_status_idx").on(table.organizationId, table.status),
+    check("saas_negotiation_kind_check", sql`${table.kind} IN ('descuento','prueba')`),
+    check("saas_negotiation_status_check", sql`${table.status} IN ('pendiente','aprobada','rechazada')`),
+  ],
+)
+
+/**
+ * Tarifa de Meta por plantilla de WhatsApp, por país y categoría, para la
+ * estimación que ve la clínica. La carga la administración desde la tabla de
+ * Meta: odentIA no cobra WhatsApp ni recibe ese pago.
+ */
+export const saasWhatsappRate = pgTable(
+  "saas_whatsapp_rate",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    countryCode: char("country_code", { length: 2 }).notNull(),
+    category: text("category").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    priceMicros: bigint("price_micros", { mode: "number" }).notNull(),
+    updatedBy: text("updated_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("saas_whatsapp_rate_country_category_uidx").on(table.countryCode, table.category),
+    check("saas_whatsapp_rate_category_check", sql`${table.category} IN ('marketing','utility','authentication')`),
+    check("saas_whatsapp_rate_price_check", sql`${table.priceMicros} >= 0`),
+  ],
+)
+
+/**
+ * Línea congelada de un cargo del cobro por acción (ADR 0030): la cuota, las
+ * acciones por encima del crédito por tipo, lo que cubrió el crédito (importe
+ * 0, para que se vea) y el impuesto. Inmutable como el cargo.
+ */
+export const saasChargeLine = pgTable(
+  "saas_charge_line",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    chargeId: uuid("charge_id").notNull(),
+    kind: text("kind").notNull(),
+    description: text("description").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    unitBaseMicros: bigint("unit_base_micros", { mode: "number" }),
+    unitPriceMicros: bigint("unit_price_micros", { mode: "number" }),
+    amountCents: integer("amount_cents").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("saas_charge_line_charge_idx").on(table.organizationId, table.chargeId, table.sortOrder),
+    foreignKey({ columns: [table.organizationId, table.chargeId], foreignColumns: [saasCharge.organizationId, saasCharge.id] }),
+    check("saas_charge_line_kind_check", sql`${table.kind} IN ('cuota','conversacion','consulta','cita','credito','impuesto')`),
+    check("saas_charge_line_amount_check", sql`${table.amountCents} >= 0 AND ${table.quantity} >= 0`),
+  ],
+)
+
+export const SAAS_ACTION_KINDS = ["conversacion", "consulta", "cita"] as const
+export type SaasActionKind = (typeof SAAS_ACTION_KINDS)[number]
+
+/**
+ * Lo que hicieron los agentes y se cobra por acción (ADR 0030): una
+ * conversación de Recepción por persona cada 24 horas, una consulta dictada y
+ * confirmada por atención y una cita recuperada que el paciente atendió. El
+ * precio se congela al contar (base, descuento de la clínica y precio
+ * propio): cambiar un precio después no reescribe lo contado. Libro: la
+ * aplicación solo registra y lee; el cobro (con owner) anota el cargo.
+ */
+export const saasAction = pgTable(
+  "saas_action",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    kind: text("kind").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    contactId: uuid("contact_id"),
+    conversationId: uuid("conversation_id"),
+    encounterId: uuid("encounter_id"),
+    appointmentId: uuid("appointment_id"),
+    /** Canal de la conversación o por dónde se reservó la cita. */
+    channel: text("channel"),
+    /** Cita: cuándo escribió el Administrador; de ahí hasta la reserva, la conversación va dentro de la cita. */
+    windowStart: timestamp("window_start", { withTimezone: true }),
+    /** Qué hizo el agente, en palabras y sin información clínica. */
+    detail: text("detail").notNull(),
+    currency: char("currency", { length: 3 }),
+    /** Millonésimas de `currency`; null si el plan no tiene precio para la acción. */
+    basePriceMicros: bigint("base_price_micros", { mode: "number" }),
+    priceMicros: bigint("price_micros", { mode: "number" }),
+    discountBps: integer("discount_bps").notNull().default(0),
+    dedupeKey: text("dedupe_key").notNull(),
+    /** Cargo que la cobró (fase 4); null mientras no se cobra. */
+    chargeId: uuid("charge_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("saas_action_org_dedupe_uidx").on(table.organizationId, table.dedupeKey),
+    index("saas_action_org_occurred_idx").on(table.organizationId, table.occurredAt),
+    index("saas_action_org_contact_idx").on(table.organizationId, table.contactId, table.kind, table.occurredAt),
+    check("saas_action_kind_check", sql`${table.kind} IN ('conversacion','consulta','cita')`),
+    check(
+      "saas_action_price_check",
+      sql`(${table.basePriceMicros} IS NULL) = (${table.priceMicros} IS NULL) AND coalesce(${table.priceMicros}, 0) >= 0 AND ${table.discountBps} BETWEEN 0 AND 9000`,
+    ),
+  ],
 )

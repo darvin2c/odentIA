@@ -1,4 +1,4 @@
-import { describeProviderProblem, extractDictation, isProviderConfigError, type PlatformLlm } from "@odentia/agent"
+import { describeProviderProblem, extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
@@ -10,6 +10,8 @@ import {
   operationFillsOf,
   previewDictationSuggestions,
   upsertAgentConfig,
+  assertAgentTestBudget,
+  assertAgentsNotPaused,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -105,7 +107,13 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       return await runService(c, 200, async () => {
-        const extracted = await extractDictation(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, transcript: parsed.data.transcript })
+        await withOrgContext(deps.db, orgId, async (tx) => {
+          await assertAgentsNotPaused(tx, orgId)
+          await assertAgentTestBudget(tx, orgId)
+        })
+        const extracted = await meterAiUse(deps.db, orgId, "practica_dictado", () =>
+          extractDictation(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, transcript: parsed.data.transcript }),
+        )
         return {
           model: extracted.model,
           suggestions: await withOrgContext(deps.db, orgId, (tx) => previewDictationSuggestions(tx, orgId, extracted.drafts)),

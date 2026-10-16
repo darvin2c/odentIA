@@ -4,6 +4,10 @@ import { invitationTemplate } from "@odentia/mail"
 import {
   type AssistedOrganizationResult,
   approveRecoveryCase,
+  getOrganizationBillingTerms,
+  setSaasBillingCycle,
+  setSaasDiscount,
+  setSaasTrialTerms,
   cancelOrganizationInvitation,
   closeAccountByAdmin,
   createAssistedOrganization,
@@ -433,6 +437,51 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
       owner((tx) => cancelOrganizationInvitation(tx, actor, c.req.param("id"))).then(() => ({
         ok: true,
       })),
+    )
+  })
+
+  // O2: cobro y consumo de la clínica (ADR 0030). Lo ve todo el personal; negociar fuera de lo de siempre pide aprobación.
+  app.get("/:id/billing", async (c) => {
+    adminContextOf(c)
+    return runService(c, 200, () => owner((tx) => getOrganizationBillingTerms(tx, c.req.param("id"))))
+  })
+
+  app.post("/:id/billing/discount", async (c) => {
+    const actor = adminContextOf(c)
+    const parsed = z
+      .object({ discountBps: z.number().int().min(0).max(9000), note: z.string().max(500).nullish() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => owner((tx) => setSaasDiscount(tx, actor, c.req.param("id"), parsed.data)))
+  })
+
+  app.post("/:id/billing/trial", async (c) => {
+    const actor = adminContextOf(c)
+    const parsed = z
+      .object({
+        trialCreditCents: z.number().int().min(0).max(100_000_000),
+        trialDays: z.number().int().min(1).max(365),
+        note: z.string().max(500).nullish(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => owner((tx) => setSaasTrialTerms(tx, actor, c.req.param("id"), parsed.data)))
+  })
+
+  app.post("/:id/billing/cycle", async (c) => {
+    const actor = adminContextOf(c)
+    const parsed = z
+      .object({ cycle: z.enum(["mensual", "quincenal"]) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      owner(async (tx) => {
+        await setSaasBillingCycle(tx, actor, c.req.param("id"), parsed.data.cycle)
+        return { ok: true }
+      }),
     )
   })
 

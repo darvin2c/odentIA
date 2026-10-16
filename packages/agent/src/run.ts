@@ -11,6 +11,8 @@ import {
   type AgentConfig,
   countAgentModelRunsToday,
   askGeneralPermissionAfterBooking,
+  getAgentSpendGate,
+  hasOpenConversationAction,
   automationReplyOf,
   getAgentConfig,
   getLesson,
@@ -33,6 +35,7 @@ import { createDecisionModel, type DecisionModel, type DecisionProvider, type Pl
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
 import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
+import { meterAiUse, takeAiUsage } from "./ai-usage.js"
 import { compileAgentGraph } from "./graph.js"
 import {
   createConfiguredChatModel,
@@ -201,6 +204,7 @@ function baseToolCtx(
       inputTokens: 0,
       outputTokens: 0,
       cachedInputTokens: 0,
+      cacheWriteTokens: 0,
       calls: 0,
       reported: false,
       cacheReported: false,
@@ -208,8 +212,14 @@ function baseToolCtx(
   }
 }
 
-async function ledger(db: Db, orgId: string, input: RecordRunInput): Promise<void> {
-  await withOrgContext(db, orgId, (tx) => recordAgentRun(tx, orgId, input)).catch(() => {})
+/**
+ * Fila del libro con lo gastado hasta ahora en la corrida (modelo que
+ * escribe, modelo de decisión, vectores): queda en el mismo registro y su
+ * suma es el costo de la fila. Lo que se gaste después se guarda al terminar.
+ */
+async function ledger(db: Db, orgId: string, input: Omit<RecordRunInput, "usage">): Promise<void> {
+  const usage = takeAiUsage()
+  await withOrgContext(db, orgId, (tx) => recordAgentRun(tx, orgId, { ...input, usage })).catch(() => {})
 }
 
 /**
@@ -223,6 +233,17 @@ async function ledger(db: Db, orgId: string, input: RecordRunInput): Promise<voi
  * equipo: nunca cuenta como correcta.
  */
 export async function processAgentRun(
+  db: Db,
+  runtime: AgentRuntime,
+  msg: QueueMessage<AgentRunJob>,
+): Promise<"done" | "retry"> {
+  const { orgId, conversationId } = msg.message
+  // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0030),
+  // también si falla o se reintenta.
+  return meterAiUse(db, orgId, "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+}
+
+async function attendAgentRun(
   db: Db,
   runtime: AgentRuntime,
   msg: QueueMessage<AgentRunJob>,
@@ -425,11 +446,37 @@ export async function processAgentRun(
     effectiveModel = spec.modelName
     toolCtx.treatment = cfg.treatment
     toolCtx.modelName = spec.modelName
+    toolCtx.modelProvider = spec.provider
     toolCtx.verifyReplies = cfg.replyCheckEnabled
     toolCtx.emojis = cfg.emojis
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
     runUsage = toolCtx.usage
+    // Dinero (ADR 0030): sin saldo de prueba los agentes se pausan; con el tope
+    // del mes alcanzado, Recepción no toma casos nuevos (quien ya conversa hoy
+    // sigue: no cuesta otra conversación). La persona recibe el aviso fijo y el
+    // caso pasa al equipo, sin llamar al modelo.
+    const spend = await withOrgContext(db, orgId, async (tx) => {
+      const gate = await getAgentSpendGate(tx, orgId)
+      if (gate.trialExhausted) return "SALDO_PRUEBA" as const
+      if (gate.capReached && !(await hasOpenConversationAction(tx, orgId, toolCtx.contactId))) return "TOPE_GASTO" as const
+      return null
+    }).catch(() => null)
+    if (spend) {
+      await performHandoff(toolCtx, spend === "SALDO_PRUEBA" ? "agentes en pausa: se usó todo el saldo de prueba" : "se alcanzó el tope de gasto del mes")
+      await noticeAfterHandoff(toolCtx)
+      await ledger(db, orgId, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        model: effectiveModel,
+        status: "handoff",
+        startedAt,
+        endedAt: new Date(),
+        llmCalls: 0,
+        error: spend,
+      })
+      return "done"
+    }
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
     const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))
@@ -541,6 +588,7 @@ export async function processAgentRun(
       inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,
       outputTokens: toolCtx.usage.reported ? toolCtx.usage.outputTokens : null,
       cachedInputTokens: toolCtx.usage.cacheReported ? toolCtx.usage.cachedInputTokens : null,
+      cacheWriteTokens: toolCtx.usage.cacheReported ? toolCtx.usage.cacheWriteTokens : null,
       llmCalls: toolCtx.usage.calls,
       toolsUsed: toolCtx.toolsUsed,
     })
@@ -606,6 +654,7 @@ export async function processAgentRun(
         inputTokens: runUsage?.reported ? runUsage.inputTokens : null,
         outputTokens: runUsage?.reported ? runUsage.outputTokens : null,
         cachedInputTokens: runUsage?.cacheReported ? runUsage.cachedInputTokens : null,
+        cacheWriteTokens: runUsage?.cacheReported ? runUsage.cacheWriteTokens : null,
         llmCalls: runUsage?.calls ?? null,
         error: detail.slice(0, 500),
       })
@@ -727,6 +776,8 @@ export async function simulateAgentTurn(
   toolCtx.dryRun = true
   toolCtx.verifyReplies = verifyReplies
   toolCtx.emojis = emojis
+  toolCtx.modelName = modelName
+  toolCtx.modelProvider = spec.provider
   toolCtx.draftText = text.slice(0, 4000)
   const model = await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
@@ -805,6 +856,7 @@ export async function simulateAgentSandbox(
   toolCtx.verifyReplies = cfg.replyCheckEnabled
   toolCtx.emojis = cfg.emojis
   toolCtx.modelName = spec.modelName
+  toolCtx.modelProvider = spec.provider
   toolCtx.draftText = text.slice(0, 4000)
   if (deps.embedder) toolCtx.embedder = deps.embedder
   const state = structuredClone(input.state ?? EMPTY_SANDBOX_STATE)

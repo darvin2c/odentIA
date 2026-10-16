@@ -16,9 +16,9 @@ import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
-import { saasSubscription } from "@odentia/db/schema/saas-billing"
+import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { agentSearchItem } from "@odentia/db/schema/agent"
+import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
   clinicalFollowUp,
@@ -337,7 +337,9 @@ async function wipeSeed(): Promise<void> {
     "support_message",
     "support_case",
     "saas_notice",
-    "saas_usage_daily",
+    "saas_negotiation",
+    "saas_charge_line",
+    "saas_action",
     "portal_challenge",
     "portal_passkey",
     "portal_verification",
@@ -355,6 +357,7 @@ async function wipeSeed(): Promise<void> {
     "automation_consent",
     "automation_rule",
     "agent_decision_log",
+    "ai_usage",
     // Lo que aprende el agente y lo que recuerda: las dejan las conversaciones
     // reales de desarrollo y referencian conversación, contacto y conocimiento
     // sin cascada; van antes que ellos y en este orden (caso de prueba →
@@ -365,6 +368,8 @@ async function wipeSeed(): Promise<void> {
     "agent_answer_trace",
     "agent_knowledge_gap",
     "agent_person_fact",
+    "agent_case_memory",
+    "appointment_booking_link",
     // Lo enviado a odentIA desde la Ayuda de desarrollo.
     "help_request",
     "agent_run_ledger",
@@ -2704,6 +2709,62 @@ await db.transaction(async (tx) => {
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })
+// Lo que hicieron los agentes este mes (ADR 0030), para ver Plan y pagos y
+// «Ver cada acción» con datos: conversaciones, una consulta y una cita, con
+// el precio base del plan de la semilla. Ejemplos; ningún agente los hizo.
+{
+  const people = [...contactIdByName.values()].slice(0, 6)
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
+  await db.insert(saasAction).values([
+    ...people.map((contactId, index) => ({
+      organizationId: ORG_A,
+      kind: "conversacion",
+      occurredAt: hoursAgo(6 + index * 30),
+      contactId,
+      channel: index % 2 === 0 ? "whatsapp" : "instagram",
+      detail: `Atendió una conversación por ${index % 2 === 0 ? "WhatsApp" : "Instagram"}`,
+      currency: "USD",
+      basePriceMicros: 500_000,
+      priceMicros: 500_000,
+      dedupeKey: `semilla:conversacion:${index}`,
+    })),
+    {
+      organizationId: ORG_A,
+      kind: "consulta",
+      occurredAt: hoursAgo(20),
+      contactId: people[0] ?? null,
+      detail: "Ordenó la consulta dictada por Ana Torres",
+      currency: "USD",
+      basePriceMicros: 400_000,
+      priceMicros: 400_000,
+      dedupeKey: "semilla:consulta:0",
+    },
+    {
+      organizationId: ORG_A,
+      kind: "cita",
+      occurredAt: hoursAgo(50),
+      contactId: people[1] ?? null,
+      channel: "enlace",
+      windowStart: hoursAgo(120),
+      detail: "Volvió tras «Seguir un presupuesto» y reservó desde el enlace",
+      currency: "USD",
+      basePriceMicros: 4_000_000,
+      priceMicros: 4_000_000,
+      dedupeKey: "semilla:cita:0",
+    },
+  ]).onConflictDoNothing()
+}
+// Uso de IA del mes para la ficha de la clínica en la administración (ADR 0030).
+// Cifras de ejemplo con el costo que da la tabla de precios del agente; no
+// salen de ningún proveedor. Jev queda sin costo: no tiene precio cargado.
+await db.insert(aiUsage).values([
+  { organizationId: ORG_A, origin: "recepcion", provider: "anthropic", model: "claude-haiku-5-5", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
+  { organizationId: ORG_A, origin: "dictado", provider: "openai", model: "gpt-6-luna", calls: 14, inputTokens: 28_000, outputTokens: 4_200, costMicros: 4_900 },
+  { organizationId: ORG_A, origin: "probar", provider: "openai", model: "gpt-6-luna", calls: 9, inputTokens: 27_000, outputTokens: 900, costMicros: 3_150 },
+  { organizationId: ORG_A, origin: "transcripcion", provider: "transcripcion", model: "whisper-1", calls: 6, audioSeconds: 240, costMicros: 24_000 },
+  { organizationId: ORG_A, origin: "vectores", provider: "vectores", model: "text-embedding-3-small", calls: 3, inputTokens: 15_000, costMicros: 300 },
+  { organizationId: ORG_A, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: null },
+])
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {

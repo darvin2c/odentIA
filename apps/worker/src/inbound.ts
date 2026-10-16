@@ -18,6 +18,7 @@ import {
   type TranscribeFn,
 } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
+import { meterAiUse } from "@odentia/agent"
 
 export interface IngestDeps {
   storage: Storage
@@ -61,7 +62,8 @@ export async function processInbound(
 ): Promise<"done" | "retry"> {
   const { orgId } = msg.message
   try {
-    await withOrgContext(db, orgId, async (tx) => {
+    // Lo único que gasta IA aquí es transcribir una nota de voz: queda con su origen.
+    await meterAiUse(db, orgId, "transcripcion", () => withOrgContext(db, orgId, async (tx) => {
       const [conn] = await tx
         .select()
         .from(channelConnection)
@@ -124,7 +126,8 @@ export async function processInbound(
         .where(eq(agentConfig.organizationId, orgId))
         .limit(1)
       // El agente nunca responde en una conversación cerrada (ADR 0024); la ingesta ya la reabrió.
-      if (conv?.status === "open" && conv.agentStatus === "on" && cfg?.enabled) {
+      // Un correo que escribió una máquina queda en la bandeja sin gastar una corrida (ADR 0030).
+      if (conv?.status === "open" && conv.agentStatus === "on" && cfg?.enabled && !msg.message.event.automated) {
         await sendAgentRun(
           tx,
           {
@@ -136,7 +139,7 @@ export async function processInbound(
           { delaySeconds: deps.agentBurstWindowSeconds ?? 0 },
         )
       }
-    })
+    }))
     return "done"
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

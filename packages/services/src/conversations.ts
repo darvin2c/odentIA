@@ -7,6 +7,7 @@ import {
 import { normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
 import {
+  agentConfig,
   channelConnection,
   contact,
   contactIdentity,
@@ -66,6 +67,26 @@ export interface IngestDeps {
   secretsKey: Buffer
   /** Transcripción best-effort de notas de voz; ausente = desactivada. */
   transcribe?: TranscribeFn
+}
+
+/**
+ * ¿El agente leerá lo que entra en este hilo? Encendido en la conversación y
+ * en la clínica, y atendiendo ese canal. El horario no cuenta: fuera de él lo
+ * lee al abrir.
+ */
+async function agentReadsThread(tx: Db, orgId: string, conversationId: string, channel: string): Promise<boolean> {
+  const [conv] = await tx
+    .select({ agentStatus: conversation.agentStatus })
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (conv?.agentStatus !== "on") return false
+  const [cfg] = await tx
+    .select({ enabled: agentConfig.enabled, channels: agentConfig.channels })
+    .from(agentConfig)
+    .where(eq(agentConfig.organizationId, orgId))
+    .limit(1)
+  return Boolean(cfg?.enabled) && (!cfg?.channels || cfg.channels.includes(channel))
 }
 
 export type TranscribeFn = (input: {
@@ -336,8 +357,16 @@ export async function ingestInbound(
   }
 
   // Nota de voz sin caption: transcribir a body (el agente lo lee como texto).
+  // Solo si el agente la va a leer (ADR 0030): con él apagado queda el audio
+  // para el equipo y no se paga una transcripción que nadie usa.
   // Best-effort: si falla, body queda null y la ingesta no se pierde.
-  if (mediaDownload && contentType === "audio" && body === null && deps.transcribe) {
+  if (
+    mediaDownload &&
+    contentType === "audio" &&
+    body === null &&
+    deps.transcribe &&
+    (await agentReadsThread(tx, orgId, conversationId, channel))
+  ) {
     try {
       body = await deps.transcribe(mediaDownload)
     } catch {

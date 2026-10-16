@@ -29,6 +29,8 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
 import { ApiError, api } from "../../lib/api"
+import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
+import { NegotiationsSection, WhatsappRatesSection } from "../../components/billing-terms"
 
 export const Route = createFileRoute("/_app/billing")({
   component: BillingPage,
@@ -36,18 +38,7 @@ export const Route = createFileRoute("/_app/billing")({
 
 const LOCALE = "es-PE"
 
-interface Plan {
-  id: string
-  code: string
-  name: string
-  description: string | null
-  currency: string
-  priceCents: number
-  billingPeriod: string
-  maxBranches: number | null
-  maxSeats: number | null
-  isActive: boolean
-}
+type Plan = AdminPlan
 
 interface PaymentMethod {
   id: string
@@ -123,6 +114,11 @@ function money(cents: number, currency: string): string {
   } catch {
     return `${cents} ${currency}`
   }
+}
+
+/** Precio por acción en millonésimas, hasta tres decimales. */
+function perAction(micros: number, currency: string): string {
+  return new Intl.NumberFormat(LOCALE, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
 }
 
 function errorMessage(error: unknown): string {
@@ -438,8 +434,11 @@ function BillingPage() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {plan.code} · {plan.billingPeriod}
-                    {plan.maxBranches ? ` · ${plan.maxBranches} sedes` : ""}
-                    {plan.maxSeats ? ` · ${plan.maxSeats} personas` : ""}
+                    {plan.isDefault ? " · por defecto" : ""}
+                    {plan.creditCents ? ` · vuelve ${money(plan.creditCents, plan.currency)} en crédito` : ""}
+                    {plan.conversationMicros !== null
+                      ? ` · conversación ${perAction(plan.conversationMicros, plan.currency)}, consulta ${perAction(plan.consultationMicros ?? 0, plan.currency)}, cita ${perAction(plan.recoveryMicros ?? 0, plan.currency)}`
+                      : ""}
                   </p>
                 </div>
                 <p className="text-sm font-semibold tabular-nums">
@@ -453,6 +452,12 @@ function BillingPage() {
           </ul>
         )}
       </section>
+
+      <NegotiationsSection
+        organizationNames={Object.fromEntries((overview.data ?? []).map((row) => [row.organizationId, row.organizationName ?? row.organizationId]))}
+      />
+
+      <WhatsappRatesSection />
 
       <section aria-labelledby="medios" className="flex flex-col gap-2">
         <h2 id="medios" className="text-base font-semibold">
@@ -574,122 +579,6 @@ function BillingPage() {
         onRefundRequest={setRefundTarget}
       />
     </PageShell>
-  )
-}
-
-function PlanDrawer({
-  plan,
-  onClose,
-  onSaved,
-}: {
-  plan?: Plan
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [code, setCode] = useState(plan?.code ?? "")
-  const [name, setName] = useState(plan?.name ?? "")
-  const [currency, setCurrency] = useState(plan?.currency ?? "PEN")
-  const [price, setPrice] = useState(plan ? centsToMajor(plan.priceCents, plan.currency) : "")
-  const [maxBranches, setMaxBranches] = useState(plan?.maxBranches ? String(plan.maxBranches) : "")
-  const [maxSeats, setMaxSeats] = useState(plan?.maxSeats ? String(plan.maxSeats) : "")
-  const [error, setError] = useState<string | null>(null)
-
-  const save = useMutation({
-    mutationFn: () => {
-      const priceCents = majorToCents(price, currency)
-      if (priceCents === null) throw new Error("Precio inválido")
-      const body = {
-        code: code.trim(),
-        name: name.trim(),
-        currency: currency.trim().toUpperCase(),
-        priceCents,
-        maxBranches: maxBranches.trim() === "" ? null : Number(maxBranches),
-        maxSeats: maxSeats.trim() === "" ? null : Number(maxSeats),
-      }
-      return plan
-        ? api(`/api/admin/billing/plans/${plan.id}`, {
-            method: "PATCH",
-            body: JSON.stringify(body),
-          })
-        : api("/api/admin/billing/plans", { method: "POST", body: JSON.stringify(body) })
-    },
-    onSuccess: () => {
-      onSaved()
-      onClose()
-    },
-    onError: (e) =>
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar") : "No se pudo guardar",
-      ),
-  })
-
-  return (
-    <FormDrawer
-      open
-      title={plan ? "Editar plan" : "Nuevo plan"}
-      submitLabel="Guardar"
-      onSubmit={() => save.mutate()}
-      onClose={onClose}
-      isSubmitting={save.isPending}
-    >
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="plan-code">Código</Label>
-        <Input
-          id="plan-code"
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          placeholder="base-pen"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="plan-name">Nombre</Label>
-        <Input
-          id="plan-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Plan Base"
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="plan-currency">Moneda</Label>
-          <CurrencySelect id="plan-currency" value={currency} onChange={setCurrency} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="plan-price">Precio</Label>
-          <Input
-            id="plan-price"
-            inputMode="decimal"
-            value={price}
-            onChange={(event) => setPrice(event.target.value)}
-            placeholder="99.00"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="plan-branches">Tope de sedes (vacío = sin tope)</Label>
-          <Input
-            id="plan-branches"
-            inputMode="numeric"
-            value={maxBranches}
-            onChange={(event) => setMaxBranches(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="plan-seats">Tope de personas (vacío = sin tope)</Label>
-          <Input
-            id="plan-seats"
-            inputMode="numeric"
-            value={maxSeats}
-            onChange={(event) => setMaxSeats(event.target.value)}
-          />
-        </div>
-      </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </FormDrawer>
   )
 }
 

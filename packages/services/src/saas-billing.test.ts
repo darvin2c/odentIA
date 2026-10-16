@@ -223,7 +223,7 @@ it("en pausa no se opera ni se envía, pero billing, soporte y lectura pasan", a
   }
 })
 
-it("la prueba dura 14 días y la gracia 7 antes de restringir", async () => {
+it("la prueba dura 30 días (ADR 0030); con plan pasa a activa y un cargo vencido abre 7 días de gracia", async () => {
   const f = await billingFixture("bil-06")
   const start = new Date("2026-01-05T12:00:00Z")
   const sub = await startSaasTrial(ownerDb, f.orgId, { planCode: `base-${f.orgId}` }, start)
@@ -232,7 +232,7 @@ it("la prueba dura 14 días y la gracia 7 antes de restringir", async () => {
     .set({ trialStartedAt: start, trialEndsAt: new Date("2026-01-19T12:00:00Z") })
     .where(eq(saasSubscription.organizationId, f.orgId))
   const trialDays = (sub.trialEndsAt!.getTime() - sub.trialStartedAt!.getTime()) / 86400000
-  expect(trialDays).toBe(14)
+  expect(trialDays).toBe(30)
   await createSaasCharge(ownerDb, f.orgId, f.admin, {
     planCode: `base-${f.orgId}`,
     periodStart: new Date("2026-01-05T00:00:00Z"),
@@ -240,7 +240,11 @@ it("la prueba dura 14 días y la gracia 7 antes de restringir", async () => {
   })
   const afterTrial = await tickSaasBilling(ownerDb, new Date("2026-01-20T12:00:00Z"))
   expect(afterTrial.summary.trialsEnded).toBeGreaterThanOrEqual(1)
-  const afterGrace = await tickSaasBilling(ownerDb, new Date("2026-02-10T12:00:00Z"))
+  expect((await f.run((tx) => getOrganizationBillingSummary(tx, f.orgId))).status).toBe("activa")
+  // El cargo venció el 5 de febrero sin pago: gracia hasta el 17.
+  await tickSaasBilling(ownerDb, new Date("2026-02-10T12:00:00Z"))
+  expect((await f.run((tx) => getOrganizationBillingSummary(tx, f.orgId))).status).toBe("gracia")
+  const afterGrace = await tickSaasBilling(ownerDb, new Date("2026-02-18T12:00:00Z"))
   expect(afterGrace.summary.restricted).toBeGreaterThanOrEqual(1)
   const summary = await f.run((tx) => getOrganizationBillingSummary(tx, f.orgId))
   expect(summary.status).toBe("restringida")

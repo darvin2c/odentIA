@@ -52,6 +52,7 @@ import {
 import { DecisionError, type DecisionResult } from "./decision/port.js"
 import { z } from "zod"
 import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
+import { reportAiUse } from "./ai-usage.js"
 import { channelFormatRule } from "./channel-format.js"
 import { ROUTE_TOOLS, routeInstruction, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
@@ -230,15 +231,16 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
 /**
  * Cuenta cada llamada al modelo y acumula tokens solo si el proveedor los
  * reporta en usage_metadata (los costes se derivan únicamente de datos del
- * proveedor, nunca estimados). La entrada servida desde caché es parte de
- * input_tokens y se guarda aparte para medir el ahorro.
+ * proveedor, nunca estimados). La entrada servida desde caché o escrita en
+ * ella es parte de input_tokens y se guarda aparte: tiene otro precio. Cada
+ * llamada queda además anotada en la operación medida (`reportAiUse`).
  */
 function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
   ctx.usage.calls += 1
   const meta = (reply.usage_metadata ?? {}) as {
     input_tokens?: unknown
     output_tokens?: unknown
-    input_token_details?: { cache_read?: unknown }
+    input_token_details?: { cache_read?: unknown; cache_creation?: unknown }
   }
   const input = typeof meta.input_tokens === "number" ? meta.input_tokens : null
   const output = typeof meta.output_tokens === "number" ? meta.output_tokens : null
@@ -247,10 +249,23 @@ function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
     if (input !== null) ctx.usage.inputTokens += input
     if (output !== null) ctx.usage.outputTokens += output
   }
-  const cached = meta.input_token_details?.cache_read
-  if (typeof cached === "number") {
+  const details = meta.input_token_details
+  const cached = typeof details?.cache_read === "number" ? details.cache_read : null
+  const written = typeof details?.cache_creation === "number" ? details.cache_creation : null
+  if (cached !== null || written !== null) {
     ctx.usage.cacheReported = true
-    ctx.usage.cachedInputTokens += cached
+    ctx.usage.cachedInputTokens += cached ?? 0
+    ctx.usage.cacheWriteTokens += written ?? 0
+  }
+  if (ctx.modelProvider !== "fake") {
+    reportAiUse({
+      provider: ctx.modelProvider ?? "desconocido",
+      model: ctx.modelName ?? "desconocido",
+      inputTokens: input,
+      cachedInputTokens: cached,
+      cacheWriteTokens: written,
+      outputTokens: output,
+    })
   }
 }
 
@@ -678,9 +693,11 @@ export function compileAgentGraph(
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
-    const system = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock, contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
+    const stable = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
+    const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
+    const system = [stable, perTurn].filter(Boolean).join("\n\n")
     const said = (who: "contact" | "agent" | "team") =>
       items
         .filter((item) =>
@@ -717,7 +734,20 @@ export function compileAgentGraph(
     toolCtx.checkFailures = 0
     const history = historyToMessages(items, zone)
     if (draft) history.push(new HumanMessage({ content: draft }))
-    return { messages: [new SystemMessage({ content: system }), ...history] }
+    // Anthropic solo guarda en caché lo que se le marca: la parte igual para
+    // toda la organización (con las herramientas, que van antes) se marca y
+    // las llamadas siguientes la leen a una décima de su precio. OpenAI la
+    // guarda sola y no admite la marca.
+    const systemMessage =
+      toolCtx.modelProvider === "anthropic" && perTurn
+        ? new SystemMessage({
+            content: [
+              { type: "text", text: stable, cache_control: { type: "ephemeral" } },
+              { type: "text", text: perTurn },
+            ],
+          })
+        : new SystemMessage({ content: system })
+    return { messages: [systemMessage, ...history] }
   }
 
   async function llm(state: typeof AgentState.State) {

@@ -1,5 +1,23 @@
+import { reportAiUse } from "@odentia/agent"
 import type { TranscribeFn } from "@odentia/services"
 import type { Env } from "./env.js"
+
+/** Lo que reportó el proveedor: segundos de audio o tokens; nada si no lo dijo. */
+function transcriptionUsage(json: unknown): { audioSeconds?: number; inputTokens?: number; outputTokens?: number } {
+  const body = (json ?? {}) as {
+    duration?: unknown
+    usage?: { type?: unknown; seconds?: unknown; input_tokens?: unknown; output_tokens?: unknown }
+  }
+  if (typeof body.duration === "number") return { audioSeconds: Math.ceil(body.duration) }
+  if (typeof body.usage?.seconds === "number") return { audioSeconds: Math.ceil(body.usage.seconds) }
+  if (typeof body.usage?.input_tokens === "number") {
+    return {
+      inputTokens: body.usage.input_tokens,
+      ...(typeof body.usage.output_tokens === "number" ? { outputTokens: body.usage.output_tokens } : {}),
+    }
+  }
+  return {}
+}
 
 /**
  * Transcriptor OpenAI-compatible (`/audio/transcriptions`, p.ej. Whisper).
@@ -19,7 +37,9 @@ export function createTranscriber(env: Env): TranscribeFn | null {
     form.set("model", model)
     form.set("file", new Blob([bytes.buffer as ArrayBuffer], { type: mimeType }), filename)
     form.set("language", "es")
-    form.set("response_format", "json")
+    // whisper-1 solo dice cuánto duró el audio (lo que cobra) en verbose_json;
+    // los modelos gpt-4o-*-transcribe lo informan en `usage` con json.
+    form.set("response_format", model === "whisper-1" ? "verbose_json" : "json")
     const res = await fetch(`${baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}` },
@@ -32,6 +52,7 @@ export function createTranscriber(env: Env): TranscribeFn | null {
         ? json.text
         : null
     if (text === null) throw new Error("Transcripción sin texto")
+    reportAiUse({ provider: "transcripcion", model, ...transcriptionUsage(json) })
     return text
   }
 }

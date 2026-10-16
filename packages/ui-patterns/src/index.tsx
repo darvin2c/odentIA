@@ -59,6 +59,8 @@ export {
   useHeaderUtilities,
 } from "./header-utilities.js"
 export { KpiCard, type KpiCardProps } from "./kpi-card.js"
+export { UsageMeter, type UsageMeterProps, usageMeterLevel } from "./usage-meter.js"
+export { PageNotice, type PageNoticeProps } from "./page-notice.js"
 export * from "./list-filtering/index.js"
 export {
   DataRefreshMarker,

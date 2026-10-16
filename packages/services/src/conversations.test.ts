@@ -3,6 +3,7 @@ import { type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { upsertAgentConfig } from "./agentConfig.js"
 import { createConnection } from "./connections.js"
 import { addContactIdentity, createContact, moveContactIdentity, updateContact } from "./contacts.js"
 import {
@@ -339,6 +340,16 @@ function audioEvent(over: Partial<NormalizedInbound> = {}): NormalizedInbound {
   })
 }
 
+/** Con el agente encendido en la clínica (la transcripción es para que él lea el audio). */
+async function withAgentOn<T>(fn: () => Promise<T>, channels: string[] | null = null): Promise<T> {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: true, channels }))
+  try {
+    return await fn()
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { enabled: false, channels: null }))
+  }
+}
+
 it("nota de voz entrante se transcribe al body", async () => {
   const connId = await makeTelegramConnection("org_a")
   const job: InboundMessageJob = {
@@ -347,8 +358,8 @@ it("nota de voz entrante se transcribe al body", async () => {
     event: audioEvent({ externalEventId: "evt-t1", externalMessageId: "ext-t1" }),
   }
   const depsT: IngestDeps = { ...deps, transcribe: async () => "hola, quiero cita" }
-  const { conversationId } = await withOrgContext(appDb, "org_a", (tx) =>
-    ingestInbound(tx, job, audioAdapter, depsT),
+  const { conversationId } = await withAgentOn(() =>
+    withOrgContext(appDb, "org_a", (tx) => ingestInbound(tx, job, audioAdapter, depsT)),
   )
   const detail = await withOrgContext(appDb, "org_a", (tx) =>
     getConversationDetail(tx, "org_a", conversationId),
@@ -358,6 +369,40 @@ it("nota de voz entrante se transcribe al body", async () => {
   expect(msg?.body).toBe("hola, quiero cita")
   expect(msg?.error).toBeNull()
   expect(msg?.attachments).toHaveLength(1)
+})
+
+it("sin el agente que la lea, la nota de voz queda como audio y no se paga su transcripción", async () => {
+  const connId = await makeTelegramConnection("org_a")
+  let calls = 0
+  const depsT: IngestDeps = {
+    ...deps,
+    transcribe: async () => {
+      calls += 1
+      return "no debería transcribirse"
+    },
+  }
+  const ingestAudio = (id: string) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      ingestInbound(tx, { orgId: "org_a", connectionId: connId, event: audioEvent({ externalEventId: id, externalMessageId: id, externalThreadId: `tg:${id}` }) }, audioAdapter, depsT),
+    )
+  const bodyOf = async (conversationId: string) =>
+    (await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", conversationId))).messages[0]?.body
+  // Agente apagado en la clínica.
+  expect(await bodyOf((await ingestAudio("evt-t-off")).conversationId)).toBeNull()
+  // Encendido, pero sin atender ese canal.
+  expect(await withAgentOn(async () => bodyOf((await ingestAudio("evt-t-canal")).conversationId), ["whatsapp"])).toBeNull()
+  // Encendido en la clínica, pero apagado en esa conversación.
+  const { conversationId } = await ingestAudio("evt-t-hilo")
+  await withOrgContext(appDb, "org_a", (tx) => tx.update(conversation).set({ agentStatus: "off" }).where(eq(conversation.id, conversationId)))
+  const again = await withAgentOn(() =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      ingestInbound(tx, { orgId: "org_a", connectionId: connId, event: audioEvent({ externalEventId: "evt-t-hilo-2", externalMessageId: "evt-t-hilo-2", externalThreadId: "tg:evt-t-hilo" }) }, audioAdapter, depsT),
+    ),
+  )
+  expect(again.conversationId).toBe(conversationId)
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getConversationDetail(tx, "org_a", conversationId))
+  expect(detail.messages.map((item) => item.body)).toEqual([null, null])
+  expect(calls).toBe(0)
 })
 
 it("fallo de transcripción no pierde la ingesta del audio", async () => {
@@ -373,8 +418,8 @@ it("fallo de transcripción no pierde la ingesta del audio", async () => {
       throw new Error("whisper caído")
     },
   }
-  const { conversationId, created } = await withOrgContext(appDb, "org_a", (tx) =>
-    ingestInbound(tx, job, audioAdapter, depsT),
+  const { conversationId, created } = await withAgentOn(() =>
+    withOrgContext(appDb, "org_a", (tx) => ingestInbound(tx, job, audioAdapter, depsT)),
   )
   expect(created).toBe(true)
   const detail = await withOrgContext(appDb, "org_a", (tx) =>

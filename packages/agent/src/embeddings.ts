@@ -1,4 +1,5 @@
 import type { SearchEmbedder } from "@odentia/services"
+import { reportAiUse } from "./ai-usage.js"
 
 /**
  * Quien vectoriza para la búsqueda por significado (ADR 0021). Es de la
@@ -78,7 +79,11 @@ export function openAiEmbedder(spec: { baseUrl: string; apiKey: string; model: s
       })
       // Nunca se repite el texto del proveedor: solo el código.
       if (!response.ok) throw new Error(`El proveedor de vectores respondió ${response.status}`)
-      const body = (await response.json()) as { data?: Array<{ index: number; embedding: number[] }> }
+      const body = (await response.json()) as {
+        data?: Array<{ index: number; embedding: number[] }>
+        usage?: { prompt_tokens?: number }
+      }
+      reportAiUse({ provider: "vectores", model: spec.model, inputTokens: body.usage?.prompt_tokens ?? null })
       const data = [...(body.data ?? [])].sort((a, b) => a.index - b.index)
       if (data.length !== texts.length) throw new Error("El proveedor de vectores no devolvió uno por texto")
       return data.map((item) => item.embedding)

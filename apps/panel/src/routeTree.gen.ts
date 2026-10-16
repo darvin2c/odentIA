@@ -22,6 +22,7 @@ import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation/$invitationId'
 import { Route as AppBillingOrganizationIdRouteImport } from './routes/_app/billing.$organizationId'
+import { Route as AppBillingOrganizationIdAccionesRouteImport } from './routes/_app/billing_.$organizationId.acciones'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -89,6 +90,12 @@ const AppBillingOrganizationIdRoute =
     path: '/billing/$organizationId',
     getParentRoute: () => AppRoute,
   } as any)
+const AppBillingOrganizationIdAccionesRoute =
+  AppBillingOrganizationIdAccionesRouteImport.update({
+    id: '/billing_/$organizationId/acciones',
+    path: '/billing/$organizationId/acciones',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/support': typeof AppSupportRoute
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/billing/$organizationId': typeof AppBillingOrganizationIdRoute
+  '/billing/$organizationId/acciones': typeof AppBillingOrganizationIdAccionesRoute
 }
 export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
@@ -117,6 +125,7 @@ export interface FileRoutesByTo {
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/': typeof AppIndexRoute
   '/billing/$organizationId': typeof AppBillingOrganizationIdRoute
+  '/billing/$organizationId/acciones': typeof AppBillingOrganizationIdAccionesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -133,6 +142,7 @@ export interface FileRoutesById {
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/_app/': typeof AppIndexRoute
   '/_app/billing/$organizationId': typeof AppBillingOrganizationIdRoute
+  '/_app/billing_/$organizationId/acciones': typeof AppBillingOrganizationIdAccionesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/support'
     | '/accept-invitation/$invitationId'
     | '/billing/$organizationId'
+    | '/billing/$organizationId/acciones'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/forgot-password'
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/accept-invitation/$invitationId'
     | '/'
     | '/billing/$organizationId'
+    | '/billing/$organizationId/acciones'
   id:
     | '__root__'
     | '/_app'
@@ -178,6 +190,7 @@ export interface FileRouteTypes {
     | '/accept-invitation/$invitationId'
     | '/_app/'
     | '/_app/billing/$organizationId'
+    | '/_app/billing_/$organizationId/acciones'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -285,6 +298,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBillingOrganizationIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/billing_/$organizationId/acciones': {
+      id: '/_app/billing_/$organizationId/acciones'
+      path: '/billing/$organizationId/acciones'
+      fullPath: '/billing/$organizationId/acciones'
+      preLoaderRoute: typeof AppBillingOrganizationIdAccionesRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -293,6 +313,7 @@ interface AppRouteChildren {
   AppSupportRoute: typeof AppSupportRoute
   AppIndexRoute: typeof AppIndexRoute
   AppBillingOrganizationIdRoute: typeof AppBillingOrganizationIdRoute
+  AppBillingOrganizationIdAccionesRoute: typeof AppBillingOrganizationIdAccionesRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -300,6 +321,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSupportRoute: AppSupportRoute,
   AppIndexRoute: AppIndexRoute,
   AppBillingOrganizationIdRoute: AppBillingOrganizationIdRoute,
+  AppBillingOrganizationIdAccionesRoute: AppBillingOrganizationIdAccionesRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

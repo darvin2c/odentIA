@@ -12,6 +12,7 @@ import {
   ServiceError,
 } from "@odentia/services"
 import { z } from "zod"
+import { reportReplyUse } from "./ai-usage.js"
 import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
 import type { AgentRuntime } from "./run.js"
 
@@ -302,6 +303,7 @@ export async function extractDictation(
     new SystemMessage({ content: systemPrompt({ services, today: `${today}, ${now.toISOString()}`, timezone: zone.timezone }) }),
     new HumanMessage({ content: human }),
   ])
+  reportReplyUse(spec.provider, spec.modelName, reply)
   const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === TOOL_NAME) : undefined
   const parsed = call ? extraction.safeParse(call.args) : null
   if (!parsed?.success) {

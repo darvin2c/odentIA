@@ -45,6 +45,7 @@ import {
 } from "./plan.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
+import { countConsultationAction } from "./saas-actions.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect
@@ -1388,6 +1389,8 @@ export async function finalizeEncounter(
   if (!row) throw notFound("Atención")
   await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, now)
   if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
+  // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0030).
+  await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
   // Los cargos caen solos al finalizar, con el precio final acordado:
   // - Modo `treatment`: un cargo por tratamiento (anti-doble-cobro por cargo
   //   activo del mismo tratamiento; el importe respeta el total acordado).

@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { formatForChannel } from "@odentia/agent"
+import { formatForChannel, meterAiUse } from "@odentia/agent"
 import { refreshAgentSearch, type SearchEmbedder, tickAutomations, type TickDeps } from "@odentia/services"
 import { sql } from "drizzle-orm"
 
@@ -36,7 +36,9 @@ function refreshSearchInBackground(deps: AutomationWorkerDeps, embedder: SearchE
   if (searchRunning || Date.now() - searchLastStart < SEARCH_EVERY_MS) return
   searchRunning = true
   searchLastStart = Date.now()
-  refreshAgentSearch(deps.ownerDb, deps.appDb, embedder)
+  refreshAgentSearch(deps.ownerDb, deps.appDb, embedder, {
+    meter: (orgId, run) => meterAiUse(deps.appDb, orgId, "vectores", run),
+  })
     .then((search) => {
       if (search.embedded || search.failed) {
         console.log(`worker: búsqueda del agente vectorizados=${search.embedded} sin_vector=${search.failed}`)

@@ -26,8 +26,6 @@ export interface BillingSummary {
     llmCalls: number
     inputTokens: number | null
     outputTokens: number | null
-    costMicros: number | null
-    runsWithCost: number
     periodLabel: string
   }
 }
@@ -95,10 +93,7 @@ export function SubscriptionStatusCard({ summary }: { summary: BillingSummary })
         </div>
       </dl>
       <p className="mt-2 text-xs text-muted-foreground">
-        Uso {summary.usage30d.periodLabel}: {summary.usage30d.agentRuns} corridas del agente ·{" "}
-        {summary.usage30d.costMicros !== null
-          ? `costo ${summary.usage30d.costMicros} µu`
-          : "costo no informado por el proveedor"}
+        Uso {summary.usage30d.periodLabel}: {summary.usage30d.agentRuns} corridas del agente
       </p>
       {summary.status === "restringida" ? (
         <p className="mt-3 text-sm">

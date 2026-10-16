@@ -610,6 +610,34 @@
       "when": 1792084231417,
       "tag": "0086_ventas_que_se_mueven_solas",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1792113996278,
+      "tag": "0087_uso_de_ia",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1792113996279,
+      "tag": "0088_cobro_por_accion",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1792113996280,
+      "tag": "0089_prueba_tope_y_negociacion",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1792113996281,
+      "tag": "0090_cargo_con_lineas",
+      "breakpoints": true
     }
   ]
 }
