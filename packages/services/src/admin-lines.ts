@@ -37,7 +37,7 @@ export function say(phrase: Phrase, timing: LineTiming = {}): string {
 export const TASK_AREA_LABELS: Record<TaskArea, { team: string; short: string }> = {
   recepcion: { team: "el equipo de recepción", short: "Equipo de recepción" },
   caja: { team: "el equipo de caja", short: "Caja" },
-  clinico: { team: "el profesional que la lleva", short: "Profesional" },
+  clinico: { team: "el equipo clínico", short: "Equipo clínico" },
   administracion: { team: "quien administra la clínica", short: "Administración" },
 }
 

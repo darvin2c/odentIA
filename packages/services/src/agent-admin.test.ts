@@ -206,7 +206,7 @@ describe("su página", () => {
     expect(flow.main.map((step) => [step.label, step.actorLabel])).toEqual([
       ["Una atención lleva 2 días sin firmar", null],
       ["Espera 2 días", "Administrador · agente"],
-      ["Tarea para firmar", "Profesional · persona"],
+      ["Tarea para firmar", "Equipo clínico · persona"],
       ["Le toca a una persona", null],
     ])
   })
