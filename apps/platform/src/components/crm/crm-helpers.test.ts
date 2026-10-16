@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { setOrgLocale } from "../../lib/locale"
 import { dueWords, formatDueAt, isOverdue } from "./crm-helpers"
+
+// El formato es el de la clínica (es-PE), nunca el de la máquina que corre la prueba.
+beforeEach(() => {
+  setOrgLocale("es-PE")
+})
+afterEach(() => {
+  setOrgLocale(undefined)
+})
 
 const LIMA = "America/Lima"
 const MADRID = "Europe/Madrid"
