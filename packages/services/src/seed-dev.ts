@@ -453,7 +453,6 @@ async function wipeSeed(): Promise<void> {
   await db
     .delete(patientRegistrationConfig)
     .where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
-  await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
   await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
   // Las citas creadas por el agente referencian su conversación: se suelta la
   // referencia antes de borrarla (las citas se purgan más abajo).
@@ -516,8 +515,10 @@ async function wipeSeed(): Promise<void> {
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
-  await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
+  // La atención referencia su cita (ADR 0002): las citas se borran después.
+  await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
+  await db.delete(scheduleChair).where(inArray(scheduleChair.organizationId, SEED_ORGS))
   await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))

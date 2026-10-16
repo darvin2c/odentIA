@@ -13,7 +13,8 @@ import {
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
 import { and, count, desc, eq, inArray } from "drizzle-orm"
-import { CONFIRM_TTL_HOURS, listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
+import { listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
+import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
 import { notFound, validation } from "./errors.js"
 import { formatZoned, type OrgLocale } from "./locale.js"
 
