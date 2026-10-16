@@ -1,10 +1,11 @@
 import { withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { patient, patientContact } from "@odentia/db/schema/clinical"
+import { patient, patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import { portalLink } from "@odentia/db/schema/portal"
-import { portalPasskey } from "@odentia/db/schema/portal-access"
+import { portalLink, portalSession } from "@odentia/db/schema/portal"
+import { portalGrant, portalPasskey } from "@odentia/db/schema/portal-access"
 import { createHash, randomBytes } from "node:crypto"
+import { readFileSync } from "node:fs"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import {
@@ -34,6 +35,7 @@ import {
 import { recordPortalPinFailure, upsertPortalPolicy } from "./portal-policy.js"
 import { ServiceError } from "./errors.js"
 import { patientPersonId } from "./patients.js"
+import { revokeResponsibility } from "./responsibilities.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -80,6 +82,18 @@ async function insertPendingLink(patient: string, pin = "123456"): Promise<{ raw
   return { raw }
 }
 
+/** El contacto pasa a ser representante legal vigente del paciente. */
+async function represent(tx: Parameters<Parameters<typeof withOrgContext>[2]>[0], patient: string): Promise<void> {
+  await tx.insert(patientResponsibility).values({
+    organizationId: ORG,
+    patientId: patient,
+    contactId,
+    kind: "representante_legal",
+    startsAt: "2020-01-01",
+    createdBy: ACTOR,
+  })
+}
+
 beforeAll(async () => {
   await ownerDb.execute(sql`
     insert into "organization" ("id", "name", "slug", "created_at")
@@ -116,13 +130,11 @@ beforeAll(async () => {
     .returning({ id: contact.id })
   contactId = createdContact!.id
   await withOrgContext(appDb, ORG, async (tx) => {
-    await tx.insert(patientContact).values({
-      organizationId: ORG,
-      patientId,
-      contactId,
-      relationship: "family",
-      createdBy: ACTOR,
-    })
+    // Quien entra al portal decide por los pacientes: es su representante legal vigente.
+    for (const id of [patientId, patient2Id, patient3Id]) {
+      await tx.insert(patientContact).values({ organizationId: ORG, patientId: id, contactId, relationship: "guardian", createdBy: ACTOR })
+      await represent(tx, id)
+    }
     const [conn] = await tx
       .insert(channelConnection)
       .values({
@@ -189,7 +201,7 @@ it("la emisión exige grant verificado y es discreta", async () => {
     createPortalGrant(tx, ORG, ACTOR, {
       patientId,
       contactId,
-      relationship: "family",
+      relationship: "guardian",
       scope: { appointments: true },
       verifiedMethod: "presencial_documento",
       evidenceNote: "DNI revisado en recepción.",
@@ -256,7 +268,7 @@ it("sesión, anti-escalada PIN y revocación en cascada del grant", async () => 
     createPortalGrant(tx, ORG, ACTOR, {
       patientId: patient2Id,
       contactId,
-      relationship: "family",
+      relationship: "guardian",
       scope: { appointments: true },
       verifiedMethod: "presencial_documento",
       evidenceNote: "DNI revisado en recepción.",
@@ -331,7 +343,7 @@ it("passkeys: registro con sesión Bearer; respuestas inválidas no crean nada",
     createPortalGrant(tx, ORG, ACTOR, {
       patientId: patient3Id,
       contactId,
-      relationship: "family",
+      relationship: "guardian",
       scope: { appointments: true },
       verifiedMethod: "presencial_documento",
     }),
@@ -388,7 +400,7 @@ it("cuestionario previo: lo responde quien tiene la sesión, se envía completo 
     createPortalGrant(tx, ORG, ACTOR, {
       patientId: patient3Id,
       contactId,
-      relationship: "family",
+      relationship: "guardian",
       scope: { appointments: true },
       verifiedMethod: "presencial_documento",
       evidenceNote: "DNI revisado en recepción.",
@@ -435,11 +447,12 @@ it("el código de 6 dígitos siempre activa el acceso, también para volver a en
     .returning({ id: patient.id })
   const patient4Id = created!.id
   await withOrgContext(appDb, ORG, async (tx) => {
-    await tx.insert(patientContact).values({ organizationId: ORG, patientId: patient4Id, contactId, relationship: "family", createdBy: ACTOR })
+    await tx.insert(patientContact).values({ organizationId: ORG, patientId: patient4Id, contactId, relationship: "guardian", createdBy: ACTOR })
+    await represent(tx, patient4Id)
     await createPortalGrant(tx, ORG, ACTOR, {
       patientId: patient4Id,
       contactId,
-      relationship: "family",
+      relationship: "guardian",
       scope: { appointments: true },
       verifiedMethod: "presencial_documento",
     })
@@ -607,4 +620,105 @@ it("pedir volver al portal por el chat deja el pedido en «Te espera» y lo atie
   expect(resent.pinOnce).toMatch(/^\d{6}$/)
   const later = await withOrgContext(appDb, ORG, (tx) => getWorkspaceHome(tx, ORG, ACTOR, access))
   expect(later.waiting.some((row) => row.kind === "portalReentry")).toBe(false)
+})
+
+/** Una hija con su madre como representante legal y una sesión abierta en el portal. */
+async function daughterWithSession(number: number, birthDate: string) {
+  const [created] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: `Hija ${number}`, patientNumber: number, birthDate })
+    .returning({ id: patient.id })
+  const daughter = created!.id
+  const grant = await withOrgContext(appDb, ORG, async (tx) => {
+    await tx.insert(patientContact).values({ organizationId: ORG, patientId: daughter, contactId, relationship: "guardian", createdBy: ACTOR })
+    await represent(tx, daughter)
+    return createPortalGrant(tx, ORG, ACTOR, {
+      patientId: daughter,
+      contactId,
+      scope: { appointments: true },
+      verifiedMethod: "representacion_verificada",
+    })
+  })
+  const { raw } = await insertPendingLink(daughter)
+  const opened = await withOrgContext(appDb, ORG, (tx) => exchangePortalToken(tx, ORG, raw, { pin: "123456" }))
+  return { daughter, grantId: grant.id, sessionToken: opened.sessionToken }
+}
+
+const minorBirth = () => `${new Date().getUTCFullYear() - 12}-01-15`
+
+it("tutela revocada: su portal de ese paciente se cierra en el acto, con sesiones y enlaces", async () => {
+  const { daughter, grantId, sessionToken } = await daughterWithSession(9401, minorBirth())
+  expect(await errorCode(withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, sessionToken)))).toBe("OK")
+  const [tutela] = await ownerDb
+    .select({ id: patientResponsibility.id })
+    .from(patientResponsibility)
+    .where(and(eq(patientResponsibility.patientId, daughter), eq(patientResponsibility.contactId, contactId)))
+  await withOrgContext(appDb, ORG, (tx) => revokeResponsibility(tx, ORG, ACTOR, daughter, tutela!.id, { reason: "Resolución judicial" }))
+  expect(await errorCode(withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, sessionToken)))).toBe("PORTAL_REVOKED")
+  const grants = await withOrgContext(appDb, ORG, (tx) => listPortalGrants(tx, ORG, daughter))
+  expect(grants.find((row) => row.id === grantId)?.status).toBe("revocado")
+})
+
+it("la hija cumple 18: la representación de menor termina y su madre ya no entra ni recibe otro enlace", async () => {
+  const { daughter, grantId, sessionToken } = await daughterWithSession(9402, minorBirth())
+  // Cumplió 18 ayer.
+  const yesterday = new Date(Date.now() - 86_400_000)
+  const eighteen = `${yesterday.getUTCFullYear() - 18}-${String(yesterday.getUTCMonth() + 1).padStart(2, "0")}-${String(yesterday.getUTCDate()).padStart(2, "0")}`
+  await ownerDb.update(patient).set({ birthDate: eighteen }).where(eq(patient.id, daughter))
+  expect(await errorCode(withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, sessionToken)))).toBe("PORTAL_REVOKED")
+  expect(
+    await errorCode(
+      withOrgContext(appDb, ORG, (tx) =>
+        resendPortalAccess(tx, ORG, ACTOR, grantId, { delivery: "qr" }, { linkUrl: (token) => `https://portal.test/a/${token}`, ...NO_RIGHTS }),
+      ),
+    ),
+  ).toBe("PORTAL_NOT_ALLOWED")
+  // Ya no es candidata a entrar por ella: ahora entra la propia hija.
+  const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, daughter))
+  expect(summary.candidates.map((row) => row.contactId)).not.toContain(contactId)
+})
+
+it("la migración 0096 no revive lo vencido: lo revoca con su sesión, y solo lo vigente deja de vencer", async () => {
+  const [created] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: "Paciente Vencida", patientNumber: 9403 })
+    .returning({ id: patient.id })
+  const [fresh] = await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: "Paciente Vigente", patientNumber: 9404 })
+    .returning({ id: patient.id })
+  const grantOf = async (patientId: string, expiresAt: Date) => {
+    await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId, contactId, relationship: "guardian", createdBy: ACTOR })
+    const [row] = await ownerDb
+      .insert(portalGrant)
+      .values({ organizationId: ORG, patientId, contactId, scope: { appointments: true, budgets: false, account: false, documents: [] }, verifiedMethod: "presencial_documento", expiresAt })
+      .returning({ id: portalGrant.id })
+    return row!.id
+  }
+  const expired = await grantOf(created!.id, new Date(Date.now() - 86_400_000))
+  const live = await grantOf(fresh!.id, new Date(Date.now() + 86_400_000))
+  const [session] = await ownerDb
+    .insert(portalSession)
+    .values({
+      organizationId: ORG,
+      patientId: created!.id,
+      contactId,
+      grantId: expired,
+      scope: { appointments: true, budgets: false, account: false, documents: [] },
+      tokenHash: randomBytes(32).toString("hex"),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    })
+    .returning({ id: portalSession.id })
+  const file = readFileSync(new URL("../../db/drizzle/0096_su_enlace_y_portal_en_un_paso.sql", import.meta.url), "utf8")
+  const tail = file.slice(file.indexOf("-- El acceso ya no vence solo."))
+  for (const statement of tail.split("--> statement-breakpoint")) {
+    if (statement.trim()) await ownerDb.execute(sql.raw(statement))
+  }
+  const [gone] = await ownerDb.select().from(portalGrant).where(eq(portalGrant.id, expired))
+  expect(gone).toMatchObject({ status: "revocado" })
+  expect(gone?.revokedAt).toBeInstanceOf(Date)
+  const [kept] = await ownerDb.select().from(portalGrant).where(eq(portalGrant.id, live))
+  expect(kept).toMatchObject({ status: "activo", expiresAt: null })
+  const [closed] = await ownerDb.select().from(portalSession).where(eq(portalSession.id, session!.id))
+  expect(closed?.revokedAt).toBeInstanceOf(Date)
 })

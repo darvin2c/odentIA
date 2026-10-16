@@ -863,7 +863,8 @@ export async function createAppointment(
           patientId: input.patientId,
           appointmentId: created.id,
           planItemId,
-          createdBy: actorUserId,
+          // Quien reserva desde su enlace o el portal no es del equipo: queda sin autor, como la cita.
+          createdBy: input.createdByUserId === undefined ? actorUserId : input.createdByUserId,
         })),
       )
     }
@@ -918,6 +919,18 @@ export async function moveAppointment(
   options: { notice?: boolean } = {},
 ): Promise<AppointmentItem> {
   const current = await requireAppointment(tx, orgId, id)
+  // Solo se mueve lo que sigue en pie: lo atendido, cancelado o que no vino ya pasó.
+  if (current.status !== "programada" && current.status !== "confirmada") {
+    throw conflict("APPOINTMENT_STATUS", "Esta cita ya no se puede mover: solo se mueven las programadas o confirmadas")
+  }
+  // Con su atención abierta, la cita es la de esa atención: no cambia de hora.
+  const linked = await linkedEncounter(tx, orgId, current.id)
+  if (linked) {
+    throw conflict(
+      "APPOINTMENT_IN_ATTENTION",
+      "La cita tiene una atención en curso: termínala o anúlala antes de moverla",
+    )
+  }
   const startsAt = parseInstant(input.startsAt, "startsAt")
   const durationMs = current.endsAt.getTime() - current.startsAt.getTime()
   const endsAt = input.endsAt

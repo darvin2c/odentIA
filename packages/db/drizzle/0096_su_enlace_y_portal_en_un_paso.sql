@@ -52,5 +52,21 @@ ALTER TABLE "portal_policy" DROP COLUMN IF EXISTS "session_ttl_hours";--> statem
 ALTER TABLE "portal_policy" DROP COLUMN IF EXISTS "grant_ttl_days";--> statement-breakpoint
 ALTER TABLE "portal_policy" DROP COLUMN IF EXISTS "passkeys_enabled";--> statement-breakpoint
 ALTER TABLE "portal_policy" DROP COLUMN IF EXISTS "assisted_recovery_enabled";--> statement-breakpoint
--- El acceso ya no vence solo: lo que tuviera fecha queda sin ella.
-UPDATE "portal_grant" SET "expires_at" = NULL WHERE "expires_at" IS NOT NULL;
+-- El acceso ya no vence solo. Lo que ya había vencido no revive: queda
+-- revocado, con sus sesiones, sus llaves y sus enlaces pendientes, como
+-- «Quitar acceso». Solo lo vigente pasa a no vencer.
+UPDATE "portal_session" SET "revoked_at" = now(), "updated_at" = now()
+WHERE "revoked_at" IS NULL AND "grant_id" IN (
+  SELECT "id" FROM "portal_grant" WHERE "status" = 'activo' AND "expires_at" IS NOT NULL AND "expires_at" <= now()
+);--> statement-breakpoint
+UPDATE "portal_passkey" SET "revoked_at" = now()
+WHERE "revoked_at" IS NULL AND "grant_id" IN (
+  SELECT "id" FROM "portal_grant" WHERE "status" = 'activo' AND "expires_at" IS NOT NULL AND "expires_at" <= now()
+);--> statement-breakpoint
+UPDATE "portal_link" AS l SET "status" = 'revocado', "revoked_at" = now(), "updated_at" = now()
+FROM "portal_grant" AS g
+WHERE l."status" = 'pendiente' AND g."status" = 'activo' AND g."expires_at" IS NOT NULL AND g."expires_at" <= now()
+  AND l."organization_id" = g."organization_id" AND l."patient_id" = g."patient_id" AND l."contact_id" = g."contact_id";--> statement-breakpoint
+UPDATE "portal_grant" SET "status" = 'revocado', "revoked_at" = now(), "revoke_reason" = 'Había vencido antes de que el acceso dejara de vencer', "updated_at" = now()
+WHERE "status" = 'activo' AND "expires_at" IS NOT NULL AND "expires_at" <= now();--> statement-breakpoint
+UPDATE "portal_grant" SET "expires_at" = NULL WHERE "status" = 'activo' AND "expires_at" IS NOT NULL;

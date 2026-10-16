@@ -1,3 +1,4 @@
+import { odontogramAssessment } from "@odentia/db/schema/clinical"
 import { consentDocument, consentTemplate } from "@odentia/db/schema/clinical-forms"
 import { expect, it } from "vitest"
 import { createClinicalOrder } from "./clinical-forms.js"
@@ -55,4 +56,39 @@ it("Historia: la atención anulada con su motivo y los papeles como hechos (ADR 
     getTimeline(tx, "org_a", f.patient.id, { types: ["encounter"] }),
   )
   expect(encounters.data.map((item) => item.type)).toEqual(["encounter"])
+})
+
+it("el odontograma firmado es un hecho de la historia: el del botón aparte, el del cierre dentro de su atención", async () => {
+  const f = await clinicalFixture()
+  const signed = (encounterId: string | null, purpose: string) => ({
+    organizationId: "org_a",
+    patientId: f.patient.id,
+    authorUserId: f.actor,
+    purpose,
+    specifications: "",
+    observations: "",
+    examinerName: "Dra. Ana Torres",
+    examinerTitle: "Cirujano dentista",
+    registrationNumber: "COP 12345",
+    patientName: "Paciente de prueba",
+    patientNumber: 1,
+    entries: [],
+    standard: "PE-NTS-188",
+    encounterId,
+  })
+  const [manual] = await ownerDb.insert(odontogramAssessment).values(signed(null, "legal")).returning({ id: odontogramAssessment.id })
+  const [closing] = await ownerDb.insert(odontogramAssessment).values(signed(f.encounter.id, "initial")).returning({ id: odontogramAssessment.id })
+  // En la historia completa, el del cierre va dentro de su atención; el del botón, como su propio hecho.
+  const all = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id))
+  const facts = all.data.filter((item) => item.type === "odontogram_signed")
+  expect(facts.map((item) => item.refId)).toEqual([manual!.id])
+  expect(facts[0]).toMatchObject({ title: expect.stringMatching(/^Odontograma firmado · /), detail: "Dra. Ana Torres · COP 12345" })
+  // Filtrando solo los firmados, salen los dos, con su atención.
+  const only = await f.run((tx) => getTimeline(tx, "org_a", f.patient.id, { types: ["odontogram_signed"] }))
+  expect(only.data.map((item) => [item.refId, item.encounterId ?? null]).sort()).toEqual(
+    [
+      [manual!.id, null],
+      [closing!.id, f.encounter.id],
+    ].sort(),
+  )
 })

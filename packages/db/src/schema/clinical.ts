@@ -569,11 +569,12 @@ export const odontogramEntry = pgTable(
     /**
      * Lo tratado queda dibujado: el tratamiento completado que dejó este
      * hallazgo en la pieza (la resina deja una restauración), según lo que su
-     * servicio dice que deja (`service_catalog.leaves_finding`).
+     * servicio dice que deja (`service_catalog.leaves_finding`). Del mismo
+     * paciente y organización: la migración 0097 añade la FK
+     * compuesta `odontogram_entry_left_by_plan_item_fk` (sin FK en TS para
+     * evitar el ciclo con `treatment_plan_item`).
      */
-    leftByPlanItemId: uuid("left_by_plan_item_id").references(
-      (): AnyPgColumn => treatmentPlanItem.id,
-    ),
+    leftByPlanItemId: uuid("left_by_plan_item_id"),
     createdBy: text("created_by").references(() => user.id),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
@@ -621,11 +622,16 @@ export const odontogramAssessment = pgTable(
     /** Norma con la que se firmó; sin valor por defecto: la pone el servicio. */
     standard: text("standard").notNull(),
     /** Atención cuyo cierre lo firmó; null en el botón «Firmar odontograma». */
-    encounterId: uuid("encounter_id").references((): AnyPgColumn => encounter.id),
+    encounterId: uuid("encounter_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("odontogram_assessment_org_patient_idx").on(table.organizationId, table.patientId),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.encounterId],
+      foreignColumns: [encounter.organizationId, encounter.patientId, encounter.id],
+      name: "odontogram_assessment_encounter_fk",
+    }),
     uniqueIndex("odontogram_assessment_encounter_uidx")
       .on(table.encounterId)
       .where(sql`"encounter_id" IS NOT NULL`),
@@ -684,6 +690,7 @@ export const encounter = pgTable(
   },
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
+    uniqueIndex("encounter_org_patient_id_uidx").on(table.organizationId, table.patientId, table.id),
     uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
     uniqueIndex("encounter_appointment_active_uidx")
       .on(table.organizationId, table.appointmentId)
@@ -1074,6 +1081,7 @@ export const treatmentBudget = pgTable(
     index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
     uniqueIndex("treatment_budget_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("treatment_budget_org_patient_id_uidx").on(table.organizationId, table.patientId, table.id),
     // Un solo borrador por persona: el de una revisión va aparte (se elige al crearla).
     uniqueIndex("treatment_budget_one_draft_uidx")
       .on(table.organizationId, table.patientId)
@@ -1105,8 +1113,8 @@ export const treatmentBudgetOption = pgTable(
   },
   (table) => [
     foreignKey({
-      columns: [table.organizationId, table.budgetId],
-      foreignColumns: [treatmentBudget.organizationId, treatmentBudget.id],
+      columns: [table.organizationId, table.patientId, table.budgetId],
+      foreignColumns: [treatmentBudget.organizationId, treatmentBudget.patientId, treatmentBudget.id],
       name: "treatment_budget_option_budget_fk",
     }),
     uniqueIndex("treatment_budget_option_org_budget_id_uidx").on(

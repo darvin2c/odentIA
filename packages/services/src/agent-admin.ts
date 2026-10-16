@@ -1,3 +1,4 @@
+import { canAccess, ORG_ROLES } from "@odentia/auth/permissions"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import type { AutomationCause } from "@odentia/db/schema/automation"
@@ -361,6 +362,9 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
   }
 }
 
+/** Roles que escriben en la historia (`clinical.write`): ven sus atenciones de otro día en «Te espera». */
+const ATTENDING_ROLES = ORG_ROLES.filter((role) => canAccess(role, "clinical.write"))
+
 async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; dentist: string | null; dentist_id: string | null; started_at: Date | string; total: number }>(sql`
     select e.id, p.id as patient_id, p.display_name as name, u.name as dentist, e.dentist_user_id as dentist_id, e.started_at,
@@ -370,6 +374,13 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
     left join "user" u on u.id = e.dentist_user_id
     where e.organization_id = ${orgId} and e.status = 'borrador'
       and e.started_at < now() - make_interval(days => ${days})
+      -- Quien la lleva y sigue atendiendo ya la tiene en «Te espera» con lo que
+      -- le falta (staleEncounter): la línea no le deja otra tarea igual.
+      and not exists (
+        select 1 from member m
+        where m.organization_id = e.organization_id and m.user_id = e.dentist_user_id
+          and lower(m.role) in (${sql.join(ATTENDING_ROLES.map((role) => sql`${role}`), sql`, `)})
+      )
       ${fresh(scope, sql`e.id::text`, sql`e.started_at + make_interval(days => ${days})`)}
     order by e.started_at asc
     limit ${ADMIN_LIST_LIMIT}`)
@@ -389,7 +400,7 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
     })),
     title: `${total} ${plural(total, "atención lleva", "atenciones llevan")} más de ${days} ${plural(days, "día", "días")} sin firmar`,
     detail: who.length ? `${who.join(" y ")}.` : "",
-    how: `Atenciones que siguen en borrador y se abrieron hace más de ${days} ${plural(days, "día", "días")}. Una atención sin firmar no forma parte de la historia.`,
+    how: `Atenciones que siguen en borrador, se abrieron hace más de ${days} ${plural(days, "día", "días")} y no le salen a nadie en «Te espera»: quien la lleva ya no está en el equipo o ya no atiende. Una atención sin firmar no forma parte de la historia.`,
   }
 }
 

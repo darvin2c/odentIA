@@ -32,6 +32,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
+import { hidePersonalLinkRefs } from "./personal-link-token.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
@@ -127,7 +128,8 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
     senderKind: row.senderKind,
     senderUserId: row.senderUserId,
     contentType: row.contentType,
-    body: row.body,
+    // «Su enlace» se ve sin su token: en el mensaje solo hay una referencia.
+    body: row.body === null ? null : hidePersonalLinkRefs(row.body),
     attachments: row.attachments,
     externalId: row.externalId,
     status: row.status,

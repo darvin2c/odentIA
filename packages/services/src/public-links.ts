@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
 import { eq } from "drizzle-orm"
+import { personalLinkRef } from "./personal-link-token.js"
 
 /**
  * Dónde vive la página pública de cada clínica: `https://<clínica>.<dominio>`.
@@ -51,6 +52,14 @@ async function slugOf(tx: Db, orgId: string): Promise<string | null> {
 export async function personalLinkUrl(tx: Db, orgId: string, token: string): Promise<string | null> {
   const origin = clinicOrigin((await slugOf(tx, orgId)) ?? "")
   return origin ? personalLinkAddress(origin, token) : null
+}
+
+/**
+ * «Su enlace» como se guarda en un mensaje: con la referencia a su enlace en
+ * lugar del token (`personalLinkRef`); el worker pone el token al enviarlo.
+ */
+export async function personalLinkMessageUrl(tx: Db, orgId: string, linkId: string): Promise<string | null> {
+  return personalLinkUrl(tx, orgId, personalLinkRef(linkId))
 }
 
 /**

@@ -1,4 +1,4 @@
-import { isValidTooth } from "@odentia/clinical"
+import { isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -8,6 +8,7 @@ import {
   encounterDiagnosis,
   encounterProcedure,
   encounterTooth,
+  odontogramAssessment,
   odontogramEntry,
   patientAnamnesis,
   patientDocument,
@@ -621,6 +622,9 @@ export const TIMELINE_TYPES = [
   "consent",
   "order",
   "form",
+  // El odontograma firmado (Perú, NTS 188) es un hecho de la historia: el que
+  // firmó el cierre de una atención va dentro de ella; el del botón, aparte.
+  "odontogram_signed",
 ] as const
 export type TimelineType = (typeof TIMELINE_TYPES)[number]
 export interface TimelineItem {
@@ -737,7 +741,11 @@ export async function getTimeline(
     )
   if (types.includes("odontogram"))
     branches.push(
-      sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null and voided_at is null and status <> 'voided' ${tooth == null ? sql`` : sql`and (tooth_number = ${tooth} or details->'relatedTeeth' @> ${JSON.stringify([tooth])}::jsonb)`}`,
+      sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${types.includes("encounter") ? sql`and encounter_id is null` : sql``} and voided_at is null and status <> 'voided' ${tooth == null ? sql`` : sql`and (tooth_number = ${tooth} or details->'relatedTeeth' @> ${JSON.stringify([tooth])}::jsonb)`}`,
+    )
+  if (types.includes("odontogram_signed") && tooth == null)
+    branches.push(
+      sql`select id, 'odontogram_signed'::text as kind, created_at from odontogram_assessment where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${types.includes("encounter") ? sql`and encounter_id is null` : sql``}`,
     )
   if (types.includes("document")) {
     const toothFilter =
@@ -942,7 +950,27 @@ export async function getTimeline(
         diagnosisCode: row.diagnosisCode,
         toothNumbers: teeth,
         authorId: row.createdBy,
-        encounterId: null,
+        // El hallazgo se registra dentro de una atención: la historia lo agrupa con ella.
+        encounterId: row.encounterId ?? null,
+      })
+    }
+  const signed = ids("odontogram_signed")
+  if (signed.length)
+    for (const row of await tx
+      .select()
+      .from(odontogramAssessment)
+      .where(and(eq(odontogramAssessment.organizationId, orgId), inArray(odontogramAssessment.id, signed)))) {
+      const purpose = SIGNED_ODONTOGRAM_PURPOSE_LABELS[row.purpose as keyof typeof SIGNED_ODONTOGRAM_PURPOSE_LABELS] ?? row.purpose
+      hydrated.set(row.id, {
+        id: row.id,
+        refId: row.id,
+        type: "odontogram_signed",
+        createdAt: row.createdAt,
+        title: `Odontograma firmado · ${purpose}`,
+        detail: `${row.examinerName} · ${row.registrationNumber}`,
+        toothNumbers: [],
+        authorId: row.authorUserId,
+        encounterId: row.encounterId ?? null,
       })
     }
   for (const source of journeySources) {

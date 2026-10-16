@@ -1,20 +1,23 @@
-import { createHash, createHmac, randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { normalizePhone, type RegistrationAnswers, type RegistrationConfig } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { organization, user } from "@odentia/db/schema/auth"
 import { patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
-import { branch } from "@odentia/db/schema/org"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal } from "./agent-operations.js"
 import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { listAvailableSlots } from "./availability.js"
+import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
+import { scheduledItems } from "./plan-next.js"
+import { contactDecides } from "./responsibilities.js"
 
 /**
  * «Su enlace» (fase 3, decisión 8; ADR 0037, que amplía el 0014): la página
@@ -50,9 +53,7 @@ function hashToken(token: string): string {
 }
 
 /** El token de un enlace: se recalcula con la clave del servidor, así un mismo enlace se vuelve a dar sin guardarlo. */
-function tokenFor(secretsKey: Buffer, linkId: string): string {
-  return createHmac("sha256", secretsKey).update(`su-enlace:${linkId}`).digest("hex")
-}
+const tokenFor = personalLinkToken
 
 type LinkRow = typeof appointmentBookingLink.$inferSelect
 
@@ -318,6 +319,15 @@ export interface ResolvedPersonalLink {
   deadline: Date
   /** Aún ofrece reservar una cita nueva. */
   canBook: boolean
+  /**
+   * Quien lo abre decide por el paciente: la propia persona mayor de edad o su
+   * representante legal vigente (`requireDecisionContact`). Solo entonces ve y
+   * responde el presupuesto, los consentimientos, «Tus datos», el cuestionario
+   * y agenda lo aceptado. Otro vínculo (un familiar, un autorizado) ve solo su cita.
+   */
+  decides: boolean
+  /** Pasó la vigencia de todo lo que no es su propia cita. */
+  expired: boolean
 }
 
 /** El enlace con lo que hoy le toca: la cita que muestra y hasta cuándo sirve lo demás. */
@@ -329,14 +339,64 @@ export async function resolvePersonalLink(tx: Db, orgId: string, token: string, 
   const own = shown && shown.id === row.appointmentId ? shown.startsAt : null
   const deadline = own && own > row.expiresAt ? own : row.expiresAt
   const canBook = live && row.booking && row.usedAt === null && row.expiresAt.getTime() > Date.now()
-  return { row, patientId, live, appointment: shown, deadline, canBook }
+  const decides = live && patientId !== null && (await contactDecides(tx, orgId, patientId, row.contactId))
+  const expired = deadline.getTime() <= Date.now()
+  return { row, patientId, live, appointment: shown, deadline, canBook, decides, expired }
 }
 
-/** El enlace vigente, o que diga que ya no sirve: un enlace revocado no hace nada. */
-export async function requireLiveLink(tx: Db, orgId: string, token: string, lock = false): Promise<ResolvedPersonalLink> {
+/**
+ * El enlace vigente, o que diga que ya no sirve: un enlace revocado no hace
+ * nada y, pasada su vigencia, solo queda su propia cita (`ownAppointment`:
+ * cambiarla, cancelarla o confirmarla mientras no empiece).
+ */
+export async function requireLiveLink(
+  tx: Db,
+  orgId: string,
+  token: string,
+  lock = false,
+  options: { ownAppointment?: boolean } = {},
+): Promise<ResolvedPersonalLink> {
   const link = await resolvePersonalLink(tx, orgId, token, lock)
   if (!link.live) throw linkExpired()
+  if (link.expired && !options.ownAppointment) throw linkExpired()
   return link
+}
+
+/** Lo del paciente que no es su cita solo lo ve y lo responde quien decide por él. */
+export function requireLinkDecider(link: ResolvedPersonalLink): string {
+  if (!link.patientId || !link.decides) {
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este enlace no puede responder por esta persona")
+  }
+  return link.patientId
+}
+
+/**
+ * Deja sin efecto «Su enlace» de un paciente («Quitar enlace»): todos los que
+ * tenga vivos, de quien sea. Lo que ya hizo con él se conserva.
+ */
+export async function revokePersonalLinks(tx: Db, orgId: string, actorUserId: string, patientId: string): Promise<{ revoked: number }> {
+  const rows = await tx
+    .update(appointmentBookingLink)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.patientId, patientId),
+        isNull(appointmentBookingLink.revokedAt),
+      ),
+    )
+    .returning({ id: appointmentBookingLink.id })
+  if (rows.length > 0) {
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "personal_link.revoked",
+      entity: "patient",
+      entityId: patientId,
+      metadata: { links: rows.length },
+    })
+  }
+  return { revoked: rows.length }
 }
 
 export function linkExpired(): ServiceError {
@@ -537,7 +597,7 @@ export async function listBookingLinkSlots(
   token: string,
   input: { branchId: string; from: string; to: string },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
-  const link = await requireLiveLink(tx, orgId, token)
+  const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
   if (link.canBook) {
     if (link.row.branchId && link.row.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
     return listWeekSlots(tx, orgId, { ...input, serviceId: link.row.serviceId })
@@ -548,8 +608,11 @@ export async function listBookingLinkSlots(
     const view = await appointmentView(tx, orgId, current.id)
     return listWeekSlots(tx, orgId, { ...input, durationMin: view?.durationMin ?? null })
   }
-  // Lo aceptado de un presupuesto se reserva desde el mismo enlace («Elegir horario»).
-  if (link.patientId && (await hasSchedulableItems(tx, orgId, link.patientId))) return listWeekSlots(tx, orgId, input)
+  // Lo aceptado de un presupuesto se reserva desde el mismo enlace («Elegir horario»):
+  // solo quien decide por el paciente y mientras el enlace esté vigente.
+  if (link.patientId && link.decides && !link.expired && (await hasSchedulableItems(tx, orgId, link.patientId))) {
+    return listWeekSlots(tx, orgId, input)
+  }
   throw linkExpired()
 }
 
@@ -719,6 +782,16 @@ export async function reserveBookingLink(
   }
   const patientId = link.patientId
   if (!patientId) throw new ServiceError("BOOKING_NEEDS_REGISTRATION", 409, "Antes de reservar necesitamos tus datos")
+  if (forTreatment) {
+    // Lo aceptado lo agenda quien decide por el paciente, y una sola vez: bajo
+    // el bloqueo del enlace, lo que ya tiene cita por venir no se vuelve a reservar.
+    requireLinkDecider(link)
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`su-enlace-agenda:${orgId}:${patientId}`}))`)
+    const already = await scheduledItems(tx, orgId, patientId, input.planItemIds ?? [])
+    if (already.size > 0) {
+      throw new ServiceError("BOOKING_ALREADY_SCHEDULED", 409, "Eso ya tiene su cita. Si quieres cambiarla, usa «Cambiar» en tu cita.")
+    }
+  }
   const created = await createAppointment(tx, orgId, `contact:${link.row.contactId}`, {
     branchId: input.branchId,
     patientId,
@@ -777,7 +850,7 @@ export async function changeBookingLinkAppointment(
   input: { startsAt: string; dentistUserId: string; chairId?: string },
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
-  const link = await requireLiveLink(tx, orgId, token, true)
+  const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
   await moveAppointment(tx, orgId, `contact:${link.row.contactId}`, current.id, {
     expectedVersion: current.version,
@@ -815,7 +888,7 @@ export async function cancelBookingLinkAppointment(
   token: string,
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
-  const link = await requireLiveLink(tx, orgId, token, true)
+  const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
   const before = await appointmentView(tx, orgId, current.id)
   await setAppointmentStatus(tx, orgId, `contact:${link.row.contactId}`, current.id, "cancelada", {
@@ -847,7 +920,7 @@ export async function cancelBookingLinkAppointment(
 
 /** Confirma la cita del enlace: la misma operación que el botón «Confirmar» del recordatorio. */
 export async function confirmBookingLinkAppointment(tx: Db, orgId: string, token: string): Promise<BookingLinkAppointment> {
-  const link = await requireLiveLink(tx, orgId, token, true)
+  const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
   if (current.status === "programada") {
     await setAppointmentStatus(tx, orgId, `contact:${link.row.contactId}`, current.id, "confirmada", { via: "enlace" })

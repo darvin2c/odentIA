@@ -66,7 +66,8 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData } from "./patient-registration.js"
-import { personalLinkUrl, publicLinksConfigured } from "./public-links.js"
+import { personalLinkRef } from "./personal-link-token.js"
+import { personalLinkMessageUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
@@ -1586,11 +1587,12 @@ async function dataNoticeFor(
     { contactId, patientId: row.patientId, appointmentId: job.appointmentId },
     { secretsKey: deps.secretsKey },
   )
-  const url = await personalLinkUrl(tx, orgId, issued.token)
+  // En el mensaje no queda el token: lo pone el worker al enviarlo.
+  const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
   if (!url) return null
   return {
     spec: await currentAutomationMessage(tx, orgId, APPOINTMENT_DATA_NOTICE_KEY),
-    link: { token: issued.token, url },
+    link: { token: personalLinkRef(issued.linkId), url },
   }
 }
 

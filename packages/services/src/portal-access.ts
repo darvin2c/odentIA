@@ -1,6 +1,6 @@
 import type { Db } from "@odentia/db"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
-import { documentText, isMinor } from "@odentia/clinical"
+import { documentText } from "@odentia/clinical"
 import { channelConnection, contact, conversation, crmTask, } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { portalAccessLog, portalLink, portalSession } from "@odentia/db/schema/portal"
@@ -41,7 +41,7 @@ import {
   type PortalSessionView,
   type PortalShareRights,
 } from "./portal.js"
-import { requireDecisionContact } from "./responsibilities.js"
+import { contactDecides } from "./responsibilities.js"
 import { createTask, settleTask } from "./tasks.js"
 
 /**
@@ -945,9 +945,7 @@ async function whatsappReady(tx: Db, orgId: string, contactId: string): Promise<
 
 /** Quién puede entrar al portal de este paciente: él mismo si es mayor de edad, si no su representante legal vigente. */
 async function portalCandidates(tx: Db, orgId: string, patientId: string): Promise<PortalAccessCandidate[]> {
-  const subject = await requirePatient(tx, orgId, patientId)
-  const today = new Date().toISOString().slice(0, 10)
-  const minor = subject.birthDate ? isMinor(String(subject.birthDate).slice(0, 10), today) : false
+  await requirePatient(tx, orgId, patientId)
   const rows = await tx
     .select({
       contactId: contact.id,
@@ -963,18 +961,9 @@ async function portalCandidates(tx: Db, orgId: string, patientId: string): Promi
   const candidates: PortalAccessCandidate[] = []
   for (const row of rows) {
     if (!row.isActive) continue
-    let relation: "self" | "representante"
-    if (row.relationship === "self") {
-      if (minor) continue
-      relation = "self"
-    } else {
-      try {
-        await requireDecisionContact(tx, orgId, patientId, row.contactId)
-      } catch {
-        continue
-      }
-      relation = "representante"
-    }
+    // La misma regla que vuelve a comprobar cada uso del portal (`requireActiveGrant`).
+    if (!(await contactDecides(tx, orgId, patientId, row.contactId))) continue
+    const relation: "self" | "representante" = row.relationship === "self" ? "self" : "representante"
     candidates.push({
       contactId: row.contactId,
       name: row.name,
@@ -1206,6 +1195,14 @@ export async function resendPortalAccess(
     .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.id, grantId)))
     .limit(1)
   if (!grant || !isGrantUsable(grant)) throw notFound("Acceso del portal")
+  // Volver a entrar exige lo mismo que darle acceso: mayor de edad o su representante legal vigente.
+  if (!(await contactDecides(tx, orgId, grant.patientId, grant.contactId))) {
+    throw new ServiceError(
+      "PORTAL_NOT_ALLOWED",
+      409,
+      "Ya no puede entrar al portal por este paciente: quita este acceso y, si corresponde, dale uno a quien decide por él",
+    )
+  }
   const scope = grant.scope
   const delivered = await deliverPortalAccess(
     tx,

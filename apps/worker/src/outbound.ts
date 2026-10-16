@@ -3,7 +3,7 @@ import { channelAdapters, type OutboundMessage } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { decryptConfig, isSaasSendBlocked, type Storage } from "@odentia/services"
+import { decryptConfig, isSaasSendBlocked, resolvePersonalLinkRefs, type Storage } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 export interface SendDeps {
@@ -59,7 +59,8 @@ async function buildOutbound(
             ? m.templateParams
             : [],
         ...(replyButtonsOf(m.replyButtons) ? { buttons: replyButtonsOf(m.replyButtons)! } : {}),
-        ...(m.templateLink ? { link: m.templateLink } : {}),
+        // «Su enlace» no se guarda: el token se pone aquí, al entregarlo.
+        ...(m.templateLink ? { link: resolvePersonalLinkRefs(m.templateLink, deps.secretsKey) } : {}),
       },
     }
   }
@@ -76,13 +77,13 @@ async function buildOutbound(
           url,
           mimeType: att.mimeType,
           filename: att.filename,
-          caption: m.body ?? undefined,
+          caption: m.body ? resolvePersonalLinkRefs(m.body, deps.secretsKey) : undefined,
         },
       },
     }
   }
   const buttons = replyButtonsOf(m.replyButtons)
-  return { to, kind: { type: "text", text: m.body ?? "", ...(buttons ? { buttons } : {}) } }
+  return { to, kind: { type: "text", text: resolvePersonalLinkRefs(m.body ?? "", deps.secretsKey), ...(buttons ? { buttons } : {}) } }
 }
 
 function replyButtonsOf(value: unknown): { id: string; title: string }[] | null {

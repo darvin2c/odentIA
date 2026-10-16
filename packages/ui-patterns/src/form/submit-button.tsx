@@ -18,6 +18,8 @@ export type SubmitButtonProps = {
   type?: "button" | "submit"
   onClick?: () => void
   className?: string
+  /** Nombre accesible cuando el texto visible no basta («Llegó: Lucía Pérez»). */
+  "aria-label"?: string
 }
 
 export function SubmitButton({
@@ -29,6 +31,7 @@ export function SubmitButton({
   type = "button",
   onClick,
   className,
+  "aria-label": ariaLabel,
 }: SubmitButtonProps) {
   return (
     <Button
@@ -37,6 +40,7 @@ export function SubmitButton({
       size={size}
       disabled={disabled || pending}
       aria-busy={pending}
+      aria-label={ariaLabel}
       onClick={onClick}
       className={className}
     >

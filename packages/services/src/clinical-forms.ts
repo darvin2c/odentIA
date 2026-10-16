@@ -2099,6 +2099,10 @@ export async function signConsentByLink(
   let verified: { displayName: string; docNumber: string | null; docType: string | null }
   if (linked.relationship === "self") {
     if (minor) throw conflict("SIGNER_NOT_AUTHORIZED", "Como es menor de edad, lo firma su madre, padre o tutor")
+    // Sin su fecha de nacimiento no se sabe si es mayor de edad: lo firma en la clínica.
+    if (!subject.birthDate) {
+      throw conflict("SIGNER_NOT_AUTHORIZED", "Para firmar aquí la clínica necesita tu fecha de nacimiento. Lo firmas en tu cita.")
+    }
     signerKind = "paciente"
     verified = linked.contact
   } else {

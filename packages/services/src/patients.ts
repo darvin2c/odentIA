@@ -25,6 +25,7 @@ import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
+import { endPairAccess } from "./pair-access.js"
 import { setPersonArchived } from "./people.js"
 import { decodeCursor } from "./cursors.js"
 import {
@@ -560,6 +561,8 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     // `patient_contact_person_adopt`): aquí solo se valida y se deja traza.
     await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.person_replaced", entity: "patient", entityId: patientId, metadata: { fromContactId: currentPerson, toContactId: link.contactId } })
   }
+  const [before] = await tx.select({ relationship: patientContact.relationship }).from(patientContact)
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, link.contactId)))
   try {
     if (link.isPreferred) await tx.update(patientContact).set({ isPreferred: false, updatedAt: new Date() }).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isPreferred, true)))
     await tx.insert(patientContact).values({ ...link, organizationId: orgId, patientId, createdBy: actorUserId })
@@ -573,6 +576,10 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("contact_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con el documento del paciente")
     throw error
   }
+  // Cambió lo que es para el paciente: lo que tenía con el vínculo anterior deja de servir.
+  if (before && before.relationship !== link.relationship) {
+    await endPairAccess(tx, orgId, actorUserId, { patientId, contactId: link.contactId, reason: "Cambió su vínculo con el paciente" })
+  }
 }
 
 export async function removePatientContact(tx: Db, orgId: string, actorUserId: string, patientId: string, contactId: string): Promise<void> {
@@ -584,6 +591,8 @@ export async function removePatientContact(tx: Db, orgId: string, actorUserId: s
     throw conflict("PATIENT_PERSON_REQUIRED", "Esta es la propia persona del paciente y no se puede desvincular")
   const deleted = await tx.delete(patientContact).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, contactId))).returning({ id: patientContact.id })
   if (deleted.length) await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_removed", entity: "patient", entityId: patientId, metadata: { contactId } })
+  // Desvinculada, su enlace y su portal de ese paciente dejan de servir.
+  if (deleted.length) await endPairAccess(tx, orgId, actorUserId, { patientId, contactId, reason: "Se desvinculó del paciente" })
 }
 
 export async function findPatientDuplicates(tx: Db, orgId: string, input: { displayName?: string; birthDate?: string; docType?: string; docNumber?: string; docCountry?: string; phone?: string }) {

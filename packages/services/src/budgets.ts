@@ -384,6 +384,14 @@ async function listBudgetLines(
         eq(treatmentBudgetOption.organizationId, treatmentBudgetItem.organizationId),
       ),
     )
+    // Las líneas en el orden del plan: las que se copian juntas comparten la hora de alta.
+    .leftJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.id, treatmentBudgetItem.planItemId),
+        eq(treatmentPlanItem.organizationId, treatmentBudgetItem.organizationId),
+      ),
+    )
     .where(
       and(
         eq(treatmentBudgetItem.budgetId, budgetId),
@@ -391,7 +399,12 @@ async function listBudgetLines(
         eq(treatmentBudgetItem.patientId, patientId),
       ),
     )
-    .orderBy(asc(treatmentBudgetOption.position), asc(treatmentBudgetItem.createdAt), asc(treatmentBudgetItem.id))
+    .orderBy(
+      asc(treatmentBudgetOption.position),
+      asc(treatmentPlanItem.sortOrder),
+      asc(treatmentBudgetItem.createdAt),
+      asc(treatmentBudgetItem.id),
+    )
   const statuses = new Map<string, string>()
   if (lines.length > 0) {
     const items = await tx

@@ -2,14 +2,18 @@ import {
   clinicalProfileFor,
   documentIssuerCountry,
   documentText,
+  documentTypeProfile,
+  identityDocumentError,
   isMinor,
   isRealDate,
   type MissingPersonDatum,
+  normalizePhone,
+  phoneFormatError,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
+import { patientResponsibility } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -34,6 +38,7 @@ import {
   linkContactFirstName,
   linkExpired,
   patientFirstNameOf,
+  requireLinkDecider,
   requireLiveLink,
   resolvePersonalLink,
   type ResolvedPersonalLink,
@@ -46,11 +51,12 @@ import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
-import { attachLegalRepresentative, getPatientMissingData } from "./patient-registration.js"
+import { getPatientMissingData } from "./patient-registration.js"
 import { patientOrganizationToday, patientPersonId, requirePatient, updatePatient } from "./patients.js"
 import { decideBudgetByPerson, type DecidePortalBudgetInput, portalBudgetLocale, type PortalBudgetView, toPortalBudget } from "./portal.js"
 import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
-import { personalLinkUrl } from "./public-links.js"
+import { personalLinkRef } from "./personal-link-token.js"
+import { personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
 import { createTask } from "./tasks.js"
 
 /**
@@ -99,15 +105,21 @@ export interface PersonalLinkView {
   questionnaire: { title: string } | null
 }
 
+/*
+ * Todo lo que no es su cita es de quien decide por el paciente (`link.decides`):
+ * la propia persona mayor de edad o su representante legal vigente. Un
+ * familiar o un autorizado que abre el enlace ve solo su cita.
+ */
+
 async function missingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<MissingPersonDatum[] | null> {
-  if (!link.patientId || link.row.dataSubmittedAt || link.deadline.getTime() <= Date.now()) return null
+  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return null
   const missing = await getPatientMissingData(tx, orgId, link.patientId)
   return missing.length > 0 ? missing : null
 }
 
-async function budgetsOf(tx: Db, orgId: string, patientId: string | null): Promise<PortalBudgetView[]> {
-  if (!patientId) return []
-  const budgets = (await listBudgets(tx, orgId, patientId)).filter(
+async function budgetsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PortalBudgetView[]> {
+  if (!link.patientId || !link.decides || link.expired) return []
+  const budgets = (await listBudgets(tx, orgId, link.patientId)).filter(
     (budget) => budget.status !== "borrador" && budget.awaitsAnswer,
   )
   if (budgets.length === 0) return []
@@ -116,7 +128,7 @@ async function budgetsOf(tx: Db, orgId: string, patientId: string | null): Promi
 }
 
 async function consentsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkConsent[]> {
-  if (!link.patientId || link.deadline.getTime() <= Date.now()) return []
+  if (!link.patientId || !link.decides || link.expired) return []
   const rows = await tx
     .select({ id: consentDocument.id, title: consentDocument.titleSnapshot })
     .from(consentDocument)
@@ -135,7 +147,7 @@ async function consentsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Pr
 
 /** El cuestionario sale antes de una cita: con una por venir y mientras no lo haya enviado. */
 async function questionnaireOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<{ title: string } | null> {
-  if (!link.patientId || !link.appointment || link.appointment.status === "cancelada") return null
+  if (!link.patientId || !link.decides || link.expired || !link.appointment || link.appointment.status === "cancelada") return null
   const pending = await pendingQuestionnaire(tx, orgId, link.patientId)
   return pending ? { title: pending.title } : null
 }
@@ -165,7 +177,7 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
   if (!link.live) return empty
   const appointment = link.appointment ? await appointmentView(tx, orgId, link.appointment.id) : null
   const missing = await missingOf(tx, orgId, link)
-  const budgets = await budgetsOf(tx, orgId, link.patientId)
+  const budgets = await budgetsOf(tx, orgId, link)
   const consents = await consentsOf(tx, orgId, link)
   const questionnaire = await questionnaireOf(tx, orgId, link)
   const context = link.canBook || budgets.length > 0 ? await bookingContext(tx, orgId, link.row) : null
@@ -308,14 +320,40 @@ async function documentOwner(
   return owner ? { contactId: owner.id, name: owner.name } : null
 }
 
+/** Los datos de su representante, revisados con las reglas del país; el error dice qué arreglar. */
+function representativeOf(
+  input: PersonalLinkDataInput["representative"],
+  countryCode: string | null,
+): { name: string; document: string | null; phone: string | null; relation: string | null } {
+  const name = input?.displayName?.trim() ?? ""
+  if (!name) throw new ServiceError("REPRESENTATIVE_REQUIRED", 409, "Como es menor de edad, completa los datos de su madre, padre o tutor")
+  if (name.length > 200) throw validation("El nombre de su madre, padre o tutor es muy largo")
+  const docNumber = input?.docNumber?.trim() || null
+  const docType = input?.docType?.trim() || null
+  let document: string | null = null
+  if (docNumber) {
+    const profile = clinicalProfileFor(countryCode)
+    if (!docType || !documentTypeProfile(profile, docType)) throw validation("Elige el tipo de documento de su madre, padre o tutor")
+    const problem = identityDocumentError(docType, docNumber)
+    if (problem) throw validation(problem)
+    document = documentText(docType, docNumber)
+  }
+  const phone = input?.phone?.trim() ? normalizePhone(input.phone, countryCode) : null
+  if (input?.phone?.trim() && !phone) throw validation(phoneFormatError(countryCode))
+  return { name, document, phone, relation: input?.relationshipDetail?.trim() || null }
+}
+
 /**
  * La persona envía lo que le faltaba, una sola vez. Se guarda con las reglas
- * de la ficha (`updatePatient`, a su nombre). Si la fecha la hace menor, en
- * la misma operación se registra a su representante legal con documento. Si
- * el documento ya es de otra persona no se guarda, nunca se unen solas, y a
- * recepción le llega «Posible ficha repetida» en «Te espera»; a la persona no
- * se le dice de quién es. La identidad sigue por revisar hasta que recepción
- * la confirme, y una nota de su persona dice qué completó y qué sigue faltando.
+ * de la ficha (`updatePatient`, a su nombre). Si la fecha la hace menor y no
+ * tiene representante legal, desde el enlace no se registra a nadie: la fecha
+ * no se guarda (la ficha sigue con «Faltan datos»), lo que escribió de su
+ * madre, padre o tutor queda en una nota y a recepción le llega la tarea de
+ * registrarlo con su documento. Si el documento ya es de otra persona no se
+ * guarda, nunca se unen solas, y a recepción le llega «Posible ficha
+ * repetida» en «Te espera»; a la persona no se le dice de quién es. La
+ * identidad sigue por revisar hasta que recepción la confirme, y una nota de
+ * su persona dice qué completó y qué sigue faltando.
  */
 export async function submitPersonalLinkData(
   tx: Db,
@@ -326,7 +364,10 @@ export async function submitPersonalLinkData(
   const link = await requireLiveLink(tx, orgId, token, true)
   const missing = await missingOf(tx, orgId, link)
   const patientId = link.patientId
-  if (!missing || !patientId) throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
+  if (!missing || !patientId) {
+    if (patientId && !link.decides) requireLinkDecider(link)
+    throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
+  }
   const allowed = fieldsFor(missing)
   const patch: Record<string, string | null> = {}
   for (const [key, raw] of Object.entries(input.data ?? {})) {
@@ -339,24 +380,11 @@ export async function submitPersonalLinkData(
   const today = await patientOrganizationToday(tx, orgId)
   const countryCode = await findOrgCountry(tx, orgId)
   const personId = await patientPersonId(tx, orgId, patientId)
-  // Si la fecha la hace menor y no tiene representante, se registra en la misma pantalla.
+  // Menor sin representante: no se registra a nadie desde aquí; lo hace recepción con su documento.
+  let pendingRepresentative: ReturnType<typeof representativeOf> | null = null
   if (patch.birthDate && isRealDate(patch.birthDate) && isMinor(patch.birthDate, today) && !(await hasLegalRepresentative(tx, orgId, patientId))) {
-    const rep = input.representative
-    if (!rep?.displayName?.trim() || !rep.docNumber?.trim()) {
-      throw new ServiceError("REPRESENTATIVE_REQUIRED", 409, "Como es menor de edad, completa los datos de su madre, padre o tutor")
-    }
-    await attachLegalRepresentative(tx, orgId, null, patientId, {
-      representative: {
-        displayName: rep.displayName.trim(),
-        docType: (rep.docType ?? undefined) as never,
-        docNumber: rep.docNumber.trim(),
-        docCountry: rep.docCountry ?? undefined,
-        phone: rep.phone?.trim() || undefined,
-        relationshipDetail: rep.relationshipDetail?.trim() ?? "",
-      },
-      countryCode,
-      today,
-    })
+    pendingRepresentative = representativeOf(input.representative, countryCode)
+    delete patch.birthDate
   }
   // Un documento que ya es de otra persona no se guarda: lo revisa recepción.
   let duplicateOf: { contactId: string; name: string } | null = null
@@ -388,6 +416,16 @@ export async function submitPersonalLinkData(
       done.length > 0 ? `Completó desde su enlace: ${done.join(", ")}.` : "Envió sus datos desde su enlace.",
       stillMissing.length > 0 ? `Sigue faltando: ${stillMissing.map((item) => item.label).join(", ")}.` : null,
       duplicateOf ? "El documento que escribió ya está en otra ficha: no se guardó." : null,
+      pendingRepresentative
+        ? `Dijo que es menor de edad (nació el ${input.data?.birthDate?.trim()}): la fecha no se guardó hasta registrar a su representante legal. Su madre, padre o tutor: ${[
+            pendingRepresentative.name,
+            pendingRepresentative.relation,
+            pendingRepresentative.document,
+            pendingRepresentative.phone,
+          ]
+            .filter(Boolean)
+            .join(", ")}.`
+        : null,
     ].filter(Boolean)
     await createContactNote(tx, orgId, personId, { body: parts.join(" ") }, { userId: null })
   }
@@ -402,57 +440,29 @@ export async function submitPersonalLinkData(
       idempotencyKey: `ficha-repetida:${patientId}:${duplicateOf.contactId}`,
     })
   }
+  if (pendingRepresentative) {
+    await createTask(tx, orgId, {
+      title: `Registrar a su representante legal: ${person.displayName}`,
+      patientId,
+      area: "recepcion",
+      createdBy: "sistema",
+      reason:
+        "Dijo en su enlace que es menor de edad. Registra a su madre, padre o tutor con su documento y guarda su fecha de nacimiento: en sus notas está lo que escribió.",
+      idempotencyKey: `registrar-representante:${patientId}`,
+    })
+  }
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId: actor,
     action: "personal_link.data_sent",
     entity: "patient",
     entityId: patientId,
-    metadata: { fields: Object.keys(patch), duplicate: !!duplicateOf, origin: "paciente" },
+    metadata: { fields: Object.keys(patch), duplicate: !!duplicateOf, minorWithoutRepresentative: !!pendingRepresentative, origin: "paciente" },
   })
   return { received: true }
 }
 
 // ---------------------------------------------------------- presupuesto ---
-
-/** Quien abre el enlace puede decidir por el paciente: la propia persona o su representante legal vigente. */
-async function requireDecider(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
-  const [own] = await tx
-    .select({ relationship: patientContact.relationship })
-    .from(patientContact)
-    .where(
-      and(
-        eq(patientContact.organizationId, orgId),
-        eq(patientContact.patientId, patientId),
-        eq(patientContact.contactId, contactId),
-      ),
-    )
-    .limit(1)
-  if (own?.relationship === "self") return
-  if (!(await isLegalRepresentative(tx, orgId, patientId, contactId))) {
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este enlace no puede responder por esta persona")
-  }
-}
-
-async function isLegalRepresentative(tx: Db, orgId: string, patientId: string, contactId: string): Promise<boolean> {
-  const today = await patientOrganizationToday(tx, orgId)
-  const [row] = await tx
-    .select({ id: patientResponsibility.id })
-    .from(patientResponsibility)
-    .where(
-      and(
-        eq(patientResponsibility.organizationId, orgId),
-        eq(patientResponsibility.patientId, patientId),
-        eq(patientResponsibility.contactId, contactId),
-        eq(patientResponsibility.kind, "representante_legal"),
-        isNull(patientResponsibility.revokedAt),
-        lte(patientResponsibility.startsAt, today),
-        or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, today)),
-      ),
-    )
-    .limit(1)
-  return !!row
-}
 
 export interface PersonalLinkBudgetAnswer {
   budget: PortalBudgetView
@@ -473,10 +483,9 @@ export async function decidePersonalLinkBudget(
   input: DecidePortalBudgetInput,
 ): Promise<PersonalLinkBudgetAnswer> {
   const link = await requireLiveLink(tx, orgId, token, true)
-  if (!link.patientId) throw linkExpired()
-  await requireDecider(tx, orgId, link.patientId, link.row.contactId)
+  const patientId = requireLinkDecider(link)
   const result = await decideBudgetByPerson(tx, orgId, {
-    patientId: link.patientId,
+    patientId,
     contactId: link.row.contactId,
     budgetId,
     decision: input,
@@ -600,6 +609,24 @@ export interface PersonalLinkSendPreview {
   /** Por qué no se puede enviar. */
   blocked: string | null
   text: string
+  /** Hasta cuándo sirve el enlace que ya tiene, si tiene uno: «Quitar enlace» lo deja sin efecto. */
+  liveUntil: string | null
+}
+
+/** Hasta cuándo sirve el enlace vivo de un paciente, de quien sea; nulo si no tiene. */
+async function liveLinkUntil(tx: Db, orgId: string, patientId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ until: sql<Date | string | null>`max(${appointmentBookingLink.expiresAt})` })
+    .from(appointmentBookingLink)
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.patientId, patientId),
+        isNull(appointmentBookingLink.revokedAt),
+        gte(appointmentBookingLink.expiresAt, new Date()),
+      ),
+    )
+  return row?.until ? new Date(row.until).toISOString() : null
 }
 
 async function personalLinkMessage(tx: Db, orgId: string, recipientName: string) {
@@ -615,7 +642,11 @@ async function personalLinkMessage(tx: Db, orgId: string, recipientName: string)
 export async function previewPersonalLinkSend(tx: Db, orgId: string, patientId: string): Promise<PersonalLinkSendPreview> {
   const recipient = await serviceRecipient(tx, orgId, patientId)
   const { spec, text } = await personalLinkMessage(tx, orgId, recipient.displayName)
-  const base = { recipient: { contactId: recipient.contactId, name: recipient.displayName, relation: recipient.relation }, text }
+  const base = {
+    recipient: { contactId: recipient.contactId, name: recipient.displayName, relation: recipient.relation },
+    text,
+    liveUntil: await liveLinkUntil(tx, orgId, patientId),
+  }
   if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) {
     return { ...base, channel: null, via: null, label: null, blocked: NO_ADDRESS }
   }
@@ -695,7 +726,8 @@ export async function sendPersonalLink(
     { contactId: recipient.contactId, patientId: input.patientId, createdBy: actorUserId },
     deps,
   )
-  const url = await personalLinkUrl(tx, orgId, link.token)
+  // En el mensaje no queda el token: lo pone el worker al enviarlo.
+  const url = await personalLinkMessageUrl(tx, orgId, link.linkId)
   if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
   let sent: { id: string }
   if (route.via === "plantilla" && route.template) {
@@ -707,7 +739,7 @@ export async function sendPersonalLink(
       language: route.template.language,
       params,
       buttons: spec.buttons.map((button) => ({ id: replyId(button.action, link.linkId), title: button.title })),
-      link: link.token,
+      link: personalLinkRef(link.linkId),
       preview: text,
     })
   } else {

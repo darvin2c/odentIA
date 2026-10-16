@@ -1,7 +1,7 @@
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { type OutboundMessageJob, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
-import { closeConversationWith, createConnection, ingestInbound, sendOutbound } from "@odentia/services"
+import { closeConversationWith, createConnection, ingestInbound, personalLinkRef, personalLinkToken, sendOutbound } from "@odentia/services"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { processOutbound } from "./outbound.js"
@@ -239,4 +239,26 @@ it("media sale con link firmado y caption vía sendPhoto", async () => {
     caption: "Mira esto",
   })
   expect((await messageState(sent.id))?.status).toBe("sent")
+})
+
+it("«Su enlace» se guarda como referencia y sale con su token: el token solo existe al entregarlo", async () => {
+  const { messageId } = await seedQueuedText()
+  const linkId = "6f1c2c1e-1d2a-4c3b-9a8e-0b1c2d3e4f50"
+  await withOrgContext(appDb, "org_a", (tx) =>
+    tx.update(message).set({ body: `Mira aquí: https://norte.test/reserva?token=${personalLinkRef(linkId)}` }).where(eq(message.id, messageId)),
+  )
+  let delivered = ""
+  const live = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async (_url: unknown, init?: { body?: unknown }) => {
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as { text?: string }) : {}
+      delivered = body.text ?? ""
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 100 } }), { status: 200 })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, live, outJob(messageId))).toBe("done")
+  expect(delivered).toBe(`Mira aquí: https://norte.test/reserva?token=${personalLinkToken(KEY, linkId)}`)
+  const [stored] = await withOrgContext(appDb, "org_a", (tx) => tx.select({ body: message.body }).from(message).where(eq(message.id, messageId)))
+  expect(stored?.body).not.toMatch(/[0-9a-f]{64}/)
 })

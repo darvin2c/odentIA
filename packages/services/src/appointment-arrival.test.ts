@@ -266,3 +266,21 @@ it("Inicio: la dueña que atiende ve «Mis pacientes de hoy» con la sala, y su 
   expect(other.today?.scope).toBe("branch")
   expect(other.today!.appointments.map((row) => row.id)).toContain(waiting.id)
 })
+
+it("mover una cita: solo la programada o confirmada y sin atención; lo atendido o cancelado ya no se mueve", async () => {
+  const f = await scene()
+  const nextDay = (iso: string) => new Date(Date.parse(iso) + 86_400_000).toISOString()
+  const visit = await f.book(1, 10)
+  await f.run((tx) => createEncounter(tx, ...f.args, { appointmentId: visit.id }))
+  const attending = await f.run((tx) => getAppointment(tx, "org_a", visit.id))
+  await expect(
+    f.run((tx) => moveAppointment(tx, "org_a", f.actor, visit.id, { expectedVersion: attending.version, startsAt: nextDay(visit.startsAt) })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_IN_ATTENTION" })
+
+  const cancelled = await f.book(2, 9)
+  await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, cancelled.id, "cancelada", { cancelReason: "paciente" }))
+  const after = await f.run((tx) => getAppointment(tx, "org_a", cancelled.id))
+  await expect(
+    f.run((tx) => moveAppointment(tx, "org_a", f.actor, cancelled.id, { expectedVersion: after.version, startsAt: nextDay(cancelled.startsAt) })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_STATUS" })
+})

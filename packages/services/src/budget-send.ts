@@ -29,7 +29,8 @@ import {
   withLinkLine,
 } from "./automation-messages.js"
 import { issuePersonalLink } from "./booking-links.js"
-import { personalLinkUrl } from "./public-links.js"
+import { personalLinkRef } from "./personal-link-token.js"
+import { personalLinkMessageUrl } from "./public-links.js"
 import { clinicName, firstName, previewMessageRoute, routeMessage } from "./automation-routing.js"
 import { mayWriteFirst } from "./automation.js"
 import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } from "./budgets.js"
@@ -80,7 +81,8 @@ export async function serviceRecipient(
   const minor = birth ? isMinor(birth, new Date().toISOString().slice(0, 10)) : false
   const self = recipients.find((r) => r.relation === "paciente") ?? null
   const representative = recipients.find((r) => r.relation === "representante_legal") ?? null
-  const chosen = minor ? (representative ?? self) : (self ?? representative)
+  // Un menor no decide: sin representante legal no hay a quién enviárselo.
+  const chosen = minor ? representative : (self ?? representative)
   if (!chosen) {
     throw new ServiceError(
       "BUDGET_NO_RECIPIENT",
@@ -294,7 +296,8 @@ export async function sendBudget(
           { secretsKey: deps.secretsKey },
         )
       : null
-  const url = link ? await personalLinkUrl(tx, orgId, link.token) : null
+  // En el mensaje no queda el token: lo pone el worker al enviarlo.
+  const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId) : null
   let sent: { conversationId: string; messageId: string }
   if (route.via === "plantilla" && route.template) {
     // Pasadas las 24 horas solo sale el mensaje aprobado, con el botón de su enlace.
@@ -307,7 +310,7 @@ export async function sendBudget(
       language: route.template.language,
       params,
       buttons: spec.buttons.map((button) => ({ id: replyId(button.action, input.budgetId), title: button.title })),
-      ...(link ? { link: link.token } : {}),
+      ...(link ? { link: personalLinkRef(link.linkId) } : {}),
       preview: text,
     })
     sent = { conversationId: route.conversationId, messageId: message.id }

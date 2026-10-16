@@ -9,6 +9,7 @@ import {
   patientOrganizationToday,
   personalLinkUrl,
   previewPersonalLinkSend,
+  revokePersonalLinks,
   savePatientRegistrationConfig,
   sendPersonalLink,
   ServiceError,
@@ -123,6 +124,16 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
         sendPersonalLink(tx, orgId, userId, { patientId: params.data.id, requestId: parsed.data.requestId ?? null }, { secretsKey: deps.secretsKey }),
       ),
     )
+  })
+  // «Quitar enlace»: deja sin efecto su enlace, de quien sea; lo que ya hizo con él se conserva.
+  app.delete("/patients/:id/personal-link", async c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Quitar su enlace es de quien edita sus datos"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse({ id: c.req.param("id") })
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, tx => revokePersonalLinks(tx, orgId, userId, params.data.id)))
   })
   return app
 }

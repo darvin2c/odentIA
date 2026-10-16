@@ -29,6 +29,7 @@ import {
   validation,
 } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { contactDecides } from "./responsibilities.js"
 import { getPatientAccount } from "./payments.js"
 import { findOrgLocale, getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
@@ -221,20 +222,17 @@ async function requirePatientLink(tx: Db, orgId: string, patientId: string, cont
   if (!link) throw validation("El contacto no está vinculado a este paciente")
 }
 
-/** El vínculo puede retirarse tras emitir: sin fila el acceso equivale a revocado. */
+/**
+ * El acceso se vuelve a comprobar en cada uso, con la regla de quién puede
+ * entrar (`portalCandidates`): la propia persona mayor de edad o su
+ * representante legal vigente. Sin vínculo, con la tutela revocada o con la
+ * hija que ya cumplió 18 (su madre la representaba de menor), el acceso
+ * equivale a revocado.
+ */
 export async function requireActiveGrant(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
-  const [grant] = await tx
-    .select({ id: patientContact.id })
-    .from(patientContact)
-    .where(
-      and(
-        eq(patientContact.organizationId, orgId),
-        eq(patientContact.patientId, patientId),
-        eq(patientContact.contactId, contactId),
-      ),
-    )
-    .limit(1)
-  if (!grant) throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
+  if (!(await contactDecides(tx, orgId, patientId, contactId))) {
+    throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
+  }
 }
 
 export async function assertScope(
@@ -1118,6 +1116,10 @@ export async function reschedulePortalAppointment(
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
   if (current.status !== "programada" && current.status !== "confirmada") {
     throw conflict("APPOINTMENT_STATUS", "Esta cita ya no puede reprogramarse")
+  }
+  // Una cita que ya empezó o pasó no se mueve desde el portal.
+  if (current.startsAt.getTime() <= Date.now()) {
+    throw conflict("APPOINTMENT_STATUS", "Esta cita ya pasó: escríbenos para ver otra fecha")
   }
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
     throw validation("La versión de la cita es inválida; recarga e intenta de nuevo")

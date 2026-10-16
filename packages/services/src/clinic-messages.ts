@@ -691,6 +691,10 @@ export async function requestMissingTemplates(
     const texts = [currentText(def), pendingText(def)].filter((text): text is MessageText => !!text)
     for (const text of texts) {
       if (have.has(text.templateName) || attempted.has(text.templateName)) continue
+      // Sin dirección pública no hay botón de «Su enlace» que pedir: no es un
+      // rechazo de WhatsApp ni un permiso que falte. Queda sin pedir y se pide
+      // en el ciclo siguiente a que la dirección esté configurada.
+      if (def.link && !linkUrl) continue
       try {
         // Punto de retorno: un rechazo del proveedor no debe abortar lo demás.
         const item = await tx.transaction((inner) =>

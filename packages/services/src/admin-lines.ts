@@ -278,10 +278,11 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     team: {
       area: "clinico",
       step: "Tarea para firmar",
-      does: "Le queda una tarea al profesional que la lleva",
-      would: "Le quedaría una tarea al profesional que la lleva",
+      // Solo cuenta lo que nadie ve en «Te espera»: quien la llevaba ya no
+      // está o ya no atiende. La tarea va al equipo clínico, no a esa persona.
+      does: "Queda una tarea para el equipo clínico: quien la llevaba ya no atiende",
+      would: "Quedaría una tarea para el equipo clínico: quien la llevaba ya no atiende",
       taskTitle: (name) => `Revisar y firmar la atención de ${name}`,
-      toOwner: true,
     },
     permission: "clinical.read",
     defaultDays: 2,

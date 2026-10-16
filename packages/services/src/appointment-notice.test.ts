@@ -32,6 +32,7 @@ import { createContact, listContacts } from "./contacts.js"
 import { listConversations, writeToPerson } from "./conversations.js"
 import { getContactWorkspace } from "./crm-workspace.js"
 import { nextPatientNumber } from "./patients.js"
+import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { reschedulePortalAppointment } from "./portal.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -220,10 +221,12 @@ describe("al cambiar la cita, el agente le avisa", () => {
       const [job] = await jobsOf(c)
       // Es el mismo aviso, ahora con su enlace: no un segundo mensaje ese día.
       expect(job).toMatchObject({ kind: "aviso_cita_reservada", status: "enviado", via: "respuesta" })
-      const body = await bodyOf(job!.sentMessageId)
-      expect(body).toMatch(
-        /^Hola, Pedro\. Te esperamos en Clínica Sonríe, sede Centro: .+\. Antes de venir, completa tus datos aquí\.\n\nVer mi cita y mis datos: https:\/\/aviso-[0-9a-f-]+\.odentia\.test\/reserva\?token=[0-9a-f]{64}$/,
+      const stored = await bodyOf(job!.sentMessageId)
+      // En el mensaje guardado no queda el token: una referencia que el worker resuelve al enviar.
+      expect(stored).toMatch(
+        /^Hola, Pedro\. Te esperamos en Clínica Sonríe, sede Centro: .+\. Antes de venir, completa tus datos aquí\.\n\nVer mi cita y mis datos: https:\/\/aviso-[0-9a-f-]+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
       )
+      const body = resolvePersonalLinkRefs(stored, KEY)
       // El enlace es el de esa persona: muestra esa cita y lo que le falta.
       const token = /token=([0-9a-f]{64})/.exec(body)![1]!
       const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, token))

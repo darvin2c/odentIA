@@ -864,7 +864,8 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(wa).toMatchObject({
     webhookVerifiedAt: null,
     health: null,
-    messages: { aprobados: 0, enRevision: 10, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 0 },
+    // Los tres con el botón de «Su enlace» no se piden sin la dirección pública de la clínica.
+    messages: { aprobados: 0, enRevision: 10, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 3 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -918,6 +919,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   expect(items.map((item) => [item.id, item.origin])).toEqual([
     ["recordatorio_cita", "agente"],
     ["aviso_cita_reservada", "agente"],
+    ["aviso_cita_reservada_datos", "agente"],
     ["aviso_cita_movida", "agente"],
     ["aviso_cita_cancelada", "agente"],
     ["recordatorio_control", "agente"],
@@ -926,6 +928,9 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
     ["seguimiento_no_asistencia", "agente"],
     ["cita_cancelada", "agente"],
     ["retomar_conversacion", "bandeja"],
+    // Los de «Su enlace» los envía quien trabaja el plan (fase 3, decisión 8).
+    ["presupuesto_listo", "plan"],
+    ["su_enlace", "plan"],
   ])
   expect((await reception.request(base)).status).toBe(403)
 
@@ -965,7 +970,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(10)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(13)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {

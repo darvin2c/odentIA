@@ -62,7 +62,7 @@ function dayWords(date: Date, locale: string, timeZone: string): string {
 }
 
 /** Tratamientos con una cita por venir que ya los trae. */
-async function scheduledItems(tx: Db, orgId: string, patientId: string, itemIds: string[]): Promise<Set<string>> {
+export async function scheduledItems(tx: Db, orgId: string, patientId: string, itemIds: string[]): Promise<Set<string>> {
   if (itemIds.length === 0) return new Set()
   const rows = await tx
     .select({ planItemId: appointmentPlanItem.planItemId })
