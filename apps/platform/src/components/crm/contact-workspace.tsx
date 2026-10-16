@@ -31,7 +31,7 @@ import {
   type CrmActivityItem,
 } from "../../lib/crm-workspace"
 import { useOrgEvents } from "../../lib/org-events"
-import { createRegistrationLink } from "../../lib/patient-registration"
+import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { dueWords, isOverdue } from "./crm-helpers"
 import { PersonMemoryDrawer } from "../agent/person-memory"
 import { useCompleteTask } from "./resolve-preview"
@@ -320,7 +320,9 @@ export function ContactWorkspace({
   })
 
   const registrationMutation = useMutation({
-    mutationFn: () => createRegistrationLink(contactId, conversationId ?? ""),
+    // Con su propia ficha registra a un familiar; sin ella recibe «Su enlace»: elige su cita y deja sus datos (ADR 0037).
+    mutationFn: (familiar: boolean) =>
+      familiar ? createRegistrationLink(contactId, conversationId ?? "") : createPersonalLinkForContact(contactId, conversationId ?? ""),
     onSuccess: (result) => {
       setRegLink(result.data)
       setCopied(false)
@@ -357,6 +359,8 @@ export function ContactWorkspace({
   const contact = workspace.contact.contact
   const identities = workspace.contact.identities
   const patients = workspace.contact.patients
+  // Ya tiene su ficha: el enlace de registro es para un familiar, nunca para sí misma.
+  const ownRecord = patients.some((link) => link.relationship === "self")
   // «Reservar cita» de la persona: su ficha si ya es paciente; si aún no lo es,
   // la Agenda crea su ficha mínima unida a ella. Quien solo lleva a otros
   // (un padre) reserva desde cada paciente, más abajo.
@@ -485,7 +489,7 @@ export function ContactWorkspace({
             {canWriteAppointments && patients.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 {contact.displayName.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y
-                teléfono, y el resto lo completa con el enlace de registro.
+                teléfono, y lo que falte queda pendiente en su página.
               </p>
             ) : null}
           </div>
@@ -688,12 +692,12 @@ export function ContactWorkspace({
 
           <Separator />
 
-          {/* Pacientes vinculados y enlace de registro */}
+          {/* Pacientes vinculados, «Su enlace» y el registro de un familiar */}
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold">Pacientes</h3>
             {patients.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                Aún no es paciente. El registro lo completa con su enlace o se crea al reservarle una cita.
+                Aún no es paciente. Con «Su enlace» elige su cita y deja sus datos; o se registra al reservarle una cita.
               </p>
             ) : (
               <ul className="flex flex-col gap-1.5">
@@ -725,6 +729,7 @@ export function ContactWorkspace({
                 ))}
               </ul>
             )}
+            {/* Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar. */}
             {canRegister && (
               <div className="flex flex-col gap-1.5">
                 <Button
@@ -732,15 +737,21 @@ export function ContactWorkspace({
                   size="sm"
                   className="w-fit"
                   disabled={!conversationId || registrationMutation.isPending}
-                  onClick={() => registrationMutation.mutate()}
+                  onClick={() => registrationMutation.mutate(ownRecord)}
                   title={
-                    conversationId
-                      ? "Genera un enlace para que el paciente complete sus datos"
-                      : "Abre el contexto desde una conversación para generar el enlace"
+                    !conversationId
+                      ? "Abre el contexto desde una conversación para generar el enlace"
+                      : ownRecord
+                        ? "Genera un enlace para que registre a su hijo o a un familiar"
+                        : "Genera su enlace: elige su cita y deja sus datos"
                   }
                 >
                   <UserPlus className="size-3.5" />
-                  {registrationMutation.isPending ? "Generando…" : "Preparar registro"}
+                  {registrationMutation.isPending
+                    ? "Generando…"
+                    : ownRecord
+                      ? "Preparar registro de un familiar"
+                      : "Preparar su enlace"}
                 </Button>
                 {regLink && (
                   <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2 text-xs">

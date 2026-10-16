@@ -1,5 +1,5 @@
 /**
- * Plan y precios por acción (ADR 0030, tablero O1). La cuota vuelve como
+ * Plan y precios por acción (ADR 0031, tablero O1). La cuota vuelve como
  * crédito; cada acción tiene su precio base y hasta dónde se negocia. La
  * comprobación contra el peor costo se ve antes de guardar; el servidor la
  * exige igual.
@@ -173,7 +173,7 @@ export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClo
           <CurrencySelect id="plan-currency" value={currency} onChange={setCurrency} />
         </div>
         {field("plan-price", "Cuota al mes (sin descuento)", price, setPrice)}
-        {field("plan-credit", "Crédito para los agentes", credit, setCredit, "Lo que vuelve de la cuota cada mes; igual a la cuota en el plan de la ADR 0030.")}
+        {field("plan-credit", "Crédito para los agentes", credit, setCredit, "Lo que vuelve de la cuota cada mes; igual a la cuota en el plan de la ADR 0031.")}
       </div>
 
       <fieldset className="flex flex-col gap-2 rounded-lg border p-3">

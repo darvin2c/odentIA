@@ -252,15 +252,21 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
   await ownerDb.execute(sql`insert into "treatment_budget" (id,organization_id,patient_id,plan_id,budget_number,title,currency,status)
     values ('cccccccc-cccc-cccc-cccc-cccccccccccc','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd',1,'Presupuesto','PEN','borrador')
     on conflict (id) do nothing`)
+  // Toda línea es de una opción del presupuesto (decisión 13 de la fase 3).
+  await ownerDb.execute(sql`insert into treatment_budget_option (id,organization_id,patient_id,budget_id,position,is_recommended)
+    values ('cccccccc-0000-4000-8000-000000000001','org_a','99999999-9999-9999-9999-999999999999','cccccccc-cccc-cccc-cccc-cccccccccccc',1,true)
+    on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into encounter (id,organization_id,patient_id,dentist_user_id) values
     ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','org_a','99999999-9999-9999-9999-999999999999','rls-dentist')
     on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,title,currency,status) values
     ('11111111-1111-4111-8111-111111111111','org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','Restauración','PEN','pendiente')
     on conflict (id) do nothing`)
-  await ownerDb.execute(sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,currency,decision) values
-    ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','cccccccc-cccc-cccc-cccc-cccccccccccc','11111111-1111-4111-8111-111111111111','Restauración','PEN','pendiente')
+  await ownerDb.execute(sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,option_id,plan_item_id,title,currency,decision) values
+    ('org_a','99999999-9999-9999-9999-999999999999','dddddddd-dddd-dddd-dddd-dddddddddddd','cccccccc-cccc-cccc-cccc-cccccccccccc','cccccccc-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','Restauración','PEN','pendiente')
     on conflict do nothing`)
+  // Un solo borrador por persona: este se entrega para que los siguientes tests armen el suyo.
+  await ownerDb.execute(sql`update treatment_budget set status = 'presentado' where id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'`)
   await ownerDb.execute(sql`insert into encounter_tooth (organization_id,encounter_id,tooth_number)
     values ('org_a','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',36)`)
   await ownerDb.execute(sql`insert into service_catalog (organization_id,source,code,name,specialty,scope,price_cents,currency)
@@ -274,6 +280,7 @@ it("encuentros y planes de A son invisibles para B; las piezas cerradas no se bo
     "treatment_plan",
     "treatment_plan_item",
     "treatment_budget_item",
+    "treatment_budget_option",
     "service_catalog",
   ]) {
     const query = sql`select id from ${sql.identifier(table)}`
@@ -315,9 +322,10 @@ it("aísla hallazgos y evaluaciones por tenant y conserva sus originales", async
   )
   await ownerDb.execute(sql`insert into odontogram_entry (organization_id,patient_id,tooth_number,condition,status,details,needs_review)
     values ('org_a','99999999-9999-9999-9999-999999999999',16,'caries','recorded','{"variant":"enamel"}',false)`)
+  // Firmado con el perfil (sin trazo) y con su norma escrita: no hay valor por defecto (ADR 0036).
   await ownerDb.execute(sql`insert into odontogram_assessment
-    (organization_id,patient_id,author_user_id,purpose,specifications,observations,examiner_name,registration_number,patient_name,patient_number,signature,entries)
-    values ('org_a','99999999-9999-9999-9999-999999999999','rls-odonto','initial','Acta inicial','Sin observaciones','Odonto','COP 1','Paciente Ana',1,'[[[5,90],[20,70]]]','[]')`)
+    (organization_id,patient_id,author_user_id,purpose,specifications,observations,examiner_name,examiner_title,registration_number,patient_name,patient_number,entries,standard)
+    values ('org_a','99999999-9999-9999-9999-999999999999','rls-odonto','initial','Acta inicial','Sin observaciones','Odonto','Cirujano dentista','COP 1','Paciente Ana',1,'[]','NTS 188-MINSA/DGIESP-2022')`)
   const assessmentQuery = sql`select id from odontogram_assessment`
   expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(assessmentQuery))).toHaveLength(1)
   expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(assessmentQuery))).toHaveLength(0)
@@ -365,7 +373,7 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
     values ('22222222-2222-4222-8222-222222222222','org_a','99999999-9999-9999-9999-999999999999','Plan RLS',false)
     on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into "treatment_budget" (id,organization_id,patient_id,plan_id,budget_number,title,currency,status)
-    values ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222',2,'Presupuesto RLS','PEN','borrador')
+    values ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222',2,'Presupuesto RLS','PEN','presentado')
     on conflict (id) do nothing`)
   await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,price_cents,currency,status)
     values ('ffffffff-ffff-ffff-ffff-ffffffffffff','org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','Corona',90000,'PEN','pendiente')
@@ -503,16 +511,30 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
       tx.execute(sql`delete from treatment_plan_item where id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`),
     ),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
-  await ownerDb.execute(sql`insert into treatment_option_group (organization_id,patient_id,plan_id,title)
-    values ('org_a','99999999-9999-9999-9999-999999999999','22222222-2222-4222-8222-222222222222','Alternativas RLS')`)
-  const optionsQuery = sql`select id from treatment_option_group where title = 'Alternativas RLS'`
-  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(optionsQuery))).toHaveLength(1)
-  expect(await withOrgContext(appDb, "org_b", tx => tx.execute(optionsQuery))).toHaveLength(0)
-  expect(await appDb.execute(optionsQuery)).toHaveLength(0)
+  // Lo agendado de un plan (ADR 0034) se aísla por tenant y es historia: no se borra.
+  const [sillon] = await ownerDb.execute<{ id: string }>(sql`
+    insert into schedule_chair (organization_id,branch_id,name)
+    values ('org_a','11111111-1111-1111-1111-111111111111','Sillón RLS') returning id`)
+  const [cita] = await ownerDb.execute<{ id: string }>(sql`
+    insert into appointment (organization_id,branch_id,patient_id,dentist_user_id,chair_id,starts_at,ends_at,duration_min,status)
+    values ('org_a','11111111-1111-1111-1111-111111111111','99999999-9999-9999-9999-999999999999','rls-dentist',${sillon!.id},
+      now() + interval '2 days', now() + interval '2 days 30 minutes', 30, 'cancelada')
+    returning id`)
+  await ownerDb.execute(sql`insert into appointment_plan_item (organization_id,patient_id,appointment_id,plan_item_id)
+    values ('org_a','99999999-9999-9999-9999-999999999999',${cita!.id},'ffffffff-ffff-ffff-ffff-ffffffffffff')`)
+  const linkedQuery = sql`select plan_item_id from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`
+  expect(await withOrgContext(appDb, "org_a", tx => tx.execute(linkedQuery))).toHaveLength(1)
+  expect(await withOrgContext(appDb, "org_b", tx => tx.execute(linkedQuery))).toHaveLength(0)
+  expect(await appDb.execute(linkedQuery)).toHaveLength(0)
   await expect(
     withOrgContext(appDb, "org_a", tx =>
-      tx.execute(sql`delete from treatment_option_group where title = 'Alternativas RLS'`)),
+      tx.execute(sql`delete from appointment_plan_item where plan_item_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'`)),
   ).rejects.toMatchObject({ cause: { code: "42501" } })
+  // La cita y el tratamiento son del mismo paciente: otro paciente no se cuela.
+  await expect(
+    ownerDb.execute(sql`insert into appointment_plan_item (organization_id,patient_id,appointment_id,plan_item_id)
+      values ('org_a','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',${cita!.id},'ffffffff-ffff-ffff-ffff-ffffffffffff')`),
+  ).rejects.toThrow()
 })
 
 it("la biblioteca global es de solo lectura y las líneas se blindan por trigger", async () => {
@@ -549,13 +571,22 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
   await ownerDb.execute(sql`insert into "treatment_budget" (id,organization_id,patient_id,plan_id,budget_number,title,currency,status)
     values ('44444444-4444-4444-8444-444444444444','org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333',3,'Líneas','PEN','borrador')
     on conflict (id) do nothing`)
+  await ownerDb.execute(sql`insert into treatment_budget_option (id,organization_id,patient_id,budget_id,position,is_recommended)
+    values ('44444444-0000-4000-8000-000000000001','org_a','99999999-9999-9999-9999-999999999999','44444444-4444-4444-8444-444444444444',1,true)
+    on conflict (id) do nothing`)
+  // Un solo borrador por persona: la base rechaza un segundo de la misma persona.
+  await expect(
+    ownerDb.execute(
+      sql`insert into treatment_budget (organization_id,patient_id,plan_id,budget_number,title,currency,status) values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333',30,'Otro borrador','PEN','borrador')`,
+    ),
+  ).rejects.toMatchObject({ cause: { code: "23505" } })
   await ownerDb.execute(sql`insert into treatment_plan_item (id,organization_id,patient_id,plan_id,budget_id,title,price_cents,currency,status)
     values ('55555555-5555-4555-8555-555555555555','org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','Línea',10000,'PEN','pendiente')
     on conflict (id) do nothing`)
   const inserted = await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(
-      sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,price_cents,currency,decision)
-      values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','55555555-5555-4555-8555-555555555555','Línea',10000,'PEN','pendiente')
+      sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,option_id,plan_item_id,title,price_cents,currency,decision)
+      values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','44444444-0000-4000-8000-000000000001','55555555-5555-4555-8555-555555555555','Línea',10000,'PEN','pendiente')
       returning id`,
     ),
   )
@@ -569,8 +600,8 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
   expect(removed).toHaveLength(1)
   await withOrgContext(appDb, "org_a", (tx) =>
     tx.execute(
-      sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,plan_item_id,title,price_cents,currency,decision)
-      values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','55555555-5555-4555-8555-555555555555','Línea',10000,'PEN','pendiente')`,
+      sql`insert into treatment_budget_item (organization_id,patient_id,plan_id,budget_id,option_id,plan_item_id,title,price_cents,currency,decision)
+      values ('org_a','99999999-9999-9999-9999-999999999999','33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','44444444-0000-4000-8000-000000000001','55555555-5555-4555-8555-555555555555','Línea',10000,'PEN','pendiente')`,
     ),
   )
   await ownerDb.execute(
@@ -605,6 +636,23 @@ it("la biblioteca global es de solo lectura y las líneas se blindan por trigger
     ),
   )
   expect(kept).toHaveLength(1)
+  // Entregado, sus opciones tampoco se quitan ni cambian de recomendada; elegir sí.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from treatment_budget_option where id = '44444444-0000-4000-8000-000000000001'`),
+    ),
+  ).rejects.toMatchObject({ cause: { message: expect.stringContaining("no se quitan") } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`update treatment_budget_option set is_recommended = false where id = '44444444-0000-4000-8000-000000000001'`),
+    ),
+  ).rejects.toThrow()
+  const chosen = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.execute(
+      sql`update treatment_budget_option set decision = 'elegida' where id = '44444444-0000-4000-8000-000000000001' returning decision`,
+    ),
+  )
+  expect(chosen).toHaveLength(1)
   // Ni el owner borra planes por API: el rol app no tiene DELETE en treatment_plan.
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>

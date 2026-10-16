@@ -127,8 +127,6 @@ let planItems: PlanItem[] = [
     decidedByContactId: null,
     decidedByName: "Lucía Quispe",
     decisionNote: null,
-    optionGroupId: null,
-    isRecommended: false,
     supersedesItemId: null,
     statusReason: null,
     startedAt: at(2),
@@ -158,8 +156,6 @@ let planItems: PlanItem[] = [
     decidedByContactId: null,
     decidedByName: null,
     decisionNote: null,
-    optionGroupId: null,
-    isRecommended: false,
     supersedesItemId: null,
     statusReason: null,
     startedAt: null,
@@ -189,8 +185,6 @@ let planItems: PlanItem[] = [
     decidedByContactId: null,
     decidedByName: null,
     decisionNote: null,
-    optionGroupId: null,
-    isRecommended: false,
     supersedesItemId: null,
     statusReason: null,
     startedAt: null,
@@ -353,6 +347,30 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       return json({ data: entry }) as T
     }
 
+    // El panel de la pieza: hallazgo (con su diagnóstico y tratamiento) en una sola llamada.
+    if (rest === "odontogram/findings" && method === "POST") {
+      const teeth = (body.toothNumbers as number[] | undefined) ?? []
+      const surfaces = (body.surfaces as string[] | undefined) ?? []
+      const diagnosis = body.diagnosis as { cie10Code?: string } | null | undefined
+      const created: OdontogramEntry[] = teeth.flatMap((toothNumber) =>
+        (surfaces.length ? surfaces : [null]).map((surface) => ({
+          id: nextId("entry"),
+          toothNumber,
+          surface,
+          condition: String(body.condition),
+          status: "recorded",
+          diagnosisCode: diagnosis?.cie10Code ?? null,
+          note: (body.note as string | null) ?? null,
+          encounterId: (body.encounterId as string | null) ?? null,
+          details: (body.details as OdontogramEntry["details"]) ?? {},
+          needsReview: false,
+          createdAt: new Date().toISOString(),
+        })),
+      )
+      entries = [...created, ...entries]
+      return json({ data: { entries: created, diagnoses: [], planItems: [] } }) as T
+    }
+
     const voidMatch = /^odontogram\/entries\/([^/]+)\/void$/.exec(rest)
     if (voidMatch && method === "POST") {
       const id = voidMatch[1]
@@ -380,13 +398,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         patientNumber: 123,
         authorUserId: "demo-user",
         createdAt: new Date().toISOString(),
-        purpose: "initial",
+        purpose: (body.purpose as OdontogramAssessment["purpose"]) ?? "personal",
         standard: "NTS 188-MINSA/DGIESP-2022",
         specifications: String(body.specifications ?? ""),
         observations: String(body.observations ?? ""),
-        examinerName: String(body.examinerName ?? ""),
-        registrationNumber: String(body.registrationNumber ?? ""),
-        signature: (body.signature as number[][][]) ?? [],
+        // Como el servidor: quién firma sale del perfil profesional, sin trazo.
+        examinerName: "Ana Torres",
+        examinerTitle: "Cirujano dentista",
+        registrationNumber: "COP 12345",
+        encounterId: null,
         entries: entries.filter((entry) => !entry.voidedAt),
       } as OdontogramAssessment
       assessments.unshift(assessment)
@@ -481,9 +501,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
             reason: "Primera consulta preventiva",
             evolution: null,
             indications: null,
-            nextStep: null,
             examination: null,
-            nextAppointmentAt: null,
             branchId: null,
             dentistUserId: "demo-user",
             createdAt: at(3),
@@ -551,6 +569,23 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
         (!specialty || service.specialty === specialty),
     )
     return json({ data: rows, nextCursor: null }) as T
+  }
+
+  // Perfil profesional propio: con él se firma la evaluación del odontograma.
+  if (rawPath === "/api/clinical-forms/professionals/me/profile" && method === "GET") {
+    return json({
+      data: {
+        userId: "demo-user",
+        accountName: "Ana Torres",
+        signatureName: "Ana Torres",
+        professionalTitle: "Cirujano dentista",
+        registrationBody: "COP",
+        registrationNumber: "12345",
+        specialtyRegistration: null,
+        complete: true,
+        updatedAt: null,
+      },
+    }) as T
   }
 
   if (segments[1] === "cie10" && method === "GET") {

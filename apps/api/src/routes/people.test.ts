@@ -200,7 +200,7 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
     ])
   })
 
-  it("recepción: datos, alergias, conversaciones y notas; nada clínico ni de caja", async () => {
+  it("recepción: datos, alergias, conversaciones, notas y el presupuesto; nada clínico ni de caja", async () => {
     const ficha = (await (await get("reception", `/patients/${patientId}`)).json()) as {
       data: { activeAllergies: { substance: string }[]; activeConditions: unknown[] }
     }
@@ -209,7 +209,8 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
     expect((await get("reception", `/people/${personId}/notes`)).status).toBe(200)
     expect((await get("reception", `/patients/${patientId}/summary`)).status).toBe(403)
     expect((await get("reception", `/patients/${patientId}/plans`)).status).toBe(403)
-    expect((await get("reception", `/patients/${patientId}/budgets`)).status).toBe(403)
+    // El presupuesto como documento de la persona (decisión 4), sin la historia clínica.
+    expect((await get("reception", `/patients/${patientId}/budgets`)).status).toBe(200)
     expect((await get("reception", `/patients/${patientId}/account`)).status).toBe(403)
   })
 

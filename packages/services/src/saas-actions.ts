@@ -7,7 +7,7 @@ import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
 import { ServiceError } from "./errors.js"
 
-/* ---------- Lo que hicieron los agentes, por acción (ADR 0030) ---------- */
+/* ---------- Lo que hicieron los agentes, por acción (ADR 0031) ---------- */
 
 /** Una conversación por persona en esta ventana, aunque escriba diez mensajes o cambie de canal. */
 export const CONVERSATION_WINDOW_MS = 24 * 60 * 60 * 1000

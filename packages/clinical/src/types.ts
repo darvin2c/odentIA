@@ -1,4 +1,9 @@
-/** Tipos del dominio clínico del odontograma (NTS 188-MINSA/DGIESP-2022). Valores en inglés, etiquetas en español. */
+/**
+ * Tipos del dominio clínico del odontograma: numeración FDI (ISO 3950) y
+ * hallazgos con la nomenclatura de la NTS 188-MINSA/DGIESP-2022, que en Perú
+ * es además la norma (siglas y variante obligatorias; ADR 0036). Valores en
+ * inglés, etiquetas en español.
+ */
 
 /** Tipo anatómico de pieza. En temporal, 54/55/64/65/74/75/84/85 son molares. */
 export type ToothType = "incisor" | "canine" | "premolar" | "molar"
@@ -37,6 +42,12 @@ export interface FindingDefinition {
   /** Descripción del símbolo gráfico normativo. */
   symbol: string
   variants?: readonly FindingVariant[]
+  /**
+   * Cómo se llama la variante en palabras clínicas («Profundidad» en la caries,
+   * «Material» en la restauración): así se pide fuera de un país con
+   * odontograma oficial, donde es opcional y no lleva sigla.
+   */
+  variantName?: string
   /** Verdadero cuando la norma solo permite registrarlo con observación clínica directa. */
   requiresEvidence?: boolean
   /** Verdadero cuando exige trazo libre (p. ej. fractura). */
@@ -59,6 +70,15 @@ export interface FindingDetails {
   drawing?: number[][][]
   specifications?: string
   observations?: string
+}
+
+/**
+ * Lo que cambia con el país de la clínica al validar un hallazgo
+ * (`clinicalProfileFor(...).odontogram`): con odontograma oficial (Perú) la
+ * variante es obligatoria como en la norma; sin él, opcional.
+ */
+export interface ValidateFindingOptions {
+  strictVariants: boolean
 }
 
 /** Carga de registro de hallazgo nuevo. Sin `status`: todo registro nace observado. */

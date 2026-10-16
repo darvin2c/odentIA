@@ -17,7 +17,7 @@ import {
 } from "./saas-terms.js"
 import { insertOrg, ownerDb, appDb, setupTestDb } from "./test-setup.js"
 
-/** Plan, prueba, descuentos, avisos y tope del cobro por acción (ADR 0030, fase 3). */
+/** Plan, prueba, descuentos, avisos y tope del cobro por acción (ADR 0031, fase 3). */
 setupTestDb()
 const admin = { userId: "terms-admin", role: "admin" as const }
 const support = { userId: "terms-support", role: "support" as const }

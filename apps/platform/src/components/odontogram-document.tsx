@@ -9,16 +9,19 @@ import {
 } from "@odentia/clinical"
 import { useId } from "react"
 import type { OdontogramEntry } from "../lib/patients"
-import { activeOrgLocale } from "../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 
 export interface OdontogramDocumentProps {
   entries: OdontogramEntry[]
+  /** Norma con la que se dibuja y se firma («NTS 188-MINSA/DGIESP-2022»). */
+  standard: string
   date?: string
   specifications?: string
   observations?: string
   examinerName?: string
+  /** Título de quien firma, de su perfil («Cirujano dentista»). */
+  examinerTitle?: string
   registrationNumber?: string
-  signature?: number[][][]
   patientName?: string
 }
 
@@ -740,24 +743,29 @@ function formatDate(raw?: string): string {
   if (!raw) return ""
   const time = new Date(raw).getTime()
   if (Number.isNaN(time)) return raw
-  return new Date(raw).toLocaleDateString(activeOrgLocale())
+  // La fecha del documento es la de la clínica, no la del navegador que imprime.
+  return new Date(raw).toLocaleDateString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
 }
 
 /**
- * Representación oficial imprimible del odontograma (NTS 188-MINSA/DGIESP-2022):
- * un SVG por fila con piezas, franja externa de números, recuadros de siglas,
- * coronas cuadradas de 5 zonas, raíces y overlays continuos de parejas y tramos.
- * Respeta los entries recibidos (el servidor entrega el snapshot firmado).
- * Componente puro: sin mutaciones ni queries. No es el preview de boca.
+ * Gráfico oficial del odontograma (solo en clínicas de Perú: NTS 188; ADR
+ * 0036): un SVG por fila con piezas, franja externa de números, recuadros de
+ * siglas, coronas cuadradas de 5 zonas, raíces y overlays continuos de parejas
+ * y tramos. El gráfico va en negro (5.17) y los hallazgos en rojo o azul
+ * (5.12 y 5.13). Respeta los entries recibidos (el servidor entrega la
+ * instantánea firmada). Se firma con el perfil, sin trazo: en papel queda la
+ * línea «Firma y sello» (5.3). Componente puro, sin mutaciones ni queries; no
+ * es la vista de boca, que es la misma en todos los países.
  */
 export function OdontogramDocument({
   entries,
+  standard,
   date,
   specifications,
   observations,
   examinerName,
+  examinerTitle,
   registrationNumber,
-  signature,
   patientName,
 }: OdontogramDocumentProps) {
   const rows: Array<{ teeth: readonly number[]; upper: boolean; caption: string }> = [
@@ -793,7 +801,7 @@ export function OdontogramDocument({
         <header className="mb-3 flex items-start justify-between gap-4 border-b-2 border-gray-900 pb-2">
           <div>
             <h2 className="text-lg font-bold tracking-wide">ODONTOGRAMA</h2>
-            <p className="text-[11px] text-gray-700">NTS 188-MINSA/DGIESP-2022 · Gráfico oficial</p>
+            <p className="text-[11px] text-gray-700">{standard} · Gráfico oficial</p>
             {patientName ? (
               <p className="mt-1 text-sm font-semibold">Paciente: {patientName}</p>
             ) : null}
@@ -836,6 +844,7 @@ export function OdontogramDocument({
             <p>
               <span className="font-semibold">Examinador: </span>
               {examinerName || ""}
+              {examinerTitle ? ` · ${examinerTitle}` : ""}
             </p>
             <p className="mt-1">
               <span className="font-semibold">Colegiatura: </span>
@@ -843,32 +852,8 @@ export function OdontogramDocument({
             </p>
           </div>
           <div className="text-center">
-            {signature && signature.length > 0 ? (
-              <svg
-                viewBox="0 0 500 144"
-                preserveAspectRatio="none"
-                className="h-20 w-64 border-b border-gray-800"
-                aria-label="Firma del examinador"
-              >
-                {signature.map((stroke, i) => (
-                  <polyline
-                    key={i}
-                    points={stroke
-                      .map((p) => `${(p[0] * 5).toFixed(1)},${(p[1] * 1.44).toFixed(1)}`)
-                      .join(" ")}
-                    fill="none"
-                    stroke="#111827"
-                    strokeWidth={3}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                ))}
-              </svg>
-            ) : (
-              <div className="h-20 w-64 border-b border-gray-800" aria-hidden="true" />
-            )}
-            <p className="mt-1 text-[11px] text-gray-700">Firma y sello del odontólogo</p>
+            <div className="h-20 w-64 border-b border-gray-800" aria-hidden="true" />
+            <p className="mt-1 text-[11px] text-gray-700">Firma y sello</p>
           </div>
         </footer>
         <p className="mt-3 text-center text-[10px] text-gray-600">

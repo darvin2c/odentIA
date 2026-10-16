@@ -346,10 +346,12 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   const first = await home(reception, recipient)
   expect(first.multiBranch).toBe(true)
   expect(first.today).toMatchObject({ scope: "branch", branch: { id: centro!.id, name: "Centro" }, summary: { total: 3, attended: 1, upcoming: 2, unconfirmed: 1 } })
-  // La sede recibe lo que falta, desde la siguiente; lo atendido queda en el resumen.
-  expect(first.today!.appointments.map(row => [row.patientName, row.status, row.next])).toEqual([
+  // La sede recibe lo que falta, desde la siguiente, y al final quien no vino (para reagendar);
+  // lo atendido queda en el resumen.
+  expect(first.today!.appointments.map(row => [row.patientName, row.visit, row.next])).toEqual([
     ["Confirmada de Luis", "confirmada", true],
-    ["Sin confirmar de Ana", "programada", false],
+    ["Sin confirmar de Ana", "por_confirmar", false],
+    ["No asistió", "no_vino", false],
   ])
   expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Sillón 1", serviceName: "Control" })
 
@@ -359,14 +361,15 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   expect(other.today!.appointments.map(row => row.patientName)).toEqual(["Ana en Norte"])
   expect((await home(reception, recipient, randomUUID())).today!.branch).toEqual({ id: centro!.id, name: "Centro" })
 
-  // Quien atiende: solo sus citas, de todas las sedes y también las atendidas.
+  // Quien atiende: solo sus citas, de todas las sedes; lo que falta primero y lo atendido al final.
   const dentist = await home({ ...reception, ownAppointments: true }, ana, norte!.id)
   expect(dentist.today).toMatchObject({ scope: "mine", branch: null, summary: { total: 3, attended: 1, upcoming: 2, unconfirmed: 1 } })
   expect(dentist.today!.appointments.map(row => [row.patientName, row.branchName, row.next])).toEqual([
-    ["Atendida de Ana", "Centro", false],
     ["Ana en Norte", "Norte", true],
     ["Sin confirmar de Ana", "Centro", false],
+    ["Atendida de Ana", "Centro", false],
   ])
+  expect(dentist.agendaLine).toBeNull()
   expect(dentist.today!.appointments.some(row => row.dentistName === "Dr. Luis Vega")).toBe(false)
 
   // Un rol sin agenda ni caja no recibe citas, caja ni filas de otros.
@@ -383,9 +386,10 @@ it("los presupuestos que esperan respuesta: quien atiende solo ve los de sus pla
   const presentedAt = new Date(Date.now() - 9 * 86_400_000)
   for (const [index, createdBy] of [ana, luis].entries()) {
     const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: person!.id, title: "Plan", createdBy }).returning({ id: treatmentPlan.id })
+    // Lo propio del odontólogo es lo que preparó o indicó (ADR 0034), no el plan donde quedó.
     await ownerDb.insert(treatmentBudget).values([
-      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 1, title: "Presentado", currency: "PEN", status: "presentado", presentedAt: index === 0 ? presentedAt : new Date() },
-      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 2, title: "Aceptado", currency: "PEN", status: "aceptado", presentedAt },
+      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 1, title: "Presentado", currency: "PEN", status: "presentado", presentedAt: index === 0 ? presentedAt : new Date(), createdBy },
+      { organizationId: orgId, patientId: person!.id, planId: plan!.id, budgetNumber: index * 10 + 2, title: "Aceptado", currency: "PEN", status: "aceptado", presentedAt, createdBy },
     ])
   }
   const budgets = async (access: WorkspaceAccess, userId: string) =>

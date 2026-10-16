@@ -1,5 +1,5 @@
 /**
- * Lo que hicieron los agentes en el tramo que corre (ADR 0030, tablero C2):
+ * Lo que hicieron los agentes en el tramo que corre (ADR 0031, tablero C2):
  * primero las acciones con su precio base y el propio, después el crédito y
  * lo que se proyecta al cierre. Mientras no se cobra lo dice arriba.
  */

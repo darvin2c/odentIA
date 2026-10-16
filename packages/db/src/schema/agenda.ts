@@ -84,6 +84,13 @@ export const appointment = pgTable(
     reason: text("reason"),
     source: text("source").notNull().default("recepcion"),
     conversationId: uuid("conversation_id").references(() => conversation.id),
+    /**
+     * «Llegó» (ADR 0032): cuándo llegó la persona y quién lo marcó. Es un hecho
+     * con hora, no un estado: solo lo tiene una cita confirmada o atendida, y no
+     * cambia lo que ocupa (la exclusión de solapamientos no lo mira).
+     */
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    arrivedBy: text("arrived_by").references(() => user.id),
     /** Bloqueo optimista en mover/editar. */
     version: integer("version").notNull().default(1),
     createdBy: text("created_by").references(() => user.id),
@@ -111,6 +118,14 @@ export const appointment = pgTable(
       "appointment_status_check",
       sql`${table.status} in ('programada','confirmada','atendida','no_asistio','cancelada')`,
     ),
+    check(
+      "appointment_arrival_check",
+      sql`${table.arrivedAt} IS NULL OR ${table.status} IN ('confirmada','atendida')`,
+    ),
+    check(
+      "appointment_arrival_pair_check",
+      sql`(${table.arrivedAt} IS NULL) = (${table.arrivedBy} IS NULL)`,
+    ),
     check("appointment_range_check", sql`${table.endsAt} > ${table.startsAt}`),
     check("appointment_duration_check", sql`${table.durationMin} > 0`),
   ],
@@ -128,14 +143,18 @@ export const appointmentBookingLink = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    conversationId: uuid("conversation_id")
-      .notNull()
-      .references(() => conversation.id),
+    /**
+     * La conversación de la que salió, si salió de una (el agente, la Bandeja).
+     * Recepción y el aviso de la cita lo envían sin conversación: entonces no
+     * hay nota del caso ni confirmación por el chat (ADR 0037).
+     */
+    conversationId: uuid("conversation_id").references(() => conversation.id),
+    /** Quien lo abre: la propia persona o quien habla por ella (su representante). */
     contactId: uuid("contact_id")
       .notNull()
       .references(() => contact.id),
     /**
-     * Para quién es la cita. Vacío cuando la persona aún no es paciente: lo
+     * De quién es lo pendiente. Vacío cuando la persona aún no es paciente: lo
      * será al completar su registro en la misma página, antes de reservar.
      */
     patientId: uuid("patient_id").references(() => patient.id),
@@ -148,10 +167,20 @@ export const appointmentBookingLink = pgTable(
     usedAt: timestamp("used_at", { withTimezone: true }),
     appointmentId: uuid("appointment_id").references(() => appointment.id),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Quién del equipo lo envió; vacío si lo envió el agente o salió con un aviso. */
+    createdBy: text("created_by").references(() => user.id),
+    /**
+     * Ofrece reservar una cita nueva hasta usarlo (lo envía el agente para eso).
+     * El que envía recepción o el aviso de la cita muestra lo pendiente.
+     */
+    booking: boolean("booking").notNull().default(true),
+    /** «Tus datos» se envían una sola vez: después dice «Recibido». */
+    dataSubmittedAt: timestamp("data_submitted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("appointment_booking_link_token_uidx").on(table.tokenHash),
     index("appointment_booking_link_conversation_idx").on(table.organizationId, table.conversationId),
+    index("appointment_booking_link_contact_idx").on(table.organizationId, table.contactId, table.patientId),
   ],
 )

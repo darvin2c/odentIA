@@ -1,5 +1,5 @@
 import { assertTreatmentSite, parseVitals, VALID_FDI_TEETH } from "@odentia/clinical"
-import { readBillingModes } from "./budgets.js"
+import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -21,10 +21,19 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { canAccess } from "@odentia/auth/permissions"
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
-import { setAppointmentStatus } from "./appointments.js"
-import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
+import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
+import {
+  type ClosingOdontogram,
+  closingOdontogramOf,
+  listEncounterDocuments,
+  type OdontogramAssessmentRow,
+  type PatientDocumentWithContext,
+  signClosingOdontogram,
+} from "./clinical.js"
+import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import {
   branchNotFound,
@@ -46,6 +55,7 @@ import {
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication } from "./service-catalog.js"
 import { countConsultationAction } from "./saas-actions.js"
+import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
 export type EncounterRow = typeof encounter.$inferSelect
 export type EncounterProcedureRow = typeof encounterProcedure.$inferSelect
@@ -57,15 +67,21 @@ export type EncounterDocumentRow = PatientDocumentWithContext
 export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect
 
 export interface CreateEncounterInput {
-  /** Motivo de la visita: obligatorio al abrir (1–2000 caracteres). */
-  reason: string
   /**
-   * Cita que motiva la atención (mismo paciente). Hereda sede y profesional;
-   * al cerrar la atención la cita pasa a «atendida».
+   * Motivo de la visita (hasta 2000 caracteres). Sin cita es obligatorio al
+   * abrir; desde una cita («Atender», sin formulario) toma el motivo escrito en
+   * la cita o queda vacío, y se exige al cerrar (ADR 0032).
+   */
+  reason?: string | null
+  /**
+   * Cita que motiva la atención (mismo paciente). Hereda la sede; al cerrar la
+   * atención la cita pasa a «atendida». Sin ella, la atención se une a la cita
+   * de hoy que siga en pie; con un borrador del mismo día sin cita, ese
+   * borrador se une a la cita en vez de abrir otro.
    */
   appointmentId?: string | null
   branchId?: string | null
-  /** Profesional que atiende; por defecto quien abre. Debe ser miembro de la organización. */
+  /** Profesional que atiende; por defecto quien abre. Debe tener escritura clínica. */
   dentistUserId?: string | null
   teeth?: number[]
   /**
@@ -81,9 +97,6 @@ export interface UpdateEncounterDraftPatch {
   reason?: string | null
   evolution?: string | null
   indications?: string | null
-  nextStep?: string | null
-  /** ISO-8601; null la limpia; undefined = sin cambio. */
-  nextAppointmentAt?: string | null
   /** Reemplaza el set completo de piezas (vacío = sin piezas). */
   teeth?: number[]
   /** Examen clínico de la atención (extraoral/intraoral/higieneOral); null lo limpia. */
@@ -94,7 +107,6 @@ export interface UpdateEncounterDraftPatch {
   /** Signos vitales (claves de @odentia/clinical); null los limpia. */
   vitals?: Record<string, unknown> | null
   prognosis?: string | null
-  auxiliaryExams?: string | null
 }
 
 export interface ExaminationInput {
@@ -153,12 +165,10 @@ const TEXT_LIMITS = {
   reason: 2000,
   evolution: 10000,
   indications: 5000,
-  nextStep: 2000,
   procedureDescription: 2000,
   presentIllness: 4000,
   illnessDuration: 200,
   prognosis: 2000,
-  auxiliaryExams: 4000,
 } as const
 
 const FDI_SET: ReadonlySet<number> = new Set(VALID_FDI_TEETH)
@@ -298,6 +308,137 @@ export async function lockEncounter(
   return row
 }
 
+/** Zona de la cita: la de su sede o, si la sede no tiene, la de la clínica. */
+const appointmentTimeZone = sql<string>`coalesce(${branch.timezone}, ${orgProfile.timezone}, 'UTC')`
+
+/** Una cita que todavía se puede atender (programada o confirmada). */
+interface AttendableAppointment {
+  id: string
+  branchId: string
+  startsAt: Date
+  timeZone: string
+}
+
+/** Día local («2026-10-16») de un instante en una zona IANA. */
+function localDateIn(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at)
+}
+
+/**
+ * La cita de hoy del paciente que sigue en pie (programada o confirmada) y aún
+ * no tiene atención; si hay varias, la que llegó y, si ninguna, la más cercana
+ * a la hora (ADR 0032). «Hoy» es el día en la zona de la sede de la cita.
+ */
+async function todaysAppointment(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  now: Date,
+): Promise<AttendableAppointment | null> {
+  const at = now.toISOString()
+  const [row] = await tx
+    .select({
+      id: appointment.id,
+      branchId: appointment.branchId,
+      startsAt: appointment.startsAt,
+      timeZone: appointmentTimeZone,
+    })
+    .from(appointment)
+    .innerJoin(
+      branch,
+      and(eq(branch.id, appointment.branchId), eq(branch.organizationId, appointment.organizationId)),
+    )
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, appointment.organizationId))
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        // Ventana amplia para el índice; el día exacto lo decide la zona.
+        sql`${appointment.startsAt} between ${at}::timestamptz - interval '36 hours' and ${at}::timestamptz + interval '36 hours'`,
+        sql`(${appointment.startsAt} at time zone ${appointmentTimeZone})::date = (${at}::timestamptz at time zone ${appointmentTimeZone})::date`,
+        sql`not exists (select 1 from ${encounter} e where e.organization_id = ${appointment.organizationId} and e.appointment_id = ${appointment.id} and e.status <> 'anulada')`,
+      ),
+    )
+    .orderBy(
+      sql`${appointment.arrivedAt} is null`,
+      sql`abs(extract(epoch from (${appointment.startsAt} - ${at}::timestamptz)))`,
+      asc(appointment.startsAt),
+    )
+    .limit(1)
+    .for("update", { of: appointment })
+  return row ?? null
+}
+
+/**
+ * Atender una cita con un borrador abierto sin cita, empezado ese mismo día:
+ * es la misma visita, así que el borrador se une a la cita (y toma su sede si
+ * no tenía) en vez de abrir otra atención. Al cerrarlo, la cita queda atendida.
+ * Si el borrador ya es de esta cita, se continúa. Otro caso no se toca.
+ */
+async function joinOpenDraft(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  visit: AttendableAppointment,
+): Promise<EncounterRow | null> {
+  const [draft] = await tx
+    .select()
+    .from(encounter)
+    .where(
+      and(
+        eq(encounter.organizationId, orgId),
+        eq(encounter.patientId, patientId),
+        eq(encounter.status, "borrador"),
+      ),
+    )
+    .for("update")
+    .limit(1)
+  if (!draft) return null
+  if (draft.appointmentId === visit.id) return draft
+  if (draft.appointmentId) return null
+  if (localDateIn(draft.createdAt, visit.timeZone) !== localDateIn(visit.startsAt, visit.timeZone))
+    return null
+  const [joined] = await tx
+    .update(encounter)
+    .set({ appointmentId: visit.id, branchId: draft.branchId ?? visit.branchId, updatedAt: new Date() })
+    .where(and(eq(encounter.id, draft.id), eq(encounter.organizationId, orgId)))
+    .returning()
+  if (!joined) throw notFound("Atención")
+  await audit(tx, orgId, actorUserId, "encounter.appointment_joined", "encounter", joined.id, {
+    patientId,
+    appointmentId: visit.id,
+  })
+  return joined
+}
+
+/** Borrador abierto de un paciente, sin nada de la historia: cuál es y quién lo lleva. */
+export async function getOpenEncounterRef(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{ id: string; dentistUserId: string } | null> {
+  await requirePatient(tx, orgId, patientId)
+  const [row] = await tx
+    .select({ id: encounter.id, dentistUserId: encounter.dentistUserId })
+    .from(encounter)
+    .where(
+      and(
+        eq(encounter.organizationId, orgId),
+        eq(encounter.patientId, patientId),
+        eq(encounter.status, "borrador"),
+      ),
+    )
+    .limit(1)
+  return row ?? null
+}
+
 export async function createEncounter(
   tx: Db,
   orgId: string,
@@ -307,18 +448,24 @@ export async function createEncounter(
 ): Promise<EncounterRow> {
   await requirePatient(tx, orgId, patientId)
   const selectedTeeth = input.teeth === undefined ? [] : dedupeTeeth(input.teeth)
-  // La cita que motiva la atención fija sede y profesional; su estado debe
-  // admitir que se atienda (no cancelada, sin inasistencia ni ya atendida).
-  let fromAppointment: { id: string; branchId: string; dentistUserId: string } | null = null
+  // La cita que motiva la atención fija la sede; su estado debe admitir que se
+  // atienda (no cancelada, sin inasistencia ni ya atendida).
+  let fromAppointment: AttendableAppointment | null = null
   if (input.appointmentId) {
     const [row] = await tx
       .select({
         id: appointment.id,
         branchId: appointment.branchId,
-        dentistUserId: appointment.dentistUserId,
+        startsAt: appointment.startsAt,
         status: appointment.status,
+        timeZone: appointmentTimeZone,
       })
       .from(appointment)
+      .innerJoin(
+        branch,
+        and(eq(branch.id, appointment.branchId), eq(branch.organizationId, appointment.organizationId)),
+      )
+      .leftJoin(orgProfile, eq(orgProfile.organizationId, appointment.organizationId))
       .where(
         and(
           eq(appointment.id, input.appointmentId),
@@ -326,7 +473,7 @@ export async function createEncounter(
           eq(appointment.patientId, patientId),
         ),
       )
-      .for("update")
+      .for("update", { of: appointment })
       .limit(1)
     if (!row) throw notFound("Cita")
     if (!["programada", "confirmada"].includes(row.status)) {
@@ -336,9 +483,23 @@ export async function createEncounter(
       )
     }
     fromAppointment = row
+    const continued = await joinOpenDraft(tx, orgId, actorUserId, patientId, row)
+    if (continued) {
+      // La cita que se agendó para lo aceptado trae sus tratamientos (ADR 0034).
+      await linkAppointmentItems(tx, orgId, patientId, row.id, continued.id)
+      // Atender a quien nadie marcó: la llegada queda anotada a esta hora.
+      await markArrivedOnAttend(tx, orgId, actorUserId, row.id)
+      await notifyAppointmentChanged(tx, orgId)
+      return continued
+    }
   }
+  // Sin cita indicada, la atención se une a la cita de hoy que sigue en pie:
+  // así, al cerrarla, la cita queda atendida y sus controles hechos.
+  const joinedToday = fromAppointment === null
+  if (joinedToday) fromAppointment = await todaysAppointment(tx, orgId, patientId, new Date())
   let branchId: string | null = fromAppointment?.branchId ?? null
-  if (input.branchId) {
+  // La sede de la cita de hoy manda sobre la que se eligió por defecto.
+  if (input.branchId && !(joinedToday && fromAppointment)) {
     const [found] = await tx
       .select({ id: branch.id })
       .from(branch)
@@ -357,24 +518,43 @@ export async function createEncounter(
       .limit(2)
     if (active.length === 1) branchId = active[0]!.id
   }
-  const reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
-  if (!reason) throw validation("El motivo de la atención es obligatorio")
-  // Profesional que atiende: el de la cita o, sin cita, quien abre; otro
-  // profesional elegido debe ser miembro de la organización.
-  let dentistUserId = fromAppointment?.dentistUserId ?? actorUserId
-  if (input.dentistUserId && input.dentistUserId !== dentistUserId) {
+  // Desde una cita no se pide el motivo al abrir: vale el que se escribió al
+  // reservar o queda vacío, y el cierre lo exige (ADR 0032).
+  let reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
+  if (!reason && fromAppointment) {
+    const [booked] = await tx
+      .select({ reason: appointment.reason })
+      .from(appointment)
+      .where(and(eq(appointment.id, fromAppointment.id), eq(appointment.organizationId, orgId)))
+      .limit(1)
+    reason = cleanText(booked?.reason, "reason", TEXT_LIMITS.reason)
+  }
+  if (!reason && !fromAppointment) throw validation("El motivo de la atención es obligatorio")
+  // Profesional que atiende: por defecto quien abre (también desde la cita de
+  // otro profesional: quien cubre a otro es quien escribe). Otro elegido debe
+  // ser miembro con escritura clínica, nunca caja ni recepción.
+  let dentistUserId = actorUserId
+  if (input.dentistUserId && input.dentistUserId !== actorUserId) {
     const [membership] = await tx
-      .select({ id: member.id })
+      .select({ role: member.role })
       .from(member)
       .where(and(eq(member.organizationId, orgId), eq(member.userId, input.dentistUserId)))
       .limit(1)
     if (!membership) throw notFound("Profesional")
+    if (!canAccess(membership.role, "clinical.write"))
+      throw validation(
+        "Quien atiende debe poder escribir en la historia clínica: elige a un profesional clínico",
+      )
     dentistUserId = input.dentistUserId
   }
   // pertenencia/estado/decisión ocurre antes de crear la atención para que un
   // planItemIds inválido no deje un borrador vacío (409/404/422, sin DRAFT_OPEN).
+  // La cita que se agendó para lo aceptado trae sus tratamientos (ADR 0034).
+  const fromCita = fromAppointment ? await appointmentItemsToLink(tx, orgId, patientId, fromAppointment.id) : []
   const planItemIds = [
-    ...new Set((input.planItemIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0)),
+    ...new Set(
+      [...(input.planItemIds ?? []), ...fromCita].map((id) => id.trim()).filter((id) => id.length > 0),
+    ),
   ]
   if (planItemIds.length > 52) throw validation("planItemIds admite como máximo 52 tratamientos")
   const acceptedPlans =
@@ -426,6 +606,11 @@ export async function createEncounter(
       planItemIds,
       appointmentId: fromAppointment?.id ?? null,
     })
+    if (fromAppointment) {
+      // La cita pasa a «En atención»; si nadie marcó la llegada, queda anotada ahora.
+      await markArrivedOnAttend(tx, orgId, actorUserId, fromAppointment.id)
+      await notifyAppointmentChanged(tx, orgId)
+    }
     return row
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
@@ -446,6 +631,44 @@ type LinkablePlan = Pick<EncounterPlannedItemRow, "id" | "toothNumber">
  * programado, aceptado en su presupuesto (decision aceptado) y con presupuesto
  * vigente (no cancelado/histórico). No muta estados: solo habilita el vínculo.
  */
+/**
+ * Lo que se agendó con la cita (`appointment_plan_item`) y aún se puede traer a
+ * su atención: aceptado en su presupuesto vigente y sin terminar. Lo que ya no
+ * cumple (se completó o cambió de decisión) simplemente no se trae.
+ */
+async function appointmentItemsToLink(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  appointmentId: string,
+): Promise<string[]> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select i.id from appointment_plan_item ap
+      join treatment_plan_item i on i.id = ap.plan_item_id and i.organization_id = ap.organization_id
+      join treatment_budget b on b.id = i.budget_id and b.organization_id = i.organization_id
+    where ap.organization_id = ${orgId} and ap.patient_id = ${patientId} and ap.appointment_id = ${appointmentId}
+      and i.decision_status = 'aceptado' and i.status in ('pendiente','programado','en_curso')
+      and b.status in ('aceptado','parcial')
+    order by i.sort_order, i.id`)
+  return rows.map((row) => row.id)
+}
+
+/** Une a una atención ya abierta lo que se agendó con su cita. */
+async function linkAppointmentItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  appointmentId: string,
+  encounterId: string,
+): Promise<void> {
+  const ids = await appointmentItemsToLink(tx, orgId, patientId, appointmentId)
+  if (ids.length === 0) return
+  await tx
+    .insert(encounterPlanItem)
+    .values(ids.map((planItemId) => ({ organizationId: orgId, encounterId, planItemId })))
+    .onConflictDoNothing({ target: [encounterPlanItem.encounterId, encounterPlanItem.planItemId] })
+}
+
 async function assertLinkablePlans(
   tx: Db,
   orgId: string,
@@ -796,22 +1019,10 @@ export async function updateEncounterDraft(
     set.evolution = cleanText(patch.evolution, "evolution", TEXT_LIMITS.evolution)
   if (patch.indications !== undefined)
     set.indications = cleanText(patch.indications, "indications", TEXT_LIMITS.indications)
-  if (patch.nextStep !== undefined)
-    set.nextStep = cleanText(patch.nextStep, "nextStep", TEXT_LIMITS.nextStep)
-  if (patch.nextAppointmentAt !== undefined) {
-    if (patch.nextAppointmentAt === null) {
-      set.nextAppointmentAt = null
-    } else {
-      const d = new Date(patch.nextAppointmentAt)
-      if (Number.isNaN(d.getTime()))
-        throw validation("nextAppointmentAt debe ser una fecha ISO válida")
-      set.nextAppointmentAt = d
-    }
-  }
   const teeth = patch.teeth === undefined ? undefined : dedupeTeeth(patch.teeth)
   if (patch.examination !== undefined)
     set.examination = patch.examination === null ? null : assertExamination(patch.examination)
-  for (const key of ["presentIllness", "illnessDuration", "prognosis", "auxiliaryExams"] as const) {
+  for (const key of ["presentIllness", "illnessDuration", "prognosis"] as const) {
     if (patch[key] !== undefined) set[key] = cleanText(patch[key], key, TEXT_LIMITS[key])
   }
   if (patch.vitals !== undefined) {
@@ -1161,6 +1372,14 @@ export async function addEncounterProcedure(
         procedureId: row.id,
       },
     )
+    // Lo tratado queda dibujado: el servicio directo nace realizado.
+    await drawTreatedFinding(tx, orgId, actorUserId, patientId, encounterId, {
+      id: directPlanItemId,
+      serviceId,
+      toothNumber,
+      surfaces,
+      odontogramEntryId: input.odontogramEntryId ?? null,
+    })
   }
   await audit(tx, orgId, actorUserId, "encounter.procedure_added", "encounter_procedure", row.id, {
     patientId,
@@ -1193,6 +1412,16 @@ export interface FinalizeEncounterResult {
   skippedCharges: SkippedCharge[]
   /** Resumen para el diálogo de cierre y caja (con moneda del primer cargo). */
   billing: { chargedCents: number; currency: string | null; lines: FinalizeBillingLine[] }
+  /**
+   * El presupuesto que quedó armado con lo indicado en esta atención (decisión
+   * 12): el cierre pregunta «¿Enviárselo ahora?». Nulo si no entró nada.
+   */
+  budget: AssembledBudget | null
+  /**
+   * El odontograma que firmó este cierre (solo en clínicas de Perú, si la
+   * atención cambió el gráfico), con su momento deducido.
+   */
+  odontogram: Pick<OdontogramAssessmentRow, "id" | "purpose"> | null
 }
 
 /** Aviso en vivo (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -1259,6 +1488,18 @@ export type ClosingRequirement = "reason" | "diagnosis" | "evolution" | "signatu
 export interface ClosingCheck {
   ready: boolean
   missing: ClosingRequirement[]
+  /**
+   * Consentimientos que pide la atención y no están firmados (pendientes, sin
+   * preparar o sin publicar). No bloquean (decisión 3): cerrar sin ellos pide
+   * decir por qué.
+   */
+  consents: ConsentNeed[]
+  /**
+   * En clínicas de Perú, el odontograma que este cierre firmará (su momento y
+   * lo que cambió), o null si la atención no cambió el gráfico o la clínica no
+   * firma odontogramas.
+   */
+  odontogram: ClosingOdontogram | null
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1270,8 +1511,9 @@ const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
 
 /**
  * Mínimo para cerrar (ADR 0003): motivo, un diagnóstico CIE-10 con tipo,
- * evolución y firma con colegiatura. Funciones vitales, exámenes auxiliares y
- * pronóstico quedan opcionales: documentar una consulta no obliga a inventar.
+ * evolución y firma con colegiatura. Funciones vitales y pronóstico quedan
+ * opcionales (los exámenes auxiliares son órdenes de la atención): documentar
+ * una consulta no obliga a inventar.
  */
 export async function checkEncounterClosing(
   tx: Db,
@@ -1303,7 +1545,11 @@ export async function checkEncounterClosing(
       throw e
     missing.push("signature")
   }
-  return { ready: missing.length === 0, missing }
+  const consents = (await getEncounterConsentNeeds(tx, orgId, row.patientId, row.id)).filter(
+    (need) => need.status !== "firmado",
+  )
+  const odontogram = await closingOdontogramOf(tx, orgId, row.patientId, row.id)
+  return { ready: missing.length === 0, missing, consents, odontogram }
 }
 
 export async function getEncounterClosing(
@@ -1320,6 +1566,11 @@ export async function getEncounterClosing(
 export interface FinalizeEncounterInput {
   /** Hora de fin declarada (ISO); por defecto, ahora. */
   endedAt?: string | null
+  /**
+   * «Seguir sin él»: por qué se cierra con un consentimiento sin firmar. Se
+   * pide solo si falta alguno; queda en la atención como el resto.
+   */
+  consentSkipReason?: string | null
 }
 
 export async function finalizeEncounter(
@@ -1350,6 +1601,20 @@ export async function finalizeEncounter(
       409,
       `Para cerrar la atención registra ${closing.missing.map((m) => CLOSING_MESSAGES[m]).join(", ")}`,
     )
+  }
+  // Un consentimiento sin firmar avisa sin bloquear: se sigue diciendo por qué.
+  let consentSkipReason: string | null = null
+  if (closing.consents.length > 0) {
+    const reason = input.consentSkipReason?.trim() ?? ""
+    if (!reason) {
+      throw new ServiceError(
+        "CONSENT_UNSIGNED",
+        409,
+        `Falta el consentimiento de ${closing.consents.map((need) => `«${need.title}»`).join(", ")}: fírmalo ahora o sigue sin él diciendo por qué`,
+      )
+    }
+    if (reason.length > 2000) throw validation("El motivo admite hasta 2000 caracteres")
+    consentSkipReason = reason
   }
   const signature = await requireProfessionalSignature(tx, orgId, actorUserId)
   const now = new Date()
@@ -1382,14 +1647,18 @@ export async function finalizeEncounter(
       signerName: signature.name,
       signerTitle: signature.title,
       signerRegistration: signature.registration,
+      consentSkipReason,
       updatedAt: now,
     })
     .where(eq(encounter.id, encounterId))
     .returning()
   if (!row) throw notFound("Atención")
   await resolveTreatedFindings(tx, orgId, actorUserId, patientId, encounterId, now)
+  // En Perú, la atención que cambió el gráfico firma el odontograma con el
+  // mismo perfil y en el mismo paso (NTS 188, 5.3 y 5.10).
+  const odontogram = await signClosingOdontogram(tx, orgId, actorUserId, patientId, encounterId, signature)
   if (row.appointmentId) await closeAppointment(tx, orgId, actorUserId, patientId, row, now)
-  // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0030).
+  // Con lo dictado confirmado, el Asistente clínico ordenó esta consulta (ADR 0031).
   await countConsultationAction(tx, orgId, { patientId, encounterId, at: now })
   // Los cargos caen solos al finalizar, con el precio final acordado:
   // - Modo `treatment`: un cargo por tratamiento (anti-doble-cobro por cargo
@@ -1576,13 +1845,20 @@ export async function finalizeEncounter(
     patientId,
     charges: charges.length,
     skippedCharges: skippedCharges.length,
+    // Cuántos consentimientos quedaron sin firmar; el motivo vive en la atención.
+    consentsUnsigned: closing.consents.length,
   })
+  // Al firmar queda armado el presupuesto con lo indicado aquí: crece el
+  // borrador de la persona o nace uno. No se envía solo.
+  const budget = await assembleEncounterBudget(tx, orgId, actorUserId, patientId, encounterId)
   await notifyClose(tx, orgId, "encounter.finalized")
   await notifyClose(tx, orgId, "patient.account.updated")
   return {
     encounter: row,
     charges,
     skippedCharges,
+    budget,
+    odontogram: odontogram ? { id: odontogram.id, purpose: odontogram.purpose } : null,
     billing: {
       chargedCents,
       currency: charges[0]?.currency ?? procedures[0]?.currency ?? null,
@@ -1807,6 +2083,9 @@ async function voidProcedureRow(
           })
           .where(eq(treatmentPlanItem.id, item.id))
       }
+      // Ya no está realizado: lo que dejó dibujado en esta atención se anula.
+      if (direct || item.status === "realizado")
+        await voidLeftFindings(tx, orgId, actorUserId, patientId, encounterId, item.id, reason, at)
     }
   }
   await audit(
@@ -1994,6 +2273,9 @@ export async function voidEncounter(
     reason,
     procedures: procedures.length,
   })
+  // La Agenda deja de decir «En atención»: la cita vuelve a poder atenderse y
+  // su llegada se conserva (ADR 0032).
+  if (row.appointmentId) await notifyAppointmentChanged(tx, orgId)
   return row
 }
 

@@ -5,7 +5,6 @@ import {
   portalGrant,
   portalPasskey,
   portalPolicy,
-  portalRequest,
   portalVerification,
 } from "@odentia/db/schema/portal-access"
 import { and, eq, inArray } from "drizzle-orm"
@@ -32,17 +31,7 @@ export async function seedPortal(
     .values({
       organizationId: orgId,
       portalEnabled: true,
-      requestsEnabled: true,
-      publicRequestsEnabled: true,
-      channelRequestsEnabled: true,
-      autoApproveVerified: false,
-      allowedChannelIds: [],
-      linkTtlMinutes: 4320,
-      sessionTtlHours: 48,
-      grantTtlDays: null,
       allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-      passkeysEnabled: true,
-      assistedRecoveryEnabled: true,
       updatedBy: ownerUserId,
     })
     .onConflictDoUpdate({
@@ -86,9 +75,6 @@ export async function seedPortal(
   await tx
     .delete(portalVerification)
     .where(and(eq(portalVerification.organizationId, orgId), eq(portalVerification.patientId, patientId)))
-  await tx
-    .delete(portalRequest)
-    .where(and(eq(portalRequest.organizationId, orgId), eq(portalRequest.idempotencyKey, "seed-portal-solicitud")))
   await tx
     .delete(portalGrant)
     .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.patientId, patientId)))
@@ -214,15 +200,5 @@ export async function seedPortal(
     createdAt: past,
     revokedAt: past,
     revokedBy: ownerUserId,
-  })
-  await tx.insert(portalRequest).values({
-    organizationId: orgId,
-    channel: "web_publica",
-    status: "pendiente",
-    contactName: "Solicitud demo",
-    contactText: "+51 999 000 111",
-    patientHint: "Paciente de demostración",
-    idempotencyKey: "seed-portal-solicitud",
-    expiresAt: future,
   })
 }

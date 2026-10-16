@@ -8,7 +8,6 @@ import {
   prescriptionItem,
   treatmentBudget,
   treatmentBudgetItem,
-  treatmentOptionGroup,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -41,13 +40,14 @@ export function deriveNextAction(input: {
   const { status, decisionStatus, budgetStatus, openSession } = input
   if (status === "cancelado" || status === "reemplazado") return null
   if (status === "realizado") return "controlar"
-  const budgetClosed =
-    budgetStatus == null || budgetStatus === "cancelado" || budgetStatus === "historico"
+  const budgetClosed = budgetStatus == null || budgetStatus === "cancelado"
   if (status === "suspendido") {
     if (budgetClosed || decisionStatus !== "aceptado") return "decidir"
     return "reanudar"
   }
   if (budgetClosed) return "presupuestar"
+  // Lo que no se eligió de un presupuesto con opciones vuelve a esperar presupuesto.
+  if (decisionStatus === "no_elegida") return "presupuestar"
   if (
     decisionStatus === "pendiente" ||
     decisionStatus === "pospuesto" ||
@@ -237,24 +237,6 @@ export async function getTreatmentJourney(
     .select()
     .from(treatmentPlanItem)
     .where(and(scope, eq(treatmentPlanItem.supersedesItemId, item.id)))
-  const [optionGroup] = item.optionGroupId
-    ? await tx
-        .select()
-        .from(treatmentOptionGroup)
-        .where(
-          and(
-            eq(treatmentOptionGroup.id, item.optionGroupId),
-            eq(treatmentOptionGroup.organizationId, orgId),
-            eq(treatmentOptionGroup.patientId, patientId),
-          ),
-        )
-    : []
-  const alternatives = item.optionGroupId
-    ? await tx
-        .select()
-        .from(treatmentPlanItem)
-        .where(and(scope, eq(treatmentPlanItem.optionGroupId, item.optionGroupId)))
-    : []
   const budgetHistory = await tx
     .select({ budget: treatmentBudget, line: treatmentBudgetItem })
     .from(treatmentBudgetItem)
@@ -371,7 +353,6 @@ export async function getTreatmentJourney(
     originFinding: originFinding ?? null,
     replacedBy,
     supersedes: supersedes ?? null,
-    optionGroup: optionGroup ? { ...optionGroup, alternatives } : null,
     budgetHistory,
     procedures,
     followUps,

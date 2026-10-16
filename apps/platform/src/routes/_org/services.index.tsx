@@ -44,7 +44,8 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
-import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { conditionLabel, formatMoney, formatMoneyInput, parseMoney, variantLabel } from "@odentia/clinical"
+import { LeavesFindingField, leavesFindingBody } from "../../components/leaves-finding-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { ApiError } from "../../lib/api"
@@ -553,6 +554,9 @@ const offerSchema = z.object({
   priceDisclosure: z.enum(["exacto", "desde", "evaluacion"]),
   /** Vacío: sin una evaluación propia. */
   evaluationServiceId: z.string(),
+  /** Lo que deja en la pieza al completarse; vacío = nada. */
+  leavesCondition: z.string(),
+  leavesVariant: z.string(),
 })
 
 type OfferFormValues = z.infer<typeof offerSchema>
@@ -568,6 +572,8 @@ const emptyOfferValues: OfferFormValues = {
   // Un servicio nuevo nace «solo con evaluación»: la clínica habilita el precio donde quiera.
   priceDisclosure: "evaluacion",
   evaluationServiceId: "",
+  leavesCondition: "",
+  leavesVariant: "",
 }
 
 /** Valores del formulario para una oferta; `null` = alta de una prestación propia. */
@@ -583,6 +589,8 @@ function offerValues(offer: ServiceCatalogItem | null, locale: string): OfferFor
     billingMode: offer.billingMode ?? "treatment",
     priceDisclosure: offer.priceDisclosure ?? "exacto",
     evaluationServiceId: offer.evaluationServiceId ?? "",
+    leavesCondition: offer.leavesFinding?.condition ?? "",
+    leavesVariant: offer.leavesFinding?.variant ?? "",
   }
 }
 
@@ -693,6 +701,8 @@ function OfferEditor({
         billingMode: values.billingMode,
         priceDisclosure: values.priceDisclosure,
         evaluationServiceId: values.evaluationServiceId === "" ? null : values.evaluationServiceId,
+        // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
+        leavesFinding: leavesFindingBody(values.leavesCondition, values.leavesVariant),
       }
       if (!offer) {
         return createServiceApi({ ...body, specialty: values.specialty, scope: values.scope })
@@ -897,6 +907,16 @@ function OfferReadOnly({
         <DetailField label="Ámbito">
           {offer.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : null}
         </DetailField>
+        <DetailField label="Deja en la pieza">
+          {offer.leavesFinding
+            ? [
+                conditionLabel(offer.leavesFinding.condition),
+                variantLabel(offer.leavesFinding.condition, offer.leavesFinding.variant),
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : null}
+        </DetailField>
         <DetailField label="Estado">{offer.isActive ? "Activa" : "Inactiva"}</DetailField>
       </DetailList>
     </div>
@@ -1087,6 +1107,7 @@ function OfferFields({
         )}
       </form.Field>
       <PriceDisclosureFields form={form} idPrefix={idPrefix} offerId={offer?.id ?? null} />
+      <OfferLeavesFinding form={form} idPrefix={idPrefix} offer={offer} />
       <form.Field name="code" validators={{ onChange: offerSchema.shape.code }}>
         {(field) => (
           <Field>
@@ -1109,6 +1130,38 @@ function OfferFields({
         )}
       </form.Field>
     </>
+  )
+}
+
+/**
+ * «Deja en la pieza»: con el ámbito que se está editando (o el de la plantilla).
+ * Cambiar dónde se hace limpia lo que ya no encaja.
+ */
+function OfferLeavesFinding({
+  form,
+  idPrefix,
+  offer,
+}: {
+  form: OfferForm
+  idPrefix: string
+  offer: ServiceCatalogItem | null
+}) {
+  const scope = useStore(form.store, (state) =>
+    offer?.source === "template" ? offer.scope : state.values.scope,
+  )
+  const condition = useStore(form.store, (state) => state.values.leavesCondition)
+  const variant = useStore(form.store, (state) => state.values.leavesVariant)
+  return (
+    <LeavesFindingField
+      idPrefix={idPrefix}
+      scope={scope}
+      condition={condition}
+      variant={variant}
+      onChange={(nextCondition, nextVariant) => {
+        form.setFieldValue("leavesCondition", nextCondition)
+        form.setFieldValue("leavesVariant", nextVariant)
+      }}
+    />
   )
 }
 

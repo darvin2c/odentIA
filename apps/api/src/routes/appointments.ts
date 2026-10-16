@@ -8,6 +8,7 @@ import {
   getAgendaAvailability,
   getAppointment,
   getAppointmentContext,
+  getPatientMissingData,
   getProfessionalSchedule,
   listAppointments,
   listChairs,
@@ -15,6 +16,7 @@ import {
   listScheduleResources,
   moveAppointment,
   searchAgendaPatients,
+  setAppointmentArrival,
   setAppointmentStatus,
   setBranchDefaultDuration,
   setProfessionalSchedule,
@@ -54,14 +56,19 @@ const settingsInput = z.object({
   defaultDurationMin: z.number().int().positive().max(480),
 })
 
-const patchInput = z.object({
-  expectedVersion: z.number().int().positive(),
-  reason: z.string().max(500).nullable().optional(),
-  serviceId: z.uuid().nullable().optional(),
-  dentistUserId: z.string().min(1).optional(),
-  chairId: z.uuid().optional(),
-  status: z.enum(STATUS).optional(),
-})
+// Los detalles de la cita; el estado tiene sus propias vías (`/status`, `/arrival`
+// y el cierre de la atención), cada una con sus efectos.
+const patchInput = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    reason: z.string().max(500).nullable().optional(),
+    serviceId: z.uuid().nullable().optional(),
+    dentistUserId: z.string().min(1).optional(),
+    chairId: z.uuid().optional(),
+  })
+  .strict()
+
+const arrivalInput = z.object({ arrived: z.boolean() }).strict()
 
 const moveInput = operationBodySchema("cita.mover")
 
@@ -363,8 +370,18 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "appointments.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
     }
+    // «Faltan datos para atenderla»: la misma regla del servidor que la página
+    // de la persona, solo para quien edita sus datos.
+    const canEditPerson = canAccess(memberRole, "patients.write")
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getAppointmentContext(tx, orgId, c.req.param("id"))),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const context = await getAppointmentContext(tx, orgId, c.req.param("id"))
+        const { patientId } = await getAppointment(tx, orgId, c.req.param("id"))
+        return {
+          ...context,
+          missingData: canEditPerson ? await getPatientMissingData(tx, orgId, patientId) : null,
+        }
+      }),
     )
   })
 
@@ -392,6 +409,24 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         moveAppointment(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  /**
+   * «Llegó» y «Deshacer» (ADR 0032): la marcan recepción y el odontólogo, con el
+   * mismo permiso que cambia las citas.
+   */
+  app.post("/:id/arrival", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para marcar la llegada"), 403)
+    }
+    const parsed = arrivalInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setAppointmentArrival(tx, orgId, userId, c.req.param("id"), parsed.data.arrived),
       ),
     )
   })

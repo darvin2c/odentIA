@@ -1,5 +1,10 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
-import { activeFindingsAsOf, type FindingDetails, REGISTRATION_FIELDS, type RegistrationConfig } from "@odentia/clinical"
+import {
+  activeFindingsAsOf,
+  type FindingDetails,
+  type MissingPersonDatum,
+  type SignedOdontogramPurpose,
+} from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { EncounterDiagnosis } from "./encounters"
 
@@ -15,14 +20,20 @@ export interface Patient {
   paternalSurname?: string | null
   maternalSurname?: string | null
   identityNeedsReview?: boolean
-  identityLegacy?: Record<string, string> | null
   bloodGroup?: BloodGroup | null
   docType?: string | null
   docNumber?: string | null
   docCountry?: string | null
   nationality?: string | null
-  birthPlaceUbigeo?: string | null
-  addressUbigeo?: string | null
+  /** Lugar de nacimiento: país (ISO 3166-1 alfa-2) y ciudad escrita. */
+  birthCountry?: string | null
+  birthPlace?: string | null
+  /** Domicilio internacional: calle en `address`; región ISO 3166-2 si el país tiene lista. */
+  addressCity?: string | null
+  addressDistrict?: string | null
+  addressRegion?: string | null
+  addressPostalCode?: string | null
+  addressCountry?: string | null
   addressReference?: string | null
   insurerName?: string | null
   affiliationNumber?: string | null
@@ -40,12 +51,12 @@ export interface Patient {
   origin?: string | null
   emergencyContactName?: string | null
   emergencyContactPhone?: string | null
+  /** Tipo general del seguro y, si lo tiene, su régimen con nombre propio del país. */
   insuranceType?: string | null
-  insuranceDetail?: string | null
+  insuranceScheme?: string | null
   referralSource?: string | null
   registeredBranchId?: string | null
   isActive: boolean
-  dataConsentAt?: string | null
   createdAt: string
   updatedAt?: string
 }
@@ -152,7 +163,6 @@ export interface SaveHealthInput {
   familyHistory?: FamilyHistoryItem[]
   asaClass?: string | null
   anamnesis?: { expectedVersion: number; answers: AnamnesisAnswers }
-  dataConsent?: true
 }
 
 export interface PatientHealth {
@@ -208,7 +218,7 @@ export const CONDITION_STATUS_LABELS: Record<string, string> = {
 }
 
 export const HEALTH_REVIEW_LABELS: Record<HealthReviewState, string> = {
-  unknown: "Sin determinar",
+  unknown: "No se le preguntó",
   none: "Niega antecedentes de este tipo",
   recorded: "Registrados",
 }
@@ -239,7 +249,7 @@ export function hasHealthInfo(health: PatientHealth | null | undefined): boolean
 
 /**
  * Declaración pendiente de revisión profesional: hay información pero nunca se
- * marcó revisor/fecha. Distinto de «Sin determinar» (contenido desconocido).
+ * marcó revisor/fecha. Distinto de «No se le preguntó» (contenido desconocido).
  */
 export function isHealthReviewPending(health: PatientHealth | null | undefined): boolean {
   return hasHealthInfo(health) && !health?.reviewedAt
@@ -318,6 +328,10 @@ export interface OdontogramEntry {
   voidedAt?: string | null
   voidedBy?: string | null
   voidReason?: string | null
+  /** Tratado: deja de estar vigente desde entonces (sigue en la evolución). */
+  resolvedAt?: string | null
+  /** Lo tratado queda dibujado: el tratamiento completado que dejó este hallazgo. */
+  leftByPlanItemId?: string | null
 }
 
 export type ToothState = {
@@ -332,6 +346,11 @@ export interface OdontogramState {
   history: OdontogramEntry[]
 }
 
+/**
+ * Odontograma firmado (solo en clínicas de Perú; ADR 0036): instantánea de los
+ * hallazgos con la firma del perfil de quien firmó (sin trazo) y su momento.
+ * El que firmó el cierre de una atención la nombra (`encounterId`).
+ */
 export interface OdontogramAssessment {
   id: string
   patientId: string
@@ -339,13 +358,15 @@ export interface OdontogramAssessment {
   patientNumber: number
   authorUserId: string
   createdAt: string
-  purpose: "initial" | "new_findings" | "completion" | "reentry" | "legal" | "personal"
+  purpose: SignedOdontogramPurpose
   standard: string
   specifications: string
   observations: string
   examinerName: string
+  examinerTitle: string
+  /** Colegio y número, como se imprime: «COP 12345». */
   registrationNumber: string
-  signature: number[][][]
+  encounterId: string | null
   entries: OdontogramEntry[]
 }
 
@@ -361,16 +382,15 @@ export interface Encounter {
   /** Cita que motivó la atención, si la hubo. */
   appointmentId?: string | null
   reason: string | null
-  /** Nota normativa: enfermedad actual, signos vitales, pronóstico y exámenes. */
+  /** Nota normativa: enfermedad actual, signos vitales y pronóstico. */
   presentIllness?: string | null
   illnessDuration?: string | null
   vitals?: Record<string, number> | null
   prognosis?: string | null
-  auxiliaryExams?: string | null
+  /** Por qué se cerró con un consentimiento sin firmar («Seguir sin él»). */
+  consentSkipReason?: string | null
   evolution: string | null
   indications: string | null
-  nextStep: string | null
-  nextAppointmentAt: string | null
   finalizedAt: string | null
   examination?: {
     extraoral?: Record<string, string>
@@ -426,9 +446,9 @@ export interface PlanItem {
   planId: string
   odontogramEntryId?: string | null
   budgetId: string | null
-  decision: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
+  decision: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado" | "no_elegida"
   /** Decisión clínica vigente del ítem: la indicación manda, el snapshot es evidencia. */
-  decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado"
+  decisionStatus: "pendiente" | "aceptado" | "pospuesto" | "rechazado" | "reemplazado" | "no_elegida"
   /** Fase del plan (urgencia → mantenimiento) y orden de ejecución. */
   phase?: "urgencia" | "basica" | "quirurgica" | "rehabilitadora" | "mantenimiento"
   sortOrder?: number
@@ -439,9 +459,6 @@ export interface PlanItem {
   decidedByContactId: string | null
   decidedByName: string | null
   decisionNote: string | null
-  /** Alternativas excluyentes del mismo problema clínico. */
-  optionGroupId: string | null
-  isRecommended: boolean
   /** Indicación anterior que esta reemplaza tras una reevaluación. */
   supersedesItemId: string | null
   /** Motivo obligatorio al suspender o cancelar. */
@@ -482,6 +499,8 @@ export interface TreatmentPlanWithStatus {
   status: "Sin tratamientos" | "En curso" | "Completado" | "Cancelado"
   totalItems: number
   pendingItems: number
+  /** El plan abierto de la persona: recibe las indicaciones nuevas (uno por persona). */
+  isOpen: boolean
 }
 
 /** Detalle de una atención: encuentro + piezas, procedimientos, notas, odontograma, documentos y adendas. */
@@ -511,6 +530,10 @@ export type TimelineType =
   | "budget"
   | "follow_up"
   | "prescription"
+  | "consent"
+  | "order"
+  | "form"
+  | "odontogram_signed"
 
 /** Evento de la historia clínica unificada. Fechas como ISO string. */
 export interface TimelineItem {
@@ -530,8 +553,6 @@ export interface TimelineItem {
   status?: string
   procedures?: string[]
   documentsCount?: number
-  nextStep?: string | null
-  nextAppointmentAt?: string | null
   indications?: string | null
   diagnoses?: string[]
   plannedItems: Array<
@@ -550,6 +571,8 @@ export interface TimelineItem {
   decision?: string | null
   /** Vencimiento de un control, para leerlo aquí mismo. */
   dueAt?: string | null
+  /** Motivo de una atención anulada: la historia la muestra con él. */
+  voidReason?: string | null
 }
 
 export interface PlanPendingTotal {
@@ -563,8 +586,6 @@ export interface PatientLastVisit {
   reason: string | null
   evolution: string | null
   indications: string | null
-  nextStep: string | null
-  nextAppointmentAt: string | null
   finalizedAt: string | null
   teeth: number[]
   procedures: Array<Pick<ProcedureItem, "description" | "toothNumber" | "diagnosisCode">>
@@ -633,7 +654,6 @@ export interface PatientSummary {
   openEncounter?: OpenEncounterBrief | null
   /** Consentimientos emitidos y aún sin firmar. */
   pendingConsents?: Array<{ id: string; title: string }>
-  nextAppointmentAt: string | null
   treatmentJourneys: TreatmentJourneySummary[]
   planPending: {
     count: number
@@ -732,6 +752,11 @@ export interface PatientFull {
   activeAllergies: Allergy[]
   activeConditions: Condition[]
   currentMedications: Medication[]
+  /**
+   * «Faltan datos para atenderla», calculado en el servidor (decisión 10 de la
+   * fase 3); null para quien no edita los datos (odontólogo, caja).
+   */
+  missingData: MissingPersonDatum[] | null
 }
 
 /** Etiqueta de historia clínica: HC-000123 (padding 6). */
@@ -827,6 +852,14 @@ export function timelineTypeLabel(type: string): string {
       return "Control"
     case "prescription":
       return "Receta"
+    case "consent":
+      return "Consentimiento"
+    case "order":
+      return "Orden"
+    case "form":
+      return "Formulario"
+    case "odontogram_signed":
+      return "Odontograma firmado"
     default:
       return type
   }
@@ -883,30 +916,17 @@ export function fetchAnamnesisHistory(patientId: string): Promise<{
 }
 
 /**
- * Lo que le falta a la filiación: los datos que «Registro de pacientes» marca
- * como obligatorios y la ficha no tiene. Un solo criterio para el Resumen y
- * para Datos personales; la clínica decide qué es obligatorio, no la pantalla.
+ * «Fecha de nacimiento, sexo y documento»: lo que falta, como lo entrega el
+ * servidor, en una frase; el tipo y el número de documento se dicen juntos.
  */
-/** «fecha de nacimiento, sexo y documento»: el tipo y el número de documento se dicen juntos. */
-export function filiationGapsText(gaps: string[]): string {
-  const words = [...new Set(gaps.map((gap) => (/documento/.test(gap) ? "documento" : gap)))]
-  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
-}
-
-export function missingFiliation(
-  config: Pick<RegistrationConfig, "fields">,
-  patient: Patient,
-): string[] {
-  return REGISTRATION_FIELDS.filter(
-    (field) =>
-      (field.step === "datos" || field.step === "contacto") &&
-      config.fields[field.key] === "required" &&
-      field.key !== "displayName" &&
-      !(field.key === "insuranceDetail" && !patient.insuranceType),
-  )
-    .filter((field) => {
-      const value = (patient as unknown as Record<string, unknown>)[field.key]
-      return value === null || value === undefined || value === ""
-    })
-    .map((field) => field.label.toLowerCase())
+export function filiationGapsText(gaps: ReadonlyArray<Pick<MissingPersonDatum, "label"> & { key: string }>): string {
+  const words = [
+    ...new Set(
+      gaps.map((gap) =>
+        gap.key === "docType" || gap.key === "docNumber" ? "documento" : gap.label.toLowerCase(),
+      ),
+    ),
+  ]
+  const text = words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} y ${words.at(-1)}`
+  return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : ""
 }

@@ -11,6 +11,7 @@ import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
   fetchReport,
+  MINUTES,
   POINTS,
   previousPhrase,
   rateOf,
@@ -56,7 +57,7 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
   const locale = data.locale
   const period = spanLabel(data.period, locale)
   const phrase = previousPhrase(data, locale)
-  const { appointments: now, previousAppointments: before, controls } = data
+  const { appointments: now, previousAppointments: before, controls, waitInRoom: wait } = data
 
   if (now.total === 0 && controls.due === 0) {
     return (
@@ -76,7 +77,7 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
   })
   const groups: Array<StackPart & { percent: number | null; change: ReturnType<typeof share>["change"]; better: Better; list?: ReportListKey; listLabel?: string }> = [
     { key: "attended", label: "Atendidas", count: now.attended, tone: "primary", percent: rateOf(now.attended, now.total), change: relativeChange(now.attended, before.attended, phrase, locale), better: "up" },
-    { key: "noShow", label: "No asistieron", count: now.noShow, tone: "attention", ...share(now.noShow, before.noShow), better: "down", list: "no_show", listLabel: "Ver quiénes" },
+    { key: "noShow", label: "No vinieron", count: now.noShow, tone: "attention", ...share(now.noShow, before.noShow), better: "down", list: "no_show", listLabel: "Ver quiénes" },
     { key: "cancelled", label: "Cancelaron", count: now.cancelled, tone: "muted", ...share(now.cancelled, before.cancelled), better: "down", list: "cancelled", listLabel: "Ver cuáles" },
   ]
   if (now.unmarked > 0)
@@ -146,7 +147,7 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
                   <span className="shrink-0 font-semibold tabular-nums">
                     {row.attended} {row.attended === 1 ? "atendida" : "atendidas"}
                   </span>
-                  <span className="shrink-0 text-[13px] text-muted-foreground tabular-nums">{rateOf(row.noShow, row.total) ?? 0} % no asistió</span>
+                  <span className="shrink-0 text-[13px] text-muted-foreground tabular-nums">{rateOf(row.noShow, row.total) ?? 0} % no vino</span>
                 </li>
               ))}
             </ul>
@@ -162,7 +163,7 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
                     Atendidas
                   </TableHead>
                   <TableHead scope="col" className="text-right">
-                    No asistieron
+                    No vinieron
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -189,6 +190,35 @@ export function AgendaTab({ query, onOpenList, advice }: { query: ReportQuery; o
             </p>
           </ReportCard>
         </div>
+      ) : null}
+
+      {now.total > 0 ? (
+        <ReportCard title="Espera en sala">
+          {wait.medianMinutes === null ? (
+            <>
+              <span className="text-[22px] leading-7 font-bold">Sin datos</span>
+              <p className="text-[13px] text-muted-foreground">
+                Se mide desde que recepción marca «Llegó» hasta que empieza la atención. En {period} nadie marcó una llegada antes de atender.
+              </p>
+            </>
+          ) : (
+            <>
+              <span className="text-[22px] leading-7 font-bold tabular-nums">
+                {wait.medianMinutes} min
+                {wait.byProfessional.length > 1 ? (
+                  <span className="text-sm font-semibold text-muted-foreground">
+                    {" "}
+                    ({wait.byProfessional.map((row) => `${row.name.split(/\s+/).slice(0, 2).join(" ")} ${row.medianMinutes}`).join(", ")})
+                  </span>
+                ) : null}
+              </span>
+              <ChangeLine change={absoluteChange(wait.medianMinutes, data.previousWaitInRoom, phrase, locale, MINUTES)} better="down" />
+              <p className="text-[13px] text-muted-foreground">
+                La mitad de las veces se espera menos, desde «Llegó» hasta que empieza la atención. Cuenta {wait.measured} {wait.measured === 1 ? "cita" : "citas"} con la llegada marcada antes de atender.
+              </p>
+            </>
+          )}
+        </ReportCard>
       ) : null}
 
       {controls.due > 0 ? (

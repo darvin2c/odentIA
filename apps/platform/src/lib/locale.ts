@@ -18,6 +18,7 @@ import { useSyncExternalStore } from "react"
  */
 let current: string | undefined
 let currentTimeZone: string | undefined
+let currentCountry: string | undefined
 const listeners = new Set<() => void>()
 
 /** Formato de la clínica o `undefined` (el del navegador) si aún no se conoce. */
@@ -26,20 +27,25 @@ export function activeOrgLocale(): string | undefined {
 }
 
 /**
- * Fija el formato (y la zona horaria, para «hoy») de la clínica. Devuelve si cambió; quien lo llama durante un
- * render avisa a los suscriptores después (`notifyOrgLocale`), no en el render.
+ * Fija el formato (y la zona horaria, para «hoy», y el país, del que parten el
+ * teléfono y los selectores de país) de la clínica. Devuelve si cambió; quien
+ * lo llama durante un render avisa a los suscriptores después
+ * (`notifyOrgLocale`), no en el render.
  */
 export function setOrgLocale(
   locale: string | null | undefined,
   timeZone?: string | null,
+  country?: string | null,
 ): boolean {
   const next = locale?.trim() || undefined
   const nextTimeZone = timeZone?.trim() || undefined
-  if (next === current && nextTimeZone === currentTimeZone) return false
+  const nextCountry = country?.trim().toUpperCase() || undefined
+  if (next === current && nextTimeZone === currentTimeZone && nextCountry === currentCountry) return false
   current = next
   currentTimeZone = nextTimeZone
-  // Los patrones compartidos (agenda, filtros, selectores) escriben con lo mismo.
-  setFormatRegion({ locale: next, timeZone: nextTimeZone })
+  currentCountry = nextCountry
+  // Los patrones compartidos (agenda, filtros, selectores, fechas y teléfono) escriben con lo mismo.
+  setFormatRegion({ locale: next, timeZone: nextTimeZone, country: nextCountry })
   return true
 }
 

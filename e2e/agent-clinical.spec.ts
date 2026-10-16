@@ -115,13 +115,16 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
   await expect(block("Diagnóstico")).toContainText("Sin diagnósticos confirmados · 1 sugerencia")
   await expect(suggested("Plan de tratamiento")).toContainText("Endodoncia multirradicular · S/ 650.00")
-  await expect(block("Plan de tratamiento")).toContainText("Sin indicaciones confirmadas · 1 sugerencia")
-  await expect(suggested("Controles").getByRole("listitem")).toHaveCount(1)
+  // Indicaciones y controles se revisan en un solo bloque, «Plan y controles» (ADR 0034).
+  await expect(block("Plan y controles")).toContainText("Sin indicaciones confirmadas · 2 sugerencias")
+  await expect(block("Plan y controles").getByRole("list", { name: "Sugerencias del asistente: Controles" }).getByRole("listitem")).toHaveCount(1)
   await expect(suggested("Consulta")).toContainText("Viene por dolor al masticar del lado derecho.")
   // El cierre dice que el diagnóstico está sugerido, no registrado.
   const closing = page.getByRole("region", { name: "Cierre de la atención" })
+  // «Finalizar y firmar» queda fijo al pie de la atención (fase 3, paso 2B), fuera del bloque de cierre.
+  const signButton = page.getByRole("button", { name: "Finalizar y firmar", exact: true })
   await expect(closing).toContainText("Diagnóstico: hay uno sugerido, sin confirmar")
-  await expect(closing.getByRole("button", { name: "Finalizar y firmar" })).toBeDisabled()
+  await expect(signButton).toBeDisabled()
   // Todavía no hay nada en la historia.
   const detail = () => call<{ encounter: { reason: string | null; evolution: string | null; status: string }; diagnoses: Array<{ cie10Code: string; toothNumber: number | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
   expect((await detail()).diagnoses).toEqual([])
@@ -151,7 +154,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await idle.getByRole("button", { name: "Dictar", exact: true }).click()
   const live = page.getByRole("region", { name: "Dictado en curso" })
   await expect(live).toContainText("Escuchando")
-  await expect(closing.getByRole("button", { name: "Finalizar y firmar" })).toBeDisabled()
+  await expect(signButton).toBeDisabled()
   await expect(closing).toContainText("Termina el dictado y revisa las sugerencias para poder firmar.")
   // El respaldo queda al lado, con la ayuda para corregir hablando.
   const backup = page.getByRole("region", { name: "Lo dictado" })
@@ -244,7 +247,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await expect(closing).toContainText("Si quedan sugerencias sin revisar, te lo pregunta antes de firmar.")
-  await closing.getByRole("button", { name: "Finalizar y firmar" }).click()
+  await signButton.click()
   const sign = page.getByRole("alertdialog", { name: "Queda 1 sugerencia sin revisar" })
   await expect(sign.getByRole("list", { name: "Sugerencias sin revisar" })).toContainText("Diagnóstico · falta confirmarla")
   await expect(sign).toContainText("Las otras 5 ya están confirmadas y se firman con la atención.")
@@ -253,7 +256,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await sign.getByRole("button", { name: "Revisar ahora" }).click()
   await expect(sign).toBeHidden()
   expect((await detail()).encounter.status).toBe("borrador")
-  await closing.getByRole("button", { name: "Finalizar y firmar" }).click()
+  await signButton.click()
   await sign.getByRole("button", { name: "Descartarla y firmar" }).click()
   await expect.poll(async () => (await detail()).encounter.status, { timeout: 30_000 }).toBe("finalizada")
   const final = await detail()

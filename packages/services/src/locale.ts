@@ -1,4 +1,4 @@
-import { formatMoney } from "@odentia/clinical"
+import { type ClinicalCountryProfile, clinicalProfileFor, formatMoney } from "@odentia/clinical"
 import { sql } from "drizzle-orm"
 import type { Db } from "@odentia/db"
 import { notFound, ServiceError } from "./errors.js"
@@ -92,6 +92,14 @@ export async function findOrgCountry(tx: Db, orgId: string): Promise<string | nu
   const [row] = await tx.execute<{ countryCode: string }>(sql`
     select country_code as "countryCode" from org_profile where organization_id = ${orgId}`)
   return row?.countryCode || null
+}
+
+/**
+ * Lo que vale en las clínicas del país de esta (ADR 0036): documentos, seguro,
+ * dirección y odontograma. Sin país, el núcleo internacional.
+ */
+export async function orgClinicalProfile(tx: Db, orgId: string): Promise<ClinicalCountryProfile> {
+  return clinicalProfileFor(await findOrgCountry(tx, orgId))
 }
 
 /**

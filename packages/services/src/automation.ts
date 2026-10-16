@@ -35,8 +35,10 @@ import { adminLineOf, DEFAULT_HOURS_BEFORE, type LineTiming, lineOfJobKind } fro
 import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-words.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
+  APPOINTMENT_DATA_NOTICE_KEY,
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
+  type AutomationMessage,
   automationMessageOf,
   GENERAL_PERMISSION_NO,
   GENERAL_PERMISSION_QUESTION,
@@ -44,10 +46,14 @@ import {
   generalPermissionButtons,
   isAppointmentNotice,
   parseReplyId,
+  withLinkLine,
 } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { issuePersonalLink } from "./booking-links.js"
+import { answerBudgetButton } from "./budget-send.js"
 import { applyTemplateStatuses, type TemplateDeps } from "./channel-templates.js"
 import {
+  currentAutomationMessage,
   currentAutomationMessageOf,
   MESSAGES_HREF,
   messageOfTemplate,
@@ -59,9 +65,13 @@ import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { updateOpportunity } from "./opportunities.js"
+import { getPatientMissingData } from "./patient-registration.js"
+import { personalLinkRef } from "./personal-link-token.js"
+import { personalLinkMessageUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
+import type { Storage } from "./storage.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -361,7 +371,7 @@ export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Dat
 export interface AdminRuntime {
   adminOn: boolean
   receptionOn: boolean
-  /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0030). */
+  /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0031). */
   agentsPaused: boolean
   quietStart: string
   quietEnd: string
@@ -398,6 +408,50 @@ export type ConsentRow = typeof automationConsent.$inferSelect
  */
 export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento", "novedades"] as const
 export type MessagePermissionKey = (typeof MESSAGE_PERMISSIONS)[number]
+
+/** Lo que deja de recibir quien se da de baja, dicho a la persona: qué es y qué incluye. */
+export interface UnsubscribeWords {
+  /** «los recordatorios de tus citas»: completa «Dejar de recibir…» y «Ya no recibirás…». */
+  what: string
+  detail: string
+  /** Lo que sigue llegando; null si la baja apaga todo lo que la clínica envía sola. */
+  keeps: string | null
+}
+
+/**
+ * Cómo se nombra cada tipo de mensaje cuando la persona se da de baja. La baja
+ * apaga el tipo del mensaje del que salió el enlace, y no los demás: la página
+ * dice cuál, sin hablar de autorizaciones ni de campañas (ADR 0030).
+ */
+export const UNSUBSCRIBE_WORDS: Record<MessagePermissionKey, UnsubscribeWords> = {
+  recordatorio: {
+    what: "los recordatorios de tus citas",
+    detail: "Son los recordatorios y avisos de tus citas y de tus controles.",
+    keeps: "Lo demás que te envía la clínica sigue igual.",
+  },
+  seguimiento: {
+    what: "los mensajes de seguimiento",
+    detail:
+      "Son los mensajes sobre un presupuesto pendiente, una cita a la que no pudiste venir o que se canceló, y una conversación por retomar.",
+    keeps: "Los recordatorios de tus citas siguen llegando.",
+  },
+  novedades: {
+    what: "las novedades y promociones",
+    detail: "Son los mensajes con las novedades y promociones de la clínica.",
+    keeps: "Los recordatorios de tus citas siguen llegando.",
+  },
+}
+
+/** Un enlace de baja que no viene de un mensaje concreto apaga los tres tipos. */
+const UNSUBSCRIBE_ALL_WORDS: UnsubscribeWords = {
+  what: "los mensajes automáticos de la clínica",
+  detail: "Son los recordatorios y avisos de tus citas, los mensajes de seguimiento y las novedades y promociones.",
+  keeps: null,
+}
+
+export function unsubscribeWords(purposes: readonly ConsentPurpose[]): UnsubscribeWords {
+  return purposes.length === 1 && purposes[0] ? UNSUBSCRIBE_WORDS[purposes[0]] : UNSUBSCRIBE_ALL_WORDS
+}
 
 export interface MessagePermission {
   purpose: MessagePermissionKey
@@ -1280,8 +1334,7 @@ const BUDGET_STATUS_WORDS: Record<string, string> = {
   pospuesto: "pospuesto",
   sustituido: "reemplazado por otro",
   cancelado: "anulado",
-  borrador: "en borrador",
-  historico: "archivado",
+  borrador: "por enviar",
 }
 const CONTROL_STATUS_WORDS: Record<string, string> = {
   realizado: "hecho",
@@ -1346,12 +1399,17 @@ async function stillValid(
   }
   if (job.kind === "seguimiento_no_asistencia" && job.appointmentId) {
     const [appt] = await tx
-      .select({ status: appointment.status })
+      .select({ status: appointment.status, startsAt: appointment.startsAt })
       .from(appointment)
       .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
       .limit(1)
     if (!appt) return { valid: false, reason: "La cita ya no existe" }
+    // Llegó tarde y se recuperó la cita: ya no está «no vino».
     if (appt.status !== "no_asistio") return { valid: false, reason: `La cita ya está ${APPOINTMENT_STATUS_WORDS[appt.status] ?? appt.status}` }
+    // Vino a la clínica por otra cita ese día o después: no se le escribe que no la vimos (ADR 0032).
+    if (job.patientId && (await arrivedSince(tx, orgId, job.patientId, new Date(appt.startsAt.getTime() - ARRIVAL_SAME_VISIT_MS)))) {
+      return { valid: false, reason: "Vino a la clínica por otra cita" }
+    }
     if (job.patientId && (await hasFutureAppointment(tx, orgId, job.patientId, now))) {
       return { valid: false, reason: "Ya tiene otra cita reservada" }
     }
@@ -1468,6 +1526,25 @@ async function stillValid(
   return { valid: true }
 }
 
+/** Una llegada hasta 12 horas antes de la cita perdida es de la misma jornada. */
+const ARRIVAL_SAME_VISIT_MS = 12 * 3_600_000
+
+/** La persona llegó a alguna cita desde ese momento («Llegó», ADR 0032). */
+async function arrivedSince(tx: Db, orgId: string, patientId: string, since: Date): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: appointment.id })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        gte(appointment.arrivedAt, since),
+      ),
+    )
+    .limit(1)
+  return !!row
+}
+
 async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, now: Date): Promise<boolean> {
   const [next] = await tx
     .select({ id: appointment.id })
@@ -1482,6 +1559,41 @@ async function hasFutureAppointment(tx: Db, orgId: string, patientId: string, no
     )
     .limit(1)
   return !!next
+}
+
+/**
+ * El aviso de reserva con «Su enlace» cuando al paciente de la cita le faltan
+ * datos para atenderlo: el enlace de quien recibe el aviso, con esa cita. Sin
+ * dirección pública configurada sale el aviso de siempre.
+ */
+async function dataNoticeFor(
+  tx: Db,
+  orgId: string,
+  job: typeof automationJob.$inferSelect,
+  contactId: string,
+  deps: DeliverDeps,
+): Promise<{ spec: AutomationMessage; link: { token: string; url: string } } | null> {
+  if (!job.appointmentId || !publicLinksConfigured()) return null
+  const [row] = await tx
+    .select({ patientId: appointment.patientId })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, job.appointmentId)))
+    .limit(1)
+  if (!row) return null
+  if ((await getPatientMissingData(tx, orgId, row.patientId)).length === 0) return null
+  const issued = await issuePersonalLink(
+    tx,
+    orgId,
+    { contactId, patientId: row.patientId, appointmentId: job.appointmentId },
+    { secretsKey: deps.secretsKey },
+  )
+  // En el mensaje no queda el token: lo pone el worker al enviarlo.
+  const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
+  if (!url) return null
+  return {
+    spec: await currentAutomationMessage(tx, orgId, APPOINTMENT_DATA_NOTICE_KEY),
+    link: { token: personalLinkRef(issued.linkId), url },
+  }
 }
 
 export interface DeliverDeps {
@@ -2077,14 +2189,26 @@ export async function deliverJob(
   }
 
   // El texto y la plantilla son los vigentes de la clínica, iguales para las tres vías.
-  const spec = await currentAutomationMessageOf(tx, orgId, job.kind)
+  let spec = await currentAutomationMessageOf(tx, orgId, job.kind)
+  // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
+  // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
+  const withData = spec && job.kind === "aviso_cita_reservada" ? await dataNoticeFor(tx, orgId, job, contactId, deps) : null
+  if (withData) spec = withData.spec
   const composed = spec ? await composeJobMessage(tx, orgId, spec, group, now) : null
   if (!spec || !composed) {
     await close(ids(), "cancelado", "Ya no existe lo que originó el mensaje")
     return { jobId: job.id, outcome: "cancelado", detail: "Sin datos para el mensaje" }
   }
-  const route = await routeMessage(tx, orgId, contactId, spec)
+  let route = await routeMessage(tx, orgId, contactId, spec)
+  let link = withData?.link ?? null
+  if ("cause" in route && withData) {
+    // Mientras WhatsApp no aprueba el aviso con su enlace, sale el aviso de siempre.
+    spec = await currentAutomationMessage(tx, orgId, "aviso_cita_reservada")
+    route = await routeMessage(tx, orgId, contactId, spec)
+    link = null
+  }
   if ("cause" in route) return cannot(route.detail, route.cause)
+  const linkedText = link ? withLinkLine(composed.text, spec.link, link.url) : composed.text
   try {
     let sent: { id: string }
     if (route.via === "plantilla" && route.template) {
@@ -2095,6 +2219,7 @@ export async function deliverJob(
         language: route.template.language,
         params: composed.params,
         buttons: composed.buttons,
+        ...(link ? { link: link.token } : {}),
         preview: composed.text,
       })
     } else if (route.via === "correo") {
@@ -2123,7 +2248,7 @@ export async function deliverJob(
         senderKind: "agent",
         content: {
           type: "text",
-          text: emailBody(composed, profile?.tradeName?.trim() || profile?.legalName || "", links),
+          text: emailBody({ ...composed, text: linkedText }, profile?.tradeName?.trim() || profile?.legalName || "", links),
         },
       })
     } else {
@@ -2132,7 +2257,7 @@ export async function deliverJob(
         senderKind: "agent",
         content: {
           type: "text",
-          text: composed.text,
+          text: linkedText,
           ...(composed.buttons.length ? { buttons: composed.buttons } : {}),
         },
       })
@@ -2483,6 +2608,8 @@ export interface PublicLinkInfo {
   timeZone: string
   expired: boolean
   used: boolean
+  /** En una baja, lo que deja de recibir (`UNSUBSCRIBE_WORDS`); null en los enlaces de una cita. */
+  stops: UnsubscribeWords | null
 }
 
 /** Información mínima del enlace: nunca incluye paciente ni contacto. */
@@ -2520,7 +2647,27 @@ export async function getPublicLinkInfo(tx: Db, token: string): Promise<PublicLi
       }).format(appt.startsAt)
     }
   }
-  return { purpose, when, timeZone, expired, used: link.usedAt !== null }
+  const stops = purpose === "baja" ? unsubscribeWords(await unsubscribePurposes(tx, link)) : null
+  return { purpose, when, timeZone, expired, used: link.usedAt !== null, stops }
+}
+
+/**
+ * Los tipos de mensaje que apaga un enlace de baja: el del mensaje del que salió
+ * (quien se da de baja de un seguimiento sigue recibiendo el recordatorio de su
+ * cita) o, si no viene de un mensaje concreto, los tres.
+ */
+async function unsubscribePurposes(
+  tx: Db,
+  link: typeof automationLinkToken.$inferSelect,
+): Promise<readonly ConsentPurpose[]> {
+  const [origin] = link.jobId
+    ? await tx
+        .select({ kind: automationJob.kind })
+        .from(automationJob)
+        .where(and(eq(automationJob.id, link.jobId), eq(automationJob.organizationId, link.organizationId)))
+        .limit(1)
+    : []
+  return origin ? [purposeOfKind(origin.kind)] : CONSENT_PURPOSES
 }
 
 async function useLinkToken(tx: Db, token: string, expected: LinkPurpose) {
@@ -2641,14 +2788,7 @@ export async function unsubscribeByToken(tx: Db, token: string): Promise<{ conta
   if (link.expiresAt.getTime() < Date.now())
     throw new ServiceError("LINK_EXPIRED", 409, "El enlace venció")
   if (!link.contactId) throw notFound("Contacto")
-  const [origin] = link.jobId
-    ? await tx
-        .select({ kind: automationJob.kind })
-        .from(automationJob)
-        .where(and(eq(automationJob.id, link.jobId), eq(automationJob.organizationId, link.organizationId)))
-        .limit(1)
-    : []
-  const purposes = origin ? [purposeOfKind(origin.kind)] : CONSENT_PURPOSES
+  const purposes = await unsubscribePurposes(tx, link)
   for (const purpose of purposes) {
     await setConsent(tx, link.organizationId, null, link.contactId, { purpose, granted: false, source: "baja" })
   }
@@ -2699,6 +2839,8 @@ export async function handleAutomationReply(
   tx: Db,
   orgId: string,
   input: { conversationId: string; replyId: string | null | undefined },
+  /** Para «Ver y responder» de «Presupuesto listo», que deja el PDF en la conversación. */
+  deps?: { storage: Storage },
 ): Promise<boolean> {
   const reply = parseReplyId(input.replyId)
   if (!reply || reply.action === "responder") return false
@@ -2707,6 +2849,17 @@ export async function handleAutomationReply(
     .from(conversation)
     .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
+  // «Ver y responder»: su id lleva el presupuesto. Le llega el PDF; lo que
+  // responda lo sigue Recepción en la conversación.
+  if (reply.action === "presupuesto") {
+    if (!thread || !deps) return false
+    return answerBudgetButton(
+      tx,
+      orgId,
+      { conversationId: input.conversationId, contactId: thread.contactId, budgetId: reply.jobId },
+      deps,
+    )
+  }
   // La pregunta de novedades y promociones: su botón lleva la persona y solo vale en su conversación.
   if (reply.action === "permiso_si" || reply.action === "permiso_no") {
     if (!thread || thread.contactId !== reply.jobId) return false

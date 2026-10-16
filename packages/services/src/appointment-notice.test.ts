@@ -6,6 +6,7 @@ import { automationConsent, automationJob, automationRule } from "@odentia/db/sc
 import { patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { portalSession } from "@odentia/db/schema/portal"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { confirmAppointmentByContact } from "./agent-operations.js"
@@ -31,7 +32,11 @@ import { createContact, listContacts } from "./contacts.js"
 import { listConversations, writeToPerson } from "./conversations.js"
 import { getContactWorkspace } from "./crm-workspace.js"
 import { nextPatientNumber } from "./patients.js"
+import { resolvePersonalLinkRefs } from "./personal-link-token.js"
+import { reschedulePortalAppointment } from "./portal.js"
+import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
+import { getPersonalLinkView } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
@@ -204,6 +209,34 @@ describe("al cambiar la cita, el agente le avisa", () => {
     expect((await deliver(c)).map((result) => [result.outcome, result.detail])).toEqual([["pospuesto", "Ya recibió un mensaje hoy"]])
   })
 
+  it("a quien le faltan datos, el aviso de reserva lleva su enlace para completarlos antes de venir", async () => {
+    configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+    try {
+      const c = await clinic()
+      await lineOn(c)
+      // Registrado por teléfono con lo mínimo: le falta, por ejemplo, su fecha de nacimiento.
+      const pedro = await person(c, "Pedro Ríos", { consent: ["recordatorio"], openWindow: true })
+      await book(c, pedro.patientId, later(3 * DAY))
+      expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+      const [job] = await jobsOf(c)
+      // Es el mismo aviso, ahora con su enlace: no un segundo mensaje ese día.
+      expect(job).toMatchObject({ kind: "aviso_cita_reservada", status: "enviado", via: "respuesta" })
+      const stored = await bodyOf(job!.sentMessageId)
+      // En el mensaje guardado no queda el token: una referencia que el worker resuelve al enviar.
+      expect(stored).toMatch(
+        /^Hola, Pedro\. Te esperamos en Clínica Sonríe, sede Centro: .+\. Antes de venir, completa tus datos aquí\.\n\nVer mi cita y mis datos: https:\/\/aviso-[0-9a-f-]+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/,
+      )
+      const body = resolvePersonalLinkRefs(stored, KEY)
+      // El enlace es el de esa persona: muestra esa cita y lo que le falta.
+      const token = /token=([0-9a-f]{64})/.exec(body)![1]!
+      const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, token))
+      expect(view.appointment).toMatchObject({ canChange: true, branchName: "Centro" })
+      expect(view.data?.missing.map((item) => item.key)).toContain("birthDate")
+    } finally {
+      configurePublicLinks(null)
+    }
+  })
+
   it("un aviso de cita no espera a mañana aunque la persona ya recibió otro mensaje hoy", async () => {
     const c = await clinic()
     await lineOn(c)
@@ -229,6 +262,34 @@ describe("al cambiar la cita, el agente le avisa", () => {
     const told = await book(c, rosa.patientId, later(4 * DAY), { notice: false })
     expect(told.notice).toBeUndefined()
     await run(c, (tx) => setAppointmentStatus(tx, c.orgId, null, told.id, "cancelada", { notice: false }))
+    expect(await jobsOf(c)).toEqual([])
+  })
+
+  it("reprogramar desde el portal no le avisa a la persona lo que ella misma hizo", async () => {
+    const c = await clinic()
+    await lineOn(c)
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio"], openWindow: true })
+    const booked = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+    const [session] = await ownerDb
+      .insert(portalSession)
+      .values({
+        organizationId: c.orgId,
+        patientId: rosa.patientId,
+        contactId: rosa.contactId,
+        scope: { appointments: true, budgets: false, account: false, documents: [] },
+        tokenHash: randomUUID(),
+        expiresAt: new Date(Date.now() + HOUR),
+      })
+      .returning()
+    const to = later(4 * DAY)
+    const moved = await run(c, (tx) =>
+      reschedulePortalAppointment(tx, { orgId: c.orgId, session: session!, patientName: "Rosa Quispe" }, booked.id, {
+        expectedVersion: booked.version,
+        startsAt: to.toISOString(),
+        dentistUserId: booked.dentistUserId,
+      }),
+    )
+    expect(new Date(moved.startsAt).getTime()).toBe(to.getTime())
     expect(await jobsOf(c)).toEqual([])
   })
 

@@ -71,6 +71,13 @@ async function clinic(options: { admin?: boolean; reception?: boolean } = {}): P
   return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id }
 }
 
+/** Quien llevaba atenciones y ya no está en el equipo: nadie las ve en «Te espera». */
+async function formerDentist(c: Clinic): Promise<string> {
+  const id = `ex-${c.orgId}`
+  await ownerDb.insert(user).values({ id, name: "Dr. Luis Paz", email: `${id}@admin.test`, emailVerified: true }).onConflictDoNothing()
+  return id
+}
+
 function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
   return withOrgContext(appDb, c.orgId, fn)
 }
@@ -199,7 +206,7 @@ describe("su página", () => {
     expect(flow.main.map((step) => [step.label, step.actorLabel])).toEqual([
       ["Una atención lleva 2 días sin firmar", null],
       ["Espera 2 días", "Administrador · agente"],
-      ["Tarea para firmar", "Quien lo lleva · persona"],
+      ["Tarea para firmar", "Equipo clínico · persona"],
       ["Le toca a una persona", null],
     ])
   })
@@ -215,7 +222,7 @@ describe("lo que recomienda", () => {
       createdAt: new Date(Date.now() - 45 * DAY),
     })
     await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: await person(c, "Elena Vargas"), dentistUserId: c.dentistId, branchId: c.branchId,
+      organizationId: c.orgId, patientId: await person(c, "Elena Vargas"), dentistUserId: await formerDentist(c), branchId: c.branchId,
       startedAt: new Date(Date.now() - 5 * DAY),
     })
     const advice = await run(c, (tx) => getAdminRecommendations(tx, c.orgId, all))
@@ -290,7 +297,11 @@ describe("las líneas que dejan trabajo al equipo", () => {
     await acceptedBudget(c, after, 8)
     const signer = await person(c, "Elena Vargas")
     await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: signer, dentistUserId: c.dentistId, branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+      organizationId: c.orgId, patientId: signer, dentistUserId: await formerDentist(c), branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+    })
+    // La de quien sigue atendiendo ya le sale en «Te espera»: la línea no le deja otra tarea.
+    await ownerDb.insert(encounter).values({
+      organizationId: c.orgId, patientId: await person(c, "Mario Soto"), dentistUserId: c.dentistId, branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
     })
     // Prendidas hace dos días: el presupuesto de 30 días ya cumplía la condición antes y no cuenta.
     await turnedOn(c, "presupuestos_sin_cita", 2)
@@ -301,8 +312,8 @@ describe("las líneas que dejan trabajo al equipo", () => {
     const tasks = await tasksOf(c)
     expect(tasks.map((task) => [task.title, task.area, task.assigneeUserId, task.createdBy]).sort()).toEqual([
       ["Llamar a Cumple hoy para agendar su tratamiento", "recepcion", null, "admin"],
-      // La atención tiene quien la lleva: la tarea es suya, no de un área.
-      ["Revisar y firmar la atención de Elena Vargas", "clinico", c.dentistId, "admin"],
+      // Quien la llevaba ya no es del equipo: la tarea va al área clínica.
+      ["Revisar y firmar la atención de Elena Vargas", "clinico", null, "admin"],
     ])
     expect(tasks.every((task) => task.dueAt !== null && !!task.reason)).toBe(true)
     const line = await run(c, (tx) => getAdminLine(tx, c.orgId, all, "presupuestos_sin_cita"))
@@ -320,7 +331,7 @@ describe("las líneas que dejan trabajo al equipo", () => {
     const c = await clinic()
     const signer = await person(c, "Elena Vargas")
     const [visit] = await ownerDb.insert(encounter).values({
-      organizationId: c.orgId, patientId: signer, dentistUserId: c.dentistId, branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
+      organizationId: c.orgId, patientId: signer, dentistUserId: await formerDentist(c), branchId: c.branchId, startedAt: new Date(Date.now() - 2.5 * DAY),
     }).returning({ id: encounter.id })
     await turnedOn(c, "atenciones_sin_firmar", 1)
     expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(1)

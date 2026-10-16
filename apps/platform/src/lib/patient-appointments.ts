@@ -1,16 +1,12 @@
 /** Citas de un paciente para su ficha: la agenda es la fuente, no la última atención. */
+import { SCHEDULE_AGENDA_LABELS } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import type { AgendaAppointment, AppointmentStatus } from "./agenda"
 import { apiFetch } from "./api"
 import { activeOrgLocale } from "./locale"
 
-export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
-  programada: "Programada",
-  confirmada: "Confirmada",
-  atendida: "Atendida",
-  no_asistio: "No asistió",
-  cancelada: "Cancelada",
-}
+/** Un nombre por estado en toda la aplicación (ADR 0032): los mismos de la Agenda. */
+export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = SCHEDULE_AGENDA_LABELS
 
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000
 

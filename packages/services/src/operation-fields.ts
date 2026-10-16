@@ -19,6 +19,13 @@ type FieldKind =
   | { kind: "enum"; values: readonly [string, ...string[]] }
   /** Lista corta de textos (superficies de una pieza). */
   | { kind: "textList"; maxItems: number; maxLength: number }
+  /** Lista corta de identificadores UUID (tratamientos de una cita). */
+  | { kind: "uuidList"; maxItems: number }
+  /**
+   * Lo que se responde por cada tratamiento (la respuesta a un presupuesto):
+   * al menos una, cada una con el id del tratamiento y uno de `values`.
+   */
+  | { kind: "decisionList"; maxItems: number; values: readonly [string, ...string[]] }
   /** Sí o no. */
   | { kind: "flag" }
 
@@ -89,6 +96,7 @@ export const OPERATIONS = {
       source: { kind: "text", max: 40, label: "Origen", description: "Por dónde entró la reserva.", body: "optional", agent: "context" },
       conversationId: { kind: "uuid", label: "Conversación", description: "La conversación donde se pidió.", body: "optional", agent: "context" },
       outsideSchedule: { kind: "flag", label: "Fuera de horario", description: "Urgencia: reservar aunque el horario del profesional no cubra esa hora. Solo lo decide una persona del equipo.", body: "optional", agent: "person" },
+      planItemIds: { kind: "uuidList", maxItems: 52, label: "Tratamientos", description: "Lo aceptado del plan que se atiende en esta cita («Agendar» desde el Plan): la cita sabe qué tratamientos son y su atención los trae.", body: "optional", agent: "person" },
     },
   },
   "cita.mover": {
@@ -118,6 +126,41 @@ export const OPERATIONS = {
       purpose: { kind: "enum", values: ["recordatorio", "seguimiento", "novedades"], label: "Qué mensajes", description: "Los de su cita y sus controles (recordatorio), los de sus presupuestos y seguimientos (seguimiento) o novedades y promociones (novedades).", body: "required", agent: "context" },
       granted: { kind: "flag", label: "Lo aceptó", description: "true si la persona dijo que sí a recibir novedades y promociones de la clínica; false si dijo que no.", body: "required", agent: "requires" },
       source: { kind: "enum", values: ["presencial", "telefono", "conversacion"], label: "Cómo lo dijo", description: "En persona, por teléfono o por la conversación.", body: "required", agent: "context" },
+    },
+  },
+  // Reenviar lo que la clínica ya entregó (fase 3, decisión 4): la pantalla
+  // elige además a quién; el agente solo dice de qué paciente y, si lo sabe, cuál.
+  "presupuesto.reenviar": {
+    label: "Reenviar el presupuesto",
+    strict: true,
+    fields: {
+      patientId: { kind: "uuid", label: "Paciente", description: "El paciente del presupuesto: la persona que escribe o alguien que ella lleva (de ver_contexto_paciente).", body: "path", agent: "requires" },
+      budgetId: { kind: "uuid", label: "Presupuesto", description: "El presupuesto que pide, de ver_presupuesto. Sin él, el último que la clínica preparó para ese paciente.", body: "path", agent: "fills" },
+      requestId: { kind: "uuid", label: "Clave del envío", description: "Repetir la misma clave no lo envía dos veces.", body: "optional", nullable: true, agent: "context" },
+      recipientContactId: { kind: "uuid", label: "Destinatario", description: "Otra persona autorizada a recibirlo; por defecto, la persona o su representante legal si es menor.", body: "optional", nullable: true, agent: "person" },
+    },
+  },
+  // La respuesta de quien decide (fase 3, decisiones 5 y 13). El agente la
+  // anota solo después del sí de la persona a la lista; quién decidió lo pone
+  // el sistema desde la conversación.
+  "presupuesto.respuesta": {
+    label: "Anotar la respuesta a un presupuesto",
+    strict: true,
+    fields: {
+      patientId: { kind: "uuid", label: "Paciente", description: "El paciente del presupuesto, de ver_presupuesto.", body: "path", agent: "requires" },
+      budgetId: { kind: "uuid", label: "Presupuesto", description: "El presupuesto que responde, de ver_presupuesto.", body: "path", agent: "requires" },
+      optionId: { kind: "uuid", label: "Opción elegida", description: "La opción que eligió, de ver_presupuesto; obligatoria si el presupuesto tiene varias.", body: "optional", nullable: true, agent: "fills" },
+      decisions: {
+        kind: "decisionList",
+        maxItems: 200,
+        values: ["aceptado", "pospuesto", "rechazado"],
+        label: "Respuesta por tratamiento",
+        description: "Lo que responde por cada tratamiento de la opción elegida, con su id de ver_presupuesto: aceptado, pospuesto (lo deja para después) o rechazado. Lo que ya había decidido antes no cambia.",
+        body: "required",
+        agent: "requires",
+      },
+      decidedByContactId: { kind: "uuid", label: "Quién decidió", description: "La persona o su representante legal vigente; cuando lo anota el agente, quien escribe en la conversación.", body: "optional", nullable: true, agent: "context" },
+      decisionNote: { kind: "text", max: 4000, label: "Nota", description: "Lo que añade quien anota la respuesta.", body: "optional", nullable: true, agent: "person" },
     },
   },
   "oportunidad.crear": {
@@ -196,9 +239,7 @@ export const OPERATIONS = {
       illnessDuration: { kind: "text", max: 200, label: "Tiempo de enfermedad", description: "Desde cuándo, tal como se dijo (por ejemplo, «una semana»).", body: "optional", nullable: true, agent: "fills" },
       evolution: { kind: "text", max: 10000, label: "Evolución", description: "Lo que se hizo en esta atención y cómo respondió el paciente.", body: "optional", nullable: true, agent: "fills" },
       indications: { kind: "text", max: 4000, label: "Indicaciones", description: "Lo que se le indica al paciente para después de la atención.", body: "optional", nullable: true, agent: "fills" },
-      nextStep: { kind: "text", max: 2000, label: "Siguiente paso", description: "Qué toca en la próxima atención.", body: "optional", nullable: true, agent: "fills" },
       prognosis: { kind: "text", max: 2000, label: "Pronóstico", description: "El pronóstico que dijo el odontólogo.", body: "optional", nullable: true, agent: "fills" },
-      auxiliaryExams: { kind: "text", max: 4000, label: "Exámenes auxiliares", description: "Exámenes pedidos o con resultado.", body: "optional", nullable: true, agent: "fills" },
     },
   },
   "atencion.diagnostico": {
@@ -217,7 +258,7 @@ export const OPERATIONS = {
     fields: {
       service: { kind: "text", min: 2, max: 200, label: "Prestación", description: "La prestación tal como la nombró el odontólogo (por ejemplo, «resina compuesta»). El sistema la busca en los servicios de la clínica.", body: "none", agent: "requires" },
       serviceId: { kind: "uuid", label: "Servicio", description: "El servicio de la clínica.", body: "required", agent: "context" },
-      planId: { kind: "uuid", label: "Plan", description: "El plan de tratamiento del paciente.", body: "required", agent: "context" },
+      planId: { kind: "uuid", label: "Plan", description: "El plan de tratamiento del paciente; sin él, su plan abierto (o uno nuevo).", body: "optional", nullable: true, agent: "context" },
       sourceEncounterId: { kind: "uuid", label: "Atención", description: "La atención donde se indica.", body: "required", agent: "context" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI, si la indicación es para una pieza.", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza que se tratan.", body: "optional", nullable: true, agent: "fills" },
@@ -244,11 +285,13 @@ type ValueOf<F> = F extends { kind: "int" }
   ? number
   : F extends { kind: "enum"; values: readonly (infer V)[] }
     ? V
-    : F extends { kind: "textList" }
-      ? string[]
-      : F extends { kind: "flag" }
-        ? boolean
-        : string
+    : F extends { kind: "decisionList"; values: readonly (infer V)[] }
+      ? Array<{ planItemId: string; decision: V }>
+      : F extends { kind: "textList" } | { kind: "uuidList" }
+        ? string[]
+        : F extends { kind: "flag" }
+          ? boolean
+          : string
 
 type Fields<O extends OperationId> = (typeof OPERATIONS)[O]["fields"]
 type KeysWhere<F, C> = { [K in keyof F]: F[K] extends C ? K : never }[keyof F]
@@ -297,6 +340,13 @@ function fieldSchema(field: OperationField): z.ZodType {
       return z.enum(field.values)
     case "textList":
       return z.array(z.string().min(1).max(field.maxLength)).max(field.maxItems)
+    case "uuidList":
+      return z.array(z.uuid()).max(field.maxItems)
+    case "decisionList":
+      return z
+        .array(z.strictObject({ planItemId: z.uuid(), decision: z.enum(field.values) }))
+        .min(1)
+        .max(field.maxItems)
     case "flag":
       return z.boolean()
   }
@@ -376,6 +426,8 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
   reprogramar_cita: "cita.mover",
   confirmar_cita: "cita.confirmar",
   responder_permiso_mensajes: "mensajes.permiso",
+  reenviar_presupuesto: "presupuesto.reenviar",
+  anotar_respuesta_presupuesto: "presupuesto.respuesta",
   create_opportunity: "oportunidad.crear",
   move_to_stage: "oportunidad.mover",
   close_opportunity: "oportunidad.cerrar",
@@ -394,6 +446,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   send_template: "La plantilla y sus parámetros los define el proveedor del canal.",
   confirmar_propuesta: "Solo lleva el id de la propuesta que el interlocutor confirma.",
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",
+  pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",
@@ -407,6 +460,7 @@ export const READ_TOOLS: readonly string[] = [
   "consultar_conocimiento",
   "ver_contexto_paciente",
   "ver_resumen_paciente",
+  "ver_presupuesto",
   "buscar_huecos",
   "leer_contexto_comercial",
   "ver_otros_canales",

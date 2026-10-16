@@ -1,19 +1,22 @@
 import {
-  conditionLabel,
+  activeFindingsAsOf,
   FDI_ADULT,
   FDI_ADULT_ROWS,
   FDI_CHILD,
   FDI_CHILD_ROWS,
-  findingAbbreviation,
   surfaceLabel,
   toothNameOf,
 } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
+  buttonVariants,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Field,
   FieldLabel,
   ScrollArea,
@@ -25,7 +28,7 @@ import {
 } from "@odentia/ui"
 import { common, useDetailMode } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
-import { ChevronDown } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 import {
   type RefObject,
   useCallback,
@@ -45,10 +48,13 @@ import {
   winnersAsOf,
 } from "../lib/patients"
 import { OdontogramArch } from "./odontogram-arch"
-import { OdontogramAssessments } from "./odontogram-assessments"
+import { SignedOdontograms } from "./odontogram-assessments"
+import { OdontogramDocument } from "./odontogram-document"
+import { findingWords, OdontogramNotationProvider, useOdontogramNotation } from "./odontogram-notation"
 import { ToothDrawer } from "./tooth-drawer"
 import { ToothSVG } from "./tooth-svg"
-import { activeOrgLocale } from "../lib/locale"
+import { formatDate } from "../lib/clinical-journey"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 
 /** Ancho del contenedor disponible (no del viewport): a partir de 960 px el área es de dos columnas. */
 function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: boolean } {
@@ -66,22 +72,12 @@ function useContainerWide(): { ref: RefObject<HTMLDivElement | null>; wide: bool
   return { ref, wide }
 }
 
-export function OdontogramStudio({
-  patientId,
-  state,
-  onChanged,
-  encounterId,
-  compact = false,
-  initialTooth,
-  readOnly = false,
-  disabled = false,
-  beforeWrite,
-  onPendingChange,
-  birthDate,
-  onSelectionChange,
-  onDirtyChange,
-  belowChart,
-}: {
+/** Momento de un estado del odontograma, con segundos, en el formato y la zona de la clínica. */
+function snapshotLabel(iso: string): string {
+  return new Date(iso).toLocaleString(activeOrgLocale(), { timeZone: activeOrgTimeZone() })
+}
+
+type OdontogramStudioProps = {
   patientId: string
   state: OdontogramState
   onChanged: () => void | Promise<void>
@@ -99,10 +95,45 @@ export function OdontogramStudio({
   onSelectionChange?: (teeth: number[]) => void
   /** Hay edición sin guardar en el panel de la pieza. */
   onDirtyChange?: (dirty: boolean) => void
-  /** Contenido enlazado a la selección, justo bajo el odontograma y antes de actas e historial. */
+  /** Contenido enlazado a la selección, justo bajo el odontograma y antes de lo firmado. */
   belowChart?: React.ReactNode
-}) {
+}
+
+/**
+ * El odontograma: la misma forma de boca en todos los países, un solo
+ * historial («Evolución» y «Ver estado al») y el panel de la pieza. Los
+ * hallazgos se registran dentro de una atención; desde la ficha se consulta.
+ * En clínicas de Perú, además, «Ver como la norma» (NTS 188, 5.18) y los
+ * odontogramas firmados; en las demás, «Imprimir odontograma» en hoja neutra.
+ */
+export function OdontogramStudio(props: OdontogramStudioProps) {
+  return (
+    <OdontogramNotationProvider>
+      <StudioBody {...props} />
+    </OdontogramNotationProvider>
+  )
+}
+
+function StudioBody({
+  patientId,
+  state,
+  onChanged,
+  encounterId,
+  compact = false,
+  initialTooth,
+  readOnly = false,
+  disabled = false,
+  beforeWrite,
+  onPendingChange,
+  birthDate,
+  onSelectionChange,
+  onDirtyChange,
+  belowChart,
+}: OdontogramStudioProps) {
   const canWrite = usePermission("clinical.write")
+  const official = useOdontogramNotation()
+  const [officialOpen, setOfficialOpen] = useState(false)
+  const officialTitleRef = useRef<HTMLHeadingElement>(null)
   const queryClient = useQueryClient()
   const id = useId()
   const { ref: containerRef, wide } = useContainerWide()
@@ -210,7 +241,8 @@ export function OdontogramStudio({
     )
     await onChanged()
   }
-  const locked = !canWrite || readOnly || historical
+  // Sin atención el odontograma se consulta: lo nuevo se registra atendiendo.
+  const locked = !canWrite || readOnly || historical || !encounterId
   const outerRows = dentition === "primary" ? FDI_CHILD_ROWS : FDI_ADULT_ROWS
   const innerRows = dentition === "mixed" ? FDI_CHILD_ROWS : null
   const upperTeeth = [...(outerRows[0] ?? []), ...(innerRows?.[0] ?? [])]
@@ -298,15 +330,22 @@ export function OdontogramStudio({
             {dentition === "mixed" ? " Arco exterior: permanentes. Arco interior: temporales." : ""}
           </p>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button
-              size="sm"
-              variant={multiple ? "default" : "outline"}
-              aria-pressed={multiple}
-              disabled={disabled}
-              onClick={() => setMultiple(!multiple)}
-            >
-              Seleccionar varias
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={multiple ? "default" : "outline"}
+                aria-pressed={multiple}
+                disabled={disabled}
+                onClick={() => setMultiple(!multiple)}
+              >
+                Seleccionar varias
+              </Button>
+              {official ? (
+                <Button size="sm" variant="outline" onClick={() => setOfficialOpen(true)}>
+                  Ver como la norma
+                </Button>
+              ) : null}
+            </div>
             {!compact && (
               <Field className="w-full sm:w-52">
                 <FieldLabel htmlFor={`${id}-date`}>Ver estado al</FieldLabel>
@@ -315,7 +354,7 @@ export function OdontogramStudio({
                   items={{
                     current: "Actual",
                     ...Object.fromEntries(
-                      dates.map((date) => [date, new Date(date).toLocaleString(activeOrgLocale())]),
+                      dates.map((date) => [date, snapshotLabel(date)]),
                     ),
                   }}
                   onValueChange={(value) => {
@@ -330,7 +369,7 @@ export function OdontogramStudio({
                     <SelectItem value="current">Actual</SelectItem>
                     {dates.map((date) => (
                       <SelectItem key={date} value={date}>
-                        {new Date(date).toLocaleString(activeOrgLocale())}
+                        {snapshotLabel(date)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -430,14 +469,14 @@ export function OdontogramStudio({
             >
               <summary className="min-h-11 cursor-pointer px-4 py-3">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {selection.length ? "Selección actual" : "Registro clínico"}
+                  {selection.length ? "Selección actual" : "Odontograma"}
                 </span>
                 <span className="block text-lg font-semibold">
                   {selectedTooth
                     ? toothNameOf(selectedTooth)
                     : selection.length
                       ? `${selection.length} piezas seleccionadas`
-                      : "Evolución del odontograma"}
+                      : "Evolución"}
                 </span>
               </summary>
               <div className="flex flex-col gap-4 px-4 pb-4">
@@ -456,9 +495,9 @@ export function OdontogramStudio({
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Selecciona un diente para ver sus hallazgos, imágenes y tratamientos. Registra
-                    los hallazgos observados en el panel de edición; los tratamientos propuestos
-                    pertenecen al plan.
+                    {encounterId
+                      ? "Elige una pieza para registrar lo que observas, su diagnóstico y su tratamiento."
+                      : "Elige una pieza para ver sus hallazgos, su plan y sus imágenes. Los hallazgos se registran dentro de una atención."}
                   </p>
                 )}
                 <ScrollArea className="h-[420px] min-h-0">
@@ -499,24 +538,26 @@ export function OdontogramStudio({
                                 <p className="text-xs text-muted-foreground">
                                   Pieza {entry.toothNumber}
                                   {entry.createdAt
-                                    ? ` · ${new Date(entry.createdAt).toLocaleDateString(activeOrgLocale())}`
+                                    ? ` · ${formatDate(entry.createdAt)}`
                                     : ""}
                                 </p>
                                 <h4 className="mt-1 font-medium">
-                                  {conditionLabel(entry.condition)}
+                                  {findingWords(official, entry)}
                                 </h4>
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <Badge variant="outline">{statusLabel(entry.status)}</Badge>
+                                {entry.resolvedAt && entry.status !== "voided" ? (
+                                  <Badge variant="outline">Tratado</Badge>
+                                ) : null}
+                                {entry.leftByPlanItemId ? (
+                                  <Badge variant="outline">Lo dejó un tratamiento</Badge>
+                                ) : null}
                                 {entry.needsReview ? (
                                   <Badge variant="outline">
                                     Registro previo · requiere revisión
                                   </Badge>
-                                ) : (
-                                  findingAbbreviation(entry) && (
-                                    <Badge variant="outline">{findingAbbreviation(entry)}</Badge>
-                                  )
-                                )}
+                                ) : null}
                               </div>
                             </div>
                             {(entry.surface || entry.diagnosisCode) && (
@@ -583,80 +624,60 @@ export function OdontogramStudio({
         </section>
       </div>
       {belowChart}
-      {!compact && (
-        <Collapsible>
-          <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
-            <div className="flex flex-col gap-1.5 pb-3">
-              <CollapsibleTrigger className="text-base font-semibold">
-                <span className="flex items-center gap-1">
-                  Actas del odontograma <ChevronDown aria-hidden className="size-4" />
-                </span>
-              </CollapsibleTrigger>
+      {!compact && official?.signedOdontogram ? (
+        <SignedOdontograms
+          patientId={patientId}
+          history={state.history}
+          readOnly={!canWrite || readOnly}
+          disabled={disabled}
+        />
+      ) : null}
+      {!compact && !official ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+          <p className="text-sm text-muted-foreground">
+            La hoja lleva la numeración internacional (FDI) y los hallazgos de hoy por pieza.
+          </p>
+          <Link
+            to="/patients/$patientId/odontogram/print"
+            params={{ patientId }}
+            target="_blank"
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            Imprimir odontograma
+          </Link>
+        </div>
+      ) : null}
+      {official ? (
+        <Dialog open={officialOpen} onOpenChange={setOfficialOpen}>
+          <DialogContent
+            initialFocus={officialTitleRef}
+            className="max-h-[90vh] w-full overflow-y-auto sm:max-w-4xl"
+          >
+            <DialogHeader>
+              <DialogTitle ref={officialTitleRef} tabIndex={-1}>
+                Odontograma según la {official.shortName}
+              </DialogTitle>
+              <DialogDescription>
+                {historical
+                  ? `Los mismos hallazgos, en el gráfico de la norma, al ${snapshotLabel(snapshot)}. No es un odontograma firmado.`
+                  : "Los mismos hallazgos de hoy, en el gráfico de la norma. No es un odontograma firmado: se firma al cerrar la atención."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-w-0 rounded-lg bg-white p-3 text-black">
+              <OdontogramDocument
+                entries={activeFindingsAsOf(state.history, historical ? snapshot : undefined)}
+                standard={official.standard}
+                date={historical ? snapshot : new Date().toISOString()}
+              />
             </div>
-            <CollapsibleContent>
-              <div>
-                <OdontogramAssessments
-                  patientId={patientId}
-                  history={state.history}
-                  readOnly={locked}
-                  disabled={disabled}
-                  beforeWrite={beforeWrite}
-                  onPendingChange={onPendingChange}
-                />
-              </div>
-            </CollapsibleContent>
-          </div>
-        </Collapsible>
-      )}
-      {!compact && (
-        <Collapsible>
-          <div className="flex flex-col gap-6 rounded-sm bg-card p-6">
-            <div className="flex flex-col gap-1.5 pb-3">
-              <CollapsibleTrigger className="text-base font-semibold">
-                <span className="flex items-center gap-1">
-                  Historial del odontograma <ChevronDown aria-hidden className="size-4" />
-                </span>
-              </CollapsibleTrigger>
-            </div>
-            <CollapsibleContent>
-              <div className="flex flex-col gap-3">
-                {historical && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">Solo lectura</Badge>
-                    <Button size="sm" variant="outline" onClick={() => setSnapshot("current")}>
-                      Volver al estado actual
-                    </Button>
-                  </div>
-                )}
-                <ol className="flex flex-col gap-2">
-                  {state.history.map((entry) => (
-                    <li
-                      key={entry.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
-                    >
-                      <span>
-                        Pieza {entry.toothNumber} · {conditionLabel(entry.condition)}
-                        {entry.createdAt
-                          ? ` · ${new Date(entry.createdAt).toLocaleDateString(activeOrgLocale())}`
-                          : ""}
-                      </span>
-                      <span className="flex gap-2">
-                        <Badge variant="outline">{statusLabel(entry.status)}</Badge>
-                        {entry.needsReview ? (
-                          <Badge variant="outline">Requiere revisión</Badge>
-                        ) : null}
-                      </span>
-                    </li>
-                  ))}
-                  {state.history.length === 0 ? (
-                    <li className="text-sm text-muted-foreground">Sin registros dentales.</li>
-                  ) : null}
-                </ol>
-              </div>
-            </CollapsibleContent>
-          </div>
-        </Collapsible>
-      )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOfficialOpen(false)}>
+                Cerrar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   )
 }

@@ -130,6 +130,11 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_b', 'Clínica Sur', 'sur', now())`,
   )
+  // Clínicas de Perú: el DNI es uno de sus documentos (ADR 0036).
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+        values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE'), ('org_b', 'Clínica Sur', 'PE', 'PEN', 'America/Lima', 'es-PE')`,
+  )
   await ownerDb.execute(
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
   )
@@ -304,8 +309,14 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
     })
     expect(charge.status).toBe(403)
   }
-  expect((await get("reception", "/budgets")).status).toBe(403)
+  // Recepción lee el presupuesto como documento de la persona (decisión 4).
+  expect((await get("reception", "/budgets")).status).toBe(200)
   expect((await get("dentist", "/budgets")).status).toBe(200)
+  // «Qué sigue» del Plan: lo pide quien ve alguna parte del plan; quien solo
+  // tiene tareas, no.
+  expect((await get("reception", "/next-step")).status).toBe(200)
+  expect((await get("cashier", "/next-step")).status).toBe(200)
+  expect((await get("member", "/next-step")).status).toBe(403)
   // Coordinación: quien agenda la consulta sin leer la ficha; caja no.
   const coordination = await get("reception", "/coordination")
   expect(coordination.status).toBe(200)
@@ -468,17 +479,22 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   expect(gone.status).toBe(404)
 })
 
-it("odontograma con pieza inválida responde 400", async () => {
-  const app = buildApp("admin")
-  const res = await app.request(`/patients/${patientId}/odontogram/entries`, {
+/** Atención en borrador de la persona del archivo, llevada por quien llama («u-1»). */
+async function openDraft(app: Hono): Promise<string> {
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+        values ('m-u-1', 'org_a', 'u-1', 'admin', now()) on conflict do nothing`,
+  )
+  const res = await app.request(`/patients/${patientId}/encounters`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ toothNumber: 99, condition: "caries", surfaces: [] }),
+    body: JSON.stringify({ reason: "Control" }),
   })
-  expect(res.status).toBe(400)
-})
+  expect(res.status).toBe(201)
+  return ((await res.json()) as { data: { id: string } }).data.id
+}
 
-it("odontograma: buccal en anterior 400; facial en anterior 201; void exige motivo", async () => {
+it("odontograma: solo dentro de una atención; buccal en anterior 400; facial 201; void exige motivo", async () => {
   const app = buildApp("admin")
   const post = (body: unknown) =>
     app.request(`/patients/${patientId}/odontogram/entries`, {
@@ -486,18 +502,29 @@ it("odontograma: buccal en anterior 400; facial en anterior 201; void exige moti
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     })
-  expect((await post({ toothNumber: 11, condition: "caries", surfaces: ["buccal"] })).status).toBe(
-    400,
-  )
+  // Sin atención no se registra: desde la ficha el odontograma se consulta.
+  const outside = await post({ toothNumber: 11, condition: "caries", surfaces: ["facial"] })
+  expect(outside.status).toBe(400)
+  const encounterId = await openDraft(app)
+  expect((await post({ toothNumber: 99, condition: "caries", surfaces: [], encounterId })).status).toBe(400)
+  expect(
+    (await post({ toothNumber: 11, condition: "caries", surfaces: ["buccal"], encounterId })).status,
+  ).toBe(400)
   const created = await post({
     toothNumber: 11,
     condition: "caries",
     surfaces: ["facial"],
     details: { variant: "enamel" },
+    encounterId,
   })
   expect(created.status).toBe(201)
   const { data } = (await created.json()) as { data: { id: string }[] }
   const entryId = data[0]!.id
+  // La hoja neutra lista lo vigente por pieza.
+  const sheet = await app.request(`/patients/${patientId}/odontogram/print`)
+  expect(sheet.status).toBe(200)
+  const sheetBody = (await sheet.json()) as { data: { entries: Array<{ id: string }> } }
+  expect(sheetBody.data.entries.map((entry) => entry.id)).toContain(entryId)
   const noReason = await app.request(`/patients/${patientId}/odontogram/entries/${entryId}/void`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -513,44 +540,107 @@ it("odontograma: buccal en anterior 400; facial en anterior 201; void exige moti
   const voidBody = (await voided.json()) as { data: { status: string; voidReason: string } }
   expect(voidBody.data.status).toBe("voided")
   expect(voidBody.data.voidReason).toBe("Error de registro")
+  // La atención de prueba se anula: las siguientes no tienen una en curso.
+  const closed = await app.request(`/patients/${patientId}/encounters/${encounterId}/void`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "Atención de prueba" }),
+  })
+  expect(closed.status).toBe(200)
 })
 
-it("actas: POST 201 con identidad firmada y GET lista; firma vacía 400", async () => {
+it("odontograma firmado: solo en clínicas de Perú, con el perfil, sin trazo ni firmante escrito", async () => {
   const app = buildApp("admin")
-  const base = {
-    purpose: "initial",
-    specifications: "Odontograma inicial",
-    observations: "Sin observaciones",
-    examinerName: "Doctora Test",
-    registrationNumber: "COP 1",
-    signature: [
-      [
-        [5, 90],
-        [20, 70],
-      ],
-    ],
+  const post = (body: unknown) =>
+    app.request(`/patients/${patientId}/odontogram/assessments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  // El trazo y el firmante no se escriben: un cuerpo que los trae se rechaza.
+  expect((await post({ purpose: "personal", signature: [[[5, 90], [20, 70]]] })).status).toBe(400)
+  expect(
+    (await post({ purpose: "personal", examinerName: "Otra persona", registrationNumber: "COP 1" }))
+      .status,
+  ).toBe(400)
+  // En un país sin odontograma firmado no se firma.
+  await ownerDb.execute(sql`update "org_profile" set "country_code" = 'CO' where "organization_id" = 'org_a'`)
+  try {
+    const abroad = await post({ purpose: "personal" })
+    expect(abroad.status).toBe(409)
+    expect(await abroad.json()).toMatchObject({ error: { code: "SIGNED_ODONTOGRAM_UNAVAILABLE" } })
+  } finally {
+    await ownerDb.execute(sql`update "org_profile" set "country_code" = 'PE' where "organization_id" = 'org_a'`)
   }
-  const empty = await app.request(`/patients/${patientId}/odontogram/assessments`, {
+  try {
+    await ownerDb.execute(
+      sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+          values ('m-u-1', 'org_a', 'u-1', 'admin', now()) on conflict do nothing`,
+    )
+    // Sin perfil con colegiatura no se firma.
+    const unsigned = await post({ purpose: "personal" })
+    expect(unsigned.status).toBe(409)
+    expect(await unsigned.json()).toMatchObject({ error: { code: "PROFILE_INCOMPLETE" } })
+    await ownerDb.execute(
+      sql`insert into "professional_profile" ("organization_id", "user_id", "signature_name", "professional_title", "registration_body", "registration_number")
+          values ('org_a', 'u-1', 'Doctora Perfil', 'Cirujano dentista', 'COP', '4321')`,
+    )
+    // El inicio, los nuevos hallazgos y la culminación los firma el cierre de la atención.
+    expect((await post({ purpose: "initial" })).status).toBe(400)
+    const sealed = await post({ purpose: "personal", observations: "Copia para su seguro" })
+    expect(sealed.status).toBe(201)
+    const sealedBody = (await sealed.json()) as {
+      data: { id: string; patientName: string; patientNumber: number; encounterId: string | null }
+    }
+    expect(sealedBody.data).toMatchObject({
+      examinerName: "Doctora Perfil",
+      examinerTitle: "Cirujano dentista",
+      registrationNumber: "COP 4321",
+      standard: "NTS 188-MINSA/DGIESP-2022",
+      encounterId: null,
+      patientName: "María Pérez",
+      patientNumber: 1,
+    })
+    const listed = await app.request(`/patients/${patientId}/odontogram/assessments`)
+    expect(listed.status).toBe(200)
+    expect(((await listed.json()) as { data: unknown[] }).data).toHaveLength(1)
+    const sheet = await app.request(
+      `/patients/${patientId}/odontogram/assessments/${sealedBody.data.id}/print`,
+    )
+    expect(sheet.status).toBe(200)
+    expect(await sheet.json()).toMatchObject({ data: { assessment: { id: sealedBody.data.id } } })
+  } finally {
+    await ownerDb.execute(sql`update "org_profile" set "country_code" = 'PE' where "organization_id" = 'org_a'`)
+  }
+})
+
+it("atención en curso: solo cuál es y quién la lleva, para quien atiende y sin traza", async () => {
+  const path = `/patients/${patientId}/open-encounter`
+  expect((await buildApp("reception").request(path)).status).toBe(403)
+  expect((await buildApp("cashier").request(path)).status).toBe(403)
+  const dentist = buildApp("dentist")
+  const none = await dentist.request(path)
+  expect(none.status).toBe(200)
+  expect(await none.json()).toEqual({ data: null })
+  const created = await dentist.request(`/patients/${patientId}/encounters`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...base, signature: [] }),
+    body: JSON.stringify({ reason: "Dolor" }),
   })
-  expect(empty.status).toBe(400)
-  const sealed = await app.request(`/patients/${patientId}/odontogram/assessments`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(base),
-  })
-  expect(sealed.status).toBe(201)
-  const sealedBody = (await sealed.json()) as {
-    data: { patientName: string; patientNumber: number; entries: unknown[] }
-  }
-  expect(sealedBody.data.patientName).toBe("María Pérez")
-  expect(sealedBody.data.patientNumber).toBe(1)
-  const listed = await app.request(`/patients/${patientId}/odontogram/assessments`)
-  expect(listed.status).toBe(200)
-  const listedBody = (await listed.json()) as { data: unknown[] }
-  expect(listedBody.data).toHaveLength(1)
+  expect(created.status).toBe(201)
+  const draft = ((await created.json()) as { data: { id: string } }).data
+  const log = async () =>
+    (
+      (await (await buildApp("admin").request(`/patients/${patientId}/access-log`)).json()) as {
+        data: { resource: string; hits: number }[]
+      }
+    ).data.reduce((sum, entry) => sum + entry.hits, 0)
+  const before = await log()
+  const open = await dentist.request(path)
+  expect(open.status).toBe(200)
+  expect(await open.json()).toEqual({ data: { id: draft.id, dentistUserId: "u-1" } })
+  // No es una lectura de la historia: no deja traza en la bitácora.
+  expect(await log()).toBe(before)
 })
 
 it("avatar privado: subida y URL firmada; rechaza tipo y tamaño inválidos", async () => {

@@ -309,6 +309,8 @@ export interface TemplateOrder {
   examples: string[]
   /** Títulos de los botones de respuesta. */
   buttons: string[]
+  /** Botón que abre «Su enlace»: su dirección con el token al final (`{{1}}`) y un ejemplo. */
+  link?: { title: string; url: string; example: string }
   /** Mensaje del catálogo al que sirve; nulo si es un mensaje propio de la clínica. */
   messageKey: string | null
 }
@@ -370,6 +372,7 @@ export async function requestConnectionTemplate(
           body: order.body,
           examples: order.examples,
           buttons: order.buttons,
+          ...(order.link ? { link: order.link } : {}),
         },
         { fetch: deps.fetch },
       )

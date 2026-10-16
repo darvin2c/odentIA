@@ -27,22 +27,13 @@ import { type ReactNode, useEffect } from "react"
 import { AccesosPanel } from "../../components/patient/accesos-panel"
 import { AccountTab } from "../../components/patient/account-tab"
 import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
-import { AtencionesTab } from "../../components/patient/atenciones-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
-import { ControlesPanel, RecetasPanel } from "../../components/patient/clinical-panels"
-import { ConsentimientosTab } from "../../components/patient/consentimientos-tab"
-import { CoordinacionPanel } from "../../components/patient/coordinacion-panel"
-import { DocumentosPanel } from "../../components/patient/documentos-panel"
-import { FormulariosTab } from "../../components/patient/formularios-tab"
+import { DocumentosSection } from "../../components/patient/documentos-panel"
 import { HistoriaTab } from "../../components/patient/historia-tab"
-import { ImagenesTab } from "../../components/patient/imagenes-tab"
 import { OdontogramaTab } from "../../components/patient/odontograma-tab"
-import { OrdenesTab } from "../../components/patient/ordenes-tab"
 import { PersonHeader } from "../../components/patient/patient-header"
 import { PlanTab } from "../../components/patient/plan-tab"
-import { RecorridoClinicoTab } from "../../components/patient/recorrido-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
-import { ClinicalSummaryTab } from "../../components/patient/resumen-tab"
 import { PersonChannels } from "../../components/person/person-channels"
 import { PersonConversations } from "../../components/person/person-conversations"
 import { PersonData } from "../../components/person/person-data"
@@ -54,6 +45,9 @@ import { useCan } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
 import {
   areaNav,
+  clinicalSummaryFor,
+  type DocumentFilter,
+  documentFilterFromSearch,
   isPatientSectionId,
   PATIENT_AREAS,
   type PageOf,
@@ -64,8 +58,8 @@ import {
   visibleAreas,
   visibleSections,
 } from "../../lib/patient-areas"
-import type { PatientFull, PatientSummary, PlanItem } from "../../lib/patients"
-import { personOfPatientKey, usePerson } from "../../lib/people"
+import type { PatientFull, PatientSummary } from "../../lib/patients"
+import { personOfPatientKey, rememberPatientSection, usePerson } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 
 const areaLabel = (id: string) => PATIENT_AREAS.find((area) => area.id === id)?.label ?? id
@@ -94,11 +88,15 @@ export type PersonSearch = {
   budgetId?: string
   documentId?: string
   itemId?: string
+  /** Filtro de Documentos: lo que requiere acción o un tipo de papel. */
+  tipo?: DocumentFilter
 } & Partial<Record<(typeof FILTER_KEYS)[number], string>>
 
 /** La búsqueda de la página, también la de los enlaces guardados de la ficha anterior (`?tab=`). */
 export function validatePersonSearch(search: Record<string, unknown>): PersonSearch {
   const tab = sectionFromSearch(search.tab)
+  // `?tab=recetas` de la ficha anterior abre Documentos con ese filtro.
+  const tipo = tab === "documentos" ? documentFilterFromSearch(search.tab, search.tipo) : undefined
   const tooth = Number(search.tooth)
   const filters = Object.fromEntries(
     FILTER_KEYS.flatMap((key) =>
@@ -108,6 +106,7 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
   return {
     ...filters,
     ...(tab ? { tab } : {}),
+    ...(tipo ? { tipo } : {}),
     ...(FDI_ADULT.includes(tooth) || FDI_CHILD.includes(tooth) ? { tooth } : {}),
     planId: searchId(search.planId),
     budgetId: searchId(search.budgetId),
@@ -135,11 +134,10 @@ const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
 
 function PersonPageRoute() {
   const { personId } = Route.useParams()
-  const { tab, tooth, planId, budgetId, documentId, itemId } = Route.useSearch()
+  const { tab, tooth, planId, budgetId, documentId, itemId, tipo } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const queryClient = useQueryClient()
   const can = useCan()
-  const canClinical = can("clinical.read")
   const personQuery = usePerson(personId, can("patients.read"))
   const person = personQuery.data?.data ?? null
   const patientId = person?.patient?.id ?? null
@@ -151,6 +149,10 @@ function PersonPageRoute() {
   useEffect(() => {
     if (patientId) queryClient.setQueryData(personOfPatientKey(patientId), { data: { personId } })
   }, [patientId, personId, queryClient])
+  // La miga de una atención vuelve a la pestaña donde estaba quien la abrió.
+  useEffect(() => {
+    if (patientId && section) rememberPatientSection(patientId, section)
+  }, [patientId, section])
   useOrgEvents(["contact.updated", "stream.reconnected"], (kind) => {
     // Al conectar o reconectar se concilia lo que ya se muestra. Si la persona
     // no llegó (error o aún cargando), no se vuelve a pedir sola: un fallo se
@@ -165,19 +167,15 @@ function PersonPageRoute() {
     enabled: Boolean(patientId),
     retry: false,
   })
-  const inClinical = section !== null && ["clinica", "plan"].includes(sectionOf(section).area)
-  // El resumen y el plan clínicos se piden solo al abrir Clínica o Plan: es ahí
-  // donde queda la traza de la lectura, no al abrir la página.
+  // Para quien lee la clínica, abrir la página es una lectura clínica (ADR
+  // 0035, que precisa el 0029): su Resumen es el clínico y el resumen se pide
+  // al abrirla, en cualquier pestaña, y deja su traza en «Consultas a la
+  // historia». Recepción y caja nunca lo piden.
+  const clinicalSummary = clinicalSummaryFor(can, pageOf)
   const summary = useQuery({
     queryKey: ["patient-summary", patientId],
     queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
-    enabled: Boolean(patientId) && canClinical && inClinical,
-    retry: false,
-  })
-  const planItems = useQuery({
-    queryKey: ["plan-items", patientId],
-    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
-    enabled: Boolean(patientId) && canClinical && inClinical,
+    enabled: Boolean(patientId) && clinicalSummary,
     retry: false,
   })
   const openTab = (
@@ -197,7 +195,8 @@ function PersonPageRoute() {
       },
     })
   }
-  const openItem = (nextItemId: string) => openTab("recorrido", undefined, nextItemId)
+  // El recorrido de un tratamiento vive en Plan, al lado de sus fases (ADR 0034).
+  const openItem = (nextItemId: string) => openTab("plan", undefined, nextItemId)
 
   if (!can("patients.read") || (person && section === null))
     return (
@@ -231,41 +230,8 @@ function PersonPageRoute() {
   const current = sectionOf(section)
   const areas = visibleAreas(can, pageOf)
   const entries = areaNav(current.area, can, pageOf)
-  const entry = entries.find((item) => item.value === (current.group ?? current.id))
   const openEncounterId = summary.data?.data.openEncounterId ?? undefined
 
-  /** Paneles que listan por tratamiento: esperan el plan y el resumen clínico. */
-  const planRows = planItems.data?.data ?? null
-  const withPlan = (render: (items: PlanItem[]) => ReactNode): ReactNode => {
-    if ((planItems.isPending || summary.isPending) && !planRows)
-      return <LoadingState message="Cargando tratamientos…" />
-    if (!planRows) {
-      const failed = planItems.isError ? planItems : summary.isError ? summary : null
-      if (failed)
-        return (
-          <QueryErrorState
-            error={failed.error}
-            onRetry={() => {
-              void planItems.refetch()
-              void summary.refetch()
-            }}
-          />
-        )
-      return <LoadingState message="Cargando tratamientos…" />
-    }
-    return render(planRows)
-  }
-  const itemFilterNotice = (label: string, target: PatientSectionId) =>
-    itemId ? (
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border p-3 text-sm">
-        <span className="text-muted-foreground">
-          Mostrando solo {label} del tratamiento abierto.
-        </span>
-        <Button type="button" size="sm" variant="outline" onClick={() => openTab(target)}>
-          Ver todo
-        </Button>
-      </div>
-    ) : null
   const needsPatient = (render: (id: string, full: PatientFull) => ReactNode): ReactNode => {
     if (!patientId) return null
     if (!patientDetail) {
@@ -279,7 +245,14 @@ function PersonPageRoute() {
   const content = (): ReactNode => {
     switch (section) {
       case "resumen":
-        return <PersonSummary person={person} detail={patientDetail} onSection={openTab} />
+        return (
+          <PersonSummary
+            person={person}
+            detail={patientDetail}
+            summary={clinicalSummary ? summary : undefined}
+            onSection={openTab}
+          />
+        )
       case "conversaciones":
         return <PersonConversations person={person} />
       case "citas":
@@ -302,10 +275,6 @@ function PersonPageRoute() {
             }
           />
         )
-      case "coordinacion":
-        return patientId ? <CoordinacionPanel patientId={patientId} /> : null
-      case "clinico":
-        return patientId ? <ClinicalSummaryTab patientId={patientId} onTabChange={openTab} /> : null
       case "odontograma":
         return needsPatient((id, full) => (
           <OdontogramaTab
@@ -316,47 +285,16 @@ function PersonPageRoute() {
             onOpenPlans={() => openTab("plan")}
           />
         ))
-      case "recorrido":
+      case "plan":
+        // Una sola sección para todos: cada rol ve lo suyo dentro (ADR 0034).
         return patientId ? (
-          <RecorridoClinicoTab
+          <PlanTab
             patientId={patientId}
+            initialPlanId={planId}
+            initialBudgetId={budgetId}
             initialItemId={itemId}
-            onChangeItem={openItem}
-            onTabChange={(target, destination) =>
-              openTab(
-                target,
-                destination?.tooth,
-                destination?.itemId,
-                destination?.planId,
-                destination?.budgetId,
-              )
-            }
           />
         ) : null
-      case "plan":
-        if (!patientId) return null
-        // Caja ve solo los presupuestos; el plan clínico es de quien lee la clínica.
-        return canClinical ? (
-          <PlanTab patientId={patientId} initialPlanId={planId} initialBudgetId={budgetId} />
-        ) : (
-          <AccountTab patientId={patientId} part="presupuestos" />
-        )
-      case "controles":
-        return patientId ? (
-          <>
-            {itemFilterNotice("los controles", "controles")}
-            {withPlan((items) => (
-              <ControlesPanel
-                patientId={patientId}
-                itemId={itemId}
-                items={items}
-                encounterId={openEncounterId}
-              />
-            ))}
-          </>
-        ) : null
-      case "atenciones":
-        return patientId ? <AtencionesTab patientId={patientId} /> : null
       case "historia":
         return patientId ? (
           <HistoriaTab
@@ -369,45 +307,21 @@ function PersonPageRoute() {
         return patientId ? <AntecedentesTab patientId={patientId} /> : null
       case "documentos":
         return patientId ? (
-          <DocumentosPanel
+          <DocumentosSection
             patientId={patientId}
-            onOpen={(target, nextDocumentId) =>
+            filter={tipo}
+            encounterId={openEncounterId}
+            initialTooth={tooth}
+            initialDocumentId={documentId}
+            onFilter={(next, nextDocumentId) =>
               void navigate({
-                search: { tab: target, ...(nextDocumentId ? { documentId: nextDocumentId } : {}) },
+                search: {
+                  tab: "documentos",
+                  ...(next ? { tipo: next } : {}),
+                  ...(nextDocumentId ? { documentId: nextDocumentId } : {}),
+                },
               })
             }
-          />
-        ) : null
-      case "imagenes":
-        return patientId ? (
-          <ImagenesTab patientId={patientId} initialTooth={tooth} initialDocumentId={documentId} />
-        ) : null
-      case "recetas":
-        return patientId ? (
-          <>
-            {itemFilterNotice("las recetas", "recetas")}
-            {withPlan((items) => (
-              <RecetasPanel
-                patientId={patientId}
-                itemId={itemId}
-                items={items}
-                encounterId={openEncounterId}
-              />
-            ))}
-          </>
-        ) : null
-      case "ordenes":
-        return patientId ? <OrdenesTab patientId={patientId} encounterId={openEncounterId} /> : null
-      case "formularios":
-        return patientId ? (
-          <FormulariosTab patientId={patientId} encounterId={openEncounterId} />
-        ) : null
-      case "consentimientos":
-        return patientId ? (
-          <ConsentimientosTab
-            patientId={patientId}
-            encounterId={openEncounterId}
-            planItemId={itemId}
           />
         ) : null
       case "cuenta":
@@ -427,36 +341,6 @@ function PersonPageRoute() {
     }
   }
 
-  const sectionBody =
-    entry && entry.members.length > 1 ? (
-      <Tabs
-        className="min-w-0 w-full"
-        value={section}
-        onValueChange={(value) => {
-          if (isPatientSectionId(value)) openTab(value)
-        }}
-      >
-        <div className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
-          <TabsList
-            className={SECTION_LIST_CLASS}
-            variant="line"
-            aria-label={`Tipo de ${entry.label}`}
-          >
-            {entry.members.map((member) => (
-              <TabsTrigger key={member.id} value={member.id}>
-                {member.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        <TabsContent value={section} className="pt-4">
-          {content()}
-        </TabsContent>
-      </Tabs>
-    ) : (
-      content()
-    )
-
   // En móvil las filas de pestañas ocupan media pantalla: un único selector
   // de sección agrupado por pestaña las reemplaza (mismo ?tab=).
   const allSections = visibleSections(can, pageOf)
@@ -472,11 +356,7 @@ function PersonPageRoute() {
         items={Object.fromEntries(
           allSections.map((s) => [
             s.id,
-            s.group
-              ? `${areaLabel(s.area)} · Documentos · ${s.label}`
-              : areaLabel(s.area) === s.label
-                ? s.label
-                : `${areaLabel(s.area)} · ${s.label}`,
+            areaLabel(s.area) === s.label ? s.label : `${areaLabel(s.area)} · ${s.label}`,
           ]),
         )}
         value={section}
@@ -495,7 +375,7 @@ function PersonPageRoute() {
                 .filter((s) => s.area === area.id)
                 .map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.group ? `Documentos · ${s.label}` : s.label}
+                    {s.label}
                   </SelectItem>
                 ))}
             </SelectGroup>
@@ -548,13 +428,12 @@ function PersonPageRoute() {
           </TabsList>
         </div>
         <TabsContent value={current.area} className="pt-4">
-          {entries.length > 1 && entry ? (
+          {entries.length > 1 ? (
             <Tabs
               className="min-w-0 w-full gap-4"
-              value={entry.value}
+              value={current.id}
               onValueChange={(value) => {
-                const target = entries.find((item) => item.value === value)?.target
-                if (target) openTab(target)
+                if (isPatientSectionId(value)) openTab(value)
               }}
             >
               <div className={`hidden sm:block ${SECTION_SCROLL_CLASS}`}>
@@ -569,10 +448,10 @@ function PersonPageRoute() {
                   ))}
                 </TabsList>
               </div>
-              <TabsContent value={entry.value}>{sectionBody}</TabsContent>
+              <TabsContent value={current.id}>{content()}</TabsContent>
             </Tabs>
           ) : (
-            sectionBody
+            content()
           )}
         </TabsContent>
       </Tabs>

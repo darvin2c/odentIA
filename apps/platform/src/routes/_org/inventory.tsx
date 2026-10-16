@@ -1,5 +1,5 @@
 import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
-import { DataTable, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
+import { DataTable, DatePickerButton, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
 import { formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
@@ -488,7 +488,7 @@ function OrderDetail({ orderId, canWrite, onDirtyChange }: {
               </div>
               <div>
                 <Label htmlFor={`exp-${line.productId}`}>Vence</Label>
-                <Input id={`exp-${line.productId}`} name={`exp-${line.productId}`} type="date" value={draft[line.productId]?.expiresAt ?? ""} onChange={(event) => setLine(line.productId, "expiresAt", event.target.value)} />
+                <DatePickerButton id={`exp-${line.productId}`} className="w-full" value={draft[line.productId]?.expiresAt ?? ""} emptyLabel="Sin vencimiento" onChange={(next) => setLine(line.productId, "expiresAt", next)} />
               </div>
             </div>
           ))}

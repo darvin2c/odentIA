@@ -37,6 +37,19 @@ const offersQuery = z
   })
   .strict()
 
+/**
+ * Qué deja el servicio en la pieza al completarse (lo tratado queda dibujado):
+ * el hallazgo y, si corresponde, su variante; `null` = nada. El servicio valida
+ * con el ámbito y la regla del país de la clínica.
+ */
+const leavesFindingInput = z
+  .object({
+    condition: z.string().trim().min(1).max(80),
+    variant: z.string().trim().min(1).max(80).nullish(),
+  })
+  .strict()
+  .transform(({ condition, variant }) => (variant ? { condition, variant } : { condition }))
+
 const createInput = z
   .object({
     templateId: z.string().uuid().nullish(),
@@ -53,6 +66,7 @@ const createInput = z
     billingMode: z.enum(["treatment", "session"]).nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
     evaluationServiceId: z.string().uuid().nullish(),
+    leavesFinding: leavesFindingInput.nullish(),
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -73,6 +87,7 @@ const patchInput = z
     billingMode: z.enum(["treatment", "session"]).optional(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
     evaluationServiceId: z.string().uuid().nullish(),
+    leavesFinding: leavesFindingInput.nullish(),
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -102,6 +117,7 @@ const batchInput = z
               priceCents: z.number().int().min(0).max(2147483647),
               billingMode: z.enum(["treatment", "session"]).nullish(),
               durationMin: z.number().int().min(1).max(1440).nullish(),
+              leavesFinding: leavesFindingInput.nullish(),
             })
             .strict(),
         ]),
@@ -235,6 +251,7 @@ export function createServicesRoute(deps: CrmDeps) {
           billingMode: parsed.data.billingMode,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
+          leavesFinding: parsed.data.leavesFinding,
           isActive: parsed.data.isActive,
         }),
       ),
@@ -262,6 +279,7 @@ export function createServicesRoute(deps: CrmDeps) {
           billingMode: parsed.data.billingMode,
           priceDisclosure: parsed.data.priceDisclosure,
           evaluationServiceId: parsed.data.evaluationServiceId,
+          leavesFinding: parsed.data.leavesFinding,
           isActive: parsed.data.isActive,
         }),
       ),

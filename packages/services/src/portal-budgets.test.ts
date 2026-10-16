@@ -22,6 +22,7 @@ import {
   requirePortalSession,
 } from "./portal.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { listWorkspaceAudit } from "./workspace.js"
 setupTestDb()
 
 const ORG = "org_a"
@@ -61,17 +62,7 @@ it("el portal entrega totales, líneas por sesión y el formato de la clínica",
   await withOrgContext(appDb, ORG, async (tx) => {
     await upsertPortalPolicy(tx, ORG, actor, {
       enabled: true,
-      requestsEnabled: true,
-      publicRequestsEnabled: false,
-      channelRequestsEnabled: false,
-      autoApproveVerified: false,
-      allowedConnectionIds: [],
-      linkTtlMinutes: 4320,
-      sessionTtlHours: 48,
-      grantTtlDays: null,
       allowedScope: { appointments: true, budgets: true, account: true, documents: true },
-      passkeysEnabled: true,
-      assistedRecoveryEnabled: true,
     })
     await createPortalGrant(tx, ORG, actor, {
       patientId,
@@ -137,4 +128,16 @@ it("el portal entrega totales, líneas por sesión y el formato de la clínica",
   // La cuenta del portal trae el mismo formato regional.
   const account = await inPortal((tx, ctx) => getPortalAccount(tx, ctx))
   expect(account.locale).toBe("es-CL")
+
+  // Lo decidió la persona en el portal: el presupuesto no queda a nombre de quien
+  // emitió el enlace, y «Actividad del equipo» lo dice como del paciente.
+  const [decidedRow] = await ownerDb.execute<{ decided_by: string | null }>(
+    sql`select "decided_by" from "treatment_budget" where "id" = ${budget.id}`,
+  )
+  expect(decidedRow?.decided_by).toBeNull()
+  for (const action of ["portal.budget_decided", "budget.decision"]) {
+    const activity = await withOrgContext(appDb, ORG, (tx) => listWorkspaceAudit(tx, ORG, { action }))
+    expect(activity.items).toHaveLength(1)
+    expect(activity.items[0]).toMatchObject({ actorName: null, who: "El paciente o su contacto" })
+  }
 })

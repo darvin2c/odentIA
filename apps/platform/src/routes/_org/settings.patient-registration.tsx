@@ -8,6 +8,7 @@ import { REGISTRATION_FIELDS as CATALOGUE, registrationConfigSchema } from "@ode
 import {
   Alert,
   AlertDescription,
+  Badge,
   Button,
   buttonVariants,
   Checkbox,
@@ -50,7 +51,7 @@ import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
-import { useOrgProfile } from "../../lib/org"
+import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
 
@@ -72,14 +73,24 @@ const MODE_LABELS: Record<RegistrationFieldMode, string> = {
   required: "Obligatorio",
 }
 
-const STEP_TITLES: Record<string, string> = {
-  datos: "Datos",
-  contacto: "Contacto y filiación",
-  salud: "Salud",
-  odontologicos: "Odontológicos",
-}
+/**
+ * Los datos de la persona en tres grupos (decisión 10 de la fase 3): lo que
+ * hace falta para atender se pide siempre; lo que pide la clínica se elige; lo
+ * censal solo puede ser opcional o no pedirse. Debajo, salud y odontológicos.
+ */
+const GROUPS = [
+  { id: "clinic", title: "Los que pide tu clínica", description: "Cuentan para el aviso «Faltan datos para atenderla» solo si los marcas obligatorios." },
+  { id: "census", title: "Opcionales", description: "Solo «Opcional» o «No se pide»: no cuentan para el aviso. En la ficha van plegados en «Más datos»." },
+  { id: "salud", title: "Salud", description: null },
+  { id: "odontologicos", title: "Odontológicos", description: null },
+] as const
 
-const LOCKED_REQUIRED: RegistrationFieldKey[] = ["displayName", "birthDate"]
+/** Los que van en pareja se eligen en una sola fila. */
+const PAIRED: Partial<Record<RegistrationFieldKey, { with: RegistrationFieldKey; label: string }>> = {
+  docType: { with: "docNumber", label: "Documento" },
+  emergencyContactName: { with: "emergencyContactPhone", label: "Contacto de emergencia" },
+}
+const PAIR_SECONDS = new Set<RegistrationFieldKey>(["docNumber", "emergencyContactPhone"])
 
 /**
  * Datos de ejemplo de la vista previa. El teléfono sale del país de la
@@ -138,6 +149,8 @@ function RegistrationSettings() {
   const canWrite = usePermission("settings.write")
   // El país del perfil define la máscara y el ejemplo de los teléfonos de la vista previa.
   const profile = useOrgProfile()
+  // Y lo que solo se pide en un país (la procedencia en Perú; ADR 0036).
+  const clinicalProfile = useClinicalProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const { org } = orgRouteApi.useRouteContext()
   const slug = org?.slug ?? orgSlugFromHostname(requestHostname()) ?? ""
@@ -256,8 +269,8 @@ function RegistrationSettings() {
     setFields((current) => {
       if (!current) return current
       const next = { ...current, [key]: mode }
-      if (key === "docType") next.docNumber = mode
-      if (key === "docNumber") next.docType = mode
+      const pair = PAIRED[key]
+      if (pair) next[pair.with] = mode
       return next
     })
   }
@@ -309,7 +322,6 @@ function RegistrationSettings() {
     }
   }
 
-  const steps = ["datos", "contacto", "salud", "odontologicos"] as const
   const otherErrors = Object.entries(formErrors).filter(
     ([key]) => key !== "general" && key !== "privacyNotice" && !(key in fields),
   )
@@ -336,43 +348,72 @@ function RegistrationSettings() {
         </p>
       ) : null}
 
-      {steps.map((step) => (
-        <section key={step} className={CARD} aria-labelledby={`registro-paso-${step}`}>
-          <h2 id={`registro-paso-${step}`} className="font-heading text-base font-medium">
-            {STEP_TITLES[step]}
-          </h2>
+      <section className={CARD} aria-labelledby="registro-siempre">
+        <h2 id="registro-siempre" className="font-heading text-base font-medium">
+          Necesarios para atender
+        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col">
+            <span className="text-sm font-medium">Nombres y apellidos · Fecha de nacimiento · Teléfono o correo</span>
+            <span className="text-sm text-muted-foreground">
+              Siempre: hacen falta para atender. El teléfono o el correo de quien habla por ella cuentan como suyos.
+            </span>
+          </div>
+          <Badge variant="outline">Siempre</Badge>
+        </div>
+      </section>
+
+      {GROUPS.map((group) => (
+        <section key={group.id} className={CARD} aria-labelledby={`registro-grupo-${group.id}`}>
+          <div className="flex flex-col gap-1.5">
+            <h2 id={`registro-grupo-${group.id}`} className="font-heading text-base font-medium">
+              {group.title}
+            </h2>
+            {group.description ? <p className="text-sm text-muted-foreground">{group.description}</p> : null}
+          </div>
           <div className="flex flex-col gap-4">
-            {CATALOGUE.filter((field) => field.step === step).map((field) => {
-              const key = field.key as RegistrationFieldKey
-              const locked = (LOCKED_REQUIRED as string[]).includes(key)
-              return (
-                <Field key={field.key}>
-                  <FieldLabel htmlFor={`registro-campo-${field.key}`}>{field.label}</FieldLabel>
-                  <Select
-                    value={fields[key]}
-                    items={MODE_LABELS}
-                    onValueChange={(value) => setMode(key, value as RegistrationFieldMode)}
-                    disabled={!canWrite || locked}
-                  >
-                    <SelectTrigger id={`registro-campo-${field.key}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(MODE_LABELS) as RegistrationFieldMode[]).map((mode) => (
-                        <SelectItem key={mode} value={mode}>
-                          {MODE_LABELS[mode]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {locked ? <FieldDescription>Siempre se pide: sin este dato no hay registro.</FieldDescription> : null}
-                  {(key === "docType" || key === "docNumber") && !locked ? (
-                    <FieldDescription>El tipo y el número de documento van juntos: se piden igual.</FieldDescription>
-                  ) : null}
-                  {formErrors[key] ? <FieldError>{formErrors[key]}</FieldError> : null}
-                </Field>
-              )
-            })}
+            {CATALOGUE.filter((field) =>
+              group.id === "salud" || group.id === "odontologicos"
+                ? field.step === group.id
+                : field.group === group.id,
+            )
+              .filter((field) => !PAIR_SECONDS.has(field.key))
+              // «Procedencia» solo se pide en clínicas de Perú.
+              .filter((field) => field.key !== "origin" || clinicalProfile.origin)
+              .map((field) => {
+                const key = field.key as RegistrationFieldKey
+                const census = field.group === "census"
+                const modes = (Object.keys(MODE_LABELS) as RegistrationFieldMode[]).filter(
+                  (mode) => !census || mode !== "required",
+                )
+                const label = PAIRED[key]?.label ?? field.label
+                return (
+                  <Field key={field.key}>
+                    <FieldLabel htmlFor={`registro-campo-${field.key}`}>{label}</FieldLabel>
+                    <Select
+                      value={fields[key]}
+                      items={Object.fromEntries(modes.map((mode) => [mode, MODE_LABELS[mode]]))}
+                      onValueChange={(value) => setMode(key, value as RegistrationFieldMode)}
+                      disabled={!canWrite}
+                    >
+                      <SelectTrigger id={`registro-campo-${field.key}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {modes.map((mode) => (
+                          <SelectItem key={mode} value={mode}>
+                            {MODE_LABELS[mode]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {key === "docType" ? (
+                      <FieldDescription>El tipo, el número y el país que lo emitió se piden juntos.</FieldDescription>
+                    ) : null}
+                    {formErrors[key] ? <FieldError>{formErrors[key]}</FieldError> : null}
+                  </Field>
+                )
+              })}
           </div>
         </section>
       ))}
@@ -551,6 +592,7 @@ function RegistrationSettings() {
               config={{ version: expectedVersion, enabled, fields, privacyNotice, askReminders, askMessages }}
               today={today}
               defaultCountry={countryCode}
+              countryCode={profile.data?.countryCode ?? null}
               context={{ kind: "generic" }}
               initialValues={previewValues(countryCode)}
               onSubmit={async () => {

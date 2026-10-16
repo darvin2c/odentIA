@@ -107,10 +107,38 @@ test("agenda: alta de sillón, paciente y cita visibles en el tenant", async ({ 
   // La rejilla del día pone un carril por profesional; el menú cambia a sillones.
   const grid = owner.page.getByRole("region", { name: /^Agenda del/ })
   await expect(grid.getByRole("group", { name: owner.user.name })).toBeVisible()
-  await owner.page.getByRole("button", { name: "Profesionales: todos" }).click()
+  // Quien atiende abre la Agenda en su columna (tablero 7): el menú dice de quién es.
+  await owner.page.getByRole("button", { name: owner.user.name, exact: true }).click()
   await owner.page.getByRole("menuitem", { name: "Ver por sillón" }).click()
   await expect(grid.getByRole("group", { name: "Sillón 1" })).toBeVisible()
   await expect(grid.getByRole("button", { name: /^Cita de Micaela Ríos/ })).toBeVisible()
+})
+
+test("agenda: «Llegó» con un clic, «Deshacer» y «Atender» sin formulario", async ({ createOwner }, info) => {
+  const owner = await createOwner("agenda-llego")
+  const { appointment, date } = await prepareAppointment(owner)
+  const { page } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, `/agenda?date=${date}&appointmentId=${appointment.id}`))
+  // Antes de llegar: «Llegó»; «Atendida» ya no se pone a mano.
+  await expect(page.getByRole("button", { name: "Llegó", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Atendida", exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Llegó", exact: true }).click()
+  // Llegó: la hora y la espera en palabras, «Atender» y «Deshacer»; ya no se cancela.
+  await expect(page.getByText(/^Llegó a las \d\d:\d\d · espera \d+ min$/)).toBeVisible()
+  await expect(page.getByRole("button", { name: "Cancelar cita" })).toHaveCount(0)
+  await info.attach("llego", { body: await page.screenshot(), contentType: "image/png" })
+  await page.getByRole("button", { name: "Deshacer", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Llegó", exact: true })).toBeVisible()
+  expect((await call<{ visit: string }>(page, "GET", `/api/appointments/${appointment.id}`, owner.org.slug)).visit).toBe("por_confirmar")
+  // «Atender» en un clic: sin formulario de motivo, la atención se abre unida a la cita y la llegada queda marcada.
+  await page.getByRole("button", { name: "Llegó", exact: true }).click()
+  await page.getByRole("button", { name: "Atender", exact: true }).click()
+  await expect(page).toHaveURL(/\/patients\/[^/]+\/encounters\//)
+  await expect(page.getByRole("dialog", { name: "Atender la cita" })).toHaveCount(0)
+  const attending = await call<{ visit: string; arrivedAt: string | null }>(page, "GET", `/api/appointments/${appointment.id}`, owner.org.slug)
+  expect(attending.visit).toBe("en_atencion")
+  expect(attending.arrivedAt).not.toBeNull()
 })
 
 test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", async ({
@@ -366,8 +394,9 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   }
   // Horario partido: el segundo turno del día propone la tarde.
   await page.getByRole("button", { name: "Añadir turno el lunes" }).click()
-  await expect(page.getByLabel("lunes, desde").nth(1)).toHaveValue("15:00")
-  await expect(page.getByLabel("lunes, hasta").nth(1)).toHaveValue("19:00")
+  // La hora es la lista «Hora» (cada 15 minutos): dice la elegida.
+  await expect(page.getByLabel("lunes, desde").nth(1)).toContainText("15:00")
+  await expect(page.getByLabel("lunes, hasta").nth(1)).toContainText("19:00")
   await page.getByRole("button", { name: "Guardar horario" }).click()
   // La agenda se llena al lado, sin haber salido de ella.
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
@@ -381,7 +410,7 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await expect(
     page.getByRole("heading", { name: `Horario semanal de ${owner.user.name}` }),
   ).toBeVisible()
-  await expect(page.getByLabel("lunes, desde").first()).toHaveValue("09:00")
+  await expect(page.getByLabel("lunes, desde").first()).toContainText("09:00")
   await expect(page.getByLabel("lunes, desde")).toHaveCount(2)
   await expect(page.getByRole("heading", { name: "Sillones" })).toBeVisible()
   await expect(page.getByText("Sillón 1", { exact: true })).toBeVisible()
@@ -611,7 +640,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await page.getByRole("button", { name: "Registrar a Rosa Quispe" }).click()
   // Lo tecleado al buscar ya viene puesto.
   await expect(page.getByLabel("Nombres", { exact: true })).toHaveValue("Rosa")
-  await expect(page.getByLabel("Apellidos", { exact: true })).toHaveValue("Quispe")
+  await expect(page.getByLabel("Primer apellido", { exact: true })).toHaveValue("Quispe")
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
   // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
   await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()

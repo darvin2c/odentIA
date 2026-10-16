@@ -223,7 +223,7 @@ it("en pausa no se opera ni se envía, pero billing, soporte y lectura pasan", a
   }
 })
 
-it("la prueba dura 30 días (ADR 0030); con plan pasa a activa y un cargo vencido abre 7 días de gracia", async () => {
+it("la prueba dura 30 días (ADR 0031); con plan pasa a activa y un cargo vencido abre 7 días de gracia", async () => {
   const f = await billingFixture("bil-06")
   const start = new Date("2026-01-05T12:00:00Z")
   const sub = await startSaasTrial(ownerDb, f.orgId, { planCode: `base-${f.orgId}` }, start)

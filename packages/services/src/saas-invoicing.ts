@@ -4,7 +4,7 @@ import { type SaasActionKind, saasAction, saasCharge, saasChargeLine, saasPlan, 
 import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm"
 import { listPeriodActions, microsToCents, type SaasActionRow, saasTaxOf, taxCents } from "./saas-actions.js"
 
-/* ---------- Cobrar (ADR 0030, fase 4) ---------- */
+/* ---------- Cobrar (ADR 0031, fase 4) ---------- */
 
 /** Días que tiene la clínica para pagar un cargo emitido; después corre la gracia. */
 export const SAAS_PAYMENT_DAYS = 7

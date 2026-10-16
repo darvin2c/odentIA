@@ -638,6 +638,55 @@
       "when": 1792113996281,
       "tag": "0090_cargo_con_lineas",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1792113996282,
+      "tag": "0091_llego_a_la_cita",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1792113996283,
+      "tag": "0092_documentos_de_la_atencion",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1792113996284,
+      "tag": "0093_un_plan_una_seccion",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1792113996285,
+      "tag": "0094_la_ficha_en_cuatro_secciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792113996286,
+      "tag": "0095_lo_de_cada_pais",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792113996287,
+      "tag": "0096_su_enlace_y_portal_en_un_paso",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1792113996288,
+      "tag": "0097_claves_por_organizacion_y_paciente",
+      "breakpoints": true
     }
   ]
 }

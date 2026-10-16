@@ -37,7 +37,7 @@ export function say(phrase: Phrase, timing: LineTiming = {}): string {
 export const TASK_AREA_LABELS: Record<TaskArea, { team: string; short: string }> = {
   recepcion: { team: "el equipo de recepción", short: "Equipo de recepción" },
   caja: { team: "el equipo de caja", short: "Caja" },
-  clinico: { team: "el profesional que la lleva", short: "Profesional" },
+  clinico: { team: "el equipo clínico", short: "Equipo clínico" },
   administracion: { team: "quien administra la clínica", short: "Administración" },
 }
 
@@ -278,10 +278,11 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     team: {
       area: "clinico",
       step: "Tarea para firmar",
-      does: "Le queda una tarea al profesional que la lleva",
-      would: "Le quedaría una tarea al profesional que la lleva",
+      // Solo cuenta lo que nadie ve en «Te espera»: quien la llevaba ya no
+      // está o ya no atiende. La tarea va al equipo clínico, no a esa persona.
+      does: "Queda una tarea para el equipo clínico: quien la llevaba ya no atiende",
+      would: "Quedaría una tarea para el equipo clínico: quien la llevaba ya no atiende",
       taskTitle: (name) => `Revisar y firmar la atención de ${name}`,
-      toOwner: true,
     },
     permission: "clinical.read",
     defaultDays: 2,
@@ -355,6 +356,8 @@ export function adminLineOf(key: string): AdminLine | null {
  */
 const JOB_KIND_LINE: Record<string, AdminLineKey> = {
   aviso_cita_reservada: "recordatorio_cita",
+  // El aviso de reserva con «Su enlace», cuando le faltan datos (ADR 0037).
+  aviso_cita_reservada_datos: "recordatorio_cita",
   aviso_cita_movida: "recordatorio_cita",
   aviso_cita_cancelada: "recordatorio_cita",
 }

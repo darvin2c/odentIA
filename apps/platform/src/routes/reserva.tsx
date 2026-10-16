@@ -1,34 +1,43 @@
-import { Button, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import { EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react"
-import { useMemo, useState } from "react"
+import { CalendarCheck, ChevronLeft } from "lucide-react"
+import { useState } from "react"
 import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../components/booking-data-form"
+import { AppointmentBlock } from "../components/public/appointment-block"
+import { type BudgetAnswer, BudgetResponder } from "../components/public/budget-responder"
+import { LinkConsentStep, LinkQuestionnaireStep } from "../components/public/link-steps"
+import { PersonalDataForm } from "../components/public/personal-data-form"
+import { capital, DentistSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../components/public/week-slots"
 import { ApiError } from "../lib/api"
 import {
+  answerLinkBudget,
   type BookingAppointment,
-  type BookingSlot,
+  type BookingLinkBranch,
   cancelBooking,
   changeBooking,
+  confirmBooking,
   fetchBookingLink,
   fetchBookingSlots,
+  type PersonalLinkView,
   reserveBooking,
 } from "../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../lib/locale"
+import { setOrgLocale } from "../lib/locale"
+import { formatPortalMoney } from "../lib/portal"
 
 /**
- * Página del enlace de reserva: quien recibió el enlace elige el día y la hora
- * viendo los horarios libres y reserva su cita. Es pública y personal a la
- * vez: no hay sesión, y todo lo que se puede hacer lo decide el enlace. No
- * muestra tarifas ni nada de la historia. En pantalla ancha la semana se ve
- * entera, un día por columna; en teléfono, un día a la vez y el botón que
- * avanza fijo abajo. Con la cita ya reservada, el mismo enlace la muestra y
- * deja cambiarla de horario o cancelarla. Quien aún no es
- * paciente deja sus datos esenciales entre elegir y reservar, en una sola
- * pantalla; la ficha la crea el registro de pacientes de la clínica y lo
- * demás se completa allí.
+ * «Su enlace» (ADR 0037): la página personal de cada persona. Muestra lo
+ * mismo que se le mandaría por su chat, una cosa a la vez: su cita, sus datos
+ * por completar, el presupuesto que se le envió, el consentimiento por firmar
+ * y el cuestionario. Nunca la historia ni lo guardado. Es pública y personal a
+ * la vez: no hay sesión, y lo que se puede hacer lo decide el enlace. Uno por
+ * persona; cada cosa deja de servir cuando ya no hace falta, y el enlace
+ * entero cuando no le queda nada pendiente.
+ *
+ * El enlace que envía el agente para reservar sigue igual: elegir día y hora
+ * en la semana de horarios y, si aún no es paciente, dejar sus datos.
  */
 export const Route = createFileRoute("/reserva")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -40,429 +49,88 @@ export const Route = createFileRoute("/reserva")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
-  component: BookingLinkPage,
+  component: PersonalLinkPage,
 })
 
-const DAY_MS = 86_400_000
-const WEEK_DAYS = 7
-/** Cuántas semanas hacia adelante se puede mirar. */
-const MAX_WEEKS = 8
-/** Sin preferencia de profesional: se ofrece cada hora con quien la tenga libre. */
-const ANYONE = "cualquiera"
+/** Lo que se está haciendo en la página: el resumen o una sola cosa. */
+type Screen =
+  | { kind: "pendiente" }
+  | { kind: "elegir"; mode: "reservar" | "cambiar" | "tratamiento"; planItems?: Array<{ planItemId: string; title: string }> }
+  | { kind: "datos" }
+  | { kind: "presupuesto"; budgetId: string }
+  | { kind: "agendar"; items: Array<{ planItemId: string; title: string }> }
+  | { kind: "consentimiento"; consentId: string }
+  | { kind: "cuestionario" }
 
-function dayKey(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant))
-}
+const EXPIRED_TEXT = "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo."
 
-function hourOf(instant: string, timeZone: string): number {
-  return Number(new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hour12: false }).format(new Date(instant)))
-}
-
-function timeLabel(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, hour: "numeric", minute: "2-digit" }).format(new Date(instant))
-}
-
-function capital(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
-function longDay(instant: string, timeZone: string): string {
-  return capital(new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, weekday: "long", day: "numeric", month: "long" }).format(new Date(instant)))
-}
-
-function shortDay(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, weekday: "long", day: "numeric" }).format(new Date(instant))
-}
-
-function monthName(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, month: "long" }).format(new Date(instant)).toLowerCase()
-}
-
-function dayParts(instant: string, timeZone: string): { weekday: string; number: string } {
-  const parts = new Intl.DateTimeFormat(activeOrgLocale(), { timeZone, weekday: "long", day: "numeric" }).formatToParts(new Date(instant))
-  return {
-    weekday: capital(parts.find((part) => part.type === "weekday")?.value ?? ""),
-    number: parts.find((part) => part.type === "day")?.value ?? "",
-  }
-}
-
-type Step = "elegir" | "datos" | "listo"
-
-/** Dónde va la persona en el recorrido. «Tus datos» solo existe para quien aún no es paciente. */
-function Steps({ current, withData }: { current: Step; withData: boolean }) {
-  const steps: Array<{ id: Step; label: string }> = [
-    { id: "elegir", label: "Elige día y hora" },
-    ...(withData ? [{ id: "datos" as const, label: "Tus datos" }] : []),
-    { id: "listo", label: "Listo" },
-  ]
-  return (
-    <ol className="hidden flex-wrap items-center gap-2 lg:flex" aria-label="Pasos">
-      {steps.map((step, index) => (
-        <li
-          key={step.id}
-          aria-current={step.id === current ? "step" : undefined}
-          className={
-            step.id === current
-              ? "flex min-h-8 items-center rounded-full bg-primary px-3 text-sm font-semibold text-primary-foreground"
-              : "flex min-h-8 items-center rounded-full border bg-card px-3 text-sm font-medium text-muted-foreground"
-          }
-        >
-          {index + 1} · {step.label}
-        </li>
-      ))}
-    </ol>
-  )
-}
-
-/** Cabecera de la página. En pantalla ancha los pasos van como píldoras; en teléfono, «paso 1 de 3» junto a la clínica. */
-function Heading({
-  clinicName,
-  title,
-  current,
-  withData,
-  progress,
-  hideSteps = false,
-}: {
-  clinicName: string
-  title: string
-  current: Step
-  withData: boolean
-  progress?: { number: number; total: number } | null
-  hideSteps?: boolean
-}) {
-  const total = withData ? 3 : 2
-  const number = progress?.number ?? (current === "elegir" ? 1 : current === "datos" ? 2 : total)
-  return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-      <div className="flex min-w-0 flex-col gap-1">
-        <p className="text-sm font-semibold text-muted-foreground">
-          {clinicName}
-          {hideSteps ? null : (
-            <span className="lg:hidden">
-              {" "}
-              · paso {number} de {total}
-            </span>
-          )}
-        </p>
-        <h1 className="text-xl font-semibold">{title}</h1>
-      </div>
-      {hideSteps ? null : <Steps current={current} withData={withData} />}
-    </header>
-  )
-}
-
-function Unavailable() {
+function Expired() {
   return (
     <PageShell maxWidth="md">
-      <EmptyState
-        title="Este enlace ya no está disponible"
-        description="Puede que haya vencido o que ya se haya usado. Escríbenos por el chat y te enviamos uno nuevo."
-      />
+      <EmptyState title="Este enlace ya no sirve" description="Responde el mensaje y te enviamos uno nuevo." />
     </PageShell>
   )
 }
 
-/**
- * Identificador del evento (UID, RFC 5545): el mismo en cada descarga de la
- * misma cita, para que al cambiarla de horario el calendario actualice su
- * evento en vez de añadir otro. El enlace es de una sola cita, así que sale de
- * una huella suya: no lleva el enlace ni ningún dato de la persona o de la
- * cita, porque los calendarios se sincronizan con terceros.
- */
-async function calendarUid(linkKey: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`odentia:cita:${linkKey}`))
-  const hex = Array.from(new Uint8Array(digest).subarray(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("")
-  return `${hex}@odentia`
+function problemOf(error: unknown, fallback: string): string | null {
+  if (!error) return null
+  if (error instanceof ApiError) return error.shape.message ?? fallback
+  return `${fallback} Revisa tu conexión y vuelve a intentarlo.`
 }
 
-/** La cita como archivo de calendario (iCalendar, RFC 5545): lo abre el calendario del teléfono o del computador. */
-function calendarFile(clinicName: string, appointment: BookingAppointment, uid: string): string {
-  const stamp = (instant: string | Date) => new Date(instant).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")
-  const text = (value: string) => value.replace(/\\/g, "\\\\").replace(/([,;])/g, "\\$1").replace(/\r?\n/g, "\\n")
-  const where = [`Sede ${appointment.branchName}`, appointment.branchAddress].filter(Boolean).join(", ")
-  return [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//odentIA//Reserva//ES",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${stamp(new Date())}`,
-    `DTSTART:${stamp(appointment.startsAt)}`,
-    `DTEND:${stamp(appointment.endsAt)}`,
-    // Sin el servicio: un título de calendario no lleva datos clínicos.
-    `SUMMARY:${text(`Cita en ${clinicName}`)}`,
-    `LOCATION:${text(where)}`,
-    `DESCRIPTION:${text(`Con ${appointment.dentistName}`)}`,
-    "END:VEVENT",
-    "END:VCALENDAR",
-  ].join("\r\n")
-}
-
-function Booked({
-  clinicName,
-  firstName,
-  appointment,
-  linkKey,
-  withData,
-  cancelling,
-  cancelError,
-  onChange,
-  onCancel,
-}: {
-  clinicName: string
-  firstName: string | null
-  appointment: BookingAppointment
-  /** Lo que identifica al enlace (y con él a su cita): de ahí sale el UID del evento. */
-  linkKey: string
-  withData: boolean
-  cancelling: boolean
-  cancelError: string | null
-  onChange: () => void
-  onCancel: () => void
-}) {
-  const [managing, setManaging] = useState(false)
-  const [confirming, setConfirming] = useState(false)
-  const addToCalendar = async () => {
-    const file = calendarFile(clinicName, appointment, await calendarUid(linkKey))
-    const url = URL.createObjectURL(new Blob([file], { type: "text/calendar;charset=utf-8" }))
-    const link = document.createElement("a")
-    link.href = url
-    link.download = "mi-cita.ics"
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-  if (appointment.cancelled) {
-    return (
-      <PageShell maxWidth="md">
-        <Heading clinicName={clinicName} title="Tu cita quedó cancelada" current="listo" withData={withData} />
-        <EmptyState
-          title={`${longDay(appointment.startsAt, appointment.timeZone)}, ${timeLabel(appointment.startsAt, appointment.timeZone)}`}
-          description="Esa cita ya no está en la agenda. Si quieres otra, escríbenos por el chat y te enviamos un enlace nuevo."
-        />
-      </PageShell>
-    )
-  }
-  return (
-    <PageShell maxWidth="md">
-      <Heading clinicName={clinicName} title="Tu cita quedó reservada" current="listo" withData={withData} />
-      <div className="flex flex-col gap-6">
-        <div role="status" className="flex flex-col items-center gap-1 rounded-2xl bg-success-soft p-6 text-center">
-          <CalendarCheck className="mb-1 size-8 text-success" aria-hidden />
-          <p className="text-lg font-semibold">
-            {longDay(appointment.startsAt, appointment.timeZone)}, {timeLabel(appointment.startsAt, appointment.timeZone)}
-          </p>
-          <p className="text-sm">
-            {[appointment.serviceName ?? "Consulta", `${appointment.durationMin} minutos`].join(" · ")}
-          </p>
-        </div>
-        <dl className="flex flex-col divide-y rounded-2xl border bg-card text-sm">
-          {firstName ? (
-            <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 p-3">
-              <dt className="text-muted-foreground">Para</dt>
-              <dd>{firstName}</dd>
-            </div>
-          ) : null}
-          <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 p-3">
-            <dt className="text-muted-foreground">Con</dt>
-            <dd>{appointment.dentistName}</dd>
-          </div>
-          <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 p-3">
-            <dt className="text-muted-foreground">Dónde</dt>
-            <dd>
-              Sede {appointment.branchName}
-              {appointment.branchAddress ? <span className="block text-muted-foreground">{appointment.branchAddress}</span> : null}
-            </dd>
-          </div>
-        </dl>
-        <p className="text-sm text-muted-foreground">Te lo confirmamos también por el chat. Ya puedes volver a la conversación.</p>
-        <div className="flex flex-col gap-2">
-          <Button type="button" className="min-h-11 w-full" onClick={() => void addToCalendar()}>
-            Agregar al calendario
-          </Button>
-          {appointment.canChange ? (
-            <Button type="button" variant="outline" className="min-h-11 w-full" aria-expanded={managing} onClick={() => setManaging(!managing)}>
-              Cambiar o cancelar
-            </Button>
-          ) : null}
-          {managing && appointment.canChange ? (
-            <div className="flex flex-col gap-2 rounded-2xl border bg-card p-3">
-              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onChange}>
-                Cambiar de día u hora
-              </Button>
-              <Button type="button" variant="outline" className="min-h-11 w-full text-destructive" onClick={() => setConfirming(true)}>
-                Cancelar la cita
-              </Button>
-              {cancelError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {cancelError}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <ConfirmDialog
-        open={confirming}
-        title="¿Cancelar tu cita?"
-        description={`${longDay(appointment.startsAt, appointment.timeZone)}, ${timeLabel(appointment.startsAt, appointment.timeZone)}. El horario queda libre para otra persona.`}
-        confirmLabel="Sí, cancelar"
-        cancelLabel="No, conservarla"
-        variant="destructive"
-        pending={cancelling}
-        onClose={() => {
-          if (!cancelling) setConfirming(false)
-        }}
-        onConfirm={onCancel}
-      />
-    </PageShell>
-  )
-}
-
-/** El lunes de la semana que se mira, en la hora del dispositivo. */
-function weekStart(offset: number): Date {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * WEEK_DAYS)
-  return start
-}
-
-function BookingLinkPage() {
+function PersonalLinkPage() {
   const { token } = Route.useSearch()
   const queryClient = useQueryClient()
   const slug = orgSlugFromHostname(requestHostname())
   const ready = typeof window !== "undefined" && slug !== null && token !== undefined
-
+  const viewKey = ["booking-link", slug, token ?? null]
   const viewQuery = useQuery({
-    queryKey: ["booking-link", slug, token ?? null],
+    queryKey: viewKey,
     queryFn: () => fetchBookingLink(slug ?? "", token ?? ""),
     enabled: ready,
     retry: false,
   })
   const view = viewQuery.data?.data
-  // Página pública, sin layout de organización: el formato regional de la
-  // clínica llega con el enlace y se fija antes de pintar fechas y horas.
-  if (view) setOrgLocale(view.locale)
-
-  const [branchChoice, setBranchChoice] = useState<string | null>(null)
-  const [dentist, setDentist] = useState<string>(ANYONE)
-  const [week, setWeek] = useState(0)
-  const [day, setDay] = useState<string | null>(null)
-  const [chosen, setChosen] = useState<BookingSlot | null>(null)
+  // Página pública, sin layout de organización: el formato regional y el país
+  // de la clínica llegan con el enlace y se fijan antes de pintar fechas y horas.
+  if (view) setOrgLocale(view.locale, undefined, view.countryCode)
+  const [screen, setScreen] = useState<Screen>({ kind: "pendiente" })
+  // La cita recién reservada o cambiada, mientras la vista se actualiza.
   const [booked, setBooked] = useState<BookingAppointment | null>(null)
-  // Con la cita ya reservada, el mismo enlace sirve para elegirle otro horario.
-  const [changing, setChanging] = useState(false)
-  // En teléfono, la sede y el profesional se abren con «Cambiar».
-  const [editing, setEditing] = useState(false)
-  // Quien aún no es paciente pasa por «Tus datos» antes de reservar. Lo que
-  // escribe vive aquí: no se pierde al volver a cambiar de horario.
-  const [enteringData, setEnteringData] = useState(false)
-  const [dataDraft, setDataDraft] = useState<BookingDataDraft>(emptyBookingDataDraft)
-  const [submissionId] = useState(() => crypto.randomUUID())
-  const [registered, setRegistered] = useState(false)
-
-  const current = booked ?? view?.appointment ?? null
-  const branch = changing && current
-    ? (view?.branches.find((item) => item.id === current.branchId) ?? {
-        id: current.branchId,
-        name: current.branchName,
-        address: current.branchAddress,
-        timeZone: current.timeZone,
-        defaultMinutes: current.durationMin,
-      })
-    : (view?.branches.find((item) => item.id === (branchChoice ?? view.branchId)) ?? (view?.branches.length === 1 ? view.branches[0] : undefined))
-
-  // La semana que se mira: de lunes a domingo, sin lo que ya pasó.
-  const range = useMemo(() => {
-    const start = weekStart(week)
-    const now = new Date()
-    now.setMinutes(0, 0, 0)
-    return {
-      start: start.toISOString(),
-      from: new Date(Math.max(start.getTime(), now.getTime())).toISOString(),
-      to: new Date(start.getTime() + WEEK_DAYS * DAY_MS).toISOString(),
-    }
-  }, [week])
-
-  const slotsQuery = useQuery({
-    queryKey: ["booking-slots", slug, token ?? null, branch?.id ?? null, range.from],
-    queryFn: () => fetchBookingSlots(slug ?? "", token ?? "", { branchId: branch?.id ?? "", from: range.from, to: range.to }),
-    enabled: ready && branch !== undefined && (changing || (view?.status === "abierto" && current === null)),
-    retry: false,
-  })
-  const timeZone = slotsQuery.data?.data.timeZone ?? branch?.timeZone ?? activeOrgTimeZone()
-  const allSlots = slotsQuery.data?.data.slots ?? []
-
-  // Con quién: los profesionales que tienen algún horario libre esta semana.
-  const dentists = useMemo(() => {
-    const byId = new Map<string, string>()
-    for (const slot of allSlots) byId.set(slot.dentistUserId, slot.dentistName)
-    return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "es"))
-  }, [allSlots])
-  const dentistFilter = dentists.some((item) => item.id === dentist) ? dentist : ANYONE
-
-  // Un horario por hora de inicio: sin preferencia, si varios profesionales lo tienen libre se ofrece una sola vez.
-  // Se muestran los días de la semana que aún no pasaron; sábado y domingo, solo si la clínica atiende.
-  const days = useMemo(() => {
-    const byDay = new Map<string, BookingSlot[]>()
-    const seen = new Set<string>()
-    for (const slot of allSlots) {
-      if (dentistFilter !== ANYONE && slot.dentistUserId !== dentistFilter) continue
-      if (seen.has(slot.startsAt)) continue
-      seen.add(slot.startsAt)
-      const key = dayKey(slot.startsAt, timeZone)
-      byDay.set(key, [...(byDay.get(key) ?? []), slot])
-    }
-    const today = dayKey(new Date().toISOString(), timeZone)
-    return Array.from({ length: WEEK_DAYS }, (_, index) => {
-      // Al mediodía, para que el día no cambie al pasarlo a la zona de la sede.
-      const instant = new Date(new Date(range.start).getTime() + index * DAY_MS + DAY_MS / 2).toISOString()
-      const key = dayKey(instant, timeZone)
-      return { key, instant, weekend: index >= 5, slots: byDay.get(key) ?? [] }
-    }).filter((item) => item.key >= today && (!item.weekend || item.slots.length > 0))
-  }, [allSlots, dentistFilter, range.start, timeZone])
-  const activeDay = days.find((item) => item.key === day && item.slots.length > 0) ?? days.find((item) => item.slots.length > 0)
-
-  const refreshSlots = () => {
-    // Ese horario pudo ocuparse mientras elegía: se vuelve a pedir lo libre.
-    setChosen(null)
-    setEnteringData(false)
-    void queryClient.invalidateQueries({ queryKey: ["booking-slots", slug, token ?? null] })
+  // Ya hizo algo aquí: si eso era lo último, se le dice «listo» en vez de «ya no sirve».
+  const [didSomething, setDidSomething] = useState(false)
+  // Lo que acaba de pasar con su cita: el título lo dice en vez del saludo.
+  const [news, setNews] = useState<"reservada" | "cambiada" | "cancelada" | "confirmada" | null>(null)
+  const refresh = () => {
+    setDidSomething(true)
+    void queryClient.invalidateQueries({ queryKey: viewKey })
   }
-  const reserve = useMutation({
-    retry: false,
-    mutationFn: (slot: BookingSlot) =>
-      reserveBooking(slug ?? "", {
-        token: token ?? "",
-        branchId: branch?.id ?? "",
-        startsAt: slot.startsAt,
-        dentistUserId: slot.dentistUserId,
-        ...(slot.chairId ? { chairId: slot.chairId } : {}),
-      }),
-    onSuccess: (result) => setBooked(result.data),
-    onError: refreshSlots,
-  })
-  const change = useMutation({
-    retry: false,
-    mutationFn: (slot: BookingSlot) =>
-      changeBooking(slug ?? "", {
-        token: token ?? "",
-        startsAt: slot.startsAt,
-        dentistUserId: slot.dentistUserId,
-        ...(slot.chairId ? { chairId: slot.chairId } : {}),
-      }),
-    onSuccess: (result) => {
-      setBooked(result.data)
-      setChanging(false)
-      setChosen(null)
-    },
-    onError: refreshSlots,
-  })
+  const back = () => {
+    setScreen({ kind: "pendiente" })
+    refresh()
+    window.scrollTo({ top: 0 })
+  }
+
   const cancel = useMutation({
     retry: false,
     mutationFn: () => cancelBooking(slug ?? "", token ?? ""),
-    onSuccess: (result) => setBooked(result.data),
+    onSuccess: (result) => {
+      setBooked(result.data)
+      setNews("cancelada")
+      refresh()
+    },
   })
-  if (!ready && typeof window !== "undefined") return <Unavailable />
+  const confirm = useMutation({
+    retry: false,
+    mutationFn: () => confirmBooking(slug ?? "", token ?? ""),
+    onSuccess: (result) => {
+      setBooked(result.data)
+      setNews("confirmada")
+      refresh()
+    },
+  })
+
+  if (!ready && typeof window !== "undefined") return <Expired />
   if (viewQuery.isPending) {
     return (
       <PageShell maxWidth="md">
@@ -471,94 +139,394 @@ function BookingLinkPage() {
     )
   }
   if (viewQuery.isError || !view) {
-    if (viewQuery.error instanceof ApiError && viewQuery.error.status === 404) return <Unavailable />
+    if (viewQuery.error instanceof ApiError && (viewQuery.error.status === 404 || viewQuery.error.shape.code === "BOOKING_LINK_EXPIRED")) return <Expired />
     return (
       <PageShell maxWidth="md">
         <ErrorState title="No pudimos abrir el enlace" message="Revisa tu conexión y vuelve a intentarlo." onRetry={() => void viewQuery.refetch()} />
       </PageShell>
     )
   }
-  const withData = view.needsRegistration || registered
-  if (current && !changing) {
+  if (slug === null || token === undefined) return <Expired />
+
+  const appointment = booked ?? view.appointment
+  if (view.status !== "abierto") {
+    if (booked && !booked.cancelled) return <BookedOnly view={view} appointment={booked} slug={slug} token={token} />
+    if (booked?.cancelled) {
+      return (
+        <PageShell maxWidth="md">
+          <EmptyState
+            title="Tu cita quedó cancelada"
+            description={`${longDay(booked.startsAt, booked.timeZone)}, ${timeLabel(booked.startsAt, booked.timeZone)}. Si quieres otra, escríbenos por el chat.`}
+          />
+        </PageShell>
+      )
+    }
+    if (didSomething) {
+      return (
+        <PageShell maxWidth="md">
+          <EmptyState title="Listo, no te queda nada pendiente" description="Gracias. Ya puedes volver a la conversación." />
+        </PageShell>
+      )
+    }
+    return <Expired />
+  }
+
+  // El enlace del agente para reservar: directo a elegir día y hora.
+  if (view.booking && !appointment) {
     return (
-      <Booked
-        clinicName={view.clinicName}
-        firstName={view.patientFirstName}
-        appointment={current}
-        linkKey={`${slug ?? ""}:${token ?? ""}`}
-        withData={booked !== null && withData}
-        cancelling={cancel.isPending}
-        cancelError={
-          cancel.error instanceof ApiError
-            ? (cancel.error.shape.message ?? "No pudimos cancelar la cita. Escríbenos por el chat.")
-            : cancel.error
-              ? "No pudimos cancelar la cita. Revisa tu conexión y vuelve a intentarlo."
-              : null
-        }
-        onChange={() => {
-          setWeek(0)
-          setDay(null)
-          setChosen(null)
-          setDentist(ANYONE)
-          setChanging(true)
+      <ChooseSlot
+        view={view}
+        slug={slug}
+        token={token}
+        mode="reservar"
+        current={null}
+        onBack={null}
+        onDone={(result) => {
+          setBooked(result)
+          setNews("reservada")
+          refresh()
         }}
-        onCancel={() => cancel.mutate()}
       />
     )
   }
-  if (!changing && view.status !== "abierto") return <Unavailable />
-  const needsData = !changing && view.needsRegistration && !registered
 
-  const serviceName = (changing ? current?.serviceName : view.service?.name) ?? "Consulta"
-  const minutes = changing ? (current?.durationMin ?? null) : (view.service?.durationMin ?? branch?.defaultMinutes ?? null)
-  const acting = changing ? change : reserve
-  const actionError =
-    acting.error instanceof ApiError
-      ? ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CHANGEABLE"].includes(acting.error.shape.code ?? "")
-        ? (acting.error.shape.message ?? "Este enlace ya no está disponible.")
-        : "Ese horario acaba de ocuparse. Elige otro de la lista."
-      : acting.error
-        ? "No pudimos reservar. Revisa tu conexión y vuelve a intentarlo."
-        : null
-  const morning = activeDay?.slots.filter((slot) => hourOf(slot.startsAt, timeZone) < 12) ?? []
-  const afternoon = activeDay?.slots.filter((slot) => hourOf(slot.startsAt, timeZone) >= 12) ?? []
-  const withWhom = dentistFilter === ANYONE ? null : (dentists.find((item) => item.id === dentistFilter)?.name ?? null)
-  // El título nombra la semana de calendario (de lunes a viernes, o hasta el fin de semana si se atiende),
-  // aunque de la semana en curso ya no se muestren los días que pasaron.
-  const monday = new Date(new Date(range.start).getTime() + DAY_MS / 2).toISOString()
-  const lastShown = days[days.length - 1]
-  const weekEnd = lastShown?.weekend ? lastShown.instant : new Date(new Date(monday).getTime() + 4 * DAY_MS).toISOString()
-  const weekTitle = `Semana del ${dayParts(monday, timeZone).number} al ${dayParts(weekEnd, timeZone).number} de ${monthName(weekEnd, timeZone)}`
-  const emptyDays = days.filter((item) => item.slots.length === 0).map((item) => longDay(item.instant, timeZone).split(" de ")[0]?.toLowerCase() ?? "")
-  const chosenLabel = chosen ? `${shortDay(chosen.startsAt, timeZone)}, ${timeLabel(chosen.startsAt, timeZone)}` : null
-  const steps = { number: 1, total: withData ? 3 : 2 }
-
-  const pick = (slot: BookingSlot) => {
-    setDay(dayKey(slot.startsAt, timeZone))
-    setChosen(slot)
-  }
-  const changeWeek = (next: number) => {
-    setWeek(Math.min(MAX_WEEKS, Math.max(0, next)))
-    setDay(null)
-    setChosen(null)
-  }
-  const slotButton = (slot: BookingSlot, compact: boolean) => {
-    const active = chosen?.startsAt === slot.startsAt && chosen.dentistUserId === slot.dentistUserId
+  if (screen.kind === "elegir" || screen.kind === "agendar") {
+    const mode = screen.kind === "agendar" ? "tratamiento" : screen.mode
     return (
-      <Button
-        key={`${slot.startsAt}-${slot.dentistUserId}`}
-        type="button"
-        variant={active ? "default" : "outline"}
-        className={compact ? "min-h-10 w-full px-1 text-sm" : "min-h-11"}
-        aria-pressed={active}
-        aria-label={`${longDay(slot.startsAt, timeZone)}, ${timeLabel(slot.startsAt, timeZone)}`}
-        onClick={() => pick(slot)}
-      >
-        {timeLabel(slot.startsAt, timeZone)}
-      </Button>
+      <ChooseSlot
+        view={view}
+        slug={slug}
+        token={token}
+        mode={mode}
+        current={mode === "cambiar" ? appointment : null}
+        planItems={screen.kind === "agendar" ? screen.items : screen.planItems}
+        onBack={back}
+        onDone={(result) => {
+          setBooked(result)
+          setNews(mode === "cambiar" ? "cambiada" : "reservada")
+          back()
+        }}
+      />
     )
   }
-  /** El botón que avanza: reservar, cambiar la cita o seguir a «Tus datos». En teléfono dice el horario elegido. */
+
+  const one = (title: string, body: React.ReactNode) => (
+    <PageShell maxWidth="md">
+      <div className="flex flex-col gap-4">
+        <Button type="button" variant="link" className="h-auto min-h-11 self-start p-0" onClick={back}>
+          <ChevronLeft className="size-4" aria-hidden />
+          Lo pendiente
+        </Button>
+        <header className="flex flex-col gap-1">
+          <p className="text-sm font-semibold text-muted-foreground">{view.clinicName}</p>
+          <h1 className="text-xl font-semibold">{title}</h1>
+        </header>
+        {body}
+      </div>
+    </PageShell>
+  )
+
+  if (screen.kind === "datos") {
+    return one(view.patientFirstName ? `Los datos de ${view.patientFirstName}` : "Tus datos", <PersonalDataForm slug={slug} token={token} clinicName={view.clinicName} onDone={back} />)
+  }
+  if (screen.kind === "consentimiento") {
+    return one("Tu consentimiento", <LinkConsentStep slug={slug} token={token} consentId={screen.consentId} onBack={back} />)
+  }
+  if (screen.kind === "cuestionario") {
+    return one("Antes de tu cita", <LinkQuestionnaireStep slug={slug} token={token} onBack={back} />)
+  }
+  if (screen.kind === "presupuesto") {
+    const budget = view.budgets.find((item) => item.id === screen.budgetId)
+    if (!budget) return one("Tu presupuesto", <EmptyState title="Este presupuesto ya está respondido" description="Gracias. Lo demás sigue en lo pendiente." actionLabel="Volver a lo pendiente" onAction={back} />)
+    return one(
+      `Tu presupuesto · ${view.clinicName}`,
+      <BudgetStep
+        slug={slug}
+        token={token}
+        budgetId={budget.id}
+        budget={budget}
+        onAnswered={(toSchedule) => {
+          refresh()
+          setScreen(toSchedule.length > 0 ? { kind: "agendar", items: toSchedule } : { kind: "pendiente" })
+        }}
+      />,
+    )
+  }
+
+  // Lo pendiente: una tarjeta por cosa.
+  const missing = view.data?.missing ?? []
+  const cancelError = problemOf(cancel.error, "No pudimos cancelar la cita.")
+  const confirmError = problemOf(confirm.error, "No pudimos confirmar la cita.")
+  return (
+    <PageShell maxWidth="md">
+      <header className="mb-6 flex flex-col gap-1">
+        <p className="text-sm font-semibold text-muted-foreground">{view.clinicName}</p>
+        <h1 className="text-xl font-semibold">{news ? `Tu cita quedó ${news}` : view.firstName ? `Hola, ${view.firstName}` : "Hola"}</h1>
+        {view.patientFirstName ? <p className="text-sm text-muted-foreground">Lo pendiente de {view.patientFirstName}.</p> : null}
+      </header>
+      <div className="flex flex-col gap-4">
+        {appointment && !appointment.cancelled ? (
+          <AppointmentBlock
+            title="Tu cita"
+            clinicName={view.clinicName}
+            appointment={appointment}
+            calendarKey={`${slug}:${token}`}
+            canChange={appointment.canChange}
+            canConfirm={appointment.canConfirm}
+            confirming={confirm.isPending}
+            cancelling={cancel.isPending}
+            error={cancelError ?? confirmError}
+            onChange={() => setScreen({ kind: "elegir", mode: "cambiar" })}
+            onCancel={() => cancel.mutate()}
+            onConfirm={() => confirm.mutate()}
+          />
+        ) : null}
+        {appointment?.cancelled ? (
+          <p role="status" className="rounded-2xl border bg-card p-4 text-sm">
+            Tu cita del {longDay(appointment.startsAt, appointment.timeZone).toLowerCase()} quedó cancelada.
+          </p>
+        ) : null}
+        {missing.length > 0 ? (
+          <Block
+            title={view.patientFirstName ? `Los datos de ${view.patientFirstName}` : "Tus datos"}
+            badge={missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`}
+            text={capital(missing.map((item) => item.label.toLowerCase()).join(", "))}
+            action="Completar"
+            onAction={() => setScreen({ kind: "datos" })}
+          />
+        ) : null}
+        {view.budgets.map((budget) => (
+          <Block
+            key={budget.id}
+            title="Tu presupuesto"
+            badge="Por responder"
+            text={`${budget.title} · ${formatPortalMoney(budget.totalCents, budget.currency, budget.locale)}`}
+            action="Ver y responder"
+            onAction={() => setScreen({ kind: "presupuesto", budgetId: budget.id })}
+          />
+        ))}
+        {view.consents.map((consent) => (
+          <Block
+            key={consent.id}
+            title="Tu consentimiento"
+            badge="Por firmar"
+            text={consent.title}
+            action="Leer y firmar"
+            onAction={() => setScreen({ kind: "consentimiento", consentId: consent.id })}
+          />
+        ))}
+        {view.questionnaire ? (
+          <Block
+            title="Antes de tu cita"
+            badge="Por responder"
+            text={view.questionnaire.title}
+            action="Responder"
+            onAction={() => setScreen({ kind: "cuestionario" })}
+          />
+        ) : null}
+        <p className="text-sm text-muted-foreground">No mostramos nada de lo que ya tenemos guardado. Si te enviamos algo nuevo, aparece aquí mismo.</p>
+      </div>
+    </PageShell>
+  )
+}
+
+function Block({ title, badge, text, action, onAction }: { title: string; badge: string; text: string; action: string; onAction: () => void }) {
+  return (
+    <section aria-label={title} className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold">{title}</h2>
+        <Badge variant="secondary">{badge}</Badge>
+      </div>
+      <p className="text-sm">{text}</p>
+      <Button type="button" className="min-h-11 self-start" onClick={onAction}>
+        {action}
+      </Button>
+    </section>
+  )
+}
+
+/** Recién reservada y sin nada más pendiente: la confirmación de siempre. */
+function BookedOnly({ view, appointment, slug, token }: { view: PersonalLinkView; appointment: BookingAppointment; slug: string; token: string }) {
+  return (
+    <PageShell maxWidth="md">
+      <header className="mb-6 flex flex-col gap-1">
+        <p className="text-sm font-semibold text-muted-foreground">{view.clinicName}</p>
+        <h1 className="text-xl font-semibold">Tu cita quedó reservada</h1>
+      </header>
+      <div className="flex flex-col gap-4">
+        <div role="status" className="flex flex-col items-center gap-1 rounded-2xl bg-success-soft p-6 text-center">
+          <CalendarCheck className="mb-1 size-8 text-success" aria-hidden />
+          <p className="text-lg font-semibold">
+            {longDay(appointment.startsAt, appointment.timeZone)}, {timeLabel(appointment.startsAt, appointment.timeZone)}
+          </p>
+          <p className="text-sm">{[appointment.serviceName ?? "Consulta", `${appointment.durationMin} minutos`].join(" · ")}</p>
+        </div>
+        <AppointmentBlock
+          title="Tu cita"
+          clinicName={view.clinicName}
+          appointment={appointment}
+          calendarKey={`${slug}:${token}`}
+          canChange={false}
+          canConfirm={false}
+          confirming={false}
+          cancelling={false}
+          error={null}
+          onChange={() => {}}
+          onCancel={() => {}}
+          onConfirm={() => {}}
+        />
+        <p className="text-sm text-muted-foreground">Te lo confirmamos también por el chat. Ya puedes volver a la conversación.</p>
+      </div>
+    </PageShell>
+  )
+}
+
+/** «Ver y responder»; al aceptar algo, ofrece «Elegir horario» aquí mismo. */
+function BudgetStep({
+  slug,
+  token,
+  budgetId,
+  budget,
+  onAnswered,
+}: {
+  slug: string
+  token: string
+  budgetId: string
+  budget: PersonalLinkView["budgets"][number]
+  onAnswered: (toSchedule: Array<{ planItemId: string; title: string }>) => void
+}) {
+  const [answered, setAnswered] = useState<Array<{ planItemId: string; title: string }> | null>(null)
+  const answer = useMutation({
+    retry: false,
+    mutationFn: (input: BudgetAnswer) => answerLinkBudget(slug, token, budgetId, input),
+    onSuccess: (result) => setAnswered(result.data.toSchedule),
+  })
+  if (answered) {
+    if (answered.length === 0) {
+      return (
+        <div role="status" className="flex flex-col items-center gap-2 rounded-2xl bg-success-soft p-6 text-center">
+          <p className="text-lg font-semibold">Gracias, recibimos tu respuesta</p>
+          <p className="text-sm">Si cambias de opinión, escríbenos por el chat.</p>
+          <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={() => onAnswered([])}>
+            Volver a lo pendiente
+          </Button>
+        </div>
+      )
+    }
+    const what = answered.length === 1 ? (answered[0]?.title.toLowerCase() ?? "tu tratamiento") : `tus ${answered.length} tratamientos`
+    return (
+      <div role="status" className="flex flex-col items-center gap-2 rounded-2xl bg-success-soft p-6 text-center">
+        <p className="text-lg font-semibold">¡Listo! ¿Reservamos {what}?</p>
+        <p className="text-sm">Elige tu horario aquí mismo.</p>
+        <div className="mt-2 flex flex-wrap justify-center gap-2">
+          <Button type="button" className="min-h-11" onClick={() => onAnswered(answered)}>
+            Elegir horario
+          </Button>
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => onAnswered([])}>
+            Después
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  return <BudgetResponder budget={budget} pending={answer.isPending} error={problemOf(answer.error, "No pudimos guardar tu respuesta.")} onAnswer={(input) => answer.mutate(input)} />
+}
+
+/**
+ * Elegir día y hora: reservar (el enlace del agente), cambiar la cita o
+ * agendar lo que aceptó de su presupuesto. Quien aún no es paciente deja sus
+ * datos esenciales entre elegir y reservar, en una sola pantalla.
+ */
+function ChooseSlot({
+  view,
+  slug,
+  token,
+  mode,
+  current,
+  planItems,
+  onBack,
+  onDone,
+}: {
+  view: PersonalLinkView
+  slug: string
+  token: string
+  mode: "reservar" | "cambiar" | "tratamiento"
+  current: BookingAppointment | null
+  planItems?: Array<{ planItemId: string; title: string }>
+  onBack: (() => void) | null
+  onDone: (appointment: BookingAppointment) => void
+}) {
+  const queryClient = useQueryClient()
+  const changing = mode === "cambiar"
+  const [branchChoice, setBranchChoice] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<WeekSlot | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [enteringData, setEnteringData] = useState(false)
+  const [dataDraft, setDataDraft] = useState<BookingDataDraft>(emptyBookingDataDraft)
+  const [submissionId] = useState(() => crypto.randomUUID())
+  const [registered, setRegistered] = useState(false)
+
+  const fixedBranch = mode === "reservar" ? (view.booking?.branchId ?? null) : null
+  const branch: BookingLinkBranch | undefined =
+    changing && current
+      ? (view.branches.find((item) => item.id === current.branchId) ?? {
+          id: current.branchId,
+          name: current.branchName,
+          address: current.branchAddress,
+          timeZone: current.timeZone,
+          defaultMinutes: current.durationMin,
+        })
+      : (view.branches.find((item) => item.id === (branchChoice ?? fixedBranch)) ?? (view.branches.length === 1 ? view.branches[0] : undefined))
+
+  const week = useWeekSlots({
+    queryKey: ["booking-slots", slug, token, mode, branch?.id ?? null],
+    fetchSlots: async (range) => (await fetchBookingSlots(slug, token, { branchId: branch?.id ?? "", ...range })).data,
+    enabled: branch !== undefined,
+    fallbackTimeZone: branch?.timeZone,
+  })
+  const timeZone = week.timeZone
+  const refreshSlots = () => {
+    setChosen(null)
+    setEnteringData(false)
+    week.refresh()
+  }
+  const act = useMutation({
+    retry: false,
+    mutationFn: (slot: WeekSlot) => {
+      const where = { startsAt: slot.startsAt, dentistUserId: slot.dentistUserId, ...(slot.chairId ? { chairId: slot.chairId } : {}) }
+      if (changing) return changeBooking(slug, { token, ...where })
+      return reserveBooking(slug, {
+        token,
+        branchId: branch?.id ?? "",
+        ...where,
+        ...(mode === "tratamiento" && planItems ? { planItemIds: planItems.map((item) => item.planItemId) } : {}),
+      })
+    },
+    onSuccess: (result) => onDone(result.data),
+    onError: refreshSlots,
+  })
+
+  const needsData = mode === "reservar" && !!view.booking?.needsRegistration && !registered
+  const withData = mode === "reservar" && (!!view.booking?.needsRegistration || registered)
+  const serviceName =
+    mode === "cambiar"
+      ? (current?.serviceName ?? "Consulta")
+      : mode === "tratamiento"
+        ? (planItems ?? []).map((item) => item.title).join(" · ") || "Tu tratamiento"
+        : (view.booking?.service?.name ?? "Consulta")
+  const minutes = changing ? (current?.durationMin ?? null) : mode === "reservar" ? (view.booking?.service?.durationMin ?? branch?.defaultMinutes ?? null) : (branch?.defaultMinutes ?? null)
+  const actionError =
+    act.error instanceof ApiError
+      ? ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CHANGEABLE"].includes(act.error.shape.code ?? "")
+        ? (act.error.shape.message ?? EXPIRED_TEXT)
+        : "Ese horario acaba de ocuparse. Elige otro de la lista."
+      : act.error
+        ? "No pudimos reservar. Revisa tu conexión y vuelve a intentarlo."
+        : null
+  const chosenLabel = chosen ? `${shortDay(chosen.startsAt, timeZone)}, ${timeLabel(chosen.startsAt, timeZone)}` : null
+  const title = changing ? "Cambia tu cita" : mode === "tratamiento" ? "Elige el horario de tu tratamiento" : "Elige tu cita"
+  const steps = withData ? 3 : 2
+
   const mainAction = (withTime: boolean) => {
     const suffix = withTime && chosenLabel ? ` ${chosenLabel}` : ""
     if (needsData) {
@@ -569,7 +537,7 @@ function BookingLinkPage() {
       )
     }
     return (
-      <SubmitButton type="button" className="min-h-11 w-full" pending={acting.isPending} disabled={chosen === null} onClick={() => chosen && acting.mutate(chosen)}>
+      <SubmitButton type="button" className="min-h-11 w-full" pending={act.isPending} disabled={chosen === null} onClick={() => chosen && act.mutate(chosen)}>
         {changing ? `Cambiar a${suffix || " este horario"}` : `Reservar${suffix}`}
       </SubmitButton>
     )
@@ -579,16 +547,33 @@ function BookingLinkPage() {
       {actionError}
     </p>
   ) : null
-  const closingNote = needsData
-    ? "Es tu primera cita: después de elegir te pedimos unos datos y reservamos."
-    : "Podrás cambiarla o cancelarla desde este mismo enlace."
+  const closingNote = needsData ? "Es tu primera cita: después de elegir te pedimos unos datos y reservamos." : "Podrás cambiarla o cancelarla desde este mismo enlace."
+  const backButton = onBack ? (
+    <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onBack}>
+      {changing ? "Conservar mi cita" : "Volver a lo pendiente"}
+    </Button>
+  ) : null
 
-  // Paso «Tus datos»: con el horario ya elegido, la persona deja lo esencial y la página reserva enseguida.
-  // Mientras se reserva sigue a la vista; si el horario se ocupó, vuelve a elegir con sus datos ya guardados.
-  if (enteringData && chosen !== null && slug !== null && token !== undefined && (needsData || (registered && reserve.isPending))) {
+  const heading = (stepNumber: number) => (
+    <header className="mb-6 flex flex-col gap-1">
+      <p className="text-sm font-semibold text-muted-foreground">
+        {view.clinicName}
+        {mode === "reservar" ? (
+          <span>
+            {" "}
+            · paso {stepNumber} de {steps}
+          </span>
+        ) : null}
+      </p>
+      <h1 className="text-xl font-semibold">{stepNumber === 2 && needsData ? "Tus datos" : title}</h1>
+    </header>
+  )
+
+  // «Tus datos» de quien aún no es paciente: con el horario ya elegido, deja lo esencial y la página reserva enseguida.
+  if (enteringData && chosen !== null && (needsData || (registered && act.isPending))) {
     return (
       <PageShell maxWidth="md">
-        <Heading clinicName={view.clinicName} title="Tus datos" current="datos" withData />
+        {heading(2)}
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-3 rounded-2xl bg-primary-soft px-4 py-3 text-primary-soft-foreground">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -597,31 +582,22 @@ function BookingLinkPage() {
               </p>
               <p className="text-sm">{[branch ? `Sede ${branch.name}` : null, chosen.dentistName].filter(Boolean).join(" · ")}</p>
             </div>
-            <Button
-              type="button"
-              variant="link"
-              className="h-auto min-h-11 shrink-0 p-0"
-              aria-label="Cambiar horario"
-              disabled={reserve.isPending}
-              onClick={() => setEnteringData(false)}
-            >
+            <Button type="button" variant="link" className="h-auto min-h-11 shrink-0 p-0" aria-label="Cambiar horario" disabled={act.isPending} onClick={() => setEnteringData(false)}>
               Cambiar
             </Button>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Es tu primera cita con nosotros. Solo pedimos lo necesario para reservarla; lo demás se completa en la clínica.
-          </p>
+          <p className="text-sm text-muted-foreground">Es tu primera cita con nosotros. Solo pedimos lo necesario para reservarla; lo demás se completa en la clínica.</p>
           <BookingDataForm
             slug={slug}
             token={token}
             submissionId={submissionId}
             draft={dataDraft}
             onDraftChange={setDataDraft}
-            reserving={reserve.isPending}
+            reserving={act.isPending}
             onRegistered={() => {
               setRegistered(true)
               void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token] })
-              reserve.mutate(chosen)
+              act.mutate(chosen)
             }}
           />
         </div>
@@ -633,15 +609,7 @@ function BookingLinkPage() {
     <PageShell>
       {/* En teléfono el botón que avanza queda fijo abajo: el contenido deja ese espacio. */}
       <div className="mx-auto w-full max-w-7xl pb-36 lg:pb-0">
-        <Heading
-          clinicName={view.clinicName}
-          title={changing ? "Cambia tu cita" : "Elige tu cita"}
-          current="elegir"
-          withData={withData}
-          progress={changing ? null : steps}
-          hideSteps={changing}
-        />
-
+        {heading(1)}
         <div className="grid gap-5 lg:grid-cols-[16rem_minmax(0,1fr)_17rem] lg:items-start">
           <section aria-label="Para qué es la cita" className="flex flex-col gap-4 rounded-2xl border bg-card p-4">
             <div className="flex items-start justify-between gap-3">
@@ -649,11 +617,7 @@ function BookingLinkPage() {
                 <p className="hidden text-sm font-semibold text-muted-foreground lg:block">Para qué es la cita</p>
                 <p className="font-semibold">{serviceName}</p>
                 <p className="text-sm text-muted-foreground">
-                  {[
-                    minutes ? `${minutes} minutos` : null,
-                    branch ? `sede ${branch.name}` : null,
-                    view.patientFirstName ? `para ${view.patientFirstName}` : null,
-                  ]
+                  {[minutes ? `${minutes} minutos` : null, branch ? `sede ${branch.name}` : null, view.patientFirstName ? `para ${view.patientFirstName}` : null]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
@@ -668,15 +632,14 @@ function BookingLinkPage() {
               </Button>
             </div>
             <div className={`${editing ? "flex" : "hidden"} flex-col gap-4 lg:flex`}>
-              {!changing && view.branches.length > 1 ? (
+              {!changing && !fixedBranch && view.branches.length > 1 ? (
                 <Field>
                   <FieldLabel htmlFor="reserva-sede">Sede</FieldLabel>
                   <Select
                     value={branch?.id ?? ""}
                     onValueChange={(value) => {
                       setBranchChoice(value)
-                      setDentist(ANYONE)
-                      setDay(null)
+                      week.reset()
                       setChosen(null)
                     }}
                   >
@@ -698,140 +661,14 @@ function BookingLinkPage() {
                   {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
                 </div>
               ) : null}
-              {branch !== undefined && dentists.length > 0 ? (
-                <Field>
-                  <FieldLabel htmlFor="reserva-profesional">Profesional</FieldLabel>
-                  <Select
-                    value={dentistFilter}
-                    onValueChange={(value) => {
-                      setDentist(value ?? ANYONE)
-                      setDay(null)
-                      setChosen(null)
-                    }}
-                  >
-                    <SelectTrigger id="reserva-profesional" className="min-h-11 w-full">
-                      <SelectValue>{dentistFilter === ANYONE ? "Cualquier profesional" : (dentists.find((item) => item.id === dentistFilter)?.name ?? "")}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ANYONE}>Cualquier profesional</SelectItem>
-                      {dentists.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              ) : null}
+              {branch !== undefined ? <DentistSelect state={week} id="reserva-profesional" onChange={() => setChosen(null)} /> : null}
             </div>
           </section>
 
           {branch === undefined ? (
             <p className="text-sm text-muted-foreground">Elige una sede para ver los horarios libres.</p>
           ) : (
-            <section aria-label="Horarios libres" className="flex min-w-0 flex-col gap-4 rounded-2xl border bg-card p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-col">
-                  <p className="font-semibold">{weekTitle}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {[withWhom ? `Con ${withWhom}` : "Con quien tenga libre", minutes ? `horarios de ${minutes} minutos` : null].filter(Boolean).join(" · ")}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="icon" className="size-11" aria-label="Semana anterior" disabled={week === 0} onClick={() => changeWeek(week - 1)}>
-                    <ChevronLeft className="size-4" aria-hidden />
-                  </Button>
-                  <Button type="button" variant="outline" size="icon" className="size-11" aria-label="Semana siguiente" disabled={week >= MAX_WEEKS} onClick={() => changeWeek(week + 1)}>
-                    <ChevronRight className="size-4" aria-hidden />
-                  </Button>
-                </div>
-              </div>
-
-              {slotsQuery.isPending ? (
-                <LoadingState kind="indeterminate" message="Buscando horarios libres…" />
-              ) : slotsQuery.isError ? (
-                <ErrorState title="No pudimos cargar los horarios" message="Vuelve a intentarlo en un momento." onRetry={() => void slotsQuery.refetch()} />
-              ) : activeDay === undefined ? (
-                <EmptyState
-                  title="No quedan horarios esta semana"
-                  description={withWhom ? "Prueba con otro profesional o mira la semana siguiente." : "Mira la semana siguiente o escríbenos por el chat y te ayudamos."}
-                  actionLabel={week < MAX_WEEKS ? "Ver la semana siguiente" : undefined}
-                  onAction={week < MAX_WEEKS ? () => changeWeek(week + 1) : undefined}
-                />
-              ) : (
-                <>
-                  {/* Pantalla ancha: la semana entera, un día por columna. */}
-                  <div className="hidden gap-2 lg:grid" style={{ gridTemplateColumns: `repeat(${Math.max(days.length, 5)}, minmax(0, 1fr))` }} data-testid="semana">
-                    {days.map((item) => {
-                      const parts = dayParts(item.instant, timeZone)
-                      const selected = chosen !== null && dayKey(chosen.startsAt, timeZone) === item.key
-                      return (
-                        <fieldset key={item.key} className="m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0" aria-label={longDay(item.instant, timeZone)}>
-                          <div className={`flex flex-col items-center rounded-xl py-2 ${selected ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            <span className="text-xs">{parts.weekday}</span>
-                            <span className="text-lg font-semibold">{parts.number}</span>
-                          </div>
-                          {item.slots.length === 0 ? (
-                            <p className="rounded-xl border border-dashed p-2 text-center text-xs text-muted-foreground">No quedan horarios</p>
-                          ) : (
-                            item.slots.map((slot) => slotButton(slot, true))
-                          )}
-                        </fieldset>
-                      )
-                    })}
-                  </div>
-
-                  {/* Teléfono: un día a la vez, con los días en una sola fila. */}
-                  <div className="flex flex-col gap-4 lg:hidden">
-                    <fieldset className="m-0 flex min-w-0 gap-2 overflow-x-auto border-0 p-0 pb-1" aria-label="Día">
-                      {days.map((item) => {
-                        const parts = dayParts(item.instant, timeZone)
-                        const empty = item.slots.length === 0
-                        const active = activeDay.key === item.key
-                        return (
-                          <Button
-                            key={item.key}
-                            type="button"
-                            variant={active ? "default" : "outline"}
-                            className="flex h-16 min-w-14 max-w-24 flex-1 flex-col gap-0.5 px-1"
-                            disabled={empty}
-                            aria-pressed={active}
-                            aria-label={`${longDay(item.instant, timeZone)}${empty ? ", no quedan horarios" : ""}`}
-                            onClick={() => {
-                              setDay(item.key)
-                              setChosen(null)
-                            }}
-                          >
-                            <span className="text-xs">{parts.weekday.slice(0, 3)}</span>
-                            <span className="text-lg font-semibold">{parts.number}</span>
-                          </Button>
-                        )
-                      })}
-                    </fieldset>
-                    {emptyDays.length > 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        {emptyDays.length === 1
-                          ? `El ${emptyDays[0]} no quedan horarios.`
-                          : `El ${emptyDays.slice(0, -1).join(", el ")} y el ${emptyDays[emptyDays.length - 1]} no quedan horarios.`}
-                      </p>
-                    ) : null}
-                    {[
-                      { label: "Mañana", slots: morning },
-                      { label: "Tarde", slots: afternoon },
-                    ]
-                      .filter((group) => group.slots.length > 0)
-                      .map((group) => (
-                        <fieldset key={group.label} className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-                          <legend className="mb-2 p-0 text-sm font-semibold text-muted-foreground">{group.label}</legend>
-                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{group.slots.map((slot) => slotButton(slot, false))}</div>
-                        </fieldset>
-                      ))}
-                    {chosen ? <p className="text-sm text-muted-foreground">Con {chosen.dentistName}.</p> : null}
-                  </div>
-                  <p className="text-sm text-muted-foreground">Solo se muestran los horarios libres. Si alguien toma uno mientras eliges, te avisamos antes de reservar.</p>
-                </>
-              )}
-            </section>
+            <WeekSlotsGrid state={week} chosen={chosen} onChoose={setChosen} minutes={minutes} />
           )}
 
           <aside aria-label="Tu cita" className="hidden flex-col gap-3 rounded-2xl border bg-card p-4 lg:sticky lg:top-6 lg:flex">
@@ -849,11 +686,7 @@ function BookingLinkPage() {
             {view.patientFirstName && !needsData ? <p className="text-sm text-muted-foreground">Para {view.patientFirstName}. Ya tenemos tus datos: no te pedimos nada más.</p> : null}
             {errors}
             {mainAction(false)}
-            {changing ? (
-              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => setChanging(false)}>
-                Conservar mi cita
-              </Button>
-            ) : null}
+            {backButton}
             <p className="text-sm text-muted-foreground">{closingNote}</p>
           </aside>
         </div>
@@ -863,13 +696,7 @@ function BookingLinkPage() {
       <div className="fixed inset-x-0 bottom-0 z-10 flex flex-col gap-2 border-t bg-background p-4 lg:hidden">
         {errors}
         {mainAction(true)}
-        {changing ? (
-          <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => setChanging(false)}>
-            Conservar mi cita
-          </Button>
-        ) : (
-          <p className="text-center text-sm text-muted-foreground">{chosen ? closingNote : "Elige un día y una hora para reservar."}</p>
-        )}
+        {backButton ?? <p className="text-center text-sm text-muted-foreground">{chosen ? closingNote : "Elige un día y una hora para reservar."}</p>}
       </div>
     </PageShell>
   )

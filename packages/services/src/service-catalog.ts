@@ -1,9 +1,12 @@
 import {
+  type LeavesFinding,
+  leavesFindingForProcedure,
   TREATMENT_SCOPES,
   TREATMENT_SPECIALTIES,
   type ProcedureCodingSnapshot,
   type TreatmentScope,
   type TreatmentSpecialty,
+  validateLeavesFinding,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -17,7 +20,7 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
-import { orgProfileRequired } from "./locale.js"
+import { orgClinicalProfile, orgProfileRequired } from "./locale.js"
 import {
   currentCatalogRelease,
   resolveSingleTemplateCoding,
@@ -182,6 +185,41 @@ async function orgCurrency(tx: Db, orgId: string): Promise<string> {
     .limit(1)
   if (!profile) throw orgProfileRequired()
   return profile.currency
+}
+
+/**
+ * Lo que deja el servicio en la pieza al completarse (lo tratado queda
+ * dibujado): `null` = nada. Se valida con el ámbito del servicio y la regla
+ * del país de la clínica (en Perú, con su variante).
+ */
+async function assertLeavesFinding(
+  tx: Db,
+  orgId: string,
+  leaves: unknown,
+  scope: string | null | undefined,
+): Promise<LeavesFinding | null> {
+  if (leaves === null || leaves === undefined) return null
+  const strictVariants = (await orgClinicalProfile(tx, orgId)).odontogram?.strictVariants ?? false
+  const errors = validateLeavesFinding(leaves, { scope, strictVariants })
+  if (errors.length) throw validation(errors.join(" "))
+  const { condition, variant } = leaves as LeavesFinding
+  return variant ? { condition, variant } : { condition }
+}
+
+/**
+ * Lo que deja un servicio de la biblioteca, según su código oficial
+ * (`LEAVES_BY_PROCEDURE`): odentIA lo deja puesto; null si el procedimiento no
+ * deja nada claro o no encaja con el ámbito de la plantilla.
+ */
+function libraryLeavesFinding(
+  codings: readonly ProcedureCodingSnapshot[],
+  scope: string | null | undefined,
+): LeavesFinding | null {
+  const coding = codings[0]
+  const leaves = coding ? leavesFindingForProcedure(coding.system, coding.code) : null
+  if (!leaves) return null
+  // La variante se exige al configurar a mano; aquí basta con que encaje en la pieza.
+  return validateLeavesFinding(leaves, { scope, strictVariants: false }).length === 0 ? leaves : null
 }
 
 async function requireTemplate(tx: Db, templateId: string): Promise<TreatmentTemplateRow> {
@@ -494,6 +532,11 @@ export interface CreateServiceInput {
   /** Cómo dice el precio el agente; por defecto «evaluacion». */
   priceDisclosure?: string | null
   evaluationServiceId?: string | null
+  /**
+   * Qué deja en la pieza al completarse; `null` = nada. De la biblioteca, si
+   * no se indica, el que odentIA tiene para su código oficial.
+   */
+  leavesFinding?: LeavesFinding | null
   isActive?: boolean
 }
 
@@ -509,7 +552,7 @@ export async function createService(
   let values: typeof serviceCatalog.$inferInsert
   if (input.templateId) {
     const tpl = await requireTemplate(tx, input.templateId)
-    await resolveSingleTemplateCoding(tx, tpl.id)
+    const codings = await resolveSingleTemplateCoding(tx, tpl.id)
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
     if (
       input.specialty !== undefined &&
@@ -535,9 +578,14 @@ export async function createService(
       billingMode: assertBillingMode(input.billingMode),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
+      leavesFinding:
+        input.leavesFinding === undefined
+          ? libraryLeavesFinding(codings, tpl.scope)
+          : await assertLeavesFinding(tx, orgId, input.leavesFinding, tpl.scope),
       isActive: input.isActive ?? true,
     }
   } else {
+    const scope = assertScope(input.scope)
     values = {
       organizationId: orgId,
       templateId: null,
@@ -545,13 +593,14 @@ export async function createService(
       code: normalizeCode(input.code),
       name: assertName(input.name),
       specialty: assertSpecialty(input.specialty),
-      scope: assertScope(input.scope),
+      scope,
       priceCents: assertPrice(input.priceCents),
       currency,
       durationMin: assertDuration(input.durationMin),
       billingMode: assertBillingMode(input.billingMode),
       priceDisclosure: assertPriceDisclosure(input.priceDisclosure),
       evaluationServiceId: await assertEvaluationService(tx, orgId, input.evaluationServiceId, null),
+      leavesFinding: await assertLeavesFinding(tx, orgId, input.leavesFinding, scope),
       isActive: input.isActive ?? true,
     }
   }
@@ -586,6 +635,8 @@ export interface UpdateServicePatch {
   billingMode?: string
   priceDisclosure?: string
   evaluationServiceId?: string | null
+  /** Qué deja en la pieza al completarse; `null` = nada. */
+  leavesFinding?: LeavesFinding | null
   isActive?: boolean
 }
 
@@ -620,7 +671,12 @@ export async function updateService(
       fields.push("templateId:null")
     } else {
       const tpl = await requireTemplate(tx, patch.templateId)
-      await resolveSingleTemplateCoding(tx, tpl.id)
+      const codings = await resolveSingleTemplateCoding(tx, tpl.id)
+      // Vincular la biblioteca trae lo que su código deja en la pieza.
+      if (patch.leavesFinding === undefined) {
+        set.leavesFinding = libraryLeavesFinding(codings, tpl.scope)
+        fields.push("leavesFinding")
+      }
       if (patch.specialty !== undefined && patch.specialty !== tpl.specialty) {
         throw validation("specialty debe coincidir con la plantilla (derivado, no editable)")
       }
@@ -680,6 +736,18 @@ export async function updateService(
   if (patch.isActive !== undefined) {
     set.isActive = patch.isActive
     fields.push("isActive")
+  }
+  if (patch.leavesFinding !== undefined) {
+    set.leavesFinding = await assertLeavesFinding(
+      tx,
+      orgId,
+      patch.leavesFinding,
+      (set.scope ?? current.scope) as string | null,
+    )
+    fields.push("leavesFinding")
+  } else if (set.scope !== undefined && set.leavesFinding === undefined && current.leavesFinding) {
+    // Cambiar dónde se hace no deja un dibujo que ya no encaja.
+    await assertLeavesFinding(tx, orgId, current.leavesFinding, set.scope)
   }
 
   const resolvedSource = (set.source ?? current.source) as string
@@ -756,10 +824,11 @@ export async function fromTemplates(
     .from(treatmentTemplate)
     .where(inArray(treatmentTemplate.id, ids))
   if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
+  const codingsOf = new Map<string, ProcedureCodingSnapshot[]>()
   for (const tpl of templates) {
     if (!tpl.isActive)
       throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
-    await resolveSingleTemplateCoding(tx, tpl.id)
+    codingsOf.set(tpl.id, await resolveSingleTemplateCoding(tx, tpl.id))
   }
   const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
   const owned = await tx
@@ -794,6 +863,8 @@ export async function fromTemplates(
         currency,
         durationMin: assertDuration(item.durationMin),
         billingMode: assertBillingMode(item.billingMode),
+        // Lo tratado queda dibujado: odentIA lo deja puesto en su biblioteca.
+        leavesFinding: libraryLeavesFinding(codingsOf.get(tpl.id) ?? [], tpl.scope),
         isActive: true,
       })
       .returning()
@@ -819,6 +890,8 @@ export interface CustomServiceItem {
   priceCents: number
   billingMode?: string | null
   durationMin?: number | null
+  /** Qué deja en la pieza al completarse; sin indicarlo, nada. */
+  leavesFinding?: LeavesFinding | null
 }
 
 export type QuickAddServiceItem =
@@ -859,6 +932,7 @@ export async function quickAddServices(
         priceCents: item.priceCents,
         billingMode: item.billingMode,
         durationMin: item.durationMin,
+        leavesFinding: item.leavesFinding ?? null,
         isActive: true,
       }),
     )

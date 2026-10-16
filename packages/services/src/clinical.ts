@@ -2,6 +2,8 @@ import {
   activeFindingsAsOf,
   BLOOD_GROUPS,
   type BloodGroup,
+  type ClosingOdontogramPurpose,
+  closingOdontogramPurpose,
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
@@ -10,12 +12,14 @@ import {
   imageTypeCategory,
   isImageType,
   isValidTooth,
+  MANUAL_SIGNED_ODONTOGRAM_PURPOSES,
+  normalizeDrugText,
   normalizeTags,
-  ODONTOGRAM_STANDARD,
   type RegistrationAnswers,
   REPORT_STATUSES,
   type ReportStatus,
   registrationAnswersSchema,
+  type SignedOdontogramPurpose,
   validateFinding,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -24,6 +28,7 @@ import {
   clinicalFollowUp,
   clinicalNote,
   encounter,
+  encounterPlanItem,
   encounterProcedure,
   encounterTooth,
   odontogramAssessment,
@@ -42,13 +47,20 @@ import {
   treatmentBudget,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent } from "@odentia/db/schema/org"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
 
-async function requireDraftLink(tx: Db, orgId: string, patientId: string, encounterId: string) {
+async function requireDraftLink(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<typeof encounter.$inferSelect> {
   const [row] = await tx
     .select()
     .from(encounter)
@@ -63,6 +75,7 @@ async function requireDraftLink(tx: Db, orgId: string, patientId: string, encoun
   if (!row) throw notFound("Atención")
   if (row.status === "anulada") throw conflict("VOIDED", "La atención está anulada")
   if (row.status !== "borrador") throw conflict("FINALIZED", "La atención está finalizada")
+  return row
 }
 
 const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
@@ -207,7 +220,6 @@ export interface SavePatientHealthInput {
   conditions: HealthConditionInput[]
   medications: HealthMedicationInput[]
   anamnesis?: { expectedVersion: number; answers: Record<string, unknown> }
-  dataConsent?: true
   bloodGroup?: BloodGroup | null
   /** Reemplaza los antecedentes familiares cuando se envía. */
   familyHistory?: FamilyHistoryInput[]
@@ -565,6 +577,99 @@ export async function savePatientHealth(
   return persistPatientHealth(tx, orgId, { kind: "staff", userId: actorUserId }, patientId, input)
 }
 
+/** Una alergia que declaró la persona (o quien habla por ella), sin verificar. */
+export interface DeclaredAllergy {
+  substance: string
+  reaction: string | null
+}
+
+/**
+ * Lo que la persona declaró sobre sus alergias (el cuestionario «Antes de tu
+ * cita») pasa a los antecedentes como alergia sin confirmar (`no_confirmada`,
+ * el `unconfirmed` de HL7 FHIR AllergyIntolerance), para que la receta avise.
+ * No duplica una alergia activa de la misma sustancia y nunca cambia lo que ya
+ * existe: lo confirmado o descartado lo decidió un clínico. Avanza la revisión
+ * del agregado, así una edición abierta de Antecedentes recarga en vez de
+ * pisarlo. Devuelve cuántas alergias añadió.
+ */
+export async function addDeclaredAllergies(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  declared: DeclaredAllergy[],
+  origin: { entity: string; entityId: string },
+): Promise<number> {
+  if (declared.length === 0) return 0
+  await requirePatient(tx, orgId, patientId)
+  const [locked] = await tx
+    .select({ revision: patient.healthRevision, reviewStatus: patient.healthReviewStatus })
+    .from(patient)
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+    .limit(1)
+    .for("update")
+  if (!locked) throw notFound("Paciente")
+  const existing = await tx
+    .select({
+      substance: patientAllergy.substance,
+      isActive: patientAllergy.isActive,
+      verification: patientAllergy.verification,
+    })
+    .from(patientAllergy)
+    .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId)))
+  // Lo que ya está decidido o vigente no se repite: una activa de la misma
+  // sustancia, o una que un clínico descartó (aunque la archivara).
+  const known = new Set(
+    existing
+      .filter((row) => row.isActive || row.verification === "descartada")
+      .map((row) => normalizeDrugText(row.substance)),
+  )
+  const fresh: DeclaredAllergy[] = []
+  for (const item of declared) {
+    const substance = item.substance.trim().slice(0, 200)
+    const key = normalizeDrugText(substance)
+    if (!key || known.has(key)) continue
+    known.add(key)
+    fresh.push({ substance, reaction: item.reaction?.trim().slice(0, 2000) || null })
+  }
+  if (fresh.length === 0) return 0
+  await tx.insert(patientAllergy).values(
+    fresh.map((item) => ({
+      organizationId: orgId,
+      patientId,
+      substance: item.substance,
+      reaction: item.reaction,
+      severity: "desconocida",
+      kind: "alergia",
+      verification: "no_confirmada",
+      isActive: true,
+      createdBy: actorUserId,
+    })),
+  )
+  const reviewStatus = { ...((locked.reviewStatus ?? {}) as Record<string, unknown>) }
+  await tx
+    .update(patient)
+    .set({
+      healthRevision: locked.revision + 1,
+      // Con alergias activas el grupo queda «registrado» (la misma regla del agregado).
+      healthReviewStatus: {
+        allergies: "recorded",
+        conditions: reviewStatus.conditions ?? "unknown",
+        medications: reviewStatus.medications ?? "unknown",
+      },
+      updatedAt: new Date(),
+    })
+    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
+  // Sin copiar lo declarado: la auditoría dice qué pasó, no el dato clínico.
+  await audit(tx, orgId, actorUserId, "health.allergies_declared", "patient", patientId, {
+    origin: origin.entity,
+    originId: origin.entityId,
+    count: fresh.length,
+    revision: { before: locked.revision, after: locked.revision + 1 },
+  })
+  return fresh.length
+}
+
 async function persistPatientHealth(
   tx: Db,
   orgId: string,
@@ -581,7 +686,6 @@ async function persistPatientHealth(
     .select({
       revision: patient.healthRevision,
       reviewStatus: patient.healthReviewStatus,
-      dataConsentAt: patient.dataConsentAt,
     })
     .from(patient)
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -721,9 +825,6 @@ async function persistPatientHealth(
     }
     interviewBaseVersion = latest?.version ?? 0
     interviewChanged = !latest || canonicalJson(latest.answers) !== canonicalJson(interviewAnswers)
-  }
-  if (input.dataConsent !== undefined && input.dataConsent !== true) {
-    throw validation("dataConsent solo admite true explícito")
   }
   // Un código CIE-10 inexistente se rechaza antes de escribir nada.
   for (const row of conditions) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
@@ -892,7 +993,6 @@ async function persistPatientHealth(
   }
   if (input.asaClass !== undefined && input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
     throw validation("Clase ASA inválida (I–VI)")
-  const setConsent = input.dataConsent === true && !locked.dataConsentAt
   await tx
     .update(patient)
     .set({
@@ -902,7 +1002,6 @@ async function persistPatientHealth(
       healthReviewedAt: context.kind === "staff" ? new Date() : null,
       healthReviewedBy: context.kind === "staff" ? context.userId : null,
       ...(input.bloodGroup !== undefined ? { bloodGroup: input.bloodGroup } : {}),
-      ...(setConsent ? { dataConsentAt: new Date(), dataConsentBy: actorUserId } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
@@ -922,7 +1021,6 @@ async function persistPatientHealth(
         medications: medications.length,
       },
       newInterviewVersion: newVersion,
-      dataConsent: setConsent,
     },
   )
   return getPatientHealth(tx, orgId, patientId)
@@ -1064,11 +1162,15 @@ export async function listClinicalNotes(
   }
 }
 
-// --- Odontograma NTS 188-MINSA/DGIESP-2022 ---
+// --- Odontograma ---
 //
-// La validación normativa real vive en `@odentia/clinical` (fail closed:
-// condición desconocida, anatomía incompatible o datos faltantes = error).
-// El servicio solo añade controles de tenant/paciente/encuentro y CIE-10.
+// Numeración FDI y nomenclatura de la NTS 188 en todos los países; las siglas,
+// la variante obligatoria y el odontograma firmado solo en clínicas de Perú
+// (`orgClinicalProfile`, ADR 0036). La validación vive en `@odentia/clinical`
+// (fail closed: condición desconocida, anatomía incompatible o datos
+// faltantes = error); el servicio añade tenant, paciente, atención y CIE-10.
+// Los hallazgos solo se registran dentro de una atención en borrador: así los
+// firma quien la cierra (NTS 188, 5.3).
 
 export interface AddOdontogramInput {
   toothNumber: number
@@ -1077,7 +1179,8 @@ export interface AddOdontogramInput {
   details?: FindingDetails
   note?: string | null
   diagnosisCode?: string | null
-  encounterId?: string
+  /** Atención en borrador donde se observa: obligatoria. */
+  encounterId: string
 }
 
 type OdontogramRow = typeof odontogramEntry.$inferSelect
@@ -1120,15 +1223,28 @@ function coveredTeeth(record: FindingRecord): number[] {
   return [record.toothNumber]
 }
 
-export async function addOdontogramEntries(
+/** Con odontograma oficial (Perú) la variante es obligatoria; si no, opcional. */
+export async function orgStrictVariants(tx: Db, orgId: string): Promise<boolean> {
+  return (await orgClinicalProfile(tx, orgId)).odontogram?.strictVariants ?? false
+}
+
+/**
+ * Registra un hallazgo ya decidido en una atención en borrador que quien llama
+ * ya comprobó: valida con la regla del país, inserta (una fila por superficie
+ * o una sola para un hallazgo de grupo), suma la pieza a la atención y lo
+ * audita. `leftByPlanItemId` es el tratamiento completado que lo dejó (se
+ * escribe al insertar: la aplicación no reescribe un hallazgo). Solo para
+ * servicios: el equipo registra con `addOdontogramEntries`.
+ */
+export async function insertOdontogramFinding(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
-  input: AddOdontogramInput,
-) {
-  await requirePatient(tx, orgId, patientId)
-  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
+  encounterId: string,
+  input: Omit<FindingInput, "encounterId">,
+  options: { strictVariants: boolean; leftByPlanItemId?: string | null },
+): Promise<OdontogramRow[]> {
   const finding: FindingInput = {
     toothNumber: input.toothNumber,
     condition: input.condition,
@@ -1136,9 +1252,9 @@ export async function addOdontogramEntries(
     details: input.details ?? {},
     note: input.note ?? null,
     diagnosisCode: input.diagnosisCode ?? null,
-    encounterId: input.encounterId,
+    encounterId,
   }
-  const errors = validateFinding(finding)
+  const errors = validateFinding(finding, { strictVariants: options.strictVariants })
   if (errors.length) throw validation(errors.join("; "))
   if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
   // Hallazgo de grupo/tramo (puente, dentadura, supernumerario): UNA sola fila
@@ -1162,21 +1278,16 @@ export async function addOdontogramEntries(
     details,
     needsReview: false,
     createdBy: actorUserId,
-    encounterId: input.encounterId ?? null,
+    encounterId,
+    leftByPlanItemId: options.leftByPlanItemId ?? null,
   }))
   const rows = await tx.insert(odontogramEntry).values(toInsert).returning()
   const teethTouched = related ?? [input.toothNumber]
-  if (input.encounterId) {
-    for (const tooth of teethTouched) {
-      await tx
-        .insert(encounterTooth)
-        .values({
-          organizationId: orgId,
-          encounterId: input.encounterId,
-          toothNumber: tooth,
-        })
-        .onConflictDoNothing()
-    }
+  for (const tooth of teethTouched) {
+    await tx
+      .insert(encounterTooth)
+      .values({ organizationId: orgId, encounterId, toothNumber: tooth })
+      .onConflictDoNothing()
   }
   await audit(
     tx,
@@ -1187,12 +1298,47 @@ export async function addOdontogramEntries(
     rows[0]?.id ?? patientId,
     {
       patientId,
+      encounterId,
       toothNumber: input.toothNumber,
       relatedTeeth: teethTouched,
       count: rows.length,
+      ...(options.leftByPlanItemId ? { leftByPlanItemId: options.leftByPlanItemId } : {}),
     },
   )
   return rows
+}
+
+/**
+ * Registra un hallazgo observado en la atención en borrador de quien la lleva.
+ * Sin atención no se registra: desde la ficha el odontograma se consulta y
+ * «Atender» está a un clic.
+ */
+export async function addOdontogramEntries(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: AddOdontogramInput,
+) {
+  await requirePatient(tx, orgId, patientId)
+  const encounterId = typeof input.encounterId === "string" ? input.encounterId.trim() : ""
+  if (!encounterId) {
+    throw new ServiceError(
+      "ENCOUNTER_REQUIRED",
+      400,
+      "Los hallazgos se registran dentro de una atención: atiende a la persona para registrarlos",
+    )
+  }
+  const row = await requireDraftLink(tx, orgId, patientId, encounterId)
+  if (row.dentistUserId !== actorUserId) {
+    throw conflict(
+      "NOT_ATTENDING",
+      "Otro profesional lleva esta atención: toma el relevo para continuarla",
+    )
+  }
+  return insertOdontogramFinding(tx, orgId, actorUserId, patientId, encounterId, input, {
+    strictVariants: await orgStrictVariants(tx, orgId),
+  })
 }
 
 export async function voidOdontogramEntry(
@@ -1313,74 +1459,121 @@ export async function getOdontogram(tx: Db, orgId: string, patientId: string) {
   return { teeth, history }
 }
 
-// --- Actas de odontograma (snapshot inmutable) ---
+// --- Odontograma firmado (solo en clínicas de Perú; ADR 0036) ---
+//
+// Una sola firma, la del perfil profesional, sin trazo: nombre, título y
+// colegiatura salen del perfil de quien firma, nunca del cuerpo. El cierre de
+// una atención que cambió el gráfico lo firma solo, con su momento deducido
+// (inicio del plan, nuevos hallazgos o culminación; NTS 188, 5.10); el botón
+// «Firmar odontograma» queda para lo judicial, lo personal y el reingreso
+// (5.11). Cada uno guarda su norma: cambiar el país no la reescribe.
 
-export const ASSESSMENT_PURPOSES = [
-  "initial",
-  "new_findings",
-  "completion",
-  "reentry",
-  "legal",
-  "personal",
-] as const
-
+/** Lo que se pide al pulsar «Firmar odontograma»: el momento y, si hace falta, notas. */
 export interface CreateAssessmentInput {
   purpose: string
-  specifications: string
-  observations: string
-  examinerName: string
-  registrationNumber: string
-  signature: number[][][]
+  specifications?: string | null
+  observations?: string | null
 }
 
-function assertSignature(signature: unknown): asserts signature is number[][][] {
-  if (!Array.isArray(signature) || !signature.length || signature.length > 50) {
-    throw validation("La firma manuscrita es obligatoria (1–50 trazos capturados)")
-  }
-  for (const stroke of signature) {
-    if (!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 500) {
-      throw validation("Cada trazo de la firma requiere 2–500 puntos")
-    }
-    for (const point of stroke) {
-      if (
-        !Array.isArray(point) ||
-        point.length !== 2 ||
-        typeof point[0] !== "number" ||
-        typeof point[1] !== "number" ||
-        !Number.isFinite(point[0]) ||
-        !Number.isFinite(point[1]) ||
-        point[0] < 0 ||
-        point[0] > 100 ||
-        point[1] < 0 ||
-        point[1] > 100
-      ) {
-        throw validation("Firma inválida: puntos [x, y] normalizados 0–100")
-      }
-    }
-  }
+export type OdontogramAssessmentRow = typeof odontogramAssessment.$inferSelect
+
+/** Inserta el odontograma firmado con la instantánea de hallazgos vigentes. */
+async function signOdontogram(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: {
+    purpose: SignedOdontogramPurpose
+    specifications: string
+    observations: string
+    encounterId: string | null
+    standard: string
+    signer: { name: string; title: string; registration: string }
+  },
+): Promise<OdontogramAssessmentRow> {
+  const patientRow = await requirePatient(tx, orgId, patientId)
+  // Identidad firmada desde el servidor (nunca del body del cliente).
+  const patientName = patientRow.displayName.trim()
+  if (!patientName) throw validation("La persona no tiene nombre registrado para firmar el odontograma")
+  // Snapshot calculado en el servidor; nunca se acepta del cliente.
+  const { history } = await getOdontogram(tx, orgId, patientId)
+  const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row))
+  const entries = activeFindingsAsOf(candidates.map(toFindingRecord))
+  const [row] = await tx
+    .insert(odontogramAssessment)
+    .values({
+      organizationId: orgId,
+      patientId,
+      authorUserId: actorUserId,
+      purpose: input.purpose,
+      specifications: input.specifications,
+      observations: input.observations,
+      examinerName: input.signer.name,
+      examinerTitle: input.signer.title,
+      registrationNumber: input.signer.registration,
+      patientName,
+      patientNumber: patientRow.patientNumber,
+      entries,
+      standard: input.standard,
+      encounterId: input.encounterId,
+    })
+    .returning()
+  if (!row) throw notFound("Odontograma firmado")
+  await audit(
+    tx,
+    orgId,
+    actorUserId,
+    "odontogram.assessment_sealed",
+    "odontogram_assessment",
+    row.id,
+    {
+      patientId,
+      purpose: input.purpose,
+      encounterId: input.encounterId,
+      entriesCount: entries.length,
+    },
+  )
+  return row
 }
 
+function cleanAssessmentText(value: string | null | undefined, field: string): string {
+  const text = value?.trim() ?? ""
+  if (text.length > 4000) throw validation(`${field} admite hasta 4000 caracteres`)
+  return text
+}
+
+/**
+ * «Firmar odontograma»: a pedido judicial, a pedido de la persona o al
+ * reingresar tras culminar el plan (NTS 188, 5.10 y 5.11). Los demás momentos
+ * los firma el cierre de la atención. Solo en clínicas con odontograma
+ * oficial; quien firma lo hace con su perfil (sin colegiatura no se firma).
+ */
 export async function createOdontogramAssessment(
   tx: Db,
   orgId: string,
   actorUserId: string,
   patientId: string,
   input: CreateAssessmentInput,
-) {
-  const patientRow = await requirePatient(tx, orgId, patientId)
-  if (!(ASSESSMENT_PURPOSES as readonly string[]).includes(input.purpose))
-    throw validation("purpose inválido")
-  const specifications = input.specifications?.trim() ?? ""
-  const observations = input.observations?.trim() ?? ""
-  const examinerName = input.examinerName?.trim() ?? ""
-  const registrationNumber = input.registrationNumber?.trim() ?? ""
-  if (specifications.length > 4000) throw validation("specifications admite hasta 4000 caracteres")
-  if (observations.length > 4000) throw validation("observations admite hasta 4000 caracteres")
-  if (!examinerName || examinerName.length > 200)
-    throw validation("examinerName es obligatorio (1–200 caracteres)")
-  if (!registrationNumber || registrationNumber.length > 40)
-    throw validation("registrationNumber es obligatorio (1–40 caracteres)")
-  assertSignature(input.signature)
+): Promise<OdontogramAssessmentRow> {
+  await requirePatient(tx, orgId, patientId)
+  const official = (await orgClinicalProfile(tx, orgId)).odontogram
+  if (!official?.signedOdontogram) {
+    throw new ServiceError(
+      "SIGNED_ODONTOGRAM_UNAVAILABLE",
+      409,
+      "En las clínicas de este país el odontograma no se firma: imprímelo desde Clínica › Odontograma",
+    )
+  }
+  if (!(MANUAL_SIGNED_ODONTOGRAM_PURPOSES as readonly string[]).includes(input.purpose)) {
+    throw validation(
+      "Con «Firmar odontograma» se firma a pedido judicial, a pedido de la persona o al reingresar; el inicio, los nuevos hallazgos y la culminación los firma el cierre de la atención",
+    )
+  }
+  const specifications = cleanAssessmentText(input.specifications, "Las especificaciones")
+  const observations = cleanAssessmentText(input.observations, "Las observaciones")
+  // Firma con su perfil: sin colegiatura no se firma (nadie firma con otro nombre).
+  const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   // Sin firma sobre revisión pendiente: primero se revisan los legados.
   const [pending] = await tx
     .select({ id: odontogramEntry.id })
@@ -1398,48 +1591,16 @@ export async function createOdontogramAssessment(
   if (pending)
     throw conflict(
       "NEEDS_REVIEW",
-      "Existen hallazgos pendientes de revisión; revísalos antes de firmar el acta",
+      "Hay hallazgos anteriores pendientes de revisión: revísalos antes de firmar el odontograma",
     )
-  // Identidad firmada desde el servidor (nunca del body del cliente).
-  const patientName = patientRow.displayName.trim()
-  if (!patientName) throw validation("El paciente no tiene nombre registrado para firmar el acta")
-  // Snapshot calculado en el servidor; nunca se acepta del cliente.
-  const { history } = await getOdontogram(tx, orgId, patientId)
-  const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row))
-  const entries = activeFindingsAsOf(candidates.map(toFindingRecord))
-  const [row] = await tx
-    .insert(odontogramAssessment)
-    .values({
-      organizationId: orgId,
-      patientId,
-      authorUserId: actorUserId,
-      purpose: input.purpose,
-      specifications,
-      observations,
-      examinerName,
-      registrationNumber,
-      patientName,
-      patientNumber: patientRow.patientNumber,
-      signature: input.signature,
-      entries,
-      standard: ODONTOGRAM_STANDARD,
-    })
-    .returning()
-  if (!row) throw notFound("Acta de odontograma")
-  await audit(
-    tx,
-    orgId,
-    actorUserId,
-    "odontogram.assessment_sealed",
-    "odontogram_assessment",
-    row.id,
-    {
-      patientId,
-      purpose: input.purpose,
-      entriesCount: entries.length,
-    },
-  )
-  return row
+  return signOdontogram(tx, orgId, actorUserId, patientId, {
+    purpose: input.purpose as SignedOdontogramPurpose,
+    specifications,
+    observations,
+    encounterId: null,
+    standard: official.standard,
+    signer,
+  })
 }
 
 export async function listOdontogramAssessments(tx: Db, orgId: string, patientId: string) {
@@ -1454,6 +1615,245 @@ export async function listOdontogramAssessments(tx: Db, orgId: string, patientId
       ),
     )
     .orderBy(desc(odontogramAssessment.createdAt), desc(odontogramAssessment.id))
+}
+
+/** Lo que dejó una atención en el gráfico, por hallazgo: «caries en 16, 26 y 36». */
+export interface EncounterFindingGroup {
+  condition: string
+  teeth: number[]
+}
+
+/** El odontograma que firmará el cierre de la atención (solo en clínicas de Perú). */
+export interface ClosingOdontogram {
+  purpose: ClosingOdontogramPurpose
+  /** Norma con la que se firma («NTS 188-MINSA/DGIESP-2022») y su nombre corto. */
+  standard: string
+  shortName: string
+  /** Lo que se registró en esta atención; vacío si solo quedó tratado lo anterior. */
+  findings: EncounterFindingGroup[]
+}
+
+/**
+ * Si el cierre de esta atención firma el odontograma y con qué momento: solo
+ * en clínicas con odontograma firmado y si la atención cambió el gráfico (un
+ * hallazgo nuevo vigente, o uno anterior que su tratamiento deja tratado al
+ * cerrar). La misma regla sirve al cierre (antes de firmar, para decirlo) y a
+ * `finalizeEncounter` (al firmar).
+ */
+export async function closingOdontogramOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<ClosingOdontogram | null> {
+  const official = (await orgClinicalProfile(tx, orgId)).odontogram
+  if (!official?.signedOdontogram) return null
+  const added = await tx
+    .select({
+      condition: odontogramEntry.condition,
+      toothNumber: odontogramEntry.toothNumber,
+      details: odontogramEntry.details,
+    })
+    .from(odontogramEntry)
+    .where(
+      and(
+        eq(odontogramEntry.organizationId, orgId),
+        eq(odontogramEntry.patientId, patientId),
+        eq(odontogramEntry.encounterId, encounterId),
+        isNull(odontogramEntry.voidedAt),
+        sql`${odontogramEntry.status} <> 'voided'`,
+        eq(odontogramEntry.needsReview, false),
+      ),
+    )
+    .orderBy(asc(odontogramEntry.createdAt), asc(odontogramEntry.id))
+  // Lo realizado en esta atención: deja tratado su hallazgo y puede culminar el plan.
+  const done = await tx
+    .select({
+      planId: treatmentPlanItem.planId,
+      entryId: treatmentPlanItem.odontogramEntryId,
+      itemId: treatmentPlanItem.id,
+    })
+    .from(encounterPlanItem)
+    .innerJoin(
+      treatmentPlanItem,
+      and(
+        eq(treatmentPlanItem.id, encounterPlanItem.planItemId),
+        eq(treatmentPlanItem.organizationId, encounterPlanItem.organizationId),
+      ),
+    )
+    .where(
+      and(
+        eq(encounterPlanItem.organizationId, orgId),
+        eq(encounterPlanItem.encounterId, encounterId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.status, "realizado"),
+      ),
+    )
+  const treatedIds = done.flatMap((item) => (item.entryId ? [item.entryId] : []))
+  const treated = treatedIds.length
+    ? await tx
+        .select({ id: odontogramEntry.id })
+        .from(odontogramEntry)
+        .where(
+          and(
+            eq(odontogramEntry.organizationId, orgId),
+            inArray(odontogramEntry.id, treatedIds),
+            isNull(odontogramEntry.voidedAt),
+            or(
+              isNull(odontogramEntry.resolvedAt),
+              inArray(
+                odontogramEntry.resolvedByPlanItemId,
+                done.map((item) => item.itemId),
+              ),
+            ),
+          ),
+        )
+    : []
+  if (added.length === 0 && treated.length === 0) return null
+  const previous = await tx
+    .select({ purpose: odontogramAssessment.purpose })
+    .from(odontogramAssessment)
+    .where(
+      and(
+        eq(odontogramAssessment.organizationId, orgId),
+        eq(odontogramAssessment.patientId, patientId),
+      ),
+    )
+    .orderBy(asc(odontogramAssessment.createdAt), asc(odontogramAssessment.id))
+  // Culmina el plan si a alguno de los planes de lo realizado hoy ya no le
+  // queda nada por hacer (todo realizado, cancelado o reemplazado).
+  const planIds = [...new Set(done.map((item) => item.planId))]
+  const open = planIds.length
+    ? await tx
+        .select({ planId: treatmentPlanItem.planId })
+        .from(treatmentPlanItem)
+        .where(
+          and(
+            eq(treatmentPlanItem.organizationId, orgId),
+            eq(treatmentPlanItem.patientId, patientId),
+            inArray(treatmentPlanItem.planId, planIds),
+            sql`${treatmentPlanItem.status} not in ('realizado', 'cancelado', 'reemplazado')`,
+          ),
+        )
+    : []
+  const stillOpen = new Set(open.map((row) => row.planId))
+  const culminated = planIds.some((planId) => !stillOpen.has(planId))
+  const groups = new Map<string, Set<number>>()
+  for (const entry of added) {
+    const teeth = groups.get(entry.condition) ?? new Set<number>()
+    const related = (entry.details as FindingDetails | null)?.relatedTeeth
+    for (const tooth of related?.length ? related : [entry.toothNumber]) teeth.add(tooth)
+    groups.set(entry.condition, teeth)
+  }
+  return {
+    purpose: closingOdontogramPurpose(
+      previous.map((row) => row.purpose),
+      culminated,
+    ),
+    standard: official.standard,
+    shortName: official.shortName,
+    findings: [...groups].map(([condition, teeth]) => ({
+      condition,
+      teeth: [...teeth].sort((a, b) => a - b),
+    })),
+  }
+}
+
+/**
+ * Al cerrar la atención (dentro de `finalizeEncounter`, después de dejar
+ * tratado lo realizado): firma el odontograma con el perfil de quien cierra,
+ * si la atención cambió el gráfico en una clínica de Perú. Uno por atención.
+ */
+export async function signClosingOdontogram(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  signer: { name: string; title: string; registration: string },
+): Promise<OdontogramAssessmentRow | null> {
+  const closing = await closingOdontogramOf(tx, orgId, patientId, encounterId)
+  if (!closing) return null
+  return signOdontogram(tx, orgId, actorUserId, patientId, {
+    purpose: closing.purpose,
+    specifications: "",
+    observations: "",
+    encounterId,
+    standard: closing.standard,
+    signer,
+  })
+}
+
+/** Datos de la clínica que encabezan una hoja impresa. */
+async function establishmentOf(tx: Db, orgId: string) {
+  const [org] = await tx
+    .select({
+      legalName: orgProfile.legalName,
+      tradeName: orgProfile.tradeName,
+      fiscalDocType: orgProfile.fiscalDocType,
+      fiscalDocNumber: orgProfile.fiscalDocNumber,
+      address: orgProfile.fiscalAddress,
+    })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+  return org ?? null
+}
+
+async function printPatientOf(tx: Db, orgId: string, patientId: string) {
+  const row = await requirePatient(tx, orgId, patientId)
+  return {
+    displayName: row.displayName,
+    patientNumber: row.patientNumber,
+    docType: row.docType,
+    docNumber: row.docNumber,
+    birthDate: row.birthDate,
+  }
+}
+
+/**
+ * Hoja de un odontograma firmado para ver e imprimir: su instantánea con el
+ * gráfico de la norma, quién lo firmó y «Firma y sello» para el papel.
+ */
+export async function getSignedOdontogramPrint(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  assessmentId: string,
+) {
+  const [assessment] = await tx
+    .select()
+    .from(odontogramAssessment)
+    .where(
+      and(
+        eq(odontogramAssessment.id, assessmentId),
+        eq(odontogramAssessment.organizationId, orgId),
+        eq(odontogramAssessment.patientId, patientId),
+      ),
+    )
+    .limit(1)
+  if (!assessment) throw notFound("Odontograma firmado")
+  return {
+    assessment,
+    patient: await printPatientOf(tx, orgId, patientId),
+    establishment: await establishmentOf(tx, orgId),
+  }
+}
+
+/**
+ * Hoja neutra del odontograma de hoy, sin norma de ningún país: numeración FDI
+ * y los hallazgos vigentes por pieza. Es lo que se imprime donde no hay
+ * odontograma firmado.
+ */
+export async function getOdontogramPrint(tx: Db, orgId: string, patientId: string) {
+  const patientRow = await printPatientOf(tx, orgId, patientId)
+  const { history } = await getOdontogram(tx, orgId, patientId)
+  const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row))
+  return {
+    entries: activeFindingsAsOf(candidates.map(toFindingRecord)),
+    patient: patientRow,
+    establishment: await establishmentOf(tx, orgId),
+    printedAt: new Date(),
+  }
 }
 
 // --- Documentos con contexto versionado ---

@@ -6,14 +6,14 @@ import { apiFetch } from "../../lib/api"
 import { timeAgo } from "../../lib/crm"
 import { documentCategoryLabel } from "../../lib/patient-overview"
 import { type EncounterDetail, encounterStatusLabel, type TimelineItem } from "../../lib/patients"
+import { SignedOdontogramFact } from "../odontogram-assessments"
 import { DocumentOpenButton } from "./document-open-button"
 import { EncounterDetailView } from "./encounter-detail-view"
-import { activeOrgLocale } from "../../lib/locale"
 
 /**
  * Atención finalizada como unidad clínica: motivo, evolución, procedimientos
- * con diagnósticos, tratamientos vinculados, documentos relacionados,
- * indicaciones y siguiente paso. Detalle expandible con carga perezosa
+ * con diagnósticos, tratamientos vinculados, documentos relacionados e
+ * indicaciones. Detalle expandible con carga perezosa
  * (GET /api/patients/:id/encounters/:encId).
  */
 export function EncounterHistoryCard({
@@ -119,25 +119,18 @@ export function EncounterHistoryCard({
             </ul>
           </div>
         ) : null}
+        <SignedOdontogramFact patientId={patientId} encounterId={item.refId} />
         {item.indications ? (
           <p className="text-sm">
             <span className="font-medium">Indicaciones: </span>
             {item.indications}
           </p>
         ) : null}
-        <p className="text-xs text-muted-foreground">
-          {typeof item.documentsCount === "number" && documents.length === 0
-            ? `${item.documentsCount} documento${item.documentsCount === 1 ? "" : "s"} · `
-            : ""}
-          {item.nextStep ? `Paso siguiente: ${item.nextStep} · ` : ""}
-          {item.nextAppointmentAt ? (
-            <time dateTime={item.nextAppointmentAt}>
-              Próxima revisión sugerida: {new Date(item.nextAppointmentAt).toLocaleString(activeOrgLocale())}
-            </time>
-          ) : (
-            "Sin próxima revisión sugerida"
-          )}
-        </p>
+        {typeof item.documentsCount === "number" && item.documentsCount > 0 && documents.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {item.documentsCount} documento{item.documentsCount === 1 ? "" : "s"}
+          </p>
+        ) : null}
         <div className="flex items-center gap-2">
           <Link
             to="/patients/$patientId/encounters/$encounterId"

@@ -8,12 +8,12 @@
 
 import {
   ADMINISTRATION_ROUTES,
-  allergyConflicts,
+  allergyWarnings,
   DENTAL_MEDICATIONS,
   DOSAGE_FORMS,
 } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, Checkbox, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
+import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
@@ -34,6 +34,7 @@ import {
   followUpAppointmentLabel,
   formatDate,
   formatDateTime,
+  instantFromClinicValue,
   mutationMessage,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
@@ -43,10 +44,13 @@ import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/pat
 import { ChoiceSelect } from "../ui/choice-select"
 import { Cie10Search } from "./cie10-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
+import { HealthDocumentSendDrawer } from "./health-document-send"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
 const MAX_INSTRUCTIONS = 4000
+/** Un control previsto vence a las 9:00 de la clínica del día elegido (la hora la pone su cita). */
+const CONTROL_HOUR = "09:00"
 
 function statusBadge(status: string): "default" | "secondary" | "success" | "destructive" {
   if (status === "realizado") return "success"
@@ -55,15 +59,6 @@ function statusBadge(status: string): "default" | "secondary" | "success" | "des
   return "secondary"
 }
 
-function toIso(value: string): string {
-  return new Date(value).toISOString()
-}
-
-/** Valor para inputs `datetime-local` en hora local del navegador. */
-function localInputValue(date: Date): string {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
-}
 
 /** Controles longitudinales del paciente, acotables a un tratamiento o atención. */
 export function ControlesPanel({
@@ -73,10 +68,13 @@ export function ControlesPanel({
   encounterOnly = false,
   allowCreate = true,
   items,
+  heading = "Controles",
 }: {
   patientId: string
   itemId?: string
   encounterId?: string
+  /** «Próximo control» dentro de la atención; «Controles» en el Plan. */
+  heading?: string
   /** Muestra solo los controles de esta atención (ficha de la atención). */
   encounterOnly?: boolean
   /** La atención cerrada es inmutable: allí no se indica un control nuevo. */
@@ -119,7 +117,9 @@ export function ControlesPanel({
   const kind = itemId ? "tratamiento" : kindState
   const planItemId = itemId ?? planItemIdState
   const [title, setTitle] = useState("")
-  const [dueAt, setDueAt] = useState(localInputValue(new Date(Date.now() + 86_400_000)))
+  // El día previsto se elige en la zona de la clínica, no en la del navegador:
+  // un control es para un día, no para una hora (la hora la pone la cita).
+  const [dueDay, setDueDay] = useState(() => addDays(regionToday(), 1))
   const [instructions, setInstructions] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -135,7 +135,7 @@ export function ControlesPanel({
       createFollowUpApi(patientId, {
         kind,
         title: title.trim(),
-        dueAt: toIso(dueAt),
+        dueAt: instantFromClinicValue(`${dueDay}T${CONTROL_HOUR}`) ?? "",
         instructions: instructions.trim() || null,
         planItemId: kind === "tratamiento" ? planItemId || null : null,
         originEncounterId: encounterId ?? null,
@@ -197,7 +197,7 @@ export function ControlesPanel({
     <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Controles</div>
+          <h3 className="font-heading text-base font-medium">{heading}</h3>
           <p className="text-sm text-muted-foreground">
             Un control programado no equivale a un control realizado: se completa contra una
             atención finalizada y deja su resultado en la historia.
@@ -242,7 +242,7 @@ export function ControlesPanel({
                 </Badge>
                 <span className="text-sm text-muted-foreground">
                   {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto{" "}
-                  {formatDateTime(row.dueAt)}
+                  {formatDate(row.dueAt)}
                   {row.legacyScheduledAt && !row.appointment
                     ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
                     : ""}
@@ -290,7 +290,7 @@ export function ControlesPanel({
                         setScheduling(row)
                       }}
                     >
-                      Programar control
+                      Reservar
                     </Button>
                   ) : null}
                   {row.status === "pendiente" || row.status === "programado" ? (
@@ -327,7 +327,7 @@ export function ControlesPanel({
               row.status === "pendiente" &&
               row.appointment?.status !== "atendida" ? (
                 <p className="text-sm text-muted-foreground">
-                  Para programar el control necesitas también permiso de escritura en agenda.
+                  Para reservar el control necesitas también permiso de escritura en agenda.
                 </p>
               ) : null}
             </li>
@@ -360,6 +360,10 @@ export function ControlesPanel({
           }
           if (!title.trim()) {
             setError("Indica el título del control.")
+            return
+          }
+          if (!dueDay) {
+            setError("Indica la fecha prevista del control.")
             return
           }
           createMutation.mutate()
@@ -419,11 +423,12 @@ export function ControlesPanel({
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-due`}>Fecha prevista</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-due`}
-              type="datetime-local"
-              value={dueAt}
-              onChange={(event) => setDueAt(event.target.value)}
+              className="w-56"
+              min={regionToday()}
+              value={dueDay}
+              onChange={setDueDay}
             />
           </Field>
           <Field>
@@ -545,14 +550,17 @@ export function ControlesPanel({
   )
 }
 
-function PrescriptionEntry({
+export function PrescriptionEntry({
   patientId,
   prescription,
   items,
+  defaultOpen = false,
 }: {
   patientId: string
   prescription: Prescription
   items?: PlanItem[]
+  /** Abierta al mostrarse sola (Documentos la abre al lado). */
+  defaultOpen?: boolean
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("clinical.write")
@@ -564,6 +572,7 @@ function PrescriptionEntry({
     enabled: canRead,
   })
   const [cancelling, setCancelling] = useState(false)
+  const [sending, setSending] = useState(false)
   const [reason, setReason] = useState("")
   const [error, setError] = useState<string | null>(null)
   const cancelMutation = useMutation({
@@ -580,7 +589,7 @@ function PrescriptionEntry({
   const rows = detail.data?.data.items ?? prescription.items ?? []
   const planItem = items?.find((item) => item.id === prescription.planItemId) ?? null
   return (
-    <details className="rounded-md border p-4">
+    <details className="rounded-md border p-4" open={defaultOpen}>
       <summary className="cursor-pointer text-sm font-medium">
         Receta N.º {prescription.prescriptionNumber} ·{" "}
         {PRESCRIPTION_STATUS_LABELS[prescription.status] ?? prescription.status} ·{" "}
@@ -624,7 +633,7 @@ function PrescriptionEntry({
           </p>
         ) : null}
         {prescription.status === "emitida" ? (
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Link
               to="/patients/$patientId/prescriptions/$prescriptionId/print"
               params={{ patientId, prescriptionId: prescription.id }}
@@ -633,7 +642,21 @@ function PrescriptionEntry({
             >
               Imprimir
             </Link>
+            {canWrite ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => setSending(true)}>
+                Enviar a la persona
+              </Button>
+            ) : null}
           </div>
+        ) : null}
+        {sending ? (
+          <HealthDocumentSendDrawer
+            open
+            patientId={patientId}
+            documentType="prescription"
+            documentId={prescription.id}
+            onClose={() => setSending(false)}
+          />
         ) : null}
         {canWrite && prescription.status === "emitida" ? (
           <div>
@@ -723,6 +746,10 @@ export function RecetasPanel({
   encounterOnly = false,
   allowCreate = true,
   items,
+  drawerOnly = false,
+  createOpen: createOpenProp,
+  onCreateOpenChange,
+  defaultDiagnosisCode,
 }: {
   patientId: string
   itemId?: string
@@ -732,6 +759,15 @@ export function RecetasPanel({
   /** La atención cerrada es inmutable: allí no se emite una receta nueva. */
   allowCreate?: boolean
   items?: PlanItem[]
+  /**
+   * Desde el bloque Documentos de la atención: solo el formulario de emitir,
+   * abierto desde fuera (`createOpen`) y sin la lista, que el bloque ya muestra.
+   */
+  drawerOnly?: boolean
+  createOpen?: boolean
+  onCreateOpenChange?: (open: boolean) => void
+  /** El diagnóstico de la atención, ya puesto. */
+  defaultDiagnosisCode?: string
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("clinical.write")
@@ -747,25 +783,28 @@ export function RecetasPanel({
   // recorrido abierto y no una selección previa de otra pantalla.
   const planItemId = itemId ?? planItemIdState
   const [notes, setNotes] = useState("")
-  const [diagnosisCode, setDiagnosisCode] = useState("")
+  const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
   const [validUntil, setValidUntil] = useState("")
   const [acknowledged, setAcknowledged] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpenState, setCreateOpenState] = useState(false)
+  const createOpen = createOpenProp ?? createOpenState
+  const setCreateOpen = (open: boolean) => {
+    setCreateOpenState(open)
+    onCreateOpenChange?.(open)
+  }
   const [medications, setMedications] = useState<MedicationDraft[]>([emptyMedication()])
-  // Alergias registradas: el aviso aparece al escribir la DCI, antes de emitir.
+  // Alergias activas, también las declaradas sin confirmar: el aviso aparece al
+  // escribir la DCI, antes de emitir, con la misma regla que el servidor.
   const healthQuery = useQuery({
     queryKey: ["patient-health", patientId],
     queryFn: () => fetchPatientHealth(patientId),
     enabled: canRead && createOpen,
   })
-  const allergySubstances = (healthQuery.data?.data.allergies ?? [])
-    .filter((allergy) => allergy.isActive)
-    .map((allergy) => allergy.substance)
+  const activeAllergies = (healthQuery.data?.data.allergies ?? []).filter(
+    (allergy) => allergy.isActive,
+  )
   const conflicts = medications.flatMap((medication) =>
-    allergyConflicts(medication.genericName, allergySubstances).map(
-      (conflict) =>
-        `${medication.genericName}: alergia a ${conflict.substance} (${conflict.reason})`,
-    ),
+    allergyWarnings(medication.genericName, activeAllergies),
   )
   const [error, setError] = useState<string | null>(null)
   const createMutation = useMutation({
@@ -817,69 +856,7 @@ export function RecetasPanel({
       ),
     )
 
-  return (
-    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Recetas</div>
-          <p className="text-sm text-muted-foreground">
-            La receta queda ligada al tratamiento y a la atención donde se emitió; se corrige
-            anulándola con motivo.
-          </p>
-        </div>
-        {canWrite && allowCreate ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              setError(null)
-              setCreateOpen(true)
-            }}
-          >
-            Emitir receta
-          </Button>
-        ) : null}
-      </div>
-
-      {list.isPending ? (
-        <p className="text-sm text-muted-foreground">Cargando recetas…</p>
-      ) : list.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          No se pudieron cargar las recetas.{" "}
-          <Button type="button" size="sm" variant="outline" onClick={() => void list.refetch()}>
-            Reintentar
-          </Button>
-        </p>
-      ) : rows.length === 0 ? (
-        <EmptyState
-          title="Sin recetas"
-          description="Emite una receta cuando el tratamiento lo requiera; quedará enlazada a esta historia."
-        />
-      ) : (
-        <div className="flex flex-col gap-2">
-          {rows.map((prescription) => (
-            <PrescriptionEntry
-              key={prescription.id}
-              patientId={patientId}
-              prescription={prescription}
-              items={items}
-            />
-          ))}
-        </div>
-      )}
-
-      <FormDrawer
-        open={createOpen}
-        title="Emitir receta"
-        description="La receta queda inmutable: para corregirla se anula con motivo."
-        error={createOpen ? error : null}
-        isSubmitting={createMutation.isPending}
-        submitLabel="Emitir receta"
-        className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
-        onClose={() => {
-          if (!createMutation.isPending) setCreateOpen(false)
-        }}
-        onSubmit={(event) => {
+  const submitCreate = (event: React.FormEvent) => {
           event.preventDefault()
           const incomplete = medications.some(
             (medication) =>
@@ -901,8 +878,8 @@ export function RecetasPanel({
             return
           }
           createMutation.mutate()
-        }}
-      >
+  }
+  const createBody = (
         <div className="flex flex-col gap-4">
           {itemId ? (
             <p className="text-sm text-muted-foreground">
@@ -1085,18 +1062,14 @@ export function RecetasPanel({
               role="alert"
               className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
             >
-              <p className="font-medium">Alergia registrada</p>
+              <p className="font-medium">Aviso de alergia</p>
               <ul className="list-disc pl-5">
                 {conflicts.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>
               <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
-                />
+                <Checkbox checked={acknowledged} onCheckedChange={(value) => setAcknowledged(value === true)} />
                 Lo revisé y prescribo igualmente (queda registrado).
               </label>
             </div>
@@ -1108,13 +1081,13 @@ export function RecetasPanel({
           />
           <Field>
             <FieldLabel htmlFor={`${uid}-rx-valid`}>Válida hasta (opcional)</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-rx-valid`}
-              type="date"
-              className="w-44"
-              min={new Date().toISOString().slice(0, 10)}
+              className="w-56"
+              min={regionToday()}
               value={validUntil}
-              onChange={(event) => setValidUntil(event.target.value)}
+              emptyLabel="Sin fecha"
+              onChange={setValidUntil}
             />
           </Field>
           <Field>
@@ -1127,7 +1100,78 @@ export function RecetasPanel({
             />
           </Field>
         </div>
+  )
+  const createDrawer = (
+      <FormDrawer
+        open={createOpen}
+        title="Emitir receta"
+        description="La receta queda inmutable: para corregirla se anula con motivo."
+        error={createOpen ? error : null}
+        isSubmitting={createMutation.isPending}
+        submitLabel="Emitir receta"
+        className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
+        onClose={() => {
+          if (!createMutation.isPending) setCreateOpen(false)
+        }}
+        onSubmit={submitCreate}
+      >
+        {createBody}
       </FormDrawer>
+  )
+  if (drawerOnly) return createDrawer
+
+  return (
+    <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5">
+          <div className="font-heading text-base font-medium">Recetas</div>
+          <p className="text-sm text-muted-foreground">
+            La receta queda ligada al tratamiento y a la atención donde se emitió; se corrige
+            anulándola con motivo.
+          </p>
+        </div>
+        {canWrite && allowCreate ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setError(null)
+              setCreateOpen(true)
+            }}
+          >
+            Emitir receta
+          </Button>
+        ) : null}
+      </div>
+
+      {list.isPending ? (
+        <p className="text-sm text-muted-foreground">Cargando recetas…</p>
+      ) : list.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudieron cargar las recetas.{" "}
+          <Button type="button" size="sm" variant="outline" onClick={() => void list.refetch()}>
+            Reintentar
+          </Button>
+        </p>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="Sin recetas"
+          description="Emite una receta cuando el tratamiento lo requiera; quedará enlazada a esta historia."
+        />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {rows.map((prescription) => (
+            <PrescriptionEntry
+              key={prescription.id}
+              patientId={patientId}
+              prescription={prescription}
+              items={items}
+            />
+          ))}
+        </div>
+      )}
+
+      {createDrawer}
     </div>
   )
 }

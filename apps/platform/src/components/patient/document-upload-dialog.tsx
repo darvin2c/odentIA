@@ -17,12 +17,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { DatePickerButton, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { FileText, Upload, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
+import { instantFromClinicValue } from "../../lib/clinical-journey"
 import { orgSlugFromHostname } from "../../lib/host"
 import type { Encounter, PlanItem } from "../../lib/patients"
 import {
@@ -51,7 +52,7 @@ interface QueuedFile {
   category: string
   /** Subtipo de imagen (radiografía o foto clínica). */
   imageType: string
-  /** Fecha y hora de toma (datetime-local); vacía = la de subida. */
+  /** Día de toma (`yyyy-mm-dd`, en la zona de la clínica); vacío = el de subida. */
   capturedAt: string
   source: string
   teeth: number[]
@@ -83,6 +84,17 @@ export interface DocumentUploadDialogProps {
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
   disabled?: boolean
+}
+
+/**
+ * Instante de toma de un día elegido en la clínica: hoy, ahora (nunca en el
+ * futuro); otro día, su mediodía, que no se corre de fecha en ningún formato.
+ * Sin día, `null`: vale la fecha de subida.
+ */
+function capturedInstant(day: string): string | null {
+  if (!day) return null
+  if (day === regionToday()) return new Date().toISOString()
+  return instantFromClinicValue(`${day}T12:00`)
 }
 
 /** Solo borradores admiten vínculo directo al subir; lo cerrado se vincula por revisión auditada. */
@@ -224,8 +236,8 @@ export function DocumentUploadDialog({
     if (!row.category) return "Elige la categoría."
     if (imageTypesFor(row.category).length > 0 && !row.imageType)
       return "Elige el tipo de imagen."
-    if (row.capturedAt && new Date(row.capturedAt).getTime() > Date.now() + 5 * 60_000)
-      return "La fecha de toma no puede ser futura."
+    // El día de toma se elige en la zona de la clínica, no en la del navegador.
+    if (row.capturedAt && row.capturedAt > regionToday()) return "La fecha de toma no puede ser futura."
     return null
   }
 
@@ -238,7 +250,8 @@ export function DocumentUploadDialog({
       form.append("label", row.title.trim())
       if (row.imageType && imageTypesFor(row.category).includes(row.imageType as never))
         form.append("imageType", row.imageType)
-      if (row.capturedAt) form.append("capturedAt", new Date(row.capturedAt).toISOString())
+      const capturedAt = capturedInstant(row.capturedAt)
+      if (capturedAt) form.append("capturedAt", capturedAt)
       if (row.source.trim()) form.append("source", row.source.trim())
       if (encounterChoice) form.append("encounterId", encounterChoice)
       if (row.planItemId) form.append("planItemId", row.planItemId)
@@ -622,15 +635,14 @@ function QueuedRow({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`${titleId}-taken`}>Fecha de toma</FieldLabel>
-                <Input
+                <DatePickerButton
                   id={`${titleId}-taken`}
-                  type="datetime-local"
+                  className="w-full"
                   value={row.capturedAt}
                   disabled={busy}
-                  max={new Date(Date.now() - new Date().getTimezoneOffset() * 60_000)
-                    .toISOString()
-                    .slice(0, 16)}
-                  onChange={(e) => onPatch({ capturedAt: e.currentTarget.value, validationError: null })}
+                  max={regionToday()}
+                  emptyLabel="La de subida"
+                  onChange={(next) => onPatch({ capturedAt: next, validationError: null })}
                   aria-describedby={`${titleId}-taken-help`}
                 />
                 <p id={`${titleId}-taken-help`} className="text-xs text-muted-foreground">

@@ -8,60 +8,179 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  toast,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
-import { useQueryClient } from "@tanstack/react-query"
+import { addDays, FormDrawer, minutesToInstant, SubmitButton, zonedDateOf } from "@odentia/ui-patterns"
+import { canAccess } from "@odentia/auth/permissions"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
+import { type AgendaAppointment, invalidateAppointmentQueries, professionalSaid } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
 import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
-import type { Encounter, PatientFull, PatientSummary } from "../../lib/patients"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import type { Encounter, PatientFull } from "../../lib/patients"
 
-/** Cita de agenda desde la que se atiende: fija sede y profesional. */
+/** Cita de agenda desde la que se atiende: fija la sede y dice de quién es. */
 export interface AttendedAppointment {
   id: string
   dentistUserId: string
-  reason: string | null
-  serviceName: string | null
+  /** Para decir «Atiendes la cita de la Dra. Ana Torres» cuando atiende otro. */
+  dentistName: string
+}
+
+/** La atención en curso de un paciente, sin nada de su historia: cuál es y quién la lleva. */
+interface OpenEncounterRef {
+  id: string
+  dentistUserId: string
 }
 
 /**
- * Nueva y reanudada abren el mismo espacio clínico. La apertura exige el
- * motivo de la visita y el profesional que atiende (por defecto quien abre);
- * la puede crear recepción o el propio médico. Desde la agenda («Atender»)
- * la atención queda vinculada a la cita, que se marca atendida al cerrar.
+ * «Atender» una cita en un clic (ADR 0032): abre su atención sin formulario, a
+ * nombre de quien pulsa; el servidor marca la llegada si nadie lo hizo y el
+ * motivo se escribe dentro (lo exige el cierre). Si la persona ya tiene una
+ * atención en curso, se continúa esa. Cuando quien pulsa no es el profesional
+ * de la cita, se le dice de quién es.
+ */
+export function useAttendAppointment() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const myUserId = useMyUserId()
+  return useMutation({
+    mutationFn: async (input: { patientId: string; appointment: AttendedAppointment }) => {
+      try {
+        const result = await apiFetch<{ data: Encounter }>(`/api/patients/${input.patientId}/encounters`, {
+          method: "POST",
+          body: JSON.stringify({ appointmentId: input.appointment.id }),
+        })
+        return result.data.id
+      } catch (err) {
+        // Ya hay una atención abierta (de la persona o de esta cita): se retoma.
+        if (err instanceof ApiError && (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")) {
+          const current = await apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${input.patientId}/open-encounter`)
+          if (current.data) return current.data.id
+        }
+        throw err
+      }
+    },
+    onSuccess: async (encounterId, input) => {
+      if (input.appointment.dentistUserId !== myUserId) {
+        toast.info(`Atiendes la cita de ${professionalSaid(input.appointment.dentistName, { full: true })}`)
+      }
+      await Promise.all([
+        invalidateAppointmentQueries(queryClient),
+        queryClient.invalidateQueries({ queryKey: ["open-encounter", input.patientId] }),
+      ])
+      void navigate({
+        to: "/patients/$patientId/encounters/$encounterId",
+        params: { patientId: input.patientId, encounterId },
+      })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? (err.shape.message ?? "No se pudo abrir la atención.") : "No se pudo abrir la atención.")
+    },
+  })
+}
+
+/** La hora de la cita en la zona de la clínica, «10:00». */
+function clockOf(iso: string): string {
+  return new Date(iso).toLocaleTimeString(activeOrgLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
+/** La cita de hoy que se puede atender (sigue en pie), de la que llegó primero o la más cercana a la hora. */
+function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppointment | null {
+  const timeZone = activeOrgTimeZone()
+  const today = zonedDateOf(new Date().toISOString(), timeZone)
+  const query = useQuery({
+    queryKey: ["patient-appointments", patientId, "hoy", today],
+    enabled,
+    queryFn: () => {
+      const params = new URLSearchParams({
+        patientId,
+        from: minutesToInstant(today, 0, timeZone),
+        to: minutesToInstant(addDays(today, 1), 0, timeZone),
+      })
+      return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
+    },
+    retry: false,
+  })
+  const now = Date.now()
+  const attendable = (query.data?.data ?? []).filter(
+    (item) => item.visit === "por_confirmar" || item.visit === "confirmada" || item.visit === "llego",
+  )
+  return (
+    attendable.find((item) => item.visit === "llego") ??
+    [...attendable].sort((a, b) => Math.abs(Date.parse(a.startsAt) - now) - Math.abs(Date.parse(b.startsAt) - now))[0] ??
+    null
+  )
+}
+
+/**
+ * El botón de atender, el mismo en la cabecera de la página (desde cualquier
+ * pestaña) y en los vacíos que lo piden (ADR 0035). Un solo nombre por caso:
+ * con una atención en curso, «Continuar la atención» (lo escrito no se
+ * pierde); con una cita hoy, «Atender (10:00)»: un clic, sin formulario; sin
+ * cita, «Atender», que pide el motivo de la visita y el profesional que
+ * atiende (por defecto quien pulsa). Solo se ofrece a quien escribe en la
+ * historia clínica. La cita se marca atendida al cerrar.
  */
 export function NewEncounterButton({
   patientId,
   openEncounterId,
   initialPlanItemIds,
   appointment,
+  variant = "default",
+  size = "default",
 }: {
   patientId: string
   detail?: PatientFull
   openEncounterId?: string | null
   initialPlanItemIds?: string[]
   appointment?: AttendedAppointment
+  /** En un vacío («Todavía no tiene atenciones») va como acción secundaria. */
+  variant?: "default" | "outline"
+  size?: "default" | "sm"
 }) {
   const canWrite = usePermission("clinical.write")
+  const canSeeAgenda = usePermission("appointments.read")
   const myUserId = useMyUserId()
   const members = useOrgMembers()
   const sede = useActiveBranch()
   const queryClient = useQueryClient()
+  const attend = useAttendAppointment()
+  // Solo profesionales clínicos: nunca caja ni recepción (el servidor lo exige igual).
+  const professionals = members.filter((m) => canAccess(m.role, "clinical.write"))
+  const eligible = (userId: string | undefined) =>
+    Boolean(userId) && professionals.some((m) => m.userId === userId)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [reason, setReason] = useState(appointment?.reason ?? "")
-  const [dentistUserId, setDentistUserId] = useState(appointment?.dentistUserId ?? myUserId)
+  const [reason, setReason] = useState("")
+  const [dentistUserId, setDentistUserId] = useState(eligible(myUserId) ? myUserId : "")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const openQuery = useQuery({
+    queryKey: ["open-encounter", patientId],
+    queryFn: () =>
+      apiFetch<{ data: OpenEncounterRef | null }>(`/api/patients/${patientId}/open-encounter`),
+    enabled: canWrite && !appointment && !openEncounterId,
+  })
+  const inProgressId = openEncounterId ?? openQuery.data?.data?.id ?? null
+  // En la página de la persona: si hoy tiene cita, atender es un clic y se une a ella.
+  const todayVisit = useTodayAppointment(patientId, canWrite && canSeeAgenda && !appointment && !inProgressId)
+  const visit: AttendedAppointment | null =
+    appointment ?? (todayVisit ? { id: todayVisit.id, dentistUserId: todayVisit.dentistUserId, dentistName: todayVisit.dentistName } : null)
   const open = (id: string) =>
     void navigate({
       to: "/patients/$patientId/encounters/$encounterId",
       params: { patientId, encounterId: id },
     })
   const start = async () => {
-    if (saving || !reason.trim()) return
+    if (saving || !reason.trim() || !dentistUserId) return
     setSaving(true)
     setError(null)
     try {
@@ -70,30 +189,24 @@ export function NewEncounterButton({
         body: JSON.stringify({
           reason: reason.trim(),
           dentistUserId,
-          // Con cita manda su sede; sin cita, la sede en la que se trabaja:
-          // así lo que quede por cobrar aparece en la caja de esa sede.
-          ...(appointment
-            ? { appointmentId: appointment.id }
-            : sede.branchId
-              ? { branchId: sede.branchId }
-              : {}),
+          // Sin cita, la sede en la que se trabaja: así lo que quede por cobrar
+          // aparece en la caja de esa sede.
+          ...(sede.branchId ? { branchId: sede.branchId } : {}),
           planItemIds: [...new Set(initialPlanItemIds ?? [])],
         }),
       })
       await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
       open(result.data.id)
     } catch (err) {
-      // Ya hay una atención abierta (del paciente o de esta cita): se retoma.
-      if (
-        err instanceof ApiError &&
-        (err.shape.code === "DRAFT_OPEN" || err.shape.code === "APPOINTMENT_HAS_ENCOUNTER")
-      ) {
+      // Ya hay una atención abierta: se retoma.
+      if (err instanceof ApiError && err.shape.code === "DRAFT_OPEN") {
         try {
-          const summary = await apiFetch<{ data: PatientSummary }>(
-            `/api/patients/${patientId}/summary`,
+          const current = await apiFetch<{ data: OpenEncounterRef | null }>(
+            `/api/patients/${patientId}/open-encounter`,
           )
-          if (summary.data.openEncounterId) {
-            open(summary.data.openEncounterId)
+          if (current.data) {
+            open(current.data.id)
             return
           }
         } catch {
@@ -109,28 +222,44 @@ export function NewEncounterButton({
     }
   }
   if (!canWrite) return null
-  if (openEncounterId) {
-    return <Button onClick={() => open(openEncounterId)}>Reanudar atención</Button>
+  if (!appointment && inProgressId) {
+    return (
+      <Button variant={variant} size={size} onClick={() => open(inProgressId)}>
+        Continuar la atención
+      </Button>
+    )
+  }
+  if (visit) {
+    // La hora de la cita de hoy dice cuál se atiende: «Atender (10:00)».
+    const at = !appointment && todayVisit ? clockOf(todayVisit.startsAt) : null
+    return (
+      <SubmitButton
+        variant={variant}
+        size={size}
+        pending={attend.isPending}
+        onClick={() => attend.mutate({ patientId, appointment: visit })}
+      >
+        {at ? `Atender (${at})` : "Atender"}
+      </SubmitButton>
+    )
   }
   return (
     <>
       <Button
+        variant={variant}
+        size={size}
         onClick={() => {
           setError(null)
           setDrawerOpen(true)
         }}
       >
-        {appointment ? "Atender" : "Nueva atención"}
+        Atender
       </Button>
       <FormDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title={appointment ? "Atender la cita" : "Nueva atención"}
-        description={
-          appointment
-            ? `Confirma el motivo con el paciente${appointment.serviceName ? ` (cita para ${appointment.serviceName})` : ""}. La atención se abre en curso y la cita se marca atendida al cerrarla.`
-            : "Registra por qué viene el paciente y quién lo atiende. La atención se abre en curso."
-        }
+        title="Atender sin cita"
+        description="Escribe por qué viene y quién lo atiende. La atención se abre en curso."
         onSubmit={(event) => {
           event.preventDefault()
           void start()
@@ -138,8 +267,8 @@ export function NewEncounterButton({
         isSubmitting={saving}
         isDirty={reason.trim().length > 0}
         error={error}
-        submitLabel="Abrir atención"
-        submitDisabled={!reason.trim() || saving}
+        submitLabel="Atender"
+        submitDisabled={!reason.trim() || !dentistUserId || saving}
       >
         <Field>
           <FieldLabel htmlFor="new-encounter-reason">Motivo de la visita</FieldLabel>
@@ -158,7 +287,7 @@ export function NewEncounterButton({
           <FieldLabel htmlFor="new-encounter-dentist">Profesional que atiende</FieldLabel>
           <Select
             value={dentistUserId}
-            items={Object.fromEntries(members.map((m) => [m.userId, m.user.name]))}
+            items={Object.fromEntries(professionals.map((m) => [m.userId, m.user.name]))}
             onValueChange={(value) => {
               if (value) setDentistUserId(value)
             }}
@@ -167,7 +296,7 @@ export function NewEncounterButton({
               <SelectValue placeholder="Selecciona el profesional…" />
             </SelectTrigger>
             <SelectContent>
-              {members.map((m) => (
+              {professionals.map((m) => (
                 <SelectItem key={m.userId} value={m.userId}>
                   {m.user.name}
                 </SelectItem>

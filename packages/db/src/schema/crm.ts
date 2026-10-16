@@ -306,17 +306,14 @@ export const contact = pgTable("contact", {
   ...timestamps,
 }, table => [
   uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id),
-  // El documento identifica a una sola persona por organización.
+  // El documento, junto con su país emisor, identifica a una sola persona por
+  // organización (NULLS NOT DISTINCT en la migración 0095).
   uniqueIndex("contact_org_doc_uidx")
-    .on(table.organizationId, table.docType, table.docNumber)
+    .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
     .where(sql`"doc_number" IS NOT NULL`),
   check(
     "contact_preferred_channel_check",
     sql`${table.preferredChannel} IS NULL OR ${table.preferredChannel} IN ('email','whatsapp','telegram','messenger','instagram')`,
-  ),
-  check(
-    "contact_doc_type_check",
-    sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
   ),
   // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
   check("contact_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
@@ -430,6 +427,8 @@ export const message = pgTable(
     templateName: text("template_name"),
     templateLanguage: text("template_language"),
     templateParams: jsonb("template_params"),
+    // Dato del botón que abre «Su enlace» (su token), si la plantilla lo lleva.
+    templateLink: text("template_link"),
     // Botones de respuesta que acompañan al mensaje: `id` es lo que vuelve
     // cuando la persona toca uno. Nulo si no lleva.
     replyButtons: jsonb("reply_buttons").$type<{ id: string; title: string }[]>(),
@@ -446,6 +445,14 @@ export const message = pgTable(
 /** Partes del equipo a las que puede ir una tarea sin responsable. */
 export const TASK_AREAS = ["recepcion", "caja", "clinico", "administracion"] as const
 export type TaskArea = (typeof TASK_AREAS)[number]
+
+/**
+ * Pendientes que deja el sistema para recepción, cada uno con su fila en «Te
+ * espera»: el documento escrito en «Su enlace» ya es de otra ficha
+ * (`ficha_repetida`) y quien pide volver a entrar al portal (`volver_al_portal`).
+ */
+export const TASK_KINDS = ["ficha_repetida", "volver_al_portal"] as const
+export type TaskKind = (typeof TASK_KINDS)[number]
 
 export const crmTask = pgTable(
   "task",
@@ -479,6 +486,11 @@ export const crmTask = pgTable(
     settledReason: text("settled_reason"),
     /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
     idempotencyKey: text("idempotency_key"),
+    /**
+     * Pendientes que deja el sistema con su propia fila en «Te espera»
+     * (`TASK_KINDS`, ADR 0037); nulo en una tarea cualquiera.
+     */
+    kind: text("kind"),
     ...timestamps,
   },
   (table) => [

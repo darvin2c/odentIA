@@ -13,13 +13,10 @@ import {
 } from "@odentia/ui"
 import {
   ConfirmDialog,
-  EmptyState,
-  ErrorState,
   FormDrawer,
-  LoadingState,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
@@ -29,13 +26,10 @@ import {
   type FormResponse,
   type FormTemplate,
   fetchFormAddenda,
-  fetchFormResponses,
-  fetchFormTemplates,
-  fetchSpecialties,
   finalizeFormResponse,
   updateFormResponse,
 } from "../../lib/clinical-forms"
-import { useMemberName, useOrgMembers, usePermission } from "../../lib/crm"
+import { useMemberName, useOrgMembers } from "../../lib/crm"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
 import {
@@ -72,236 +66,29 @@ function statusOf(response: FormResponse): {
   }
 }
 
-/**
- * Formularios clínicos del paciente: lista con fecha, atención y profesional y
- * el detalle al lado. El borrador se guarda solo; «Finalizar» guarda, valida
- * lo obligatorio y confirma (después, solo adendas). Un borrador se descarta
- * con motivo. Lo enviado desde el portal llega como «declarado» y se revisa.
- */
-export function FormulariosTab({
-  patientId,
-  encounterId,
-}: {
-  patientId: string
-  encounterId?: string
-}): React.JSX.Element {
-  const queryClient = useQueryClient()
-  const canRead = usePermission("clinical.read")
-  const canWrite = usePermission("clinical.write")
-  const ids = useId()
-  const [specialtyId, setSpecialtyId] = useState("")
-  const [statusFilter, setStatusFilter] = useState("")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const memberName = useMemberName()
-
-  const templatesQuery = useQuery({
-    queryKey: ["form-templates-published"],
-    queryFn: () => fetchFormTemplates({ status: "publicado" }),
-    enabled: canRead,
-  })
-  const specialtiesQuery = useQuery({
-    queryKey: ["specialties-active"],
-    queryFn: () => fetchSpecialties({ activeOnly: true }),
-    enabled: canRead,
-  })
-  const responsesQuery = useQuery({
-    queryKey: ["form-responses", patientId],
-    queryFn: () => fetchFormResponses({ patientId }),
-    enabled: canRead,
-  })
-  const templates = useMemo(() => templatesQuery.data?.data ?? [], [templatesQuery.data])
-  const templateById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates])
-  const responses = useMemo(() => {
-    const all = responsesQuery.data?.data ?? []
-    return all.filter((r) => {
-      if (statusFilter === "declarado") return r.status === "borrador" && r.submittedAt
-      if (statusFilter && r.status !== statusFilter) return false
-      if (specialtyId) {
-        const t = templateById.get(r.templateId)
-        if (!t || t.specialtyId !== specialtyId) return false
-      }
-      return true
-    })
-  }, [responsesQuery.data, statusFilter, specialtyId, templateById])
-  const selected = (responsesQuery.data?.data ?? []).find((r) => r.id === selectedId) ?? null
-  const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["form-responses", patientId] })
-  }
-
-  return (
-    <section aria-labelledby={`${ids}-title`} className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 id={`${ids}-title`} className="text-base font-semibold">
-            Formularios clínicos
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Evaluaciones estructuradas por especialidad y cuestionarios del paciente.
-          </p>
-        </div>
-        {canWrite ? (
-          <Button
-            type="button"
-            disabled={templates.length === 0}
-            onClick={() => setDrawerOpen(true)}
-          >
-            Nuevo formulario
-          </Button>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Select
-          items={Object.fromEntries([
-            ["", "Todas las especialidades"],
-            ...(specialtiesQuery.data?.data ?? []).map((s) => [s.id, s.name]),
-          ])}
-          value={specialtyId}
-          onValueChange={(v) => setSpecialtyId(v ?? "")}
-        >
-          <SelectTrigger className="w-56" aria-label="Especialidad">
-            <SelectValue placeholder="Todas las especialidades" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">Todas las especialidades</SelectItem>
-            {(specialtiesQuery.data?.data ?? []).map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {s.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          items={{
-            "": "Todos los estados",
-            borrador: "Borrador",
-            declarado: "Declarado por el paciente",
-            finalizado: "Finalizado",
-            descartado: "Descartado",
-          }}
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v ?? "")}
-        >
-          <SelectTrigger className="w-56" aria-label="Estado">
-            <SelectValue placeholder="Todos los estados" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">Todos los estados</SelectItem>
-            <SelectItem value="borrador">Borrador</SelectItem>
-            <SelectItem value="declarado">Declarado por el paciente</SelectItem>
-            <SelectItem value="finalizado">Finalizado</SelectItem>
-            <SelectItem value="descartado">Descartado</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {responsesQuery.isPending ? (
-        <LoadingState message="Cargando formularios…" />
-      ) : responsesQuery.isError ? (
-        <ErrorState
-          message="No se pudieron cargar los formularios"
-          onRetry={() => void responsesQuery.refetch()}
-        />
-      ) : responses.length === 0 ? (
-        <EmptyState
-          title="Sin formularios"
-          description={
-            templates.length === 0
-              ? "No hay plantillas publicadas. Se diseñan en Configuración → Formularios y consentimientos."
-              : (responsesQuery.data?.data ?? []).length > 0
-                ? "Ningún formulario coincide con los filtros."
-                : "Inicia el primero con «Nuevo formulario»."
-          }
-        />
-      ) : (
-        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-          <ul aria-label="Formularios del paciente" className="flex flex-col gap-2">
-            {responses.map((response) => {
-              const status = statusOf(response)
-              const active = response.id === selectedId
-              return (
-                <li key={response.id}>
-                  <button
-                    type="button"
-                    aria-current={active ? "true" : undefined}
-                    className={`flex w-full flex-col gap-1 rounded-md border p-3 text-left transition-colors hover:border-primary ${active ? "border-primary bg-primary/5" : ""}`}
-                    onClick={() => setSelectedId(response.id)}
-                  >
-                    <span className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-medium">
-                        {response.templateTitle ??
-                          templateById.get(response.templateId)?.title ??
-                          "Formulario"}{" "}
-                        <span className="text-muted-foreground">
-                          · versión {response.templateVersion}
-                        </span>
-                      </span>
-                      <Badge variant={status.tone}>{status.label}</Badge>
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {response.source === "portal"
-                        ? "Respondido desde el portal"
-                        : response.professionalUserId
-                          ? memberName(response.professionalUserId)
-                          : "Sin profesional asignado"}
-                      {response.encounterId ? " · en atención" : ""} · actualizado{" "}
-                      {when(response.updatedAt)}
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-          <div className="min-w-0">
-            {selected ? (
-              <ResponseDetail
-                key={selected.id}
-                response={selected}
-                canWrite={canWrite}
-                onChanged={invalidate}
-              />
-            ) : (
-              <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-                Elige un formulario para ver o continuar su captura.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-      <NewResponseDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        templates={templates.filter((t) => t.respondent !== "portal")}
-        patientId={patientId}
-        encounterId={encounterId}
-        onCreated={async (id) => {
-          setDrawerOpen(false)
-          setSelectedId(id)
-          await invalidate()
-        }}
-      />
-    </section>
-  )
-}
-
-function NewResponseDrawer({
+export function NewResponseDrawer({
   open,
   onClose,
   templates,
   patientId,
   encounterId,
+  defaultProfessionalUserId,
   onCreated,
 }: {
   open: boolean
   onClose: () => void
+  /** En el orden en que se ofrecen: desde la atención, primero los de su especialidad. */
   templates: FormTemplate[]
   patientId: string
   encounterId?: string
+  /** Desde la atención, el responsable por defecto es quien atiende. */
+  defaultProfessionalUserId?: string
   onCreated: (id: string) => Promise<void>
 }) {
   const ids = useId()
   const members = useOrgMembers()
   const [templateId, setTemplateId] = useState("")
-  const [professionalUserId, setProfessionalUserId] = useState("")
+  const [professionalUserId, setProfessionalUserId] = useState(defaultProfessionalUserId ?? "")
   const [error, setError] = useState<string | null>(null)
   const create = useMutation({
     mutationFn: () =>
@@ -390,7 +177,7 @@ function NewResponseDrawer({
 
 type SaveState = "guardado" | "pendiente" | "guardando" | "error"
 
-function ResponseDetail({
+export function ResponseDetail({
   response,
   canWrite,
   onChanged,

@@ -31,7 +31,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import { ConfirmDialog, PastDateInput } from "@odentia/ui-patterns"
 import type { ReactNode } from "react"
 import { useId, useState } from "react"
 import {
@@ -183,7 +183,7 @@ export function DeclarationStateSelect({
   )
 }
 
-/** Estado de revisión clínica Sin determinar/Ausencia/Registrados (ficha interna). */
+/** Estado de revisión clínica: no se le preguntó, niega o registrados (ficha interna). */
 export function ReviewStateSelect({
   id,
   value,
@@ -557,12 +557,11 @@ export function ConditionRows({
           {mode === "clinical" ? (
             <Field>
               <FieldLabel htmlFor={fid(`con-ini-${row.key}`)}>Inicio</FieldLabel>
-              <Input
+              <PastDateInput
                 id={fid(`con-ini-${row.key}`)}
-                type="date"
                 value={row.startDate}
                 disabled={readOnly}
-                onChange={(e) => patch(row.key, { startDate: e.target.value })}
+                onChange={(next) => patch(row.key, { startDate: next })}
               />
               <RowError message={pickError(errors, [fid(`con-ini-${row.key}`)])} />
             </Field>
@@ -570,12 +569,11 @@ export function ConditionRows({
           {mode === "clinical" ? (
             <Field>
               <FieldLabel htmlFor={fid(`con-fin-${row.key}`)}>Fin (vacío = activa)</FieldLabel>
-              <Input
+              <PastDateInput
                 id={fid(`con-fin-${row.key}`)}
-                type="date"
                 value={row.endDate}
                 disabled={readOnly}
-                onChange={(e) => patch(row.key, { endDate: e.target.value })}
+                onChange={(next) => patch(row.key, { endDate: next })}
               />
               <RowError message={pickError(errors, [fid(`con-fin-${row.key}`)])} />
             </Field>
@@ -705,12 +703,11 @@ export function MedicationRows({
           {mode === "clinical" ? (
             <Field>
               <FieldLabel htmlFor={fid(`med-ini-${row.key}`)}>Inicio</FieldLabel>
-              <Input
+              <PastDateInput
                 id={fid(`med-ini-${row.key}`)}
-                type="date"
                 value={row.startDate}
                 disabled={readOnly}
-                onChange={(e) => patch(row.key, { startDate: e.target.value })}
+                onChange={(next) => patch(row.key, { startDate: next })}
               />
               <RowError message={pickError(errors, [fid(`med-ini-${row.key}`)])} />
             </Field>
@@ -718,12 +715,11 @@ export function MedicationRows({
           {mode === "clinical" && row.persisted ? (
             <Field>
               <FieldLabel htmlFor={fid(`med-fin-${row.key}`)}>Fin (suspender)</FieldLabel>
-              <Input
+              <PastDateInput
                 id={fid(`med-fin-${row.key}`)}
-                type="date"
                 value={row.endDate}
                 disabled={readOnly}
-                onChange={(e) => patch(row.key, { endDate: e.target.value })}
+                onChange={(next) => patch(row.key, { endDate: next })}
               />
               <RowError message={pickError(errors, [fid(`med-fin-${row.key}`)])} />
             </Field>

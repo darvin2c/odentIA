@@ -5,7 +5,7 @@ import { orgContextOf } from "../lib/context.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import { listResponsibilities, grantResponsibility, revokeResponsibility } from "@odentia/services"
 
-const createInput = z.object({contactId:z.uuid(),kind:z.enum(["representante_legal","autorizado_informacion","responsable_economico","acompanante"]),startsAt:z.iso.date(),endsAt:z.iso.date().nullish(),evidenceDocumentId:z.uuid().nullish(),notes:z.string().max(4000).nullish()}).strict()
+const createInput = z.object({contactId:z.uuid(),kind:z.enum(["representante_legal","autorizado_informacion","responsable_economico"]),startsAt:z.iso.date(),endsAt:z.iso.date().nullish(),evidenceDocumentId:z.uuid().nullish(),notes:z.string().max(4000).nullish()}).strict()
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
 
 export function createPatientResponsibilitiesRoute(deps: Pick<CrmDeps, "db">) {

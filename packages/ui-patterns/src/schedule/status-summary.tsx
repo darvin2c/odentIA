@@ -15,7 +15,7 @@ const PLURAL: Record<ScheduleStatus, string> = {
   programada: "Por confirmar",
   confirmada: "Confirmadas",
   atendida: "Atendidas",
-  no_asistio: "No asistieron",
+  no_asistio: "No vinieron",
   cancelada: "Canceladas",
 }
 

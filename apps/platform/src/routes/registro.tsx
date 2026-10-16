@@ -6,6 +6,7 @@ import type { RegistrationAnswers } from "@odentia/clinical"
 import { PatientRegistrationForm } from "../components/patient/patient-registration-form"
 import { ApiError } from "../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
+import { setOrgLocale } from "../lib/locale"
 import {
   fetchPublicRegistration,
   submitPublicRegistration,
@@ -96,6 +97,9 @@ function PublicRegistrationPage() {
   }
 
   const info = infoQuery.data.data
+  // Página pública, sin layout de organización: el formato regional, la zona y
+  // el país de la clínica llegan con el registro y se fijan antes de pintar fechas.
+  setOrgLocale(info.locale, info.timeZone, info.countryCode)
 
   if (!info.config.enabled) {
     return (
@@ -110,6 +114,8 @@ function PublicRegistrationPage() {
 
 
   const contextKind = info.context.kind === "conversation" ? "conversation" : "generic"
+  // Ya tiene su ficha: el enlace solo sirve para registrar a otra persona.
+  const ownRecord = info.context.kind === "conversation" && info.context.ownRecord === true
 
   return (
     <PageShell maxWidth="md">
@@ -124,7 +130,11 @@ function PublicRegistrationPage() {
         ) : null}
         <div>
           <h1 className="text-xl font-semibold">Registro de paciente · {info.organization.name}</h1>
-          {contextKind === "conversation" ? (
+          {ownRecord ? (
+            <p className="text-sm text-muted-foreground">
+              Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar.
+            </p>
+          ) : contextKind === "conversation" ? (
             <p className="text-sm text-muted-foreground">
               Continúa con el registro compartido por la clínica.
             </p>
@@ -145,7 +155,8 @@ function PublicRegistrationPage() {
         mode="public"
         config={info.config}
         today={info.today}
-        context={{ kind: contextKind }}
+        countryCode={info.countryCode ?? null}
+        context={{ kind: contextKind, ownRecord }}
         initialValues={retainedDraft}
         onSubmit={async (draft) => {
           setNotice(null)

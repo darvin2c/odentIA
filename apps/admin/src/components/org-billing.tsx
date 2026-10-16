@@ -1,5 +1,5 @@
 /**
- * Ficha de la clínica › Cobro y consumo (ADR 0030, tablero O2): prueba y
+ * Ficha de la clínica › Cobro y consumo (ADR 0031, tablero O2): prueba y
  * descuento negociados (por encima de lo de siempre queda pedido para la
  * administración), cada cuánto se factura y lo que hicieron los agentes.
  */

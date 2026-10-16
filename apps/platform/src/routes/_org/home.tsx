@@ -1,4 +1,5 @@
-import { DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { FieldLabel, Textarea, toast } from "@odentia/ui"
+import { ConfirmDialog, DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
@@ -8,7 +9,7 @@ import { invalidateAgentPanelQueries, takeCase } from "../../components/agent-pa
 import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
-import { type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
+import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -49,6 +50,7 @@ const HOME_EVENTS = [
 
 type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
 type CaseRow = Extract<WaitingRow, { kind: "case" }>
+type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -93,6 +95,24 @@ function HomePage() {
   const [advice, setAdvice] = useState<string | null>(null)
   const [unreached, setUnreached] = useState(false)
   const [budgets, setBudgets] = useState<BudgetsRow | null>(null)
+  // «Anular con motivo» una atención de otro día sin cerrar: la misma anulación de la atención.
+  const [discarding, setDiscarding] = useState<StaleEncounterRow | null>(null)
+  const [discardReason, setDiscardReason] = useState("")
+  const discard = useMutation({
+    mutationFn: (input: { row: StaleEncounterRow; reason: string }) =>
+      apiFetch(`/api/patients/${input.row.patientId}/encounters/${input.row.id}/void`, {
+        method: "POST",
+        body: JSON.stringify({ reason: input.reason }),
+      }),
+    onSuccess: async (_result, input) => {
+      toast.success(`Se anuló la atención de ${input.row.patientName}`)
+      setDiscarding(null)
+      setDiscardReason("")
+      await queryClient.invalidateQueries({ queryKey: ["open-encounter", input.row.patientId] })
+      refresh()
+    },
+    onError: (cause) => toast.error(mutationErrorMessage(cause) ?? "No se pudo anular la atención."),
+  })
 
   const data = query.data?.data
   const context = data ? { today: data.date, timezone: data.timezone, locale: data.locale, allTasks: data.access.allTasks } : null
@@ -121,6 +141,11 @@ function HomePage() {
               onBudgets: setBudgets,
               onTake: canTake ? (row) => take.mutate(row) : undefined,
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
+              onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
+              onVoidEncounter: (row) => {
+                setDiscardReason("")
+                setDiscarding(row)
+              },
               busyKey,
             }}
           />
@@ -132,6 +157,8 @@ function HomePage() {
             ) : data.today ? (
               <TodayAgenda today={data.today} locale={data.locale} choice={choice} />
             ) : null}
+            {/* Quien atiende y además ve la sede (la dueña que atiende): la agenda de la sede en una línea. */}
+            {data.agendaLine ? <AgendaLine line={data.agendaLine} /> : null}
             {/* Quien solo cobra tiene la caja como su «Hoy»; quien además ve la agenda, una línea. */}
             {data.cash && data.today ? (
               <CashLine cash={data.cash} locale={data.locale} />
@@ -143,6 +170,29 @@ function HomePage() {
       </div>
     )}
 
+    <ConfirmDialog
+      open={discarding !== null}
+      title="Anular la atención"
+      description={discarding ? `La atención de ${discarding.patientName} queda anulada en su historia, con tu motivo. No genera cargos y su ficha queda libre para otra atención.` : ""}
+      confirmLabel="Anular la atención"
+      cancelLabel="Volver"
+      pending={discard.isPending}
+      confirmDisabled={discardReason.trim().length === 0}
+      onClose={() => setDiscarding(null)}
+      onConfirm={() => discarding && discard.mutate({ row: discarding, reason: discardReason.trim() })}
+    >
+      <div className="grid gap-2 text-left">
+        <FieldLabel htmlFor="anular-atencion-motivo">Motivo</FieldLabel>
+        <Textarea
+          id="anular-atencion-motivo"
+          value={discardReason}
+          maxLength={2000}
+          rows={3}
+          placeholder="Ej.: se abrió por error"
+          onChange={(event) => setDiscardReason(event.target.value)}
+        />
+      </div>
+    </ConfirmDialog>
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />

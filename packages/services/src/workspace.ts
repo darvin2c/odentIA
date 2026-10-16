@@ -1,11 +1,16 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
+import { encounter, patient } from "@odentia/db/schema/clinical"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
 import { listHandoffs } from "./agent-operations.js"
+import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
+import { checkEncounterClosing } from "./encounters.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { listConsentsToPublish } from "./clinical-forms.js"
 import { handoffOpenExistsSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
@@ -15,9 +20,13 @@ import {
   WAITING_LIMITS,
   type WaitingBudgets,
   type WaitingCase,
+  type WaitingStaleEncounter,
   type WaitingStillOpen,
+  type WaitingPortalReentry,
+  type WaitingPossibleDuplicate,
   type WaitingTask,
   type WaitingUnconfirmed,
+  type WaitingUnsentBudget,
 } from "./workspace-home.js"
 
 export interface WorkspaceAccess {
@@ -38,6 +47,17 @@ export interface WorkspaceAccess {
   configure: boolean
   /** Quien atiende (odontólogo): solo sus citas, en todas las sedes, y los presupuestos de sus planes. */
   ownAppointments: boolean
+  /**
+   * Envía presupuestos y habla con la persona (`budgets.send` y el CRM):
+   * recepción y quien dirige. Le salen los presupuestos que nadie envió.
+   */
+  sendsBudgets?: boolean
+  /**
+   * Escribe en la historia clínica (`clinical.write`): si hoy tiene citas propias
+   * ve «Mis pacientes de hoy», también si es la dueña, y sus atenciones de otro
+   * día sin cerrar llegan a «Te espera».
+   */
+  attends?: boolean
 }
 
 /**
@@ -216,34 +236,60 @@ export interface WorkspaceAppointment {
   startsAt: string
   status: string
   serviceName: string | null
+  dentistUserId: string
   dentistName: string
   chairName: string
   branchName: string
-  /** La siguiente cita en pie; a lo sumo una. */
+  /** Cuándo llegó; null si nadie lo marcó. */
+  arrivedAt: string | null
+  /** El momento de la cita (`appointmentVisit`, ADR 0032): de ahí salen la sala, «Ahora» y «Más tarde». */
+  visit: AppointmentVisit
+  /** La atención abierta unida a la cita, sin nada de la historia: con quién y desde cuándo. */
+  encounter: { id: string; startedAt: string; dentistUserId: string; dentistName: string } | null
+  /** La siguiente cita en pie que aún no llega; a lo sumo una. */
   next: boolean
 }
 
 /**
- * «Hoy» de quien trabaja con la agenda. `branch`: la agenda de una sede, solo
- * lo que falta. `mine`: las citas de quien atiende, en todas las sedes y
- * también las ya atendidas.
+ * Cuántas citas hay hoy y cómo van. `total` cuenta lo que ocupa la agenda (ni
+ * canceladas ni inasistencias), igual que el número de citas del día en la
+ * Agenda; `waiting` son las que llegaron y esperan, `attending` las que están
+ * en atención, `attended` las atendidas y `upcoming` las que faltan (por
+ * confirmar o confirmadas, sin llegar); `unconfirmed`, de esas, las que nadie
+ * confirmó.
+ */
+export interface WorkspaceTodaySummary {
+  total: number
+  waiting: number
+  attending: number
+  attended: number
+  upcoming: number
+  unconfirmed: number
+}
+
+/**
+ * «Hoy» de quien trabaja con la agenda. `branch`: la agenda de una sede, con lo
+ * que está en la sala y lo que falta. `mine`: las citas de quien atiende, en
+ * todas las sedes, en el orden «Sala de espera», «Ahora» y «Más tarde» (las ya
+ * atendidas al final).
  */
 export interface WorkspaceToday {
   scope: "branch" | "mine"
   branch: { id: string; name: string } | null
   /** Zona con que se partió el día y se leen las horas: la de la sede o la de la clínica. */
   timezone: string
-  /**
-   * `total` cuenta lo que ocupa la agenda (ni canceladas ni inasistencias),
-   * igual que el número de citas del día en la Agenda; `upcoming` son las que
-   * siguen en pie y `unconfirmed`, de esas, las que nadie confirmó.
-   */
-  summary: { total: number; attended: number; upcoming: number; unconfirmed: number }
+  summary: WorkspaceTodaySummary
   appointments: WorkspaceAppointment[]
 }
 
+/** La agenda de la sede en una línea, para quien atiende y además ve la sede (la dueña que atiende). */
+export interface WorkspaceAgendaLine {
+  branch: { id: string; name: string }
+  summary: WorkspaceTodaySummary
+}
+
 /** Filas de la agenda de una sede que viajan a Inicio; el resto se ve en la Agenda. */
-const TODAY_BRANCH_ROWS = 5
+const TODAY_BRANCH_ROWS = 6
 
 async function homeBranch(tx: Db, orgId: string, branchId?: string) {
   const rows = await tx.execute<{ id: string; name: string; timezone: string | null }>(sql`
@@ -251,38 +297,100 @@ async function homeBranch(tx: Db, orgId: string, branchId?: string) {
   return { branch: rows.find(row => row.id === branchId) ?? rows[0] ?? null, many: rows.length > 1 }
 }
 
+/** El día de hoy en una zona, como rango de instantes. */
+function dayBounds(zone: string) {
+  return {
+    start: sql`((now() at time zone ${zone})::date::timestamp at time zone ${zone})`,
+    end: sql`(((now() at time zone ${zone})::date + 1)::timestamp at time zone ${zone})`,
+  }
+}
+
+/** Quien atiende tiene hoy citas propias (en pie, atendidas o «No vino»), en la zona de la clínica. */
+async function hasOwnAppointmentsToday(tx: Db, orgId: string, userId: string, timezone: string): Promise<boolean> {
+  const { start, end } = dayBounds(timezone)
+  const [row] = await tx.execute<{ found: boolean }>(sql`
+    select exists(select 1 from appointment a where a.organization_id=${orgId} and a.dentist_user_id=${userId}
+      and a.starts_at >= ${start} and a.starts_at < ${end}
+      and a.status in ('programada','confirmada','atendida','no_asistio')) as found`)
+  return row?.found ?? false
+}
+
+/** Orden de lectura: la sala (por llegada), lo que está en atención, lo que falta y, al final, lo terminado. */
+const VISIT_ORDER: Record<AppointmentVisit, number> = {
+  llego: 0, en_atencion: 1, por_confirmar: 2, confirmada: 2, atendida: 3, no_vino: 4, cancelada: 5,
+}
+
 async function workspaceToday(
   tx: Db, orgId: string, userId: string, own: boolean, branch: { id: string; name: string; timezone: string | null } | null, timezone: string,
 ): Promise<WorkspaceToday> {
-  const empty = { total: 0, attended: 0, upcoming: 0, unconfirmed: 0 }
+  const empty: WorkspaceTodaySummary = { total: 0, waiting: 0, attending: 0, attended: 0, upcoming: 0, unconfirmed: 0 }
   if (!own && !branch) return { scope: "branch", branch: null, timezone, summary: empty, appointments: [] }
   // El día se parte con la zona de la sede, como en la Agenda; las citas propias, con la de la clínica.
   const zone = own ? timezone : (branch?.timezone ?? timezone)
-  const start = sql`((now() at time zone ${zone})::date::timestamp at time zone ${zone})`
-  const end = sql`(((now() at time zone ${zone})::date + 1)::timestamp at time zone ${zone})`
-  const rows = await tx.execute<Omit<WorkspaceAppointment, "next"> & { open: boolean }>(sql`
+  const { start, end } = dayBounds(zone)
+  type Row = Omit<WorkspaceAppointment, "next" | "visit" | "encounter"> & {
+    open: boolean
+    encounterId: string | null
+    encounterStatus: string | null
+    encounterStartedAt: string | null
+    encounterDentistUserId: string | null
+    encounterDentistName: string | null
+  }
+  const rows = await tx.execute<Row>(sql`
     select a.id, a.patient_id as "patientId", p.display_name as "patientName",
       ${iso(sql`a.starts_at`)} as "startsAt", a.status, a.service_name as "serviceName",
-      u.name as "dentistName", ch.name as "chairName", b.name as "branchName", a.ends_at > now() as open
+      a.dentist_user_id as "dentistUserId", u.name as "dentistName", ch.name as "chairName", b.name as "branchName",
+      case when a.arrived_at is null then null else ${iso(sql`a.arrived_at`)} end as "arrivedAt",
+      a.ends_at > now() as open,
+      e.id as "encounterId", e.status as "encounterStatus",
+      case when e.id is null then null else ${iso(sql`e.started_at`)} end as "encounterStartedAt",
+      e.dentist_user_id as "encounterDentistUserId", eu.name as "encounterDentistName"
     from appointment a join patient p on p.id=a.patient_id and p.organization_id=${orgId}
     join branch b on b.id=a.branch_id and b.organization_id=${orgId}
     join schedule_chair ch on ch.id=a.chair_id and ch.organization_id=${orgId}
     join "user" u on u.id=a.dentist_user_id
+    left join encounter e on e.organization_id=a.organization_id and e.appointment_id=a.id and e.status<>'anulada'
+    left join "user" eu on eu.id=e.dentist_user_id
     where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end}
-      and a.status in ('programada','confirmada','atendida')
+      and a.status in ('programada','confirmada','atendida','no_asistio')
       and ${own ? sql`a.dentist_user_id=${userId}` : sql`a.branch_id=${branch?.id ?? null}`}
     order by a.starts_at, a.id limit 300`)
-  const standing = rows.filter(row => row.status !== "atendida")
-  const nextId = standing.find(row => row.open)?.id ?? null
-  const summary = {
-    total: rows.length,
-    attended: rows.length - standing.length,
-    upcoming: standing.length,
-    unconfirmed: standing.filter(row => row.status === "programada").length,
+  const items = rows.map(({ encounterId, encounterStatus, encounterStartedAt, encounterDentistUserId, encounterDentistName, ...row }) => {
+    const visit = appointmentVisit({ status: row.status, arrivedAt: row.arrivedAt, encounterStatus })
+    const encounter = encounterId && encounterStatus === "borrador" && encounterStartedAt && encounterDentistUserId
+      ? { id: encounterId, startedAt: encounterStartedAt, dentistUserId: encounterDentistUserId, dentistName: encounterDentistName ?? "" }
+      : null
+    return { ...row, visit, encounter }
+  })
+  const count = (...visits: AppointmentVisit[]) => items.filter(item => visits.includes(item.visit)).length
+  const occupying = items.filter(item => item.visit !== "no_vino")
+  const summary: WorkspaceTodaySummary = {
+    total: occupying.length,
+    waiting: count("llego"),
+    attending: count("en_atencion"),
+    attended: count("atendida"),
+    upcoming: count("por_confirmar", "confirmada"),
+    unconfirmed: count("por_confirmar"),
   }
-  // La sede ve lo que falta, desde la siguiente; quien atiende, su día entero.
-  const from = nextId ? standing.findIndex(row => row.id === nextId) : 0
-  const shown = own ? rows : standing.slice(from, from + TODAY_BRANCH_ROWS)
+  const pending = items.filter(item => item.visit === "por_confirmar" || item.visit === "confirmada")
+  const nextId = pending.find(item => item.open)?.id ?? null
+  const sorted = [...items].sort((a, b) =>
+    VISIT_ORDER[a.visit] - VISIT_ORDER[b.visit]
+    || (a.visit === "llego" ? (a.arrivedAt ?? "").localeCompare(b.arrivedAt ?? "") : 0)
+    || a.startsAt.localeCompare(b.startsAt))
+  // Quien atiende ve su día entero. La sede ve la sala, lo que está en atención,
+  // lo que falta desde la siguiente, lo que pasó sin que llegara (aún puede
+  // llegar tarde o marcarse «No vino») y, al final, quien no vino (para reagendar).
+  const waitingRank = (item: (typeof sorted)[number]) =>
+    item.visit === "llego" || item.visit === "en_atencion" ? 0
+      : item.visit === "por_confirmar" || item.visit === "confirmada" ? (item.open ? 1 : 2)
+        : item.visit === "no_vino" ? 3 : 4
+  const shown = own
+    ? sorted
+    : sorted
+        .filter(item => waitingRank(item) < 4)
+        .sort((a, b) => waitingRank(a) - waitingRank(b))
+        .slice(0, TODAY_BRANCH_ROWS)
   return {
     scope: own ? "mine" : "branch",
     branch: own || !branch ? null : { id: branch.id, name: branch.name },
@@ -291,6 +399,35 @@ async function workspaceToday(
     appointments: shown.map(({ open: _open, ...row }) => ({ ...row, next: row.id === nextId })),
   }
 }
+
+/**
+ * Atenciones en borrador de un día anterior (en la zona de la clínica) que
+ * lleva quien mira, con lo que les falta para cerrarse (decisión 12 de la fase 3).
+ */
+async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, timezone: string): Promise<WaitingStaleEncounter[]> {
+  const { start } = dayBounds(timezone)
+  const rows = await tx
+    .select({ row: encounter, patientName: patient.displayName })
+    .from(encounter)
+    .innerJoin(patient, and(eq(patient.id, encounter.patientId), eq(patient.organizationId, encounter.organizationId)))
+    .where(and(
+      eq(encounter.organizationId, orgId),
+      eq(encounter.dentistUserId, userId),
+      eq(encounter.status, "borrador"),
+      sql`${encounter.startedAt} < ${start}`,
+    ))
+    .orderBy(asc(encounter.startedAt), asc(encounter.id))
+    .limit(WAITING_STALE_ENCOUNTERS)
+  const items: WaitingStaleEncounter[] = []
+  for (const { row, patientName } of rows) {
+    const closing = await checkEncounterClosing(tx, orgId, userId, row)
+    items.push({ id: row.id, patientId: row.patientId, patientName, startedAt: row.startedAt.toISOString(), missing: closing.missing })
+  }
+  return items
+}
+
+/** Atenciones de otro día sin cerrar que llegan a «Te espera» a la vez. */
+const WAITING_STALE_ENCOUNTERS = 5
 
 /** Casos que pasó el agente y siguen sin resolver, para quien puede tomarlos. */
 async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean): Promise<WaitingCase[]> {
@@ -367,7 +504,8 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   const cases = access.agent
     ? sql`and not exists (select 1 from agent_handoff h where h.organization_id = t.organization_id and h.task_id = t.id)`
     : sql``
-  const scope = sql`t.organization_id=${orgId} and t.status='open' and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}`
+  // Lo que dejó el sistema con su propia fila (`task.kind`) no se repite como tarea.
+  const scope = sql`t.organization_id=${orgId} and t.status='open' and t.kind is null and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}`
   type Row = Omit<WaitingTask, "href"> & { conversationId: string | null }
   const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
       case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
@@ -388,11 +526,94 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
   return { overdue: overdue.map(place), next: next ? place(next) : null, open: count?.open ?? 0 }
 }
 
-/** Presupuestos presentados o pospuestos que siguen sin respuesta; quien atiende, solo los de sus planes. */
+/**
+ * Lo que dejaron «Su enlace» y el portal para recepción, con su propia fila:
+ * la posible ficha repetida y quien pide volver a entrar al portal (ADR 0037).
+ * Son tareas abiertas de su área; se van al hacerlas.
+ */
+async function waitingSystemTasks(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  access: WorkspaceAccess,
+): Promise<{ duplicates: WaitingPossibleDuplicate[]; reentries: WaitingPortalReentry[] }> {
+  const areas = access.taskAreas?.length ? sql`or (t.assignee_user_id is null and t.area in ${[...access.taskAreas]})` : sql``
+  const rows = await tx.execute<{
+    id: string
+    kind: string
+    patientId: string
+    patientName: string
+    contactName: string | null
+    reason: string | null
+    createdAt: string
+    grantId: string | null
+  }>(sql`
+    select t.id, t.kind, t.patient_id as "patientId", p.display_name as "patientName", ct.display_name as "contactName",
+      t.reason, ${iso(sql`t.created_at`)} as "createdAt",
+      (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
+        and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId"
+    from task t join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
+    left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
+    where t.organization_id = ${orgId} and t.status = 'open' and t.kind is not null
+      and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
+    order by t.created_at, t.id limit 20`)
+  return {
+    duplicates: rows
+      .filter((row) => row.kind === "ficha_repetida")
+      .map((row) => ({ id: row.id, patientId: row.patientId, patientName: row.patientName, detail: row.reason ?? "", createdAt: row.createdAt })),
+    reentries: rows
+      .filter((row) => row.kind === "volver_al_portal")
+      .map((row) => ({
+        id: row.id,
+        patientId: row.patientId,
+        contactName: row.contactName ?? row.patientName,
+        grantId: row.grantId,
+        createdAt: row.createdAt,
+      })),
+  }
+}
+
+/**
+ * Presupuestos armados y sin enviar desde antes de hoy (en la zona de la
+ * clínica): el borrador de la persona con alguna línea. El total es el de la
+ * opción recomendada (la que vale mientras decide).
+ */
+async function waitingUnsentBudgets(
+  tx: Db,
+  orgId: string,
+  dayStart: SQL,
+): Promise<{ items: WaitingUnsentBudget[]; total: number }> {
+  const rows = await tx.execute<{ [K in keyof WaitingUnsentBudget]: WaitingUnsentBudget[K] } & { total: number }>(sql`
+    select b.id, b.patient_id as "patientId", p.display_name as "patientName", ${iso(sql`armado.at`)} as since,
+      (select count(distinct l.plan_item_id)::int from treatment_budget_item l
+        join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
+        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "itemCount",
+      (select case when bool_or(l.price_cents is null) then null else sum(l.price_cents *
+          case when l.billing_mode = 'session' then greatest(coalesce(l.sessions_planned, 1), 1) else 1 end)::int end
+        from treatment_budget_item l
+        join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
+        where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "totalCents",
+      b.currency,
+      (select count(*)::int from treatment_budget_option o where o.organization_id = b.organization_id and o.budget_id = b.id) as options,
+      count(*) over ()::int as total
+    from treatment_budget b join patient p on p.id = b.patient_id and p.organization_id = ${orgId}
+    -- Armado cuando entró su último tratamiento: lo que creció hoy aún no espera.
+    cross join lateral (select max(l.created_at) as at from treatment_budget_item l
+      where l.organization_id = b.organization_id and l.budget_id = b.id) armado
+    where b.organization_id = ${orgId} and b.status = 'borrador' and b.supersedes_budget_id is null
+      and armado.at < ${dayStart}
+    order by armado.at, b.id limit ${WAITING_LIMITS.unsentBudgets}`)
+  return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+}
+
+/** Presupuestos que siguen esperando respuesta (`budgetAwaitsAnswerSql`); quien atiende, solo los de sus planes. */
 async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: boolean): Promise<WaitingBudgets> {
-  const scope = sql`b.organization_id=${orgId} and b.status in ('presentado','pospuesto')
-    and (not ${ownOnly} or exists (select 1 from treatment_plan tp
-      where tp.id=b.plan_id and tp.organization_id=${orgId} and tp.created_by=${userId}))`
+  const awaiting = budgetAwaitsAnswerSql({ id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` })
+  // Quien atiende ve los de lo que él indicó o preparó (el plan es uno por persona).
+  const scope = sql`b.organization_id=${orgId} and ${awaiting}
+    and (not ${ownOnly} or b.created_by=${userId} or exists (select 1 from treatment_budget_item own_line
+      join treatment_plan_item own_item on own_item.id=own_line.plan_item_id and own_item.organization_id=own_line.organization_id
+      where own_line.organization_id=${orgId} and own_line.budget_id=b.id and own_item.created_by=${userId}))`
   const items = await tx.execute<WaitingBudgets["items"][number]>(sql`
     select b.id, b.patient_id as "patientId", p.display_name as "patientName", b.title,
       ${iso(sql`b.presented_at`)} as "presentedAt"
@@ -414,13 +635,22 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const { timezone, locale } = await workspaceZone(tx, orgId)
   const [day] = await tx.execute<{ date: string }>(sql`select to_char(now() at time zone ${timezone}, 'YYYY-MM-DD') as date`)
   const dayEnd = sql`((${day.date}::date + 1)::timestamp at time zone ${timezone})`
+  const dayStart = sql`((${day.date}::date)::timestamp at time zone ${timezone})`
   const needsBranch = access.appointments || access.finance
   const { branch, many } = needsBranch ? await homeBranch(tx, orgId, options.branchId) : { branch: null, many: false }
 
-  const today = access.appointments ? await workspaceToday(tx, orgId, userId, access.ownAppointments, branch, timezone) : null
+  // «Mis pacientes de hoy» es de quien atiende: el odontólogo siempre y, si hoy
+  // tiene citas propias, también la dueña o quien dirige y atiende (ADR 0032).
+  const ownToday = access.appointments && (access.ownAppointments
+    || (access.attends === true && await hasOwnAppointmentsToday(tx, orgId, userId, timezone)))
+  const today = access.appointments ? await workspaceToday(tx, orgId, userId, ownToday, branch, timezone) : null
+  // Quien además ve la sede tiene su agenda en una línea, como la caja.
+  const branchDay = ownToday && !access.ownAppointments && branch ? await workspaceToday(tx, orgId, userId, false, branch, timezone) : null
+  const agendaLine: WorkspaceAgendaLine | null = branchDay?.branch ? { branch: branchDay.branch, summary: branchDay.summary } : null
   const cash = access.finance && branch ? await getCashToday(tx, orgId, { branchId: branch.id }) : null
 
   const tasks = access.tasks ? await waitingTasks(tx, orgId, userId, access, dayEnd) : { overdue: [], next: null, open: 0 }
+  const system = access.tasks && access.patients ? await waitingSystemTasks(tx, orgId, userId, access) : { duplicates: [], reentries: [] }
   // A lo sumo tres recomendaciones a la vez, como declara la ficha del administrador,
   // y solo las que quien mira puede atender. Quien atiende solo ve lo suyo, y las
   // recomendaciones son de toda la clínica: no las recibe.
@@ -432,8 +662,14 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
   const waiting = composeWaiting({
     cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
+    // Ningún borrador queda abandonado: la atención de otro día le sale a quien la lleva.
+    staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
+    // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).
+    unsentBudgets: access.sendsBudgets ? await waitingUnsentBudgets(tx, orgId, dayStart) : null,
+    possibleDuplicates: system.duplicates,
+    portalReentries: system.reentries,
     conversations: access.conversations ? await waitingConversations(tx, orgId, access.agent) : null,
     stillOpen: access.conversations ? await waitingStillOpen(tx, orgId, userId, access) : null,
     overdueTasks: tasks.overdue,
@@ -443,6 +679,15 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unreached: unreached && unreached.total > 0 ? { total: unreached.total, byCause: unreached.byCause.map(({ total, reason }) => ({ total, reason })) } : null,
     // Con el administrador encendido, los presupuestos sin respuesta son una de sus líneas: no se repiten aquí.
     budgets: (access.finance || access.clinical) && !admin.enabled ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
+    // Quien configura publica el consentimiento que una atención pidió (paso 2B).
+    consentsToPublish: access.configure
+      ? (await listConsentsToPublish(tx, orgId)).map(({ templateKey, title, requestedByName, requestedAt }) => ({
+          templateKey,
+          title,
+          requestedByName,
+          requestedAt,
+        }))
+      : [],
   })
 
   // La puesta en marcha consulta capacidades existentes, no deduce configuración
@@ -468,7 +713,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
       or ${access.agent} and exists(select 1 from agent_run_ledger where organization_id=${orgId})
       or ${access.agent} and exists(select 1 from agent_proposal where organization_id=${orgId})
     ) as recorded`)
-  return { date: day.date, timezone, locale, access, multiBranch: many, waiting, today, cash,
+  return { date: day.date, timezone, locale, access, multiBranch: many, waiting, today, agendaLine, cash,
     setup: setup ? { ...setup, ...(agentStep ? { agent: agentStep.adminOn && agentStep.receptionOn } : {}) } : null,
     activity: { recorded: activity?.recorded ?? false } }
 }
@@ -501,7 +746,8 @@ export async function listWorkspaceAudit(tx: Db, orgId: string, input: { action?
   const rows = await tx.execute<{ id: string; action: string; entity: string; entityId: string | null; actorName: string | null; createdAt: string; origin: string | null }>(sql`
     select a.id, a.action, a.entity, a.entity_id as "entityId", u.name as "actorName",
       to_char(a.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "createdAt",
-      a.metadata->>'origin' as origin
+      -- Lo que hizo la propia persona (portal, enlace de reserva) lleva el actor «contact:<id>».
+      case when a.actor_user_id like 'contact:%' then 'patient' else a.metadata->>'origin' end as origin
     from audit_event a left join "user" u on u.id=a.actor_user_id
     where a.organization_id=${orgId}
     ${input.action ? sql`and a.action = ${input.action}` : sql``}

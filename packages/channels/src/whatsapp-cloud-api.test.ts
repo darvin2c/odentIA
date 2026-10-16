@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import whatsappFixtures from "./__fixtures__/whatsapp.json"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
-import { whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"
+import { buildBody, whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"
 
 // Golden JSON con forma oficial de Cloud API; el contrato lo valida en runtime.
 const fx: ContractFixtures = whatsappFixtures as unknown as ContractFixtures
@@ -204,9 +204,9 @@ it("lee las plantillas de la cuenta con estado, categoría, variables y botones,
   )
   const templates = await whatsappCloudApiAdapter.listTemplates!(fx.config, { fetch })
   expect(templates).toEqual([
-    { externalId: "900", name: "odentia_recordatorio_cita_v1", language: "es", category: "utility", status: "aprobada", reason: null, body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}.", variables: 3, buttons: ["Confirmar", "No podré ir"] },
-    { externalId: "901", name: "promo", language: "es", category: "marketing", status: "rechazada", reason: "INVALID_FORMAT", body: "Oferta", variables: 0, buttons: [] },
-    { externalId: "902", name: "pausada", language: "es_MX", category: "utility", status: "pausada", reason: null, body: "", variables: 0, buttons: [] },
+    { externalId: "900", name: "odentia_recordatorio_cita_v1", language: "es", category: "utility", status: "aprobada", reason: null, body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}.", variables: 3, buttons: ["Confirmar", "No podré ir"], link: { title: "Ver", url: "https://x" } },
+    { externalId: "901", name: "promo", language: "es", category: "marketing", status: "rechazada", reason: "INVALID_FORMAT", body: "Oferta", variables: 0, buttons: [], link: null },
+    { externalId: "902", name: "pausada", language: "es_MX", category: "utility", status: "pausada", reason: null, body: "", variables: 0, buttons: [], link: null },
   ])
   expect(calls).toHaveLength(2)
   expect(calls[0]?.url).toContain("/message_templates?fields=")
@@ -238,6 +238,43 @@ it("pide la aprobación con un ejemplo por variable y devuelve lo que respondió
     },
   })
   expect(calls[0]?.url).toMatch(/\/message_templates$/)
+})
+
+it("pide el botón de «Su enlace» con su dirección fija y el dato al final, antes de los de respuesta", async () => {
+  const { calls, fetch } = fakeFetch({ json: { id: "951", status: "PENDING", category: "UTILITY" } })
+  await whatsappCloudApiAdapter.requestTemplate!(
+    fx.config,
+    {
+      name: "odentia_aviso_cita_datos_v1", language: "es", category: "utility",
+      body: "Hola, {{1}}. Antes de venir, completa tus datos aquí.", examples: ["Pedro"], buttons: ["No enviar más"],
+      link: { title: "Ver mi cita y mis datos", url: "https://smile.odentia.app/reserva?token={{1}}", example: "https://smile.odentia.app/reserva?token=abc" },
+    },
+    { fetch },
+  )
+  expect(calls[0]?.body).toMatchObject({
+    components: [
+      { type: "BODY" },
+      {
+        type: "BUTTONS",
+        buttons: [
+          { type: "URL", text: "Ver mi cita y mis datos", url: "https://smile.odentia.app/reserva?token={{1}}", example: ["https://smile.odentia.app/reserva?token=abc"] },
+          { type: "QUICK_REPLY", text: "No enviar más" },
+        ],
+      },
+    ],
+  })
+})
+
+it("una plantilla con «Su enlace» lleva el token en su botón y corre los de respuesta un lugar", () => {
+  const body = buildBody("51999", {
+    type: "template", name: "odentia_aviso_cita_datos_v1", language: "es", params: ["Pedro"],
+    link: "ab".repeat(32), buttons: [{ id: "odentia:baja:j1", title: "No enviar más" }],
+  }) as { template: { components: unknown[] } }
+  expect(body.template.components).toEqual([
+    { type: "body", parameters: [{ type: "text", text: "Pedro" }] },
+    { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "ab".repeat(32) }] },
+    { type: "button", sub_type: "quick_reply", index: "1", parameters: [{ type: "payload", payload: "odentia:baja:j1" }] },
+  ])
 })
 
 it("una solicitud que Meta rechaza dice el motivo de Meta", async () => {

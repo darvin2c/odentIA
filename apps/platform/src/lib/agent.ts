@@ -27,6 +27,7 @@ export const ACTION_LABEL: Record<string, string> = {
   crear_oportunidad: "Crear oportunidad",
   actualizar_seguimiento: "Dejar la tarea de una oportunidad",
   cerrar_oportunidad: "Cerrar oportunidad",
+  decidir_presupuesto: "Anotar la respuesta a un presupuesto",
 }
 
 export interface AgentProposal {
@@ -126,8 +127,10 @@ export interface AgentActivityItem {
 /** Permiso operativo que exige decidir cada acto, además de `agent.decide`. */
 export function permissionForAction(
   action: string,
-): "conversations.write" | "appointments.write" | "crm.write" {
+): "conversations.write" | "appointments.write" | "budgets.decide" | "crm.write" {
   if (action === "enviar_mensaje") return "conversations.write"
+  // La misma regla que la API: anotar una respuesta es decidir el presupuesto.
+  if (action === "decidir_presupuesto") return "budgets.decide"
   if (["reservar_cita", "reprogramar_cita", "cancelar_cita"].includes(action))
     return "appointments.write"
   return "crm.write"

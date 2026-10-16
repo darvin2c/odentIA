@@ -48,7 +48,7 @@ function escapeHtml(text: string): string {
 }
 
 /** Días de prueba al crear la suscripción. */
-/** Prueba cuando ningún plan dice la suya (ADR 0030: 30 días). */
+/** Prueba cuando ningún plan dice la suya (ADR 0031: 30 días). */
 export const SAAS_TRIAL_DAYS = 30
 /** Días de gracia tras el vencimiento antes de restringir. */
 export const SAAS_GRACE_DAYS = 7
@@ -307,7 +307,7 @@ export interface SaasPlanInput {
   maxBranches?: number | null
   maxSeats?: number | null
   sortOrder?: number
-  /** Cobro por acción (ADR 0030). */
+  /** Cobro por acción (ADR 0031). */
   creditCents?: number
   conversationMicros?: number | null
   consultationMicros?: number | null
@@ -753,7 +753,7 @@ export async function startSaasTrial(
     await audit(tx, orgId, "system", "saas_subscription", orgId, "saas.trial_completed", {
       planCode: input.planCode ?? null,
     })
-    // El cargo del mes sale al cerrarlo, con lo que hicieron los agentes (ADR 0030).
+    // El cargo del mes sale al cerrarlo, con lo que hicieron los agentes (ADR 0031).
     const completed = await getSaasSubscription(tx, orgId)
     if (!completed) throw new ServiceError("INTERNAL", 409, "No se pudo leer la suscripción")
     return completed
@@ -870,7 +870,7 @@ export async function assertSaasCurrencyChange(
       `Hay saldo pendiente en otra moneda (${detail}): regularízalo antes de cambiar a ${newCurrency}`,
     )
   }
-  // La moneda del plan es la de odentIA (ADR 0030: precios en dólares), no la
+  // La moneda del plan es la de odentIA (ADR 0031: precios en dólares), no la
   // con que la clínica cobra a sus pacientes: no se exige que coincidan.
 }
 /**
@@ -892,7 +892,7 @@ export async function chooseSaasPlan(
   if (!current) return startSaasTrial(tx, orgId, { planCode }, now)
   await assertSaasCurrencyChange(tx, orgId, plan.currency)
   // Fuera de la prueba, elegir el primer plan lo activa: el mes empieza hoy.
-  // En prueba, empieza cuando termina la prueba (ADR 0030). Si estaba en
+  // En prueba, empieza cuando termina la prueba (ADR 0031). Si estaba en
   // solo lectura solo por no tener plan, vuelve a operar.
   const starts = current.status !== "prueba" && !current.activatedAt
   const [row] = await tx
@@ -1165,7 +1165,7 @@ export interface SaasUsageSummary {
    * Cobertura: cuántas corridas informaron tokens. El costo real de IA no
    * va aquí: es de odentIA y lo ve solo su administración
    * (`OrganizationDetail.aiCost`); la clínica verá lo que se le cobra por
-   * acción (ADR 0030).
+   * acción (ADR 0031).
    */
   runsWithTokens: number
   /** Mes calendario evaluado (nunca "últimos 30 días"). */
@@ -2676,7 +2676,7 @@ export async function tickSaasBilling(
       .where(eq(saasSubscription.organizationId, orgId))
       .limit(1)
     if (sub?.billingEmail?.trim()) return sub.billingEmail.trim()
-    // Los avisos los reciben el propietario y el administrador (ADR 0030, decisión 9).
+    // Los avisos los reciben el propietario y el administrador (ADR 0031, decisión 9).
     const owners = await tx
       .select({ email: user.email })
       .from(member)
@@ -2719,7 +2719,7 @@ export async function tickSaasBilling(
     }
   }
 
-  // 1. Avisos de la prueba, del crédito y del tope (ADR 0030): una vez por
+  // 1. Avisos de la prueba, del crédito y del tope (ADR 0031): una vez por
   // nivel y por tramo, en la plataforma (calculados al leer) y por correo.
   const watched = await tx
     .select({ organizationId: saasSubscription.organizationId })
@@ -2803,7 +2803,7 @@ export async function tickSaasBilling(
     }
     // Con plan elegido, la prueba deja paso al plan: el mes de la clínica
     // empieza hoy y su cargo sale al cerrarlo, con lo que hicieron los agentes
-    // (ADR 0030). La gracia queda para los cargos que no se pagan.
+    // (ADR 0031). La gracia queda para los cargos que no se pagan.
     await tx
       .update(saasSubscription)
       .set({ status: "activa", activatedAt: now, currentPeriodStart: now, currentPeriodEnd: addMonth(now), updatedAt: now })
@@ -2911,7 +2911,7 @@ export async function tickSaasBilling(
     )
   }
 
-  // 4. Cobro por acción (ADR 0030): al cerrar cada tramo, el cargo con sus
+  // 4. Cobro por acción (ADR 0031): al cerrar cada tramo, el cargo con sus
   // líneas; con ciclo quincenal, también a mitad de tramo. La cobranza sigue
   // siendo manual con comprobante.
   const { issued: chargesEnsured } = await closeSaasPeriods(tx, now)

@@ -6,12 +6,10 @@ import {
   sendAgentRun,
   withOrgContext,
 } from "@odentia/db"
-import { organization } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   handleAutomationReply,
-  handlePortalChannelRequest,
   ingestInbound,
   ServiceError,
   type Storage,
@@ -25,8 +23,6 @@ export interface IngestDeps {
   fetch: typeof fetch
   secretsKey: Buffer
   transcribe?: TranscribeFn
-  webURL?: string
-  cookieDomain?: string
   /** Ventana de ráfaga: retardo de la corrida del agente tras cada entrante. */
   agentBurstWindowSeconds?: number
 }
@@ -93,27 +89,18 @@ export async function processInbound(
       if (content.type === "text") {
         const handled = await tx
           .transaction((inner) =>
-            handleAutomationReply(inner, orgId, { conversationId: result.conversationId, replyId: content.replyId }),
+            handleAutomationReply(
+              inner,
+              orgId,
+              { conversationId: result.conversationId, replyId: content.replyId },
+              { storage: deps.storage },
+            ),
           )
           .catch((error: unknown) => {
             if (error instanceof ServiceError) return false
             throw error
           })
         if (handled) return
-      }
-      if (deps.webURL && deps.cookieDomain) {
-        const [org] = await tx.select({ slug: organization.slug }).from(organization).where(eq(organization.id, orgId)).limit(1)
-        if (org?.slug) {
-          const portal = new URL(deps.webURL)
-          portal.hostname = `${org.slug}.${deps.cookieDomain.replace(/^\./, "")}`
-          portal.pathname = "/portal"
-          portal.search = ""
-          portal.hash = ""
-          const handled = await handlePortalChannelRequest(tx, orgId, {
-            conversationId: result.conversationId, messageId: result.messageId,
-          }, { portalUrl: () => portal.toString() })
-          if (handled) return
-        }
       }
       const [conv] = await tx
         .select({ agentStatus: conversation.agentStatus, status: conversation.status })
@@ -126,7 +113,7 @@ export async function processInbound(
         .where(eq(agentConfig.organizationId, orgId))
         .limit(1)
       // El agente nunca responde en una conversación cerrada (ADR 0024); la ingesta ya la reabrió.
-      // Un correo que escribió una máquina queda en la bandeja sin gastar una corrida (ADR 0030).
+      // Un correo que escribió una máquina queda en la bandeja sin gastar una corrida (ADR 0031).
       if (conv?.status === "open" && conv.agentStatus === "on" && cfg?.enabled && !msg.message.event.automated) {
         await sendAgentRun(
           tx,

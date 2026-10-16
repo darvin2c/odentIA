@@ -28,9 +28,9 @@ interface ListCopy {
 
 const LISTS: Record<ReportListKey, ListCopy> = {
   no_show: {
-    title: "No asistieron",
+    title: "No vinieron",
     noun: { one: "cita", many: "citas" },
-    how: (period) => `Citas con fecha en ${period} que quedaron como «No asistió». Las canceladas se cuentan aparte.`,
+    how: (period) => `Citas con fecha en ${period} que quedaron como «No vino». Las canceladas se cuentan aparte.`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: true,
   },
@@ -44,7 +44,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   unmarked: {
     title: "Sin marcar",
     noun: { one: "cita", many: "citas" },
-    how: (period) => `Citas de ${period} cuya hora ya pasó y siguen como programadas o confirmadas. Se marcan en la Agenda como atendidas o como inasistencia.`,
+    how: (period) => `Citas de ${period} cuya hora ya pasó y siguen por confirmar o confirmadas. En la Agenda se cierran con «Registrar la atención» o «No vino».`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: false,
   },

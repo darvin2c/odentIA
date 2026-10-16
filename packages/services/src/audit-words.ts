@@ -89,6 +89,8 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
   clinic_message: "agente",
   channel_template: "agente",
   portal: "portal",
+  // «Su enlace»: lo que la persona hace en su página personal se ve junto al portal.
+  personal_link: "portal",
   passkey: "portal",
   session: "portal",
   questionnaire: "portal",
@@ -180,7 +182,7 @@ const APPOINTMENT_STATUS_WORDS: Record<string, string> = {
   programada: "Dejó una cita como programada",
   confirmada: "Confirmó una cita",
   cancelada: "Canceló una cita",
-  atendida: "Marcó una cita como atendida",
+  atendida: "Cerró una cita con su atención",
   en_atencion: "Marcó que una cita está en atención",
   en_sala: "Marcó la llegada de un paciente a su cita",
   inasistencia: "Marcó una inasistencia",
@@ -212,6 +214,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "patient-registration.link_created": say("Creó un enlace de registro para un paciente"),
   "health.declared": say("Declaró antecedentes de salud en el registro", "paciente"),
   "health.saved": say("Guardó los antecedentes de salud de un paciente"),
+  "health.allergies_declared": say("Pasó a los antecedentes las alergias que declaró un paciente en un cuestionario"),
   "document.uploaded": say("Subió un archivo a la ficha de un paciente"),
   "document.retired": say("Retiró un archivo de la ficha de un paciente"),
   "document.context_corrected": say("Corrigió a qué pertenece un archivo de un paciente"),
@@ -220,9 +223,12 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "appointment.created": say("Reservó una cita"),
   "appointment.moved": say("Movió una cita"),
   "appointment.updated": say("Cambió una cita"),
+  "appointment.arrived": say("Marcó que un paciente llegó a su cita"),
+  "appointment.arrival_undone": say("Deshizo la llegada de un paciente a su cita"),
   "branch.appointment_default_minutes": say("Cambió lo que dura una cita regular en una sede"),
   // Atención clínica
   "encounter.created": say("Abrió una atención"),
+  "encounter.appointment_joined": say("Unió una atención en curso a su cita"),
   "encounter.updated": say("Editó una atención"),
   "encounter.finalized": say("Firmó y cerró una atención"),
   "encounter.voided": say("Anuló una atención"),
@@ -237,7 +243,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "odontogram.entry_added": say("Anotó un hallazgo en el odontograma"),
   "odontogram.entry_voided": say("Anuló un hallazgo del odontograma"),
   "odontogram.entry_resolved": say("Marcó como resuelto un hallazgo del odontograma"),
-  "odontogram.assessment_sealed": say("Firmó la evaluación del odontograma"),
+  "odontogram.assessment_sealed": say("Firmó el odontograma"),
   "odontogram.legacy_reviewed": say("Revisó un odontograma anterior"),
   "plan.created": say("Creó un plan de tratamiento"),
   "plan.item_added": say("Añadió un tratamiento al plan"),
@@ -246,8 +252,6 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "plan.item_planned": say("Planificó un tratamiento"),
   "plan.item_revised": say("Revisó un tratamiento del plan"),
   "plan.item_status_changed": say("Cambió el estado de un tratamiento"),
-  "plan.item_alternative_set": say("Marcó un tratamiento como alternativa"),
-  "plan.option_group_created": say("Creó un grupo de alternativas en el plan"),
   "plan.item_direct_completed": say("Registró un tratamiento ya realizado"),
   "prescription.issued": say("Emitió una receta"),
   "prescription.cancelled": say("Anuló una receta"),
@@ -259,6 +263,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "consent.sign": say("Registró la firma de un consentimiento"),
   "consent.revoke": say("Registró la revocación de un consentimiento"),
   "consent.cancel": say("Anuló un consentimiento"),
+  "consent.sent_to_sign": say("Envió un consentimiento a firmar por su enlace"),
+  "consent.person_signed": say("Firmó un consentimiento desde su enlace", "paciente"),
   "form_response.create": say("Empezó un formulario de un paciente"),
   "form_response.update": say("Editó un formulario de un paciente"),
   "form_response.finalize": say("Finalizó un formulario de un paciente"),
@@ -267,6 +273,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "form_response.portal_submitted": say("Envió un cuestionario desde el portal", "paciente"),
   "order.create": say("Emitió una orden"),
   "order.status": say("Cambió el estado de una orden"),
+  "order.cancel": say("Canceló una orden"),
   "note.created": say("Dejó una nota"),
   // Caja y cobros
   "cash.shift_opened": say("Abrió la caja"),
@@ -301,10 +308,14 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "budget.items_added": say("Añadió conceptos a un presupuesto"),
   "budget.items_removed": say("Quitó conceptos de un presupuesto"),
   "budget.prices_adjusted": say("Ajustó los precios de un presupuesto"),
+  "budget.option_duplicated": say("Duplicó una opción de un presupuesto"),
+  "budget.option_recommended": say("Marcó la opción recomendada de un presupuesto"),
+  "budget.option_removed": say("Quitó una opción de un presupuesto"),
   "promotion.created": say("Creó una promoción"),
   "promotion.updated": say("Cambió una promoción"),
   "promotion.ended": say("Terminó una promoción"),
   "financial_document.sent": say("Envió un documento de cobro"),
+  "health_document.sent": say("Envió una receta, una orden o un consentimiento a la persona"),
   // Contactos y ventas
   "contact.created": say("Creó un contacto"),
   "contact.updated": say("Cambió los datos de un contacto"),
@@ -391,19 +402,19 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "portal.grant_created": say("Dio acceso al portal a una persona"),
   "portal.grant_revoked": say("Retiró el acceso al portal de una persona"),
   "portal.grant_scope_updated": say("Cambió lo que una persona puede ver en el portal"),
-  "portal.request_created": say("Pidió acceso al portal", "paciente"),
-  "portal.request_approved": say("Aprobó una solicitud de acceso al portal"),
-  "portal.request_auto_approved": say("Aprobó sola una solicitud de acceso al portal, con identidad ya verificada"),
-  "portal.request_rejected": say("Rechazó una solicitud de acceso al portal"),
+  "portal.access_given": say("Dio acceso al portal a una persona, con su documento a la vista"),
+  "portal.access_resent": say("Envió un enlace nuevo para volver a entrar al portal"),
   "portal.passkey_registered": say("Registró su dispositivo para entrar al portal", "paciente"),
   "portal.passkey_authenticated": say("Entró al portal con su dispositivo", "paciente"),
   "portal.passkey_revoked": say("Retiró un dispositivo registrado en el portal"),
   "portal.appointment_confirmed": say("Confirmó su cita desde el portal", "paciente"),
   "portal.appointment_rescheduled": say("Cambió su cita desde el portal", "paciente"),
+  "portal.appointment_cancelled": say("Canceló su cita desde el portal", "paciente"),
   "portal.budget_decided": say("Respondió un presupuesto desde el portal", "paciente"),
   "portal.document_read": say("Abrió un documento en el portal", "paciente"),
   "session.opened": say("Entró al portal", "paciente"),
   "session.switched": say("Cambió de paciente dentro del portal", "paciente"),
+  "session.remembered": say("Pidió que su teléfono recuerde el portal 30 días", "paciente"),
   "account.viewed": say("Consultó su cuenta en el portal", "paciente"),
   "appointments.listed": say("Consultó sus citas en el portal", "paciente"),
   "budgets.listed": say("Consultó sus presupuestos en el portal", "paciente"),
@@ -411,6 +422,11 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "questionnaire.viewed": say("Abrió un cuestionario en el portal", "paciente"),
   "questionnaire.saved": say("Guardó un cuestionario sin enviarlo, en el portal", "paciente"),
   "questionnaire.submitted": say("Envió un cuestionario desde el portal", "paciente"),
+  // Su enlace (ADR 0037): lo que la persona hizo en su página personal.
+  "personal_link.sent": say("Le envió su enlace"),
+  "personal_link.revoked": say("Quitó su enlace"),
+  "personal_link.data_sent": say("Completó sus datos desde su enlace", "paciente"),
+  "personal_link.budget_decided": say("Respondió un presupuesto desde su enlace", "paciente"),
   // Inventario
   "stock.ajuste": say("Ajustó las existencias de un producto"),
   "stock.traslado": say("Trasladó existencias entre almacenes"),
@@ -438,6 +454,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "consent_template.update": say("Editó el borrador de una plantilla de consentimiento"),
   "consent_template.publish": say("Publicó una versión de una plantilla de consentimiento"),
   "consent_template.archive": say("Archivó una plantilla de consentimiento"),
+  "consent_template.services": say("Cambió para qué servicios se pide un consentimiento"),
   "professional_profile.updated": say("Cambió el perfil profesional de alguien del equipo"),
   "catalog.service_created": say("Creó un servicio"),
   "catalog.service_updated": say("Cambió un servicio"),
@@ -503,14 +520,15 @@ export interface AuditWords {
 
 /**
  * Un registro dicho con palabras. Nunca devuelve el código. `origin` es lo que
- * el propio registro anotó sobre quién actuó (hoy, `agent` en los contactos).
+ * el propio registro anotó sobre quién actuó: `agent` (los contactos) o
+ * `patient` (lo que hizo la propia persona, con el actor `contact:<id>`).
  */
 export function describeAuditEvent(action: string, origin?: string | null): AuditWords {
   const phrase = phraseOf(action)
   const area = auditAreaOf(action)
   return {
     what: phrase.what,
-    author: AUTHOR_WORDS[origin === "agent" ? "agente" : (phrase.by ?? "sistema")],
+    author: AUTHOR_WORDS[origin === "agent" ? "agente" : origin === "patient" ? "paciente" : (phrase.by ?? "sistema")],
     area,
     areaLabel: AUDIT_AREA_LABELS[area],
   }

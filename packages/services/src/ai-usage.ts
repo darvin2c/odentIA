@@ -3,7 +3,7 @@ import { AI_USAGE_ORIGINS, type AiUsageOrigin, aiUsage } from "@odentia/db/schem
 import { and, eq, gte, inArray, lt, sql } from "drizzle-orm"
 import { ServiceError, validation } from "./errors.js"
 
-/* ---------- Uso de IA por origen (ADR 0030, fase 1: medir) ---------- */
+/* ---------- Uso de IA por origen (ADR 0031, fase 1: medir) ---------- */
 
 /**
  * Lo que una operación gastó en un proveedor y un modelo. El costo lo calcula
@@ -101,7 +101,7 @@ export const AGENT_TEST_ORIGINS = ["probar", "simulacion", "vista_previa", "prac
  * Tope de gasto en pruebas por clínica en 30 días, en millonésimas de USD.
  * Una prueba cuesta menos de un centavo: USD 3 son cientos de pruebas y
  * acotan lo que una clínica puede gastar sin atender a nadie. Pasa a la
- * administración con los demás precios (fase 3 de la ADR 0030).
+ * administración con los demás precios (fase 3 de la ADR 0031).
  */
 export const AGENT_TEST_BUDGET_MICROS = 3_000_000
 

@@ -120,7 +120,7 @@ export const portalSession = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     revokedBy: text("revoked_by").references(() => user.id),
-    /** Operador que emitió el enlace: firma las acciones del portal (FK real). */
+    /** Operador que emitió el enlace (FK real): recibe los avisos de lo que hace la persona; sus acciones quedan a nombre de ella. */
     issuedBy: text("issued_by").references(() => user.id),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     ...timestamps,

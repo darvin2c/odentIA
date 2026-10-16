@@ -19,6 +19,7 @@ import {
   ErrorState,
   findScheduleConflicts,
   formatDateLong,
+  formatMonthLong,
   formatSpan,
   freeMinutesOf,
   hourLabel,
@@ -77,20 +78,26 @@ import { AppointmentSearch } from "../../components/agenda/appointment-search"
 import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking-drawer"
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { ChairForm } from "../../components/agenda/chair-form"
+import { useAppointmentArrival } from "../../components/agenda/arrival"
 import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
+import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { useActiveBranch } from "../../lib/active-branch"
-import type {
-  AgendaAppointment,
-  AgendaAvailability,
-  AgendaResources,
-  AppointmentStatus,
+import {
+  type AgendaAppointment,
+  type AgendaAvailability,
+  type AgendaResources,
+  type AppointmentStatus,
+  invalidateAppointmentQueries,
+  visitLabel,
+  visitStage,
 } from "../../lib/agenda"
-import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useMyUserId, usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const Route = createFileRoute("/_org/agenda")({
   validateSearch: (
@@ -100,6 +107,10 @@ export const Route = createFileRoute("/_org/agenda")({
     contactId?: string
     conversationId?: string
     appointmentId?: string
+    /** «Agendar» desde el Plan: tratamientos aceptados que trae la cita, separados por coma. */
+    planItems?: string
+    /** El servicio de esos tratamientos, si es uno solo. */
+    serviceId?: string
     /** Vista, fecha, sede y filtros: los lee `useListSearch`; aquí solo se tipan para los enlaces. */
     view?: string
     date?: string
@@ -113,9 +124,17 @@ export const Route = createFileRoute("/_org/agenda")({
     contactId: typeof search.contactId === "string" ? search.contactId : undefined,
     conversationId: typeof search.conversationId === "string" ? search.conversationId : undefined,
     appointmentId: typeof search.appointmentId === "string" ? search.appointmentId : undefined,
+    planItems: typeof search.planItems === "string" && search.planItems.length <= 1200 ? search.planItems : undefined,
+    serviceId: typeof search.serviceId === "string" && UUID_RE.test(search.serviceId) ? search.serviceId : undefined,
   }),
   component: AgendaPage,
 })
+
+/** Los tratamientos que llegan en la URL: solo identificadores válidos, sin repetir. */
+function planItemIdsOf(value: string | undefined): string[] {
+  if (!value) return []
+  return [...new Set(value.split(",").filter((id) => UUID_RE.test(id)))].slice(0, 20)
+}
 
 type AgendaView = "dia" | "semana" | "lista"
 type GroupMode = "professionals" | "chairs"
@@ -134,10 +153,15 @@ const STATUSES: AppointmentStatus[] = [
   "cancelada",
 ]
 
+/** «Confirmar» deja paso a «Llegó» desde una hora antes de la cita. */
+const ARRIVAL_WINDOW_MS = 60 * 60_000
+
 /** Lo cancelado o no asistido deja el sitio libre: no ocupa la rejilla. */
 const occupies = (status: AppointmentStatus) => status !== "cancelada" && status !== "no_asistio"
 const standing = (status: AppointmentStatus) => status === "programada" || status === "confirmada"
 const capitalize = (text: string) => text.charAt(0).toLocaleUpperCase("es") + text.slice(1)
+/** `?who=todos`: ver a todos aunque quien mira tenga su propia columna. */
+const WHO_ALL = "todos"
 
 function rangesOn(
   items: Array<{ columnId: string; start: string; end: string }>,
@@ -153,16 +177,19 @@ function rangesOn(
     })
 }
 
-/** «12 al 17 de octubre», o con los dos meses si la semana los cruza. */
+/**
+ * «12 al 17 de octubre», o con los dos meses si la semana los cruza; el año
+ * solo cuando no es el en curso («29 de diciembre al 4 de enero de 2027»).
+ */
 function weekLabel(dates: string[]): string {
   const first = dates[0] ?? ""
   const last = dates[dates.length - 1] ?? first
-  const said = (date: string) => formatDateLong(date).split(" ").slice(1)
-  const [firstDay = "", , firstMonth = ""] = said(first)
-  const [lastDay = "", , lastMonth = ""] = said(last)
+  const day = (date: string) => String(Number(date.slice(8, 10)))
+  const firstMonth = formatMonthLong(first)
+  const lastMonth = formatMonthLong(last)
   return firstMonth === lastMonth
-    ? `${firstDay} al ${lastDay} de ${lastMonth}`
-    : `${firstDay} de ${firstMonth} al ${lastDay} de ${lastMonth}`
+    ? `${day(first)} al ${day(last)} de ${lastMonth}`
+    : `${day(first)} de ${firstMonth} al ${day(last)} de ${lastMonth}`
 }
 
 function AgendaPage() {
@@ -171,6 +198,8 @@ function AgendaPage() {
   const small = useMediaQuery(SCHEDULE_SMALL_QUERY)
   const canWrite = usePermission("appointments.write")
   const canConfigure = usePermission("settings.write")
+  const canAttend = usePermission("clinical.write")
+  const myUserId = useMyUserId()
   const requested = Route.useSearch()
   const navigate = useNavigate()
 
@@ -195,7 +224,7 @@ function AgendaPage() {
   const view: AgendaView = viewParam === "semana" || viewParam === "lista" ? viewParam : "dia"
   const group: GroupMode =
     view === "dia" && get("group") === "chairs" ? "chairs" : "professionals"
-  const who = get("who") ?? null
+  const whoParam = get("who") ?? null
   const statusParam = get("status")
   const statusFilter = STATUSES.find((item) => item === statusParam) ?? null
 
@@ -294,7 +323,14 @@ function AgendaPage() {
     if (requested.patientId && !requested.contactId && solo && resources && canWrite) {
       if (openedRequest.current === solo.id) return
       openedRequest.current = solo.id
-      setBooking({ patient: { id: solo.id, name: solo.displayName }, lockedPatient: true })
+      // «Agendar» desde el Plan trae también el servicio y los tratamientos aceptados.
+      const planItemIds = planItemIdsOf(requested.planItems)
+      setBooking({
+        patient: { id: solo.id, name: solo.displayName },
+        lockedPatient: true,
+        ...(requested.serviceId ? { serviceId: requested.serviceId } : {}),
+        ...(planItemIds.length > 0 ? { planItemIds } : {}),
+      })
       return
     }
     // Quien aún no es paciente: «Nueva cita» abre con su ficha mínima por crear, unida a ella.
@@ -332,6 +368,8 @@ function AgendaPage() {
     requested.contactId,
     requested.patientId,
     requested.conversationId,
+    requested.planItems,
+    requested.serviceId,
     patientLink,
     soloPatient.data,
     contextualPatient.data,
@@ -341,7 +379,13 @@ function AgendaPage() {
 
   const closeBooking = () => {
     if (booking?.lockedPatient) {
-      setParams({ patientId: undefined, contactId: undefined, conversationId: undefined })
+      setParams({
+        patientId: undefined,
+        contactId: undefined,
+        conversationId: undefined,
+        planItems: undefined,
+        serviceId: undefined,
+      })
     }
     setBooking(null)
   }
@@ -369,6 +413,9 @@ function AgendaPage() {
     }
     return [...known].map(([id, label]) => ({ id, label, tone: toneOf(id) }))
   }, [availability, appointments, toneOf])
+  // Un odontólogo abre la Agenda en su columna (tablero 7); «todos» la abre entera.
+  const ownColumn = canAttend && group === "professionals" && team.some((item) => item.id === myUserId) ? myUserId : null
+  const who = whoParam === WHO_ALL ? null : (whoParam ?? ownColumn)
   const chairs = React.useMemo(
     (): ScheduleColumn[] =>
       (resources?.chairs ?? []).map((item, index) => ({
@@ -460,6 +507,11 @@ function AgendaPage() {
     return hit ? `Dentro de una ausencia: ${hit.label ?? "sin motivo"}` : undefined
   }
 
+  /** Llegó o en atención, dicho con su hora: el estado real, no el reloj. */
+  const stateOf = (item: AgendaAppointment) => ({
+    stage: visitStage(item.visit),
+    stateLabel: visitLabel(item, { now, timeZone: TZ }),
+  })
   const entries = appointments.map(
     (item): ScheduleEntry => ({
       id: item.id,
@@ -469,6 +521,7 @@ function AgendaPage() {
       start: item.startsAt,
       end: item.endsAt,
       status: item.status,
+      ...stateOf(item),
       warning: conflictLabel(conflicts.get(item.id)) ?? insideAbsence(item),
     }),
   )
@@ -637,9 +690,33 @@ function AgendaPage() {
   })
 
   const started = (item: AgendaAppointment) => Date.parse(item.startsAt) <= Date.parse(now)
+  /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
+  const before = (item: AgendaAppointment) => item.visit === "por_confirmar" || item.visit === "confirmada"
+  const isToday = (item: AgendaAppointment) => zonedDateOf(item.startsAt, TZ) === today
+  /** Su hora pasó sin llegada ni atención: «Ya pasaron · sin cerrar». */
+  const unclosed = (item: AgendaAppointment) => before(item) && Date.parse(item.endsAt) <= Date.parse(now)
+  const rebook = (patient: { id: string; name: string }) => openBooking({ patient })
+  const arrival = useAppointmentArrival({ onRebook: rebook })
+  const attend = useAttendAppointment()
+  const attendItem = (item: AgendaAppointment) =>
+    attend.mutate({
+      patientId: item.patientId,
+      appointment: { id: item.id, dentistUserId: item.dentistUserId, dentistName: item.dentistName },
+    })
+  const patientOf = (item: AgendaAppointment) => ({ id: item.patientId, name: item.patientName })
   const menuFor = (entry: ScheduleEntry): RowActionItem[] => {
     const item = byId.get(entry.id)
-    if (!item || !canWrite || !standing(item.status)) return []
+    if (!item || !canWrite) return []
+    if (item.visit === "llego") {
+      return [
+        {
+          key: "deshacer",
+          label: "Deshacer la llegada",
+          onSelect: () => arrival.mutate({ id: item.id, arrived: false }),
+        },
+      ]
+    }
+    if (!before(item)) return []
     return [
       {
         key: "mover",
@@ -650,7 +727,7 @@ function AgendaPage() {
         ? [
             {
               key: "ausente",
-              label: "No asistió",
+              label: "No vino",
               onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }),
             },
           ]
@@ -662,6 +739,37 @@ function AgendaPage() {
         onSelect: () => setDetail({ id: item.id, mode: "cancel" }),
       },
     ]
+  }
+  /**
+   * Una sola acción principal por cita, según su estado (tablero 7): «Confirmar»
+   * lo que falta confirmar, «Llegó» lo de hoy, «Atender» a quien llegó,
+   * «Reagendar» a quien no vino y, lo que pasó sin cerrarse, «Registrar la
+   * atención» o «No vino».
+   */
+  const primaryFor = (item: AgendaAppointment): { label: string; pending?: boolean; onSelect: () => void } | null => {
+    const busy = (id: string) => (arrival.isPending && arrival.variables?.id === id) || (attend.isPending && attend.variables?.appointment.id === id)
+    if (item.visit === "llego") return canAttend ? { label: "Atender", pending: busy(item.id), onSelect: () => attendItem(item) } : null
+    if (item.visit === "no_vino" || item.visit === "cancelada") {
+      return canWrite ? { label: "Reagendar", onSelect: () => rebook(patientOf(item)) } : null
+    }
+    if (!before(item)) return null
+    if (unclosed(item)) {
+      if (canAttend) return { label: "Registrar la atención", pending: busy(item.id), onSelect: () => attendItem(item) }
+      return canWrite ? { label: "No vino", pending: statusMutation.isPending && statusMutation.variables?.id === item.id, onSelect: () => statusMutation.mutate({ id: item.id, status: "no_asistio" }) } : null
+    }
+    if (!canWrite) return null
+    // Hoy, cerca de la hora o pasada, lo que toca es marcar que llegó (eso también la confirma).
+    const soon = isToday(item) && Date.parse(item.startsAt) - Date.parse(now) <= ARRIVAL_WINDOW_MS
+    if (item.visit === "por_confirmar" && !soon) {
+      return {
+        label: "Confirmar",
+        pending: statusMutation.isPending && statusMutation.variables?.id === item.id,
+        onSelect: () => statusMutation.mutate({ id: item.id, status: "confirmada" }),
+      }
+    }
+    return isToday(item)
+      ? { label: "Llegó", pending: busy(item.id), onSelect: () => arrival.mutate({ id: item.id, arrived: true, patient: patientOf(item) }) }
+      : null
   }
 
   const listItems: ScheduleAgendaItem[] = dayAppointments
@@ -676,6 +784,7 @@ function AgendaPage() {
         start: item.startsAt,
         end: item.endsAt,
         status: item.status,
+        ...stateOf(item),
       },
       resourceLabel: item.dentistName,
       resourceShortLabel: shortName(item.dentistName),
@@ -754,7 +863,7 @@ function AgendaPage() {
       </DropdownMenu>
     )
   }
-  const pickWho = (id: string | null) => setParam("who", id ?? undefined)
+  const pickWho = (id: string | null) => setParam("who", id ?? (ownColumn ? WHO_ALL : undefined))
 
   const newButton = canWrite ? (
     <Button onClick={() => openBooking()} className={small ? "h-12 w-full text-base" : undefined}>
@@ -1108,26 +1217,8 @@ function AgendaPage() {
             now={day === today ? now : undefined}
             onOpen={(entry) => setDetail({ id: entry.id, mode: "view" })}
             primaryAction={({ entry }) => {
-              if (!canWrite) return null
-              if (entry.status === "programada") {
-                return {
-                  label: "Confirmar",
-                  pending:
-                    statusMutation.isPending && statusMutation.variables?.id === entry.id,
-                  onSelect: () => statusMutation.mutate({ id: entry.id, status: "confirmada" }),
-                }
-              }
-              if (entry.status === "no_asistio") {
-                const item = byId.get(entry.id)
-                return item
-                  ? {
-                      label: "Reagendar",
-                      onSelect: () =>
-                        openBooking({ patient: { id: item.patientId, name: item.patientName } }),
-                    }
-                  : null
-              }
-              return null
+              const item = byId.get(entry.id)
+              return item ? primaryFor(item) : null
             }}
             menuItems={({ entry }) => menuFor(entry)}
           />

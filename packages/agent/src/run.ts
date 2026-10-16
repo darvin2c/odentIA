@@ -26,6 +26,7 @@ import {
   type RecordRunInput,
   recordAgentRun,
   type SearchEmbedder,
+  type Storage,
   reportAgentNoReply,
   toolsDisabledBy,
 } from "@odentia/services"
@@ -77,6 +78,11 @@ export interface AgentRuntime {
   publicUrl?: { webURL: string; cookieDomain: string }
   /** Quien vectoriza para buscar por significado; sin él, se busca por palabras. */
   embedder?: SearchEmbedder
+  /**
+   * Almacén de adjuntos: reenviar un presupuesto lleva su PDF. Sin él, el agente
+   * no lo envía y deja la tarea a recepción.
+   */
+  storage?: Storage
   secretsKey: Buffer
   callbacks?: Callbacks
   /** Reloj de la corrida (pruebas); sin él, la hora real. */
@@ -238,7 +244,7 @@ export async function processAgentRun(
   msg: QueueMessage<AgentRunJob>,
 ): Promise<"done" | "retry"> {
   const { orgId, conversationId } = msg.message
-  // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0030),
+  // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0031),
   // también si falla o se reintenta.
   return meterAiUse(db, orgId, "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
 }
@@ -451,8 +457,9 @@ async function attendAgentRun(
     toolCtx.emojis = cfg.emojis
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
+    if (runtime.storage) toolCtx.storage = runtime.storage
     runUsage = toolCtx.usage
-    // Dinero (ADR 0030): sin saldo de prueba los agentes se pausan; con el tope
+    // Dinero (ADR 0031): sin saldo de prueba los agentes se pausan; con el tope
     // del mes alcanzado, Recepción no toma casos nuevos (quien ya conversa hoy
     // sigue: no cuesta otra conversación). La persona recibe el aviso fijo y el
     // caso pasa al equipo, sin llamar al modelo.

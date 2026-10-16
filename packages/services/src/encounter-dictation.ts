@@ -6,10 +6,9 @@ import {
   type DictationKind,
   encounterDictationSuggestion,
   serviceCatalog,
-  treatmentPlan,
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch } from "./encounters.js"
@@ -18,7 +17,7 @@ import { createFollowUp } from "./follow-ups.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { findOrgLocale, formatOrgMoney, type OrgLocale } from "./locale.js"
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
-import { addPlanItem, createTreatmentPlan } from "./plan.js"
+import { addPlanItem } from "./plan.js"
 
 /* ---------- Asistente clínico: lo dictado se vuelve sugerencias que el odontólogo confirma ---------- */
 
@@ -669,17 +668,6 @@ export async function undoDictationVoiceCorrection(
 }
 
 /** Plan donde entra una indicación dictada: el de esta atención, el más reciente del paciente o uno nuevo. */
-async function planFor(tx: Db, orgId: string, actorUserId: string, patientId: string, encounterId: string): Promise<string> {
-  const plans = await tx
-    .select({ id: treatmentPlan.id, originEncounterId: treatmentPlan.originEncounterId })
-    .from(treatmentPlan)
-    .where(and(eq(treatmentPlan.organizationId, orgId), eq(treatmentPlan.patientId, patientId), eq(treatmentPlan.isLegacy, false)))
-    .orderBy(desc(treatmentPlan.createdAt))
-  const own = plans.find((plan) => plan.originEncounterId === encounterId) ?? plans[0]
-  if (own) return own.id
-  return (await createTreatmentPlan(tx, orgId, actorUserId, patientId, { title: "Plan de tratamiento", originEncounterId: encounterId })).id
-}
-
 const pick = <T extends string>(payload: Record<string, unknown>, keys: readonly T[]): Partial<Record<T, unknown>> =>
   Object.fromEntries(keys.filter((key) => payload[key] !== undefined).map((key) => [key, payload[key]])) as Partial<Record<T, unknown>>
 
@@ -718,7 +706,8 @@ export async function confirmDictationSuggestion(
   } else if (row.kind === "plan") {
     const created = await addPlanItem(tx, orgId, actorUserId, patientId, {
       serviceId: String(payload["serviceId"]),
-      planId: await planFor(tx, orgId, actorUserId, patientId, encounterId),
+      // Sin plan elegido: va al plan abierto de la persona (o nace uno), como al escribirlo.
+      planId: null,
       sourceEncounterId: encounterId,
       toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
       surfaces: (payload["surfaces"] as string[] | undefined) ?? null,

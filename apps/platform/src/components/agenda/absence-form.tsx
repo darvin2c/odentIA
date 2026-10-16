@@ -1,5 +1,4 @@
 import {
-  Button,
   buttonVariants,
   Checkbox,
   cn,
@@ -11,10 +10,12 @@ import {
 } from "@odentia/ui"
 import {
   addDays,
+  clockValue,
   DatePickerButton,
   FormDrawer,
   formatDateLong,
   minutesToInstant,
+  TimeSelect,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
@@ -50,6 +51,11 @@ export type AbsenceScope =
 function toMinutes(label: string): number {
   const [hours = 0, minutes = 0] = label.split(":").map(Number)
   return hours * 60 + minutes
+}
+
+/** «12:00» + 60 → «13:00», sin pasar de las 23:45 (la última hora de la lista). */
+function addMinutes(label: string, add: number): string {
+  return clockValue(Math.min(toMinutes(label) + add, 23 * 60 + 45))
 }
 
 /** «Ana, Luis y Marta» o «Ana, Luis, Marta y 2 más». */
@@ -243,22 +249,24 @@ export function AbsenceForm({
             <>
               <div className="grid gap-2">
                 <FieldLabel htmlFor="ausencia-inicio">Desde las</FieldLabel>
-                <Input
+                <TimeSelect
                   id="ausencia-inicio"
-                  type="time"
-                  required
+                  className="w-full"
                   value={fromTime}
-                  onChange={(event) => setFromTime(event.target.value)}
+                  onChange={(next) => {
+                    setFromTime(next)
+                    if (toMinutes(toTime) <= toMinutes(next)) setToTime(addMinutes(next, 60))
+                  }}
                 />
               </div>
               <div className="grid gap-2">
                 <FieldLabel htmlFor="ausencia-fin">Hasta las</FieldLabel>
-                <Input
+                <TimeSelect
                   id="ausencia-fin"
-                  type="time"
-                  required
+                  className="w-full"
+                  min={addMinutes(fromTime, 15)}
                   value={toTime}
-                  onChange={(event) => setToTime(event.target.value)}
+                  onChange={setToTime}
                 />
               </div>
             </>

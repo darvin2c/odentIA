@@ -90,7 +90,7 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field>
-          <FieldLabel htmlFor="new-person-paternal">Apellido paterno</FieldLabel>
+          <FieldLabel htmlFor="new-person-paternal">Primer apellido</FieldLabel>
           <Input
             id="new-person-paternal"
             maxLength={100}
@@ -99,7 +99,7 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="new-person-maternal">Apellido materno</FieldLabel>
+          <FieldLabel htmlFor="new-person-maternal">Segundo apellido</FieldLabel>
           <Input
             id="new-person-maternal"
             maxLength={100}

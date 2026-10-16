@@ -1,7 +1,6 @@
 import {
   Button,
   cn,
-  Input,
   Skeleton,
   toast,
 } from "@odentia/ui"
@@ -10,6 +9,7 @@ import {
   FormDrawer,
   type ScheduleColumn,
   ScheduleResourceChips,
+  TimeSelect,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -39,9 +39,8 @@ const WEEK: Array<{ weekday: number; short: string; long: string }> = [
   { weekday: 0, short: "Dom", long: "domingo" },
 ]
 
-/** Hora de un turno: caja estrecha y sin el icono del navegador, para que el día quepa en una línea. */
-const TIME_FIELD =
-  "h-10 w-[76px] px-2 text-center tabular-nums [&::-webkit-calendar-picker-indicator]:hidden"
+/** Hora de un turno: caja estrecha, para que el día quepa en una línea. */
+const TIME_FIELD = "h-10 w-[92px] px-2.5"
 
 function toMinutes(label: string): number {
   const [hours = 0, minutes = 0] = label.split(":").map(Number)
@@ -221,22 +220,20 @@ export function WeeklyScheduleFields({
               ) : null}
               {turns.map((turn) => (
                 <div key={turn.key} className="flex items-center gap-1.5">
-                  <Input
+                  <TimeSelect
                     aria-label={`${day.long}, desde`}
-                    type="time"
                     className={TIME_FIELD}
                     disabled={!canEdit}
                     value={turn.from}
-                    onChange={(event) => schedule.change(turn.key, "from", event.target.value)}
+                    onChange={(next) => schedule.change(turn.key, "from", next)}
                   />
                   <span className="text-sm text-muted-foreground">a</span>
-                  <Input
+                  <TimeSelect
                     aria-label={`${day.long}, hasta`}
-                    type="time"
                     className={TIME_FIELD}
                     disabled={!canEdit}
                     value={turn.to}
-                    onChange={(event) => schedule.change(turn.key, "to", event.target.value)}
+                    onChange={(next) => schedule.change(turn.key, "to", next)}
                   />
                   {canEdit ? (
                     <Button

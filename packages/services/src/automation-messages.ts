@@ -20,7 +20,13 @@ import type { ConsentPurpose } from "@odentia/db/schema/automation"
  * a la pregunta del permiso general tras reservar: su id lleva la persona, no
  * un trabajo (`generalPermissionButtons`).
  */
-export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no"] as const
+/**
+ * «presupuesto» era «Ver y responder» de la primera versión de «Presupuesto
+ * listo»: tocarlo deja el PDF en la conversación. Desde «Su enlace» (ADR
+ * 0037) ese botón abre su enlace (`MessageSpec.link`); la acción queda para
+ * los mensajes que ya salieron con la versión anterior.
+ */
+export const REPLY_ACTIONS = ["confirmar", "responder", "baja", "permiso_si", "permiso_no", "presupuesto"] as const
 export type ReplyAction = (typeof REPLY_ACTIONS)[number]
 
 export interface MessageButton {
@@ -47,7 +53,14 @@ export interface MessageSpec {
   /** Variables por posición: `{{1}}` es `variables[0]`. */
   body: string
   variables: readonly MessageVariable[]
+  /** Botones de respuesta rápida, después del enlace si lo hay. */
   buttons: readonly MessageButton[]
+  /**
+   * Botón que abre «Su enlace» de la persona (ADR 0037): en WhatsApp es un botón
+   * de dirección con el token al final; dentro de las 24 horas y por correo, la
+   * dirección va escrita al final del texto. Lo pone el sistema al enviar.
+   */
+  link?: { title: string }
 }
 
 export interface AutomationMessage extends MessageSpec {
@@ -69,6 +82,7 @@ export const MESSAGE_VARIABLES = {
   cita_pasada: { label: "Fecha de la cita que no se dio", example: "lunes 12 de octubre" },
   control: { label: "Control pendiente", example: "Control de ortodoncia" },
   presupuesto: { label: "Título del presupuesto", example: "Ortodoncia" },
+  resumen_presupuesto: { label: "Tratamientos y total del presupuesto", example: "3 tratamientos por S/ 540" },
   oportunidad: { label: "Título de la oportunidad", example: "Ortodoncia" },
 } as const
 export type MessageVariable = keyof typeof MESSAGE_VARIABLES
@@ -88,10 +102,22 @@ export function isAppointmentNotice(kind: string): kind is AppointmentNoticeKey 
   return (APPOINTMENT_NOTICE_KEYS as readonly string[]).includes(kind)
 }
 
+/**
+ * El aviso de cita reservada cuando a la persona le faltan datos para
+ * atenderla: el mismo aviso, con el botón de «Su enlace» para completarlos
+ * antes de venir (decisión 8). No es otro trabajo: sale en lugar del aviso de
+ * reserva cuando faltan datos, y así no se le manda un segundo mensaje ese día.
+ */
+export const APPOINTMENT_DATA_NOTICE_KEY = "aviso_cita_reservada_datos"
+
 export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
-  // Los avisos de la cita van junto a su línea, «Recordar la cita».
-  ...APPOINTMENT_NOTICE_KEYS,
+  // Los avisos de la cita van junto a su línea, «Recordar la cita»; el de
+  // reserva con «Su enlace», junto al de reserva.
+  "aviso_cita_reservada",
+  APPOINTMENT_DATA_NOTICE_KEY,
+  "aviso_cita_movida",
+  "aviso_cita_cancelada",
   "recordatorio_control",
   "seguimiento_presupuesto",
   "seguimiento_comercial",
@@ -182,6 +208,17 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, OPT_OUT],
     subject: "Tu cita quedó reservada",
   },
+  aviso_cita_reservada_datos: {
+    key: "aviso_cita_reservada_datos",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_aviso_cita_datos_v1",
+    body: "Hola, {{1}}. Te esperamos en {{2}}: {{3}}. Antes de venir, completa tus datos aquí.",
+    variables: ["persona", "lugar", "citas"],
+    link: { title: "Ver mi cita y mis datos" },
+    buttons: [OPT_OUT],
+    subject: "Tu cita quedó reservada: completa tus datos",
+  },
   aviso_cita_movida: {
     key: "aviso_cita_movida",
     purpose: "recordatorio",
@@ -226,12 +263,69 @@ export const RESUME_MESSAGE: MessageSpec = {
   buttons: [{ action: "responder", title: "Sí, continuemos" }],
 }
 
-/** Los mensajes con los que viene cada clínica: los que envía el agente y el de la Bandeja. */
-export const CATALOG_MESSAGE_KEYS = [...AUTOMATION_MESSAGE_KEYS, RESUME_MESSAGE_KEY] as const
+/**
+ * «Presupuesto listo» (paso 3 de la fase 3): lo envía quien entrega el
+ * presupuesto desde Plan o el cierre de la atención, y el agente cuando la
+ * persona se lo pide por el chat. Es parte del servicio: no pide permiso
+ * previo (ADR 0030) y deja de salir solo si se dio de baja de los mensajes de
+ * seguimiento. «Ver y responder» abre «Su enlace», donde lo ve y responde
+ * (ADR 0037). Por WhatsApp dentro de las 24 horas sale con el PDF y su
+ * enlace; por correo, con el PDF adjunto y su enlace.
+ */
+export const BUDGET_READY_MESSAGE_KEY = "presupuesto_listo"
+export const BUDGET_READY_MESSAGE: MessageSpec = {
+  key: BUDGET_READY_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_presupuesto_listo_v2",
+  body: "Hola, {{1}}. Tu presupuesto está listo: {{2}}. Puedes verlo y decirnos qué aceptas aquí.",
+  variables: ["persona", "resumen_presupuesto"],
+  link: { title: "Ver y responder" },
+  buttons: [],
+}
+/** Asunto cuando «Presupuesto listo» sale por correo. */
+export const BUDGET_READY_SUBJECT = "Tu presupuesto está listo"
+
+/**
+ * «Su enlace» (ADR 0037): lo envía recepción con «Enviarle su enlace» (datos
+ * por completar, un consentimiento por firmar) y lleva solo el botón que lo
+ * abre. Es parte del servicio, como el aviso de su cita: no pide permiso y
+ * deja de salir solo si se dio de baja de los recordatorios.
+ */
+export const PERSONAL_LINK_MESSAGE_KEY = "su_enlace"
+export const PERSONAL_LINK_MESSAGE: MessageSpec = {
+  key: PERSONAL_LINK_MESSAGE_KEY,
+  category: "utility",
+  template: "odentia_su_enlace_v1",
+  body: "Hola, {{1}}. En {{2}} te dejamos aquí lo que tienes pendiente con nosotros.",
+  variables: ["persona", "clinica"],
+  link: { title: "Ver lo pendiente" },
+  buttons: [],
+}
+/** Asunto cuando «Su enlace» sale por correo. */
+export const PERSONAL_LINK_SUBJECT = "Lo que tienes pendiente con la clínica"
+
+/** Los mensajes con los que viene cada clínica: los que envía el agente, el de la Bandeja, el del presupuesto y «Su enlace». */
+export const CATALOG_MESSAGE_KEYS = [
+  ...AUTOMATION_MESSAGE_KEYS,
+  RESUME_MESSAGE_KEY,
+  BUDGET_READY_MESSAGE_KEY,
+  PERSONAL_LINK_MESSAGE_KEY,
+] as const
 export type CatalogMessageKey = (typeof CATALOG_MESSAGE_KEYS)[number]
 
 export function catalogMessageOf(key: string): MessageSpec | null {
-  return key === RESUME_MESSAGE_KEY ? RESUME_MESSAGE : automationMessageOf(key)
+  if (key === RESUME_MESSAGE_KEY) return RESUME_MESSAGE
+  if (key === BUDGET_READY_MESSAGE_KEY) return BUDGET_READY_MESSAGE
+  if (key === PERSONAL_LINK_MESSAGE_KEY) return PERSONAL_LINK_MESSAGE
+  return automationMessageOf(key)
+}
+
+/**
+ * El texto con «Su enlace» escrito al final: lo que sale dentro de las 24
+ * horas de WhatsApp y por correo, donde no hay botón de dirección.
+ */
+export function withLinkLine(text: string, link: { title: string } | undefined, url: string | null): string {
+  return link && url ? `${text}\n\n${link.title}: ${url}` : text
 }
 
 /** Idioma de las plantillas: el de los textos del producto, sin variante de país. */

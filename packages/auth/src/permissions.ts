@@ -25,7 +25,11 @@
  * Invariante: lo clínico (`clinical.read`/`.write`) nunca se entrega a
  * recepción/caja y lo financiero (`finance.*`) nunca a recepción/clínica.
  * Presupuestos y comisiones tienen permisos propios; el servidor además limita
- * al odontólogo a su plan y sus comisiones. `member` es el mínimo seguro.
+ * al odontólogo a lo que él indicó y a sus comisiones. `member` es el mínimo
+ * seguro. Del presupuesto (decisión 4 de la fase 3): `budgets.read` lo lee como
+ * el documento de la persona, `budgets.send` lo entrega (imprimir o enviar),
+ * `budgets.decide` anota su respuesta y `budgets.write` lo arma y cambia
+ * precios, que sigue siendo del odontólogo y de quien dirige.
  * Rol o permiso desconocido siempre deniega, incluso para owner/admin.
  */
 
@@ -56,6 +60,7 @@ export type Permission =
   | "agent.decide"
   | "clinical.alerts"
   | "budgets.decide"
+  | "budgets.send"
   | "finance.close"
   | "finance.admin"
   | "tasks.all"
@@ -76,8 +81,8 @@ export const ROLE_DESCRIPTIONS: Record<OrgRole, string> = {
   owner: "Puede hacer todo, también nombrar o quitar a otros propietarios.",
   admin: "Puede hacer todo en la clínica, menos nombrar o quitar propietarios.",
   reception:
-    "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve las alergias del paciente, pero no su historia clínica, la caja ni la configuración del agente.",
-  dentist: "Pacientes, historia clínica, presupuestos de sus planes, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
+    "Registra pacientes y lleva la agenda, los contactos y oportunidades, las conversaciones y las tareas; decide lo que el agente le consulta sobre eso. Ve el presupuesto como lo recibe la persona, lo envía, anota su respuesta y agenda lo aceptado, sin cambiar precios. Ve las alergias del paciente, pero no su historia clínica, la caja ni la configuración del agente.",
+  dentist: "Pacientes, historia clínica, presupuestos de lo que indicó, sus propias comisiones, agenda, conversaciones y tareas. Sin caja ni contactos y oportunidades.",
   cashier: "Ve a los pacientes, lleva la caja, registra la respuesta a los presupuestos y ve las tareas. Sin historia clínica ni agenda.",
   member: "Acceso mínimo: solo ve las tareas.",
 };
@@ -90,6 +95,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "agent.decide",
   "clinical.alerts",
   "budgets.decide",
+  "budgets.send",
   "finance.close",
   "finance.admin",
   "tasks.all",
@@ -117,6 +123,10 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "agent.decide",
     "clinical.alerts",
     "catalog.read",
+    // El presupuesto como documento de la persona: lo lee, lo envía y anota la respuesta.
+    "budgets.read",
+    "budgets.send",
+    "budgets.decide",
   ],
   dentist: [
     "patients.read",
@@ -125,6 +135,7 @@ const ROLE_PERMISSIONS: Record<Exclude<OrgRole, "owner" | "admin">, readonly Per
     "budgets.read",
     "budgets.write",
     "budgets.decide",
+    "budgets.send",
     "commissions.read",
     "catalog.read",
     "appointments.read",
@@ -158,6 +169,7 @@ function isPermission(permission: string): permission is Permission {
     permission === "agent.decide" ||
     permission === "clinical.alerts" ||
     permission === "budgets.decide" ||
+    permission === "budgets.send" ||
     permission === "finance.close" ||
     permission === "finance.admin" ||
     permission === "tasks.all" ||

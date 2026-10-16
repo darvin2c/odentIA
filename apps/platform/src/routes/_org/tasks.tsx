@@ -21,7 +21,6 @@ import { dueWords, formatDueAt, isOverdue } from "../../components/crm/crm-helpe
 import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { TaskDrawer } from "../../components/crm/task-drawer"
 import { PersonLink } from "../../components/person-link"
-import { PortalRequestsSection } from "../../components/portal/portal-requests-panel"
 import { AGENT_CASE_ROW } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { TASK_AREA_LABEL, type TaskItem, useMemberName, usePermission } from "../../lib/crm"
@@ -49,6 +48,7 @@ const PAGE = 30
 function originWords(task: TaskItem): string {
   if (task.createdBy === "admin") return "La dejó el Administrador"
   if (task.createdBy === "agent") return "La dejó el agente"
+  if (task.createdBy === "sistema") return "La dejó el sistema"
   return "La dejó el equipo"
 }
 
@@ -269,7 +269,6 @@ function TasksPage() {
           ) : undefined
         }
       />
-      <PortalRequestsSection />
       {actionError || completion.error ? (
         <p role="alert" className="rounded-md border border-destructive/40 p-2 text-sm text-destructive">
           No se pudo actualizar la tarea: {actionError ?? completion.error}

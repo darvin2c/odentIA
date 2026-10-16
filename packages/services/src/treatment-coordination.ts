@@ -10,11 +10,13 @@
 import type { Db } from "@odentia/db"
 import { treatmentBudget } from "@odentia/db/schema/clinical"
 import { and, desc, eq } from "drizzle-orm"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listFollowUps, type ScheduleFollowUpInput, scheduleFollowUp } from "./follow-ups.js"
 import { listPlanItems } from "./plan.js"
 
 const OPEN_TREATMENT_STATUSES = ["pendiente", "programado", "en_curso", "suspendido"]
-const DISCARDED_DECISIONS = ["rechazado", "reemplazado"]
+// Lo que no aceptó, lo reemplazado y lo que estaba solo en una opción no elegida.
+const DISCARDED_DECISIONS = ["rechazado", "reemplazado", "no_elegida"]
 
 export interface CoordinationFollowUp {
   id: string
@@ -27,7 +29,7 @@ export interface CoordinationFollowUp {
 }
 
 export interface TreatmentCoordination {
-  /** Presupuestos presentados que esperan respuesta de quien decide. */
+  /** Presupuestos que esperan respuesta de quien decide (`budgetAwaitsAnswerSql`). */
   budgetsAwaitingDecision: Array<{ id: string; title: string; presentedAt: Date | null }>
   /** Controles abiertos: por reservar o con cita vigente. */
   followUps: CoordinationFollowUp[]
@@ -68,7 +70,7 @@ export async function getTreatmentCoordination(
       and(
         eq(treatmentBudget.organizationId, orgId),
         eq(treatmentBudget.patientId, patientId),
-        eq(treatmentBudget.status, "presentado"),
+        budgetAwaitsAnswerSql(treatmentBudget),
       ),
     )
     .orderBy(desc(treatmentBudget.createdAt), desc(treatmentBudget.id))

@@ -32,6 +32,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
+import { hidePersonalLinkRefs } from "./personal-link-token.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
@@ -127,7 +128,8 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
     senderKind: row.senderKind,
     senderUserId: row.senderUserId,
     contentType: row.contentType,
-    body: row.body,
+    // «Su enlace» se ve sin su token: en el mensaje solo hay una referencia.
+    body: row.body === null ? null : hidePersonalLinkRefs(row.body),
     attachments: row.attachments,
     externalId: row.externalId,
     status: row.status,
@@ -357,7 +359,7 @@ export async function ingestInbound(
   }
 
   // Nota de voz sin caption: transcribir a body (el agente lo lee como texto).
-  // Solo si el agente la va a leer (ADR 0030): con él apagado queda el audio
+  // Solo si el agente la va a leer (ADR 0031): con él apagado queda el audio
   // para el equipo y no se paga una transcripción que nadie usa.
   // Best-effort: si falla, body queda null y la ingesta no se pierde.
   if (
@@ -494,6 +496,8 @@ export type OutboundContent =
       language: string
       params: string[]
       buttons?: ReplyButton[]
+      /** Token de «Su enlace» para el botón que lo abre (ADR 0037). */
+      link?: string
       preview?: string
     }
   | { type: "media"; attachment: AttachmentRef; caption?: string }
@@ -675,6 +679,7 @@ export async function sendOutbound(
       templateName: content.type === "template" ? content.name : null,
       templateLanguage: content.type === "template" ? content.language : null,
       templateParams: content.type === "template" ? content.params : null,
+      templateLink: content.type === "template" ? (content.link ?? null) : null,
       replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       status: "queued",
@@ -716,6 +721,8 @@ export async function sendTemplateOutbound(
     language: string
     params: string[]
     buttons?: ReplyButton[]
+    /** Token de «Su enlace» para el botón de la plantilla que lo abre. */
+    link?: string
     preview?: string
   },
 ): Promise<MessageItem> {
@@ -748,6 +755,7 @@ export async function sendTemplateOutbound(
       language: input.language,
       params: input.params,
       ...(input.buttons?.length ? { buttons: input.buttons } : {}),
+      ...(input.link ? { link: input.link } : {}),
       ...(preview ? { preview } : {}),
     },
   })

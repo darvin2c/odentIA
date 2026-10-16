@@ -53,8 +53,13 @@ import {
   updateFormTemplate,
 } from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
+import { fetchConsentTemplateServices, saveConsentTemplateServices } from "../../lib/encounter-documents"
+import { fetchServices } from "../../lib/services"
 
 export const Route = createFileRoute("/_org/settings/forms")({
+  // «Te espera» abre directo la pestaña de consentimientos (?tab=consentimientos).
+  validateSearch: (search: Record<string, unknown>): { tab?: "formularios" | "consentimientos" } =>
+    search.tab === "consentimientos" || search.tab === "formularios" ? { tab: search.tab } : {},
   component: FormulariosPage,
 })
 
@@ -84,7 +89,8 @@ function errorText(error: unknown, fallback: string): string {
  */
 function FormulariosPage() {
   const canRead = usePermission("settings.read")
-  const [tab, setTab] = useState("formularios")
+  const search = Route.useSearch()
+  const [tab, setTab] = useState<string>(search.tab ?? "formularios")
   if (!canRead) {
     return (
       <div className="flex flex-col gap-6">
@@ -386,7 +392,16 @@ function TemplateBuilder({
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const schema: FormSchemaDef = { sections }
+      // Pasar a los antecedentes es del cuestionario que responde el paciente.
+      const schema: FormSchemaDef = {
+        sections:
+          respondent === "portal"
+            ? sections
+            : sections.map((section) => ({
+                ...section,
+                fields: section.fields.map(({ definition: _definition, ...field }) => field),
+              })),
+      }
       const body = {
         title: title.trim(),
         description: description.trim() ? description.trim() : null,
@@ -503,7 +518,7 @@ function TemplateBuilder({
         <Field>
           <FieldLabel htmlFor={`${ids}-responde`}>Quién lo responde</FieldLabel>
           <Select
-            items={{ staff: "El equipo, desde la ficha o la atención", portal: "El paciente, desde el portal (cuestionario previo)" }}
+            items={{ staff: "El equipo, desde la ficha", portal: "El paciente, desde el portal (cuestionario previo)" }}
             value={respondent}
             onValueChange={(v) => setRespondent(v === "portal" ? "portal" : "staff")}
             disabled={!canAdmin}
@@ -512,13 +527,15 @@ function TemplateBuilder({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="staff">El equipo, desde la ficha o la atención</SelectItem>
+              <SelectItem value="staff">El equipo, desde la ficha</SelectItem>
               <SelectItem value="portal">El paciente, desde el portal (cuestionario previo)</SelectItem>
             </SelectContent>
           </Select>
           {respondent === "portal" ? (
             <FieldDescription>
-              Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo finaliza.
+              Lo que responde el paciente llega como «declarado»; el profesional lo revisa y lo
+              finaliza. Al finalizarlo, las respuestas marcadas como alergias pasan a sus
+              antecedentes sin confirmar y la receta avisa.
             </FieldDescription>
           ) : null}
         </Field>
@@ -549,6 +566,7 @@ function TemplateBuilder({
                 <FieldEditor
                   key={field.id}
                   field={field}
+                  declaresHealth={respondent === "portal"}
                   previousFields={sections
                     .flatMap((s) => s.fields)
                     .slice(
@@ -620,12 +638,15 @@ function TemplateBuilder({
 
 function FieldEditor({
   field,
+  declaresHealth,
   previousFields,
   disabled,
   onPatch,
   onRemove,
 }: {
   field: FormFieldDef
+  /** Lo responde el paciente: una respuesta de texto puede pasar a sus antecedentes. */
+  declaresHealth: boolean
   /** Campos anteriores Sí/No u opciones: los únicos que pueden condicionar este. */
   previousFields: FormFieldDef[]
   disabled: boolean
@@ -659,11 +680,13 @@ function FieldEditor({
             items={FIELD_TYPE_LABELS}
             value={field.type}
             onValueChange={(value) =>
-              onPatch(
-                value === "escala"
+              onPatch({
+                ...(value === "escala"
                   ? { type: "escala", min: field.min ?? 0, max: field.max ?? 10 }
-                  : { type: value as FormFieldType },
-              )
+                  : { type: value as FormFieldType }),
+                // Solo una respuesta de texto pasa a los antecedentes.
+                ...(value === "texto" || value === "texto_largo" ? {} : { definition: null }),
+              })
             }
             disabled={disabled}
           >
@@ -690,6 +713,19 @@ function FieldEditor({
           />
           <label htmlFor={`${ids}-obligatorio`}>Obligatorio</label>
         </div>
+        {declaresHealth && (field.type === "texto" || field.type === "texto_largo") ? (
+          <div className="flex min-h-11 items-center gap-2 text-sm sm:min-h-0">
+            <Checkbox
+              id={`${ids}-alergias`}
+              checked={field.definition === "AllergyIntolerance.code"}
+              disabled={disabled}
+              onCheckedChange={(checked) =>
+                onPatch({ definition: checked === true ? "AllergyIntolerance.code" : null })
+              }
+            />
+            <label htmlFor={`${ids}-alergias`}>Son alergias: pasan a sus antecedentes</label>
+          </div>
+        ) : null}
         {(field.type === "texto" || field.type === "texto_largo") && (
           <Input
             className="w-32"
@@ -948,6 +984,18 @@ function ConsentTemplatesPanel() {
   })
   const templates = listQuery.data?.data ?? []
   const grouped = useMemo(() => byTemplate(templates), [templates])
+  // «Se pide para»: los servicios que piden cada plantilla (por su clave).
+  const linksQuery = useQuery({
+    queryKey: ["consent-template-services"],
+    queryFn: fetchConsentTemplateServices,
+  })
+  const servicesQuery = useQuery({
+    queryKey: ["services", "para-consentimientos"],
+    queryFn: () => fetchServices({ limit: 200 }),
+  })
+  const serviceName = new Map((servicesQuery.data?.data ?? []).map((service) => [service.id, service.name]))
+  const linkedOf = (key: string) => linksQuery.data?.data.find((link) => link.templateKey === key)?.serviceIds ?? []
+  const [servicesFor, setServicesFor] = useState<ConsentTemplate | null>(null)
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["consent-templates"] })
@@ -1055,6 +1103,13 @@ function ConsentTemplatesPanel() {
                           {draft ? ` · borrador de la versión ${draft.version}` : ""}
                           {latest.sections ? "" : " · texto libre (anterior a las secciones)"}
                         </p>
+                        <p className="text-sm text-muted-foreground">
+                          {linkedOf(latest.key).length > 0
+                            ? `Se pide para: ${linkedOf(latest.key)
+                                .map((id) => serviceName.get(id) ?? "un servicio retirado")
+                                .join(", ")}`
+                            : "Aún no se pide para ningún servicio: la atención no lo propone sola"}
+                        </p>
                       </div>
                       <div className="flex flex-wrap gap-1">
                         {versions.map((version) => (
@@ -1085,6 +1140,15 @@ function ConsentTemplatesPanel() {
                             Nueva versión desde la {latest.version}
                           </Button>
                         )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className={ROW_BUTTON}
+                          onClick={() => setServicesFor(latest)}
+                        >
+                          Se pide para…
+                        </Button>
                         {current ? (
                           <Button
                             type="button"
@@ -1119,6 +1183,19 @@ function ConsentTemplatesPanel() {
         />
       ) : null}
       <DiscardDraftDialog form={builder} what="otra plantilla" />
+      {servicesFor ? (
+        <ConsentServicesDrawer
+          template={servicesFor}
+          selected={linkedOf(servicesFor.key)}
+          services={servicesQuery.data?.data ?? []}
+          loading={servicesQuery.isPending}
+          onClose={() => setServicesFor(null)}
+          onSaved={() => {
+            setServicesFor(null)
+            void queryClient.invalidateQueries({ queryKey: ["consent-template-services"] })
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={confirm?.kind === "publish"}
@@ -1147,6 +1224,101 @@ function ConsentTemplatesPanel() {
         onConfirm={() => confirm?.kind === "archive" && archiveMutation.mutate(confirm.template)}
       />
     </div>
+  )
+}
+
+/**
+ * «Se pide para»: los servicios por los que la atención propone este
+ * consentimiento («Necesita consentimiento · Preparar»). Es configuración, no
+ * contenido: se guarda para la plantilla y todas sus versiones.
+ */
+function ConsentServicesDrawer({
+  template,
+  selected,
+  services,
+  loading,
+  onClose,
+  onSaved,
+}: {
+  template: ConsentTemplate
+  selected: string[]
+  services: Array<{ id: string; name: string; isActive?: boolean }>
+  loading: boolean
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const ids = useId()
+  const canAdmin = usePermission("settings.write")
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set(selected))
+  const [query, setQuery] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const dirty = chosen.size !== selected.length || selected.some((id) => !chosen.has(id))
+  const save = useMutation({
+    mutationFn: () => saveConsentTemplateServices(template.id, [...chosen]),
+    onSuccess: () => {
+      toast.success(`«${template.title}» se pide para ${chosen.size} servicio${chosen.size === 1 ? "" : "s"}`)
+      onSaved()
+    },
+    onError: (e) => setError(errorText(e, "No pudimos guardar los servicios. Vuelve a intentarlo.")),
+  })
+  const needle = query.trim().toLowerCase()
+  const shown = services.filter(
+    (service) =>
+      (service.isActive !== false || chosen.has(service.id)) &&
+      (!needle || service.name.toLowerCase().includes(needle)),
+  )
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={`Se pide para · ${template.title}`}
+      description="Al registrar o indicar uno de estos servicios, la atención propone preparar este consentimiento."
+      onSubmit={(event: FormEvent) => {
+        event.preventDefault()
+        setError(null)
+        save.mutate()
+      }}
+      isSubmitting={save.isPending}
+      isDirty={dirty}
+      error={error}
+      submitDisabled={!canAdmin}
+    >
+      <div className="flex flex-col gap-3">
+        <Field>
+          <FieldLabel htmlFor={`${ids}-q`}>Buscar un servicio</FieldLabel>
+          <Input id={`${ids}-q`} value={query} onChange={(event) => setQuery(event.target.value)} />
+        </Field>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Cargando servicios…</p>
+        ) : shown.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {services.length === 0 ? "Aún no hay servicios en la lista de la clínica." : "Ningún servicio coincide."}
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {shown.map((service) => (
+              <li key={service.id}>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={chosen.has(service.id)}
+                    disabled={!canAdmin}
+                    onCheckedChange={(value) =>
+                      setChosen((current) => {
+                        const next = new Set(current)
+                        if (value === true) next.add(service.id)
+                        else next.delete(service.id)
+                        return next
+                      })
+                    }
+                  />
+                  {service.name}
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </FormDrawer>
   )
 }
 
@@ -1238,7 +1410,7 @@ function ConsentBuilder({
             ? `Nueva versión de «${initial.title}»`
             : "Nueva plantilla"
       }
-      description="Se guarda como borrador; para usarla, publícala desde la lista. El diagnóstico y el profesional que informa se toman de la atención al generar el consentimiento."
+      description="Se guarda como borrador; para usarla, publícala desde la lista. El diagnóstico se elige al generar el consentimiento (o se toma del tratamiento) y el profesional que informa firma con su perfil profesional."
       onSubmit={(event: FormEvent) => {
         event.preventDefault()
         const problem = missing()

@@ -1,5 +1,5 @@
 import { Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { DueAtField, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -15,16 +15,20 @@ import {
 import { type PickedPerson, PersonPicker } from "../person-picker"
 import { PersonLink } from "../person-link"
 import { ChoiceSelect } from "../ui/choice-select"
-import { DueAtField } from "./due-at-field"
 
 /**
  * Contrato compartido con InboxWorkspace. `taskId` abre la tarea para
  * cambiarla (foco `/tasks?task=`); sin él crea una nueva con el contexto que
- * venga fijado (persona, conversación u oportunidad).
+ * venga fijado (persona, paciente, conversación u oportunidad).
  */
 export interface TaskDrawerProps {
   open: boolean
   contactId?: string
+  /**
+   * La ficha de un paciente, desde su página: la tarea es de su propia persona
+   * y no pide permiso de ventas (quien atiende también la crea).
+   */
+  patientId?: string
   conversationId?: string
   opportunityId?: string
   taskId?: string
@@ -52,7 +56,7 @@ function errorText(err: unknown, fallback: string): string {
  * el buscador de personas y, si tiene oportunidades abiertas, la tarea puede
  * ser la próxima acción de una (una sola tarea abierta por oportunidad).
  */
-export function TaskDrawer({ open, contactId, conversationId, opportunityId, taskId, onClose, onSaved }: TaskDrawerProps) {
+export function TaskDrawer({ open, contactId, patientId, conversationId, opportunityId, taskId, onClose, onSaved }: TaskDrawerProps) {
   const ids = useId()
   const queryClient = useQueryClient()
   const members = useOrgMembers()
@@ -132,7 +136,7 @@ export function TaskDrawer({ open, contactId, conversationId, opportunityId, tas
         body: JSON.stringify({
           title: title.trim(),
           ...(dueAt ? { dueAt } : {}),
-          ...(effectiveContactId ? { contactId: effectiveContactId } : {}),
+          ...(effectiveContactId ? { contactId: effectiveContactId } : patientId ? { patientId } : {}),
           ...(conversationId ? { conversationId } : {}),
           ...(chosenOpportunity ? { opportunityId: chosenOpportunity } : {}),
           assigneeUserId,
@@ -169,7 +173,9 @@ export function TaskDrawer({ open, contactId, conversationId, opportunityId, tas
               ? "Ya está hecha."
               : opportunityId
                 ? "Es la próxima acción de la oportunidad: una sola a la vez."
-                : undefined
+                : patientId && !isEdit
+                  ? "Queda referida a este paciente y aparece en sus pendientes."
+                  : undefined
       }
       onSubmit={(event) => {
         event.preventDefault()
@@ -233,7 +239,7 @@ export function TaskDrawer({ open, contactId, conversationId, opportunityId, tas
           <FieldDescription>Sin responsable, la ve quien trabaja en esa parte del equipo.</FieldDescription>
         </Field>
 
-        {!isEdit && !contactId && !opportunityId && canReadCrm ? (
+        {!isEdit && !contactId && !patientId && !opportunityId && canReadCrm ? (
           <PersonPicker
             label="De quién es (opcional)"
             value={person}

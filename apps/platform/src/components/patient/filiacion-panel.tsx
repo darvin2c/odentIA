@@ -1,31 +1,32 @@
 import {
   ageLabel,
-  documentText,
   EDUCATION_LEVEL_LABELS,
   KINSHIP_LABELS,
   MARITAL_STATUS_LABELS,
+  type RegistrationConfig,
 } from "@odentia/clinical"
-import { Badge, Button } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@odentia/ui"
 import { internationalText } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
+import { ChevronDown } from "lucide-react"
 import type { ReactNode } from "react"
 import { useState } from "react"
-import type { RegistrationConfig } from "@odentia/clinical"
 import { apiFetch } from "../../lib/api"
-import { usePermission, useCan } from "../../lib/crm"
-import { sexLabel } from "../../lib/patient-overview"
-import { hcLabel, missingFiliation, type PatientFull } from "../../lib/patients"
-import { DataConsentSection } from "./data-consent-section"
-import { MessagePermissionsSection, messageRecipientOf } from "./message-permissions-section"
-import {
-  COUNTRY_LABELS,
-  FiliacionSectionDrawer,
-  type FiliacionSectionKey,
-  INSURANCE_LABELS,
-  useBranches,
-} from "./filiacion-section-drawer"
-import { useUbigeoLabel } from "./ubigeo-field"
+import { useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
+import { useClinicalProfile } from "../../lib/org"
+import { sexLabel } from "../../lib/patient-overview"
+import { filiationGapsText, hcLabel, type PatientFull } from "../../lib/patients"
+import { addressLine, countryText, documentLine, insuranceText } from "../../lib/person-data"
+import { DataConsentSection } from "./data-consent-section"
+import { FiliacionSectionDrawer, type FiliacionSectionKey, useBranches } from "./filiacion-section-drawer"
+import { MessagePermissionsSection, messageRecipientOf } from "./message-permissions-section"
 
 const missing = <span className="text-muted-foreground">No registrado</span>
 
@@ -68,37 +69,50 @@ function Section({
   )
 }
 
-const country = (code: string | null | undefined) =>
-  code ? `${COUNTRY_LABELS[code] ?? code}` : null
-
 /**
- * Filiación con las secciones del formato de historia clínica. Cada grupo se
- * edita en su propio cajón con los catálogos del registro; lo no registrado se
- * ve como tal. La obligatoriedad la fija «Registro de pacientes».
+ * Datos de la persona en tres tarjetas (Identidad, Contacto y, si la clínica
+ * lo pide o ya lo tiene, Seguro) y lo opcional plegado en «Más datos»
+ * (decisión 10 de la fase 3). Lo que depende del país (documento, dirección,
+ * seguro) se dice como en la clínica de ese país. «Faltan datos para
+ * atenderla» lo calcula el servidor y solo lo recibe quien edita; «Completar»
+ * abre solo lo que falta.
  */
 export function FiliacionPanel({ detail }: { detail: PatientFull }) {
   const canWrite = usePermission("patients.write")
   const canRead = usePermission("patients.read")
+  const profile = useClinicalProfile()
   const [editing, setEditing] = useState<FiliacionSectionKey | null>(null)
+  const [moreOpen, setMoreOpen] = useState(false)
   const p = detail.patient
-  const birthPlace = useUbigeoLabel(p.birthPlaceUbigeo)
-  const addressPlace = useUbigeoLabel(p.addressUbigeo)
   const branches = useBranches(canRead)
   const can = useCan()
   const canConfig = can("crm.read") || can("settings.read")
-  // Lo que falta es lo que «Registro de pacientes» pide como obligatorio: el
-  // mismo criterio que los pendientes del Resumen (`missingFiliation`).
+  // El seguro se muestra si la clínica lo pide o si ya hay uno guardado.
   const config = useQuery({
     queryKey: ["patient-registration-config"],
     queryFn: () =>
       apiFetch<{ data: RegistrationConfig; meta: { today: string } }>("/api/patient-registration/config"),
-    enabled: canWrite && canConfig,
+    enabled: canConfig,
     retry: false,
   })
+  const asksInsurance = config.data ? config.data.data.fields.insuranceType !== "hidden" : false
+  const showInsurance = asksInsurance || Boolean(p.insuranceType || p.insurerName || p.affiliationNumber)
   const age = ageLabel(p.birthDate)
   const edit = (section: FiliacionSectionKey) => (canWrite ? () => setEditing(section) : undefined)
-  const gaps = config.data ? missingFiliation(config.data.data, p) : []
-  const legacy = p.identityLegacy ? Object.values(p.identityLegacy).join(", ") : null
+  const gaps = detail.missingData ?? []
+  const emergency = p.emergencyContactName
+    ? [
+        p.emergencyContactName,
+        p.emergencyContactRelationship
+          ? (KINSHIP_LABELS[p.emergencyContactRelationship as keyof typeof KINSHIP_LABELS] ??
+            p.emergencyContactRelationship)
+          : null,
+        p.emergencyContactPhone ? internationalText(p.emergencyContactPhone) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null
+  const birthPlace = [p.birthPlace, countryText(p.birthCountry)].filter(Boolean).join(", ") || null
 
   return (
     <section aria-labelledby="filiacion-titulo" className="flex min-w-0 flex-col gap-4">
@@ -108,122 +122,116 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
       </h2>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Badge variant="outline">{hcLabel(p.patientNumber)}</Badge>
-        {p.identityNeedsReview ? (
-          <Badge variant="warning">Identidad por revisar: confirma apellidos y nombres</Badge>
+        {p.identityNeedsReview && gaps.length === 0 ? (
+          <Badge variant="warning">Apellidos por confirmar: al guardar Identidad quedan confirmados</Badge>
         ) : null}
         {gaps.length > 0 ? (
-          <span className="text-muted-foreground">Faltan datos que la clínica pide: {gaps.join(", ")}.</span>
+          <>
+            <Badge variant="warning">Faltan datos para atenderla</Badge>
+            <span className="text-muted-foreground">{filiationGapsText(gaps)}.</span>
+            {canWrite ? (
+              <Button size="sm" variant="outline" onClick={() => setEditing("completar")}>
+                Completar
+              </Button>
+            ) : null}
+          </>
         ) : null}
       </div>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-        <Section
-          title="Identidad"
-          onEdit={edit("identidad")}
-          footer={
-            legacy ? (
-              <p className="text-xs text-muted-foreground">
-                Dato anterior sin catálogo, conservado para revisar: {legacy}.
-              </p>
-            ) : null
-          }
-        >
-          <Item label="Apellido paterno">{p.paternalSurname}</Item>
-          <Item label="Apellido materno">{p.maternalSurname}</Item>
+        <Section title="Identidad" onEdit={edit("identidad")}>
           <Item label="Nombres">{p.givenNames}</Item>
-          <Item label="Documento">
-            {p.docNumber
-              ? `${documentText(p.docType, p.docNumber)}${p.docCountry ? ` · ${country(p.docCountry)}` : ""}`
-              : null}
-          </Item>
+          <Item label="Primer apellido">{p.paternalSurname}</Item>
+          <Item label="Segundo apellido">{p.maternalSurname}</Item>
+          <Item label="Documento">{documentLine(p.docType, p.docNumber, p.docCountry)}</Item>
           <Item label="Nacimiento">
             {p.birthDate
               ? `${new Date(`${p.birthDate}T12:00:00`).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", year: "numeric" })}${age ? ` · ${age}` : ""}`
               : null}
           </Item>
           <Item label="Sexo">{p.sex ? sexLabel(p.sex) : null}</Item>
-          <Item label="Estado civil">
-            {p.maritalStatus
-              ? MARITAL_STATUS_LABELS[p.maritalStatus as keyof typeof MARITAL_STATUS_LABELS]
-              : null}
-          </Item>
-          <Item label="Grado de instrucción">
-            {p.educationLevel
-              ? EDUCATION_LEVEL_LABELS[p.educationLevel as keyof typeof EDUCATION_LEVEL_LABELS]
-              : null}
-          </Item>
-          <Item label="Ocupación">{p.occupation}</Item>
-          <Item label="Nacionalidad">{country(p.nationality)}</Item>
-        </Section>
-        <Section title="Nacimiento y domicilio" onEdit={edit("domicilio")}>
-          <Item label="Lugar de nacimiento">{birthPlace}</Item>
-          <Item label="Domicilio">{p.address}</Item>
-          <Item label="Ubigeo del domicilio">{addressPlace}</Item>
-          <Item label="Referencia">{p.addressReference}</Item>
-          <Item label="Procedencia">{p.origin}</Item>
         </Section>
         <Section title="Contacto" onEdit={edit("contacto")}>
           <Item label="Teléfono">{p.phone ? internationalText(p.phone) : null}</Item>
           <Item label="Correo">{p.email}</Item>
-          <Item label="Cómo nos conoció">{p.referralSource}</Item>
+          <Item label="Dirección">{addressLine(profile, p)}</Item>
+          <Item label="Contacto de emergencia">{emergency}</Item>
         </Section>
-        <Section title="Seguro" onEdit={edit("seguro")}>
-          <Item label="Tipo">
-            {p.insuranceType ? (INSURANCE_LABELS[p.insuranceType] ?? p.insuranceType) : null}
-          </Item>
-          <Item label="Aseguradora">{p.insurerName}</Item>
-          <Item label="N.º de afiliación">{p.affiliationNumber}</Item>
-          <Item label="Detalle">{p.insuranceDetail}</Item>
-        </Section>
-        <Section
-          title="Contacto de emergencia"
-          onEdit={edit("emergencia")}
-          footer={
-            <p className="text-xs text-muted-foreground">
-              El representante legal de un menor es una persona vinculada con documento: se
-              gestiona en Responsables.
-            </p>
-          }
-        >
-          <Item label="Contacto de emergencia">
-            {p.emergencyContactName
-              ? `${p.emergencyContactName}${p.emergencyContactRelationship ? ` · ${KINSHIP_LABELS[p.emergencyContactRelationship as keyof typeof KINSHIP_LABELS] ?? p.emergencyContactRelationship}` : ""}`
+        {showInsurance ? (
+          <Section title="Seguro" onEdit={edit("seguro")}>
+            <Item label="Seguro">{insuranceText(profile, p.insuranceType, p.insuranceScheme)}</Item>
+            <Item label="Aseguradora">{p.insurerName}</Item>
+            <Item label="N.º de afiliación">{p.affiliationNumber}</Item>
+          </Section>
+        ) : null}
+      </div>
+      <Collapsible
+        open={moreOpen}
+        onOpenChange={setMoreOpen}
+        className="elevated rounded-xl border bg-card p-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CollapsibleTrigger className="text-sm font-medium">
+            <span className="flex items-center gap-1">
+              Más datos <ChevronDown aria-hidden className="size-4" />
+            </span>
+          </CollapsibleTrigger>
+          {canWrite && moreOpen ? (
+            <Button size="sm" variant="outline" onClick={() => setEditing("mas")}>
+              Editar
+            </Button>
+          ) : null}
+        </div>
+        <CollapsibleContent>
+          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 pt-3 sm:grid-cols-2">
+            <Item label="Nacionalidad">{countryText(p.nationality)}</Item>
+            <Item label="Lugar de nacimiento">{birthPlace}</Item>
+            <Item label="Estado civil">
+              {p.maritalStatus
+                ? MARITAL_STATUS_LABELS[p.maritalStatus as keyof typeof MARITAL_STATUS_LABELS]
+                : null}
+            </Item>
+            <Item label="Nivel educativo">
+              {p.educationLevel
+                ? EDUCATION_LEVEL_LABELS[p.educationLevel as keyof typeof EDUCATION_LEVEL_LABELS]
+                : null}
+            </Item>
+            <Item label="Ocupación">{p.occupation}</Item>
+            <Item label="Cómo nos conoció">{p.referralSource}</Item>
+            {profile.origin ? <Item label="Procedencia">{p.origin}</Item> : null}
+          </dl>
+        </CollapsibleContent>
+      </Collapsible>
+      <section
+        className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
+        aria-label="Datos y consentimiento"
+      >
+        <h3 className="font-heading text-sm font-medium">Datos y consentimiento</h3>
+        <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+          <Item label="Sede de registro">
+            {p.registeredBranchId
+              ? (branches.data?.data.find((b) => b.id === p.registeredBranchId)?.name ?? "—")
               : null}
           </Item>
-          <Item label="Teléfono de emergencia">
-            {p.emergencyContactPhone ? internationalText(p.emergencyContactPhone) : null}
+          <Item label="Registrado">
+            {detail.registration
+              ? `${new Date(detail.registration.createdAt).toLocaleDateString(activeOrgLocale())} · ${detail.registration.entryPoint === "platform" ? "alta interna" : "registro público"}`
+              : null}
           </Item>
-        </Section>
-        <section
-          className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-5"
-          aria-label="Datos y consentimiento"
-        >
-          <h3 className="font-heading text-sm font-medium">Datos y consentimiento</h3>
-          <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Item label="Sede de registro">
-              {p.registeredBranchId
-                ? (branches.data?.data.find((b) => b.id === p.registeredBranchId)?.name ?? "—")
-                : null}
-            </Item>
-            <Item label="Registrado">
-              {detail.registration
-                ? `${new Date(detail.registration.createdAt).toLocaleDateString(activeOrgLocale())} · ${detail.registration.entryPoint === "platform" ? "alta interna" : "registro público"}`
-                : null}
-            </Item>
-          </dl>
-          <DataConsentSection detail={detail} />
-          <MessagePermissionsSection
-            contactId={messageRecipientOf(detail)?.contactId}
-            recipientName={
-              messageRecipientOf(detail)?.relationship === "self" ? null : messageRecipientOf(detail)?.displayName
-            }
-          />
-        </section>
-      </div>
+        </dl>
+        <DataConsentSection detail={detail} />
+        <MessagePermissionsSection
+          contactId={messageRecipientOf(detail)?.contactId}
+          recipientName={
+            messageRecipientOf(detail)?.relationship === "self" ? null : messageRecipientOf(detail)?.displayName
+          }
+        />
+      </section>
       {editing ? (
         <FiliacionSectionDrawer
           key={editing}
           patient={p}
           section={editing}
+          missing={gaps}
           open
           onClose={() => setEditing(null)}
         />

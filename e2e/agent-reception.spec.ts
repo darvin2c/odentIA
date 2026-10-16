@@ -2,7 +2,7 @@ import { member } from "@odentia/db/schema/auth"
 import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
-import { api, call, expect, test } from "./fixtures"
+import { api, call, chooseOption, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface as sideSurface } from "./surface"
 
@@ -103,7 +103,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Las dos funciones fijas se ven, sin interruptor.
   await expect(does.getByRole("listitem").filter({ hasText: "Ordenar el caso" })).toContainText("Siempre")
   await expect(does.getByRole("listitem").filter({ hasText: "Pasar a una persona" })).toContainText("Siempre")
-  await expect(does.getByRole("switch")).toHaveCount(3)
+  // Informar, agendar, oportunidades y presupuestos (fase 3, decisiones 4 y 5) se apagan.
+  await expect(does.getByRole("switch")).toHaveCount(4)
 
   // Apagar una función: queda dicho qué hará cuando se la pidan.
   await does.getByRole("switch", { name: "Oportunidades" }).click()
@@ -149,8 +150,9 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   const hoursForm = sideSurface(page, { name: "Horario de Recepción", exact: true })
   await expect(hoursForm.getByRole("checkbox", { name: "En todos los canales conectados" })).toHaveCount(0)
   await hoursForm.getByRole("checkbox", { name: "A toda hora" }).uncheck()
-  await hoursForm.getByLabel("Desde").fill("08:00")
-  await hoursForm.getByLabel("Hasta").fill("20:00")
+  // «Hora»: una lista cada 15 minutos, no el campo de hora del navegador.
+  await chooseOption(hoursForm.getByLabel("Desde", { exact: true }), { label: "08:00" })
+  await chooseOption(hoursForm.getByLabel("Hasta", { exact: true }), { label: "20:00" })
   await hoursForm.getByRole("button", { name: "Guardar" }).click()
   await expect(hoursForm).toBeHidden()
   await expect(reach.getByRole("button", { name: /^Horario/ })).toContainText("De 08:00 a 20:00")
@@ -305,7 +307,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await info.attach("recepcion-movil-pantalla", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await reach.getByRole("button", { name: "Límites y cuándo pasa a una persona" }).click()
   const mobileLimits = page.getByRole("dialog", { name: "Límites de Recepción" })
-  await expect(mobileLimits.getByLabel("Desde")).toHaveValue("08:00")
+  await expect(mobileLimits.getByLabel("Desde", { exact: true })).toContainText("08:00")
   await expect(mobileLimits.getByLabel("Tope diario de respuestas")).toHaveValue("300")
   await expect(mobileLimits.getByLabel("Pasa siempre a una persona si mencionan")).toHaveValue("queja, reclamo")
   await info.attach("limites-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })

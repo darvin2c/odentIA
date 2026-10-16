@@ -15,7 +15,6 @@ export {
   countryLabel,
   countryOf,
   countryOptions,
-  DEFAULT_COUNTRY,
   getCountryCallingCode,
   internationalText,
   isValidE164,
@@ -25,6 +24,7 @@ export {
   phoneDigits,
   phoneMeta,
   readInternational,
+  regionCountry,
   toE164,
 } from "./phone.js"
 export { PhoneInput, type PhoneInputProps } from "./phone-input.js"

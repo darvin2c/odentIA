@@ -4,14 +4,13 @@ import { withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
-import { patientContact } from "@odentia/db/schema/clinical"
+import { encounter, patientContact } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { recordAgentRun } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
-import { setAppointmentStatus } from "./appointments.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createConnection } from "./connections.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
@@ -22,7 +21,7 @@ import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Lo que hicieron los agentes, por acción (ADR 0030, fase 2): qué cuenta, cuánto y una sola vez. */
+/** Lo que hicieron los agentes, por acción (ADR 0031, fase 2): qué cuenta, cuánto y una sola vez. */
 setupTestDb()
 const ORG = "org_a"
 const KEY = secretsKeyFromEnv("cd".repeat(32))
@@ -73,7 +72,7 @@ const actionsOf = (kind: string) =>
   run((tx) => tx.select().from(saasAction).where(and(eq(saasAction.organizationId, ORG), eq(saasAction.kind, kind))))
 
 beforeAll(async () => {
-  // El plan de la ADR 0030 como plan por defecto, y un 10 % negociado para la clínica.
+  // El plan de la ADR 0031 como plan por defecto, y un 10 % negociado para la clínica.
   await ownerDb.insert(saasPlan).values({
     code: "odentia-prueba-acciones",
     name: "Plan odentIA",
@@ -182,11 +181,18 @@ describe("cita recuperada", () => {
     return { fx, appointmentId: appt!.id }
   }
 
+  /** El paciente asiste: su atención se une a la cita y, al firmarla, la cita queda atendida (ADR 0032). */
+  async function attend(item: Awaited<ReturnType<typeof scene>>) {
+    await ownerDb.update(encounter).set({ appointmentId: item.appointmentId }).where(eq(encounter.id, item.fx.encounter.id))
+    await item.fx.ready(item.fx.encounter.id)
+    await item.fx.run((tx) => finalizeEncounter(tx, ...item.fx.args, item.fx.encounter.id))
+  }
+
   it("se cuenta cuando el paciente asiste, si el agente la reservó tras un mensaje del Administrador", async () => {
     const recovered = await scene("enlace", 2)
     // Mientras no asiste, espera; no se cobra.
     expect((await run((tx) => listPendingRecoveries(tx, ORG))).map((row) => row.appointmentId)).toContain(recovered.appointmentId)
-    await run((tx) => setAppointmentStatus(tx, ORG, recovered.fx.actor, recovered.appointmentId, "atendida"))
+    await attend(recovered)
     const counted = await actionsOf("cita")
     expect(counted.map((row) => row.appointmentId)).toEqual([recovered.appointmentId])
     expect(counted[0]).toMatchObject({ basePriceMicros: 4_000_000, priceMicros: 3_600_000, channel: "enlace" })
@@ -196,7 +202,7 @@ describe("cita recuperada", () => {
   it("no cuenta la que agendó el equipo, la de un recordatorio ni la de un mensaje de hace más de 7 días", async () => {
     const before = (await actionsOf("cita")).length
     for (const item of [await scene("recepcion", 1), await scene("agent", 1, "recordatorio_cita"), await scene("agent", 8)]) {
-      await run((tx) => setAppointmentStatus(tx, ORG, item.fx.actor, item.appointmentId, "atendida"))
+      await attend(item)
     }
     expect(await actionsOf("cita")).toHaveLength(before)
   })

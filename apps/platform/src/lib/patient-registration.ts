@@ -2,15 +2,24 @@ import type { RegistrationAnswers, RegistrationConfig } from "@odentia/clinical"
 import { API_URL } from "./auth-client"
 import { ApiError, apiFetch } from "./api"
 
-/** Contexto público resuelto por el servidor: genérico o conversación. */
+/**
+ * Contexto público resuelto por el servidor: genérico o conversación. Con
+ * `ownRecord`, quien abrió su enlace ya tiene su ficha y solo registra a otra
+ * persona (ausente en respuestas antiguas).
+ */
 export type PublicRegistrationContext =
   | { kind: "generic" }
-  | { kind: "conversation" }
+  | { kind: "conversation"; ownRecord?: boolean }
 
 export interface PublicRegistrationInfo {
   organization: { name: string; logo: string | null }
   config: RegistrationConfig
   today: string
+  /** País de la clínica: de él dependen documentos, seguros y regiones (ADR 0036). */
+  countryCode: string | null
+  /** Formato regional y zona de la clínica (BCP 47, IANA); ausentes en respuestas antiguas. */
+  locale?: string
+  timeZone?: string
   context: PublicRegistrationContext
 }
 
@@ -91,6 +100,21 @@ export async function saveRegistrationConfig(
     method: "PUT",
     body: JSON.stringify(input),
   })
+}
+
+/**
+ * «Su enlace» para quien aún no es paciente (ADR 0037): elige su cita y deja
+ * sus datos esenciales en la misma página. El mensaje lo revisa y envía el
+ * equipo. Registrar a un familiar sigue con `createRegistrationLink`.
+ */
+export async function createPersonalLinkForContact(
+  contactId: string,
+  conversationId: string,
+): Promise<{ data: { url: string; expiresAt: string } }> {
+  return apiFetch<{ data: { url: string; expiresAt: string } }>(
+    `/api/contacts/${encodeURIComponent(contactId)}/personal-link`,
+    { method: "POST", body: JSON.stringify({ conversationId }) },
+  )
 }
 
 export async function createRegistrationLink(

@@ -28,6 +28,7 @@ import {
   AUTOMATION_MESSAGES,
   type AutomationMessage,
   type AutomationMessageKey,
+  BUDGET_READY_MESSAGE_KEY,
   CATALOG_MESSAGE_KEYS,
   type CatalogMessageKey,
   catalogMessageOf,
@@ -41,6 +42,7 @@ import {
   namedBody,
   placePhrase,
   positionalBody,
+  PERSONAL_LINK_MESSAGE_KEY,
   RESUME_MESSAGE_KEY,
   replyId,
   splitNamedBody,
@@ -59,15 +61,18 @@ import {
 import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
+import { personalLinkButtonUrl } from "./public-links.js"
 
 /**
  * Los mensajes de WhatsApp de una clínica. Son suyos: viven en su cuenta,
  * vienen escritos por odentIA y cada clínica puede cambiarles el texto.
  *
- * - Diez vienen con odentIA: los nueve que envía el agente
+ * - Once vienen con odentIA: los nueve que envía el agente
  *   (`AUTOMATION_MESSAGES`: uno por línea que escribe y los tres avisos de
- *   «Recordar la cita» cuando la cita cambia) y «Retomar la conversación», que
- *   envía una persona desde la Bandeja. La clínica puede además crear los suyos para la Bandeja.
+ *   «Recordar la cita» cuando la cita cambia), «Retomar la conversación», que
+ *   envía una persona desde la Bandeja, y «Presupuesto listo», que sale al
+ *   entregar un presupuesto (desde Plan, el cierre de la atención o el agente).
+ *   La clínica puede además crear los suyos para la Bandeja.
  * - Un texto nuevo es otra versión, con otro nombre de plantilla, que se pide a
  *   WhatsApp. Mientras está en revisión, o si la rechazan, sigue saliendo la
  *   versión vigente: un cambio nunca deja a la clínica sin mensaje.
@@ -94,7 +99,8 @@ export const MESSAGE_BUTTON_MAX = 20
 /** Mensajes propios que una clínica puede tener a la vez. */
 export const OWN_MESSAGES_MAX = 20
 
-export type MessageOrigin = "agente" | "bandeja" | "clinica" | "cuenta"
+/** `plan`: «Presupuesto listo», que sale al entregar el presupuesto. */
+export type MessageOrigin = "agente" | "bandeja" | "plan" | "clinica" | "cuenta"
 /** El estado que da WhatsApp, o `sin_pedir` si todavía no se le pidió. */
 export type MessageStatus = TemplateStatus | "sin_pedir"
 
@@ -150,6 +156,8 @@ interface MessageDef {
   /** Datos que puede llevar; `required`: no puede faltar. */
   data: { key: MessageVariable; required: boolean }[]
   buttons: readonly MessageButton[]
+  /** Botón que abre «Su enlace» (ADR 0037); nulo en los demás. */
+  link: { title: string } | null
   category: TemplateCategory
 }
 
@@ -161,12 +169,15 @@ const OWN_DATA: MessageDef["data"] = [
 /** Los avisos de «Recordar la cita» no son una línea: cada uno dice qué avisa. */
 const NOTICE_TITLES: Record<string, string> = {
   aviso_cita_reservada: "Recordar la cita: cita reservada",
+  aviso_cita_reservada_datos: "Recordar la cita: cita reservada, faltan datos",
   aviso_cita_movida: "Recordar la cita: cambio de fecha",
   aviso_cita_cancelada: "Recordar la cita: cita cancelada",
 }
 
 function catalogTitle(key: CatalogMessageKey): string {
   if (key === RESUME_MESSAGE_KEY) return "Retomar la conversación"
+  if (key === BUDGET_READY_MESSAGE_KEY) return "Presupuesto listo"
+  if (key === PERSONAL_LINK_MESSAGE_KEY) return "Su enlace"
   return NOTICE_TITLES[key] ?? adminLineOf(key)?.name ?? key
 }
 
@@ -179,13 +190,20 @@ function catalogDef(
   if (!spec) throw new Error(`Mensaje del catálogo desconocido: ${key}`)
   return {
     id: key,
-    origin: key === RESUME_MESSAGE_KEY ? "bandeja" : "agente",
+    // «Su enlace» lo envía el equipo desde la página de la persona, como el presupuesto.
+    origin:
+      key === RESUME_MESSAGE_KEY
+        ? "bandeja"
+        : key === BUDGET_READY_MESSAGE_KEY || key === PERSONAL_LINK_MESSAGE_KEY
+          ? "plan"
+          : "agente",
     title: catalogTitle(key),
     catalog: spec,
     row,
     versions,
     data: spec.variables.map((name) => ({ key: name, required: true })),
     buttons: spec.buttons,
+    link: spec.link ?? null,
     category: spec.category,
   }
 }
@@ -200,6 +218,7 @@ function ownDef(row: MessageRow, versions: VersionRow[]): MessageDef {
     versions,
     data: OWN_DATA,
     buttons: row.buttonTitle ? [{ action: "responder", title: row.buttonTitle }] : [],
+    link: null,
     // Se pide como utilidad; WhatsApp decide la categoría y puede asignar otra.
     category: "utility",
   }
@@ -237,14 +256,23 @@ function pendingText(def: MessageDef): MessageText | null {
   return number === null || number === undefined ? null : textOf(def, number)
 }
 
-function orderOf(def: MessageDef, text: MessageText): TemplateOrder {
+/**
+ * Lo que se pide a WhatsApp. Un mensaje con «Su enlace» lleva su botón de
+ * dirección, que es la de la clínica con el token al final: sin dirección
+ * pública configurada no se puede pedir.
+ */
+function orderOf(def: MessageDef, text: MessageText, linkUrl: { url: string; example: string } | null): TemplateOrder {
   const { body, variables } = positionalBody(text.body)
+  if (def.link && !linkUrl) {
+    throw new ServiceError("NO_PUBLIC_URL", 409, "Falta la dirección pública de la clínica para el botón de su enlace")
+  }
   return {
     name: text.templateName,
     category: def.category,
     body,
     examples: variables.map((name) => MESSAGE_VARIABLES[name].example),
     buttons: def.buttons.map((button) => button.title),
+    ...(def.link && linkUrl ? { link: { title: def.link.title, ...linkUrl } } : {}),
     messageKey: def.catalog?.key ?? null,
   }
 }
@@ -335,6 +363,16 @@ async function currentTextOf(
     .limit(1)
   if (!version) return base
   return { template: version.templateName, ...positionalBody(version.body) }
+}
+
+/**
+ * Un mensaje del catálogo con el texto vigente de la clínica (plantilla,
+ * cuerpo y datos): de aquí salen la plantilla, la respuesta y el correo.
+ */
+export async function currentCatalogMessage(tx: Db, orgId: string, key: CatalogMessageKey): Promise<MessageSpec> {
+  const base = catalogMessageOf(key)
+  if (!base) throw new Error(`Mensaje del catálogo desconocido: ${key}`)
+  return { ...base, ...(await currentTextOf(tx, orgId, base)) }
 }
 
 /** Plantilla del texto vigente de un mensaje del catálogo en una conexión, en el estado que tenga. */
@@ -648,10 +686,15 @@ export async function requestMissingTemplates(
         ).map((row) => row.template),
       )
   const outcome: RequestOutcome = { requested: 0, failed: [] }
+  const linkUrl = await personalLinkButtonUrl(tx, orgId)
   for (const def of defs) {
     const texts = [currentText(def), pendingText(def)].filter((text): text is MessageText => !!text)
     for (const text of texts) {
       if (have.has(text.templateName) || attempted.has(text.templateName)) continue
+      // Sin dirección pública no hay botón de «Su enlace» que pedir: no es un
+      // rechazo de WhatsApp ni un permiso que falte. Queda sin pedir y se pide
+      // en el ciclo siguiente a que la dirección esté configurada.
+      if (def.link && !linkUrl) continue
       try {
         // Punto de retorno: un rechazo del proveedor no debe abortar lo demás.
         const item = await tx.transaction((inner) =>
@@ -659,7 +702,7 @@ export async function requestMissingTemplates(
             inner,
             orgId,
             connectionId,
-            orderOf(def, text),
+            orderOf(def, text, def.link ? linkUrl : null),
             secretsKey,
             deps,
           ),
@@ -787,7 +830,7 @@ export interface ClinicMessageItem {
   id: string
   origin: MessageOrigin
   title: string
-  /** Cuándo sale; solo en los que envía el agente. */
+  /** Cuándo sale; en los que envía el agente y en «Presupuesto listo». */
   when: string | null
   /** Línea del Administrador que lo usa; `enabled`: prendida y con «el agente le escribe». */
   line: { key: string; title: string; enabled: boolean } | null
@@ -820,6 +863,8 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
   cita_cancelada: (_, timing) =>
     `${capital(HOURS(timing.delayHours ?? adminLineOf("cita_cancelada")?.delayHours ?? 1))} después de que se cancela una cita.`,
   aviso_cita_reservada: () => "Al reservar una cita desde la Agenda, la ficha o la conversación.",
+  aviso_cita_reservada_datos: () =>
+    "Al reservar una cita a quien le faltan datos para atenderla: en lugar del aviso de reserva, con su enlace para completarlos.",
   aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
   aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",
 }
@@ -835,6 +880,8 @@ function buttonDoes(def: MessageDef, button: MessageButton): string {
       ? "Deja de recibir recordatorios; lo demás no cambia."
       : "Deja de recibir estos mensajes; lo demás no cambia."
   }
+  if (button.action === "presupuesto")
+    return "Le llega el PDF del presupuesto en la conversación y puede decir ahí qué acepta."
   if (button.asks === "cambiar") return "Recepción le busca otra fecha en la conversación."
   if (button.asks === "reservar") return "Recepción le ofrece horarios en la conversación."
   if (def.origin === "agente") return "Recepción sigue la conversación con la persona."
@@ -875,6 +922,10 @@ function meanwhileOf(
       ? "WhatsApp no aceptó el cambio: sigue saliendo el texto anterior."
       : "Tu cambio de texto está en revisión; sigue saliendo el anterior."
   }
+  if (def.id === PERSONAL_LINK_MESSAGE_KEY)
+    return "Mientras tanto su enlace sale escrito a quien escribió en las últimas 24 horas, o por correo."
+  if (def.origin === "plan")
+    return "Mientras tanto el presupuesto sale con su PDF a quien escribió en las últimas 24 horas, o por correo."
   if (def.origin !== "agente") return "Mientras tanto no se ofrece en la Bandeja."
   const people =
     waiting > 0
@@ -931,13 +982,20 @@ function itemOf(
     title: def.title,
     when: line
       ? WHEN[def.id as AutomationMessageKey](lineDays(rule, line.key), lineTiming(rule))
-      : null,
+      : def.id === PERSONAL_LINK_MESSAGE_KEY
+        ? "Cuando recepción pulsa «Enviarle su enlace» o envía un consentimiento para firmar antes de la cita."
+        : def.origin === "plan"
+          ? "Al entregar un presupuesto: desde Plan, al cerrar la atención o cuando la persona lo pide por el chat."
+          : null,
     line: line
       ? { key: line.key, title: line.name, enabled: !!rule?.enabled && rule.agentPart }
       : null,
     current,
     pending,
-    buttons: def.buttons.map((button) => ({ title: button.title, does: buttonDoes(def, button) })),
+    buttons: [
+      ...(def.link ? [{ title: def.link.title, does: "Abre su enlace: lo que tiene pendiente con la clínica, sin ver nada de lo guardado." }] : []),
+      ...def.buttons.map((button) => ({ title: button.title, does: buttonDoes(def, button) })),
+    ],
     variables: def.data.map((item) => ({
       key: item.key,
       label: MESSAGE_VARIABLES[item.key].label,
@@ -1206,7 +1264,7 @@ export async function saveMessageText(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text),
+    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null),
     deps.secretsKey,
     deps,
   )
@@ -1258,7 +1316,7 @@ export async function revertMessageText(
       tx,
       orgId,
       connectionId,
-      orderOf(def, original),
+      orderOf(def, original, def.link ? await personalLinkButtonUrl(tx, orgId) : null),
       deps.secretsKey,
       deps,
     )
@@ -1350,7 +1408,7 @@ export async function createClinicMessage(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text),
+    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null),
     deps.secretsKey,
     deps,
   )
@@ -1544,7 +1602,8 @@ async function sendables(
   const options: Sendable[] = []
   for (const def of defs) {
     // Los que envía el agente piden los datos de una cita, un presupuesto o una oportunidad: no se envían a mano.
-    if (def.origin === "agente") continue
+    // «Presupuesto listo» sale al entregar el presupuesto, con su PDF, no desde la Bandeja.
+    if (def.origin === "agente" || def.origin === "plan") continue
     // «Retomar» continúa una consulta: solo donde la persona ya escribió.
     if (def.origin === "bandeja" && !wrote) continue
     const text = currentText(def)

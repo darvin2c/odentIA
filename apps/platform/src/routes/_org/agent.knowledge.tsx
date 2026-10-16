@@ -12,7 +12,7 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { ErrorState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { DatePickerButton, ErrorState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
@@ -573,21 +573,30 @@ function AgentKnowledgePage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="nc-desde">Vale desde</FieldLabel>
-                  <Input
+                  <DatePickerButton
                     id="nc-desde"
-                    type="date"
+                    className="w-full"
                     value={form.validFrom}
-                    onChange={(event) => setForm({ ...form, validFrom: event.target.value })}
+                    emptyLabel="Desde ya"
+                    onChange={(validFrom) =>
+                      setForm({
+                        ...form,
+                        validFrom,
+                        // Un periodo no termina antes de empezar.
+                        validUntil: form.validUntil && validFrom && form.validUntil < validFrom ? validFrom : form.validUntil,
+                      })
+                    }
                   />
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="nc-hasta">Vale hasta</FieldLabel>
-                  <Input
+                  <DatePickerButton
                     id="nc-hasta"
-                    type="date"
+                    className="w-full"
                     value={form.validUntil}
                     min={form.validFrom || undefined}
-                    onChange={(event) => setForm({ ...form, validUntil: event.target.value })}
+                    emptyLabel="Sin vencimiento"
+                    onChange={(validUntil) => setForm({ ...form, validUntil })}
                   />
                 </Field>
               </div>

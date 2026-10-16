@@ -1,8 +1,17 @@
 import { z } from "zod"
 import {
-  EDUCATION_LEVELS,
-  FOREIGN_DOC_TYPES,
+  type ClinicalCountryProfile,
+  clinicalProfileFor,
+  documentTypeProfile,
   IDENTITY_DOC_TYPES,
+  INSURANCE_TYPES,
+  insuranceScheme,
+  normalizeCountryCode,
+  regionOption,
+} from "./country-profiles.js"
+import {
+  DOC_TYPE_LABELS,
+  EDUCATION_LEVELS,
   identityDocumentError,
   ISO_COUNTRY_RE,
   KINSHIP,
@@ -10,7 +19,6 @@ import {
   normalizePhone,
   phoneFormatError,
   SEX_CODES,
-  UBIGEO_RE,
 } from "./identity.js"
 
 export const CONTACT_RELATIONSHIPS = ["self", "guardian", "family", "other"] as const
@@ -23,7 +31,13 @@ export type RegistrationEntryPoint = "platform" | "public_link" | "qr" | "conver
 export type DeclarationState = "unanswered" | "unknown" | "none" | "recorded"
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"] as const
 export type BloodGroup = (typeof BLOOD_GROUPS)[number]
+/** «No se pide», «Opcional» y «Obligatorio» en «Registro de pacientes». */
 export type RegistrationFieldMode = "hidden" | "optional" | "required"
+export const REGISTRATION_MODE_LABELS: Record<RegistrationFieldMode, string> = {
+  hidden: "No se pide",
+  optional: "Opcional",
+  required: "Obligatorio",
+}
 /**
  * Alcance del registro. `essentials` son los datos esenciales para reservar:
  * desde el enlace de cita, identidad y un celular; cuando el equipo registra
@@ -37,36 +51,55 @@ export const ESSENTIAL_DEMOGRAPHICS = [
   "docType", "docNumber", "docCountry", "phone", "birthDate",
 ] as const
 export const DOC_TYPES = IDENTITY_DOC_TYPES
-export const INSURANCE_TYPES = ["PARTICULAR", "SIS", "ESSALUD", "EPS", "OTRO"] as const
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Grupos de datos de la persona (decisión 10 de la fase 3):
+ * - `always`: los fija odentIA porque hacen falta para atender (nombres y
+ *   apellidos, fecha de nacimiento, un teléfono o correo suyo o de quien habla
+ *   por ella). Siempre cuentan para el aviso «Faltan datos para atenderla».
+ * - `clinic`: los que la clínica decide en «Registro de pacientes»; cuentan
+ *   solo si los marca obligatorios.
+ * - `census`: opcionales y nunca obligatorios (nadie los lee: ni reportes,
+ *   ni impresos, ni el agente). Nunca cuentan.
+ * - `health`: los antecedentes que el registro puede preguntar.
+ */
+export type RegistrationFieldGroup = "always" | "clinic" | "census" | "health"
+
 export const REGISTRATION_FIELDS = [
-  { key: "displayName", label: "Nombre completo", step: "datos" },
-  { key: "birthDate", label: "Fecha de nacimiento", step: "datos" },
-  { key: "docType", label: "Tipo de documento", step: "datos" },
-  { key: "docNumber", label: "Número de documento", step: "datos" },
-  { key: "sex", label: "Sexo", step: "datos" },
-  { key: "phone", label: "Teléfono", step: "contacto" },
-  { key: "email", label: "Correo", step: "contacto" },
-  { key: "address", label: "Dirección", step: "contacto" },
-  { key: "maritalStatus", label: "Estado civil", step: "contacto" },
-  { key: "educationLevel", label: "Grado de instrucción", step: "contacto" },
-  { key: "occupation", label: "Ocupación", step: "contacto" },
-  { key: "origin", label: "Procedencia", step: "contacto" },
-  { key: "emergencyContactName", label: "Contacto de emergencia", step: "contacto" },
-  { key: "emergencyContactPhone", label: "Teléfono de emergencia", step: "contacto" },
-  { key: "insuranceType", label: "Seguro", step: "contacto" },
-  { key: "insuranceDetail", label: "Detalle del seguro", step: "contacto" },
-  { key: "referralSource", label: "Referencia", step: "contacto" },
-  { key: "bloodGroup", label: "Grupo sanguíneo", step: "salud" },
-  { key: "allergies", label: "Alergias", step: "salud" },
-  { key: "conditions", label: "Enfermedades", step: "salud" },
-  { key: "medications", label: "Medicación", step: "salud" },
-  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos" },
-  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos" },
-  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos" },
+  { key: "displayName", label: "Nombres y apellidos", step: "datos", group: "always" },
+  { key: "birthDate", label: "Fecha de nacimiento", step: "datos", group: "always" },
+  { key: "phone", label: "Teléfono o correo", step: "contacto", group: "always" },
+  { key: "docType", label: "Tipo de documento", step: "datos", group: "clinic" },
+  { key: "docNumber", label: "Número de documento", step: "datos", group: "clinic" },
+  { key: "sex", label: "Sexo", step: "datos", group: "clinic" },
+  { key: "email", label: "Correo", step: "contacto", group: "clinic" },
+  { key: "address", label: "Dirección", step: "contacto", group: "clinic" },
+  { key: "emergencyContactName", label: "Contacto de emergencia", step: "contacto", group: "clinic" },
+  { key: "emergencyContactPhone", label: "Teléfono de emergencia", step: "contacto", group: "clinic" },
+  { key: "insuranceType", label: "Seguro", step: "contacto", group: "clinic" },
+  { key: "maritalStatus", label: "Estado civil", step: "contacto", group: "census" },
+  { key: "educationLevel", label: "Nivel educativo", step: "contacto", group: "census" },
+  { key: "occupation", label: "Ocupación", step: "contacto", group: "census" },
+  { key: "referralSource", label: "Cómo nos conoció", step: "contacto", group: "census" },
+  // Solo en clínicas de Perú (`clinicalProfileFor(...).origin`).
+  { key: "origin", label: "Procedencia", step: "contacto", group: "census" },
+  { key: "bloodGroup", label: "Grupo sanguíneo", step: "salud", group: "health" },
+  { key: "allergies", label: "Alergias", step: "salud", group: "health" },
+  { key: "conditions", label: "Enfermedades", step: "salud", group: "health" },
+  { key: "medications", label: "Medicación", step: "salud", group: "health" },
+  { key: "dental.ultimaVisita", label: "Última visita dental", step: "odontologicos", group: "health" },
+  { key: "dental.experienciaPrevia", label: "Experiencia previa", step: "odontologicos", group: "health" },
+  { key: "dental.ansiedadDental", label: "Ansiedad dental", step: "odontologicos", group: "health" },
 ] as const
 export type RegistrationFieldKey = (typeof REGISTRATION_FIELDS)[number]["key"]
+/** Datos que se piden siempre: el registro los guarda como obligatorios y no se cambian. */
+export const ALWAYS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
+  .filter((field) => field.group === "always").map((field) => field.key)
+/** Datos censales: solo «Opcional» o «No se pide». */
+export const CENSUS_REGISTRATION_FIELDS: readonly RegistrationFieldKey[] = REGISTRATION_FIELDS
+  .filter((field) => field.group === "census").map((field) => field.key)
+
 export interface RegistrationConfig {
   version: number
   enabled: boolean
@@ -81,26 +114,30 @@ const optionalDefaults: Record<string, true> = { docType: true, docNumber: true,
 export const DEFAULT_REGISTRATION_CONFIG: RegistrationConfig = {
   version: 0, enabled: false, privacyNotice: "", askReminders: true, askMessages: true,
   fields: Object.fromEntries(REGISTRATION_FIELDS.map(({ key }) => [key,
-    ["displayName", "birthDate", "phone"].includes(key) ? "required" : optionalDefaults[key] ? "optional" : "hidden",
+    ALWAYS_REGISTRATION_FIELDS.includes(key) ? "required" : optionalDefaults[key] ? "optional" : "hidden",
   ])) as RegistrationConfig["fields"],
 }
 const text = (max: number) => z.string().trim().max(max, `Máximo ${max} caracteres`)
 const optionalText = (max: number) => text(max).nullable().optional()
-const email = text(200).refine(v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Ingresa un correo válido")
+const email = text(200).refine(v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), "Escribe el correo completo, como nombre@dominio.com")
 const codeOrEmpty = <T extends readonly [string, ...string[]]>(values: T) => z.enum([...values, ""]).nullable().optional()
 export const demographicsSchema = z.strictObject({
-  displayName: text(200).min(1, "Ingresa el nombre del paciente"),
+  displayName: text(200).min(1, "Escribe el nombre de la persona"),
   /** Nombre separado (ADR 0004); el nombre visible se deriva de él. */
   givenNames: optionalText(100), paternalSurname: optionalText(100), maternalSurname: optionalText(100),
   birthDate: optionalText(10), docType: codeOrEmpty(DOC_TYPES),
   docNumber: optionalText(20), docCountry: optionalText(2), nationality: optionalText(2),
+  birthCountry: optionalText(2), birthPlace: optionalText(200),
   sex: codeOrEmpty(SEX_CODES),
-  phone: optionalText(50), email: email.nullable().optional(), address: optionalText(500),
-  addressUbigeo: optionalText(6), addressReference: optionalText(300), birthPlaceUbigeo: optionalText(6),
+  phone: optionalText(50), email: email.nullable().optional(),
+  /** Domicilio internacional (HL7 FHIR Address): calle y número, localidad, provincia, región, código postal y país. */
+  address: optionalText(500), addressCity: optionalText(100), addressDistrict: optionalText(100),
+  addressRegion: optionalText(100), addressPostalCode: optionalText(20), addressCountry: optionalText(2),
+  addressReference: optionalText(300),
   maritalStatus: codeOrEmpty(MARITAL_STATUSES), educationLevel: codeOrEmpty(EDUCATION_LEVELS), occupation: optionalText(200),
   origin: optionalText(200), emergencyContactName: optionalText(200), emergencyContactPhone: optionalText(50),
   emergencyContactRelationship: codeOrEmpty(KINSHIP),
-  insuranceType: z.enum([...INSURANCE_TYPES, ""]).nullable().optional(), insuranceDetail: optionalText(500),
+  insuranceType: z.enum([...INSURANCE_TYPES, ""]).nullable().optional(), insuranceScheme: optionalText(20),
   insurerName: optionalText(200), affiliationNumber: optionalText(50), referralSource: optionalText(500),
 })
 export type RegistrationDemographics = z.infer<typeof demographicsSchema>
@@ -153,13 +190,14 @@ export const registrationConfigSchema = z.strictObject({
   askReminders: z.boolean().default(true), askMessages: z.boolean().default(true),
 }).superRefine((config, ctx) => {
   const issue = (path: string[], message: string) => ctx.addIssue({ code: "custom", path, message })
-  for (const key of ["displayName", "birthDate"] as const) {
-    if (config.fields[key] !== "required") issue(["fields", key], "Este campo es obligatorio en el formulario público")
+  for (const key of ALWAYS_REGISTRATION_FIELDS) {
+    if (config.fields[key] !== "required") issue(["fields", key], "Se pide siempre: hace falta para atender")
+  }
+  for (const key of CENSUS_REGISTRATION_FIELDS) {
+    if (config.fields[key] === "required") issue(["fields", key], "Este dato solo puede ser opcional o no pedirse")
   }
   if (config.fields.docType !== config.fields.docNumber) issue(["fields", "docNumber"], "Configura el documento como pareja")
-  if (config.fields.phone !== "required" && config.fields.email !== "required") issue(["fields", "email"], "Exige al menos un medio de contacto")
-  if (config.fields.insuranceType === "hidden" && config.fields.insuranceDetail !== "hidden") issue(["fields", "insuranceDetail"], "Habilita primero el seguro")
-  if (config.enabled && !config.privacyNotice) issue(["privacyNotice"], "Ingresa el aviso de privacidad antes de publicar")
+  if (config.enabled && !config.privacyNotice) issue(["privacyNotice"], "Escribe el aviso de privacidad antes de publicar")
 })
 
 export function isRealDate(value: string): boolean {
@@ -174,11 +212,88 @@ export function isMinor(birthDate: string, today: string): boolean {
 export function documentNumberError(docType: string | null | undefined, docNumber: string | null | undefined): string | null {
   return identityDocumentError(docType, docNumber)
 }
+
 /**
- * `countryCode` es el país de la clínica (ISO 3166-1 alfa-2): con él se acepta
- * un teléfono nacional escrito sin prefijo; sin él, solo con código de país.
+ * País emisor de un documento según el país de la clínica: el del tipo cuando
+ * lo emite un país fijo (el DNI, el Perú), el elegido y, si falta, el de la
+ * clínica en el documento nacional. El pasaporte y el documento extranjero no
+ * suponen ninguno: hay que elegirlo (nunca se inventa un país).
  */
-export function validateDemographics(value: unknown, today?: string, countryCode?: string | null): Record<string, string> {
+export function documentIssuerCountry(
+  profile: ClinicalCountryProfile,
+  docType: string | null | undefined,
+  docCountry: string | null | undefined,
+): string | null {
+  const chosen = normalizeCountryCode(docCountry)
+  const issuer = documentTypeProfile(profile, docType)?.issuer
+  if (issuer?.kind === "fixed") return issuer.country
+  if (issuer?.kind === "foreign" || issuer?.kind === "chosen") return chosen
+  return chosen ?? profile.country
+}
+
+/**
+ * Datos completos de la persona (lo guardado más lo que cambia) listos para
+ * guardar según el país de la clínica: países en mayúsculas, documento con su
+ * país emisor, dirección con el país de la clínica si no se eligió otro y el
+ * tipo general del seguro tomado de su régimen (SIS → público). No valida:
+ * eso es `validateDemographics`.
+ */
+export function normalizePersonData<T extends Partial<RegistrationDemographics>>(
+  data: T,
+  profile: ClinicalCountryProfile,
+): T & Pick<Partial<RegistrationDemographics>, "docCountry" | "insuranceType" | "addressCountry"> {
+  const out: Record<string, unknown> = { ...data }
+  for (const key of ["docCountry", "nationality", "birthCountry", "addressCountry"] as const) {
+    if (typeof out[key] === "string") out[key] = (out[key] as string).trim().toUpperCase() || null
+  }
+  if (out.docNumber) out.docCountry = documentIssuerCountry(profile, out.docType as string, out.docCountry as string)
+  else if ("docNumber" in out) out.docCountry = null
+  if (typeof out.address === "string" && out.address.trim() && !out.addressCountry) out.addressCountry = profile.country
+  const scheme = insuranceScheme(profile, out.insuranceScheme as string)
+  if (scheme) out.insuranceType = scheme.type
+  return out as T
+}
+
+/**
+ * Lo que valida un dato según el país: tipos de documento, regímenes de
+ * seguro y lista de regiones. Un dato ya guardado que no cambia (`previous`)
+ * se acepta aunque el país de la clínica haya cambiado: lo guardado conserva
+ * su norma.
+ */
+function countryErrors(
+  data: RegistrationDemographics,
+  profile: ClinicalCountryProfile,
+  previous: Partial<Record<string, unknown>> | undefined,
+  errors: Record<string, string>,
+): void {
+  const unchanged = (key: keyof RegistrationDemographics) => previous !== undefined && (previous[key] ?? null) === (data[key] ?? null)
+  if (data.docType && !unchanged("docType") && !documentTypeProfile(profile, data.docType))
+    errors.docType = "Elige un tipo de documento de la lista"
+  const issuer = documentTypeProfile(profile, data.docType)?.issuer
+  const docCountry = documentIssuerCountry(profile, data.docType, data.docCountry)
+  if (data.docNumber && !docCountry && !unchanged("docNumber")) errors.docCountry ??= "Elige el país que emitió el documento"
+  if (data.docNumber && issuer?.kind === "foreign" && docCountry && docCountry === profile.country)
+    errors.docCountry ??= `El ${DOC_TYPE_LABELS.DIE.toLowerCase()} lo emite otro país`
+  if (data.insuranceScheme && !unchanged("insuranceScheme") && !insuranceScheme(profile, data.insuranceScheme))
+    errors.insuranceScheme = "Elige el seguro de la lista"
+  const regions = profile.address.regions
+  if (regions && data.addressRegion && !unchanged("addressRegion") && !regionOption(profile, data.addressRegion))
+    errors.addressRegion = `Elige el ${profile.address.regionLabel.toLowerCase()} de la lista`
+}
+
+/**
+ * `countryCode` es el país de la clínica (ISO 3166-1 alfa-2): de él dependen
+ * los documentos, los seguros y las regiones que se aceptan, y con él se
+ * reconoce un teléfono nacional escrito sin prefijo. `previous` son los datos
+ * ya guardados: lo que no cambia no se vuelve a juzgar por el país. Los
+ * errores dicen qué arreglar, nunca «formato inválido».
+ */
+export function validateDemographics(
+  value: unknown,
+  today?: string,
+  countryCode?: string | null,
+  previous?: Partial<Record<string, unknown>>,
+): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = demographicsSchema.safeParse(value)
   if (!parsed.success) {
@@ -186,21 +301,23 @@ export function validateDemographics(value: unknown, today?: string, countryCode
     return errors
   }
   const data = parsed.data
+  const profile = clinicalProfileFor(countryCode)
   const docError = documentNumberError(data.docType, data.docNumber)
   if (docError) errors.docNumber = docError
-  if (data.docNumber && !data.docType) errors.docType = "Indica el tipo de documento"
-  if (data.docType && !data.docNumber) errors.docNumber = "Indica el número de documento"
-  if (data.birthDate && (!isRealDate(data.birthDate) || (today && data.birthDate > today))) errors.birthDate = "Ingresa una fecha real no futura"
-  if (data.insuranceDetail && !data.insuranceType) errors.insuranceDetail = "Indica primero el seguro"
-  if (data.docCountry && !ISO_COUNTRY_RE.test(data.docCountry.toUpperCase())) errors.docCountry = "País emisor en código ISO de dos letras (p. ej. VE)"
-  if (data.docType && FOREIGN_DOC_TYPES.includes(data.docType as never) && !data.docCountry) errors.docCountry = "Indica el país que emitió el documento"
-  if (data.nationality && !ISO_COUNTRY_RE.test(data.nationality.toUpperCase())) errors.nationality = "Nacionalidad en código ISO de dos letras (p. ej. PE)"
-  for (const key of ["addressUbigeo", "birthPlaceUbigeo"] as const)
-    if (data[key] && !UBIGEO_RE.test(data[key] as string)) errors[key] = "Ubigeo de seis dígitos (INEI)"
+  if (data.docNumber && !data.docType) errors.docType = "Elige el tipo de documento"
+  if (data.docType && !data.docNumber) errors.docNumber = "Escribe el número de documento"
+  if (data.birthDate && (!isRealDate(data.birthDate) || (today && data.birthDate > today))) errors.birthDate = "Escribe una fecha real que no sea futura"
+  for (const key of ["docCountry", "nationality", "birthCountry", "addressCountry"] as const)
+    if (data[key] && !ISO_COUNTRY_RE.test(data[key]!.toUpperCase())) errors[key] = "Elige el país de la lista"
+  if (data.addressPostalCode && !/^[A-Za-z0-9][A-Za-z0-9 -]{1,11}$/.test(data.addressPostalCode))
+    errors.addressPostalCode = "El código postal tiene de 2 a 12 letras o números"
+  if (data.insuranceScheme && !data.insuranceType && !insuranceScheme(profile, data.insuranceScheme))
+    errors.insuranceType ??= "Elige el tipo de seguro"
   for (const key of ["phone", "emergencyContactPhone"] as const)
     if (data[key] && !normalizePhone(data[key], countryCode)) errors[key] = phoneFormatError(countryCode)
-  if ((data.givenNames || data.maternalSurname) && !data.paternalSurname && !data.maternalSurname) errors.paternalSurname = "Indica al menos un apellido"
-  if ((data.paternalSurname || data.maternalSurname) && !data.givenNames) errors.givenNames = "Indica los nombres"
+  if ((data.givenNames || data.maternalSurname) && !data.paternalSurname && !data.maternalSurname) errors.paternalSurname = "Escribe al menos el primer apellido"
+  if ((data.paternalSurname || data.maternalSurname) && !data.givenNames) errors.givenNames = "Escribe los nombres"
+  countryErrors(data, profile, previous, errors)
   return errors
 }
 function registrationFieldValue(data: RegistrationAnswers, field: (typeof REGISTRATION_FIELDS)[number]): unknown {
@@ -213,19 +330,67 @@ function isUnanswered(value: unknown): boolean {
   return value === undefined || value === null || value === "" || (typeof value === "object" && "state" in value && value.state === "unanswered")
 }
 /**
- * Lo que la clínica configuró como obligatorio y estas respuestas no traen.
- * Con el alcance `essentials` no impide registrar: es lo que queda por
- * completar en la clínica.
+ * El teléfono o el correo de quien habla por la persona (su madre, su tutor)
+ * cuentan como su medio de contacto: a un niño de 6 años no le falta teléfono si
+ * el de su madre está. La misma regla para el registro y para el aviso de los
+ * datos que faltan en su página.
  */
-export function pendingRegistrationFields(config: RegistrationConfig, answers: RegistrationAnswers): Array<{ key: RegistrationFieldKey; label: string }> {
-  const representativeContact = !!answers.representative && !!(answers.representative.phone || answers.representative.email)
-  return REGISTRATION_FIELDS.filter((field) => {
-    if (config.fields[field.key] !== "required") return false
-    if (field.key === "insuranceDetail" && !answers.demographics.insuranceType) return false
-    if (representativeContact && (field.key === "phone" || field.key === "email")) return false
-    return isUnanswered(registrationFieldValue(answers, field))
-  }).map(({ key, label }) => ({ key, label }))
+export function contactCoveredByRepresentative(key: RegistrationFieldKey, representativeContact: boolean): boolean {
+  return representativeContact && (key === "phone" || key === "email")
 }
+
+/** Un dato que le falta a la persona para atenderla, con su nombre en pantalla. */
+export interface MissingPersonDatum {
+  key:
+    | "givenNames" | "paternalSurname" | "birthDate" | "phone" | "docType" | "docNumber"
+    | "sex" | "email" | "address" | "emergencyContactName" | "emergencyContactPhone" | "insuranceType"
+  label: string
+}
+
+/**
+ * «Faltan datos para atenderla»: una sola regla para la página de la persona,
+ * la Agenda, la nota del caso y el registro (decisión 10 de la fase 3). Cuentan
+ * siempre nombres, primer apellido, fecha de nacimiento y un teléfono o correo
+ * (suyo o de quien habla por ella); además, lo que «Registro de pacientes»
+ * marca obligatorio de lo que pide la clínica. Los datos censales nunca
+ * cuentan. `representativeContact`: quien habla por ella tiene teléfono o correo.
+ */
+export function missingPersonData(
+  config: Pick<RegistrationConfig, "fields">,
+  data: Partial<Record<string, unknown>>,
+  options: { representativeContact: boolean },
+): MissingPersonDatum[] {
+  const missing: MissingPersonDatum[] = []
+  const blank = (key: string) => isUnanswered(data[key])
+  if (blank("givenNames")) missing.push({ key: "givenNames", label: "Nombres" })
+  if (blank("paternalSurname") && blank("maternalSurname")) missing.push({ key: "paternalSurname", label: "Primer apellido" })
+  if (blank("birthDate")) missing.push({ key: "birthDate", label: "Fecha de nacimiento" })
+  if (blank("phone") && blank("email") && !options.representativeContact)
+    missing.push({ key: "phone", label: "Teléfono o correo" })
+  for (const field of REGISTRATION_FIELDS) {
+    if (field.group !== "clinic" || config.fields[field.key] !== "required") continue
+    if (contactCoveredByRepresentative(field.key, options.representativeContact)) continue
+    if (blank(field.key)) missing.push({ key: field.key as MissingPersonDatum["key"], label: field.label })
+  }
+  return missing
+}
+
+/**
+ * Lo que la clínica pide y estas respuestas del registro no traen: la misma
+ * regla del aviso (`missingPersonData`). Con el alcance `essentials` no impide
+ * registrar: es lo que queda por completar en la clínica.
+ */
+export function pendingRegistrationFields(config: RegistrationConfig, answers: RegistrationAnswers): MissingPersonDatum[] {
+  const representativeContact = !!answers.representative && !!(answers.representative.phone || answers.representative.email)
+  return missingPersonData(config, answers.demographics, { representativeContact })
+}
+
+/** Si el registro de esta clínica pregunta ese dato: «Procedencia» solo en clínicas de Perú. */
+export function registrationFieldAsked(config: Pick<RegistrationConfig, "fields">, key: RegistrationFieldKey, countryCode?: string | null): boolean {
+  if (key === "origin" && !clinicalProfileFor(countryCode).origin) return false
+  return config.fields[key] !== "hidden"
+}
+
 /**
  * Lo común del alcance `essentials`, lo registre la persona (enlace de reserva)
  * o el equipo (al reservar): solo datos de identidad y contacto, nada de salud,
@@ -237,9 +402,24 @@ function essentialIdentityErrors(data: RegistrationAnswers, errors: Record<strin
     if (!(ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key) && value !== null && value !== "") errors[`demographics.${key}`] ??= "Este dato se completa en la clínica"
   }
   if (data.health !== undefined) errors.health = "Los datos de salud se completan en la clínica"
-  if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Indica los nombres"
-  if (!demographics.paternalSurname && !demographics.maternalSurname) errors["demographics.paternalSurname"] ??= "Indica los apellidos"
+  if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Escribe los nombres"
+  if (!demographics.paternalSurname && !demographics.maternalSurname) errors["demographics.paternalSurname"] ??= "Escribe los apellidos"
 }
+
+/** El documento del representante, juzgado como el de la persona por el país de la clínica. */
+function representativeDocumentErrors(
+  representative: NonNullable<RegistrationAnswers["representative"]>,
+  profile: ClinicalCountryProfile,
+  errors: Record<string, string>,
+): void {
+  const repDocError = identityDocumentError(representative.docType, representative.docNumber)
+  if (repDocError) errors["representative.docNumber"] = repDocError
+  if (representative.docType && !documentTypeProfile(profile, representative.docType))
+    errors["representative.docType"] = "Elige un tipo de documento de la lista"
+  if (representative.docNumber && !documentIssuerCountry(profile, representative.docType, representative.docCountry))
+    errors["representative.docCountry"] ??= "Elige el país que emitió el documento"
+}
+
 export function validateRegistrationAnswers(config: RegistrationConfig, answers: RegistrationAnswers, context: { mode: "internal" | "public"; today: string; scope?: RegistrationScope; countryCode?: string | null }): Record<string, string> {
   const errors: Record<string, string> = {}
   const parsed = registrationAnswersSchema.safeParse(answers)
@@ -248,52 +428,53 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     return errors
   }
   const data = parsed.data
+  const profile = clinicalProfileFor(context.countryCode)
   for (const [key, message] of Object.entries(validateDemographics(data.demographics, context.today, context.countryCode))) errors[`demographics.${key}`] = message
   const minor = !!data.demographics.birthDate && isRealDate(data.demographics.birthDate) && isMinor(data.demographics.birthDate, context.today)
   const needsRepresentative = minor || data.respondent === "representative" || (context.mode === "internal" && data.respondent === "staff" && !!data.representative)
   if (needsRepresentative) {
-    if (!data.representative) errors.representative = "Ingresa los datos del responsable"
+    if (!data.representative) errors.representative = "Escribe los datos del responsable"
     else {
-      if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Indica teléfono o correo del responsable"
+      if (!data.representative.phone && !data.representative.email) errors["representative.phone"] = "Escribe el teléfono o el correo del responsable"
       if (minor && data.representative.relationship !== "guardian") errors["representative.relationship"] = "Para menores corresponde tutor o responsable"
-      if (minor && (!data.representative.docType || !data.representative.docNumber)) errors["representative.docNumber"] = "Indica el documento del representante legal"
-      const repDocError = identityDocumentError(data.representative.docType, data.representative.docNumber)
-      if (repDocError) errors["representative.docNumber"] = repDocError
+      if (minor && (!data.representative.docType || !data.representative.docNumber)) errors["representative.docNumber"] = "Escribe el documento del representante legal"
+      representativeDocumentErrors(data.representative, profile, errors)
     }
   } else if (data.representative) errors.representative = "Selecciona registrar a otra persona"
+  const representativeContact = needsRepresentative && !!(data.representative?.phone || data.representative?.email)
   if (context.mode === "public") {
     if (data.respondent === "staff") errors.respondent = "Selecciona quién declara la información"
     if (minor && data.respondent !== "representative") errors.respondent = "El responsable debe registrar al menor"
     if (!data.privacyAccepted) errors.privacyAccepted = "Debes aceptar el aviso de privacidad"
-    const representativeContact = needsRepresentative && !!(data.representative?.phone || data.representative?.email)
     if (context.scope === "essentials") {
       // Datos esenciales para reservar: la identidad y un celular, siempre los
       // mismos. La configuración de la clínica no los quita ni añade otros: lo
       // que ella exige y aquí no se pide queda pendiente (`pendingRegistrationFields`).
       essentialIdentityErrors(data, errors)
       const demographics = data.demographics
-      if (!demographics.docType) errors["demographics.docType"] ??= "Indica el tipo de documento"
-      if (!demographics.docNumber) errors["demographics.docNumber"] ??= "Indica el número de documento"
-      if (!demographics.phone && !representativeContact) errors["demographics.phone"] ??= "Indica un celular"
+      if (!demographics.docType) errors["demographics.docType"] ??= "Elige el tipo de documento"
+      if (!demographics.docNumber) errors["demographics.docNumber"] ??= "Escribe el número de documento"
+      if (!demographics.phone && !representativeContact) errors["demographics.phone"] ??= "Escribe un celular"
       // De la edad depende que haga falta un representante legal: se pide solo
       // cuando alguien registra a otra persona.
-      if (data.respondent === "representative" && !demographics.birthDate) errors["demographics.birthDate"] ??= "Indica su fecha de nacimiento"
+      if (data.respondent === "representative" && !demographics.birthDate) errors["demographics.birthDate"] ??= "Escribe su fecha de nacimiento"
       return errors
     }
     for (const field of REGISTRATION_FIELDS) {
       const key = field.key
       const path = field.step === "datos" || field.step === "contacto" ? `demographics.${key}` : `health.${key}`
       const value = registrationFieldValue(data, field)
-      if (config.fields[key] === "hidden") {
-        if (value !== undefined) errors[path] = "Este campo no está habilitado"
+      if (!registrationFieldAsked(config, key, context.countryCode)) {
+        if (value !== undefined) errors[path] = "Este dato no se pide en el registro"
         continue
       }
-      if (key === "insuranceDetail" && !data.demographics.insuranceType) continue
-      if (needsRepresentative && (key === "phone" || key === "email") && (data.representative?.phone || data.representative?.email)) continue
-      if (config.fields[key] === "required" && isUnanswered(value)) errors[path] = "Este campo es obligatorio"
+      if (contactCoveredByRepresentative(key, representativeContact)) continue
+      // «Teléfono o correo»: cualquiera de los dos basta.
+      if (key === "phone") continue
+      if (config.fields[key] === "required" && isUnanswered(value)) errors[path] = "Este dato es obligatorio"
       if (["allergies", "conditions", "medications"].includes(key) && value === undefined) errors[path] = "Indica una respuesta, incluido Sin responder"
     }
-    if (!data.demographics.phone && !data.demographics.email && !(needsRepresentative && (data.representative?.phone || data.representative?.email))) errors["demographics.phone"] = "Indica al menos un medio de contacto"
+    if (!data.demographics.phone && !data.demographics.email && !representativeContact) errors["demographics.phone"] = "Escribe un teléfono o un correo"
   } else if (context.scope === "essentials") {
     // Lo mínimo que registra el equipo al reservar: nombres, apellidos y, si se
     // conoce, el teléfono (a quien escribe ya se le conocen sus canales; a quien
@@ -306,8 +487,13 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     // para recepción (el aviso de privacidad y los campos ocultos no aplican).
     // Sin configuración guardada rige el alta rápida.
     for (const field of REGISTRATION_FIELDS) {
-      if (config.fields[field.key] !== "required" || field.step === "salud" || field.step === "odontologicos") continue
-      if (needsRepresentative && (field.key === "phone" || field.key === "email") && (data.representative?.phone || data.representative?.email)) continue
+      if (config.fields[field.key] !== "required" || field.group === "health") continue
+      if (field.key === "phone") {
+        if (!data.demographics.phone && !data.demographics.email && !representativeContact)
+          errors["demographics.phone"] = "Teléfono o correo: hace falta uno para atenderla"
+        continue
+      }
+      if (needsRepresentative && (field.key === "email") && representativeContact) continue
       const value = data.demographics[field.key as keyof RegistrationDemographics]
       if (value === undefined || value === null || value === "")
         errors[`demographics.${field.key}`] = `${field.label}: obligatorio según la configuración del registro`

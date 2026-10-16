@@ -4,7 +4,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { assertSaasBranchAvailable, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -58,7 +58,6 @@ import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
-import { createUbigeoRoute } from "./routes/ubigeo.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
@@ -105,7 +104,6 @@ const branchInput = z.object({
   department: z.string().max(80).nullish(),
   province: z.string().max(80).nullish(),
   district: z.string().max(80).nullish(),
-  ubigeo: z.string().length(6).nullish(),
   phone: z.string().max(30).nullish(),
   email: z.string().email().nullish(),
   mapsUrl: z.string().url().nullish(),
@@ -184,6 +182,9 @@ async function toReplayPayload(
 
 export function createApp(deps: AppDeps) {
   const { auth, db } = deps
+  // «Su enlace» de cada persona vive en el subdominio de su clínica: los
+  // mensajes y las plantillas de WhatsApp que lo llevan leen esta dirección.
+  configurePublicLinks({ webURL: deps.webURL, cookieDomain: deps.cookieDomain })
   // El puerto es opcional: prod sirve en 443 (sin puerto en Origin) y el
   // harness e2e expone el proxy en :4463.
   const tenantOrigin = new RegExp(
@@ -284,7 +285,7 @@ export function createApp(deps: AppDeps) {
       cookieDomain: deps.cookieDomain,
     }),
   )
-  app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb }))
+  app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))
   app.route(
     "/api/public/booking",
     createPublicBookingRoute({ db: deps.db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }),
@@ -657,7 +658,6 @@ export function createApp(deps: AppDeps) {
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
   guarded.route("/cie10", createCie10Route(crmDeps))
-  guarded.route("/ubigeo", createUbigeoRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))

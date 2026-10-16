@@ -84,7 +84,7 @@ describe("fichas de los agentes", () => {
   })
 
   it("las funciones fijas no se pueden apagar", () => {
-    expect(switchableFunctions("recepcion")).toEqual(["informar", "agendar", "seguimiento"])
+    expect(switchableFunctions("recepcion")).toEqual(["informar", "agendar", "seguimiento", "presupuestos"])
     expect(toolsDisabledBy("recepcion", ["ordenar", "derivar"])).toEqual([])
   })
 
@@ -103,11 +103,12 @@ describe("fichas de los agentes", () => {
     expect(left).toEqual(expect.arrayContaining(["send_reply", "request_human_handoff", "anotar_caso", "confirmar_propuesta"]))
     expect(left).not.toContain("proponer_cita")
     expect(left).not.toContain("create_opportunity")
+    expect(left).not.toContain("anotar_respuesta_presupuesto")
   })
 })
 
 describe("quién dice que sí: fijo para todas las clínicas", () => {
-  it("el agente responde solo, la cita la confirma el paciente y lo comercial va directo", () => {
+  it("el agente responde solo, la cita y la respuesta a un presupuesto las confirma el paciente y lo comercial va directo", () => {
     expect(Object.keys(DEFAULT_AUTONOMY_MODES).sort()).toEqual([...AUTONOMY_ACTIONS].sort())
     expect(Object.fromEntries(AUTONOMY_ACTIONS.map((action) => [action, autonomyModeOf(action)]))).toEqual({
       reservar_cita: "confirmar_usuario",
@@ -118,6 +119,7 @@ describe("quién dice que sí: fijo para todas las clínicas", () => {
       crear_oportunidad: "directo",
       actualizar_seguimiento: "directo",
       cerrar_oportunidad: "directo",
+      decidir_presupuesto: "confirmar_usuario",
     })
   })
 })

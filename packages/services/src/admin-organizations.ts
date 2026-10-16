@@ -181,7 +181,7 @@ export interface OrganizationDetail {
   activity: OrgActivityItem[]
   billing: VisibleBillingSummary | null
   /**
-   * Costo real de IA del mes calendario de la clínica, por origen (ADR 0030),
+   * Costo real de IA del mes calendario de la clínica, por origen (ADR 0031),
    * en millonésimas de USD. Solo para el rol admin: null para soporte.
    */
   aiCost: { periodLabel: string; totalMicros: number | null; unpricedCalls: number; byOrigin: AiCostByOrigin[] } | null

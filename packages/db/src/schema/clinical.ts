@@ -42,12 +42,15 @@ export const patient = pgTable(
     givenNames: text("given_names"),
     paternalSurname: text("paternal_surname"),
     maternalSurname: text("maternal_surname"),
-    /** El nombre se separó por heurística al migrar: recepción debe confirmarlo. */
+    /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
     identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
-    /** Valores anteriores que no encajaron en un catálogo (nunca se descartan). */
-    identityLegacy: jsonb("identity_legacy"),
     bloodGroup: text("blood_group").$type<BloodGroup>(),
     patientNumber: integer("patient_number").notNull(),
+    /**
+     * Tipo de documento: qué tipos se ofrecen lo dice el país de la clínica
+     * (`clinicalProfileFor`) y lo valida el servicio; la base no fija una lista
+     * nacional. El documento es único junto con su país emisor.
+     */
     docType: text("doc_type"),
     docNumber: text("doc_number"),
     /** País emisor del documento y nacionalidad (ISO 3166-1 alfa-2). */
@@ -58,9 +61,10 @@ export const patient = pgTable(
     phone: text("phone"),
     email: text("email"),
     avatarStorageKey: text("avatar_storage_key"),
-    /** Ubigeo INEI del lugar de nacimiento y del domicilio. */
-    birthPlaceUbigeo: char("birth_place_ubigeo", { length: 6 }),
-    addressUbigeo: char("address_ubigeo", { length: 6 }),
+    /** Lugar de nacimiento: país (ISO 3166-1 alfa-2) y ciudad o localidad escrita. */
+    birthCountry: char("birth_country", { length: 2 }),
+    birthPlace: text("birth_place"),
+    /** Referencia del domicilio («frente al parque»): solo en clínicas de Perú. */
     addressReference: text("address_reference"),
     insurerName: text("insurer_name"),
     affiliationNumber: text("affiliation_number"),
@@ -70,15 +74,27 @@ export const patient = pgTable(
     maritalStatus: text("marital_status"),
     educationLevel: text("education_level"),
     occupation: text("occupation"),
+    /**
+     * Domicilio internacional (HL7 FHIR Address): calle y número en `address`,
+     * localidad (`city`), nivel intermedio (`district`, la provincia en Perú),
+     * región (`state`: código ISO 3166-2 si el país tiene lista, o escrita),
+     * código postal y país (ISO 3166-1 alfa-2).
+     */
     address: text("address"),
+    addressCity: text("address_city"),
+    addressDistrict: text("address_district"),
+    addressRegion: text("address_region"),
+    addressPostalCode: text("address_postal_code"),
+    addressCountry: char("address_country", { length: 2 }),
+    /** «Procedencia»: dato censal que solo se pide en clínicas de Perú. */
     origin: text("origin"),
     emergencyContactName: text("emergency_contact_name"),
     emergencyContactPhone: text("emergency_contact_phone"),
+    /** Tipo general del seguro (`INSURANCE_TYPES`), igual en todos los países. */
     insuranceType: text("insurance_type"),
-    insuranceDetail: text("insurance_detail"),
+    /** Régimen con nombre propio del país (SIS, EsSalud, EPS en Perú), si lo tiene. */
+    insuranceScheme: text("insurance_scheme"),
     referralSource: text("referral_source"),
-    dataConsentAt: timestamp("data_consent_at", { withTimezone: true }),
-    dataConsentBy: text("data_consent_by").references(() => user.id),
     registeredBranchId: uuid("registered_branch_id").references(() => branch.id),
     /** Revisión de antecedentes (agregado transaccional de salud). */
     healthRevision: integer("health_revision").notNull().default(0),
@@ -97,8 +113,16 @@ export const patient = pgTable(
       sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`,
     ),
     check(
-      "patient_doc_type_check",
-      sql`${table.docType} IS NULL OR ${table.docType} IN ('DNI','CE','PASAPORTE','CNV','DIE','OTRO')`,
+      "patient_insurance_type_check",
+      sql`${table.insuranceType} IS NULL OR ${table.insuranceType} IN ('PUBLICO','PRIVADO','PARTICULAR','OTRO')`,
+    ),
+    check(
+      "patient_insurance_scheme_check",
+      sql`${table.insuranceScheme} IS NULL OR (${table.insuranceType} IS NOT NULL AND char_length(${table.insuranceScheme}) BETWEEN 1 AND 20)`,
+    ),
+    check(
+      "patient_address_lengths_check",
+      sql`(${table.addressCity} IS NULL OR char_length(${table.addressCity}) BETWEEN 1 AND 100) AND (${table.addressDistrict} IS NULL OR char_length(${table.addressDistrict}) BETWEEN 1 AND 100) AND (${table.addressRegion} IS NULL OR char_length(${table.addressRegion}) BETWEEN 1 AND 100) AND (${table.addressPostalCode} IS NULL OR char_length(${table.addressPostalCode}) BETWEEN 1 AND 20) AND (${table.birthPlace} IS NULL OR char_length(${table.birthPlace}) BETWEEN 1 AND 200)`,
     ),
     // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
     check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
@@ -115,8 +139,9 @@ export const patient = pgTable(
       sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,
     ),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
+    // NULLS NOT DISTINCT en la migración 0095: sin país emisor tampoco se repite.
     uniqueIndex("patient_org_doc_uidx")
-      .on(table.organizationId, table.docType, table.docNumber)
+      .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
       .where(sql`"doc_number" IS NOT NULL`),
   ],
 )
@@ -541,6 +566,15 @@ export const odontogramEntry = pgTable(
     resolvedByPlanItemId: uuid("resolved_by_plan_item_id").references(
       (): AnyPgColumn => treatmentPlanItem.id,
     ),
+    /**
+     * Lo tratado queda dibujado: el tratamiento completado que dejó este
+     * hallazgo en la pieza (la resina deja una restauración), según lo que su
+     * servicio dice que deja (`service_catalog.leaves_finding`). Del mismo
+     * paciente y organización: la migración 0097 añade la FK
+     * compuesta `odontogram_entry_left_by_plan_item_fk` (sin FK en TS para
+     * evitar el ciclo con `treatment_plan_item`).
+     */
+    leftByPlanItemId: uuid("left_by_plan_item_id"),
     createdBy: text("created_by").references(() => user.id),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     ...timestamps,
@@ -555,11 +589,14 @@ export const odontogramEntry = pgTable(
 )
 
 /**
- * Acta de odontograma NTS 188: snapshot inmutable de los hallazgos activos al
- * sellar, con firma manuscrita capturada (trazos normalizados 0..100, NO se
- * afirma firma digital certificada), datos del examinador y propósito.
- * Append-only sin updatedAt; la inmutabilidad es regla de servicio y REVOKE
- * a nivel DB. El snapshot `entries` siempre lo calcula el servidor.
+ * Odontograma firmado (solo en clínicas de un país con odontograma oficial:
+ * NTS 188 en Perú; ADR 0036): instantánea inmutable de los hallazgos activos
+ * al firmar, con la firma del perfil profesional de quien firma (nombre,
+ * título y colegiatura; sin trazo) y su momento. El que sale al cerrar una
+ * atención la nombra (`encounterId`, uno por atención); el del botón
+ * «Firmar odontograma» (judicial, personal, reingreso) no. Guarda su norma:
+ * cambiar el país de la clínica no la reescribe. Append-only sin updatedAt;
+ * REVOKE a nivel DB. El snapshot `entries` siempre lo calcula el servidor.
  */
 export const odontogramAssessment = pgTable(
   "odontogram_assessment",
@@ -576,17 +613,28 @@ export const odontogramAssessment = pgTable(
     specifications: text("specifications").notNull(),
     observations: text("observations").notNull(),
     examinerName: text("examiner_name").notNull(),
+    examinerTitle: text("examiner_title").notNull(),
+    /** Colegio y número, como se imprime: «COP 12345». */
     registrationNumber: text("registration_number").notNull(),
     patientName: text("patient_name").notNull(),
     patientNumber: integer("patient_number").notNull(),
-    signature: jsonb("signature").notNull(),
-    signatureKind: text("signature_kind").notNull().default("captured_handwritten"),
     entries: jsonb("entries").notNull(),
-    standard: text("standard").notNull().default("NTS 188-MINSA/DGIESP-2022"),
+    /** Norma con la que se firmó; sin valor por defecto: la pone el servicio. */
+    standard: text("standard").notNull(),
+    /** Atención cuyo cierre lo firmó; null en el botón «Firmar odontograma». */
+    encounterId: uuid("encounter_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("odontogram_assessment_org_patient_idx").on(table.organizationId, table.patientId),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.encounterId],
+      foreignColumns: [encounter.organizationId, encounter.patientId, encounter.id],
+      name: "odontogram_assessment_encounter_fk",
+    }),
+    uniqueIndex("odontogram_assessment_encounter_uidx")
+      .on(table.encounterId)
+      .where(sql`"encounter_id" IS NOT NULL`),
   ],
 )
 
@@ -618,12 +666,8 @@ export const encounter = pgTable(
     vitals: jsonb("vitals"),
     evolution: text("evolution"),
     indications: text("indications"),
-    nextStep: text("next_step"),
     prognosis: text("prognosis"),
-    /** Exámenes auxiliares solicitados o con resultado. */
-    auxiliaryExams: text("auxiliary_exams"),
     examination: jsonb("examination"),
-    nextAppointmentAt: timestamp("next_appointment_at", { withTimezone: true }),
     /** Hora de inicio declarada (por defecto, al abrir). */
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     /** Hora de fin declarada al cerrar. */
@@ -637,10 +681,16 @@ export const encounter = pgTable(
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     voidedBy: text("voided_by").references(() => user.id),
     voidReason: text("void_reason"),
+    /**
+     * Por qué se cerró con un consentimiento sin firmar (avisa sin bloquear,
+     * decisión 3 de la fase 3). Historia como el resto: no cambia al cerrar.
+     */
+    consentSkipReason: text("consent_skip_reason"),
     ...timestamps,
   },
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
+    uniqueIndex("encounter_org_patient_id_uidx").on(table.organizationId, table.patientId, table.id),
     uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
     uniqueIndex("encounter_appointment_active_uidx")
       .on(table.organizationId, table.appointmentId)
@@ -658,6 +708,10 @@ export const encounter = pgTable(
     check(
       "encounter_end_check",
       sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
+    ),
+    check(
+      "encounter_consent_skip_reason_check",
+      sql`${table.consentSkipReason} IS NULL OR char_length(${table.consentSkipReason}) BETWEEN 1 AND 2000`,
     ),
   ],
 )
@@ -875,6 +929,13 @@ export const serviceCatalog = pgTable(
     priceDisclosure: text("price_disclosure").notNull().default("evaluacion"),
     /** La evaluación que ofrece el agente cuando el precio no es exacto. */
     evaluationServiceId: uuid("evaluation_service_id").references((): AnyPgColumn => serviceCatalog.id),
+    /**
+     * Qué deja en la pieza al completarse (hallazgo del odontograma y, si
+     * corresponde, su variante): la resina, una restauración; la exodoncia, una
+     * pieza ausente. null = no deja nada dibujado. odentIA lo pone en los
+     * servicios de su biblioteca; en un servicio propio se elige al crearlo.
+     */
+    leavesFinding: jsonb("leaves_finding").$type<{ condition: string; variant?: string }>(),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
@@ -888,6 +949,10 @@ export const serviceCatalog = pgTable(
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
     check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),
     check("service_catalog_price_disclosure_check", sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`),
+    check(
+      "service_catalog_leaves_finding_check",
+      sql`${table.leavesFinding} IS NULL OR (jsonb_typeof(${table.leavesFinding}) = 'object' AND jsonb_typeof(${table.leavesFinding} -> 'condition') = 'string')`,
+    ),
   ],
 )
 
@@ -948,9 +1013,9 @@ export const encounterProcedure = pgTable(
 )
 
 /** Plan clínico longitudinal del paciente: existe antes que cualquier
- * presupuesto y puede continuar en múltiples visitas. `originEncounterId`
- * solo se informa en planes heredados (legado); los planes nuevos nacen
- * desde una atención borrador pero no se cierran con ella. */
+ * presupuesto y puede continuar en múltiples visitas. Hay un plan abierto por
+ * persona (ADR 0034): la primera indicación lo crea solo y guarda en
+ * `originEncounterId` la atención donde nació; no se cierra con ella. */
 export const treatmentPlan = pgTable(
   "treatment_plan",
   {
@@ -968,31 +1033,11 @@ export const treatmentPlan = pgTable(
   (table) => [index("treatment_plan_org_patient_idx").on(table.organizationId, table.patientId)],
 )
 
-/** Alternativas excluyentes para un mismo problema clínico. */
-export const treatmentOptionGroup = pgTable(
-  "treatment_option_group",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    patientId: uuid("patient_id")
-      .notNull()
-      .references(() => patient.id, { onDelete: "cascade" }),
-    planId: uuid("plan_id")
-      .notNull()
-      .references(() => treatmentPlan.id),
-    title: text("title").notNull(),
-    createdBy: text("created_by").references(() => user.id),
-    ...timestamps,
-  },
-  (table) => [
-    index("treatment_option_group_org_patient_idx").on(table.organizationId, table.patientId),
-    index("treatment_option_group_org_plan_idx").on(table.organizationId, table.planId),
-  ],
-)
 /** Cabecera del documento económico: siempre pertenece a un plan clínico.
  * `status`/`acceptedByName`/`decisionNote` conservan la máquina de estados
  * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
- * no en un join mutable a la oferta vigente. */
+ * no en un join mutable a la oferta vigente. Un solo borrador por persona
+ * (salvo el de una revisión): crece con cada atención (decisión 12). */
 export const treatmentBudget = pgTable(
   "treatment_budget",
   {
@@ -1030,11 +1075,66 @@ export const treatmentBudget = pgTable(
     ),
     check(
       "treatment_budget_status_check",
-      sql`${table.status} IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido','historico')`,
+      sql`${table.status} IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido')`,
     ),
     check("treatment_budget_revision_check", sql`${table.revisionNumber} > 0`),
     index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
+    uniqueIndex("treatment_budget_org_id_uidx").on(table.organizationId, table.id),
+    uniqueIndex("treatment_budget_org_patient_id_uidx").on(table.organizationId, table.patientId, table.id),
+    // Un solo borrador por persona: el de una revisión va aparte (se elige al crearla).
+    uniqueIndex("treatment_budget_one_draft_uidx")
+      .on(table.organizationId, table.patientId)
+      .where(sql`status = 'borrador' AND supersedes_budget_id IS NULL`),
+  ],
+)
+
+/**
+ * Opción de un presupuesto (decisión 13): dos o tres caminos para lo mismo,
+ * cada uno con sus líneas y su propio total, nunca sumados. Todo presupuesto
+ * tiene al menos una; con una sola, la pantalla no habla de opciones. Una es la
+ * recomendada mientras se decide; al elegir, la elegida queda `elegida` y las
+ * demás `no_elegida`. La posición da la letra que ve la persona (1 = «A»).
+ */
+export const treatmentBudgetOption = pgTable(
+  "treatment_budget_option",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    budgetId: uuid("budget_id").notNull(),
+    position: smallint("position").notNull(),
+    isRecommended: boolean("is_recommended").notNull().default(false),
+    decision: text("decision").notNull().default("pendiente"),
+    createdBy: text("created_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.budgetId],
+      foreignColumns: [treatmentBudget.organizationId, treatmentBudget.patientId, treatmentBudget.id],
+      name: "treatment_budget_option_budget_fk",
+    }),
+    uniqueIndex("treatment_budget_option_org_budget_id_uidx").on(
+      table.organizationId,
+      table.budgetId,
+      table.id,
+    ),
+    uniqueIndex("treatment_budget_option_position_uidx").on(table.budgetId, table.position),
+    uniqueIndex("treatment_budget_option_recommended_uidx")
+      .on(table.budgetId)
+      .where(sql`is_recommended`),
+    uniqueIndex("treatment_budget_option_chosen_uidx")
+      .on(table.budgetId)
+      .where(sql`decision = 'elegida'`),
+    index("treatment_budget_option_org_patient_idx").on(table.organizationId, table.patientId),
+    check("treatment_budget_option_position_check", sql`${table.position} BETWEEN 1 AND 3`),
+    check(
+      "treatment_budget_option_decision_check",
+      sql`${table.decision} IN ('pendiente','elegida','no_elegida')`,
+    ),
   ],
 )
 /** Indicación longitudinal: decisión vigente propia, propuesta y oferta snapshot.
@@ -1052,13 +1152,15 @@ export const treatmentPlanItem = pgTable(
       .references(() => treatmentPlan.id),
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
     budgetId: uuid("budget_id").references(() => treatmentBudget.id),
-    optionGroupId: uuid("option_group_id").references(() => treatmentOptionGroup.id),
     supersedesItemId: uuid("supersedes_item_id").references(
       (): AnyPgColumn => treatmentPlanItem.id,
     ),
     /** Hallazgo del odontograma que motivó la indicación (trazabilidad clínica explícita). */
     odontogramEntryId: uuid("odontogram_entry_id").references(() => odontogramEntry.id),
-    isRecommended: boolean("is_recommended").notNull().default(false),
+    /**
+     * Decisión vigente. `no_elegida`: el tratamiento solo estaba en una opción
+     * del presupuesto que la persona no eligió (decisión 13); no es un «no».
+     */
     decisionStatus: text("decision_status").notNull().default("pendiente"),
     decisionNote: text("decision_note"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -1108,13 +1210,20 @@ export const treatmentPlanItem = pgTable(
     ),
     check(
       "treatment_plan_item_decision_status_check",
-      sql`${table.decisionStatus} IN ('pendiente','aceptado','pospuesto','rechazado','reemplazado')`,
+      sql`${table.decisionStatus} IN ('pendiente','aceptado','pospuesto','rechazado','reemplazado','no_elegida')`,
+    ),
+    uniqueIndex("treatment_plan_item_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
     ),
   ],
 )
 /** Línea económica cotizada en un presupuesto: snapshot de lo realmente
- * cotizado (no un join mutable). UNIQUE(budgetId,planItemId). Append-only
- * tras entregar: solo `decision` cambia al decidir.
+ * cotizado (no un join mutable). Cada línea es de una opción del presupuesto
+ * (`optionId`); el mismo tratamiento puede estar en varias opciones, una vez
+ * en cada una: UNIQUE(optionId,planItemId). Append-only tras entregar: solo
+ * `decision` cambia al decidir (`no_elegida` en las opciones que no se eligieron).
  *
  * `priceCents` es el precio final acordado por unidad (total en modo
  * `treatment`, por sesión en modo `session`); `tariffPriceCents` congela la
@@ -1137,6 +1246,7 @@ export const treatmentBudgetItem = pgTable(
     budgetId: uuid("budget_id")
       .notNull()
       .references(() => treatmentBudget.id),
+    optionId: uuid("option_id").notNull(),
     planItemId: uuid("plan_item_id")
       .notNull()
       .references(() => treatmentPlanItem.id),
@@ -1167,7 +1277,17 @@ export const treatmentBudgetItem = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("treatment_budget_item_budget_plan_uidx").on(table.budgetId, table.planItemId),
+    uniqueIndex("treatment_budget_item_option_plan_uidx").on(table.optionId, table.planItemId),
+    // La opción es del mismo presupuesto y de la misma organización que la línea.
+    foreignKey({
+      columns: [table.organizationId, table.budgetId, table.optionId],
+      foreignColumns: [
+        treatmentBudgetOption.organizationId,
+        treatmentBudgetOption.budgetId,
+        treatmentBudgetOption.id,
+      ],
+      name: "treatment_budget_item_option_fk",
+    }),
     index("treatment_budget_item_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_item_org_budget_idx").on(table.organizationId, table.budgetId),
     index("treatment_budget_item_org_plan_idx").on(table.organizationId, table.planId),
@@ -1203,6 +1323,41 @@ export const encounterPlanItem = pgTable(
   (table) => [
     primaryKey({ columns: [table.encounterId, table.planItemId] }),
     index("encounter_plan_item_plan_item_idx").on(table.planItemId),
+  ],
+)
+
+/**
+ * Lo aceptado que se agendó (ADR 0034): la cita sabe qué tratamientos son y
+ * su atención los trae. Mismo paciente que la cita y que el tratamiento (claves
+ * compuestas); queda como historia aunque la cita se cancele.
+ */
+export const appointmentPlanItem = pgTable(
+  "appointment_plan_item",
+  {
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id").notNull(),
+    appointmentId: uuid("appointment_id").notNull(),
+    planItemId: uuid("plan_item_id").notNull(),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.appointmentId, table.planItemId] }),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.appointmentId],
+      foreignColumns: [appointment.organizationId, appointment.patientId, appointment.id],
+      name: "appointment_plan_item_appointment_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.patientId, table.planItemId],
+      foreignColumns: [
+        treatmentPlanItem.organizationId,
+        treatmentPlanItem.patientId,
+        treatmentPlanItem.id,
+      ],
+      name: "appointment_plan_item_plan_item_fk",
+    }),
+    index("appointment_plan_item_plan_item_idx").on(table.organizationId, table.planItemId),
   ],
 )
 
@@ -1248,24 +1403,6 @@ export const cie10Code = pgTable("cie10_code", {
   code: text("code").primaryKey(),
   description: text("description").notNull(),
 })
-
-/**
- * Ubigeo del INEI (departamento, provincia y distrito). Catálogo global sin
- * organización ni RLS, como CIE-10: se carga desde la fuente oficial.
- */
-export const ubigeo = pgTable(
-  "ubigeo",
-  {
-    code: char("code", { length: 6 }).primaryKey(),
-    department: text("department").notNull(),
-    province: text("province"),
-    district: text("district"),
-  },
-  (table) => [
-    check("ubigeo_code_check", sql`${table.code} ~ '^[0-9]{6}$'`),
-    index("ubigeo_department_idx").on(table.department),
-  ],
-)
 
 /**
  * Consentimiento para el tratamiento de datos personales (Ley 29733): por
@@ -1725,7 +1862,7 @@ export const patientResponsibility = pgTable(
       .where(sql`${table.revokedAt} IS NULL`),
     check(
       "patient_responsibility_kind_check",
-      sql`${table.kind} IN ('representante_legal','autorizado_informacion','responsable_economico','acompanante')`,
+      sql`${table.kind} IN ('representante_legal','autorizado_informacion','responsable_economico')`,
     ),
     check(
       "patient_responsibility_dates_check",

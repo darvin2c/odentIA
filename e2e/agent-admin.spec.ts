@@ -1,4 +1,4 @@
-import { member } from "@odentia/db/schema/auth"
+import { member, user } from "@odentia/db/schema/auth"
 import { automationJob, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, encounter } from "@odentia/db/schema/clinical"
 import type { Page } from "@playwright/test"
@@ -39,8 +39,12 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
     organizationId: org.id, patientId: patient.id, kind: "mantenimiento", title: "Control de ortodoncia",
     dueAt: new Date(Date.now() - 10 * 86_400_000),
   })
+  // La lleva alguien que ya no está en la clínica: quien sigue atendiendo la ve en
+  // su «Te espera» y la línea solo cuenta las que nadie más verá.
+  const formerDentist = crypto.randomUUID()
+  await fixtureDb.insert(user).values({ id: formerDentist, name: "Dr. Ya No Atiende", email: `${formerDentist}@admin.test`, emailVerified: true })
   await fixtureDb.insert(encounter).values({
-    organizationId: org.id, patientId: patient.id, dentistUserId: owner.user.id,
+    organizationId: org.id, patientId: patient.id, dentistUserId: formerDentist,
     startedAt: new Date(Date.now() - 3 * 86_400_000),
   })
 
@@ -143,7 +147,7 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   await info.attach("inicio-administrador", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await card.getByRole("button", { name: /Ver la lista$/ }).click()
   const drawer = sideSurface(page, { name: "Recomendación del administrador", exact: true })
-  await expect(drawer).toContainText("Atenciones que siguen en borrador y se abrieron hace más de 2 días.")
+  await expect(drawer).toContainText("Atenciones que siguen en borrador, se abrieron hace más de 2 días y no le salen a nadie en «Te espera»")
   await expect(drawer).toContainText("Los números salen de la base de datos, no de un modelo.")
   await expect(drawer.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
   await expect(drawer).toContainText("Le toca a una persona")
@@ -176,6 +180,8 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
 
   // --- Tareas: lo que deja el administrador se reconoce por su origen y por qué, y lleva a la persona ---
   await gotoHydrated(page, tenant(org.slug, "/tasks"))
+  // Va al equipo clínico: la dueña (área administración) la ve en «Toda la clínica».
+  await page.getByRole("button", { name: "Toda la clínica" }).click()
   const task = page.getByRole("row").filter({ hasText: "Revisar y firmar la atención de Mariana Soto" })
   await expect(task).toContainText("La dejó el Administrador")
   await expect(task.getByRole("link", { name: "Mariana Soto" })).toBeVisible()
@@ -326,13 +332,13 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   }, 201)
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // --- WhatsApp (Integraciones): los diez mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
+  // --- WhatsApp (Integraciones): los trece mensajes de la clínica con su estado; nadie escribe nombres de plantilla ---
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(10)
+  await expect(approved.getByRole("listitem")).toHaveCount(13)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
-  await expect(approved).toContainText("1 aprobado · 9 en revisión")
+  await expect(approved).toContainText("1 aprobado · 12 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v1")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)

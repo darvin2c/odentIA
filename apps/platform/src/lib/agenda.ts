@@ -1,4 +1,11 @@
 /** Contratos de la agenda con la API (`/api/agenda` y `/api/appointments`). */
+import {
+  dayMinutesIn,
+  hourLabel,
+  SCHEDULE_STATE_LABELS,
+  type ScheduleStage,
+  type ScheduleState,
+} from "@odentia/ui-patterns"
 import type { QueryClient } from "@tanstack/react-query"
 
 /** Una cita afecta disponibilidad y seguimiento, también en superficies no montadas. */
@@ -28,6 +35,29 @@ export type AppointmentStatus =
   | "no_asistio"
   | "cancelada"
 
+/**
+ * El momento de la cita que calcula el servidor (ADR 0032): sale del estado, de
+ * la hora de llegada y de la atención unida. Los nombres los pone `visitName`.
+ */
+export type AppointmentVisit =
+  | "por_confirmar"
+  | "confirmada"
+  | "llego"
+  | "en_atencion"
+  | "atendida"
+  | "no_vino"
+  | "cancelada"
+
+/** La atención unida a la cita, sin nada de la historia: quién la lleva y desde cuándo. */
+export interface AppointmentEncounterRef {
+  id: string
+  status: "borrador" | "finalizada"
+  startedAt: string
+  endedAt: string | null
+  dentistUserId: string
+  dentistName: string
+}
+
 export interface AgendaAppointment {
   id: string
   patientId: string
@@ -49,6 +79,72 @@ export interface AgendaAppointment {
   conversationId?: string | null
   /** Solo al reservar, mover o cancelar: si el agente le avisará a la persona. */
   notice?: { queued: boolean }
+  /** Cuándo llegó; null si nadie lo marcó. */
+  arrivedAt: string | null
+  visit: AppointmentVisit
+  /** La atención unida (abierta o firmada); null sin atención. */
+  encounter: AppointmentEncounterRef | null
+}
+
+/** El estado de cada momento como lo entiende la rejilla (`ScheduleState`). */
+const VISIT_STATE: Record<AppointmentVisit, ScheduleState> = {
+  por_confirmar: "programada",
+  confirmada: "confirmada",
+  llego: "llego",
+  en_atencion: "en_atencion",
+  atendida: "atendida",
+  no_vino: "no_asistio",
+  cancelada: "cancelada",
+}
+
+/** El nombre del momento, el mismo en toda la aplicación («Por confirmar», «Llegó», «No vino»…). */
+export function visitName(visit: AppointmentVisit): string {
+  return SCHEDULE_STATE_LABELS[VISIT_STATE[visit]]
+}
+
+/** El estado para el icono y el color de la rejilla, la lista y el cajón. */
+export function visitState(visit: AppointmentVisit): ScheduleState {
+  return VISIT_STATE[visit]
+}
+
+/** Llegó o está en atención: lo que la rejilla y la lista dicen por encima del estado guardado. */
+export function visitStage(visit: AppointmentVisit): ScheduleStage | undefined {
+  return visit === "llego" || visit === "en_atencion" ? visit : undefined
+}
+
+/** «la Dra. Ana», «el Dr. Luis» o «Ana»: cómo se nombra en una frase a quien atiende. */
+export function professionalSaid(name: string, options: { full?: boolean } = {}): string {
+  const said = options.full ? name : name.split(/\s+/).slice(0, 2).join(" ")
+  if (/^dra\.?\s/i.test(name)) return `la ${said}`
+  if (/^dr\.?\s/i.test(name)) return `el ${said}`
+  return said
+}
+
+/** Minutos enteros de espera desde la llegada, nunca negativos. */
+export function waitMinutes(arrivedAt: string, now: string): number {
+  return Math.max(0, Math.floor((Date.parse(now) - Date.parse(arrivedAt)) / 60_000))
+}
+
+/**
+ * El momento de la cita con su hora, en palabras: «Llegó 10:00 · espera 6 min»,
+ * «En atención · con la Dra. Ana desde 10:06», «Atendida · 10:35» o el nombre
+ * del estado. Así se dice en la Agenda, en el cajón y en Inicio.
+ */
+export function visitLabel(
+  appointment: Pick<AgendaAppointment, "visit" | "arrivedAt" | "encounter">,
+  context: { now: string; timeZone: string },
+): string {
+  const clock = (iso: string) => hourLabel(dayMinutesIn(iso, context.timeZone))
+  if (appointment.visit === "llego" && appointment.arrivedAt) {
+    return `Llegó ${clock(appointment.arrivedAt)} · espera ${waitMinutes(appointment.arrivedAt, context.now)} min`
+  }
+  if (appointment.visit === "en_atencion" && appointment.encounter) {
+    return `En atención · con ${professionalSaid(appointment.encounter.dentistName)} desde ${clock(appointment.encounter.startedAt)}`
+  }
+  if (appointment.visit === "atendida" && appointment.encounter?.endedAt) {
+    return `Atendida · ${clock(appointment.encounter.endedAt)}`
+  }
+  return visitName(appointment.visit)
 }
 
 /** Lo que el cajón de la cita dice además de la cita (`GET /api/appointments/:id/context`). */
@@ -56,6 +152,8 @@ export interface AppointmentContext {
   person: { contactId: string; name: string; phone: string | null; relationship: string } | null
   origin: { source: string; conversationId: string | null; channel: string | null; at: string }
   confirmation: { askAt: string | null; askedAt: string | null } | null
+  /** «Faltan datos para atenderla», del servidor; null para quien no edita los datos. */
+  missingData: Array<{ key: string; label: string }> | null
 }
 
 export interface AgendaResources {

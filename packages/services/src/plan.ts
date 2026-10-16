@@ -16,7 +16,7 @@ import {
   serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
-  treatmentOptionGroup,
+  treatmentBudgetOption,
   treatmentPlan,
   treatmentPlanItem,
   treatmentTemplate,
@@ -28,13 +28,16 @@ import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
 import { readBillingModes } from "./budgets.js"
+import { drawTreatedFinding } from "./treated-findings.js"
 
 /**
  * Plan clínico longitudinal: existe antes que cualquier presupuesto y puede
- * continuar en múltiples visitas. El ítem (indicación) nace en una atención
- * borrador con sitio clínico y snapshot de oferta; `budgetId` es el
- * presupuesto vigente. La decisión clínica vive en la indicación; las líneas
- * económicas conservan la decisión de cada propuesta histórica.
+ * continuar en múltiples visitas. Hay un plan abierto por persona (ADR 0034):
+ * no se elige plan al indicar; la primera indicación lo crea solo, con la
+ * atención donde nació. El ítem (indicación) nace en una atención borrador con
+ * sitio clínico y snapshot de oferta; `budgetId` es el presupuesto vigente. La
+ * decisión clínica vive en la indicación; las líneas económicas conservan la
+ * decisión de cada propuesta histórica.
  * Convención: `tx` ya corre dentro de `withOrgContext`; nunca abrir contexto
  * aquí. El encounter se toca vía schema directo (lock), nunca vía el servicio
  * de encounters (evita ciclo).
@@ -60,6 +63,8 @@ export const PLAN_ITEM_DECISIONS = [
   "pospuesto",
   "rechazado",
   "reemplazado",
+  // Solo estaba en una opción del presupuesto que la persona no eligió (decisión 13).
+  "no_elegida",
 ] as const
 export type PlanItemDecision = (typeof PLAN_ITEM_DECISIONS)[number]
 
@@ -95,8 +100,8 @@ export interface TreatmentSiteInput {
 export interface AddPlanItemInput {
   /** Oferta del tarifario (activa y con tarifa). Scope/precio/título/moneda se copian. */
   serviceId: string
-  /** Plan clínico del mismo paciente/org. */
-  planId: string
+  /** Plan clínico del mismo paciente/org; sin él, el plan abierto (o uno nuevo). */
+  planId?: string | null
   /** Atención borrador donde se indica (origen inmutable). */
   sourceEncounterId: string
   toothNumber?: number | null
@@ -105,8 +110,6 @@ export interface AddPlanItemInput {
   arch?: string | null
   detail?: string | null
   diagnosisCode?: string | null
-  optionGroupId?: string | null
-  isRecommended?: boolean
   /** Hallazgo del odontograma que motiva la indicación (mismo paciente, no anulado). */
   odontogramEntryId?: string | null
   /** Fase del plan; por defecto, la que propone la especialidad del servicio. */
@@ -327,16 +330,27 @@ async function lockBudgetRow(tx: Db, orgId: string, budgetId: string): Promise<B
   return row
 }
 
-/** Línea económica vigente del ítem (null = sin presupuesto). */
+/**
+ * Línea económica vigente del ítem (null = sin presupuesto). Si el tratamiento
+ * está en varias opciones, vale la de la opción elegida (o, mientras decide,
+ * la de la recomendada).
+ */
 async function currentLine(
   tx: Db,
   orgId: string,
   item: { id: string; budgetId: string | null },
 ): Promise<BudgetLineRow | null> {
   if (!item.budgetId) return null
-  const [line] = await tx
-    .select()
+  const [row] = await tx
+    .select({ line: treatmentBudgetItem })
     .from(treatmentBudgetItem)
+    .innerJoin(
+      treatmentBudgetOption,
+      and(
+        eq(treatmentBudgetOption.id, treatmentBudgetItem.optionId),
+        eq(treatmentBudgetOption.organizationId, treatmentBudgetItem.organizationId),
+      ),
+    )
     .where(
       and(
         eq(treatmentBudgetItem.budgetId, item.budgetId),
@@ -344,8 +358,13 @@ async function currentLine(
         eq(treatmentBudgetItem.organizationId, orgId),
       ),
     )
+    .orderBy(
+      sql`${treatmentBudgetOption.decision} = 'elegida' desc`,
+      sql`${treatmentBudgetOption.isRecommended} desc`,
+      asc(treatmentBudgetOption.position),
+    )
     .limit(1)
-  return line ?? null
+  return row?.line ?? null
 }
 
 export async function itemDecision(
@@ -451,18 +470,82 @@ export async function createTreatmentPlan(
   await requirePatient(tx, orgId, patientId)
   if (!input.originEncounterId?.trim())
     throw validation("originEncounterId es obligatorio: el plan nace en una atención borrador")
-  await lockDraftEncounter(tx, orgId, patientId, input.originEncounterId.trim())
+  const originEncounterId = input.originEncounterId.trim()
+  await lockDraftEncounter(tx, orgId, patientId, originEncounterId)
   const title = assertTitle(input.title)
+  // La atención donde nace queda en el plan (antes se pedía y no se guardaba).
   const [row] = await tx
     .insert(treatmentPlan)
-    .values({ organizationId: orgId, patientId, title, isLegacy: false, createdBy: actorUserId })
+    .values({ organizationId: orgId, patientId, title, originEncounterId, isLegacy: false, createdBy: actorUserId })
     .returning()
   if (!row) throw new Error("No se pudo crear el plan de tratamiento")
   await audit(tx, orgId, actorUserId, "plan.created", "treatment_plan", row.id, {
     patientId,
     title,
+    originEncounterId,
   })
   return row
+}
+
+/** Título del plan que nace solo con la primera indicación. */
+export const OPEN_PLAN_TITLE = "Plan de tratamiento"
+
+/**
+ * Un plan está abierto mientras le queda algo por hacer o aún no tiene nada:
+ * no es heredado y no todo está realizado, cancelado o reemplazado.
+ */
+export function isPlanOpen(plan: { isLegacy: boolean }, statuses: readonly string[]): boolean {
+  if (plan.isLegacy) return false
+  return statuses.length === 0 || statuses.some((status) => !CLOSED_STATUSES.includes(status))
+}
+
+/** El plan abierto de la persona (el más reciente), o null si no tiene. */
+export async function findOpenPlan(tx: Db, orgId: string, patientId: string): Promise<TreatmentPlanRow | null> {
+  const plans = await tx
+    .select()
+    .from(treatmentPlan)
+    .where(and(eq(treatmentPlan.organizationId, orgId), eq(treatmentPlan.patientId, patientId), eq(treatmentPlan.isLegacy, false)))
+    .orderBy(desc(treatmentPlan.createdAt), desc(treatmentPlan.id))
+  if (plans.length === 0) return null
+  const items = await tx
+    .select({ planId: treatmentPlanItem.planId, status: treatmentPlanItem.status })
+    .from(treatmentPlanItem)
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        inArray(treatmentPlanItem.planId, plans.map((plan) => plan.id)),
+      ),
+    )
+  return (
+    plans.find((plan) =>
+      isPlanOpen(plan, items.filter((item) => item.planId === plan.id).map((item) => item.status)),
+    ) ?? null
+  )
+}
+
+/**
+ * El plan donde se indica: el pedido (del mismo paciente) o el abierto; si no
+ * hay ninguno, nace uno con la atención como origen. La atención borrador ya
+ * está bloqueada por quien llama, así que dos indicaciones a la vez no abren
+ * dos planes.
+ */
+async function planForIndication(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  planId: string | null | undefined,
+): Promise<TreatmentPlanRow> {
+  if (planId?.trim()) return lockPlanRow(tx, orgId, patientId, planId.trim())
+  const open = await findOpenPlan(tx, orgId, patientId)
+  if (open) return lockPlanRow(tx, orgId, patientId, open.id)
+  const created = await createTreatmentPlan(tx, orgId, actorUserId, patientId, {
+    title: OPEN_PLAN_TITLE,
+    originEncounterId: encounterId,
+  })
+  return lockPlanRow(tx, orgId, patientId, created.id)
 }
 
 export async function listTreatmentPlans(
@@ -475,9 +558,12 @@ export async function listTreatmentPlans(
     status: TreatmentPlanStatus
     totalItems: number
     pendingItems: number
+    /** El plan abierto de la persona: el que recibe las indicaciones nuevas. */
+    isOpen: boolean
   }>
 > {
   await requirePatient(tx, orgId, patientId)
+  const open = await findOpenPlan(tx, orgId, patientId)
   const plans = await tx
     .select()
     .from(treatmentPlan)
@@ -512,6 +598,7 @@ export async function listTreatmentPlans(
       status: derivePlanStatus(statuses),
       totalItems: statuses.length,
       pendingItems: statuses.filter((s) => s === "pendiente" || s === "programado").length,
+      isOpen: open?.id === plan.id,
     }
   })
 }
@@ -526,7 +613,6 @@ export async function getTreatmentPlanDetail(
   status: TreatmentPlanStatus
   items: PlanItemWithDecision[]
   budgetIds: string[]
-  optionGroups: Array<typeof treatmentOptionGroup.$inferSelect>
 }> {
   await requirePatient(tx, orgId, patientId)
   const [plan] = await tx
@@ -550,23 +636,11 @@ export async function getTreatmentPlanDetail(
   const budgetIds = [
     ...new Set(items.map((i) => i.budgetId).filter((id): id is string => id !== null)),
   ]
-  const optionGroups = await tx
-    .select()
-    .from(treatmentOptionGroup)
-    .where(
-      and(
-        eq(treatmentOptionGroup.planId, planId),
-        eq(treatmentOptionGroup.organizationId, orgId),
-        eq(treatmentOptionGroup.patientId, patientId),
-      ),
-    )
-    .orderBy(asc(treatmentOptionGroup.createdAt), asc(treatmentOptionGroup.id))
   return {
     plan,
     status: derivePlanStatus(items.map((i) => i.status)),
     items: withDecision,
     budgetIds,
-    optionGroups,
   }
 }
 
@@ -603,12 +677,12 @@ export async function addPlanItem(
 ): Promise<PlanItemWithDecision> {
   await requirePatient(tx, orgId, patientId)
   if (!input.sourceEncounterId?.trim()) throw validation("sourceEncounterId es obligatorio")
-  if (!input.planId?.trim())
-    throw validation("planId es obligatorio: la indicación pertenece a un plan")
   if (!input.serviceId?.trim())
     throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
-  await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
-  await lockPlanRow(tx, orgId, patientId, input.planId.trim())
+  const encounterId = input.sourceEncounterId.trim()
+  await lockDraftEncounter(tx, orgId, patientId, encounterId)
+  // No se elige plan al indicar: va al abierto, que nace solo si no hay.
+  const plan = await planForIndication(tx, orgId, actorUserId, patientId, encounterId, input.planId)
   if (input.odontogramEntryId) {
     // Trazabilidad clínica: la indicación responde a un hallazgo real del paciente.
     const [entry] = await tx
@@ -623,38 +697,6 @@ export async function addPlanItem(
         ),
       )
     if (!entry) throw notFound("Hallazgo del odontograma")
-  }
-  if (input.optionGroupId) {
-    const [group] = await tx
-      .select()
-      .from(treatmentOptionGroup)
-      .where(
-        and(
-          eq(treatmentOptionGroup.id, input.optionGroupId),
-          eq(treatmentOptionGroup.organizationId, orgId),
-          eq(treatmentOptionGroup.patientId, patientId),
-          eq(treatmentOptionGroup.planId, input.planId),
-        ),
-      )
-      .for("update")
-    if (!group) throw notFound("Grupo de alternativas")
-    if (input.isRecommended) {
-      await tx
-        .update(treatmentPlanItem)
-        .set({ isRecommended: false, updatedAt: new Date() })
-        .where(
-          and(
-            eq(treatmentPlanItem.organizationId, orgId),
-            eq(treatmentPlanItem.optionGroupId, group.id),
-            inArray(treatmentPlanItem.status, [
-              "pendiente",
-              "programado",
-              "en_curso",
-              "suspendido",
-            ]),
-          ),
-        )
-    }
   }
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
   const scope = assertScopeValue(service.scope)
@@ -674,21 +716,19 @@ export async function addPlanItem(
   const codings = await resolveServiceCodings(tx, service)
   const phase = assertPhase(input.phase) ?? phaseForSpecialty(service.specialty)
   const plannedSessions = assertPlannedSessions(input.plannedSessions) ?? 1
-  const sortOrder = await nextSortOrder(tx, orgId, input.planId.trim())
+  const sortOrder = await nextSortOrder(tx, orgId, plan.id)
   const [row] = await tx
     .insert(treatmentPlanItem)
     .values({
       organizationId: orgId,
       patientId,
-      planId: input.planId.trim(),
+      planId: plan.id,
       serviceId: service.id,
       budgetId: null,
       phase,
       plannedSessions,
       sortOrder,
-      optionGroupId: input.optionGroupId ?? null,
       odontogramEntryId: input.odontogramEntryId ?? null,
-      isRecommended: input.isRecommended ?? false,
       toothNumber: site.toothNumber,
       scope,
       surfaces: site.surfaces,
@@ -701,7 +741,7 @@ export async function addPlanItem(
       priceCents: service.priceCents,
       currency: service.currency,
       status: "pendiente",
-      sourceEncounterId: input.sourceEncounterId.trim(),
+      sourceEncounterId: encounterId,
       createdBy: actorUserId,
     })
     .returning()
@@ -722,7 +762,8 @@ export async function addPlanItem(
 export interface AddPlanItemsBatchInput {
   /** Oferta de ámbito tooth: una fila por diente (selección explícita multi-pieza). */
   serviceId: string
-  planId: string
+  /** Sin él, el plan abierto (o uno nuevo). */
+  planId?: string | null
   sourceEncounterId: string
   toothNumbers: number[]
   detail?: string | null
@@ -743,7 +784,6 @@ export async function addPlanItemsBatch(
 ): Promise<PlanItemWithDecision[]> {
   await requirePatient(tx, orgId, patientId)
   if (!input.sourceEncounterId?.trim()) throw validation("sourceEncounterId es obligatorio")
-  if (!input.planId?.trim()) throw validation("planId es obligatorio")
   if (!input.serviceId?.trim()) throw validation("serviceId es obligatorio")
   if (
     !Array.isArray(input.toothNumbers) ||
@@ -755,7 +795,7 @@ export async function addPlanItemsBatch(
   const teeth = [...new Set(input.toothNumbers)].sort((a, b) => a - b)
   if (teeth.length !== input.toothNumbers.length) throw validation("toothNumbers no debe repetirse")
   await lockDraftEncounter(tx, orgId, patientId, input.sourceEncounterId.trim())
-  await lockPlanRow(tx, orgId, patientId, input.planId.trim())
+  const plan = await planForIndication(tx, orgId, actorUserId, patientId, input.sourceEncounterId.trim(), input.planId)
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
   const scope = assertScopeValue(service.scope)
   if (scope !== "tooth")
@@ -770,14 +810,14 @@ export async function addPlanItemsBatch(
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, service)
   const rows: PlanItemRow[] = []
-  let sortOrder = await nextSortOrder(tx, orgId, input.planId.trim())
+  let sortOrder = await nextSortOrder(tx, orgId, plan.id)
   for (const tooth of teeth) {
     const [row] = await tx
       .insert(treatmentPlanItem)
       .values({
         organizationId: orgId,
         patientId,
-        planId: input.planId.trim(),
+        planId: plan.id,
         serviceId: service.id,
         budgetId: null,
         phase: phaseForSpecialty(service.specialty),
@@ -810,7 +850,7 @@ export async function addPlanItemsBatch(
     rows[0]?.id ?? "",
     {
       patientId,
-      planId: input.planId.trim(),
+      planId: plan.id,
       serviceId: service.id,
       count: rows.length,
     },
@@ -1048,7 +1088,7 @@ export async function setPlanItemStatus(
   if (["programado", "en_curso", "realizado"].includes(input.status)) {
     if (current.decisionStatus !== "aceptado")
       throw conflict("ITEM_NOT_ACCEPTED", "El tratamiento no está aceptado")
-    if (!budget || ["cancelado", "historico"].includes(budget.status)) {
+    if (!budget || budget.status === "cancelado") {
       throw conflict("BUDGET_CLOSED", "El presupuesto del tratamiento está cerrado")
     }
     assertExecutableCodings(current.codings)
@@ -1106,113 +1146,10 @@ export async function setPlanItemStatus(
     reason,
     encounterId: input.encounterId,
   })
-  return { ...updated, decision: updated.decisionStatus as PlanItemDecision }
-}
-
-export async function createOptionGroup(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  input: { planId: string; title: string },
-) {
-  await requirePatient(tx, orgId, patientId)
-  await lockPlanRow(tx, orgId, patientId, input.planId)
-  const [group] = await tx
-    .insert(treatmentOptionGroup)
-    .values({
-      organizationId: orgId,
-      patientId,
-      planId: input.planId,
-      title: assertTitle(input.title),
-      createdBy: actorUserId,
-    })
-    .returning()
-  if (!group) throw new Error("No se pudo crear el grupo de alternativas")
-  await audit(
-    tx,
-    orgId,
-    actorUserId,
-    "plan.option_group_created",
-    "treatment_option_group",
-    group.id,
-    { patientId },
-  )
-  return group
-}
-
-/**
- * Agrupa una indicación existente como alternativa de un problema clínico, o
- * la saca del grupo. Marcar la recomendada desmarca las demás del mismo grupo.
- */
-export async function setPlanItemAlternative(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  patientId: string,
-  itemId: string,
-  input: { optionGroupId: string | null; isRecommended?: boolean },
-): Promise<PlanItemWithDecision> {
-  await requirePatient(tx, orgId, patientId)
-  const { item } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
-  if (CLOSED_STATUSES.includes(item.status))
-    throw conflict("ITEM_CLOSED", "El tratamiento está cerrado")
-  const recommended = input.isRecommended === true
-  if (input.optionGroupId) {
-    const [group] = await tx
-      .select()
-      .from(treatmentOptionGroup)
-      .where(
-        and(
-          eq(treatmentOptionGroup.id, input.optionGroupId),
-          eq(treatmentOptionGroup.organizationId, orgId),
-          eq(treatmentOptionGroup.patientId, patientId),
-          eq(treatmentOptionGroup.planId, item.planId),
-        ),
-      )
-      .for("update")
-    if (!group) throw notFound("Grupo de alternativas")
-    if (recommended) {
-      await tx
-        .update(treatmentPlanItem)
-        .set({ isRecommended: false, updatedAt: new Date() })
-        .where(
-          and(
-            eq(treatmentPlanItem.organizationId, orgId),
-            eq(treatmentPlanItem.optionGroupId, group.id),
-            inArray(treatmentPlanItem.status, [
-              "pendiente",
-              "programado",
-              "en_curso",
-              "suspendido",
-            ]),
-          ),
-        )
-    }
-  } else if (recommended) {
-    throw validation("Solo una alternativa agrupada puede marcarse como recomendada")
-  }
-  const [updated] = await tx
-    .update(treatmentPlanItem)
-    .set({
-      optionGroupId: input.optionGroupId,
-      isRecommended: input.optionGroupId ? recommended : false,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(treatmentPlanItem.id, itemId),
-        eq(treatmentPlanItem.organizationId, orgId),
-        eq(treatmentPlanItem.patientId, patientId),
-      ),
-    )
-    .returning()
-  if (!updated) throw notFound("Ítem del plan")
-  await audit(tx, orgId, actorUserId, "plan.item_alternative_set", "treatment_plan_item", itemId, {
-    patientId,
-    optionGroupId: input.optionGroupId,
-    isRecommended: updated.isRecommended,
-  })
+  // Lo tratado queda dibujado: lo que su servicio deja en la pieza (la resina,
+  // una restauración) se registra en esta atención, una sola vez.
+  if (input.status === "realizado" && input.encounterId)
+    await drawTreatedFinding(tx, orgId, actorUserId, patientId, input.encounterId, updated)
   return { ...updated, decision: updated.decisionStatus as PlanItemDecision }
 }
 
@@ -1241,8 +1178,6 @@ export async function revisePlanItem(
     ...input,
     sourceEncounterId: input.encounterId,
     planId: item.planId,
-    optionGroupId: item.optionGroupId,
-    isRecommended: item.isRecommended,
   })
   await tx
     .update(treatmentPlanItem)

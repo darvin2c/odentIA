@@ -3,12 +3,15 @@ import {
   type ConsentSections,
   consentSectionsToText,
   isValidTooth,
+  normalizeDrugText,
   parseConsentSections,
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import {
   cie10Code,
   encounter,
+  encounterDiagnosis,
+  encounterProcedure,
   patient,
   patientDocument,
   serviceCatalog,
@@ -22,17 +25,21 @@ import {
   consentDocument,
   consentEvent,
   consentTemplate,
+  consentTemplateService,
   orgSpecialty,
   professionalSpecialty,
   serviceSpecialty,
 } from "@odentia/db/schema/clinical-forms"
-import { member } from "@odentia/db/schema/auth"
+import { canAccess } from "@odentia/auth/permissions"
+import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm"
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
+import { createTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -435,6 +442,15 @@ export const FIELD_TYPES = [
 ] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
 
+/**
+ * A qué dato de los antecedentes va una respuesta al finalizar el formulario.
+ * Es la extracción por definición de HL7 FHIR SDC (`Questionnaire.item.definition`,
+ * aquí solo el elemento): `AllergyIntolerance.code` es la sustancia de una
+ * alergia declarada, escrita como «sustancia: lo que le pasó», una por línea.
+ */
+export const FIELD_DEFINITIONS = ["AllergyIntolerance.code"] as const
+export type FieldDefinition = (typeof FIELD_DEFINITIONS)[number]
+
 /** Mostrar el campo solo si otro campo anterior tiene ese valor. */
 export interface FieldCondition {
   field: string
@@ -452,6 +468,8 @@ export interface FormFieldDef {
   max?: number | null
   help?: string | null
   showIf?: FieldCondition | null
+  /** Solo en texto: la respuesta pasa a los antecedentes al finalizar. */
+  definition?: FieldDefinition | null
 }
 
 export interface FormSectionDef {
@@ -514,6 +532,7 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
         const rawMin: unknown = "min" in f ? f.min : undefined
         const rawMax: unknown = "max" in f ? f.max : undefined
         const rawShowIf: unknown = "showIf" in f ? f.showIf : undefined
+        const rawDefinition: unknown = "definition" in f ? f.definition : undefined
         const fieldId = assertFieldId(typeof rawId === "string" ? rawId : "")
         if (seenFields.has(fieldId)) throw validation(`Campo duplicado: ${fieldId}`)
         seenFields.add(fieldId)
@@ -578,6 +597,13 @@ export function assertFormSchema(raw: unknown): FormSchemaDef {
             throw validation(`"${label}" solo puede depender de un campo Sí/No o de opciones`)
           }
           field.showIf = { field: target, equals: cond.equals }
+        }
+        if (rawDefinition !== undefined && rawDefinition !== null) {
+          if (!(FIELD_DEFINITIONS as readonly string[]).includes(String(rawDefinition)))
+            throw validation(`"${label}" va a un dato de los antecedentes que no existe`)
+          if (type !== "texto" && type !== "texto_largo")
+            throw validation(`"${label}" pasa a los antecedentes: debe ser una respuesta de texto`)
+          field.definition = rawDefinition as FieldDefinition
         }
         if (type === "numero") {
           if (rawMin !== undefined && rawMin !== null) {
@@ -818,7 +844,13 @@ function assertPortalSchema(respondent: "staff" | "portal", schema: FormSchemaDe
 export async function listFormTemplates(
   tx: Db,
   orgId: string,
-  query: { specialtyId?: string; status?: string; q?: string } = {},
+  query: {
+    specialtyId?: string
+    status?: string
+    q?: string
+    /** Primero los de las especialidades de este profesional (desde la atención). */
+    forUserId?: string
+  } = {},
 ): Promise<FormTemplateRow[]> {
   const conditions = [eq(clinicalFormTemplate.organizationId, orgId)]
   if (query.specialtyId) conditions.push(eq(clinicalFormTemplate.specialtyId, query.specialtyId))
@@ -830,11 +862,25 @@ export async function listFormTemplates(
   }
   const q = (query.q ?? "").trim()
   if (q) conditions.push(ilike(clinicalFormTemplate.title, `%${q}%`))
-  return tx
+  const rows = await tx
     .select()
     .from(clinicalFormTemplate)
     .where(and(...conditions))
     .orderBy(desc(clinicalFormTemplate.updatedAt))
+  if (!query.forUserId) return rows
+  const own = await tx
+    .select({ specialtyId: professionalSpecialty.specialtyId })
+    .from(professionalSpecialty)
+    .where(
+      and(
+        eq(professionalSpecialty.organizationId, orgId),
+        eq(professionalSpecialty.userId, query.forUserId),
+      ),
+    )
+  const mine = new Set(own.map((row) => row.specialtyId))
+  // Orden estable: dentro de cada grupo se conserva el de la consulta.
+  const first = (row: FormTemplateRow) => (row.specialtyId && mine.has(row.specialtyId) ? 0 : 1)
+  return [...rows].sort((a, b) => first(a) - first(b))
 }
 
 export async function createFormTemplate(
@@ -1092,14 +1138,19 @@ export async function createFormResponse(
   }
   const schema = assertFormSchema(template.schema)
   let encounterId: string | null = null
+  let attendingUserId: string | null = null
   if (input.encounterId) {
-    await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
+    const visible = await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
     encounterId = input.encounterId
+    attendingUserId = visible.dentistUserId
   }
   let professionalUserId: string | null = null
   if (input.professionalUserId) {
     await requireMemberUserId(tx, orgId, input.professionalUserId)
     professionalUserId = input.professionalUserId
+  } else if (attendingUserId) {
+    // Desde la atención, el responsable por defecto es quien atiende.
+    professionalUserId = attendingUserId
   }
   const answers = assertAnswers(schema, input.answers ?? {}, { requireAll: false })
   await assertAttachmentAnswers(tx, orgId, input.patientId, schema, answers)
@@ -1206,7 +1257,41 @@ export async function finalizeFormResponse(
     .returning()
   if (!row) throw notFound("Formulario")
   await audit(tx, orgId, actorUserId, "form_response.finalize", "clinical_form_response", row.id, {})
+  // Lo declarado sobre alergias pasa a los antecedentes sin confirmar, para que
+  // la receta avise; la misma transacción: si no se puede, no se finaliza.
+  await addDeclaredAllergies(tx, orgId, actorUserId, row.patientId, declaredAllergiesOf(schema, answers), {
+    entity: "clinical_form_response",
+    entityId: row.id,
+  })
   return row
+}
+
+/**
+ * Alergias declaradas en las respuestas de texto marcadas como
+ * `AllergyIntolerance.code`: una por línea (o separadas por «;»), con la
+ * sustancia antes de «:» y lo que le pasó después («Penicilina: ronchas en la
+ * piel»). Sin «:», todo es la sustancia. «Ninguna» o «No» no es una alergia.
+ */
+const NO_ALLERGY = new Set(["no", "ninguna", "ninguno", "nada", "no tengo", "no se", "no sé", "n/a", "na", "-"])
+
+function declaredAllergiesOf(schema: FormSchemaDef, answers: Record<string, unknown>): DeclaredAllergy[] {
+  return schema.sections
+    .flatMap((section) => section.fields)
+    .filter((field) => field.definition === "AllergyIntolerance.code")
+    .flatMap((field) => {
+      const value = answers[field.id]
+      return typeof value === "string" ? value.split(/[\n;]+/) : []
+    })
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((part) => {
+      const colon = part.indexOf(":")
+      return colon > 0
+        ? { substance: part.slice(0, colon).trim(), reaction: part.slice(colon + 1).trim() || null }
+        : { substance: part, reaction: null }
+    })
+    .filter((item) => item.substance.length > 0 && !NO_ALLERGY.has(normalizeDrugText(item.substance).replace(/[.!]+$/, "")))
 }
 
 /** Descarta un borrador con motivo: no cuenta como registro clínico y no se edita más. */
@@ -1690,15 +1775,30 @@ export interface SignConsentInput {
   /** Solo si el registro de la persona no tiene documento. */
   signerDoc?: string | null
   representativeRelation?: string | null
-  /** Trazo manuscrito de quien firma. */
-  signatureData: unknown
+  /** Trazo manuscrito de quien firma en la clínica; en papel no se pide. */
+  signatureData?: unknown
   /** La persona firmante confirmó haber comprendido la información. */
   comprehensionConfirmed: boolean
-  /** Firma manuscrita del profesional que informa (el actor). */
-  professionalSignature: unknown
+  /**
+   * Trazo del profesional que informa (el actor). Opcional: confirma con su
+   * perfil profesional, que ya es su firma (nombre y colegiatura), sin dibujar
+   * otra. Se conserva si viene, como evidencia adicional.
+   */
+  professionalSignature?: unknown
   witness?: { name: string; doc?: string | null } | null
   /** Hora en que se informó; por defecto, ahora. */
   informedAt?: string | null
+  /** Cómo firmó la persona: en la clínica (por defecto) o en papel. */
+  method?: "clinica" | "papel"
+  /** En papel: la foto o el escaneo de la hoja firmada, ya en Documentos. */
+  paperDocumentId?: string | null
+}
+
+/** Nivel real de la firma, siempre a la vista. */
+export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", string> = {
+  clinica: "Firma simple · en la clínica",
+  papel: "Firma simple · en papel",
+  enlace: "Firma simple · por enlace",
 }
 
 function assertSignatureData(raw: unknown, label = "La firma manuscrita"): Record<string, unknown> {
@@ -1769,6 +1869,9 @@ export async function signConsentDocument(
   if (current.status !== "pendiente") {
     throw conflict("SIGNED", "El consentimiento ya no está pendiente")
   }
+  if (current.personSignedAt) {
+    throw conflict("LINK_SIGNED", "Ya lo firmó en su enlace: infórmale y confírmalo con «Confirmar»")
+  }
   if (input.signerKind !== "paciente" && input.signerKind !== "representante") {
     throw validation("Firmante inválido: paciente|representante")
   }
@@ -1807,11 +1910,37 @@ export async function signConsentDocument(
       "Representante legal"
     if (!signerDoc) throw validation("El representante necesita documento de identidad")
   }
-  const signatureData = assertSignatureData(input.signatureData)
-  const professionalSignature = assertSignatureData(
-    input.professionalSignature,
-    "La firma del profesional",
-  )
+  const method = input.method ?? "clinica"
+  if (method !== "clinica" && method !== "papel")
+    throw validation("Método de firma inválido: en la clínica o en papel")
+  let signatureData: Record<string, unknown> | null = null
+  let paperDocumentId: string | null = null
+  if (method === "clinica") {
+    signatureData = assertSignatureData(input.signatureData)
+  } else {
+    // La hoja firmada es la evidencia: debe estar ya en los documentos de esta persona.
+    if (!input.paperDocumentId) throw validation("Sube la foto de la hoja firmada")
+    const [paper] = await tx
+      .select({
+        id: patientDocument.id,
+        patientId: patientDocument.patientId,
+        category: patientDocument.category,
+        retiredAt: patientDocument.retiredAt,
+      })
+      .from(patientDocument)
+      .where(and(eq(patientDocument.id, input.paperDocumentId), eq(patientDocument.organizationId, orgId)))
+      .limit(1)
+    if (!paper || paper.patientId !== current.patientId || paper.retiredAt)
+      throw validation("La hoja firmada debe ser un documento vigente de esta persona")
+    if (paper.category !== "consentimiento")
+      throw validation("La hoja firmada se guarda como consentimiento")
+    paperDocumentId = paper.id
+  }
+  // El profesional firma con su perfil; un trazo, si viene, queda como evidencia.
+  const professionalSignature =
+    input.professionalSignature === undefined || input.professionalSignature === null
+      ? null
+      : assertSignatureData(input.professionalSignature, "La firma del profesional")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   let informedAt = now
   if (input.informedAt) {
@@ -1847,6 +1976,9 @@ export async function signConsentDocument(
       witnessDoc,
       status: "firmado",
       signedAt: now,
+      signatureMethod: method,
+      signatureLevel: "simple",
+      paperDocumentId,
       updatedAt: now,
     })
     .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
@@ -1868,13 +2000,14 @@ export async function signConsentDocument(
       fromStatus: "pendiente",
       toStatus: "firmado",
       actorUserId,
-      reason: `${input.signerKind}: ${signerName}${witnessName ? ` · testigo ${witnessName}` : ""}`,
+      reason: `${input.signerKind}: ${signerName}${witnessName ? ` · testigo ${witnessName}` : ""} · ${CONSENT_SIGNATURE_WORDS[method]}`,
     },
   ])
   await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
     signerKind: input.signerKind,
     minor,
     witness: Boolean(witnessName),
+    method,
   })
   // Si quien recabó la firma no es el autor, se avisa al autor del documento.
   if (row.authorUserId && row.authorUserId !== actorUserId) {
@@ -1886,6 +2019,189 @@ export async function signConsentDocument(
       actorUserId,
     })
   }
+  return row
+}
+
+/** Un documento escrito por la persona, comparado sin espacios, puntos ni guiones. */
+function sameDocument(typed: string, stored: string): boolean {
+  const clean = (value: string) => value.replace(/[\s.-]/g, "").toUpperCase()
+  return clean(typed).length > 0 && clean(typed) === clean(stored)
+}
+
+/**
+ * Enviar a firmar antes de llegar (decisión 3, ADR 0037): el consentimiento
+ * pendiente aparece en «Su enlace» de la persona (o de su representante legal
+ * si es menor). Lo marca aquí; el enlace lo envía `sendPersonalLink`.
+ */
+export async function markConsentSentByLink(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente") throw conflict("SIGNED", "El consentimiento ya no está pendiente")
+  if (current.personSignedAt) throw conflict("SIGNED", "La persona ya lo firmó en su enlace: falta que lo confirmes en la cita")
+  const [row] = await tx
+    .update(consentDocument)
+    .set({ linkSentAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Consentimiento")
+  await audit(tx, orgId, actorUserId, "consent.sent_to_sign", "consent_document", documentId, {})
+  return row
+}
+
+export interface SignConsentByLinkInput {
+  /** Su documento, escrito por la persona: se compara con el de su registro. */
+  docNumber: string
+  comprehensionConfirmed: boolean
+  /** Su firma con el dedo. */
+  signatureData: unknown
+}
+
+/**
+ * La persona firma en su enlace, antes de llegar: la propia persona si es
+ * mayor de edad o su representante legal vigente, nunca otra. Escribe su
+ * documento como comprobación. Queda pendiente hasta que el profesional, en
+ * la cita, la informe y lo confirme con su perfil (`confirmLinkSignedConsent`).
+ * Nivel de firma: simple, por enlace.
+ */
+export async function signConsentByLink(
+  tx: Db,
+  orgId: string,
+  signerContactId: string,
+  documentId: string,
+  input: SignConsentByLinkInput,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente" || !current.linkSentAt || current.personSignedAt) {
+    throw conflict("SIGNED", "Este consentimiento ya no se firma desde aquí")
+  }
+  if (input.comprehensionConfirmed !== true) throw validation("Marca que entendiste lo que te explicaron y aceptas")
+  const subject = await requirePatient(tx, orgId, current.patientId)
+  const now = new Date()
+  const minor = subject.birthDate ? ageOn(subject.birthDate, now) < 18 : false
+  const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, signerContactId)
+  let signerKind: "paciente" | "representante"
+  let verified: { displayName: string; docNumber: string | null; docType: string | null }
+  if (linked.relationship === "self") {
+    if (minor) throw conflict("SIGNER_NOT_AUTHORIZED", "Como es menor de edad, lo firma su madre, padre o tutor")
+    // Sin su fecha de nacimiento no se sabe si es mayor de edad: lo firma en la clínica.
+    if (!subject.birthDate) {
+      throw conflict("SIGNER_NOT_AUTHORIZED", "Para firmar aquí la clínica necesita tu fecha de nacimiento. Lo firmas en tu cita.")
+    }
+    signerKind = "paciente"
+    verified = linked.contact
+  } else {
+    signerKind = "representante"
+    // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
+    verified = await requireDecisionContact(tx, orgId, current.patientId, signerContactId)
+  }
+  const typed = assertOptionalText(input.docNumber, "Tu documento", 40)
+  if (!typed) throw validation("Escribe tu documento")
+  if (verified.docNumber && !sameDocument(typed, verified.docNumber))
+    throw validation("Ese documento no coincide con el que tenemos registrado")
+  const signerDoc = verified.docNumber ? `${verified.docType ?? ""} ${verified.docNumber}`.trim() : typed
+  const signatureData = assertSignatureData(input.signatureData)
+  const [row] = await tx
+    .update(consentDocument)
+    .set({
+      signerKind,
+      signerContactId,
+      signerName: assertName(verified.displayName, "Nombre de quien firma", 200),
+      signerDoc,
+      representativeRelation: signerKind === "representante" ? "Representante legal" : null,
+      signatureData,
+      comprehensionConfirmed: true,
+      signatureMethod: "enlace",
+      signatureLevel: "simple",
+      personSignedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Consentimiento")
+  await audit(tx, orgId, `contact:${signerContactId}`, "consent.person_signed", "consent_document", documentId, {
+    signerKind,
+    minor,
+    method: "enlace",
+  })
+  return row
+}
+
+/**
+ * En la cita, el profesional informa a quien firmó en su enlace y lo confirma
+ * con su perfil (sin dibujar otra firma): ahí queda firmado.
+ */
+export async function confirmLinkSignedConsent(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  documentId: string,
+): Promise<ConsentDocumentRow> {
+  const [current] = await tx
+    .select()
+    .from(consentDocument)
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!current) throw notFound("Consentimiento")
+  if (current.status !== "pendiente" || current.signatureMethod !== "enlace" || !current.personSignedAt) {
+    throw conflict("NOT_LINK_SIGNED", "Este consentimiento no espera tu confirmación")
+  }
+  const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
+  const now = new Date()
+  const [row] = await tx
+    .update(consentDocument)
+    .set({
+      informedAt: now,
+      informedBy: actorUserId,
+      informerName: informer.name,
+      informerTitle: informer.title,
+      informerRegistration: informer.registration,
+      status: "firmado",
+      signedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(consentDocument.id, documentId), eq(consentDocument.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Consentimiento")
+  await tx.insert(consentEvent).values([
+    {
+      organizationId: orgId,
+      documentId,
+      fromStatus: "pendiente",
+      toStatus: "informado",
+      actorUserId,
+      reason: `${informer.name} · ${informer.registration}`,
+      createdAt: now,
+    },
+    {
+      organizationId: orgId,
+      documentId,
+      fromStatus: "pendiente",
+      toStatus: "firmado",
+      actorUserId,
+      reason: `${current.signerKind}: ${current.signerName} · ${CONSENT_SIGNATURE_WORDS.enlace}`,
+    },
+  ])
+  await audit(tx, orgId, actorUserId, "consent.sign", "consent_document", documentId, {
+    signerKind: current.signerKind,
+    method: "enlace",
+  })
   return row
 }
 
@@ -2134,19 +2450,514 @@ export async function listConsentEvents(
 }
 
 // ---------------------------------------------------------------------------
-// Órdenes de laboratorio / interconsulta
+// «Se pide para»: el consentimiento que se propone solo (decisión 3)
+// ---------------------------------------------------------------------------
+
+export interface ConsentTemplateServices {
+  templateKey: string
+  serviceIds: string[]
+}
+
+/** Servicios que piden cada plantilla, por su clave: valen para todas sus versiones. */
+export async function listConsentTemplateServices(
+  tx: Db,
+  orgId: string,
+): Promise<ConsentTemplateServices[]> {
+  const rows = await tx
+    .select({ templateKey: consentTemplateService.templateKey, serviceId: consentTemplateService.serviceId })
+    .from(consentTemplateService)
+    .where(eq(consentTemplateService.organizationId, orgId))
+    .orderBy(asc(consentTemplateService.templateKey), asc(consentTemplateService.createdAt))
+  const byKey = new Map<string, string[]>()
+  for (const row of rows) byKey.set(row.templateKey, [...(byKey.get(row.templateKey) ?? []), row.serviceId])
+  return [...byKey.entries()].map(([templateKey, serviceIds]) => ({ templateKey, serviceIds }))
+}
+
+/**
+ * Reemplaza los servicios para los que se pide una plantilla. Es configuración,
+ * no contenido: se puede cambiar también en una versión publicada, y vale para
+ * la clave (las versiones siguientes lo conservan).
+ */
+export async function setConsentTemplateServices(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  templateId: string,
+  serviceIds: string[],
+): Promise<ConsentTemplateServices> {
+  const [template] = await tx
+    .select({ key: consentTemplate.key })
+    .from(consentTemplate)
+    .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
+    .limit(1)
+  if (!template) throw notFound("Plantilla de consentimiento")
+  const wanted = [...new Set(serviceIds)]
+  if (wanted.length > 100) throw validation("Elige como mucho 100 servicios")
+  if (wanted.length > 0) {
+    const found = await tx
+      .select({ id: serviceCatalog.id })
+      .from(serviceCatalog)
+      .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, wanted)))
+    if (found.length !== wanted.length) throw validation("Hay servicios que no son de esta clínica")
+  }
+  const current = await tx
+    .select({ serviceId: consentTemplateService.serviceId })
+    .from(consentTemplateService)
+    .where(
+      and(
+        eq(consentTemplateService.organizationId, orgId),
+        eq(consentTemplateService.templateKey, template.key),
+      ),
+    )
+  const had = new Set(current.map((row) => row.serviceId))
+  const removed = [...had].filter((id) => !wanted.includes(id))
+  const added = wanted.filter((id) => !had.has(id))
+  if (removed.length > 0) {
+    await tx
+      .delete(consentTemplateService)
+      .where(
+        and(
+          eq(consentTemplateService.organizationId, orgId),
+          eq(consentTemplateService.templateKey, template.key),
+          inArray(consentTemplateService.serviceId, removed),
+        ),
+      )
+  }
+  if (added.length > 0) {
+    await tx
+      .insert(consentTemplateService)
+      .values(
+        added.map((serviceId) => ({
+          organizationId: orgId,
+          templateKey: template.key,
+          serviceId,
+          createdBy: actorUserId,
+        })),
+      )
+      .onConflictDoNothing()
+  }
+  if (removed.length > 0 || added.length > 0) {
+    await audit(tx, orgId, actorUserId, "consent_template.services", "consent_template", templateId, {
+      key: template.key,
+      added: added.length,
+      removed: removed.length,
+    })
+  }
+  return { templateKey: template.key, serviceIds: wanted }
+}
+
+/**
+ * Lo que pide la atención: firmado; pendiente (falta la firma); sin preparar
+ * (hay plantilla publicada, falta generarlo) o sin publicar (la clínica aún no
+ * publicó esa plantilla: se firma en papel y quien configura lo ve en «Te
+ * espera»).
+ */
+export type ConsentNeedStatus = "firmado" | "pendiente" | "sin_preparar" | "sin_publicar"
+
+export interface ConsentNeed {
+  templateKey: string
+  /** Título de la versión publicada o, sin ella, del último borrador. */
+  title: string
+  status: ConsentNeedStatus
+  /** Plantilla publicada con la que se prepara (nula si no hay). */
+  templateId: string | null
+  /** Documento pendiente o firmado que lo cubre. */
+  documentId: string | null
+  /** «Exodoncia simple · pieza 38»: lo que se registró o indicó en la atención. */
+  procedureRef: string | null
+  planItemId: string | null
+  diagnosisCode: string | null
+  /** Nombres de los servicios de la atención que lo piden; vacío en uno preparado a mano. */
+  services: string[]
+}
+
+interface NeedSource {
+  serviceId: string
+  serviceName: string
+  label: string
+  toothNumber: number | null
+  planItemId: string | null
+  diagnosisCode: string | null
+}
+
+const NEED_RANK: Record<ConsentNeedStatus, number> = {
+  sin_publicar: 0,
+  sin_preparar: 1,
+  pendiente: 2,
+  firmado: 3,
+}
+
+/**
+ * Consentimientos que pide una atención: por los servicios registrados como
+ * hechos y por los indicados en ella, más los pendientes que se prepararon a
+ * mano en la misma atención. Uno firmado para el mismo tratamiento en otra
+ * visita también lo cubre. Una sola definición para el bloque Documentos, el
+ * cierre y la API.
+ */
+export async function getEncounterConsentNeeds(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+): Promise<ConsentNeed[]> {
+  await requireVisibleEncounter(tx, orgId, patientId, encounterId)
+  const procedures = await tx
+    .select({
+      serviceId: encounterProcedure.serviceId,
+      serviceName: serviceCatalog.name,
+      description: encounterProcedure.description,
+      toothNumber: encounterProcedure.toothNumber,
+      planItemId: encounterProcedure.planItemId,
+      diagnosisCode: encounterProcedure.diagnosisCode,
+    })
+    .from(encounterProcedure)
+    .innerJoin(serviceCatalog, eq(serviceCatalog.id, encounterProcedure.serviceId))
+    .where(
+      and(
+        eq(encounterProcedure.organizationId, orgId),
+        eq(encounterProcedure.encounterId, encounterId),
+        isNull(encounterProcedure.voidedAt),
+      ),
+    )
+    .orderBy(asc(encounterProcedure.createdAt))
+  const indicated = await tx
+    .select({
+      id: treatmentPlanItem.id,
+      serviceId: treatmentPlanItem.serviceId,
+      serviceName: serviceCatalog.name,
+      title: treatmentPlanItem.title,
+      toothNumber: treatmentPlanItem.toothNumber,
+      diagnosisCode: treatmentPlanItem.diagnosisCode,
+    })
+    .from(treatmentPlanItem)
+    .innerJoin(serviceCatalog, eq(serviceCatalog.id, treatmentPlanItem.serviceId))
+    .where(
+      and(
+        eq(treatmentPlanItem.organizationId, orgId),
+        eq(treatmentPlanItem.patientId, patientId),
+        eq(treatmentPlanItem.sourceEncounterId, encounterId),
+        sql`${treatmentPlanItem.status} <> 'cancelado'`,
+      ),
+    )
+    .orderBy(asc(treatmentPlanItem.createdAt))
+  const sources: NeedSource[] = []
+  for (const proc of procedures) {
+    if (!proc.serviceId) continue
+    sources.push({
+      serviceId: proc.serviceId,
+      serviceName: proc.serviceName,
+      label: proc.description,
+      toothNumber: proc.toothNumber,
+      planItemId: proc.planItemId,
+      diagnosisCode: proc.diagnosisCode,
+    })
+  }
+  for (const item of indicated) {
+    if (!item.serviceId) continue
+    // Lo hecho hoy ya trae este tratamiento: no se cuenta dos veces.
+    if (sources.some((source) => source.planItemId === item.id)) continue
+    sources.push({
+      serviceId: item.serviceId,
+      serviceName: item.serviceName,
+      label: item.title,
+      toothNumber: item.toothNumber,
+      planItemId: item.id,
+      diagnosisCode: item.diagnosisCode,
+    })
+  }
+  const serviceIds = [...new Set(sources.map((source) => source.serviceId))]
+  const links = serviceIds.length
+    ? await tx
+        .select({ templateKey: consentTemplateService.templateKey, serviceId: consentTemplateService.serviceId })
+        .from(consentTemplateService)
+        .where(
+          and(
+            eq(consentTemplateService.organizationId, orgId),
+            inArray(consentTemplateService.serviceId, serviceIds),
+          ),
+        )
+    : []
+  const keys = [...new Set(links.map((link) => link.templateKey))]
+  const templates = keys.length
+    ? await tx
+        .select({
+          id: consentTemplate.id,
+          key: consentTemplate.key,
+          title: consentTemplate.title,
+          status: consentTemplate.status,
+          version: consentTemplate.version,
+        })
+        .from(consentTemplate)
+        .where(and(eq(consentTemplate.organizationId, orgId), inArray(consentTemplate.key, keys)))
+        .orderBy(desc(consentTemplate.version))
+    : []
+  // Documentos de esta atención (cualquier plantilla) y los de los tratamientos de la atención.
+  const planItemIds = [...new Set(sources.map((s) => s.planItemId).filter((id): id is string => !!id))]
+  const documents = await tx
+    .select({
+      id: consentDocument.id,
+      status: consentDocument.status,
+      key: consentTemplate.key,
+      title: consentDocument.titleSnapshot,
+      encounterId: consentDocument.encounterId,
+      planItemId: consentDocument.planItemId,
+      procedureRef: consentDocument.procedureRef,
+      diagnosisCode: consentDocument.diagnosisCode,
+      templateId: consentDocument.templateId,
+    })
+    .from(consentDocument)
+    .innerJoin(consentTemplate, eq(consentTemplate.id, consentDocument.templateId))
+    .where(
+      and(
+        eq(consentDocument.organizationId, orgId),
+        eq(consentDocument.patientId, patientId),
+        inArray(consentDocument.status, ["pendiente", "firmado"]),
+        planItemIds.length
+          ? or(eq(consentDocument.encounterId, encounterId), inArray(consentDocument.planItemId, planItemIds))
+          : eq(consentDocument.encounterId, encounterId),
+      ),
+    )
+    .orderBy(asc(consentDocument.createdAt))
+  const diagnoses = await tx
+    .select({ code: encounterDiagnosis.cie10Code, toothNumber: encounterDiagnosis.toothNumber })
+    .from(encounterDiagnosis)
+    .where(
+      and(
+        eq(encounterDiagnosis.organizationId, orgId),
+        eq(encounterDiagnosis.encounterId, encounterId),
+        isNull(encounterDiagnosis.voidedAt),
+      ),
+    )
+    .orderBy(asc(encounterDiagnosis.createdAt))
+  const diagnosisFor = (source: NeedSource | undefined): string | null =>
+    source?.diagnosisCode ??
+    diagnoses.find((dx) => source?.toothNumber != null && dx.toothNumber === source.toothNumber)?.code ??
+    diagnoses[0]?.code ??
+    null
+
+  const needs: ConsentNeed[] = []
+  const covered = new Set<string>()
+  for (const key of keys) {
+    const linked = new Set(links.filter((l) => l.templateKey === key).map((l) => l.serviceId))
+    const mine = sources.filter((source) => linked.has(source.serviceId))
+    const published = templates.find((t) => t.key === key && t.status === "publicado") ?? null
+    const latest = templates.find((t) => t.key === key) ?? null
+    const ownDocs = documents.filter(
+      (doc) =>
+        doc.key === key &&
+        (doc.encounterId === encounterId || (doc.planItemId && mine.some((s) => s.planItemId === doc.planItemId))),
+    )
+    const signed = ownDocs.find((doc) => doc.status === "firmado")
+    const pending = ownDocs.find((doc) => doc.status === "pendiente")
+    const doc = signed ?? pending ?? null
+    if (doc) covered.add(doc.id)
+    const status: ConsentNeedStatus = signed
+      ? "firmado"
+      : pending
+        ? "pendiente"
+        : published
+          ? "sin_preparar"
+          : "sin_publicar"
+    const first = mine[0]
+    const procedureRef =
+      doc?.procedureRef ??
+      (mine
+        .map((source) => `${source.label}${source.toothNumber != null ? ` · pieza ${source.toothNumber}` : ""}`)
+        .filter((label, index, all) => all.indexOf(label) === index)
+        .join(", ")
+        .slice(0, 500) ||
+        null)
+    needs.push({
+      templateKey: key,
+      title: doc?.title ?? published?.title ?? latest?.title ?? key,
+      status,
+      templateId: doc?.templateId ?? published?.id ?? null,
+      documentId: doc?.id ?? null,
+      procedureRef,
+      planItemId: doc?.planItemId ?? (mine.length === 1 ? (first?.planItemId ?? null) : null),
+      diagnosisCode: doc?.diagnosisCode ?? diagnosisFor(first),
+      services: [...new Set(mine.map((source) => source.serviceName))],
+    })
+  }
+  // Los pendientes que se prepararon a mano en esta atención también faltan al cerrar.
+  for (const doc of documents) {
+    if (covered.has(doc.id) || doc.encounterId !== encounterId || doc.status !== "pendiente") continue
+    if (needs.some((need) => need.templateKey === doc.key && need.documentId === doc.id)) continue
+    needs.push({
+      templateKey: doc.key,
+      title: doc.title,
+      status: "pendiente",
+      templateId: doc.templateId,
+      documentId: doc.id,
+      procedureRef: doc.procedureRef,
+      planItemId: doc.planItemId,
+      diagnosisCode: doc.diagnosisCode,
+      services: [],
+    })
+  }
+  return needs.sort((a, b) => NEED_RANK[a.status] - NEED_RANK[b.status])
+}
+
+/**
+ * «Preparar»: genera los consentimientos que la atención pide y aún no
+ * existen, llenos con lo de la atención (procedimiento, pieza, diagnóstico y
+ * tratamiento). Sin `templateKeys`, todos los que faltan. Nunca duplica.
+ */
+export async function prepareEncounterConsents(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  templateKeys?: string[],
+): Promise<{ created: ConsentDocumentRow[]; needs: ConsentNeed[] }> {
+  const visible = await requireVisibleEncounter(tx, orgId, patientId, encounterId)
+  if (visible.status !== "borrador")
+    throw conflict("ENCOUNTER_CLOSED", "La atención ya está cerrada: prepara el consentimiento desde Documentos")
+  // Dos «Preparar» a la vez no generan dos documentos.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('consent-prepare:' || ${encounterId}))`)
+  const needs = await getEncounterConsentNeeds(tx, orgId, patientId, encounterId)
+  const wanted = needs.filter(
+    (need) => need.status === "sin_preparar" && (!templateKeys || templateKeys.includes(need.templateKey)),
+  )
+  if (templateKeys) {
+    const unpublished = needs.find(
+      (need) => need.status === "sin_publicar" && templateKeys.includes(need.templateKey),
+    )
+    if (unpublished)
+      throw conflict(
+        "CONSENT_NOT_PUBLISHED",
+        `Esta clínica aún no publicó el consentimiento de «${unpublished.title}»: fírmalo en papel`,
+      )
+  }
+  const created: ConsentDocumentRow[] = []
+  for (const need of wanted) {
+    if (!need.templateId) continue
+    created.push(
+      await createConsentDocument(tx, orgId, actorUserId, {
+        templateId: need.templateId,
+        patientId,
+        encounterId,
+        planItemId: need.planItemId,
+        procedureRef: need.procedureRef,
+        diagnosisCode: need.diagnosisCode,
+      }),
+    )
+  }
+  return {
+    created,
+    needs: created.length ? await getEncounterConsentNeeds(tx, orgId, patientId, encounterId) : needs,
+  }
+}
+
+export interface ConsentToPublish {
+  templateKey: string
+  title: string
+  /** Quien atiende la atención más reciente que lo pidió. */
+  requestedBy: string | null
+  requestedByName: string | null
+  requestedAt: string
+}
+
+/**
+ * Consentimientos que la clínica pide para un servicio y aún no publicó, y
+ * que alguna atención de los últimos 30 días necesitó: «Te espera» de quien
+ * configura («Publicar el consentimiento de … · lo pidió la Dra. Ana»). Se
+ * calcula del estado: desaparece sola al publicar la plantilla.
+ */
+export async function listConsentsToPublish(tx: Db, orgId: string): Promise<ConsentToPublish[]> {
+  const rows = await tx.execute<{
+    template_key: string
+    requested_by: string | null
+    requested_by_name: string | null
+    requested_at: Date | string
+  }>(sql`
+    with needed as (
+      select cts."template_key", e."dentist_user_id", e."created_at"
+      from "consent_template_service" cts
+      join "encounter_procedure" ep
+        on ep."organization_id" = cts."organization_id" and ep."service_id" = cts."service_id" and ep."voided_at" is null
+      join "encounter" e on e."id" = ep."encounter_id" and e."organization_id" = cts."organization_id"
+      where cts."organization_id" = ${orgId} and e."status" <> 'anulada'
+        and e."created_at" > now() - interval '30 days'
+      union all
+      select cts."template_key", e."dentist_user_id", e."created_at"
+      from "consent_template_service" cts
+      join "treatment_plan_item" tpi
+        on tpi."organization_id" = cts."organization_id" and tpi."service_id" = cts."service_id"
+        and tpi."status" <> 'cancelado'
+      join "encounter" e on e."id" = tpi."source_encounter_id" and e."organization_id" = cts."organization_id"
+      where cts."organization_id" = ${orgId} and e."status" <> 'anulada'
+        and e."created_at" > now() - interval '30 days'
+    ),
+    latest as (
+      select distinct on (n."template_key") n."template_key", n."dentist_user_id", n."created_at"
+      from needed n
+      where not exists (
+        select 1 from "consent_template" ct
+        where ct."organization_id" = ${orgId} and ct."key" = n."template_key" and ct."status" = 'publicado'
+      )
+      order by n."template_key", n."created_at" desc
+    )
+    select l."template_key", l."dentist_user_id" as requested_by, u."name" as requested_by_name,
+      l."created_at" as requested_at
+    from latest l
+    left join "user" u on u."id" = l."dentist_user_id"
+    order by l."created_at" desc
+    limit 20
+  `)
+  const keyed = Array.from(rows)
+  if (keyed.length === 0) return []
+  const titles = await tx
+    .select({ key: consentTemplate.key, title: consentTemplate.title })
+    .from(consentTemplate)
+    .where(
+      and(
+        eq(consentTemplate.organizationId, orgId),
+        inArray(
+          consentTemplate.key,
+          keyed.map((row) => row.template_key),
+        ),
+      ),
+    )
+    .orderBy(desc(consentTemplate.version))
+  return keyed.map((row) => ({
+    templateKey: row.template_key,
+    title: titles.find((t) => t.key === row.template_key)?.title ?? row.template_key,
+    requestedBy: row.requested_by,
+    requestedByName: row.requested_by_name,
+    requestedAt: new Date(row.requested_at).toISOString(),
+  }))
+}
+
+
+// ---------------------------------------------------------------------------
+// Órdenes: imagen, laboratorio y derivación
 // ---------------------------------------------------------------------------
 
 export type OrderRow = typeof clinicalOrder.$inferSelect
+export type OrderKind = (typeof ORDER_KINDS)[number]
+/** `interconsulta` se dice «Derivación» en pantalla. */
+export const ORDER_KINDS = ["imagen", "laboratorio", "interconsulta"] as const
 
 export interface CreateOrderInput {
-  kind: "laboratorio" | "interconsulta"
+  kind: OrderKind
   specialtyId?: string | null
   patientId: string
   encounterId?: string | null
-  recipient: string
+  /** Destinatario externo: centro de imágenes, laboratorio o profesional (texto libre). */
+  recipient?: string | null
+  /** Derivación a un colega de la clínica: recibe la tarea, con la persona a la vista. */
+  recipientUserId?: string | null
   title: string
   detail?: string | null
+  /** CIE-10 que la motiva; desde la atención, por defecto su primer diagnóstico. */
+  diagnosisCode?: string | null
+}
+
+function assertOrderKind(kind: unknown): OrderKind {
+  if (typeof kind === "string" && (ORDER_KINDS as readonly string[]).includes(kind)) return kind as OrderKind
+  throw validation("Tipo inválido: imagen, laboratorio o derivación")
 }
 
 export async function createClinicalOrder(
@@ -2155,10 +2966,8 @@ export async function createClinicalOrder(
   actorUserId: string,
   input: CreateOrderInput,
 ): Promise<OrderRow> {
-  if (input.kind !== "laboratorio" && input.kind !== "interconsulta") {
-    throw validation("Tipo inválido: laboratorio|interconsulta")
-  }
-  await requirePatient(tx, orgId, input.patientId)
+  const kind = assertOrderKind(input.kind)
+  const person = await requirePatient(tx, orgId, input.patientId)
   let specialtyId: string | null = null
   if (input.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, input.specialtyId)
@@ -2170,65 +2979,92 @@ export async function createClinicalOrder(
     await requireVisibleEncounter(tx, orgId, input.patientId, input.encounterId)
     encounterId = input.encounterId
   }
-  const recipient = assertName(input.recipient, "Destinatario", 200)
+  let recipientUserId: string | null = null
+  let recipientName: string | null = null
+  if (input.recipientUserId) {
+    if (kind !== "interconsulta") throw validation("Solo una derivación va a un colega de la clínica")
+    if (input.recipientUserId === actorUserId) throw validation("Deriva a otro profesional, no a ti")
+    const [colleague] = await tx
+      .select({ role: member.role, name: user.name })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(and(eq(member.organizationId, orgId), eq(member.userId, input.recipientUserId)))
+      .limit(1)
+    if (!colleague) throw validation("El colega debe ser miembro de la clínica")
+    // Solo a quien atiende: recepción y caja no reciben una derivación clínica.
+    if (!canAccess(colleague.role, "clinical.write"))
+      throw validation("Deriva a un profesional que atiende, no a recepción ni a caja")
+    recipientUserId = input.recipientUserId
+    recipientName = colleague.name
+  }
+  const recipient = assertName(input.recipient?.trim() || recipientName, "Destinatario", 200)
   const title = assertName(input.title, "Título de la orden", 200)
   const detail = assertOptionalText(input.detail, "Detalle", 5000)
+  let diagnosisCode = input.diagnosisCode?.trim().toUpperCase() || null
+  if (!diagnosisCode && encounterId) {
+    const [first] = await tx
+      .select({ code: encounterDiagnosis.cie10Code })
+      .from(encounterDiagnosis)
+      .where(
+        and(
+          eq(encounterDiagnosis.organizationId, orgId),
+          eq(encounterDiagnosis.encounterId, encounterId),
+          isNull(encounterDiagnosis.voidedAt),
+        ),
+      )
+      .orderBy(asc(encounterDiagnosis.createdAt))
+      .limit(1)
+    diagnosisCode = first?.code ?? null
+  }
+  if (diagnosisCode) {
+    const [known] = await tx.select({ code: cie10Code.code }).from(cie10Code).where(eq(cie10Code.code, diagnosisCode))
+    if (!known) throw validation(`Código CIE-10 inexistente: ${diagnosisCode}`)
+  }
   const [row] = await tx
     .insert(clinicalOrder)
     .values({
       organizationId: orgId,
-      kind: input.kind,
+      kind,
       specialtyId,
       patientId: input.patientId,
       encounterId,
       fromUserId: actorUserId,
       recipient,
+      recipientUserId,
       title,
       detail,
+      diagnosisCode,
       status: "solicitado",
     })
     .returning()
   await audit(tx, orgId, actorUserId, "order.create", "clinical_order", row.id, {
-    kind: input.kind,
+    kind,
+    colleague: Boolean(recipientUserId),
   })
-  // Responsable: profesionales adscritos a la especialidad destino; sin ellos,
-  // el solicitante (da seguimiento al destinatario externo libre).
-  const responsible = row.specialtyId
-    ? (
-        await tx
-          .select({ userId: professionalSpecialty.userId })
-          .from(professionalSpecialty)
-          .where(
-            and(
-              eq(professionalSpecialty.organizationId, orgId),
-              eq(professionalSpecialty.specialtyId, row.specialtyId),
-            ),
-          )
-      ).map((r) => r.userId)
-    : []
-  const recipients = [...new Set(responsible.length > 0 ? responsible : [actorUserId])]
-  for (const userId of recipients) {
-    await notifyUser(tx, orgId, userId, {
-      dedupeKey: `clinical-order-${row.id}-solicitado`,
-      title: "Nueva orden clínica por atender",
-      body: "Tienes una orden clínica pendiente de atención.",
-      href: `/patients/${row.patientId}`,
+  // Una derivación a un colega de la clínica es trabajo suyo: le queda la
+  // tarea con la persona a la vista. Sin aviso por la campana (ADR 0025).
+  if (recipientUserId) {
+    await createTask(tx, orgId, {
+      title: `Derivación: ${title}`.slice(0, 200),
+      patientId: input.patientId,
+      assigneeUserId: recipientUserId,
+      createdBy: "user",
       actorUserId,
-      // Se retira cuando alguien la toma o se cancela.
-      subject: `orden-clinica:${row.id}`,
+      reason: `Te derivaron a ${person.displayName} desde su atención`,
+      idempotencyKey: `clinical-order:${row.id}`,
     })
   }
   return row
 }
 
-export async function advanceClinicalOrder(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  orderId: string,
-  toStatus: "en_proceso" | "completado" | "cancelado",
-  resultText?: string | null,
-): Promise<OrderRow> {
+const ORDER_TRANSITIONS: Record<string, string[]> = {
+  solicitado: ["en_proceso", "completado", "cancelado"],
+  en_proceso: ["completado", "cancelado"],
+  completado: [],
+  cancelado: [],
+}
+
+async function lockOrder(tx: Db, orgId: string, orderId: string): Promise<OrderRow> {
   const [current] = await tx
     .select()
     .from(clinicalOrder)
@@ -2236,26 +3072,52 @@ export async function advanceClinicalOrder(
     .for("update")
     .limit(1)
   if (!current) throw notFound("Orden")
-  const allowed: Record<string, string[]> = {
-    solicitado: ["en_proceso", "cancelado"],
-    en_proceso: ["completado", "cancelado"],
-    completado: [],
-    cancelado: [],
-  }
-  if (!allowed[current.status]?.includes(toStatus)) {
-    throw conflict("TRANSITION", `No puede pasar de ${current.status} a ${toStatus}`)
+  return current
+}
+
+/**
+ * Pasa una orden a «en proceso» o la completa con su resultado: el texto, el
+ * archivo subido a la propia orden (un documento vigente de la misma persona)
+ * o ambos. Cancelar pide motivo y va por `cancelClinicalOrder`.
+ */
+export async function advanceClinicalOrder(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  orderId: string,
+  toStatus: "en_proceso" | "completado",
+  resultText?: string | null,
+  options: { resultDocumentId?: string | null } = {},
+): Promise<OrderRow> {
+  if ((toStatus as string) === "cancelado") throw validation("Cancelar una orden pide el motivo")
+  const current = await lockOrder(tx, orgId, orderId)
+  if (!ORDER_TRANSITIONS[current.status]?.includes(toStatus)) {
+    throw conflict("TRANSITION", "La orden ya no admite ese cambio")
   }
   const result = assertOptionalText(resultText, "Resultado", 10000)
-  if (toStatus === "completado" && !result) {
-    throw validation("Completar la orden necesita el resultado")
+  let resultDocumentId: string | null = current.resultDocumentId
+  if (options.resultDocumentId) {
+    const [document] = await tx
+      .select({ patientId: patientDocument.patientId, retiredAt: patientDocument.retiredAt })
+      .from(patientDocument)
+      .where(and(eq(patientDocument.id, options.resultDocumentId), eq(patientDocument.organizationId, orgId)))
+      .limit(1)
+    if (!document || document.patientId !== current.patientId || document.retiredAt)
+      throw validation("El resultado debe ser un documento vigente de esta persona")
+    resultDocumentId = options.resultDocumentId
   }
+  if (toStatus === "completado" && !result && !resultDocumentId) {
+    throw validation("Completar la orden necesita el resultado: escríbelo o sube el archivo")
+  }
+  const completed = toStatus === "completado"
   const [row] = await tx
     .update(clinicalOrder)
     .set({
       status: toStatus,
-      resultText: toStatus === "completado" ? result : current.resultText,
-      resultAt: toStatus === "completado" ? new Date() : current.resultAt,
-      completedBy: toStatus === "completado" ? actorUserId : current.completedBy,
+      resultText: completed ? result : current.resultText,
+      resultDocumentId: completed ? resultDocumentId : current.resultDocumentId,
+      resultAt: completed ? new Date() : current.resultAt,
+      completedBy: completed ? actorUserId : current.completedBy,
       updatedAt: new Date(),
     })
     .where(and(eq(clinicalOrder.id, orderId), eq(clinicalOrder.organizationId, orgId)))
@@ -2264,9 +3126,10 @@ export async function advanceClinicalOrder(
   await audit(tx, orgId, actorUserId, "order.status", "clinical_order", orderId, {
     from: current.status,
     to: toStatus,
+    file: completed && Boolean(resultDocumentId),
   })
   // Resultado disponible: se avisa al solicitante (si no fue quien completó).
-  if (toStatus === "completado" && row.fromUserId && row.fromUserId !== actorUserId) {
+  if (completed && row.fromUserId && row.fromUserId !== actorUserId) {
     await notifyUser(tx, orgId, row.fromUserId, {
       dedupeKey: `clinical-order-${row.id}-completado`,
       title: "Una orden clínica tiene resultado disponible",
@@ -2278,10 +3141,34 @@ export async function advanceClinicalOrder(
   return row
 }
 
+/** Cancela una orden pedida o en proceso, con motivo; queda en la historia. */
+export async function cancelClinicalOrder(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  orderId: string,
+  reason: string,
+): Promise<OrderRow> {
+  const current = await lockOrder(tx, orgId, orderId)
+  if (!ORDER_TRANSITIONS[current.status]?.includes("cancelado"))
+    throw conflict("TRANSITION", "Solo se cancela una orden pedida o en proceso")
+  const clean = (reason ?? "").trim()
+  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  const now = new Date()
+  const [row] = await tx
+    .update(clinicalOrder)
+    .set({ status: "cancelado", cancelledAt: now, cancelledBy: actorUserId, cancelReason: clean, updatedAt: now })
+    .where(and(eq(clinicalOrder.id, orderId), eq(clinicalOrder.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Orden")
+  await audit(tx, orgId, actorUserId, "order.cancel", "clinical_order", orderId, { from: current.status })
+  return row
+}
+
 export async function listClinicalOrders(
   tx: Db,
   orgId: string,
-  query: { patientId?: string; status?: string; kind?: string; specialtyId?: string },
+  query: { patientId?: string; status?: string; kind?: string; specialtyId?: string; encounterId?: string },
 ): Promise<OrderRow[]> {
   const conditions = [eq(clinicalOrder.organizationId, orgId)]
   if (query.patientId) {
@@ -2294,13 +3181,9 @@ export async function listClinicalOrders(
     }
     conditions.push(eq(clinicalOrder.status, query.status))
   }
-  if (query.kind) {
-    if (query.kind !== "laboratorio" && query.kind !== "interconsulta") {
-      throw validation("Tipo inválido: laboratorio|interconsulta")
-    }
-    conditions.push(eq(clinicalOrder.kind, query.kind))
-  }
+  if (query.kind) conditions.push(eq(clinicalOrder.kind, assertOrderKind(query.kind)))
   if (query.specialtyId) conditions.push(eq(clinicalOrder.specialtyId, query.specialtyId))
+  if (query.encounterId) conditions.push(eq(clinicalOrder.encounterId, query.encounterId))
   return tx
     .select()
     .from(clinicalOrder)
@@ -2308,3 +3191,72 @@ export async function listClinicalOrders(
     .orderBy(desc(clinicalOrder.createdAt))
 }
 
+/** Paciente dueño de una orden: para dejar traza de su lectura (404 si no existe). */
+export async function clinicalOrderPatientId(tx: Db, orgId: string, orderId: string): Promise<string> {
+  const [row] = await tx
+    .select({ patientId: clinicalOrder.patientId })
+    .from(clinicalOrder)
+    .where(and(eq(clinicalOrder.id, orderId), eq(clinicalOrder.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Orden")
+  return row.patientId
+}
+
+/**
+ * La hoja de la orden para imprimir o enviar: establecimiento, paciente, qué
+ * se pide y para quién, el diagnóstico que la motiva y quién la pide (de su
+ * perfil profesional).
+ */
+export async function getOrderPrint(tx: Db, orgId: string, orderId: string) {
+  const [order] = await tx
+    .select()
+    .from(clinicalOrder)
+    .where(and(eq(clinicalOrder.id, orderId), eq(clinicalOrder.organizationId, orgId)))
+    .limit(1)
+  if (!order) throw notFound("Orden")
+  const [person] = await tx
+    .select({
+      displayName: patient.displayName,
+      patientNumber: patient.patientNumber,
+      docType: patient.docType,
+      docNumber: patient.docNumber,
+      birthDate: patient.birthDate,
+    })
+    .from(patient)
+    .where(and(eq(patient.id, order.patientId), eq(patient.organizationId, orgId)))
+  if (!person) throw notFound("Paciente")
+  const [org] = await tx
+    .select({
+      legalName: orgProfile.legalName,
+      tradeName: orgProfile.tradeName,
+      fiscalDocType: orgProfile.fiscalDocType,
+      fiscalDocNumber: orgProfile.fiscalDocNumber,
+      address: orgProfile.fiscalAddress,
+      locale: orgProfile.locale,
+      timezone: orgProfile.timezone,
+    })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+  const [dx] = order.diagnosisCode
+    ? await tx
+        .select({ description: cie10Code.description })
+        .from(cie10Code)
+        .where(eq(cie10Code.code, order.diagnosisCode))
+    : []
+  let requestedBy: { name: string; title: string | null; registration: string | null } | null = null
+  if (order.fromUserId) {
+    try {
+      const signature = await requireProfessionalSignature(tx, orgId, order.fromUserId)
+      requestedBy = { name: signature.name, title: signature.title, registration: signature.registration }
+    } catch (e) {
+      if (!(e instanceof ServiceError)) throw e
+    }
+  }
+  return {
+    order,
+    diagnosisDescription: dx?.description ?? null,
+    patient: person,
+    establishment: org ?? null,
+    requestedBy,
+  }
+}

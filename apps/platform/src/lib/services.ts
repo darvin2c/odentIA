@@ -21,7 +21,15 @@ export interface ServiceCatalogItem {
   priceDisclosure: PriceDisclosure
   /** La evaluación que ofrece el agente cuando el precio no es exacto. */
   evaluationServiceId: string | null
+  /** Qué deja en la pieza al completarse (lo tratado queda dibujado); null = nada. */
+  leavesFinding: LeavesFindingBody | null
   isActive: boolean
+}
+
+/** Lo que un servicio deja en la pieza: el hallazgo y, si corresponde, su variante. */
+export interface LeavesFindingBody {
+  condition: string
+  variant?: string
 }
 
 /** Prestación de la biblioteca global (contrato GET /api/services/templates). */
@@ -198,6 +206,7 @@ export interface CreateServiceBody {
   billingMode?: "treatment" | "session" | null
   priceDisclosure?: PriceDisclosure | null
   evaluationServiceId?: string | null
+  leavesFinding?: LeavesFindingBody | null
   isActive?: boolean
 }
 
@@ -220,6 +229,7 @@ export interface UpdateServiceBody {
   billingMode?: "treatment" | "session"
   priceDisclosure?: PriceDisclosure
   evaluationServiceId?: string | null
+  leavesFinding?: LeavesFindingBody | null
   isActive?: boolean
 }
 
@@ -291,6 +301,7 @@ export interface CustomServiceBody {
   priceCents: number
   billingMode?: BillingMode | null
   durationMin?: number | null
+  leavesFinding?: LeavesFindingBody | null
 }
 
 export type QuickAddServiceBody = TemplateServiceBody | CustomServiceBody

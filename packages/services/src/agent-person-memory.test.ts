@@ -28,12 +28,12 @@ import {
   cancelBookingLinkAppointment,
   changeBookingLinkAppointment,
   createBookingLink,
-  getBookingLinkView,
   listBookingLinkSlots,
   reserveBookingLink,
   getBookingLinkRegistrationForm,
   registerFromBookingLink,
 } from "./booking-links.js"
+import { getPersonalLinkView as getBookingLinkView } from "./su-enlace.js"
 import { createConnection } from "./connections.js"
 import { createContact } from "./contacts.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
@@ -330,7 +330,7 @@ describe("reservar desde un enlace", () => {
   it("reserva una vez, con la operación de Agenda, y deja constancia en el caso", async () => {
     const eva = await person("eva-enlace")
     // Aún no es paciente y la clínica no tiene activo el registro en línea: no hay con qué pedirle sus datos.
-    await expect(run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId }))).rejects.toMatchObject({ code: "BOOKING_NEEDS_PATIENT" })
+    await expect(run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "BOOKING_NEEDS_PATIENT" })
 
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Miraflores", timezone: "America/Lima" }).returning({ id: branch.id })
     const dentist = "dentista-enlace"
@@ -349,16 +349,23 @@ describe("reservar desde un enlace", () => {
       .returning({ id: patient.id })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: eva.contactId, relationship: "self", isPreferred: true }))
 
-    const first = await run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId, branchId: site!.id }))
+    const first = await run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId, branchId: site!.id }, { secretsKey: KEY }))
     expect(first.token).toMatch(/^[0-9a-f]{64}$/)
-    // Solo se guarda la huella; un enlace nuevo deja sin efecto el anterior.
-    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId, branchId: site!.id }))
+    // «Su enlace» es uno por persona: enviarlo otra vez da el mismo, y solo se guarda su huella.
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId, branchId: site!.id }, { secretsKey: KEY }))
+    expect(link.token).toBe(first.token)
     const stored = await ownerDb.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.conversationId, eva.conversationId))
+    expect(stored).toHaveLength(1)
     expect(stored.map((row) => row.tokenHash)).not.toContain(link.token)
-    expect((await run((tx) => getBookingLinkView(tx, ORG, first.token))).status).toBe("vencido")
 
     const view = await run((tx) => getBookingLinkView(tx, ORG, link.token))
-    expect(view).toMatchObject({ status: "abierto", patientFirstName: "Eva", service: null, branchId: site!.id, appointment: null })
+    expect(view).toMatchObject({
+      status: "abierto",
+      firstName: "Eva",
+      patientFirstName: null,
+      booking: { needsRegistration: false, service: null, branchId: site!.id },
+      appointment: null,
+    })
     expect(view.branches.map((item) => item.name)).toEqual(["Miraflores"])
     // No hay tarifas en nada de lo que entrega la página.
     expect(JSON.stringify(view)).not.toMatch(/price|precio|S\//i)
@@ -386,7 +393,7 @@ describe("reservar desde un enlace", () => {
     expect((await run((tx) => getBookingLinkView(tx, ORG, link.token))).appointment).toMatchObject({ startsAt: chosen.startsAt, canChange: true, cancelled: false })
     // El agente y quien tome el caso lo ven: queda anotado en el caso.
     const brief = await run((tx) => getCaseBrief(tx, ORG, eva.conversationId))
-    expect(brief.known.map((item) => item.text).join(" ")).toContain("Reservó desde el enlace")
+    expect(brief.known.map((item) => item.text).join(" ")).toContain("Reservó desde su enlace")
 
     // Con la cita reservada, el mismo enlace la cambia de horario: es la misma cita, movida, con las reglas de la Agenda.
     const other = after.slots[0]!
@@ -406,10 +413,10 @@ describe("reservar desde un enlace", () => {
     await expect(run((tx) => cancelBookingLinkAppointment(tx, ORG, link.token))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
     await expect(run((tx) =>
       changeBookingLinkAppointment(tx, ORG, link.token, { startsAt: chosen.startsAt, dentistUserId: dentist }))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
-    await expect(run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))).rejects.toMatchObject({ code: "BOOKING_NOT_CHANGEABLE" })
+    await expect(run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))).rejects.toMatchObject({ code: "BOOKING_LINK_EXPIRED" })
     const notes = (await run((tx) => getCaseBrief(tx, ORG, eva.conversationId))).known.map((item) => item.text).join(" ")
-    expect(notes).toContain("Cambió su cita desde el enlace")
-    expect(notes).toContain("Canceló desde el enlace")
+    expect(notes).toContain("Cambió su cita desde su enlace")
+    expect(notes).toContain("Canceló desde su enlace")
   })
 })
 
@@ -435,10 +442,10 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       }))
 
     const nuevo = await person("nuevo-enlace")
-    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: nuevo.conversationId, branchId: site!.id }))
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: nuevo.conversationId, branchId: site!.id }, { secretsKey: KEY }))
     expect(link).toMatchObject({ patientName: null, needsRegistration: true })
     const before = await run((tx) => getBookingLinkView(tx, ORG, link.token))
-    expect(before).toMatchObject({ status: "abierto", needsRegistration: true, patientFirstName: null })
+    expect(before).toMatchObject({ status: "abierto", booking: { needsRegistration: true }, patientFirstName: null })
 
     // Puede ver los horarios, pero no reservar sin sus datos.
     const day = new Date(Date.now() + 3 * 86_400_000)
@@ -485,7 +492,6 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       displayName: "Carla Núñez Prado", docType: "DNI", docNumber: "45678912", phone: "+51987654321",
       birthDate: null, sex: null, identityNeedsReview: true,
     })
-    expect(ficha!.dataConsentAt).not.toBeNull()
     // Mismo consentimiento y misma procedencia que cualquier registro: versión del aviso, enlace consumido y conversación.
     const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, registered.id))
     expect(consents.map((row) => [row.noticeVersion, row.noticeText, row.channel, row.grantedByName])).toEqual([
@@ -498,11 +504,11 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect((await ownerDb.select().from(auditEvent).where(eq(auditEvent.entityId, registered.id))).map((row) => row.action)).toContain("patient.created")
     // Lo que la clínica exige y no se pidió queda dicho en el caso.
     const pendingNote = (await run((tx) => getCaseBrief(tx, ORG, nuevo.conversationId))).known.map((item) => item.text).join(" ")
-    expect(pendingNote).toContain("Falta en la clínica: confirmar apellidos y nombres, fecha de nacimiento, sexo.")
+    expect(pendingNote).toContain("Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento, sexo.")
 
     // Ya es paciente: el mismo enlace reserva, y no vuelve a pedir datos.
     const after = await run((tx) => getBookingLinkView(tx, ORG, link.token))
-    expect(after).toMatchObject({ needsRegistration: false, patientFirstName: "Carla" })
+    expect(after).toMatchObject({ booking: { needsRegistration: false }, firstName: "Carla", patientFirstName: null })
     await expect(run((tx) => getBookingLinkRegistrationForm(tx, ORG, link.token))).rejects.toMatchObject({ code: "BOOKING_ALREADY_PATIENT" })
     await expect(send(essentials)).rejects.toMatchObject({ code: "BOOKING_ALREADY_PATIENT" })
     const booked = await run((tx) => reserveBookingLink(tx, ORG, link.token, choice, { secretsKey: KEY }))
@@ -513,7 +519,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
 
   it("propone el celular solo cuando la conversación es de WhatsApp", async () => {
     const quien = await person("wa-enlace")
-    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }))
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }, { secretsKey: KEY }))
     expect((await run((tx) => getBookingLinkRegistrationForm(tx, ORG, link.token))).phone).toBeNull()
     // La misma conversación, ahora por WhatsApp: su identificador es el número.
     const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, quien.conversationId))
@@ -525,7 +531,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
   it("para otra persona: valen las reglas del registro sobre menores y quien escribe queda como responsable", async () => {
     const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
     const madre = await person("madre-enlace")
-    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: madre.conversationId }))
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: madre.conversationId }, { secretsKey: KEY }))
     const answers = {
       demographics: { displayName: "Mateo Rojas Lima", givenNames: "Mateo", paternalSurname: "Rojas", maternalSurname: "Lima", docType: "DNI" as const, docNumber: "78123456", birthDate: "2018-03-10" },
       respondent: "representative" as const,
@@ -545,6 +551,6 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect(child).toMatchObject({ displayName: "Mateo Rojas Lima", relationship: "guardian" })
     const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, child!.id))
     expect(consents.map((row) => row.grantedByName)).toEqual(["Rosa Lima"])
-    expect((await run((tx) => getBookingLinkView(tx, ORG, link.token)))).toMatchObject({ needsRegistration: false, patientFirstName: "Mateo" })
+    expect((await run((tx) => getBookingLinkView(tx, ORG, link.token)))).toMatchObject({ booking: { needsRegistration: false }, patientFirstName: "Mateo" })
   })
 })

@@ -1,4 +1,4 @@
-import { isValidTooth } from "@odentia/clinical"
+import { isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -8,6 +8,7 @@ import {
   encounterDiagnosis,
   encounterProcedure,
   encounterTooth,
+  odontogramAssessment,
   odontogramEntry,
   patientAnamnesis,
   patientDocument,
@@ -15,11 +16,14 @@ import {
   prescriptionItem,
   treatmentBudget,
   treatmentBudgetItem,
+  treatmentBudgetOption,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { consentDocument } from "@odentia/db/schema/clinical-forms"
+import { clinicalFormResponse, clinicalOrder, consentDocument } from "@odentia/db/schema/clinical-forms"
 import { orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, notInArray, type SQL, sql } from "drizzle-orm"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { valueOptionOf } from "./budgets.js"
 import { getCurrentDocumentContexts, getOdontogram, listPatientDocuments } from "./clinical.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { validation } from "./errors.js"
@@ -29,7 +33,7 @@ import { requirePatient } from "./patients.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
-const RETIRED_BUDGETS = ["cancelado", "historico"] as const
+const RETIRED_BUDGETS = ["cancelado"] as const
 
 export interface AcceptedPendingItem {
   id: string
@@ -101,8 +105,6 @@ interface LastVisit {
   reason: string | null
   evolution: string | null
   indications: string | null
-  nextStep: string | null
-  nextAppointmentAt: Date | null
   finalizedAt: Date | null
   teeth: number[]
   procedures: Array<
@@ -292,6 +294,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         eq(treatmentBudgetItem.planItemId, treatmentPlanItem.id),
         eq(treatmentBudgetItem.budgetId, treatmentPlanItem.budgetId),
         eq(treatmentBudgetItem.organizationId, treatmentPlanItem.organizationId),
+        // Con opciones, el tratamiento está una vez por opción: cuenta la línea aceptada.
+        eq(treatmentBudgetItem.decision, "aceptado"),
       ),
     )
     .innerJoin(
@@ -383,8 +387,6 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       reason: lastEncounter.reason,
       evolution: lastEncounter.evolution,
       indications: lastEncounter.indications,
-      nextStep: lastEncounter.nextStep,
-      nextAppointmentAt: lastEncounter.nextAppointmentAt,
       finalizedAt: lastEncounter.finalizedAt,
       teeth: teethRows.map((t) => t.toothNumber),
       procedures,
@@ -408,7 +410,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     budgetTitle: row.budgetTitle,
   }))
 
-  // Propuestas aparte: presupuestos presentados o en borrador con sus totales
+  // Propuestas aparte: los presupuestos que esperan respuesta (la única regla,
+  // `budgetAwaitsAnswerSql`; un borrador nunca cuenta) con sus totales
   // propuestos (nunca saldos ni deuda).
   const budgetRows = await tx
     .select()
@@ -417,7 +420,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       and(
         eq(treatmentBudget.organizationId, orgId),
         eq(treatmentBudget.patientId, patientId),
-        inArray(treatmentBudget.status, ["presentado", "borrador"]),
+        budgetAwaitsAnswerSql(treatmentBudget),
       ),
     )
     .orderBy(
@@ -428,22 +431,43 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     .limit(6)
   let proposedBudgets: ProposedBudget[] = []
   if (budgetRows.length > 0) {
-    const items = await tx
-      .select({
-        budgetId: treatmentBudgetItem.budgetId,
-        priceCents: treatmentBudgetItem.priceCents,
-        currency: treatmentBudgetItem.currency,
-      })
-      .from(treatmentBudgetItem)
+    // Con varias opciones, el total propuesto es el de la que vale (la elegida
+    // o la recomendada): nunca la suma de las opciones.
+    const options = await tx
+      .select()
+      .from(treatmentBudgetOption)
       .where(
         and(
-          eq(treatmentBudgetItem.organizationId, orgId),
+          eq(treatmentBudgetOption.organizationId, orgId),
           inArray(
-            treatmentBudgetItem.budgetId,
+            treatmentBudgetOption.budgetId,
             budgetRows.map((b) => b.id),
           ),
         ),
       )
+      .orderBy(asc(treatmentBudgetOption.position))
+    const valued = new Set(
+      budgetRows.flatMap((b) => valueOptionOf(options.filter((o) => o.budgetId === b.id))?.id ?? []),
+    )
+    const items = (
+      await tx
+        .select({
+          budgetId: treatmentBudgetItem.budgetId,
+          optionId: treatmentBudgetItem.optionId,
+          priceCents: treatmentBudgetItem.priceCents,
+          currency: treatmentBudgetItem.currency,
+        })
+        .from(treatmentBudgetItem)
+        .where(
+          and(
+            eq(treatmentBudgetItem.organizationId, orgId),
+            inArray(
+              treatmentBudgetItem.budgetId,
+              budgetRows.map((b) => b.id),
+            ),
+          ),
+        )
+    ).filter((item) => valued.has(item.optionId))
     const byBudget = new Map<string, typeof items>()
     for (const item of items) {
       const list = byBudget.get(item.budgetId) ?? []
@@ -556,7 +580,6 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     openEncounterId: draft?.id ?? null,
     openEncounter,
     pendingConsents: pendingConsentRows,
-    nextAppointmentAt: lastEncounter?.nextAppointmentAt ?? null,
     // Nunca sumar monedas distintas: la UI muestra un total por moneda.
     planPending: {
       count: acceptedRows.length,
@@ -594,6 +617,14 @@ export const TIMELINE_TYPES = [
   "budget",
   "follow_up",
   "prescription",
+  // Los papeles como hechos de la historia (ADR 0035): «firmó», «se pidió»,
+  // «se completó». El papel se busca en Documentos.
+  "consent",
+  "order",
+  "form",
+  // El odontograma firmado (Perú, NTS 188) es un hecho de la historia: el que
+  // firmó el cierre de una atención va dentro de ella; el del botón, aparte.
+  "odontogram_signed",
 ] as const
 export type TimelineType = (typeof TIMELINE_TYPES)[number]
 export interface TimelineItem {
@@ -613,8 +644,6 @@ export interface TimelineItem {
   status?: string
   procedures?: string[]
   documentsCount?: number
-  nextStep?: string | null
-  nextAppointmentAt?: Date | null
   indications?: string | null
   /** CIE-10 distintos de procedimientos y notas de la atención. */
   diagnoses?: string[]
@@ -634,6 +663,15 @@ export interface TimelineItem {
   decision?: string | null
   /** Vencimiento de un control, para leerlo sin consultar otra pantalla. */
   dueAt?: Date | null
+  /** Motivo de una atención anulada: la historia la muestra con él. */
+  voidReason?: string | null
+}
+
+/** Cómo se dice el tipo de una orden en la historia. */
+const ORDER_KIND_WORDS: Record<string, string> = {
+  imagen: "Orden de imagen",
+  laboratorio: "Orden de laboratorio",
+  interconsulta: "Derivación",
 }
 
 export async function getTimeline(
@@ -673,9 +711,26 @@ export async function getTimeline(
   const cmp = order === "desc" ? sql`<` : sql`>`
   const direction = order === "desc" ? sql`desc` : sql`asc`
   const branches: SQL[] = []
+  // Las atenciones firmadas y las anuladas (con su motivo, a la hora en que se
+  // anularon): Historia absorbe la lista de Atenciones (ADR 0035). El borrador
+  // en curso no es todavía un hecho: lo continúa la cabecera.
   if (types.includes("encounter"))
-    branches.push(sql`select id, 'encounter'::text as kind, created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizada'
+    branches.push(sql`select id, 'encounter'::text as kind, case when status = 'anulada' then coalesce(voided_at, created_at) else created_at end as created_at from encounter where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status in ('finalizada', 'anulada')
     ${tooth == null ? sql`` : sql`and exists (select 1 from encounter_tooth et where et.encounter_id = encounter.id and et.organization_id = ${orgId} and et.tooth_number = ${tooth})`}`)
+  // Los papeles, a la hora de lo que pasó con ellos: el consentimiento cuando se
+  // firmó o se revocó, la orden cuando se pidió y el formulario al completarse.
+  if (types.includes("consent") && tooth == null)
+    branches.push(
+      sql`select id, 'consent'::text as kind, coalesce(revoked_at, signed_at, created_at) as created_at from consent_document where organization_id = ${orgId} and patient_id = ${patientId}::uuid`,
+    )
+  if (types.includes("order") && tooth == null)
+    branches.push(
+      sql`select id, 'order'::text as kind, created_at from clinical_order where organization_id = ${orgId} and patient_id = ${patientId}::uuid`,
+    )
+  if (types.includes("form") && tooth == null)
+    branches.push(
+      sql`select id, 'form'::text as kind, finalized_at as created_at from clinical_form_response where organization_id = ${orgId} and patient_id = ${patientId}::uuid and status = 'finalizado' and finalized_at is not null`,
+    )
   if (types.includes("note") && tooth == null)
     branches.push(
       sql`select id, 'note'::text as kind, created_at from clinical_note where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null`,
@@ -686,7 +741,11 @@ export async function getTimeline(
     )
   if (types.includes("odontogram"))
     branches.push(
-      sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid and encounter_id is null and voided_at is null and status <> 'voided' ${tooth == null ? sql`` : sql`and (tooth_number = ${tooth} or details->'relatedTeeth' @> ${JSON.stringify([tooth])}::jsonb)`}`,
+      sql`select id, 'odontogram'::text as kind, created_at from odontogram_entry where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${types.includes("encounter") ? sql`and encounter_id is null` : sql``} and voided_at is null and status <> 'voided' ${tooth == null ? sql`` : sql`and (tooth_number = ${tooth} or details->'relatedTeeth' @> ${JSON.stringify([tooth])}::jsonb)`}`,
+    )
+  if (types.includes("odontogram_signed") && tooth == null)
+    branches.push(
+      sql`select id, 'odontogram_signed'::text as kind, created_at from odontogram_assessment where organization_id = ${orgId} and patient_id = ${patientId}::uuid ${types.includes("encounter") ? sql`and encounter_id is null` : sql``}`,
     )
   if (types.includes("document")) {
     const toothFilter =
@@ -783,7 +842,8 @@ export async function getTimeline(
         id: row.id,
         refId: row.id,
         type: "encounter",
-        createdAt: row.createdAt,
+        createdAt: row.status === "anulada" ? (row.voidedAt ?? row.createdAt) : row.createdAt,
+        voidReason: row.voidReason,
         title: row.reason || "Atención",
         detail: row.evolution,
         toothNumbers: teeth
@@ -792,8 +852,6 @@ export async function getTimeline(
           .sort((a, b) => a - b),
         authorId: row.dentistUserId,
         status: row.status,
-        nextStep: row.nextStep,
-        nextAppointmentAt: row.nextAppointmentAt,
         procedures: rowProcedures.map((p) => p.description),
         documentsCount: related.length,
         documents: related,
@@ -892,7 +950,27 @@ export async function getTimeline(
         diagnosisCode: row.diagnosisCode,
         toothNumbers: teeth,
         authorId: row.createdBy,
-        encounterId: null,
+        // El hallazgo se registra dentro de una atención: la historia lo agrupa con ella.
+        encounterId: row.encounterId ?? null,
+      })
+    }
+  const signed = ids("odontogram_signed")
+  if (signed.length)
+    for (const row of await tx
+      .select()
+      .from(odontogramAssessment)
+      .where(and(eq(odontogramAssessment.organizationId, orgId), inArray(odontogramAssessment.id, signed)))) {
+      const purpose = SIGNED_ODONTOGRAM_PURPOSE_LABELS[row.purpose as keyof typeof SIGNED_ODONTOGRAM_PURPOSE_LABELS] ?? row.purpose
+      hydrated.set(row.id, {
+        id: row.id,
+        refId: row.id,
+        type: "odontogram_signed",
+        createdAt: row.createdAt,
+        title: `Odontograma firmado · ${purpose}`,
+        detail: `${row.examinerName} · ${row.registrationNumber}`,
+        toothNumbers: [],
+        authorId: row.authorUserId,
+        encounterId: row.encounterId ?? null,
       })
     }
   for (const source of journeySources) {
@@ -960,7 +1038,8 @@ export async function getTimeline(
       )) {
       const [line] = await tx
         .select({
-          total: sql<number>`count(*)::int`,
+          // Un tratamiento cuenta una vez aunque esté en varias opciones.
+          total: sql<number>`count(distinct ${treatmentBudgetItem.planItemId})::int`,
           currency: sql<string>`min(${treatmentBudgetItem.currency})`,
         })
         .from(treatmentBudgetItem)
@@ -1029,6 +1108,79 @@ export async function getTimeline(
         authorId: row.issuedBy,
         planItemId: row.planItemId,
         prescriptionId: row.id,
+      })
+    }
+  const consentIds = ids("consent")
+  if (consentIds.length)
+    for (const row of await tx
+      .select()
+      .from(consentDocument)
+      .where(and(eq(consentDocument.organizationId, orgId), inArray(consentDocument.id, consentIds)))) {
+      const fact =
+        row.status === "revocado"
+          ? { at: row.revokedAt, title: `Revocó el consentimiento: ${row.titleSnapshot}`, detail: row.revokeReason }
+          : row.status === "firmado"
+            ? { at: row.signedAt, title: `Firmó el consentimiento: ${row.titleSnapshot}`, detail: `Firmó ${row.signerName}` }
+            : row.status === "anulado"
+              ? { at: null, title: `Se anuló el consentimiento: ${row.titleSnapshot}`, detail: null }
+              : { at: null, title: `Se preparó el consentimiento: ${row.titleSnapshot}`, detail: "Falta la firma" }
+      hydrated.set(row.id, {
+        id: row.id,
+        refId: row.id,
+        type: "consent",
+        createdAt: fact.at ?? row.createdAt,
+        title: fact.title,
+        detail: fact.detail ?? row.procedureRef,
+        status: row.status,
+        toothNumbers: [],
+        authorId: row.authorUserId,
+        encounterId: row.encounterId,
+        planItemId: row.planItemId,
+      })
+    }
+  const orderIds = ids("order")
+  if (orderIds.length)
+    for (const row of await tx
+      .select()
+      .from(clinicalOrder)
+      .where(and(eq(clinicalOrder.organizationId, orgId), inArray(clinicalOrder.id, orderIds)))) {
+      const state =
+        row.status === "completado"
+          ? "con resultado"
+          : row.status === "cancelado"
+            ? `cancelada${row.cancelReason ? `: ${row.cancelReason}` : ""}`
+            : "sin resultado"
+      hydrated.set(row.id, {
+        id: row.id,
+        refId: row.id,
+        type: "order",
+        createdAt: row.createdAt,
+        title: `Se pidió: ${row.title}`,
+        detail: `${ORDER_KIND_WORDS[row.kind] ?? "Orden"} · ${state}`,
+        status: row.status,
+        diagnosisCode: row.diagnosisCode,
+        toothNumbers: [],
+        authorId: row.fromUserId,
+        encounterId: row.encounterId,
+      })
+    }
+  const formIds = ids("form")
+  if (formIds.length)
+    for (const row of await tx
+      .select()
+      .from(clinicalFormResponse)
+      .where(and(eq(clinicalFormResponse.organizationId, orgId), inArray(clinicalFormResponse.id, formIds)))) {
+      hydrated.set(row.id, {
+        id: row.id,
+        refId: row.id,
+        type: "form",
+        createdAt: row.finalizedAt ?? row.createdAt,
+        title: `Se completó el formulario: ${row.templateTitle ?? "Formulario clínico"}`,
+        detail: row.source === "portal" ? "Lo respondió la persona y el equipo lo revisó" : null,
+        status: row.status,
+        toothNumbers: [],
+        authorId: row.authorUserId,
+        encounterId: row.encounterId,
       })
     }
   // Los pagos no son historia clínica: sus movimientos viven en la cuenta.

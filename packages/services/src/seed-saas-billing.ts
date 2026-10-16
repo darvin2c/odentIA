@@ -79,7 +79,7 @@ const FICTIONAL_METHODS = [
 ] as const
 
 /**
- * El plan de la ADR 0030 para probar el cobro por acción: USD 29 que vuelven
+ * El plan de la ADR 0031 para probar el cobro por acción: USD 29 que vuelven
  * en crédito, precio base por acción y prueba de USD 50 y 30 días. Es el plan
  * por defecto de la semilla; en producción lo configura administración.
  */

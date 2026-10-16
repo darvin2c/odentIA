@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { apiFetch } from "../lib/api"
 import { panelUrl } from "../lib/host"
+import { activeOrgLocale, activeOrgTimeZone } from "../lib/locale"
 import { useOrgProfile } from "../lib/org"
 
 interface SaasStatus {
@@ -20,7 +21,7 @@ interface SaasStatus {
   graceEndsAt: string | null
 }
 
-function dateLabel(iso: string | null, locale: string, timeZone: string): string {
+function dateLabel(iso: string | null, locale: string | undefined, timeZone: string): string {
   if (!iso) return ""
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ""
@@ -31,7 +32,7 @@ function dateLabel(iso: string | null, locale: string, timeZone: string): string
   }
 }
 
-/** Aviso de cobro calculado por el servidor (ADR 0030, tablero C4). */
+/** Aviso de cobro calculado por el servidor (ADR 0031, tablero C4). */
 interface SaasAlert {
   family: "saldo_prueba" | "dias_prueba" | "credito" | "tope"
   level: "aviso" | "alarma" | "limite"
@@ -65,8 +66,9 @@ export function SaasStatusBanner({ organizationId, role }: { organizationId: str
     staleTime: 60_000,
   })
   const profile = useOrgProfile()
-  const locale = profile.data?.locale ?? "es-PE"
-  const timeZone = profile.data?.timezone ?? "UTC"
+  // El formato y la zona de la clínica; mientras no llegan, los de la sesión (nunca un país fijo).
+  const locale = profile.data?.locale ?? activeOrgLocale()
+  const timeZone = profile.data?.timezone ?? activeOrgTimeZone()
   const status = useQuery({
     queryKey: ["saas", organizationId, "status"],
     queryFn: () =>

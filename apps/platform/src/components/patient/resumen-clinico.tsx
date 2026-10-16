@@ -1,18 +1,17 @@
 import { Button, buttonVariants } from "@odentia/ui"
-import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { apiFetch } from "../../lib/api"
+import type { AgendaAppointment } from "../../lib/agenda"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
-import type { PatientSectionId } from "../../lib/patient-areas"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { appointmentWhen } from "../../lib/patient-appointments"
 import {
   ALLERGY_SEVERITY_LABELS,
   type OpenEncounterBrief,
   type PatientHealth,
   type PatientSummary,
 } from "../../lib/patients"
-import { categoryLabel, imageTypeLabel, takenAt } from "./document-labels"
-import { activeOrgLocale } from "../../lib/locale"
+import { SummaryCard } from "./resumen-tab"
 
 /** Lo que le falta a la atención, dicho para quien no necesariamente la lleva. */
 const MISSING_LABELS: Record<OpenEncounterBrief["missing"][number], string> = {
@@ -96,7 +95,7 @@ function Alert({
 }: {
   tone: "danger" | "warning" | "muted"
   title: string
-  detail: string
+  detail?: string | null
 }) {
   const toneClass =
     tone === "danger"
@@ -107,169 +106,211 @@ function Alert({
   return (
     <li className={`rounded-lg border px-3 py-2 ${toneClass}`}>
       <p className="text-sm font-medium">{title}</p>
-      <p className="text-sm text-muted-foreground">{detail}</p>
+      {detail ? <p className="text-sm text-muted-foreground">{detail}</p> : null}
     </li>
   )
 }
 
-const REVIEW_LABELS = {
-  allergies: "Alergias",
-  conditions: "Enfermedades y antecedentes",
-  medications: "Medicación",
-} as const
-
 /**
- * Alertas clínicas antes de tocar al paciente: alergias por gravedad,
- * condiciones activas, medicación y lo que nunca se preguntó (distinto de
- * «niega»).
+ * Alergias y alertas antes de tocar al paciente (Resumen de quien atiende):
+ * alergias por gravedad, con la declarada «por confirmar», condiciones
+ * activas y medicación vigente. Sin alergias registradas dice lo que consta
+ * («no preguntado» o «niega»), nunca «ninguna»: no es lo mismo.
  */
 export function ClinicalAlertsCard({
   health,
-  action,
+  onAntecedentes,
 }: {
   health: PatientHealth | null
-  action: ReactNode
+  onAntecedentes: () => void
 }): React.JSX.Element {
-  const allergies = (health?.allergies ?? []).filter((a) => a.isActive)
-  const conditions = (health?.conditions ?? []).filter((c) => c.status === "activa")
+  const canWrite = usePermission("clinical.write")
+  const allergies = (health?.allergies ?? []).filter(
+    (allergy) => allergy.isActive && allergy.verification !== "descartada",
+  )
+  const conditions = (health?.conditions ?? []).filter((condition) => condition.status === "activa")
   // Vigente = sin fecha de fin, igual que la cabecera de la ficha.
-  const medications = (health?.medications ?? []).filter((m) => !m.endDate)
-  const unasked = health
-    ? (Object.keys(REVIEW_LABELS) as Array<keyof typeof REVIEW_LABELS>).filter(
-        (key) => health.reviewStatus[key] === "unknown",
-      )
-    : []
+  const medications = (health?.medications ?? []).filter((medication) => !medication.endDate)
+  const allergyState = health?.reviewStatus.allergies ?? "unknown"
   const severe = (severity: string) => severity === "severa" || severity === "grave"
   return (
-    <section className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-heading text-base font-medium">Alertas clínicas</h2>
-        {action}
-      </div>
-      {allergies.length === 0 &&
-      conditions.length === 0 &&
-      medications.length === 0 &&
-      unasked.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Sin alergias, condiciones ni medicación registradas.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {allergies.map((allergy) => (
-            <Alert
-              key={allergy.id}
-              tone={severe(allergy.severity) ? "danger" : "warning"}
-              title={`Alergia ${(ALLERGY_SEVERITY_LABELS[allergy.severity] ?? allergy.severity).toLowerCase()}`}
-              detail={`${allergy.substance} · ${allergy.reaction ?? "reacción no descrita"}`}
-            />
-          ))}
-          {conditions.map((condition) => (
-            <Alert
-              key={condition.id}
-              tone="warning"
-              title={condition.name}
-              detail={condition.cie10Code ? `CIE-10 ${condition.cie10Code}` : "Antecedente activo"}
-            />
-          ))}
-          {medications.length > 0 ? (
-            <Alert
-              tone="muted"
-              title={plural(medications.length, "medicamento vigente", "medicamentos vigentes")}
-              detail={medications.map((m) => m.name).join(", ")}
-            />
-          ) : null}
-          {unasked.length > 0 ? (
-            <Alert
-              tone="muted"
-              title="No preguntado"
-              detail={`${unasked.map((key) => REVIEW_LABELS[key]).join(", ")}: no consta si se preguntó.`}
-            />
-          ) : null}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-type RecentDoc = PatientSummary["recentDocuments"][number]
-
-function Thumbnail({ patientId, doc }: { patientId: string; doc: RecentDoc }) {
-  const signed = useQuery({
-    queryKey: ["patient-document-url", patientId, doc.id, "thumb"],
-    queryFn: () =>
-      apiFetch<{ data: { url: string } }>(
-        `/api/patients/${patientId}/documents/${doc.id}/url?variant=thumb`,
-      ),
-    staleTime: 10 * 60 * 1000,
-  })
-  const url = signed.data?.data.url
-  return (
-    <li className="flex min-w-0 flex-col gap-1">
-      <div className="aspect-square overflow-hidden rounded-lg border bg-muted">
-        {url ? (
-          <img src={url} alt={doc.label} loading="lazy" className="size-full object-cover" />
+    <SummaryCard
+      title="Alergias y alertas"
+      action={
+        <Button type="button" size="sm" variant="outline" onClick={onAntecedentes}>
+          Antecedentes
+        </Button>
+      }
+    >
+      <ul className="flex flex-col gap-2">
+        {allergies.map((allergy) => (
+          <Alert
+            key={allergy.id}
+            tone={severe(allergy.severity) ? "danger" : "warning"}
+            title={`${allergy.kind === "intolerancia" ? "Intolerancia" : "Alergia"}${
+              severe(allergy.severity)
+                ? ` ${(ALLERGY_SEVERITY_LABELS[allergy.severity] ?? allergy.severity).toLowerCase()}`
+                : ""
+            } · ${allergy.substance}`}
+            detail={[
+              allergy.reaction ?? "reacción no descrita",
+              allergy.verification === "no_confirmada" ? "declarada · por confirmar" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        ))}
+        {allergies.length === 0 ? (
+          <li className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2">
+            <span className="text-sm font-medium">
+              {allergyState === "none" ? "Alergias: niega" : "Alergias: no preguntado"}
+            </span>
+            {allergyState === "unknown" && canWrite ? (
+              <Button type="button" size="sm" variant="outline" onClick={onAntecedentes}>
+                Registrar antecedentes
+              </Button>
+            ) : null}
+          </li>
         ) : null}
-      </div>
-      <span className="truncate text-xs font-medium" title={doc.label}>
-        {doc.label}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        {imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}
-        {doc.toothNumbers.length > 0 ? ` · ${doc.toothNumbers.join(", ")}` : ""} ·{" "}
-        {new Date(takenAt(doc)).toLocaleDateString(activeOrgLocale(), { day: "2-digit", month: "short" })}
-      </span>
-    </li>
+        {conditions.map((condition) => (
+          <Alert
+            key={condition.id}
+            tone="warning"
+            title={condition.name}
+            detail={condition.cie10Code ? `CIE-10 ${condition.cie10Code}` : "Antecedente activo"}
+          />
+        ))}
+        {medications.length > 0 ? (
+          <Alert
+            tone="muted"
+            title={plural(medications.length, "medicamento vigente", "medicamentos vigentes")}
+            detail={medications.map((medication) => medication.name).join(", ")}
+          />
+        ) : null}
+      </ul>
+    </SummaryCard>
   )
 }
 
-/** Imágenes recientes con miniatura: radiografías y fotos a un clic de la galería. */
-export function RecentImagesCard({
+/** «8 oct», en la zona de la clínica. */
+function dayOf(iso: string): string {
+  return new Date(iso).toLocaleDateString(activeOrgLocale(), {
+    day: "numeric",
+    month: "short",
+    timeZone: activeOrgTimeZone(),
+  })
+}
+
+/**
+ * La última atención cerrada: cuándo, por qué, quién y qué encontró (los
+ * diagnósticos y las piezas), con «Ver» para abrirla. Sin atenciones, el
+ * vacío lleva su acción.
+ */
+export function LastVisitCard({
   patientId,
-  documents,
-  onOpen,
+  summary,
+  attend,
 }: {
   patientId: string
-  documents: RecentDoc[]
-  onOpen: (section: PatientSectionId) => void
-}): React.JSX.Element | null {
-  const images = documents.filter((doc) => doc.contentType?.startsWith("image/")).slice(0, 4)
+  summary: PatientSummary
+  /** «Atender», el mismo botón de la cabecera. */
+  attend: ReactNode
+}): React.JSX.Element {
+  const memberName = useMemberName()
+  const visit = summary.lastVisit
+  const dentist = summary.lastEncounter?.dentistUserId
   return (
-    <section className="flex min-w-0 flex-col gap-3 elevated rounded-xl border bg-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-heading text-base font-medium">Imágenes recientes</h2>
-        <Button size="sm" variant="outline" onClick={() => onOpen("imagenes")}>
-          Todas
-        </Button>
-      </div>
-      {images.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Sin radiografías ni fotos clínicas. Se suben desde la atención o la galería.
-        </p>
+    <SummaryCard
+      title="Última atención"
+      action={
+        visit ? (
+          <Link
+            to="/patients/$patientId/encounters/$encounterId"
+            params={{ patientId, encounterId: visit.encounterId }}
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            Ver
+          </Link>
+        ) : undefined
+      }
+    >
+      {visit ? (
+        <div className="flex flex-col gap-1 text-sm">
+          <p className="font-medium">
+            {[visit.finalizedAt ? dayOf(visit.finalizedAt) : null, visit.reason || "Atención"]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          <p className="text-muted-foreground">
+            {[
+              dentist ? memberName(dentist) : null,
+              visit.diagnoses.length > 0 ? visit.diagnoses.join(", ") : null,
+              visit.teeth.length > 0
+                ? `${visit.teeth.length === 1 ? "pieza" : "piezas"} ${visit.teeth.join(", ")}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "Sin diagnósticos registrados"}
+          </p>
+        </div>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {images.map((doc) => (
-            <Thumbnail key={doc.id} patientId={patientId} doc={doc} />
-          ))}
-        </ul>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">Todavía no tiene atenciones</p>
+          {attend}
+        </div>
       )}
-    </section>
+    </SummaryCard>
   )
 }
 
-export function ClinicalShortcuts({ onOpen }: { onOpen: (section: PatientSectionId) => void }) {
+/**
+ * La próxima cita con el teléfono para avisarle: lo mismo que recepción ve en
+ * su Resumen. Sin cita por venir, «Reservar cita».
+ */
+export function UpcomingCard({
+  patientId,
+  upcoming,
+  loading,
+  failed,
+  phone,
+}: {
+  patientId: string
+  upcoming: AgendaAppointment | null
+  loading: boolean
+  failed: boolean
+  /** «Teléfono +51 987 654 305 · WhatsApp», ya dicho. */
+  phone: string
+}): React.JSX.Element {
+  const canBook = usePermission("appointments.write")
   return (
-    <nav aria-label="Accesos clínicos" className="flex flex-wrap gap-2">
-      {(
-        [
-          ["odontograma", "Odontograma"],
-          ["historia", "Historia"],
-          ["antecedentes", "Antecedentes"],
-        ] as const
-      ).map(([section, label]) => (
-        <Button key={section} size="sm" variant="outline" onClick={() => onOpen(section)}>
-          {label}
-        </Button>
-      ))}
-    </nav>
+    <SummaryCard title="Próxima cita">
+      <div className="flex flex-col gap-1 text-sm">
+        {loading ? (
+          <p className="text-muted-foreground">Consultando…</p>
+        ) : failed ? (
+          <p className="text-muted-foreground">No disponible</p>
+        ) : upcoming ? (
+          <p className="font-medium">
+            {[appointmentWhen(upcoming), upcoming.serviceName ?? upcoming.reason, upcoming.dentistName]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-muted-foreground">Sin cita por venir</p>
+            {canBook ? (
+              <Link
+                to="/agenda"
+                search={{ patientId }}
+                className={buttonVariants({ size: "sm", variant: "outline" })}
+              >
+                Reservar cita
+              </Link>
+            ) : null}
+          </div>
+        )}
+        <p className="text-muted-foreground">{phone}</p>
+      </div>
+    </SummaryCard>
   )
 }

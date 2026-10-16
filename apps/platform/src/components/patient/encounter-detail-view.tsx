@@ -192,12 +192,6 @@ export function EncounterDetailView({
               <dd className="text-sm">{formatVitals(encounter.vitals)}</dd>
             </div>
           ) : null}
-          {encounter.auxiliaryExams ? (
-            <div>
-              <dt className="text-xs font-medium text-muted-foreground">Exámenes auxiliares</dt>
-              <dd className="whitespace-pre-wrap text-sm">{encounter.auxiliaryExams}</dd>
-            </div>
-          ) : null}
           {encounter.prognosis ? (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Pronóstico</dt>
@@ -208,27 +202,17 @@ export function EncounterDetailView({
             <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
           </div>
+          {encounter.consentSkipReason ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">
+                Se cerró sin un consentimiento firmado
+              </dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.consentSkipReason}</dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Indicaciones</dt>
             <dd className="whitespace-pre-wrap text-sm">{encounter.indications ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">Paso siguiente</dt>
-            <dd className="whitespace-pre-wrap text-sm">{encounter.nextStep ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">
-              Próxima revisión sugerida (sin reserva)
-            </dt>
-            <dd className="text-sm">
-              {encounter.nextAppointmentAt ? (
-                <time dateTime={encounter.nextAppointmentAt}>
-                  {formatDateTime(encounter.nextAppointmentAt)}
-                </time>
-              ) : (
-                "—"
-              )}
-            </dd>
           </div>
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Odontólogo</dt>

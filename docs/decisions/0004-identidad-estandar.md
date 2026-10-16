@@ -1,6 +1,6 @@
 # 0004 · Identidad estándar del paciente, número de historia y catálogos oficiales
 
-Fecha: 2026-10-08 · **Estado:** aceptada (implementación en la fase 3 de la propuesta UX)
+Fecha: 2026-10-08 · **Estado:** aceptada (implementación en la fase 3 de la propuesta UX) · Actualizada por [0036](0036-nucleo-internacional-y-lo-que-solo-es-de-peru.md): los documentos, el seguro y la dirección dependen del país de la clínica (documento con su país emisor y único con él, seguro con tipo general y régimen del país, dirección HL7 FHIR); sale el ubigeo, salen `identity_legacy` e `insurance_detail`, y los datos censales solo pueden ser opcionales.
 
 ## Problema
 

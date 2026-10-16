@@ -1,7 +1,7 @@
 import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
-import { CalendarClock, CheckCircle2, FileText, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, SquareCheckBig, UserRound } from "lucide-react"
+import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import type { WaitingRow } from "../../lib/workspace"
@@ -18,6 +18,10 @@ export interface WaitingHandlers {
   onTake?: (row: RowOf<"case">) => void
   /** «Hecha» en una tarea; sin esto (sin permiso) la fila solo la abre. */
   onDone?: (row: RowOf<"task">) => void
+  /** «Revisada» una posible ficha repetida: cierra la tarea que la recuerda. */
+  onReviewed?: (row: RowOf<"possibleDuplicate">) => void
+  /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
+  onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
   /** La fila cuya acción está en curso: su botón se desactiva y dice que trabaja. */
   busyKey?: string | null
 }
@@ -43,12 +47,16 @@ function TypeIcon({ icon: Icon, urgent }: { icon: LucideIcon; urgent?: boolean }
 function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "unreached") return <AgentMark className="rounded-full" />
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
+  if (row.kind === "staleEncounter") return <TypeIcon icon={Stethoscope} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
   if (row.kind === "unconfirmed" || (row.kind === "more" && row.of === "unconfirmed")) return <TypeIcon icon={CalendarClock} />
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
   if (row.kind === "stillOpen") return <TypeIcon icon={MessagesSquare} />
   if (row.kind === "advice") return <TypeIcon icon={Lightbulb} />
-  if (row.kind === "budgets") return <TypeIcon icon={FileText} />
+  if (row.kind === "possibleDuplicate") return <TypeIcon icon={UsersRound} />
+  if (row.kind === "portalReentry") return <TypeIcon icon={KeyRound} />
+  if (row.kind === "budgets" || row.kind === "unsentBudget" || row.kind === "consentToPublish" || (row.kind === "more" && row.of === "unsentBudgets"))
+    return <TypeIcon icon={FileText} />
   return <TypeIcon icon={SquareCheckBig} />
 }
 
@@ -69,8 +77,21 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
   switch (row.kind) {
     case "case":
       return row.conversationId ? null : <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
+    case "staleEncounter":
+      return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
     case "unconfirmed":
       return <Link to="/agenda" search={{ appointmentId: row.id }} {...props} />
+    case "unsentBudget":
+      // El Plan de la persona: «Qué sigue» ofrece «Enviar» y dice por dónde y a quién le llega.
+      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "plan", budgetId: row.id }} {...props} />
+    case "possibleDuplicate":
+      // Datos personales de la persona: ahí se ve el documento y se decide si son la misma.
+      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "filiacion" }} {...props} />
+    case "portalReentry":
+      // Datos › Acceso al portal: la fila de su acceso dice «Pidió volver a entrar» y ofrece «Enviar nuevo enlace».
+      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
+    case "consentToPublish":
+      return <Link to="/settings/forms" search={{ tab: "consentimientos" }} {...props} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
     case "stillOpen":
@@ -82,6 +103,7 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
     case "more":
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
       if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
+      if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
       return <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
     default:
       return null
@@ -105,6 +127,14 @@ function quickAction(row: WaitingRow, handlers: WaitingHandlers): { label: strin
   if (row.kind === "case" && row.unclaimed && row.conversationId && handlers.onTake) {
     const take = handlers.onTake
     return { label: "Tomar", run: () => take(row), primary: true }
+  }
+  if (row.kind === "staleEncounter" && handlers.onVoidEncounter) {
+    const discard = handlers.onVoidEncounter
+    return { label: "Anular con motivo", run: () => discard(row), primary: false }
+  }
+  if (row.kind === "possibleDuplicate" && handlers.onReviewed) {
+    const reviewed = handlers.onReviewed
+    return { label: "Revisada", run: () => reviewed(row), primary: false }
   }
   if (row.kind === "task" && row.more === 0 && handlers.onDone) {
     const done = handlers.onDone

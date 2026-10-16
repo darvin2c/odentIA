@@ -1,5 +1,5 @@
 /**
- * Hoy › cobro (ADR 0030, tablero O3): las pruebas por vencer o sin saldo, con
+ * Hoy › cobro (ADR 0031, tablero O3): las pruebas por vencer o sin saldo, con
  * lo que hicieron los agentes como argumento de la llamada, y las clínicas
  * con margen bajo dos meses seguidos. Solo la administración las ve.
  */

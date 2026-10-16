@@ -485,12 +485,27 @@ it("salud revierte todo si una fila es inválida y exige colecciones completas",
   expect(denied.reviewStatus.allergies).toBe("none")
 })
 
+/**
+ * Los hallazgos se registran dentro de una atención de quien la lleva (fase 3,
+ * paso 5): una atención en borrador de la persona para estas pruebas.
+ */
+async function draftFor(patientId: string, orgId = "org_a"): Promise<string> {
+  await seedUserAndCie()
+  const [row] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "encounter" ("organization_id", "patient_id", "dentist_user_id", "reason")
+        values (${orgId}, ${patientId}::uuid, ${ACTOR}, 'Control') returning "id"`,
+  )
+  return row!.id
+}
+
 it("odontograma: add + void; el estado deriva sin anuladas y el original se preserva", async () => {
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Odonto O" }),
   )
+  const draft = await draftFor(p.id)
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
     addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
       toothNumber: 16,
       condition: "caries",
       surfaces: ["occlusal"],
@@ -522,8 +537,10 @@ it("odontograma: coexisten varias condiciones en la misma pieza", async () => {
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Coexiste C" }),
   )
+  const draft = await draftFor(p.id)
   await withOrgContext(appDb, "org_a", (tx) =>
     addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
       toothNumber: 16,
       condition: "caries",
       surfaces: ["occlusal"],
@@ -532,6 +549,7 @@ it("odontograma: coexisten varias condiciones en la misma pieza", async () => {
   )
   await withOrgContext(appDb, "org_a", (tx) =>
     addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
       toothNumber: 16,
       condition: "fracture",
       details: {
@@ -565,9 +583,11 @@ it("odontograma: superficie FDI inválida y buccal en anterior se rechazan", asy
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Superficie S" }),
   )
+  const draft = await draftFor(p.id)
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
         toothNumber: 99,
         condition: "caries",
         surfaces: [],
@@ -577,6 +597,7 @@ it("odontograma: superficie FDI inválida y buccal en anterior se rechazan", asy
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
         toothNumber: 11,
         condition: "caries",
         surfaces: ["buccal"],
@@ -587,6 +608,7 @@ it("odontograma: superficie FDI inválida y buccal en anterior se rechazan", asy
   await expect(
     withOrgContext(appDb, "org_a", (tx) =>
       addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
         toothNumber: 11,
         condition: "caries",
         surfaces: ["facial"],
@@ -600,8 +622,10 @@ it("odontograma: void cross-tenant y cross-paciente responden 404", async () => 
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Tenant T" }),
   )
+  const draft = await draftFor(p.id)
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
     addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
       toothNumber: 16,
       condition: "caries",
       surfaces: ["occlusal"],
@@ -628,32 +652,42 @@ it("odontograma: void cross-tenant y cross-paciente responden 404", async () => 
   ).rejects.toMatchObject({ status: 404 })
 })
 
-it("acta: snapshot inmutable con identidad firmada; bloquear con revisión pendiente", async () => {
+it("odontograma firmado: instantánea inmutable con la firma del perfil; bloquear con revisión pendiente", async () => {
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Acta A" }),
   )
-  const base = {
-    purpose: "initial",
-    specifications: "Odontograma inicial",
-    observations: "Sin observaciones",
-    examinerName: "Doctora Tests",
-    registrationNumber: "COP 999",
-    signature: [
-      [
-        [5, 90],
-        [20, 70],
-        [40, 75],
-      ],
-    ],
-  }
-  const first = await withOrgContext(appDb, "org_a", (tx) =>
-    createOdontogramAssessment(tx, "org_a", ACTOR, p.id, base),
+  const draft = await draftFor(p.id)
+  const base = { purpose: "personal", specifications: "", observations: "Pedido de la persona" }
+  // Quien firma lo hace con su perfil: sin colegiatura no hay firma.
+  const signer = `acta-${crypto.randomUUID()}`
+  await ownerDb.execute(
+    sql`insert into "user" ("id", "name", "email") values (${signer}, 'Cuenta de Ana', ${`${signer}@example.com`})`,
   )
+  await ownerDb.execute(
+    sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+        values (${crypto.randomUUID()}, 'org_a', ${signer}, 'dentist', now())`,
+  )
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => createOdontogramAssessment(tx, "org_a", signer, p.id, base)),
+  ).rejects.toMatchObject({ code: "PROFILE_INCOMPLETE" })
+  await ownerDb.execute(
+    sql`insert into "professional_profile" ("organization_id", "user_id", "signature_name", "professional_title", "registration_body", "registration_number")
+        values ('org_a', ${signer}, 'Ana Torres', 'Cirujano dentista', 'COP', '12345')`,
+  )
+  const first = await withOrgContext(appDb, "org_a", (tx) =>
+    createOdontogramAssessment(tx, "org_a", signer, p.id, base),
+  )
+  expect(first).toMatchObject({
+    examinerName: "Ana Torres",
+    examinerTitle: "Cirujano dentista",
+    registrationNumber: "COP 12345",
+  })
   expect(first.patientName).toBe("Acta A")
   expect(first.patientNumber).toBeGreaterThan(0)
   expect(first.entries).toEqual([])
   await withOrgContext(appDb, "org_a", (tx) =>
     addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
       toothNumber: 16,
       condition: "caries",
       surfaces: ["occlusal"],
@@ -666,23 +700,26 @@ it("acta: snapshot inmutable con identidad firmada; bloquear con revisión pendi
   expect(listed).toHaveLength(1)
   expect(listed[0]!.entries).toEqual([])
   const second = await withOrgContext(appDb, "org_a", (tx) =>
-    createOdontogramAssessment(tx, "org_a", ACTOR, p.id, { ...base, purpose: "new_findings" }),
+    createOdontogramAssessment(tx, "org_a", signer, p.id, { ...base, purpose: "reentry" }),
   )
   expect(second.entries as unknown[]).toHaveLength(1)
-  // Sin firma capturada no se sella.
+  // Con un hallazgo anterior por revisar no se firma.
+  await ownerDb.execute(
+    sql`update odontogram_entry set needs_review=true where patient_id=${p.id}::uuid`,
+  )
   await expect(
-    withOrgContext(appDb, "org_a", (tx) =>
-      createOdontogramAssessment(tx, "org_a", ACTOR, p.id, { ...base, signature: [] }),
-    ),
-  ).rejects.toMatchObject({ status: 400 })
+    withOrgContext(appDb, "org_a", (tx) => createOdontogramAssessment(tx, "org_a", signer, p.id, base)),
+  ).rejects.toMatchObject({ code: "NEEDS_REVIEW" })
 })
 
 it("legado: reviewLegacyEntry exige needsReview y anula con motivo", async () => {
   const p = await withOrgContext(appDb, "org_a", (tx) =>
     createPatient(tx, "org_a", ACTOR, { displayName: "Legado L" }),
   )
+  const draft = await draftFor(p.id)
   const rows = await withOrgContext(appDb, "org_a", (tx) =>
     addOdontogramEntries(tx, "org_a", ACTOR, p.id, {
+      encounterId: draft,
       toothNumber: 16,
       condition: "caries",
       surfaces: ["occlusal"],

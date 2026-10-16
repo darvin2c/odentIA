@@ -1,11 +1,24 @@
-import { surfacesForTooth } from "@odentia/clinical"
+/**
+ * «Plan y controles» dentro de la atención (tablero 3, ADR 0034): un solo
+ * bloque en lugar de «Plan de tratamiento», «Tratamientos de esta atención» y
+ * «Controles». De arriba abajo: el plan en corto con lo indicado hoy marcado e
+ * «Indicar un tratamiento», «Hecho hoy» con «Completar», «Próximo control» con
+ * «Reservar» y, si hay un presupuesto por enviar y la persona sigue en el
+ * sillón, «Enviar presupuesto».
+ *
+ * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
+ * persona, que se crea solo con la primera indicación.
+ */
+import { conditionLabel, formatMoney, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
 import {
   Badge,
   Button,
   Checkbox,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   Field,
   FieldLabel,
-  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -13,26 +26,24 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ChevronDown } from "lucide-react"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import {
-  createTreatmentPlanApi,
-  fetchTreatmentPlanDetail,
-  fetchTreatmentPlans,
-  planDecisionLabel,
-} from "../../lib/budgets"
-import { createOptionGroupApi } from "../../lib/clinical-journey"
+import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
-import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
-import type { OdontogramState, PlanItem } from "../../lib/patients"
+import { type OdontogramState, type PlanItem, planStatusLabel } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
-import { ToothSelector } from "./tooth-selector"
+import { ControlesPanel } from "./clinical-panels"
 import { Cie10Search } from "./cie10-search"
-import { treatmentSiteLabel } from "./plan-tab"
+import { EncounterTreatments } from "./encounter-treatments"
+import { treatmentSiteLabel } from "./plan/budget-parts"
+import { BudgetSendButton } from "./plan/budget-send"
+import { usePlanNextStep } from "./plan/plan-next"
 import { ServicePicker } from "./service-picker"
+import { ToothSelector } from "./tooth-selector"
 
 const QUADRANT_LABELS: Record<string, string> = {
   "1": "Cuadrante 1 · superior derecho",
@@ -45,38 +56,233 @@ const QUADRANT_LABELS: Record<string, string> = {
   "8": "Cuadrante 8 · inferior derecho temporal",
 }
 
+/** Lo cerrado ya no es «lo que sigue» en el plan en corto. */
+const CLOSED = new Set(["realizado", "cancelado", "reemplazado"])
+
 function mutationMessage(err: unknown): string {
   if (err instanceof ApiError && err.shape.message) return err.shape.message
   return err instanceof Error ? err.message : "No se pudo guardar la indicación."
 }
 
-/**
- * Indicación durante la atención: plan con origen aquí, ámbito y sitio,
- * prestación del tarifario con tarifa de solo lectura y alta una por una sin
- * cerrar el panel ni perder la boca. Registrar indicación nunca ejecuta nada.
- */
+function BlockPart({
+  title,
+  action,
+  children,
+}: {
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <section aria-label={title} className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-heading text-base font-medium">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 export function EncounterPlanPanel({
   patientId,
   encounterId,
+  plannedItems,
+  indicatedItems,
+  attentionItems,
   disabled = false,
+  autoOpen = false,
   beforeWrite,
   onChanged,
   onPendingChange,
 }: {
   patientId: string
   encounterId: string
+  /** Tratamientos vinculados a esta atención (sesión registrada o traídos por la cita). */
+  plannedItems: PlanItem[]
+  /** Indicados en esta atención: se marcan «Hoy» en el plan en corto. */
+  indicatedItems: PlanItem[]
+  /** Unos y otros, para ligar un control a su tratamiento. */
+  attentionItems: PlanItem[]
   disabled?: boolean
+  /** Recién agregado el bloque: abre «Indicar un tratamiento» sin un clic de más. */
+  autoOpen?: boolean
+  beforeWrite: () => Promise<void>
+  onChanged: () => Promise<void>
+  onPendingChange: (pending: boolean) => void
+}): React.JSX.Element {
+  const canWrite = usePermission("clinical.write")
+  const canRead = usePermission("clinical.read")
+  const orgLocale = useOrgProfile().data?.locale
+  const plansQuery = useQuery({
+    queryKey: ["treatment-plans", patientId],
+    queryFn: () => fetchTreatmentPlans(patientId),
+    enabled: canRead,
+  })
+  const itemsQuery = useQuery({
+    queryKey: ["plan-items", patientId],
+    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
+    enabled: canRead,
+  })
+  const openPlan = (plansQuery.data?.data ?? []).find((row) => row.isOpen) ?? null
+  const today = new Set(indicatedItems.map((item) => item.id))
+  // El plan en corto: lo abierto del plan vigente, con lo de hoy primero.
+  const brief = (itemsQuery.data?.data ?? [])
+    .filter((item) => item.planId === openPlan?.plan.id && !CLOSED.has(item.status))
+    .sort((a, b) => Number(today.has(b.id)) - Number(today.has(a.id)))
+  const [indicating, setIndicating] = useState(autoOpen)
+
+  return (
+    <div className="flex flex-col gap-4">
+      <BlockPart title="Plan">
+        {itemsQuery.isPending || plansQuery.isPending ? (
+          <LoadingState message="Cargando el plan…" />
+        ) : brief.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Todavía no hay tratamientos por hacer. El primero que indiques abre el plan.
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y">
+            {brief.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-medium">
+                    {item.title}
+                    {today.has(item.id) ? (
+                      <Badge variant="default" className="ml-2 align-middle">
+                        Hoy
+                      </Badge>
+                    ) : null}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {[
+                      treatmentSiteLabel(item),
+                      item.priceCents != null && orgLocale
+                        ? formatMoney(item.priceCents, item.currency, orgLocale)
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
+                <span className="flex gap-1">
+                  <Badge variant={item.decisionStatus === "aceptado" ? "success" : "secondary"}>
+                    {planDecisionLabel(item.decisionStatus)}
+                  </Badge>
+                  <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {canWrite ? (
+          <Collapsible open={indicating} onOpenChange={setIndicating} className="flex flex-col gap-3">
+            <CollapsibleTrigger
+              render={
+                <Button
+                  type="button"
+                  variant={indicating ? "ghost" : "outline"}
+                  size="sm"
+                  className="group self-start"
+                  disabled={disabled}
+                >
+                  Indicar un tratamiento
+                  <ChevronDown
+                    aria-hidden
+                    className="transition-transform group-data-[panel-open]:rotate-180 motion-reduce:transition-none"
+                  />
+                </Button>
+              }
+            />
+            <CollapsibleContent>
+              <IndicationForm
+                patientId={patientId}
+                encounterId={encounterId}
+                disabled={disabled}
+                beforeWrite={beforeWrite}
+                onChanged={onChanged}
+                onPendingChange={onPendingChange}
+              />
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
+      </BlockPart>
+
+      <EncounterTreatments
+        patientId={patientId}
+        encounterId={encounterId}
+        items={plannedItems}
+        disabled={disabled}
+        beforeWrite={beforeWrite}
+        onChanged={() => void onChanged()}
+      />
+
+      <ControlesPanel
+        patientId={patientId}
+        encounterId={encounterId}
+        encounterOnly
+        items={attentionItems}
+        heading="Próximo control"
+      />
+
+      <EncounterBudgetSend patientId={patientId} beforeWrite={beforeWrite} />
+    </div>
+  )
+}
+
+/**
+ * «Enviar presupuesto» mientras la persona sigue en el sillón: el borrador que
+ * ya está armado (de una atención anterior o revisado). Lo de esta atención se
+ * suma al firmar, y el cierre pregunta «¿Enviárselo ahora?». La misma regla de
+ * «Qué sigue» decide si hay algo que enviar.
+ */
+function EncounterBudgetSend({
+  patientId,
+  beforeWrite,
+}: {
+  patientId: string
+  beforeWrite: () => Promise<void>
+}): React.JSX.Element | null {
+  const canSend = usePermission("budgets.send")
+  const step = usePlanNextStep(patientId, canSend).data?.data ?? null
+  if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return null
+  return (
+    <BlockPart title="Presupuesto por enviar">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+          {step.detail ?? "Ya está armado y nadie lo envió."} Lo que indiques hoy se suma al firmar.
+        </p>
+        <BudgetSendButton
+          patientId={patientId}
+          budgetId={step.action.budgetId}
+          size="sm"
+          beforeSend={beforeWrite}
+        />
+      </div>
+    </BlockPart>
+  )
+}
+
+/** «Indicar un tratamiento»: ámbito y sitio, prestación con su tarifa, hallazgo, detalle y CIE-10. */
+function IndicationForm({
+  patientId,
+  encounterId,
+  disabled,
+  beforeWrite,
+  onChanged,
+  onPendingChange,
+}: {
+  patientId: string
+  encounterId: string
+  disabled: boolean
   beforeWrite: () => Promise<void>
   onChanged: () => Promise<void>
   onPendingChange: (pending: boolean) => void
 }): React.JSX.Element {
   const queryClient = useQueryClient()
-  const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const orgLocale = useOrgProfile().data?.locale
   const uid = useId()
-  const [planId, setPlanId] = useState("")
-  const [newTitle, setNewTitle] = useState("Plan de tratamiento")
   const [scope, setScope] = useState("general")
   const [teeth, setTeeth] = useState<number[]>([])
   const [surfaces, setSurfaces] = useState<string[]>([])
@@ -84,28 +290,9 @@ export function EncounterPlanPanel({
   const [arch, setArch] = useState("")
   const [service, setService] = useState<ServiceCatalogItem | null>(null)
   const [findingId, setFindingId] = useState("")
-  const [optionGroupId, setOptionGroupId] = useState("")
-  const [isRecommended, setIsRecommended] = useState(false)
-  const [groupOpen, setGroupOpen] = useState(false)
-  const [groupTitle, setGroupTitle] = useState("")
-  const [groupError, setGroupError] = useState<string | null>(null)
   const [detail, setDetail] = useState("")
   const [cie, setCie] = useState("")
   const [error, setError] = useState<string | null>(null)
-
-  const plansQuery = useQuery({
-    queryKey: ["treatment-plans", patientId],
-    queryFn: () => fetchTreatmentPlans(patientId),
-    enabled: canRead,
-  })
-  const planOptions = plansQuery.data?.data ?? []
-  const detailQuery = useQuery({
-    queryKey: ["treatment-plan", patientId, planId],
-    queryFn: () => fetchTreatmentPlanDetail(patientId, planId),
-    enabled: canRead && planId !== "",
-  })
-  const items: PlanItem[] = detailQuery.data?.data.items ?? []
-  const optionGroups = detailQuery.data?.data.optionGroups ?? []
 
   const odontogramQuery = useQuery({
     queryKey: ["odontogram", patientId],
@@ -118,52 +305,16 @@ export function EncounterPlanPanel({
     (entry) => !entry.voidedAt && tooth != null && entry.toothNumber === tooth,
   )
 
-  const fieldDisabled = disabled || !canWrite
-  const blocked = fieldDisabled
-
-  const invalidatePlans = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["treatment-plans", patientId] }),
-      queryClient.invalidateQueries({ queryKey: ["treatment-plan", patientId] }),
-      queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] }),
-      queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
-    ])
-
-  const createPlanMutation = useMutation({
-    mutationFn: async () => {
-      const title = newTitle.trim() || "Plan de tratamiento"
-      onPendingChange(true)
-      try {
-        await beforeWrite()
-        const created = await createTreatmentPlanApi(patientId, {
-          title,
-          originEncounterId: encounterId,
-        })
-        await invalidatePlans()
-        setPlanId(created.data.id)
-        setNewTitle("Plan de tratamiento")
-        setError(null)
-      } finally {
-        onPendingChange(false)
-      }
-    },
-    onError: (err) => setError(mutationMessage(err)),
-  })
-
   const addMutation = useMutation({
     mutationFn: async () => {
-      if (!planId) throw new Error("Elige el plan clínico donde se indicará.")
       if (!service) throw new Error("Busca y elige la prestación de la lista de servicios.")
-      const tooth = teeth[0] ?? null
+      // Sin plan: el servidor usa el abierto o lo crea con esta atención como origen.
       const body: Record<string, unknown> = {
         serviceId: service.id,
-        planId,
         sourceEncounterId: encounterId,
         detail: detail.trim() === "" ? null : detail.trim(),
         diagnosisCode: cie.trim() === "" ? null : cie.trim(),
         odontogramEntryId: findingId === "" ? null : findingId,
-        optionGroupId: optionGroupId === "" ? null : optionGroupId,
-        isRecommended: optionGroupId !== "" && isRecommended,
       }
       if (scope === "tooth" || scope === "surfaces") {
         if (tooth == null) throw new Error("Selecciona la pieza.")
@@ -188,13 +339,16 @@ export function EncounterPlanPanel({
           method: "POST",
           body: JSON.stringify(body),
         })
-        await invalidatePlans()
+        await Promise.all(
+          ["treatment-plans", "treatment-plan", "plan-items", "patient-summary", "plan-next"].map((key) =>
+            queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+          ),
+        )
         await onChanged()
         setService(null)
         setDetail("")
         setCie("")
         setFindingId("")
-        setIsRecommended(false)
         setError(null)
       } finally {
         onPendingChange(false)
@@ -203,28 +357,8 @@ export function EncounterPlanPanel({
     onError: (err) => setError(mutationMessage(err)),
   })
 
-  const groupMutation = useMutation({
-    mutationFn: async () => {
-      onPendingChange(true)
-      try {
-        await beforeWrite()
-        const created = await createOptionGroupApi(patientId, planId, { title: groupTitle.trim() })
-        await invalidatePlans()
-        setOptionGroupId(created.data.id)
-        setGroupOpen(false)
-        setGroupError(null)
-      } finally {
-        onPendingChange(false)
-      }
-    },
-    onError: (err) => setGroupError(mutationMessage(err)),
-  })
-
-  const busy = createPlanMutation.isPending || addMutation.isPending || groupMutation.isPending
-  const toothForSurfaces = teeth[0] ?? null
-  const validSurfaces =
-    toothForSurfaces != null ? surfacesForTooth(toothForSurfaces).map(String) : []
-
+  const blocked = disabled || addMutation.isPending
+  const validSurfaces = tooth != null ? surfacesForTooth(tooth).map(String) : []
   const toggleSurface = (surface: string): void => {
     setSurfaces((prev) =>
       prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface],
@@ -232,352 +366,160 @@ export function EncounterPlanPanel({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
-        <div className="flex flex-col gap-1.5">
-          <div className="font-heading text-base font-medium">Indicar en el plan</div>
-        </div>
-        <div className="flex flex-col gap-3">
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${uid}-plan`}>Plan clínico</FieldLabel>
-              <Select
-                value={planId}
-                onValueChange={(v) => setPlanId(v ?? "")}
-                disabled={blocked || busy}
-              >
-                <SelectTrigger id={`${uid}-plan`}>
-                  <SelectValue
-                    placeholder={plansQuery.isLoading ? "Cargando…" : "Elige el plan…"}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {planOptions.map((p) => (
-                    <SelectItem key={p.plan.id} value={p.plan.id}>
-                      {p.plan.title} · {p.status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${uid}-new-title`}>
-                Nuevo plan (origen: esta atención)
-              </FieldLabel>
-              <div className="flex gap-2">
-                <Input
-                  id={`${uid}-new-title`}
-                  value={newTitle}
-                  maxLength={200}
-                  disabled={blocked || busy}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={blocked || busy}
-                  onClick={() => void createPlanMutation.mutate()}
-                >
-                  {createPlanMutation.isPending ? "Creando…" : "Crear"}
-                </Button>
-              </div>
-            </Field>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
-              <Select
-                value={scope}
-                onValueChange={(v) => setScope(v ?? "general")}
-                disabled={blocked || busy}
-              >
-                <SelectTrigger id={`${uid}-scope`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            {(scope === "tooth" || scope === "surfaces") && (
-              <Field>
-                <FieldLabel>Pieza</FieldLabel>
-                <ToothSelector
-                  value={teeth.slice(0, 1)}
-                  onChange={(next) => {
-                    setTeeth(next.slice(0, 1))
-                    setSurfaces([])
-                    setFindingId("")
-                  }}
-                  disabled={blocked || busy}
-                />
-              </Field>
-            )}
-            {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-finding`}>Hallazgo que motiva</FieldLabel>
-                <Select
-                  value={findingId || undefined}
-                  onValueChange={(v) => setFindingId(v ?? "")}
-                  disabled={blocked || busy}
-                >
-                  <SelectTrigger id={`${uid}-finding`}>
-                    <SelectValue placeholder="Sin hallazgo asociado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {findings.map((entry) => (
-                      <SelectItem key={entry.id} value={entry.id}>
-                        {entry.condition}
-                        {entry.surface ? ` · ${entry.surface}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-            {scope === "quadrant" && (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-quadrant`}>Cuadrante</FieldLabel>
-                <Select
-                  value={quadrant}
-                  onValueChange={(v) => setQuadrant(v ?? "")}
-                  disabled={blocked || busy}
-                >
-                  <SelectTrigger id={`${uid}-quadrant`}>
-                    <SelectValue placeholder="Elige el cuadrante" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(QUADRANT_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-            {scope === "arch" && (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-arch`}>Arcada</FieldLabel>
-                <Select
-                  value={arch}
-                  onValueChange={(v) => setArch(v ?? "")}
-                  disabled={blocked || busy}
-                >
-                  <SelectTrigger id={`${uid}-arch`}>
-                    <SelectValue placeholder="Elige la arcada" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="upper">Superior</SelectItem>
-                    <SelectItem value="lower">Inferior</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
-          </div>
-
-          {scope === "surfaces" && toothForSurfaces != null ? (
-            <Field>
-              <FieldLabel>Superficies de la pieza {toothForSurfaces}</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {validSurfaces.map((surface) => (
-                  <label key={surface} className="flex items-center gap-1.5 text-sm">
-                    <Checkbox
-                      checked={surfaces.includes(surface)}
-                      disabled={blocked || busy}
-                      onCheckedChange={() => toggleSurface(surface)}
-                    />
-                    {surface}
-                  </label>
-                ))}
-              </div>
-            </Field>
-          ) : null}
-
-          <ServicePicker
-            value={service?.id ?? ""}
-            label="Tratamiento"
-            disabled={blocked || busy}
-            onChange={(next) => {
-              setService(next)
-              if (next.scope) setScope(next.scope)
-              setError(null)
-            }}
-          />
-          {service ? (
-            <p className="text-sm text-muted-foreground" aria-live="polite">
-              Precio de solo lectura:{" "}
-              {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
-              {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
-            </p>
-          ) : null}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={`${uid}-option-group`}>Alternativa de (opcional)</FieldLabel>
-              <div className="flex gap-2">
-                <Select
-                  value={optionGroupId || undefined}
-                  onValueChange={(v) => {
-                    setOptionGroupId(v ?? "")
-                    if (!v) setIsRecommended(false)
-                  }}
-                  disabled={blocked || busy || !planId}
-                >
-                  <SelectTrigger id={`${uid}-option-group`}>
-                    <SelectValue placeholder="Sin agrupación" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {optionGroups.map((group) => (
-                      <SelectItem key={group.id} value={group.id}>
-                        {group.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={blocked || busy || !planId}
-                  onClick={() => {
-                    setGroupTitle("")
-                    setGroupError(null)
-                    setGroupOpen(true)
-                  }}
-                >
-                  Nueva
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Agrupa opciones excluyentes del mismo problema: al aceptar una, las demás quedan
-                rechazadas.
-              </p>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${uid}-recommended`}>Recomendación</FieldLabel>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  id={`${uid}-recommended`}
-                  checked={isRecommended}
-                  disabled={blocked || busy || optionGroupId === ""}
-                  onCheckedChange={(next) => setIsRecommended(next === true)}
-                />
-                Recomendada dentro de la agrupación
-              </label>
-            </Field>
-          </div>
-
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor={`${uid}-scope`}>Ámbito</FieldLabel>
+          <Select value={scope} onValueChange={(v) => setScope(v ?? "general")} disabled={blocked}>
+            <SelectTrigger id={`${uid}-scope`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(TREATMENT_SCOPE_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        {(scope === "tooth" || scope === "surfaces") && (
           <Field>
-            <FieldLabel htmlFor={`${uid}-detail`}>Detalle</FieldLabel>
-            <Textarea
-              id={`${uid}-detail`}
-              rows={2}
-              value={detail}
-              maxLength={4000}
-              disabled={blocked || busy}
-              onChange={(e) => setDetail(e.target.value)}
+            <FieldLabel>Pieza</FieldLabel>
+            <ToothSelector
+              value={teeth.slice(0, 1)}
+              onChange={(next) => {
+                setTeeth(next.slice(0, 1))
+                setSurfaces([])
+                setFindingId("")
+              }}
+              disabled={blocked}
             />
           </Field>
-          <Cie10Search value={cie} onChange={(code) => setCie(code)} disabled={blocked || busy} />
-
-          <div>
-            <Button
-              type="button"
-              disabled={blocked || busy || !planId || !service}
-              onClick={() => void addMutation.mutate()}
+        )}
+        {(scope === "tooth" || scope === "surfaces") && findings.length > 0 && (
+          <Field>
+            <FieldLabel htmlFor={`${uid}-finding`}>Hallazgo que motiva</FieldLabel>
+            <Select
+              value={findingId || undefined}
+              onValueChange={(v) => setFindingId(v ?? "")}
+              disabled={blocked}
             >
-              {addMutation.isPending ? "Añadiendo…" : "Añadir al plan"}
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            La fila queda en el plan con la boca y el listado visibles; se limpia la prestación y se
-            conserva la selección anatómica. El plan puede seguir recibiendo indicaciones en futuras
-            atenciones.
-          </p>
-        </div>
+              <SelectTrigger id={`${uid}-finding`}>
+                <SelectValue placeholder="Sin hallazgo asociado" />
+              </SelectTrigger>
+              <SelectContent>
+                {findings.map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {conditionLabel(entry.condition)}
+                    {entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
+        {scope === "quadrant" && (
+          <Field>
+            <FieldLabel htmlFor={`${uid}-quadrant`}>Cuadrante</FieldLabel>
+            <Select value={quadrant} onValueChange={(v) => setQuadrant(v ?? "")} disabled={blocked}>
+              <SelectTrigger id={`${uid}-quadrant`}>
+                <SelectValue placeholder="Elige el cuadrante" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(QUADRANT_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
+        {scope === "arch" && (
+          <Field>
+            <FieldLabel htmlFor={`${uid}-arch`}>Arcada</FieldLabel>
+            <Select value={arch} onValueChange={(v) => setArch(v ?? "")} disabled={blocked}>
+              <SelectTrigger id={`${uid}-arch`}>
+                <SelectValue placeholder="Elige la arcada" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="upper">Superior</SelectItem>
+                <SelectItem value="lower">Inferior</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
       </div>
 
-      {planId ? (
-        <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
-          <div className="flex flex-col gap-1.5">
-            <div className="font-heading text-base font-medium">Tratamientos del plan</div>
+      {scope === "surfaces" && tooth != null ? (
+        <Field>
+          <FieldLabel>Superficies de la pieza {tooth}</FieldLabel>
+          <div className="flex flex-wrap gap-2">
+            {validSurfaces.map((surface) => (
+              <FieldLabel key={surface} className="flex items-center gap-1.5 text-sm font-normal">
+                <Checkbox
+                  checked={surfaces.includes(surface)}
+                  disabled={blocked}
+                  onCheckedChange={() => toggleSurface(surface)}
+                />
+                {surfaceLabel(surface)}
+              </FieldLabel>
+            ))}
           </div>
-          <div className="flex flex-col gap-2">
-            {detailQuery.isPending ? (
-              <LoadingState message="Cargando…" />
-            ) : items.length === 0 ? (
-              <p className="text-sm text-muted-foreground">El plan aún no tiene tratamientos.</p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 text-sm"
-                  >
-                    <span className="flex min-w-0 flex-col">
-                      <span className="font-medium">{item.title}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {treatmentSiteLabel(item)} ·{" "}
-                        {item.priceCents != null
-                          ? (orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…")
-                          : "sin precio"}
-                      </span>
-                    </span>
-                    <span className="flex gap-1">
-                      <Badge variant={item.decision === "aceptado" ? "success" : "secondary"}>
-                        {planDecisionLabel(item.decision)}
-                      </Badge>
-                      <Badge variant="outline">{item.status}</Badge>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
+        </Field>
       ) : null}
 
-      <FormDrawer
-        open={groupOpen}
-        title="Nueva agrupación de alternativas"
-        description="Se crea en este plan; después quedará seleccionada para la indicación que estás registrando."
-        error={groupError}
-        isSubmitting={groupMutation.isPending}
-        submitLabel="Crear agrupación"
-        onClose={() => {
-          if (!groupMutation.isPending) setGroupOpen(false)
+      <ServicePicker
+        value={service?.id ?? ""}
+        label="Tratamiento"
+        disabled={blocked}
+        onChange={(next) => {
+          setService(next)
+          if (next.scope) setScope(next.scope)
+          setError(null)
         }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!groupTitle.trim()) {
-            setGroupError("Indica un título para la agrupación.")
-            return
-          }
-          groupMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-group-title`}>Título</FieldLabel>
-          <Input
-            id={`${uid}-group-title`}
-            value={groupTitle}
-            maxLength={200}
-            disabled={busy}
-            onChange={(event) => setGroupTitle(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
+      />
+      {service ? (
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          Precio de la tarifa:{" "}
+          {orgLocale ? formatMoney(service.priceCents, service.currency, orgLocale) : "…"}
+          {service.scope ? ` · ${TREATMENT_SCOPE_LABELS[service.scope] ?? service.scope}` : ""}
+        </p>
+      ) : null}
+
+      <Field>
+        <FieldLabel htmlFor={`${uid}-detail`}>Detalle</FieldLabel>
+        <Textarea
+          id={`${uid}-detail`}
+          rows={2}
+          value={detail}
+          maxLength={4000}
+          disabled={blocked}
+          onChange={(e) => setDetail(e.target.value)}
+        />
+      </Field>
+      <Cie10Search value={cie} onChange={(code) => setCie(code)} disabled={blocked} />
+
+      <div className="flex flex-col gap-1">
+        <Button
+          type="button"
+          className="self-start"
+          disabled={blocked || !service}
+          onClick={() => void addMutation.mutate()}
+        >
+          {addMutation.isPending ? "Añadiendo…" : "Añadir al plan"}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Se conserva la pieza elegida para indicar el siguiente. Al firmar la atención, lo indicado
+          se suma al presupuesto por enviar.
+        </p>
+      </div>
     </div>
   )
 }

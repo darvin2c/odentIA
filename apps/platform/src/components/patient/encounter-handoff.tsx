@@ -24,6 +24,8 @@ interface Step {
   detail: string
   tone: "warning" | "success"
   section: PatientSectionId
+  /** Documentos abre en «Requieren acción». */
+  pending?: boolean
   action: string
 }
 
@@ -101,7 +103,8 @@ export function EncounterHandoff({
       title: `Consentimiento sin firmar: ${consent.titleSnapshot}`,
       detail: "Debe firmarlo el paciente o su representante legal vigente.",
       tone: "warning",
-      section: "consentimientos",
+      section: "documentos",
+      pending: true,
       action: "Recabar firma",
     })
   for (const control of ownControls.filter((row) => row.status === "pendiente"))
@@ -109,9 +112,9 @@ export function EncounterHandoff({
       key: `control-${control.id}`,
       owner: "Recepción",
       title: `Reservar el control: ${control.title}`,
-      detail: `Corresponde el ${formatDate(control.dueAt)}. Recepción lo recibe en sus pendientes.`,
+      detail: `Corresponde el ${formatDate(control.dueAt)}. Falta reservarle la cita.`,
       tone: "warning",
-      section: "controles",
+      section: "plan",
       action: "Programar",
     })
   for (const control of ownControls.filter(
@@ -123,7 +126,7 @@ export function EncounterHandoff({
       title: `Control con cita: ${control.title}`,
       detail: control.appointment ? formatDateTime(control.appointment.startsAt) : "",
       tone: "success",
-      section: "controles",
+      section: "plan",
       action: "Ver controles",
     })
   if (proposed.length > 0)
@@ -134,7 +137,8 @@ export function EncounterHandoff({
         proposed.length === 1
           ? `Seguimiento del presupuesto «${proposed[0].title}»`
           : `Seguimiento de ${proposed.length} presupuestos sin decisión`,
-      detail: "Presentado y pendiente de respuesta de quien decide.",
+      // Enviado o «lo está pensando»: la regla del servidor; un borrador nunca llega aquí.
+      detail: "Espera la respuesta de quien decide.",
       tone: "warning",
       section: "plan",
       action: "Ver presupuestos",
@@ -156,11 +160,11 @@ export function EncounterHandoff({
     (canClinical && (followUps.isPending || prescriptions.isPending || consents.isPending)) ||
     (canFinance && account.isPending)
 
-  const linkTo = (section: PatientSectionId, label: string): ReactNode => (
+  const linkTo = (section: PatientSectionId, label: string, pending?: boolean): ReactNode => (
     <Link
       to="/patients/$patientId"
       params={{ patientId }}
-      search={{ tab: section }}
+      search={pending ? { tab: section, tipo: "requieren" } : { tab: section }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
       {label}
@@ -206,7 +210,7 @@ export function EncounterHandoff({
                   <span className="text-sm text-muted-foreground">{step.detail}</span>
                 ) : null}
               </div>
-              {linkTo(step.section, step.action)}
+              {linkTo(step.section, step.action, step.pending)}
             </li>
           ))}
         </ul>

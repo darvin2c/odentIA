@@ -1,5 +1,5 @@
 import { Checkbox, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, TimeSelect } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useState } from "react"
 import { type AgentFunction, clockToMinutes, minutesToClock, withInstruction } from "../../lib/agent"
@@ -286,20 +286,20 @@ export function LimitsDrawer({
           <div className="grid grid-cols-2 gap-3 pl-6">
             <Field>
               <FieldLabel htmlFor="limites-desde">Desde</FieldLabel>
-              <Input
+              <TimeSelect
                 id="limites-desde"
-                type="time"
+                className="w-full"
                 value={draft.from}
-                onChange={(event) => setDraft({ ...draft, from: event.target.value })}
+                onChange={(from) => setDraft({ ...draft, from })}
               />
             </Field>
             <Field>
               <FieldLabel htmlFor="limites-hasta">Hasta</FieldLabel>
-              <Input
+              <TimeSelect
                 id="limites-hasta"
-                type="time"
+                className="w-full"
                 value={draft.until}
-                onChange={(event) => setDraft({ ...draft, until: event.target.value })}
+                onChange={(until) => setDraft({ ...draft, until })}
               />
             </Field>
           </div>

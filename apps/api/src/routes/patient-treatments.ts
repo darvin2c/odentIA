@@ -1,17 +1,10 @@
 import { withOrgContext } from "@odentia/db"
-import {
-  createOptionGroup,
-  getTreatmentJourney,
-  revisePlanItem,
-  setPlanItemAlternative,
-  setPlanItemStatus,
-} from "@odentia/services"
+import { getTreatmentJourney, revisePlanItem, setPlanItemStatus } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
-const groupInput = z.object({ title: z.string().trim().min(1).max(200) }).strict()
 const reviseInput = z
   .object({
     encounterId: z.uuid(),
@@ -30,28 +23,10 @@ const reasonInput = z
   .object({ encounterId: z.uuid().optional(), reason: z.string().trim().min(1).max(2000) })
   .strict()
 const resumeInput = z.object({ status: z.enum(["pendiente", "programado", "en_curso"]) }).strict()
-const alternativeInput = z
-  .object({ optionGroupId: z.uuid().nullable(), isRecommended: z.boolean().optional() })
-  .strict()
 const itemParams = z.object({ id: z.uuid(), itemId: z.uuid() })
 
 export function createPatientTreatmentsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
-  app.post("/:id/plans/:planId/option-groups", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    const params = z.object({ id: z.uuid(), planId: z.uuid() }).safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    const parsed = groupInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        createOptionGroup(tx, orgId, userId, params.data.id, {
-          ...parsed.data,
-          planId: params.data.planId,
-        }),
-      ),
-    )
-  })
   app.get("/:id/treatments/:itemId/journey", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     const params = itemParams.safeParse(c.req.param())
@@ -61,18 +36,6 @@ export function createPatientTreatmentsRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         getTreatmentJourney(tx, orgId, params.data.id, params.data.itemId, { finance }),
-      ),
-    )
-  })
-  app.post("/:id/treatments/:itemId/alternative", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
-    const params = itemParams.safeParse(c.req.param())
-    if (!params.success) return validationError(c, params.error.issues)
-    const parsed = alternativeInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        setPlanItemAlternative(tx, orgId, userId, params.data.id, params.data.itemId, parsed.data),
       ),
     )
   })

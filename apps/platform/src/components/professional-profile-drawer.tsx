@@ -1,18 +1,23 @@
 import { Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { ApiError } from "../lib/api"
 import {
   type ProfessionalProfile,
   type ProfessionalProfileInput,
   saveProfessionalProfileApi,
 } from "../lib/encounters"
+import { useClinicalProfile } from "../lib/org"
 
 /**
  * Perfil profesional: nombre de firma, título y colegiatura. Es la identidad
- * con la que se firman atenciones, actas, recetas y consentimientos; cada
+ * con la que se firman atenciones, recetas, consentimientos y, en clínicas de
+ * Perú, el odontograma (nadie escribe su nombre a mano al firmar); cada
  * documento guarda su copia, así que cambiarlo no reescribe lo ya firmado.
+ * Título y colegio no tienen valor por defecto: si están vacíos se proponen
+ * los del país de la clínica cuando los hay (`clinicalProfileFor().professional`,
+ * «Cirujano dentista» y «COP» solo en Perú), a la vista y editables.
  */
 export function ProfessionalProfileDrawer({
   open,
@@ -30,15 +35,24 @@ export function ProfessionalProfileDrawer({
 }): React.JSX.Element {
   const uid = useId()
   const queryClient = useQueryClient()
-  // Título y colegio dependen del país y de la profesión: se escriben, no se proponen.
+  const suggested = useClinicalProfile().professional
   const [values, setValues] = useState<Required<ProfessionalProfileInput>>(() => ({
     signatureName: profile?.signatureName ?? "",
-    professionalTitle: profile?.professionalTitle ?? "",
-    registrationBody: profile?.registrationBody ?? "",
+    professionalTitle: profile?.professionalTitle || suggested?.title || "",
+    registrationBody: profile?.registrationBody || suggested?.registrationBody || "",
     registrationNumber: profile?.registrationNumber ?? "",
     specialtyRegistration: profile?.specialtyRegistration ?? "",
   }))
   const [dirty, setDirty] = useState(false)
+  // El país de la clínica puede llegar después de abrir: lo vacío toma su propuesta.
+  useEffect(() => {
+    if (!suggested) return
+    setValues((prev) => ({
+      ...prev,
+      professionalTitle: prev.professionalTitle || suggested.title,
+      registrationBody: prev.registrationBody || suggested.registrationBody,
+    }))
+  }, [suggested])
   const set = (key: keyof ProfessionalProfileInput, value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }))
     setDirty(true)
@@ -74,7 +88,7 @@ export function ProfessionalProfileDrawer({
     <FormDrawer
       open={open}
       title="Perfil profesional"
-      description="Con estos datos firmas atenciones, actas, recetas y consentimientos."
+      description="Con estos datos firmas atenciones, recetas, consentimientos y documentos clínicos."
       onClose={onClose}
       onSubmit={(event) => {
         event.preventDefault()

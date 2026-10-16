@@ -3,7 +3,7 @@ import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv,
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createMailer } from "@odentia/mail"
-import { createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
+import { configurePublicLinks, createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { env } from "./env.js"
 import { type DemoTaskMessage, processDemoTask } from "./handler.js"
@@ -18,6 +18,8 @@ import { runAccountLifecycleTick } from "./account-lifecycle.js"
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
+// «Su enlace» va en el aviso de la cita y en las plantillas de WhatsApp: con la dirección pública de cada clínica.
+configurePublicLinks({ webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN })
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
@@ -46,6 +48,8 @@ const embedder = embedderFromEnv(env)
 const agentRuntime: AgentRuntime = {
   checkpointer,
   publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
+  // Reenviar un presupuesto lleva su PDF.
+  storage,
   ...(embedder ? { embedder } : {}),
   ...(env.AGENT_BURST_WINDOW_SECONDS > 0
     ? {
@@ -116,8 +120,6 @@ const queues: QueueDef[] = [
           fetch,
           secretsKey,
           transcribe: transcribe ?? undefined,
-          webURL: env.WEB_URL,
-          cookieDomain: env.COOKIE_DOMAIN,
           agentBurstWindowSeconds: env.AGENT_BURST_WINDOW_SECONDS,
         },
         msg,

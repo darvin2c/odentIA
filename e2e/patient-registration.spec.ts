@@ -5,7 +5,7 @@ import type { Browser, Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
 import { API, PANEL, tenant } from "./env"
-import { call, expect, fillPatientNames, test } from "./fixtures"
+import { call, expect, fillPatientNames, test, writtenDate } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
@@ -61,7 +61,8 @@ async function anonymousPage(browser: Browser, viewport?: { width: number; heigh
 /** Paso "Datos": adulto con nombre y nacimiento, y avanza al siguiente paso. */
 async function fillAdultDatos(page: Page, input: { name: string; birthDate: string }) {
   await fillPatientNames(page, input.name)
-  await page.getByLabel("Fecha de nacimiento").fill(input.birthDate)
+  // Se escribe en el orden de la clínica (día/mes/año en Perú); se guarda en ISO.
+  await page.getByLabel("Fecha de nacimiento").fill(writtenDate(input.birthDate))
   await page.getByRole("button", { name: "Siguiente", exact: true }).click()
 }
 
@@ -106,8 +107,6 @@ interface PatientDetail {
     id: string
     displayName: string
     bloodGroup: string | null
-    dataConsentAt: string | null
-    dataConsentBy: string | null
     healthReviewedAt: string | null
     healthReviewedBy: string | null
   }
@@ -186,7 +185,7 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
     await expect(anon.getByText(`Registro de paciente · ${org.name}`).first()).toBeVisible()
 
     await fillPatientNames(anon, patientName)
-    await anon.getByLabel("Fecha de nacimiento").fill("1990-04-11")
+    await anon.getByLabel("Fecha de nacimiento").fill("11/04/1990")
     await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
     await anon.getByLabel(/^Teléfono(?: \*)?$/).fill(sharedPhone)
     // Volver conserva el nombre y reavanzar conserva el teléfono.
@@ -236,8 +235,15 @@ test("registro público QR en escritorio: conserva borrador, declara salud y no 
   expect(detail.patient.bloodGroup).toBe("O+")
   expect(detail.patient.healthReviewedAt).toBeNull()
   expect(detail.patient.healthReviewedBy).toBeNull()
-  expect(detail.patient.dataConsentAt).not.toBeNull()
-  expect(detail.patient.dataConsentBy).toBeNull()
+  // El consentimiento queda en «Datos y consentimiento», por versión del aviso:
+  // lo dio la persona en el formulario, sin nadie del equipo.
+  const consents = await call<
+    { channel: string; recordedBy: string | null; purposes: string[]; revokedAt: string | null }[]
+  >(page, "GET", `/api/patients/${created.id}/data-consents`, org.slug)
+  expect(consents).toEqual([
+    expect.objectContaining({ channel: "formulario_publico", recordedBy: null, revokedAt: null }),
+  ])
+  expect(consents[0]?.purposes).toContain("atencion")
   expect(detail.activeAllergies).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ substance: "Penicilina", severity: "severa" }),
@@ -363,7 +369,7 @@ test("cambio de configuración conserva el borrador y no reenvía solo", async (
   expect(detail.registration).toMatchObject({ entryPoint: "qr", respondent: "patient" })
 })
 
-test("enlace contextual registra a un menor sin duplicar self y luego no está disponible", async ({
+test("enlace contextual de quien ya tiene ficha registra a un menor sin ofrecerle registrarse y luego no está disponible", async ({
   browser,
   createOwner,
   nextEventId,
@@ -420,9 +426,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
   const conversationId = expected!.id
   const contactId = expected!.contact.id
 
-  // El contacto ya tiene ficha propia: un segundo «A mí» no debe duplicarla.
-  // Documento deliberadamente repetido: es la condición del caso duplicado.
-  const selfDoc = docFromId(nextEventId())
+  // El contacto ya tiene ficha propia: su enlace es para registrar a un familiar.
   const selfPatient = await call<{ id: string }>(
     page,
     "POST",
@@ -435,7 +439,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
           displayName: `Titular Enlace ${org.slug}`,
           birthDate: "1985-03-20",
           docType: "DNI",
-          docNumber: selfDoc,
+          docNumber: docFromId(nextEventId()),
           // La configuración publicada exige teléfono también en el alta interna.
           phone: phoneFromId(nextEventId()),
         },
@@ -460,47 +464,18 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
   // El enlace conserva el origen público del tenant, puerto incluido.
   expect(new URL(linkUrl).origin).toBe(new URL(tenant(org.slug, "/")).origin)
 
-  // Intento duplicado como "Soy el paciente" con el mismo documento: mensaje neutro.
-  const { context: dupContext, page: dup } = await anonymousPage(browser)
-  try {
-    await gotoHydrated(dup, linkUrl)
-    await expect(
-      dup.getByText("Continúa con el registro compartido por la clínica."),
-    ).toBeVisible()
-    await fillPatientNames(dup, `Duplicado Enlace ${org.slug}`)
-    await dup.getByLabel("Fecha de nacimiento").fill("1985-03-20")
-    await dup.getByLabel("Tipo de documento").click()
-    await dup.getByRole("option", { name: "DNI", exact: true }).click()
-    await dup.getByLabel("Número de documento").fill(selfDoc)
-    await dup.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await dup.getByLabel(/^Teléfono(?: \*)?$/).fill(phoneFromId(nextEventId()))
-    await dup.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await dup.getByRole("button", { name: "Siguiente", exact: true }).click()
-    await dup.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
-    await dup.getByRole("button", { name: "Enviar registro", exact: true }).click()
-
-    await expect(
-      dup.getByText("No pudimos completar el registro. Comunícate con recepción.", {
-        exact: true,
-      }),
-    ).toBeVisible()
-    await expect(dup.getByText("Paciente registrado", { exact: true })).toHaveCount(0)
-    await expect(dup.getByText(/HC-\d{6}/)).toHaveCount(0)
-  } finally {
-    await dupContext.close()
-  }
-  const stillOne = await call<PatientListItem[]>(page, "GET", "/api/patients", org.slug)
-  expect(stillOne).toHaveLength(1)
-
   // Registro del menor como "otra persona": vínculo de tutor, sin ficha self nueva.
+  // Ya tiene su ficha: el formulario no le ofrece registrarse a sí misma.
   const { context: minorContext, page: minor } = await anonymousPage(browser)
   try {
     await gotoHydrated(minor, linkUrl)
-    await minor.getByLabel("¿Quién completa el registro?").click()
-    await minor.getByRole("option", { name: "Registro a otra persona", exact: true }).click()
+    await expect(
+      minor.getByText("Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."),
+    ).toBeVisible()
+    await expect(minor.getByLabel("¿Quién completa el registro?")).toHaveCount(0)
     const minorName = `Menor Enlace ${org.slug}`
     await fillPatientNames(minor, minorName)
-    await minor.getByLabel("Fecha de nacimiento").fill("2018-06-15")
+    await minor.getByLabel("Fecha de nacimiento").fill("15/06/2018")
     await minor.getByRole("button", { name: "Siguiente", exact: true }).click()
     // El responsable se pide en "Contacto y filiación" cuando el paciente es menor.
     await minor.getByLabel("Nombre del responsable").fill(`Madre Enlace ${org.slug}`)
@@ -562,7 +537,7 @@ test("enlace contextual registra a un menor sin duplicar self y luego no está d
   try {
     await gotoHydrated(gone, linkUrl)
     await expect(gone.getByText("Enlace no disponible", { exact: true }).first()).toBeVisible()
-    await expect(gone.getByLabel(/^Apellido paterno/)).toHaveCount(0)
+    await expect(gone.getByLabel(/^Primer apellido/)).toHaveCount(0)
   } finally {
     await goneContext.close()
   }
@@ -653,12 +628,12 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
     await anon.getByLabel("Nombres", { exact: true }).fill("Carla")
     await anon.getByLabel("Número", { exact: true }).fill("123")
     await submit.click()
-    await expect(anon.getByText("Escribe tus apellidos")).toBeVisible()
-    await expect(anon.getByText("El DNI tiene exactamente 8 dígitos")).toBeVisible()
+    await expect(anon.getByText("Escribe tu primer apellido")).toBeVisible()
+    await expect(anon.getByText("El DNI tiene 8 números; faltan 5")).toBeVisible()
     await expect(anon.getByText("Escribe un celular para avisarte de tu cita")).toBeVisible()
     await expect(anon.getByText("Para reservar necesitamos que aceptes el uso de estos datos")).toBeVisible()
     await expect(anon.getByLabel("Nombres", { exact: true })).toHaveValue("Carla")
-    await expect(anon.getByLabel("Apellidos", { exact: true })).toBeFocused()
+    await expect(anon.getByLabel("Primer apellido", { exact: true })).toBeFocused()
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await info.attach("reserva-tus-datos-errores", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
 
@@ -671,7 +646,8 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
     await anon.getByRole("radio", { name: "Para mí" }).click()
     await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(0)
 
-    await anon.getByLabel("Apellidos", { exact: true }).fill("Núñez Prado")
+    await anon.getByLabel("Primer apellido", { exact: true }).fill("Núñez")
+    await anon.getByLabel("Segundo apellido", { exact: true }).fill("Prado")
     await anon.getByLabel("Número", { exact: true }).fill(docFromId(nextEventId()))
     await phone.fill(maskedPhone(phoneFromId(nextEventId())))
     // El aviso de privacidad es el del registro de la clínica.
@@ -682,7 +658,8 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
     // Volver a cambiar de horario no borra lo escrito.
     await anon.getByRole("button", { name: "Cambiar horario" }).click()
     await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
-    await expect(anon.getByLabel("Apellidos", { exact: true })).toHaveValue("Núñez Prado")
+    await expect(anon.getByLabel("Primer apellido", { exact: true })).toHaveValue("Núñez")
+    await expect(anon.getByLabel("Segundo apellido", { exact: true })).toHaveValue("Prado")
     await anon.getByRole("button", { name: "Reservar mi cita" }).click()
 
     // Con sus datos guardados, la página reserva el horario que ya había elegido.
@@ -698,10 +675,10 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
   const linked = await fixtureDb.select({ patientId: patientContact.patientId, relationship: patientContact.relationship }).from(patientContact).where(eq(patientContact.contactId, conversation.contact.id))
   expect(linked).toEqual([{ patientId: rows[0]!.patientId, relationship: "self" }])
 
-  // Recepción ve en su página que quedó con lo esencial: faltan datos que la clínica pide.
+  // Recepción ve en su página que quedó con lo esencial: faltan datos para atenderla.
   const detail = await getPatientDetail(page, org.slug, rows[0]!.patientId)
   expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: true })
   await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
-  await expect(page.getByText("Faltan datos que la clínica pide").first()).toBeVisible()
+  await expect(page.getByText("Faltan datos para atenderla").first()).toBeVisible()
   await info.attach("reserva-ficha-incompleta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })

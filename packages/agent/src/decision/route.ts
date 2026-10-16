@@ -80,7 +80,14 @@ const ALWAYS = ["send_reply", "send_template", "request_human_handoff"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   derivar: ["request_human_handoff"],
-  informacion: [...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica"],
+  // «¿Me mandas mi presupuesto?» o «prefiero la de la corona» se leen como una
+  // pregunta de precios: el presupuesto de la persona va en este camino.
+  informacion: [
+    ...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica",
+    "ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto",
+    // «Cambié de teléfono y no puedo entrar al portal»: se pide como información.
+    "pedir_volver_al_portal",
+  ],
   // Un agradecimiento o una despedida pueden cerrar la conversación (ADR 0024).
   // «Sí, ahí estaré» a un recordatorio puede llegar como saludo: confirmar_cita la confirma.
   // «Sí» a la pregunta del permiso general tras reservar también: responder_permiso_mensajes.
@@ -104,10 +111,10 @@ export const WIDEN_TOOL = "ampliar_herramientas"
  */
 const NOT_IN_PATH: Partial<Record<RoutePath, string>> = {
   informacion: "reservar, cambiar o cancelar una cita; registrar una oportunidad, una tarea o un seguimiento",
-  saludo: "reservar, cambiar o cancelar una cita; consultar el conocimiento; registrar una oportunidad, una tarea o un seguimiento",
-  clinico: "reservar, cambiar o cancelar una cita; consultar el conocimiento; registrar una oportunidad, una tarea o un seguimiento",
-  cita: "cambiar o cancelar una cita que ya existe; registrar una oportunidad, una tarea o un seguimiento",
-  cambio_cita: "reservar una cita nueva; consultar el conocimiento; registrar una oportunidad, una tarea o un seguimiento",
+  saludo: "reservar, cambiar o cancelar una cita; consultar el conocimiento; reenviar su presupuesto o anotar su respuesta a uno; registrar una oportunidad, una tarea o un seguimiento",
+  clinico: "reservar, cambiar o cancelar una cita; consultar el conocimiento; reenviar su presupuesto o anotar su respuesta a uno; registrar una oportunidad, una tarea o un seguimiento",
+  cita: "cambiar o cancelar una cita que ya existe; reenviar su presupuesto o anotar su respuesta a uno; registrar una oportunidad, una tarea o un seguimiento",
+  cambio_cita: "reservar una cita nueva; consultar el conocimiento; reenviar su presupuesto o anotar su respuesta a uno; registrar una oportunidad, una tarea o un seguimiento",
 }
 export function widenDescription(path: RoutePath): string {
   return `Este turno trae solo las herramientas del camino elegido, y con ellas se resuelve casi siempre. Llama a esta, sola en su paso, únicamente si lo que pide el interlocutor es otra cosa (${NOT_IN_PATH[path] ?? "algo que estas herramientas no cubren"}): en el siguiente paso tendrás todas.`
@@ -173,10 +180,14 @@ export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string 
  * está, el modelo aún puede consultar, pedir el resto de herramientas
  * (ROUTE_TOOLS) o pasar el caso.
  */
-export function routeInstruction(path: RoutePath, prefetched?: string | null): string | null {
+export function routeInstruction(path: RoutePath, prefetched?: string | null, options: { budgets?: boolean } = {}): string | null {
   const head = "Camino de este turno, elegido por lo que escribió el interlocutor:"
   if (path === "informacion") {
-    return `${head} pide información. Arriba ya tienes las sedes, los servicios con sus tarifas, los medios de pago que acepta la clínica y las respuestas oficiales que aplican. Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas. Solo si el dato no está arriba, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona.`
+    // Con «Presupuestos» apagada no se nombran herramientas que no tiene: su indicación ya va arriba.
+    const budgets = options.budgets === false
+      ? ""
+      : " Si pide su propio presupuesto o responde a uno (qué acepta, qué deja para después), usa ver_presupuesto y después reenviar_presupuesto o anotar_respuesta_presupuesto."
+    return `${head} pide información. Arriba ya tienes las sedes, los servicios con sus tarifas, los medios de pago que acepta la clínica y las respuestas oficiales que aplican. Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas. Solo si el dato no está arriba, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona.${budgets}`
   }
   if (path === "saludo") {
     return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso, breve, sin consultar nada: si agradece o se despide y no queda nada pendiente, despídete con despedirse_y_cerrar; si no, con send_reply.`

@@ -4,10 +4,13 @@ import { z } from "zod"
 import {
   getDocumentSendOptions,
   getFinancialDocumentPdf,
+  getHealthDocumentSendOptions,
   getRefundReceiptPdf,
   saveRecipientEmail,
   sendFinancialDocument,
+  sendHealthDocument,
 } from "@odentia/services"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -24,9 +27,9 @@ function canReadBudget(role: string): boolean {
 }
 
 function canSendBudget(role: string): boolean {
-  // Estricto budgets.write: quien puede presupuestar envía; caja no (aunque
-  // tenga finance.write). El plan propio del odontólogo se valida en servicio.
-  return canAccess(role, "budgets.write")
+  // `budgets.send` (decisión 4): recepción y quien presupuesta lo envían; caja
+  // no (aunque tenga finance.write). Lo propio del odontólogo se valida en servicio.
+  return canAccess(role, "budgets.send")
 }
 
 /**
@@ -39,8 +42,8 @@ function canSendBudget(role: string): boolean {
  *   connectionId, message?, savePreferredChannel?, paper? } → 201 { conversationId, messageId,
  *   status: "queued" } (encolado, nunca entregado).
  * Permisos canónicos: ticket exige finance.read/write; budget exige
- * budgets.read/write. La titularidad (paciente de la org, destinatario
- * autorizado, plan propio del odontólogo) se valida en el servicio.
+ * budgets.read/send. La titularidad (paciente de la org, destinatario
+ * autorizado, lo propio del odontólogo) se valida en el servicio.
  */
 const documentType = z.enum(["ticket", "budget"])
 
@@ -81,6 +84,35 @@ const recipientEmailInput = z
     email: z.string().trim().min(3).max(200),
   })
   .strict()
+
+const healthDocumentType = z.enum(["prescription", "order", "consent"])
+
+const healthOptionsQuery = z.object({
+  documentType: healthDocumentType,
+  documentId: z.uuid(),
+  recipientContactId: z.uuid().optional(),
+})
+
+const healthSendInput = z
+  .object({
+    documentType: healthDocumentType,
+    documentId: z.uuid(),
+    recipientContactId: z.uuid().nullish(),
+    connectionId: z.uuid(),
+    message: z.string().max(500).nullish(),
+    requestId: z.uuid().nullish(),
+  })
+  .strict()
+
+const HEALTH_RESOURCE = {
+  prescription: "recetas",
+  order: "ordenes",
+  consent: "consentimientos",
+} as const
+
+function forbidClinical(c: Context) {
+  return c.json(errorBody(c, "FORBIDDEN", "Sin acceso clínico"), 403)
+}
 
 const refundPdfQuery = z.object({
   receiptId: z.uuid(),
@@ -163,6 +195,57 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
             otherEmail: parsed.data.otherEmail ?? undefined,
             confirmOtherEmail: parsed.data.confirmOtherEmail,
             patientId,
+          },
+          { storage: deps.storage },
+        ),
+      ),
+    )
+  })
+
+  // --- Papeles de salud (receta, orden, consentimiento firmado) ---
+  // Solo a la propia persona o a su representante legal; WhatsApp primero,
+  // correo si no; sin ninguno, solo imprimir (lo dice `printOnly`).
+  app.get("/:id/health-document-options", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidClinical(c)
+    const parsed = healthOptionsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const patientId = c.req.param("id")
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getHealthDocumentSendOptions(tx, orgId, patientId, parsed.data),
+      ),
+    )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, {
+        orgId,
+        userId,
+        patientId,
+        resource: HEALTH_RESOURCE[parsed.data.documentType],
+      })
+    return response
+  })
+
+  app.post("/:id/health-documents/send", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) return forbidClinical(c)
+    const parsed = healthSendInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const patientId = c.req.param("id")
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        sendHealthDocument(
+          tx,
+          orgId,
+          userId,
+          {
+            patientId,
+            documentType: parsed.data.documentType,
+            documentId: parsed.data.documentId,
+            recipientContactId: parsed.data.recipientContactId ?? undefined,
+            connectionId: parsed.data.connectionId,
+            message: parsed.data.message ?? undefined,
+            requestId: parsed.data.requestId ?? undefined,
           },
           { storage: deps.storage },
         ),

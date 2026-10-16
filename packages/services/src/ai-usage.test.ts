@@ -13,7 +13,7 @@ import {
 } from "./ai-usage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Uso de IA por origen (ADR 0030, fase 1): lo que se guarda, quién lo ve y el tope de pruebas. */
+/** Uso de IA por origen (ADR 0031, fase 1): lo que se guarda, quién lo ve y el tope de pruebas. */
 setupTestDb()
 const ORG = "org_a"
 const OTHER = "org_b"

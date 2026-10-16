@@ -31,12 +31,17 @@ import {
   getEncounterDetail,
   getLatestAnamnesis,
   getOdontogram,
+  getOdontogramPrint,
+  getOpenEncounterRef,
   getPatient,
+  getPatientMissingData,
   getPatientDocument,
   getPatientHealth,
   getPatientSummary,
   getTimeline,
   getToothHistory,
+  getPlanNextStep,
+  getSignedOdontogramPrint,
   getTreatmentCoordination,
   getTreatmentPlanDetail,
   grantDataConsent,
@@ -55,6 +60,7 @@ import {
   PATIENT_AVATAR_MIME_EXT,
   PATIENT_DOC_MAX_BYTES,
   registerPatient,
+  registerToothFinding,
   makeImageThumbnail,
   registerPatientDocument,
   retirePatientDocument,
@@ -140,7 +146,6 @@ const createInput = z.strictObject({
 const patchInput = z.object({
   ...filiation,
   isActive: z.boolean().optional(),
-  dataConsent: z.boolean().optional(),
   /** Recepción confirma el nombre separado tras la migración. */
   identityConfirmed: z.boolean().optional(),
 })
@@ -216,7 +221,6 @@ const healthSaveInput = z
       })
       .strict()
       .optional(),
-    dataConsent: z.literal(true).optional(),
     bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
   })
   .strict()
@@ -252,6 +256,7 @@ const findingDetailsInput = z
     observations: z.string().max(2000).optional(),
   })
   .catchall(z.unknown())
+// Los hallazgos se registran dentro de una atención: sin ella, 400.
 const odontogramInput = z
   .object({
     toothNumber: z.number().int(),
@@ -260,25 +265,38 @@ const odontogramInput = z
     details: findingDetailsInput.optional(),
     note: z.string().max(2000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
-    encounterId: z.uuid().optional(),
+    encounterId: z.uuid(),
+  })
+  .strict()
+// El panel de la pieza: hallazgo, diagnóstico CIE-10 con su tipo y
+// tratamiento en una sola operación (`registerToothFinding`).
+const toothFindingInput = z
+  .object({
+    encounterId: z.uuid(),
+    toothNumbers: z.array(z.number().int()).min(1).max(52),
+    condition: z.string().trim().min(1).max(80),
+    surfaces: z.array(odontogramSurface).max(8).default([]),
+    details: findingDetailsInput.optional(),
+    note: z.string().max(2000).nullish(),
+    diagnosis: z
+      .object({ cie10Code: z.string().trim().min(1).max(10), diagnosisType: z.string().max(20) })
+      .strict()
+      .nullish(),
+    treatment: z
+      .object({ serviceId: z.uuid(), detail: z.string().max(4000).nullish() })
+      .strict()
+      .nullish(),
   })
   .strict()
 const voidInput = z.object({ reason: z.string().trim().min(1).max(2000) })
-const assessmentInput = z.object({
+// «Firmar odontograma» (solo en clínicas de Perú): quién firma no se escribe y
+// no hay trazo; nombre, título y colegiatura salen del perfil de quien firma.
+// Un cuerpo que los trae se rechaza (`strict`). El servicio admite aquí solo
+// lo judicial, lo personal y el reingreso.
+const assessmentInput = z.strictObject({
   purpose: z.enum(["initial", "new_findings", "completion", "reentry", "legal", "personal"]),
-  specifications: z.string().trim().max(4000),
-  observations: z.string().trim().max(4000),
-  examinerName: z.string().trim().min(1).max(200),
-  registrationNumber: z.string().trim().min(1).max(40),
-  signature: z
-    .array(
-      z
-        .array(z.tuple([z.number(), z.number()]))
-        .min(2)
-        .max(500),
-    )
-    .min(1)
-    .max(50),
+  specifications: z.string().trim().max(4000).nullish(),
+  observations: z.string().trim().max(4000).nullish(),
 })
 const timelineQuery = listQuery.extend({
   types: z
@@ -291,9 +309,10 @@ const timelineQuery = listQuery.extend({
   order: z.enum(["desc", "asc"]).optional(),
 })
 const encounterCreateInput = z.object({
-  // El motivo es obligatorio al abrir la atención (decisión de diseño).
-  reason: z.string().trim().min(1).max(2000),
-  /** Cita que motiva la atención: hereda sede y profesional. */
+  // Sin cita, el motivo es obligatorio al abrir; desde una cita («Atender») se
+  // abre sin él y el cierre lo exige (ADR 0032). La regla vive en el servicio.
+  reason: z.string().trim().max(2000).nullish(),
+  /** Cita que motiva la atención; sin ella se une a la cita de hoy que siga en pie. */
   appointmentId: z.uuid().nullish(),
   branchId: z.uuid().nullish(),
   /** Profesional que atiende; por defecto quien abre la atención. */
@@ -306,7 +325,6 @@ const encounterCreateInput = z.object({
 const encounterPatchInput = z.object({
   ...operationBodyShape("atencion.nota"),
   branchId: z.uuid().nullish(),
-  nextAppointmentAt: z.iso.datetime({ offset: true }).nullish(),
   teeth: z.array(z.number().int()).max(52).optional(),
   examination: z
     .object({
@@ -350,14 +368,13 @@ const planSiteFields = {
   quadrant: z.number().int().min(1).max(8).nullish(),
   arch: z.enum(["upper", "lower"]).nullish(),
 }
+// Sin plan, la indicación va al plan abierto de la persona (o nace uno): no se elige plan al indicar.
 const planCreateInput = z
   .object({
     serviceId: z.uuid(),
-    planId: z.uuid(),
+    planId: z.uuid().nullish(),
     sourceEncounterId: z.uuid(),
-    optionGroupId: z.uuid().nullish(),
     odontogramEntryId: z.uuid().nullish(),
-    isRecommended: z.boolean().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     phase: z.enum(TREATMENT_PHASES).nullish(),
@@ -402,7 +419,7 @@ const planPatchInput = z
 const planBatchInput = z
   .object({
     serviceId: z.uuid(),
-    planId: z.uuid(),
+    planId: z.uuid().nullish(),
     sourceEncounterId: z.uuid(),
     toothNumbers: z.array(z.number().int()).min(1).max(52),
     detail: z.string().max(4000).nullish(),
@@ -410,7 +427,13 @@ const planBatchInput = z
   })
   .strict()
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
-const finalizeInput = z.object({ endedAt: z.iso.datetime({ offset: true }).nullish() }).strict()
+const finalizeInput = z
+  .object({
+    endedAt: z.iso.datetime({ offset: true }).nullish(),
+    // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
+    consentSkipReason: z.string().trim().max(2000).nullish(),
+  })
+  .strict()
 // El diagnóstico se declara una vez, para la pantalla y para el dictado.
 const diagnosisInput = operationBodySchema("atencion.diagnostico")
 const diagnosisStatusInput = z.object({ status: z.enum(["activo", "resuelto"]) }).strict()
@@ -483,8 +506,13 @@ const FINANCIAL_DOCUMENTS_PREFIXES = ["/financial-documents", "/financial-docume
  */
 const COORDINATION_SUBPATH = "/coordination"
 
-/** Presupuestos: `budgets.read`/`.write`; la decisión usa `budgets.decide`. */
+/**
+ * Presupuestos: `budgets.read`/`.write`; la decisión usa `budgets.decide` y
+ * entregar o enviar, `budgets.send` (decisión 4: recepción envía y anota, no
+ * cambia precios).
+ */
 const BUDGET_SUBPATH = "/budgets"
+const BUDGET_SEND_SUFFIXES = ["/deliver", "/send"]
 
 /** Bitácora de consultas a la historia: la lee quien audita (`audit.read`). */
 const ACCESS_LOG_SUBPATH = "/access-log"
@@ -551,12 +579,15 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
               ? "budgets"
               : "patients"
     const write = !["GET", "HEAD", "OPTIONS"].includes(c.req.method)
-    // La decisión del presupuesto usa `budgets.decide` (caja decide sin
-    // clínica); el resto de mutaciones, `budgets.write`.
+    // La decisión del presupuesto usa `budgets.decide` (caja y recepción
+    // deciden sin clínica); entregarlo o enviarlo, `budgets.send`; el resto
+    // de mutaciones, `budgets.write`.
     const permission =
       domain === "budgets" && write && remainder.includes("/decision")
         ? "budgets.decide"
-        : `${domain}.${write ? "write" : "read"}`
+        : domain === "budgets" && write && BUDGET_SEND_SUFFIXES.some((suffix) => remainder.endsWith(suffix))
+          ? "budgets.send"
+          : `${domain}.${write ? "write" : "read"}`
     if (!canAccess(memberRole, permission)) {
       return c.json(
         errorBody(
@@ -630,6 +661,8 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
         birthDate: z.iso.date().optional(),
         docType: z.string().max(20).optional(),
         docNumber: z.string().max(20).optional(),
+        // El documento se compara con su país emisor (ADR 0036).
+        docCountry: z.string().length(2).optional(),
         phone: z.string().max(50).optional(),
       })
       .safeParse(c.req.query())
@@ -674,9 +707,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     // el registro solo viajan cuando se piden (`?clinical=1`, desde Clínica o
     // la atención), y solo esa lectura deja traza en la bitácora.
     const clinical = clinicalRead && c.req.query("clinical") === "1"
+    // «Faltan datos para atenderla» lo calcula el servidor y solo lo recibe
+    // quien edita los datos (recepción, propietario, administrador): odontólogo
+    // y caja ven los datos sin el aviso (decisión 10 de la fase 3).
+    const canEdit = canAccess(memberRole, "patients.write")
     const response = await runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        const full = await getPatient(tx, orgId, c.req.param("id"))
+        const base = await getPatient(tx, orgId, c.req.param("id"))
+        const full = {
+          ...base,
+          missingData: canEdit ? await getPatientMissingData(tx, orgId, c.req.param("id")) : null,
+        }
         if (clinical) return full
         // Del registro queda lo administrativo (de dónde y cuándo llegó, quién
         // lo declaró y sus datos de contacto), sin la salud declarada: así la
@@ -752,6 +793,21 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updatePatient(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+
+  // --- «Qué sigue» del plan: frase y botón que decide el servidor (tablero 3) ---
+  // La leen quien atiende, recepción y caja: sin diagnósticos ni piezas, y el
+  // botón solo para quien puede hacerlo.
+  app.get("/:id/next-step", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!["clinical.read", "budgets.read", "appointments.read"].some((permission) => canAccess(memberRole, permission))) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getPlanNextStep(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
       ),
     )
   })
@@ -877,6 +933,24 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
       ),
     )
   })
+  // Panel de la pieza: «Registrar y agregar al plan», todo o nada.
+  app.post("/:id/odontogram/findings", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = toothFindingInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        registerToothFinding(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
+    )
+  })
+  // Hoja neutra para imprimir (donde el odontograma no se firma).
+  app.get("/:id/odontogram/print", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getOdontogramPrint(tx, orgId, c.req.param("id"))),
+    )
+  })
   app.post("/:id/odontogram/entries/:entryId/void", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = voidInput.safeParse(await c.req.json().catch(() => null))
@@ -916,6 +990,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         listOdontogramAssessments(tx, orgId, c.req.param("id")),
+      ),
+    )
+  })
+  // Un odontograma firmado para ver e imprimir (gráfico de la norma, en negro).
+  app.get("/:id/odontogram/assessments/:assessmentId/print", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const assessmentId = z.uuid().safeParse(c.req.param("assessmentId"))
+    if (!assessmentId.success) return validationError(c, assessmentId.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getSignedOdontogramPrint(tx, orgId, c.req.param("id"), assessmentId.data),
       ),
     )
   })
@@ -1164,6 +1249,17 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getPatientSummary(tx, orgId, c.req.param("id"))),
+    )
+  })
+  // La página de la persona sabe si hay una atención en curso sin leer la
+  // historia: solo cuál es y quién la lleva, para quien puede atender. No es
+  // una lectura clínica (no deja traza en la bitácora).
+  app.get("/:id/open-encounter", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write"))
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver este recurso"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getOpenEncounterRef(tx, orgId, c.req.param("id"))),
     )
   })
   app.get("/:id/timeline", async (c) => {

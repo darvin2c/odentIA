@@ -12,6 +12,7 @@ import {
   DatePickerButton,
   dayRangeOf,
   formatDateLong,
+  formatMonthLong,
   formatSpan,
   hourLabel,
   minutesToInstant,
@@ -366,7 +367,7 @@ export function WhenFields({ when }: { when: WhenState }) {
           >
             <CalendarDays aria-hidden />
             <span className="first-letter:uppercase">
-              {formatDateLong(date).split(" ").slice(-1)[0]}
+              {formatMonthLong(date)}
             </span>
           </DatePickerButton>
         </div>

@@ -19,7 +19,8 @@ import type {
   TreatmentNextAction,
   TreatmentPlan,
 } from "./patients"
-import { activeOrgLocale } from "./locale"
+import { dayMinutesIn, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
+import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 const base = (patientId: string) => `/api/patients/${patientId}`
 
@@ -32,15 +33,25 @@ export function mutationMessage(err: unknown): string {
   return err instanceof Error ? err.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
-/** Fecha corta, en el formato de la clínica; "—" cuando el valor falta o es inválido. */
+/**
+ * Fecha corta, en el formato y la zona de la clínica (no la del navegador);
+ * "—" cuando el valor falta o es inválido. Una fecha sin hora («2026-10-22»)
+ * se dice tal cual, sin moverla de día.
+ */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—"
-  const date = new Date(value)
+  const calendarDay = /^\d{4}-\d{2}-\d{2}$/.test(value)
+  const date = new Date(calendarDay ? `${value}T00:00:00Z` : value)
   if (Number.isNaN(date.getTime())) return "—"
-  return date.toLocaleDateString(activeOrgLocale(), { day: "2-digit", month: "2-digit", year: "numeric" })
+  return date.toLocaleDateString(activeOrgLocale(), {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: calendarDay ? "UTC" : activeOrgTimeZone(),
+  })
 }
 
-/** Fecha y hora cortas, en el formato de la clínica para citas y controles. */
+/** Fecha y hora cortas, en el formato y la zona de la clínica, para citas y controles. */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—"
   const date = new Date(value)
@@ -51,7 +62,31 @@ export function formatDateTime(value: string | null | undefined): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: activeOrgTimeZone(),
   })
+}
+
+/**
+ * Valor de un campo de fecha y hora («2026-10-22T10:00») para un instante, en
+ * la zona de la clínica: desde otro país se ve la misma hora que en la clínica.
+ */
+export function clinicDateTimeValue(iso: string): string {
+  const timeZone = activeOrgTimeZone()
+  const minutes = dayMinutesIn(iso, timeZone)
+  const hh = String(Math.floor(minutes / 60)).padStart(2, "0")
+  const mm = String(minutes % 60).padStart(2, "0")
+  return `${zonedDateOf(iso, timeZone)}T${hh}:${mm}`
+}
+
+/** El instante de un valor de fecha y hora escrito en la zona de la clínica; null si no es válido. */
+export function instantFromClinicValue(value: string): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/.exec(value)
+  if (!match) return null
+  const [, date, hh, mm] = match as unknown as [string, string, string, string]
+  const hours = Number(hh)
+  const minutes = Number(mm)
+  if (hours > 23 || minutes > 59 || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) return null
+  return minutesToInstant(date, hours * 60 + minutes, activeOrgTimeZone())
 }
 
 // --- Controles clínicos -----------------------------------------------------
@@ -106,7 +141,7 @@ export function followUpAppointmentLabel(control: FollowUp): string {
       : "Cita atendida"
   }
   if (appointment.status === "cancelada") return "Cita cancelada · sin reserva vigente"
-  if (appointment.status === "no_asistio") return "No asistió · sin reserva vigente"
+  if (appointment.status === "no_asistio") return "No vino · sin reserva vigente"
   return `Cita ${appointment.status === "confirmada" ? "confirmada" : "reservada"} · ${formatDateTime(appointment.startsAt)}`
 }
 
@@ -345,7 +380,6 @@ export const RESPONSIBILITY_KINDS = [
   "representante_legal",
   "autorizado_informacion",
   "responsable_economico",
-  "acompanante",
 ] as const
 export type ResponsibilityKind = (typeof RESPONSIBILITY_KINDS)[number]
 
@@ -353,7 +387,6 @@ export const RESPONSIBILITY_KIND_LABELS: Record<ResponsibilityKind, string> = {
   representante_legal: "Representante legal",
   autorizado_informacion: "Autorizado para información",
   responsable_economico: "Responsable económico",
-  acompanante: "Acompañante",
 }
 
 /** Responsabilidad de un contacto vinculado, con vigencia e historial. */
@@ -443,13 +476,6 @@ export interface JourneyBudgetLine {
   decision: string
 }
 
-/** Alternativas excluyentes del mismo problema clínico. */
-export interface JourneyOptionGroup {
-  id: string
-  title: string
-  alternatives: PlanItem[]
-}
-
 export interface TreatmentJourney {
   item: PlanItem
   plan: TreatmentPlan
@@ -458,7 +484,6 @@ export interface TreatmentJourney {
   originFinding: OdontogramEntry | null
   replacedBy: PlanItem[]
   supersedes: PlanItem | null
-  optionGroup: JourneyOptionGroup | null
   budgetHistory: Array<{ budget: JourneyBudget; line: JourneyBudgetLine }>
   procedures: Array<{ procedure: ProcedureItem; encounter: Encounter }>
   followUps: FollowUp[]
@@ -541,18 +566,6 @@ export function suspendTreatmentApi(
   })
 }
 
-/** Agrupa la indicación como alternativa del mismo problema clínico. */
-export function setItemAlternativeApi(
-  patientId: string,
-  itemId: string,
-  body: { optionGroupId: string | null; isRecommended?: boolean },
-): Promise<{ data: PlanItem }> {
-  return apiFetch<{ data: PlanItem }>(`${base(patientId)}/treatments/${itemId}/alternative`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  })
-}
-
 /** Reactiva un tratamiento suspendido donde quedó: en curso si ya tenía sesiones. */
 export function resumeTreatmentApi(
   patientId: string,
@@ -595,17 +608,6 @@ export function reviseTreatmentApi(
     method: "POST",
     body: JSON.stringify(body),
   })
-}
-
-export function createOptionGroupApi(
-  patientId: string,
-  planId: string,
-  body: { title: string },
-): Promise<{ data: JourneyOptionGroup }> {
-  return apiFetch<{ data: JourneyOptionGroup }>(
-    `${base(patientId)}/plans/${planId}/option-groups`,
-    { method: "POST", body: JSON.stringify(body) },
-  )
 }
 
 /** Saldo del tratamiento por moneda; nunca se suman monedas distintas. */

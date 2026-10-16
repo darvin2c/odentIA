@@ -605,10 +605,20 @@ it("responsables: vigencia, duplicado y revocación con motivo", async () => {
   // Un contacto no vinculado al paciente no puede recibir roles.
   const outsider = await post(app, `/patients/${patientId}/responsibilities`, {
     contactId: "99999999-9999-4999-8999-999999999999",
-    kind: "acompanante",
+    kind: "autorizado_informacion",
     startsAt,
   })
   expect(outsider.status).toBe(404)
+
+  // «Acompañante» ya no es una responsabilidad: quien solo acompaña es una
+  // persona vinculada.
+  const companion = await post(app, `/patients/${patientId}/responsibilities`, {
+    contactId,
+    kind: "acompanante",
+    startsAt,
+  })
+  expect(companion.status).toBe(400)
+  expect((await json<ErrorBody>(companion)).error.code).toBe("VALIDATION")
 
   const list = await app.request(`/patients/${patientId}/responsibilities`)
   const rows = await json<{ data: Array<{ isCurrent: boolean; contactId: string }> }>(list)
@@ -632,7 +642,7 @@ it("responsables: vigencia, duplicado y revocación con motivo", async () => {
   })
 })
 
-it("suspendido se reanuda y las alternativas se agrupan con recomendación", async () => {
+it("suspendido se reanuda; sin plan la indicación va al abierto y ya no hay alternativas", async () => {
   const { patientId, planId, itemId, encounterId } = await setupAcceptedItem()
 
   const suspended = await post(app, `/patients/${patientId}/treatments/${itemId}/suspend`, {
@@ -654,52 +664,24 @@ it("suspendido se reanuda y las alternativas se agrupan con recomendación", asy
   })
   expect(badResume.status).toBe(400)
 
-  // Alternativas: se agrupan después de indicarlas y solo una queda recomendada.
+  // Plan abierto implícito (ADR 0034): sin `planId`, la indicación va al plan abierto.
+  const second = await post(app, `/patients/${patientId}/plan/items`, {
+    serviceId: "c1111111-1111-4111-8111-111111111111",
+    sourceEncounterId: encounterId,
+    toothNumber: 46,
+  })
+  expect(second.status).toBe(201)
+  expect((await json<{ data: { planId: string } }>(second)).data.planId).toBe(planId)
+
+  // Las alternativas se retiraron: son opciones dentro del presupuesto (decisión 13).
   const group = await post(app, `/patients/${patientId}/plans/${planId}/option-groups`, {
     title: "Corona o resina",
   })
-  expect(group.status).toBe(201)
-  const groupId = (await json<{ data: { id: string } }>(group)).data.id
-  const second = await post(app, `/patients/${patientId}/plan/items`, {
-    planId,
-    serviceId: "c1111111-1111-4111-8111-111111111111",
-    sourceEncounterId: encounterId,
-    toothNumber: 36,
-  })
-  expect(second.status).toBe(201)
-  const secondId = (await json<{ data: { id: string } }>(second)).data.id
-
+  expect(group.status).toBe(404)
   const grouped = await post(app, `/patients/${patientId}/treatments/${itemId}/alternative`, {
-    optionGroupId: groupId,
-    isRecommended: true,
-  })
-  expect(grouped.status).toBe(200)
-  expect(
-    (await json<{ data: { optionGroupId: string; isRecommended: boolean } }>(grouped)).data,
-  ).toMatchObject({ optionGroupId: groupId, isRecommended: true })
-  const other = await post(app, `/patients/${patientId}/treatments/${secondId}/alternative`, {
-    optionGroupId: groupId,
-    isRecommended: true,
-  })
-  expect(other.status).toBe(200)
-  const journey = await app.request(`/patients/${patientId}/treatments/${itemId}/journey`)
-  const alternatives = (
-    await json<{
-      data: {
-        optionGroup: {
-          title: string
-          alternatives: Array<{ id: string; isRecommended: boolean }>
-        } | null
-      }
-    }>(journey)
-  ).data.optionGroup
-  expect(alternatives?.title).toBe("Corona o resina")
-  expect(alternatives?.alternatives.filter((a) => a.isRecommended)).toHaveLength(1)
-
-  const foreignGroup = await post(app, `/patients/${patientId}/treatments/${itemId}/alternative`, {
     optionGroupId: "11111111-1111-4111-8111-111111111111",
   })
-  expect(foreignGroup.status).toBe(404)
+  expect(grouped.status).toBe(404)
 })
 
 it("la historia declara el contexto de cada evento del recorrido", async () => {
@@ -771,6 +753,7 @@ it("recorrido: hallazgo de origen, sesiones y saldo del tratamiento; aislado por
     condition: "caries",
     surfaces: ["occlusal"],
     details: { variant: "dentin" },
+    encounterId,
   })
   expect(finding.status).toBe(201)
   const findings = (await json<{ data: Array<{ id: string }> }>(finding)).data
@@ -1224,6 +1207,44 @@ it("formularios: finalizar con un obligatorio vacío responde 400 nombrando el c
     reason: "Paciente equivocado",
   })
   expect(discarded.status).toBe(200)
+})
+
+it("órdenes: imagen con diagnóstico y hoja para imprimir; cancelar pide motivo; recepción no lee lo que pide la atención", async () => {
+  const patientId = await createPatient()
+  const created = await post(app, "/clinical-forms/orders", {
+    kind: "imagen",
+    patientId,
+    recipient: "Centro de imágenes",
+    title: "Radiografía panorámica",
+    diagnosisCode: "K02.1",
+  })
+  expect(created.status).toBe(201)
+  const orderId = (await json<{ data: { id: string; kind: string } }>(created)).data.id
+  const sheet = await app.request(`/clinical-forms/orders/${orderId}/print`)
+  expect(sheet.status).toBe(200)
+  expect(
+    (await json<{ data: { order: { kind: string }; diagnosisDescription: string | null } }>(sheet)).data,
+  ).toMatchObject({ order: { kind: "imagen" }, diagnosisDescription: "Caries de la dentina" })
+  // Sin para quién no hay orden; sin motivo no se cancela.
+  const noRecipient = await post(app, "/clinical-forms/orders", { kind: "laboratorio", patientId, title: "Hemograma" })
+  expect(noRecipient.status).toBe(400)
+  expect((await post(app, `/clinical-forms/orders/${orderId}/status`, { toStatus: "cancelado" })).status).toBe(400)
+  const cancelled = await post(app, `/clinical-forms/orders/${orderId}/status`, {
+    toStatus: "cancelado",
+    reason: "Ya trajo la radiografía",
+  })
+  expect(cancelled.status).toBe(200)
+  expect((await json<{ data: { cancelReason: string } }>(cancelled)).data.cancelReason).toBe("Ya trajo la radiografía")
+  // Lo que pide la atención en consentimientos es clínico: recepción no lo lee ni lo prepara.
+  const reception = buildApp("reception")
+  const needs = await reception.request(
+    `/clinical-forms/consent-needs?patientId=${patientId}&encounterId=${crypto.randomUUID()}`,
+  )
+  expect(needs.status).toBe(403)
+  expect(
+    (await post(reception, "/clinical-forms/consent-needs/prepare", { patientId, encounterId: crypto.randomUUID() }))
+      .status,
+  ).toBe(403)
 })
 
 it("imágenes: la subida genera miniatura WebP y la URL la sirve con ?variant=thumb", async () => {

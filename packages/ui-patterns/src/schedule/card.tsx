@@ -11,7 +11,7 @@ import type * as React from "react"
 
 import { entryAccessibleName } from "./block.js"
 import type { EntryDragBlockProps, EntryDragResizeProps } from "./drag.js"
-import { StatusIcon, statusSurfaceClass } from "./status.js"
+import { entryState, StatusIcon, statusSurfaceClass } from "./status.js"
 import { dayMinutesIn, hourLabel } from "./time.js"
 import type { ScheduleEntry } from "./types.js"
 
@@ -52,6 +52,7 @@ export function ScheduleCard({
   const dragging = dragProps["data-dragging"] === "true"
   const startLabel = hourLabel(dayMinutesIn(entry.start, timeZone))
   const twoLines = heightPx >= TWO_LINES_PX
+  const state = entryState(entry)
 
   const open = (event: React.MouseEvent | React.KeyboardEvent) => {
     if (suppressClick()) return
@@ -84,7 +85,7 @@ export function ScheduleCard({
         className={cn(
           "flex size-full touch-manipulation flex-col justify-center overflow-hidden rounded-[10px] px-2.5 text-left outline-none select-none",
           "transition-shadow focus-visible:ring-2 focus-visible:ring-ring",
-          statusSurfaceClass(entry.status),
+          statusSurfaceClass(state),
           entry.warning && "ring-2 ring-warning ring-inset",
           selected && "ring-2 ring-ring",
           draggable && "cursor-grab",
@@ -98,7 +99,7 @@ export function ScheduleCard({
               {entry.warning ? (
                 <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
               ) : null}
-              <StatusIcon status={entry.status} className="size-3.5" />
+              <StatusIcon status={state} className="size-3.5" />
             </span>
             <span className="w-full truncate text-xs leading-[15px] text-muted-foreground">
               <span className="font-semibold tabular-nums">{startLabel}</span>
@@ -109,7 +110,7 @@ export function ScheduleCard({
           <span className="flex w-full items-center gap-1.5 text-xs leading-4 font-semibold">
             <span className="shrink-0 tabular-nums">{startLabel}</span>
             <span className="min-w-0 flex-1 truncate">{entry.title}</span>
-            <StatusIcon status={entry.status} className="size-3.5" />
+            <StatusIcon status={state} className="size-3.5" />
           </span>
         )}
       </button>

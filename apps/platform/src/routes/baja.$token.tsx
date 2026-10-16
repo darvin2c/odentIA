@@ -17,8 +17,9 @@ export const Route = createFileRoute("/baja/$token")({
 })
 
 /**
- * Baja verificable de mensajes automáticos (sin sesión). Revoca el opt-in de
- * todas las finalidades y cancela los envíos pendientes del contacto.
+ * Baja verificable de un tipo de mensaje (sin sesión): apaga el del mensaje del
+ * que salió el enlace y cancela lo que de ese tipo estaba por salir. Lo que deja
+ * de recibir lo dice el servidor (`stops`); la página no lo deduce.
  */
 function PublicUnsubscribePage() {
   const { token } = Route.useParams()
@@ -34,12 +35,14 @@ function PublicUnsubscribePage() {
     staleTime: 30_000,
   })
 
+  const stops = infoQuery.data?.data.stops ?? null
+
   if (done) {
     return (
       <PageShell maxWidth="md">
         <EmptyState
           title="Baja confirmada"
-          description="Ya no recibirás mensajes automáticos en este número o correo. Si cambias de opinión, avísale a recepción."
+          description={`Ya no recibirás ${stops?.what ?? "estos mensajes"}. Si cambias de opinión, avísale a recepción.`}
         />
       </PageShell>
     )
@@ -100,8 +103,10 @@ function PublicUnsubscribePage() {
   return (
     <PageShell maxWidth="md">
       <PageHeader
-        title="Dejar de recibir mensajes"
-        subtitle="Al confirmar, revocamos tu autorización para mensajes automáticos (recordatorios, seguimientos y campañas) y cancelamos los envíos pendientes. La clínica podrá seguir contactándote por otras vías para asuntos asistenciales."
+        title={`Dejar de recibir ${stops?.what ?? "estos mensajes"}`}
+        subtitle={[stops?.detail, "Al confirmar, dejan de llegarte y se cancelan los que estaban por salir.", stops?.keeps]
+          .filter(Boolean)
+          .join(" ")}
       />
       {submitError ? (
         <p role="alert" className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">

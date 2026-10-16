@@ -179,7 +179,7 @@ export interface TaskItem {
 export const TASK_AREA_LABEL: Record<NonNullable<TaskItem["area"]>, string> = {
   recepcion: "Equipo de recepción",
   caja: "Caja",
-  clinico: "Profesional",
+  clinico: "Equipo clínico",
   administracion: "Administración",
 }
 

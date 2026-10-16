@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react"
 import { PageNotice } from "./page-notice.js"
 
 /**
- * Los momentos del tablero C4 (cobro por acción, ADR 0030), de arriba abajo:
+ * Los momentos del tablero C4 (cobro por acción, ADR 0031), de arriba abajo:
  * aviso, alarma y límite. Verlo en tema oscuro y en ancho de teléfono: la
  * acción baja de línea antes de recortar el texto.
  */

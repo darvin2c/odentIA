@@ -10,7 +10,7 @@
  */
 import type { Db } from "@odentia/db"
 import { automationConsent } from "@odentia/db/schema/automation"
-import { patient, patientContact, patientDataConsent } from "@odentia/db/schema/clinical"
+import { patientContact, patientDataConsent } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
@@ -95,7 +95,7 @@ export async function grantDataConsent(
   patientId: string,
   input: GrantDataConsentInput,
 ): Promise<DataConsentRow> {
-  const person = await requirePatient(tx, orgId, patientId)
+  await requirePatient(tx, orgId, patientId)
   const purposes = [...new Set(input.purposes)]
   if (!purposes.includes("atencion"))
     throw validation("La finalidad de atención es la base del consentimiento")
@@ -143,12 +143,6 @@ export async function grantDataConsent(
     asked: ["comunicaciones", ...(purposes.includes("recordatorios") ? ["recordatorios"] : [])],
     channel,
   })
-  if (!person.dataConsentAt) {
-    await tx
-      .update(patient)
-      .set({ dataConsentAt: row.grantedAt, dataConsentBy: actorUserId, updatedAt: new Date() })
-      .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-  }
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,

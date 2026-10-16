@@ -8,7 +8,7 @@ import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { updateContact } from "./contacts.js"
 import { grantDataConsent, listDataConsents, revokeDataConsent } from "./data-consents.js"
-import { getPatient, updatePatient } from "./patients.js"
+import { updatePatient } from "./patients.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -51,13 +51,20 @@ it("el nombre separado deriva el visible, el teléfono queda en E.164 y la perso
     displayName: "Rosa María Quispe Huamán",
     givenNames: "Rosa María",
   })
-  // Pasaporte sin país, ubigeo inexistente y catálogo inválido se rechazan.
+  // Un departamento fuera de la lista del Perú y un catálogo inválido se rechazan.
   await expect(
-    f.run((tx) => updatePatient(tx, "org_a", f.actor, f.patient.id, { docCountry: null })),
+    f.run((tx) => updatePatient(tx, "org_a", f.actor, f.patient.id, { addressRegion: "Lima" })),
   ).rejects.toMatchObject({ status: 400 })
-  await expect(
-    f.run((tx) => updatePatient(tx, "org_a", f.actor, f.patient.id, { addressUbigeo: "999999" })),
-  ).rejects.toMatchObject({ status: 400 })
+  const withRegion = await f.run((tx) =>
+    updatePatient(tx, "org_a", f.actor, f.patient.id, { address: "Jr. Las Begonias 120", addressRegion: "PE-LMA" }),
+  )
+  // La dirección toma el país de la clínica si no se eligió otro.
+  expect(withRegion).toMatchObject({ addressRegion: "PE-LMA", addressCountry: "PE" })
+  // Solo cambiar el número no le quita su país emisor al pasaporte.
+  const renumbered = await f.run((tx) =>
+    updatePatient(tx, "org_a", f.actor, f.patient.id, { docNumber: "AB654321" }),
+  )
+  expect(renumbered).toMatchObject({ docType: "PASAPORTE", docCountry: "VE" })
   await expect(
     f.run((tx) =>
       updatePatient(tx, "org_a", f.actor, f.patient.id, { maritalStatus: "unión libre" }),
@@ -133,9 +140,10 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
     { purpose: "seguimiento", granted: null },
     { purpose: "novedades", granted: false, source: "revocacion_datos" },
   ])
-  expect(
-    (await f.run((tx) => getPatient(tx, "org_a", f.patient.id))).patient.dataConsentAt,
-  ).not.toBeNull()
+  // Revocar no borra la historia: el consentimiento sigue, con quién lo revocó.
+  expect(await f.run((tx) => listDataConsents(tx, "org_a", f.patient.id))).toEqual([
+    expect.objectContaining({ id: granted.id, revokedAt: expect.any(Date), revokedBy: f.actor }),
+  ])
 })
 
 it("antecedentes: gravedad ausente es desconocida, familiares por parentesco y ASA", async () => {

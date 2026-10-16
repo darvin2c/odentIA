@@ -55,15 +55,19 @@ import {
   setOpportunityTask,
 } from "./opportunities.js"
 import { confirmationReply } from "./appointment-confirm-words.js"
+import { firstName } from "./automation-routing.js"
+import { type SendBudgetDeps, sendBudget } from "./budget-send.js"
+import { type BudgetLineWithStatus, type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
+import { OPERATIONS } from "./operation-fields.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
-import { requireLinkedActiveContact } from "./responsibilities.js"
+import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getAccountSummary } from "./payments.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS, proposalPendingSql } from "./proposal-state.js"
-import { formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
+import { formatOrgMoney, formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
 
 export { CONFIRM_TTL_HOURS }
 /** Ventana en ms derivada del plazo (una sola fuente de verdad). */
@@ -111,7 +115,7 @@ async function notify(tx: Db, payload: { orgId: string; kind: string; at: string
 function assertAction(action: string): asserts action is ProposalAction {
   if (!(PROPOSAL_ACTIONS as readonly string[]).includes(action)) {
     throw validation(
-      "Acción inválida (reservar_cita|reprogramar_cita|cancelar_cita|enviar_mensaje|mover_oportunidad|crear_oportunidad|actualizar_seguimiento|cerrar_oportunidad)",
+      "Acción inválida (reservar_cita|reprogramar_cita|cancelar_cita|enviar_mensaje|mover_oportunidad|crear_oportunidad|actualizar_seguimiento|cerrar_oportunidad|decidir_presupuesto)",
     )
   }
 }
@@ -132,6 +136,8 @@ function cleanReason(value: unknown, max = 2000): string | null {
 export function requiredPermissionForAction(action: string): string {
   assertAction(action)
   if (action === "enviar_mensaje") return "conversations.write"
+  // Registrar el sí de la persona a su respuesta es anotarla: lo de quien anota respuestas.
+  if (action === "decidir_presupuesto") return "budgets.decide"
   if (
     action === "mover_oportunidad" ||
     action === "crear_oportunidad" ||
@@ -519,6 +525,457 @@ async function hasEconomicRole(tx: Db, orgId: string, patientId: string, contact
   return !!grant
 }
 
+/* ---------- Presupuestos de la persona (Recepción, fase 3: decisiones 4 y 5) ---------- */
+
+/** Lo que se responde por cada tratamiento: la lista la declara su operación. */
+const BUDGET_ANSWER_DECISIONS = OPERATIONS["presupuesto.respuesta"].fields.decisions.values
+type BudgetAnswerDecision = (typeof BUDGET_ANSWER_DECISIONS)[number]
+
+/** Estados en los que se anota una respuesta: enviado, o con algo que dejó para después. */
+const BUDGET_ANSWERABLE = ["presentado", "parcial", "pospuesto"]
+/** Lo que la persona no recibe como suyo: lo que aún se prepara y lo que se anuló o reemplazó. */
+const BUDGET_NOT_DELIVERED = ["borrador", "cancelado", "sustituido"]
+/** Lo que se puede reenviar (o, en borrador, lo que todavía no está listo). */
+const BUDGET_RESENDABLE = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"]
+/** Presupuestos entregados que ve el agente, del más reciente al más antiguo. */
+const AGENT_BUDGETS_SHOWN = 3
+/** Plazo de la tarea que deja el agente cuando no puede enviarlo: el de un caso de prioridad media. */
+const BUDGET_TASK_DUE_HOURS = 24
+
+/** Una línea tal como la ve la persona en su presupuesto: nunca diagnósticos ni notas clínicas. */
+export interface AgentBudgetLine {
+  planItemId: string
+  title: string
+  /** «pieza 16», como en el PDF; nulo si no es de una pieza. */
+  piece: string | null
+  lineTotalCents: number | null
+  /** Se cobra por sesión: cuántas visitas y a cuánto cada una. */
+  sessions: { count: number; unitCents: number | null } | null
+  promotionName: string | null
+  /** `pendiente`, `aceptado`, `pospuesto`, `rechazado` o `no_elegida`. */
+  decision: string
+}
+
+export interface AgentBudgetOption {
+  id: string
+  /** «Opción A». */
+  label: string
+  isRecommended: boolean
+  decision: string
+  totalCents: number | null
+  lines: AgentBudgetLine[]
+}
+
+export interface AgentBudgetView {
+  budgetId: string
+  budgetNumber: number
+  status: string
+  /** El estado con el nombre de toda la aplicación («Enviado · espera respuesta»). */
+  stateText: string
+  currency: string
+  /** Se le puede anotar una respuesta. */
+  answerable: boolean
+  /** El de la opción elegida o, mientras decide, el de la recomendada. */
+  totalCents: number | null
+  options: AgentBudgetOption[]
+}
+
+export interface AgentPatientBudgets {
+  context: AgentPatientContext
+  /** Los entregados, del más reciente al más antiguo (como mucho tres). */
+  budgets: AgentBudgetView[]
+  /** Hay uno que la clínica aún prepara: se dice que existe, nunca qué lleva. */
+  inPreparation: boolean
+}
+
+function agentBudgetLine(line: BudgetLineWithStatus): AgentBudgetLine {
+  return {
+    planItemId: line.planItemId,
+    title: line.title,
+    piece: line.toothNumber != null ? `pieza ${line.toothNumber}` : null,
+    lineTotalCents: line.lineTotalCents,
+    sessions: line.billingMode === "session" ? { count: Math.max(line.sessionsPlanned ?? 1, 1), unitCents: line.priceCents } : null,
+    promotionName: line.promotionName,
+    decision: line.decision,
+  }
+}
+
+function agentBudgetView(budget: BudgetWithTotals): AgentBudgetView {
+  return {
+    budgetId: budget.id,
+    budgetNumber: budget.budgetNumber,
+    status: budget.status,
+    stateText: budget.stateText,
+    currency: budget.currency,
+    answerable: BUDGET_ANSWERABLE.includes(budget.status),
+    totalCents: budget.totalCents,
+    options: budget.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      isRecommended: option.isRecommended,
+      decision: option.decision,
+      totalCents: option.totalCents,
+      lines: budget.items.filter((line) => line.optionId === option.id).map(agentBudgetLine),
+    })),
+  }
+}
+
+/** «N.º 0012», como en el documento. */
+export function budgetNumberText(budgetNumber: number): string {
+  return `N.º ${String(budgetNumber).padStart(4, "0")}`
+}
+
+/**
+ * Los presupuestos de un paciente que el interlocutor está autorizado a ver
+ * (`resolveAgentPatientContext`: la persona, su representante o quien ella
+ * autorizó; nunca por coincidencia de teléfono), tal como los recibe la
+ * persona: tratamientos, pieza, precios y opciones. Sin diagnósticos ni notas.
+ * Del que aún se prepara solo se dice que existe.
+ */
+export async function getAgentPatientBudgets(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string,
+): Promise<AgentPatientBudgets> {
+  const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
+  const all = await listBudgets(tx, orgId, patientId)
+  const newest = [...all].reverse()
+  return {
+    context,
+    budgets: newest.filter((budget) => !BUDGET_NOT_DELIVERED.includes(budget.status)).slice(0, AGENT_BUDGETS_SHOWN).map(agentBudgetView),
+    inPreparation: all.some((budget) => budget.status === "borrador"),
+  }
+}
+
+export type AgentBudgetResend =
+  | {
+      outcome: "enviado"
+      budgetNumber: number
+      recipientName: string
+      /** Le llegó a quien escribe; si no, a su representante legal (paciente menor). */
+      toInterlocutor: boolean
+      channel: "whatsapp" | "email"
+      via: "respuesta" | "plantilla" | "correo"
+      /** Salió en esta misma conversación. */
+      here: boolean
+    }
+  | {
+      /** `no_listo`: aún en borrador; `ninguno`: no hay presupuesto; `sin_via`: no hubo por dónde enviarlo. */
+      outcome: "no_listo" | "ninguno" | "sin_via"
+      /** Por qué no salió, para el equipo. */
+      detail: string | null
+      /** La tarea que quedó a recepción. */
+      taskId: string
+    }
+
+/**
+ * La persona pide su presupuesto por la conversación: se le reenvía el que la
+ * clínica ya preparó y entregó, por la misma operación que la pantalla
+ * (`sendBudget` con `by: "agente"`: WhatsApp primero, a la persona o, si es
+ * menor, a su representante legal). Nunca entrega un borrador ni arma uno.
+ * Solo para pacientes que el interlocutor está autorizado a ver. Sin
+ * `budgetId`, el último que la clínica preparó para ese paciente.
+ *
+ * Si aún no está listo, no hay ninguno o no hay por dónde enviarlo, no se
+ * intenta otra vía: queda una tarea a recepción («Lucía pidió su presupuesto:
+ * enviarlo») con el motivo, y el agente sigue atendiendo. `requestId` hace que
+ * reintentar el mismo pedido no lo envíe ni deje la tarea dos veces.
+ */
+export async function resendBudgetByContact(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; conversationId: string; patientId: string; budgetId?: string | null; requestId: string },
+  deps: { storage?: SendBudgetDeps["storage"] | null; secretsKey?: Buffer },
+): Promise<AgentBudgetResend> {
+  const context = await resolveAgentPatientContext(tx, orgId, input.contactId, input.patientId)
+  const budgets = await listBudgets(tx, orgId, input.patientId)
+  let target: BudgetWithTotals | undefined
+  if (input.budgetId) {
+    target = budgets.find((budget) => budget.id === input.budgetId)
+    if (!target) throw notFound("Presupuesto")
+  } else {
+    target = [...budgets].reverse().find((budget) => BUDGET_RESENDABLE.includes(budget.status))
+  }
+  const leaveTask = async (outcome: "no_listo" | "ninguno" | "sin_via", detail: string | null): Promise<AgentBudgetResend> => {
+    const [asker] = await tx
+      .select({ givenNames: contact.givenNames, displayName: contact.displayName })
+      .from(contact)
+      .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
+      .limit(1)
+    const [person] = await tx
+      .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+      .from(patient)
+      .where(and(eq(patient.organizationId, orgId), eq(patient.id, input.patientId)))
+      .limit(1)
+    const who = asker ? firstName(asker) : "La persona"
+    const whose = context.relationship === "self" || !person ? "su presupuesto" : `el presupuesto de ${firstName(person)}`
+    const reason =
+      outcome === "no_listo"
+        ? "Aún no está listo: revísalo y envíaselo."
+        : outcome === "ninguno"
+          ? "No tiene un presupuesto preparado."
+          : `No se pudo enviar: ${detail ?? "no hubo por dónde"}`
+    const task = await createTask(tx, orgId, {
+      title: `${who} pidió ${whose}: enviarlo`,
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      patientId: input.patientId,
+      dueAt: new Date(Date.now() + BUDGET_TASK_DUE_HOURS * 3_600_000).toISOString(),
+      area: "recepcion",
+      reason,
+      createdBy: "agent",
+      idempotencyKey: `${input.requestId}:tarea`,
+    })
+    return { outcome, detail, taskId: task.id }
+  }
+  if (!target) return leaveTask("ninguno", null)
+  if (target.status === "borrador") return leaveTask("no_listo", null)
+  if (!deps.storage) return leaveTask("sin_via", "el envío de documentos no está disponible desde el agente")
+  // Lo que el envío alcanzó a escribir antes de fallar no queda a medias.
+  await tx.execute(sql.raw("SAVEPOINT sp_budget_resend"))
+  try {
+    const sent = await sendBudget(
+      tx,
+      orgId,
+      { userId: null, by: "agente" },
+      { patientId: input.patientId, budgetId: target.id, requestId: input.requestId },
+      { storage: deps.storage, ...(deps.secretsKey ? { secretsKey: deps.secretsKey } : {}) },
+    )
+    await tx.execute(sql.raw("RELEASE SAVEPOINT sp_budget_resend"))
+    const [thread] = await tx
+      .select({ contactId: conversation.contactId })
+      .from(conversation)
+      .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, sent.conversationId)))
+      .limit(1)
+    return {
+      outcome: "enviado",
+      budgetNumber: target.budgetNumber,
+      recipientName: sent.recipientName,
+      toInterlocutor: thread?.contactId === input.contactId,
+      channel: sent.channel,
+      via: sent.via,
+      here: sent.conversationId === input.conversationId,
+    }
+  } catch (error) {
+    await tx.execute(sql.raw("ROLLBACK TO SAVEPOINT sp_budget_resend"))
+    await tx.execute(sql.raw("RELEASE SAVEPOINT sp_budget_resend"))
+    if (!(error instanceof ServiceError)) throw error
+    if (error.code === "BUDGET_NOT_READY") return leaveTask("no_listo", null)
+    if (error.code === "BUDGET_NO_ROUTE" || error.code === "BUDGET_OPTED_OUT" || error.code === "BUDGET_NO_RECIPIENT") {
+      return leaveTask("sin_via", error.message)
+    }
+    throw error
+  }
+}
+
+/** La respuesta de la persona, leída contra el presupuesto vivo. */
+export interface BudgetAnswer {
+  budget: BudgetWithTotals
+  option: { id: string; label: string; /** Elige ahora entre varias. */ choosing: boolean }
+  accepted: AgentBudgetLine[]
+  postponed: AgentBudgetLine[]
+  rejected: AgentBudgetLine[]
+  /** Lo que suma lo que acepta ahora; nulo si algún precio no se conoce. */
+  acceptedCents: number | null
+  /** Una por cada línea de la opción: lo que dijo y, de lo ya decidido, lo que había. */
+  decisions: Array<{ planItemId: string; decision: BudgetAnswerDecision }>
+}
+
+export interface BudgetAnswerInput {
+  patientId: string
+  budgetId: string
+  optionId?: string | null
+  decisions: Array<{ planItemId: string; decision: BudgetAnswerDecision }>
+}
+
+/**
+ * Valida lo que respondió contra el presupuesto, sin escribir: la opción (si
+ * hay varias y aún no eligió, debe decir cuál), que cada tratamiento esté en
+ * ella y que responda todo lo que sigue abierto (lo pendiente, o lo que dejó
+ * para después). Lo ya decidido se conserva tal cual; nunca se reescribe.
+ */
+async function budgetAnswerOf(tx: Db, orgId: string, input: BudgetAnswerInput): Promise<BudgetAnswer> {
+  const budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
+  if (!BUDGET_ANSWERABLE.includes(budget.status)) {
+    throw new ServiceError("BUDGET_STATUS", 409, `Ese presupuesto no espera respuesta (${budget.stateText})`)
+  }
+  const chosen = budget.options.find((option) => option.decision === "elegida") ?? null
+  let option: BudgetWithTotals["options"][number] | undefined
+  if (chosen) {
+    if (input.optionId && input.optionId !== chosen.id) {
+      throw new ServiceError("BUDGET_DECISION_FINAL", 409, `Ya eligió la ${chosen.label}: esa elección no cambia por aquí`)
+    }
+    option = chosen
+  } else if (budget.options.length === 1) {
+    option = budget.options[0]
+  } else {
+    option = budget.options.find((item) => item.id === input.optionId)
+    if (!option) {
+      throw new ServiceError(
+        "BUDGET_OPTION_REQUIRED",
+        409,
+        `Tiene ${budget.options.length} opciones (${budget.options.map((item) => item.label).join(", ")}): pregunta cuál elige`,
+      )
+    }
+  }
+  if (!option) throw notFound("Opción del presupuesto")
+  const lines = budget.items.filter((line) => line.optionId === option.id)
+  const said = new Map(input.decisions.map((item) => [item.planItemId, item.decision]))
+  if (said.size !== input.decisions.length) throw validation("Un tratamiento aparece dos veces en la respuesta")
+  if (input.decisions.some((item) => !lines.some((line) => line.planItemId === item.planItemId))) {
+    throw new ServiceError("BUDGET_ANSWER_UNKNOWN", 409, `Hay tratamientos que no están en la ${option.label}: usa los ids de ver_presupuesto`)
+  }
+  const open = lines.filter((line) => line.decision === "pendiente" || line.decision === "pospuesto")
+  if (open.length === 0) throw new ServiceError("BUDGET_STATUS", 409, "Ya respondió todo ese presupuesto")
+  for (const line of lines) {
+    if (open.includes(line)) continue
+    const next = said.get(line.planItemId)
+    if (next && next !== line.decision) {
+      throw new ServiceError("BUDGET_DECISION_FINAL", 409, `Lo que ya decidió no cambia: ${budgetLineWords(agentBudgetLine(line))} ya está ${line.decision}`)
+    }
+  }
+  const missing = open.filter((line) => !said.has(line.planItemId))
+  if (missing.length > 0) {
+    throw new ServiceError(
+      "BUDGET_ANSWER_INCOMPLETE",
+      409,
+      `Falta saber qué hace con ${joinWords(missing.map((line) => budgetLineWords(agentBudgetLine(line))))}: pregúntaselo`,
+    )
+  }
+  const answered = open.map((line) => ({ line: agentBudgetLine(line), decision: said.get(line.planItemId)! }))
+  const accepted = answered.filter((item) => item.decision === "aceptado").map((item) => item.line)
+  let acceptedCents: number | null = 0
+  for (const line of accepted) {
+    if (line.lineTotalCents == null || acceptedCents == null) acceptedCents = null
+    else acceptedCents += line.lineTotalCents
+  }
+  return {
+    budget,
+    option: { id: option.id, label: option.label, choosing: !chosen && budget.options.length > 1 },
+    accepted,
+    postponed: answered.filter((item) => item.decision === "pospuesto").map((item) => item.line),
+    rejected: answered.filter((item) => item.decision === "rechazado").map((item) => item.line),
+    acceptedCents,
+    decisions: lines.map((line) => ({
+      planItemId: line.planItemId,
+      decision: said.get(line.planItemId) ?? (line.decision as BudgetAnswerDecision),
+    })),
+  }
+}
+
+/** La respuesta de una propuesta ya guardada; nula si el presupuesto ya no la admite. */
+async function readBudgetAnswer(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<BudgetAnswer | null> {
+  if (!isUuid(payload.patientId) || !isUuid(payload.budgetId) || !Array.isArray(payload.decisions)) return null
+  try {
+    return await budgetAnswerOf(tx, orgId, {
+      patientId: payload.patientId,
+      budgetId: payload.budgetId,
+      optionId: isUuid(payload.optionId) ? payload.optionId : null,
+      decisions: payload.decisions as BudgetAnswerInput["decisions"],
+    })
+  } catch (error) {
+    if (error instanceof ServiceError) return null
+    throw error
+  }
+}
+
+/**
+ * Antes de proponer la respuesta: quien escribe debe poder decidir (la
+ * persona o su representante legal vigente; un autorizado de información, no)
+ * y, si ya respondió antes otra persona, solo ella completa lo que quedó para
+ * después. Devuelve lo que se repetirá a la persona y la propuesta a crear.
+ */
+export async function planBudgetAnswer(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  input: BudgetAnswerInput,
+): Promise<{ answer: BudgetAnswer; payload: Record<string, unknown> }> {
+  await requireDecisionContact(tx, orgId, input.patientId, contactId)
+  const answer = await budgetAnswerOf(tx, orgId, input)
+  if (answer.budget.decisionContactId && answer.budget.decisionContactId !== contactId) {
+    throw new ServiceError("BUDGET_DECISION_OWNER", 409, "Lo respondió otra persona: solo ella completa lo que dejó para después")
+  }
+  return {
+    answer,
+    payload: { patientId: input.patientId, budgetId: input.budgetId, optionId: answer.option.id, decisions: answer.decisions },
+  }
+}
+
+/** «Resina compuesta de la pieza 16». */
+export function budgetLineWords(line: Pick<AgentBudgetLine, "title" | "piece">): string {
+  return line.piece ? `${line.title} de la ${line.piece}` : line.title
+}
+
+function joinWords(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ""
+  return `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`
+}
+
+function acceptedMoney(answer: BudgetAnswer, zone: Pick<OrgLocale, "locale">): string {
+  return answer.accepted.length > 0 && answer.acceptedCents != null
+    ? ` (${formatOrgMoney(answer.acceptedCents, answer.budget.currency, zone)})`
+    : ""
+}
+
+/** Lo que se anotará, dicho para el equipo y para el propio agente en el estado del caso. */
+export function budgetAnswerSummary(answer: BudgetAnswer, zone: Pick<OrgLocale, "locale">): string {
+  const parts = [
+    answer.accepted.length ? `acepta ${joinWords(answer.accepted.map(budgetLineWords))}${acceptedMoney(answer, zone)}` : null,
+    answer.postponed.length ? `deja para después ${joinWords(answer.postponed.map(budgetLineWords))}` : null,
+    answer.rejected.length ? `no acepta ${joinWords(answer.rejected.map(budgetLineWords))}` : null,
+  ].filter((part): part is string => part !== null)
+  const head = `Presupuesto ${budgetNumberText(answer.budget.budgetNumber)}${answer.option.choosing ? `, ${answer.option.label}` : ""}`
+  return `${head}: ${parts.join("; ")}`
+}
+
+/**
+ * La pregunta que confirma la lista antes de anotarla, en el trato de la
+ * clínica: «Entonces anoto que aceptas … (S/ 360.00) y dejas para después ….
+ * ¿Es correcto?». El importe es la suma de lo que acepta ahora.
+ */
+export function budgetAnswerQuestion(
+  answer: BudgetAnswer,
+  zone: Pick<OrgLocale, "locale">,
+  treatment: "tu" | "usted" | null,
+): string {
+  const say = (tu: string, usted: string) => (treatment === "usted" ? usted : tu)
+  const clauses = [
+    answer.option.choosing ? `${say("eliges", "elige")} la ${answer.option.label}` : null,
+    answer.accepted.length ? `${say("aceptas", "acepta")} ${joinWords(answer.accepted.map(budgetLineWords))}${acceptedMoney(answer, zone)}` : null,
+    answer.postponed.length ? `${say("dejas", "deja")} para después ${joinWords(answer.postponed.map(budgetLineWords))}` : null,
+    answer.rejected.length ? `no ${say("aceptas", "acepta")} ${joinWords(answer.rejected.map(budgetLineWords))}` : null,
+  ].filter((part): part is string => part !== null)
+  return `Entonces anoto que ${joinWords(clauses)}. ¿Es correcto?`
+}
+
+/**
+ * «Sí» / «No» bajo la pregunta que espera confirmar una propuesta. No son
+ * botones del sistema (no empiezan por `odentia:`): tocarlos es escribirlo, y
+ * el sí lo confirma el agente como cualquier otro (`confirmProposalByContact`).
+ */
+export function proposalConfirmButtons(proposalId: string): Array<{ id: string; title: string }> {
+  return [
+    { id: `agente:si:${proposalId}`, title: "Sí" },
+    { id: `agente:no:${proposalId}`, title: "No" },
+  ]
+}
+
+/** Botones de un mensaje del agente, si son válidos: de uno a tres, con id y título breve. */
+function replyButtonsOf(value: unknown): Array<{ id: string; title: string }> | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3) return null
+  const buttons: Array<{ id: string; title: string }> = []
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return null
+    const { id, title } = item as Record<string, unknown>
+    if (typeof id !== "string" || !id.trim() || id.length > 200) return null
+    if (typeof title !== "string" || !title.trim() || title.length > 20) return null
+    buttons.push({ id, title })
+  }
+  return buttons
+}
+
 /* ---------- Disponibilidad (delegada en Agenda) ---------- */
 
 export interface FreeGapInput {
@@ -710,6 +1167,7 @@ export const PROPOSAL_ACTION_LABEL: Record<ProposalAction, string> = {
   crear_oportunidad: "Crear oportunidad",
   actualizar_seguimiento: "Dejar la tarea de una oportunidad",
   cerrar_oportunidad: "Cerrar oportunidad",
+  decidir_presupuesto: "Anotar la respuesta a un presupuesto",
 }
 
 async function stageNamesById(tx: Db, ids: string[]): Promise<Map<string, string>> {
@@ -743,38 +1201,44 @@ async function contactOpportunityOrNull(tx: Db, orgId: string, contactId: string
  */
 async function summarizeAfter(
   tx: Db,
+  orgId: string,
   action: ProposalAction,
   payload: Record<string, unknown>,
   zone: Pick<OrgLocale, "timezone" | "locale">,
 ): Promise<string> {
   const label = PROPOSAL_ACTION_LABEL[action]
   if (action === "enviar_mensaje") {
-    const text = payload["kind"] === "text" || payload["text"] ? payloadText(payload["text"]) : null
-    const name = typeof payload["name"] === "string" ? payload["name"] : null
+    const text = payload.kind === "text" || payload.text ? payloadText(payload.text) : null
+    const name = typeof payload.name === "string" ? payload.name : null
     return text ?? (name ? `Plantilla ${name}` : label)
   }
   if (action === "mover_oportunidad") {
-    const stages = await stageNamesById(tx, isUuid(payload["stageId"]) ? [payload["stageId"]] : [])
-    const to = typeof payload["stageId"] === "string" ? stages.get(payload["stageId"]) : undefined
+    const stages = await stageNamesById(tx, isUuid(payload.stageId) ? [payload.stageId] : [])
+    const to = typeof payload.stageId === "string" ? stages.get(payload.stageId) : undefined
     return to ? `Etapa destino: ${to}` : label
   }
   if (action === "crear_oportunidad") {
-    const title = payloadText(payload["title"], 80)
+    const title = payloadText(payload.title, 80)
     return title ? `Nueva oportunidad: ${title}` : label
   }
   if (action === "actualizar_seguimiento") {
-    const line = [payloadText(payload["nextActionNote"]), payloadDate(payload["nextActionAt"], zone)]
+    const line = [payloadText(payload.nextActionNote), payloadDate(payload.nextActionAt, zone)]
       .filter(Boolean)
       .join(" · ")
     return line ? `Nueva tarea: ${line}` : label
   }
   if (action === "cerrar_oportunidad") {
-    const outcome = payload["outcome"] === "won" ? "Ganada" : payload["outcome"] === "lost" ? "Perdida" : null
-    const reasonText = payloadText(payload["reason"], 80)
+    const outcome = payload.outcome === "won" ? "Ganada" : payload.outcome === "lost" ? "Perdida" : null
+    const reasonText = payloadText(payload.reason, 80)
     return outcome ? `${outcome}${reasonText ? `: ${reasonText}` : ""}` : label
   }
-  const startsAt = payloadDate(payload["startsAt"], zone)
-  const appointmentId = typeof payload["appointmentId"] === "string" ? payload["appointmentId"].slice(0, 8) : null
+  if (action === "decidir_presupuesto") {
+    // Lo que se le repitió a la persona, sin el trato: lo lee el equipo y el propio agente.
+    const answer = await readBudgetAnswer(tx, orgId, payload)
+    return answer ? budgetAnswerSummary(answer, zone) : label
+  }
+  const startsAt = payloadDate(payload.startsAt, zone)
+  const appointmentId = typeof payload.appointmentId === "string" ? payload.appointmentId.slice(0, 8) : null
   const line = [startsAt, appointmentId ? `cita ${appointmentId}…` : null].filter(Boolean).join(" · ")
   return line || label
 }
@@ -791,10 +1255,14 @@ async function summarizeBefore(
   contactId: string,
   zone: Pick<OrgLocale, "timezone" | "locale">,
 ): Promise<string | null> {
+  if (action === "decidir_presupuesto") {
+    const answer = await readBudgetAnswer(tx, orgId, payload)
+    return answer ? `Presupuesto ${budgetNumberText(answer.budget.budgetNumber)}: ${answer.budget.stateText}` : null
+  }
   if (action !== "mover_oportunidad" && action !== "actualizar_seguimiento" && action !== "cerrar_oportunidad") {
     return null
   }
-  const opp = await contactOpportunityOrNull(tx, orgId, contactId, payload["opportunityId"])
+  const opp = await contactOpportunityOrNull(tx, orgId, contactId, payload.opportunityId)
   if (!opp) return null
   if (action === "mover_oportunidad" || action === "cerrar_oportunidad") {
     const stages = await stageNamesById(tx, [opp.stageId])
@@ -820,14 +1288,18 @@ export type ExpectedProposalState = {
   appointmentId?: string
   appointmentVersion?: number | null
   appointmentStatus?: string | null
+  /** La respuesta a un presupuesto: su estado y su última modificación al proponer. */
+  budgetId?: string
+  budgetStatus?: string | null
+  budgetUpdatedAt?: string | null
 }
 
 function expectedOf(row: ProposalRow): ExpectedProposalState | null {
   const raw: unknown = row.expectedState
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
   const candidate = raw as Record<string, unknown>
-  const textKeys = ["opportunityId", "appointmentId"] as const
-  const nullableTextKeys = ["stageId", "status", "nextActionAt", "nextActionNote", "appointmentStatus"] as const
+  const textKeys = ["opportunityId", "appointmentId", "budgetId"] as const
+  const nullableTextKeys = ["stageId", "status", "nextActionAt", "nextActionNote", "appointmentStatus", "budgetStatus", "budgetUpdatedAt"] as const
   for (const key of Object.keys(candidate)) {
     if (
       !(textKeys as readonly string[]).includes(key) &&
@@ -845,7 +1317,7 @@ function expectedOf(row: ProposalRow): ExpectedProposalState | null {
     const value = candidate[key]
     if (value !== undefined && value !== null && typeof value !== "string") return null
   }
-  const version = candidate["appointmentVersion"]
+  const version = candidate.appointmentVersion
   if (version !== undefined && version !== null && typeof version !== "number") return null
   return candidate as ExpectedProposalState
 }
@@ -871,7 +1343,7 @@ async function captureExpectedState(
     (action === "mover_oportunidad" || action === "actualizar_seguimiento" || action === "cerrar_oportunidad") &&
     contactId
   ) {
-    const opp = await nullIfNotFound(getOpportunity(tx, orgId, payload["opportunityId"] as string))
+    const opp = await nullIfNotFound(getOpportunity(tx, orgId, payload.opportunityId as string))
     if (!opp || opp.contactId !== contactId) return null
     // Sin 'Abierta' fija en la evidencia: el estado ya cerrado se rechaza al
     // crear en vez de congelar un antes falso.
@@ -884,12 +1356,34 @@ async function captureExpectedState(
       nextActionNote: opp.nextTask?.title ?? null,
     }
   }
-  if ((action === "reprogramar_cita" || action === "cancelar_cita") && typeof payload["appointmentId"] === "string") {
-    const current = await nullIfNotFound(getAppointment(tx, orgId, payload["appointmentId"] as string))
+  if ((action === "reprogramar_cita" || action === "cancelar_cita") && typeof payload.appointmentId === "string") {
+    const current = await nullIfNotFound(getAppointment(tx, orgId, payload.appointmentId as string))
     if (!current) return null
     return { appointmentId: current.id, appointmentVersion: current.version, appointmentStatus: current.status }
   }
+  if (action === "decidir_presupuesto") {
+    const live = await liveBudgetOf(tx, orgId, payload)
+    if (!live) return null
+    return { budgetId: live.id, budgetStatus: live.status, budgetUpdatedAt: live.updatedAt.toISOString() }
+  }
   return null
+}
+
+/** Cabecera viva del presupuesto de una propuesta (estado y última modificación). */
+async function liveBudgetOf(tx: Db, orgId: string, payload: Record<string, unknown>) {
+  if (!isUuid(payload.budgetId) || !isUuid(payload.patientId)) return null
+  const [row] = await tx
+    .select({ id: treatmentBudget.id, number: treatmentBudget.budgetNumber, status: treatmentBudget.status, updatedAt: treatmentBudget.updatedAt })
+    .from(treatmentBudget)
+    .where(
+      and(
+        eq(treatmentBudget.organizationId, orgId),
+        eq(treatmentBudget.id, payload.budgetId),
+        eq(treatmentBudget.patientId, payload.patientId),
+      ),
+    )
+    .limit(1)
+  return row ?? null
 }
 
 /** Error de obsolescencia: lo vivo cambió desde la evidencia congelada. */
@@ -976,6 +1470,24 @@ function apptFreshness(
   return { isStale: false, currentSummary, reason: "" }
 }
 
+/**
+ * La respuesta propuesta vale para el presupuesto tal como estaba al
+ * proponerla: si alguien lo decidió, lo revisó o lo anuló después, ya no.
+ */
+function budgetFreshness(
+  expected: ExpectedProposalState | null,
+  live: { status: string; updatedAt: Date } | null,
+  number: number | null,
+): { isStale: boolean; currentSummary: string | null; reason: string } {
+  if (!live) return { isStale: true, currentSummary: "El presupuesto ya no está disponible", reason: "el presupuesto ya no existe" }
+  const currentSummary = `Presupuesto ${number === null ? "" : `${budgetNumberText(number)} `}(${live.status})`
+  if (!expected?.budgetId) return { isStale: false, currentSummary, reason: "" }
+  if (live.status !== expected.budgetStatus || live.updatedAt.toISOString() !== expected.budgetUpdatedAt) {
+    return { isStale: true, currentSummary, reason: "el presupuesto cambió desde la propuesta" }
+  }
+  return { isStale: false, currentSummary, reason: "" }
+}
+
 
 /**
  * Enriquece propuestas con el mismo contexto en todos los caminos
@@ -991,6 +1503,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
   const branchIds = new Set<string>()
   const userIds = new Set<string>()
   const appointmentIds = new Set<string>()
+  const budgetIds = new Set<string>()
   for (const row of rows) {
     if (row.contactId) contactIds.add(row.contactId)
     if (row.conversationId) conversationIds.add(row.conversationId)
@@ -1002,16 +1515,17 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     }
     const expected = expectedOf(row)
     if (expected?.opportunityId && isUuid(expected.opportunityId)) opportunityIds.add(expected.opportunityId)
-    const apptId = payload["appointmentId"] ?? expected?.appointmentId
+    const apptId = payload.appointmentId ?? expected?.appointmentId
     if (isUuid(apptId)) appointmentIds.add(apptId)
     for (const key of ["patientId"] as const) {
       const id = payload[key] ?? result[key]
       if (isUuid(id)) patientIds.add(id)
     }
-    if (isUuid(payload["branchId"])) branchIds.add(payload["branchId"])
-    if (isUuid(payload["dentistUserId"])) userIds.add(payload["dentistUserId"])
+    if (isUuid(payload.branchId)) branchIds.add(payload.branchId)
+    if (isUuid(payload.dentistUserId)) userIds.add(payload.dentistUserId)
+    if (row.action === "decidir_presupuesto" && isUuid(payload.budgetId)) budgetIds.add(payload.budgetId)
   }
-  const [contacts, convs, opps, appts, patients, branches, users] = await Promise.all([
+  const [contacts, convs, opps, appts, patients, branches, users, budgets] = await Promise.all([
     contactIds.size
       ? tx.select({ id: contact.id, displayName: contact.displayName }).from(contact).where(inArray(contact.id, [...contactIds]))
       : [],
@@ -1050,7 +1564,14 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     userIds.size
       ? tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, [...userIds]))
       : [],
+    budgetIds.size
+      ? tx
+          .select({ id: treatmentBudget.id, number: treatmentBudget.budgetNumber, status: treatmentBudget.status, updatedAt: treatmentBudget.updatedAt })
+          .from(treatmentBudget)
+          .where(and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, [...budgetIds])))
+      : [],
   ])
+  const budgetById = new Map(budgets.map((b) => [b.id, b]))
   const contactById = new Map(contacts.map((c) => [c.id, c.displayName]))
   const connectionByConv = new Map(convs.map((c) => [c.id, c.connectionId]))
   const oppById = new Map(opps.map((o) => [o.id, o]))
@@ -1080,7 +1601,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       .map(async (row) => {
         legacyAfter.set(
           row.id,
-          await summarizeAfter(tx, row.action as ProposalAction, row.payload as Record<string, unknown>, zone),
+          await summarizeAfter(tx, orgId, row.action as ProposalAction, row.payload as Record<string, unknown>, zone),
         )
       }),
   )
@@ -1088,11 +1609,11 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
     const action = row.action as ProposalAction
     const payload = row.payload as Record<string, unknown>
     const result = (row.result ?? {}) as Record<string, unknown>
-    const oppId = [payload["opportunityId"], result["opportunityId"], result["createdOpportunityId"]].find(
+    const oppId = [payload.opportunityId, result.opportunityId, result.createdOpportunityId].find(
       (v): v is string => typeof v === "string" && !!v,
     )
     const opp = oppId ? oppById.get(oppId) : undefined
-    const patientId = [payload["patientId"], result["patientId"], opp?.patientId].find(
+    const patientId = [payload.patientId, result.patientId, opp?.patientId].find(
       (v): v is string => typeof v === "string" && !!v,
     )
     const connectionId = connectionByConv.get(row.conversationId)
@@ -1104,7 +1625,8 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       action === "actualizar_seguimiento" ||
       action === "cerrar_oportunidad" ||
       action === "reprogramar_cita" ||
-      action === "cancelar_cita"
+      action === "cancelar_cita" ||
+      action === "decidir_presupuesto"
     if (action === "mover_oportunidad" || action === "actualizar_seguimiento" || action === "cerrar_oportunidad") {
       const live = opp
         ? {
@@ -1118,10 +1640,15 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       isStale = fresh.isStale
       currentSummary = fresh.currentSummary
     } else if (action === "reprogramar_cita" || action === "cancelar_cita") {
-      const apptId = payload["appointmentId"] ?? expected?.appointmentId
+      const apptId = payload.appointmentId ?? expected?.appointmentId
       const live = typeof apptId === "string" ? apptById.get(apptId) : undefined
-      const payloadVersion = typeof payload["expectedVersion"] === "number" ? (payload["expectedVersion"] as number) : null
+      const payloadVersion = typeof payload.expectedVersion === "number" ? (payload.expectedVersion as number) : null
       const fresh = apptFreshness(expected, payloadVersion, live ?? null, zone)
+      isStale = fresh.isStale
+      currentSummary = fresh.currentSummary
+    } else if (action === "decidir_presupuesto") {
+      const live = typeof payload.budgetId === "string" ? budgetById.get(payload.budgetId) : undefined
+      const fresh = budgetFreshness(expected, live ? { status: live.status, updatedAt: live.updatedAt } : null, live?.number ?? null)
       isStale = fresh.isStale
       currentSummary = fresh.currentSummary
     }
@@ -1132,7 +1659,8 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       touchesState &&
       (row.status === "propuesta" || row.status === "aprobada") &&
       !expected?.opportunityId &&
-      !expected?.appointmentId
+      !expected?.appointmentId &&
+      !expected?.budgetId
     ) {
       isStale = true
     }
@@ -1141,12 +1669,12 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       patientName: patientId ? (patientById.get(patientId) ?? null) : null,
       channel: connectionId ? (channelByConnection.get(connectionId) ?? null) : null,
       branchName:
-        typeof payload["branchId"] === "string" ? (branchById.get(payload["branchId"] as string) ?? null) : null,
+        typeof payload.branchId === "string" ? (branchById.get(payload.branchId as string) ?? null) : null,
       dentistName:
-        typeof result["dentistName"] === "string"
-          ? (result["dentistName"] as string)
-          : typeof payload["dentistUserId"] === "string"
-            ? (userById.get(payload["dentistUserId"] as string) ?? null)
+        typeof result.dentistName === "string"
+          ? (result.dentistName as string)
+          : typeof payload.dentistUserId === "string"
+            ? (userById.get(payload.dentistUserId as string) ?? null)
             : null,
       opportunityTitle: opp?.title ?? null,
       beforeSummary: row.beforeSummary ?? null,
@@ -1183,41 +1711,44 @@ function uuidField(payload: Record<string, unknown>, key: string, label: string,
 
 function validatePayload(action: ProposalAction, payload: Record<string, unknown>): void {
   if (action === "reservar_cita") {
-    if (typeof payload["patientId"] !== "string" || !payload["patientId"]) throw validation("patientId es obligatorio")
-    if (typeof payload["dentistUserId"] !== "string" || !payload["dentistUserId"]) throw validation("dentistUserId es obligatorio")
-    if (typeof payload["chairId"] !== "string" || !payload["chairId"]) throw validation("chairId es obligatorio")
-    if (typeof payload["startsAt"] !== "string" || Number.isNaN(Date.parse(payload["startsAt"]))) throw validation("startsAt inválido")
+    if (typeof payload.patientId !== "string" || !payload.patientId) throw validation("patientId es obligatorio")
+    if (typeof payload.dentistUserId !== "string" || !payload.dentistUserId) throw validation("dentistUserId es obligatorio")
+    if (typeof payload.chairId !== "string" || !payload.chairId) throw validation("chairId es obligatorio")
+    if (typeof payload.startsAt !== "string" || Number.isNaN(Date.parse(payload.startsAt))) throw validation("startsAt inválido")
     return
   }
   if (action === "reprogramar_cita" || action === "cancelar_cita") {
-    if (typeof payload["appointmentId"] !== "string" || !payload["appointmentId"]) throw validation("appointmentId es obligatorio")
+    if (typeof payload.appointmentId !== "string" || !payload.appointmentId) throw validation("appointmentId es obligatorio")
     if (action === "reprogramar_cita") {
-      if (typeof payload["startsAt"] !== "string" || Number.isNaN(Date.parse(payload["startsAt"]))) throw validation("startsAt inválido")
-      if (typeof payload["expectedVersion"] !== "number") throw validation("expectedVersion es obligatorio")
+      if (typeof payload.startsAt !== "string" || Number.isNaN(Date.parse(payload.startsAt))) throw validation("startsAt inválido")
+      if (typeof payload.expectedVersion !== "number") throw validation("expectedVersion es obligatorio")
     }
     return
   }
   if (action === "enviar_mensaje") {
     // Secretos del proveedor NUNCA en el payload: solo texto o plantilla validada.
-    if (payload["secretsKey"] !== undefined || payload["accessToken"] !== undefined || payload["botToken"] !== undefined) {
+    if (payload.secretsKey !== undefined || payload.accessToken !== undefined || payload.botToken !== undefined) {
       throw validation("El payload no debe incluir secretos del proveedor")
     }
-    const kind = payload["kind"]
-    if (kind === "text" || (kind === undefined && typeof payload["text"] === "string")) {
-      if (typeof payload["text"] !== "string" || !payload["text"].trim() || payload["text"].length > 4000) {
+    const kind = payload.kind
+    if (kind === "text" || (kind === undefined && typeof payload.text === "string")) {
+      if (typeof payload.text !== "string" || !payload.text.trim() || payload.text.length > 4000) {
         throw validation("text debe tener 1–4000 caracteres")
+      }
+      if (payload.buttons !== undefined && !replyButtonsOf(payload.buttons)) {
+        throw validation("buttons debe tener de 1 a 3 botones con id y título breve")
       }
       return
     }
     if (kind === "template") {
-      if (typeof payload["name"] !== "string" || !payload["name"].trim() || payload["name"].length > 120) {
+      if (typeof payload.name !== "string" || !payload.name.trim() || payload.name.length > 120) {
         throw validation("name de plantilla inválido")
       }
-      if (typeof payload["language"] !== "string" || !payload["language"].trim() || payload["language"].length > 20) {
+      if (typeof payload.language !== "string" || !payload.language.trim() || payload.language.length > 20) {
         throw validation("language de plantilla inválido")
       }
-      if (payload["params"] !== undefined) {
-        if (!Array.isArray(payload["params"]) || payload["params"].some((p) => typeof p !== "string" || p.length > 500)) {
+      if (payload.params !== undefined) {
+        if (!Array.isArray(payload.params) || payload.params.some((p) => typeof p !== "string" || p.length > 500)) {
           throw validation("params de plantilla inválidos")
         }
       }
@@ -1231,23 +1762,23 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
     return
   }
   if (action === "crear_oportunidad") {
-    if (typeof payload["title"] !== "string" || !payload["title"].trim() || payload["title"].length > 200) {
+    if (typeof payload.title !== "string" || !payload.title.trim() || payload.title.length > 200) {
       throw validation("title debe tener 1–200 caracteres")
     }
     uuidField(payload, "patientId", "patientId", true)
-    if (payload["interestText"] !== undefined && (typeof payload["interestText"] !== "string" || payload["interestText"].length > 500)) {
+    if (payload.interestText !== undefined && (typeof payload.interestText !== "string" || payload.interestText.length > 500)) {
       throw validation("interestText supera 500 caracteres")
     }
-    if (payload["amountCents"] !== undefined && (typeof payload["amountCents"] !== "number" || payload["amountCents"] < 0)) {
+    if (payload.amountCents !== undefined && (typeof payload.amountCents !== "number" || payload.amountCents < 0)) {
       throw validation("amountCents inválido")
     }
-    if (payload["nextActionAt"] !== undefined && payload["nextActionAt"] !== null) {
-      if (typeof payload["nextActionAt"] !== "string" || Number.isNaN(Date.parse(payload["nextActionAt"]))) {
+    if (payload.nextActionAt !== undefined && payload.nextActionAt !== null) {
+      if (typeof payload.nextActionAt !== "string" || Number.isNaN(Date.parse(payload.nextActionAt))) {
         throw validation("nextActionAt inválido")
       }
     }
-    if (payload["nextActionNote"] !== undefined && payload["nextActionNote"] !== null) {
-      if (typeof payload["nextActionNote"] !== "string" || payload["nextActionNote"].length > 500) {
+    if (payload.nextActionNote !== undefined && payload.nextActionNote !== null) {
+      if (typeof payload.nextActionNote !== "string" || payload.nextActionNote.length > 500) {
         throw validation("nextActionNote supera 500 caracteres")
       }
     }
@@ -1255,27 +1786,48 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
   }
   if (action === "actualizar_seguimiento") {
     uuidField(payload, "opportunityId", "opportunityId")
-    if (payload["nextActionAt"] === undefined && payload["nextActionNote"] === undefined) {
+    if (payload.nextActionAt === undefined && payload.nextActionNote === undefined) {
       throw validation("Indica nextActionAt o nextActionNote para el seguimiento")
     }
-    if (payload["nextActionAt"] !== undefined && payload["nextActionAt"] !== null) {
-      if (typeof payload["nextActionAt"] !== "string" || Number.isNaN(Date.parse(payload["nextActionAt"]))) {
+    if (payload.nextActionAt !== undefined && payload.nextActionAt !== null) {
+      if (typeof payload.nextActionAt !== "string" || Number.isNaN(Date.parse(payload.nextActionAt))) {
         throw validation("nextActionAt inválido")
       }
     }
-    if (payload["nextActionNote"] !== undefined && payload["nextActionNote"] !== null) {
-      if (typeof payload["nextActionNote"] !== "string" || payload["nextActionNote"].length > 500) {
+    if (payload.nextActionNote !== undefined && payload.nextActionNote !== null) {
+      if (typeof payload.nextActionNote !== "string" || payload.nextActionNote.length > 500) {
         throw validation("nextActionNote supera 500 caracteres")
       }
     }
     return
   }
+  if (action === "decidir_presupuesto") {
+    uuidField(payload, "patientId", "patientId")
+    uuidField(payload, "budgetId", "budgetId")
+    uuidField(payload, "optionId", "optionId", true)
+    const decisions = payload.decisions
+    if (
+      !Array.isArray(decisions) ||
+      decisions.length < 1 ||
+      decisions.length > 200 ||
+      decisions.some(
+        (item) =>
+          typeof item !== "object" ||
+          item === null ||
+          !isUuid((item as Record<string, unknown>).planItemId) ||
+          !(BUDGET_ANSWER_DECISIONS as readonly unknown[]).includes((item as Record<string, unknown>).decision),
+      )
+    ) {
+      throw validation("decisions debe traer una respuesta válida por tratamiento")
+    }
+    return
+  }
   uuidField(payload, "opportunityId", "opportunityId")
-  if (payload["outcome"] !== "won" && payload["outcome"] !== "lost") throw validation("outcome debe ser won|lost")
-  if (typeof payload["reason"] !== "string" || !payload["reason"].trim() || payload["reason"].length > 500) {
+  if (payload.outcome !== "won" && payload.outcome !== "lost") throw validation("outcome debe ser won|lost")
+  if (typeof payload.reason !== "string" || !payload.reason.trim() || payload.reason.length > 500) {
     throw validation("Elige el motivo del cierre de la lista")
   }
-  if (payload["note"] !== undefined && payload["note"] !== null && (typeof payload["note"] !== "string" || payload["note"].length > 500)) {
+  if (payload.note !== undefined && payload.note !== null && (typeof payload.note !== "string" || payload.note.length > 500)) {
     throw validation("La nota del cierre supera 500 caracteres")
   }
 }
@@ -1346,8 +1898,8 @@ export async function createProposal(
     // citas): mientras espera su «sí», ningún otro acto que no sea un mensaje
     // entra en el hilo, porque un mismo «sí» no puede autorizar dos cosas. Los
     // mensajes coexisten siempre.
-    const [pending] = await tx
-      .select({ id: agentProposal.id })
+    const pending = await tx
+      .select({ id: agentProposal.id, action: agentProposal.action })
       .from(agentProposal)
       .where(
         and(
@@ -1357,8 +1909,27 @@ export async function createProposal(
           gt(agentProposal.createdAt, new Date(Date.now() - CONFIRM_TTL_MS)),
         ),
       )
-      .limit(1)
-    if (pending && input.action !== "enviar_mensaje") {
+    // La persona corrige la lista de su respuesta («no, la 36 también»): la
+    // nueva reemplaza a la anterior, que nunca recibió su sí. Sigue habiendo
+    // una sola esperando confirmación.
+    const replaces =
+      input.action === "decidir_presupuesto" && pending.length > 0 && pending.every((row) => row.action === "decidir_presupuesto")
+    if (replaces) {
+      for (const row of pending) {
+        await tx
+          .update(agentProposal)
+          .set({ status: "expirada", updatedAt: new Date() })
+          .where(and(eq(agentProposal.id, row.id), eq(agentProposal.status, "propuesta")))
+        await tx.insert(auditEvent).values({
+          organizationId: orgId,
+          actorUserId: input.actorUserId ?? null,
+          action: "agent.proposal_expired",
+          entity: "agent_proposal",
+          entityId: row.id,
+          metadata: { replaced: true },
+        })
+      }
+    } else if (pending.length > 0 && input.action !== "enviar_mensaje") {
       throw new ServiceError(
         "PROPOSAL_PENDING_CONFIRM",
         409,
@@ -1373,7 +1944,7 @@ export async function createProposal(
   const beforeSnapshot = conv.contactId
     ? await summarizeBefore(tx, orgId, input.action, input.payload, conv.contactId, zone)
     : null
-  const afterSnapshot = await summarizeAfter(tx, input.action, input.payload, zone)
+  const afterSnapshot = await summarizeAfter(tx, orgId, input.action, input.payload, zone)
   const expectedSnapshot = conv.contactId
     ? await captureExpectedState(tx, orgId, input.action, input.payload, conv.contactId)
     : null
@@ -1573,6 +2144,17 @@ const AFFIRMATIVE_PHRASES = new Set([
   "quiero",
   "si quiero",
   "si confirmo",
+  // La respuesta natural a «¿Es correcto?» al repetirle una lista.
+  "correcto",
+  "es correcto",
+  "si correcto",
+  "si es correcto",
+  "asi es",
+  "si asi es",
+  "exacto",
+  "si exacto",
+  "esta bien",
+  "si esta bien",
 ])
 
 export function isAffirmative(text: string | null): boolean {
@@ -1713,22 +2295,22 @@ export async function executeProposal(
   try {
     let result: Record<string, unknown>
     if (action === "reservar_cita") {
-      const patientId = payload["patientId"] as string
+      const patientId = payload.patientId as string
       if (locked.contactId) {
         await resolveAgentPatientContext(tx, orgId, locked.contactId, patientId)
       } else {
         await requirePatient(tx, orgId, patientId)
       }
       const created = await createAppointment(tx, orgId, actorUserId, {
-        branchId: typeof payload["branchId"] === "string" ? (payload["branchId"] as string) : undefined,
+        branchId: typeof payload.branchId === "string" ? (payload.branchId as string) : undefined,
         patientId,
-        dentistUserId: payload["dentistUserId"] as string,
-        chairId: payload["chairId"] as string,
-        serviceId: typeof payload["serviceId"] === "string" ? (payload["serviceId"] as string) : undefined,
-        startsAt: payload["startsAt"] as string,
-        endsAt: typeof payload["endsAt"] === "string" ? (payload["endsAt"] as string) : undefined,
-        durationMin: typeof payload["durationMin"] === "number" ? (payload["durationMin"] as number) : undefined,
-        reason: typeof payload["reason"] === "string" ? (payload["reason"] as string) : undefined,
+        dentistUserId: payload.dentistUserId as string,
+        chairId: payload.chairId as string,
+        serviceId: typeof payload.serviceId === "string" ? (payload.serviceId as string) : undefined,
+        startsAt: payload.startsAt as string,
+        endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
+        durationMin: typeof payload.durationMin === "number" ? (payload.durationMin as number) : undefined,
+        reason: typeof payload.reason === "string" ? (payload.reason as string) : undefined,
         source: "agent",
         conversationId: locked.conversationId ?? undefined,
         // El agente y el interlocutor que confirma no son usuarios: la cita
@@ -1739,7 +2321,7 @@ export async function executeProposal(
       })
       result = { appointmentId: created.id, startsAt: created.startsAt, dentistName: created.dentistName }
     } else if (action === "reprogramar_cita") {
-      const appointmentId = payload["appointmentId"] as string
+      const appointmentId = payload.appointmentId as string
       const [liveAppt] = await tx
         .select()
         .from(appointment)
@@ -1758,21 +2340,21 @@ export async function executeProposal(
       }
       const fresh = apptFreshness(
         expected,
-        typeof payload["expectedVersion"] === "number" ? (payload["expectedVersion"] as number) : null,
+        typeof payload.expectedVersion === "number" ? (payload.expectedVersion as number) : null,
         { version: liveAppt.version, status: liveAppt.status, startsAt: liveAppt.startsAt },
         zone,
       )
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const moved = await moveAppointment(tx, orgId, actorUserId, appointmentId, {
-        expectedVersion: payload["expectedVersion"] as number,
-        startsAt: payload["startsAt"] as string,
-        endsAt: typeof payload["endsAt"] === "string" ? (payload["endsAt"] as string) : undefined,
-        dentistUserId: typeof payload["dentistUserId"] === "string" ? (payload["dentistUserId"] as string) : undefined,
-        chairId: typeof payload["chairId"] === "string" ? (payload["chairId"] as string) : undefined,
+        expectedVersion: payload.expectedVersion as number,
+        startsAt: payload.startsAt as string,
+        endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
+        dentistUserId: typeof payload.dentistUserId === "string" ? (payload.dentistUserId as string) : undefined,
+        chairId: typeof payload.chairId === "string" ? (payload.chairId as string) : undefined,
       }, { notice: false })
       result = { appointmentId: moved.id, startsAt: moved.startsAt }
     } else if (action === "cancelar_cita") {
-      const appointmentId = payload["appointmentId"] as string
+      const appointmentId = payload.appointmentId as string
       const [liveAppt] = await tx
         .select()
         .from(appointment)
@@ -1797,36 +2379,66 @@ export async function executeProposal(
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada", { notice: false })
       result = { appointmentId: cancelled.id, status: cancelled.status }
+    } else if (action === "decidir_presupuesto") {
+      // Decide quien escribe en la conversación (la persona o su representante
+      // legal vigente, lo comprueba `decideBudget`), con su sí a la lista. Es la
+      // misma operación que la pantalla y el portal; nadie del equipo firma.
+      if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
+      const patientId = payload.patientId as string
+      const budgetId = payload.budgetId as string
+      const live = await liveBudgetOf(tx, orgId, payload)
+      if (!expected?.budgetId) {
+        throw staleError("la propuesta no trae evidencia de estado; pide una nueva", live ? `Presupuesto (${live.status})` : null)
+      }
+      const fresh = budgetFreshness(expected, live, live?.number ?? null)
+      if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
+      const decided = await decideBudget(
+        tx,
+        orgId,
+        null,
+        patientId,
+        budgetId,
+        {
+          optionId: typeof payload.optionId === "string" ? (payload.optionId as string) : null,
+          decisions: payload.decisions as Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>,
+          decidedByContactId: locked.contactId,
+        },
+        { skipOwnPlan: true, via: "conversacion" },
+      )
+      result = { patientId, budgetId, status: decided.status, stateText: decided.stateText, acceptedCents: decided.acceptedCents }
     } else if (action === "enviar_mensaje") {
       const conversationId = locked.conversationId
-      if (payload["kind"] === "template") {
+      if (payload.kind === "template") {
         if (!opts.secretsKey) throw validation("Falta la clave de secretos para ejecutar la plantilla")
         const sent = await sendTemplateOutbound(tx, orgId, opts.secretsKey, {
           conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
-          name: payload["name"] as string,
-          language: payload["language"] as string,
-          params: Array.isArray(payload["params"]) ? (payload["params"] as string[]) : [],
+          name: payload.name as string,
+          language: payload.language as string,
+          params: Array.isArray(payload.params) ? (payload.params as string[]) : [],
         })
         result = {
           messageId: sent.id,
           kind: "template",
-          name: payload["name"],
-          language: payload["language"],
+          name: payload.name,
+          language: payload.language,
         }
       } else {
+        // «Sí» / «No» bajo la pregunta que pide confirmar una lista: tocarlos es
+        // escribirlo, y el sí llega al agente como cualquier otro.
+        const buttons = replyButtonsOf(payload.buttons)
         const sent = await sendOutbound(tx, orgId, {
           conversationId,
           senderKind: "agent",
           senderUserId: teamUserId,
-          content: { type: "text", text: payload["text"] as string },
+          content: { type: "text", text: payload.text as string, ...(buttons ? { buttons } : {}) },
         })
         result = { messageId: sent.id, kind: "text" }
       }
     } else if (action === "mover_oportunidad") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
-      const opportunityId = payload["opportunityId"] as string
+      const opportunityId = payload.opportunityId as string
       const live = await lockContactOpportunity(tx, orgId, locked.contactId, opportunityId)
       const stageName = (await stageNamesById(tx, [live.stageId])).get(live.stageId) ?? null
       const liveOpp = {
@@ -1843,7 +2455,7 @@ export async function executeProposal(
       }
       const fresh = oppFreshness("mover_oportunidad", expected, liveOpp, stageName, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const detail = await moveOpportunity(tx, orgId, opportunityId, payload["stageId"] as string, {
+      const detail = await moveOpportunity(tx, orgId, opportunityId, payload.stageId as string, {
         userId: teamUserId,
         origin: "agente",
       })
@@ -1857,26 +2469,26 @@ export async function executeProposal(
         orgId,
         {
           contactId: locked.contactId,
-          title: payload["title"] as string,
-          ...(typeof payload["patientId"] === "string" ? { patientId: payload["patientId"] as string } : {}),
-          ...(typeof payload["serviceId"] === "string" ? { serviceId: payload["serviceId"] as string } : {}),
-          ...(typeof payload["interestText"] === "string" ? { interestText: payload["interestText"] as string } : {}),
-          ...(typeof payload["assignedUserId"] === "string" ? { assignedUserId: payload["assignedUserId"] as string } : {}),
-          ...(typeof payload["budgetId"] === "string" ? { budgetId: payload["budgetId"] as string } : {}),
+          title: payload.title as string,
+          ...(typeof payload.patientId === "string" ? { patientId: payload.patientId as string } : {}),
+          ...(typeof payload.serviceId === "string" ? { serviceId: payload.serviceId as string } : {}),
+          ...(typeof payload.interestText === "string" ? { interestText: payload.interestText as string } : {}),
+          ...(typeof payload.assignedUserId === "string" ? { assignedUserId: payload.assignedUserId as string } : {}),
+          ...(typeof payload.budgetId === "string" ? { budgetId: payload.budgetId as string } : {}),
           ...(locked.conversationId ? { conversationId: locked.conversationId } : {}),
         },
         { userId: teamUserId, origin: "agente" },
         { reuseOpen: true },
       )
       // Propuestas anteriores podían traer la próxima acción: ahora es su tarea.
-      if (typeof payload["nextActionAt"] === "string" || typeof payload["nextActionNote"] === "string") {
+      if (typeof payload.nextActionAt === "string" || typeof payload.nextActionNote === "string") {
         await setOpportunityTask(
           tx,
           orgId,
           created.id,
           {
-            title: typeof payload["nextActionNote"] === "string" ? (payload["nextActionNote"] as string) : null,
-            dueAt: typeof payload["nextActionAt"] === "string" ? (payload["nextActionAt"] as string) : null,
+            title: typeof payload.nextActionNote === "string" ? (payload.nextActionNote as string) : null,
+            dueAt: typeof payload.nextActionAt === "string" ? (payload.nextActionAt as string) : null,
           },
           { userId: teamUserId, createdBy: "agent" },
         )
@@ -1890,7 +2502,7 @@ export async function executeProposal(
       }
     } else if (action === "actualizar_seguimiento") {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
-      const opportunityId = payload["opportunityId"] as string
+      const opportunityId = payload.opportunityId as string
       const live = await lockContactOpportunity(tx, orgId, locked.contactId, opportunityId)
       const liveOpp = {
         stageId: live.stageId,
@@ -1912,8 +2524,8 @@ export async function executeProposal(
         orgId,
         opportunityId,
         {
-          ...(typeof payload["nextActionNote"] === "string" ? { title: payload["nextActionNote"] as string } : {}),
-          ...(payload["nextActionAt"] !== undefined ? { dueAt: payload["nextActionAt"] as string | null } : {}),
+          ...(typeof payload.nextActionNote === "string" ? { title: payload.nextActionNote as string } : {}),
+          ...(payload.nextActionAt !== undefined ? { dueAt: payload.nextActionAt as string | null } : {}),
         },
         { userId: teamUserId, createdBy: "agent" },
       )
@@ -1925,7 +2537,7 @@ export async function executeProposal(
       }
     } else {
       if (!locked.contactId) throw validation("La propuesta no tiene contacto asociado")
-      const opportunityId = payload["opportunityId"] as string
+      const opportunityId = payload.opportunityId as string
       const live = await lockContactOpportunity(tx, orgId, locked.contactId, opportunityId)
       const stageName = (await stageNamesById(tx, [live.stageId])).get(live.stageId) ?? null
       const liveOpp = {
@@ -1943,8 +2555,8 @@ export async function executeProposal(
       const fresh = oppFreshness("cerrar_oportunidad", expected, liveOpp, stageName, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
       // Los motivos son de la lista; una propuesta antigua con texto libre queda como «Otro» con su nota.
-      const outcome = payload["outcome"] as "won" | "lost"
-      const raw = typeof payload["reason"] === "string" ? (payload["reason"] as string) : ""
+      const outcome = payload.outcome as "won" | "lost"
+      const raw = typeof payload.reason === "string" ? (payload.reason as string) : ""
       const listed = outcome === "won" ? raw === "acepto" : (CHOOSABLE_LOST_REASONS as readonly string[]).includes(raw)
       const closed = await closeOpportunity(
         tx,
@@ -1953,11 +2565,11 @@ export async function executeProposal(
         {
           outcome,
           reason: listed ? raw : outcome === "won" ? "acepto" : "otro",
-          note: typeof payload["note"] === "string" ? (payload["note"] as string) : listed ? null : raw.slice(0, 500) || null,
+          note: typeof payload.note === "string" ? (payload.note as string) : listed ? null : raw.slice(0, 500) || null,
         },
         { userId: teamUserId, origin: "agente" },
       )
-      result = { opportunityId, outcome: payload["outcome"], closedAt: closed.closedAt }
+      result = { opportunityId, outcome: payload.outcome, closedAt: closed.closedAt }
     }
     const [row] = await tx
       .update(agentProposal)
@@ -2628,7 +3240,7 @@ export async function recordAgentRun(tx: Db, orgId: string, input: RecordRunInpu
   if (input.usage?.length) {
     await recordAiUsage(tx, orgId, { origin: "recepcion", conversationId: input.conversationId ?? null, entries: input.usage })
   }
-  // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0030).
+  // Recepción atendió con IA: cuenta la conversación de esa persona (ADR 0031).
   if (input.status === "ok" && (input.llmCalls ?? 0) > 0 && input.conversationId) {
     await countConversationAction(tx, orgId, { conversationId: input.conversationId, at: input.startedAt })
   }
@@ -2700,7 +3312,7 @@ export interface AgentRunStats {
 /**
  * Métricas reales desde el libro (rango opcional ISO), para la clínica. El
  * costo de cada corrida no va: es lo que odentIA paga a los proveedores y lo
- * ve su administración (ADR 0030).
+ * ve su administración (ADR 0031).
  */
 export async function getAgentRunStats(tx: Db, orgId: string, input: { from?: string; to?: string } = {}): Promise<AgentRunStats> {
   const conditions = [eq(agentRunLedger.organizationId, orgId)]

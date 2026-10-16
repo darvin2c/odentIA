@@ -162,3 +162,23 @@ export const RELATIONSHIP_WORDS: Record<string, string> = {
 export function relationshipText(relationship: string, detail: string | null): string {
   return detail?.trim() || RELATIONSHIP_WORDS[relationship] || relationship
 }
+
+const SECTION_KEY = (patientId: string) => `odentia:seccion-de-la-persona:${patientId}`
+
+/** La pestaña de su página donde estaba quien trabaja con este paciente (solo en esta pestaña del navegador). */
+export function rememberPatientSection(patientId: string, section: string): void {
+  try {
+    sessionStorage.setItem(SECTION_KEY(patientId), section)
+  } catch {
+    // Sin almacenamiento la miga vuelve a la pestaña de siempre.
+  }
+}
+
+/** La pestaña a la que vuelve la miga de una atención; nula si no se sabe. */
+export function lastPatientSection(patientId: string): string | null {
+  try {
+    return sessionStorage.getItem(SECTION_KEY(patientId))
+  } catch {
+    return null
+  }
+}

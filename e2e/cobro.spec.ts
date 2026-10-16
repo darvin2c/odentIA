@@ -9,7 +9,7 @@ import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
- * Cobro por acción (ADR 0030): lo que hicieron los agentes en Plan y pagos y
+ * Cobro por acción (ADR 0031): lo que hicieron los agentes en Plan y pagos y
  * fila por fila, el aviso de la plataforma, y en la administración el plan,
  * la ficha de la clínica y Hoy. Los datos de cobro se preparan por la base:
  * contarlos ya lo prueban los servicios; aquí se recorre lo que se ve.

@@ -1,7 +1,7 @@
 import { registrationAnswersSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { getPublicPatientRegistration, registerPatient, ServiceError } from "@odentia/services"
+import { findOrgLocale, getPublicPatientRegistration, registerPatient, ServiceError } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -64,8 +64,13 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
     if (!query.success) return unavailable(c)
     const org = c.get("registrationOrganization")
     try {
-      const result = await withOrgContext(deps.db, org.id, tx => getPublicPatientRegistration(tx, org.id, query.data.token))
-      return c.json({ data: { organization: { name: org.name, logo: org.logo }, ...result } })
+      // El formato regional de la clínica: la página pública escribe fechas como en la clínica.
+      const result = await withOrgContext(deps.db, org.id, async tx => ({
+        ...(await getPublicPatientRegistration(tx, org.id, query.data.token)),
+        region: await findOrgLocale(tx, org.id),
+      }))
+      const { region, ...rest } = result
+      return c.json({ data: { organization: { name: org.name, logo: org.logo }, locale: region.locale, timeZone: region.timezone, ...rest } })
     } catch (error) {
       if (error instanceof ServiceError && error.status === 404) return unavailable(c)
       throw error

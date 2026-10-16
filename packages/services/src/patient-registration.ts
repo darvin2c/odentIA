@@ -1,7 +1,11 @@
 import {
+  clinicalProfileFor,
   DEFAULT_REGISTRATION_CONFIG,
+  documentIssuerCountry,
   isMinor,
   isRealDate,
+  missingPersonData,
+  type MissingPersonDatum,
   normalizePhone,
   pendingRegistrationFields,
   registrationAnswersSchema,
@@ -53,6 +57,29 @@ function notCompleted(): ServiceError {
     "REGISTRATION_NOT_COMPLETED",
     "No pudimos completar el registro. Comunícate con recepción.",
   )
+}
+
+/**
+ * Quien abrió su enlace ya tiene su ficha: no se registra otra vez, pero sí
+ * puede registrar a otra persona. Solo lo sabe quien tiene el enlace de su
+ * conversación, que es esa misma persona.
+ */
+const ALREADY_REGISTERED_TEXT = "Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."
+
+/** El contacto ya tiene ficha propia (su vínculo `self`). */
+async function hasOwnRecord(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+  const [own] = await tx
+    .select({ id: patientContact.id })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, contactId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .limit(1)
+  return !!own
 }
 
 function cloneDefaultConfig(): RegistrationConfig {
@@ -143,6 +170,37 @@ export async function getPatientRegistrationConfig(
     .where(eq(patientRegistrationConfig.organizationId, orgId))
     .limit(1)
   return row ? rowToConfig(row) : cloneDefaultConfig()
+}
+
+/**
+ * «Faltan datos para atenderla» de una ficha (decisión 10 de la fase 3): lo
+ * necesario para atender más lo que «Registro de pacientes» marca
+ * obligatorio, con la regla de `missingPersonData`. Se calcula aquí, en el
+ * servidor, para la página de la persona; el teléfono o el correo de quien
+ * habla por ella (un vínculo activo que no es ella) cuentan como suyos.
+ */
+export async function getPatientMissingData(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<MissingPersonDatum[]> {
+  const row = await requirePatient(tx, orgId, patientId)
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const [spokesperson] = await tx
+    .select({ id: contact.id })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+        sql`${patientContact.relationship} <> 'self'`,
+        eq(contact.isActive, true),
+        sql`(${contact.phone} is not null or ${contact.email} is not null)`,
+      ),
+    )
+    .limit(1)
+  return missingPersonData(config, row as unknown as Record<string, unknown>, { representativeContact: !!spokesperson })
 }
 
 export interface SaveRegistrationConfigInput {
@@ -316,13 +374,17 @@ export async function createPatientRegistrationLink(
 
 // --- Vista pública ---
 
-export type PublicRegistrationContext = { kind: "generic" } | { kind: "conversation" }
+/**
+ * `ownRecord`: quien abrió el enlace de su conversación ya tiene su ficha; el
+ * formulario no le ofrece registrarse a sí misma, solo a otra persona.
+ */
+export type PublicRegistrationContext = { kind: "generic" } | { kind: "conversation"; ownRecord: boolean }
 
 export async function getPublicPatientRegistration(
   tx: Db,
   orgId: string,
   token?: string,
-): Promise<{ config: RegistrationConfig; today: string; context: PublicRegistrationContext }> {
+): Promise<{ config: RegistrationConfig; today: string; countryCode: string | null; context: PublicRegistrationContext }> {
   await advisoryShared(tx, `patient-registration-config:${orgId}`)
   const [config] = await tx
     .select()
@@ -332,8 +394,10 @@ export async function getPublicPatientRegistration(
     .for("share")
   if (!config || !config.enabled) throw unavailable()
   const today = await patientOrganizationToday(tx, orgId)
+  // El país de la clínica: de él dependen los documentos, seguros y regiones del formulario (ADR 0036).
+  const countryCode = await findOrgCountry(tx, orgId)
   // Token vacío o inválido nunca cae al formulario genérico.
-  if (token === undefined) return { config: rowToConfig(config), today, context: { kind: "generic" } }
+  if (token === undefined) return { config: rowToConfig(config), today, countryCode, context: { kind: "generic" } }
   const [link] = await tx
     .select()
     .from(patientRegistrationLink)
@@ -364,7 +428,12 @@ export async function getPublicPatientRegistration(
   if (!person || !person.isActive || !thread || thread.contactId !== link.contactId || !await directConversation(tx, orgId, thread.id, person.id)) {
     throw unavailable()
   }
-  return { config: rowToConfig(config), today, context: { kind: "conversation" } }
+  return {
+    config: rowToConfig(config),
+    today,
+    countryCode,
+    context: { kind: "conversation", ownRecord: await hasOwnRecord(tx, orgId, link.contactId) },
+  }
 }
 
 // --- Registro transaccional ---
@@ -456,8 +525,11 @@ async function lockTokenRow(tx: Db, orgId: string, token: string): Promise<Resol
  * aún falta. Es corta: si la lista no cabe, dice cuántos más faltan en vez de cortarse.
  */
 function pendingRegistrationNote(who: string, config: RegistrationConfig, answers: RegistrationAnswers): string {
-  const pending = pendingRegistrationFields(config, answers).map((field) => field.label.toLowerCase())
-  const head = `${who}. Falta en la clínica: confirmar apellidos y nombres`
+  // La misma regla y las mismas palabras que el aviso de su página
+  // («Faltan datos para atenderla»); tipo y número se dicen «documento».
+  const pending = [...new Set(pendingRegistrationFields(config, answers).map((field) =>
+    field.key === "docType" || field.key === "docNumber" ? "documento" : field.label.toLowerCase()))]
+  const head = `${who}. Faltan datos para atenderla: confirmar apellidos y nombres`
   const named: string[] = []
   for (const label of pending) {
     const rest = pending.length - named.length - 1
@@ -637,19 +709,9 @@ export async function registerPatient(
         isRealDate(answers.demographics.birthDate) &&
         isMinor(answers.demographics.birthDate, today)
       if (answers.respondent === "patient") {
-        const [existing] = await tx
-          .select({ id: patientContact.id })
-          .from(patientContact)
-          .where(
-            and(
-              eq(patientContact.organizationId, orgId),
-              eq(patientContact.contactId, link.contactId),
-              eq(patientContact.relationship, "self"),
-            ),
-          )
-          .limit(1)
-          .for("share")
-        if (existing) throw notCompleted()
+        // Quien ya tiene su ficha no se registra otra vez: se le dice en palabras
+        // y el formulario le ofrece registrar a otra persona.
+        if (await hasOwnRecord(tx, orgId, link.contactId)) throw conflict("ALREADY_REGISTERED", ALREADY_REGISTERED_TEXT)
         links = [{ contactId: link.contactId, relationship: "self", isPreferred: true }]
       } else {
         const relationship = minor ? "guardian" : (answers.representative?.relationship ?? "family")
@@ -777,37 +839,11 @@ export async function registerPatient(
     !!demographics.birthDate && isRealDate(demographics.birthDate) && isMinor(demographics.birthDate, today)
   if (answers.representative && minorPatient) {
     const linkedGuardian = links.find((l) => l.relationship === "guardian")
-    let representativeId = linkedGuardian?.contactId ?? null
-    if (!representativeId) {
-      const rep = answers.representative
-      const [person] = await tx
-        .insert(contact)
-        .values({
-          organizationId: orgId,
-          displayName: rep.displayName,
-          phone: rep.phone ? normalizePhone(rep.phone, countryCode) : null,
-          email: rep.email || null,
-          docType: rep.docType ?? null,
-          docNumber: rep.docNumber || null,
-          docCountry: rep.docCountry?.toUpperCase() || null,
-        })
-        .returning({ id: contact.id })
-      if (!person) throw new Error("No se pudo crear al representante")
-      representativeId = person.id
-      await tx.insert(patientContact).values({
-        organizationId: orgId,
-        patientId: created.id,
-        contactId: person.id,
-        relationship: "guardian",
-        relationshipDetail: rep.relationshipDetail || null,
-        isPreferred: false,
-        createdBy: actorUserId,
-      })
-    }
-    await grantResponsibility(tx, orgId, actorUserId, created.id, {
-      contactId: representativeId,
-      kind: "representante_legal",
-      startsAt: today,
+    await attachLegalRepresentative(tx, orgId, actorUserId, created.id, {
+      existingContactId: linkedGuardian?.contactId ?? null,
+      representative: answers.representative,
+      countryCode,
+      today,
     })
   }
 
@@ -835,10 +871,6 @@ export async function registerPatient(
         channel: isPublic ? "formulario_publico" : "presencial",
       })
     }
-    await tx
-      .update(patient)
-      .set({ dataConsentAt: new Date(), dataConsentBy: actorUserId, updatedAt: new Date() })
-      .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
     await tx.insert(patientDataConsent).values({
       organizationId: orgId,
       patientId: created.id,
@@ -870,6 +902,65 @@ export async function registerPatient(
   // Releer para no responder con una revisión anterior a salud/consentimiento.
   const saved = await requirePatient(tx, orgId, created.id)
   return whatsapp ? { ...saved, whatsapp } : saved
+}
+
+/**
+ * El representante legal de un menor, en la misma transacción que sus datos:
+ * su persona con documento (con su país emisor), el vínculo `guardian` y la
+ * responsabilidad de representante legal desde hoy. Si ya está vinculado,
+ * solo se le asigna el rol. Lo usan el registro y «Tus datos» de su enlace.
+ */
+export async function attachLegalRepresentative(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  patientId: string,
+  input: {
+    existingContactId?: string | null
+    representative: Pick<
+      NonNullable<RegistrationAnswers["representative"]>,
+      "displayName" | "phone" | "email" | "docType" | "docNumber" | "docCountry" | "relationshipDetail"
+    >
+    countryCode: string | null
+    today: string
+  },
+): Promise<string> {
+  let representativeId = input.existingContactId ?? null
+  if (!representativeId) {
+    const rep = input.representative
+    const [person] = await tx
+      .insert(contact)
+      .values({
+        organizationId: orgId,
+        displayName: rep.displayName,
+        phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
+        email: rep.email || null,
+        docType: rep.docType ?? null,
+        docNumber: rep.docNumber || null,
+        // El documento con su país emisor, como el de la persona.
+        docCountry: rep.docNumber
+          ? documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry)
+          : null,
+      })
+      .returning({ id: contact.id })
+    if (!person) throw new Error("No se pudo crear al representante")
+    representativeId = person.id
+    await tx.insert(patientContact).values({
+      organizationId: orgId,
+      patientId,
+      contactId: person.id,
+      relationship: "guardian",
+      relationshipDetail: rep.relationshipDetail || null,
+      isPreferred: false,
+      createdBy: actorUserId,
+    })
+  }
+  await grantResponsibility(tx, orgId, actorUserId, patientId, {
+    contactId: representativeId,
+    kind: "representante_legal",
+    startsAt: input.today,
+  })
+  return representativeId
 }
 
 /** La clínica tiene un WhatsApp conectado por el que escribir. */

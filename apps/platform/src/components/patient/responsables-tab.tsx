@@ -1,6 +1,7 @@
 /**
- * Responsables del paciente: quién representa, autoriza información, responde
- * económicamente o acompaña, con vigencia y documento de respaldo.
+ * Responsables del paciente: quién representa, autoriza información o responde
+ * económicamente, con vigencia y documento de respaldo. Quien solo acompaña va
+ * en «Personas vinculadas», no aquí.
  *
  * La persona se elige con el buscador de personas de la aplicación; si aún no
  * está vinculada al paciente, se vincula en el mismo paso (tutor si es menor,
@@ -8,8 +9,8 @@
  * historia.
  */
 
-import { Badge, Button, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
+import { DatePickerButton, EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
@@ -255,20 +256,25 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-start`}>Vigente desde</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-resp-start`}
-              type="date"
+              className="w-56"
               value={startsAt}
-              onChange={(event) => setStartsAt(event.target.value)}
+              onChange={(next) => {
+                setStartsAt(next)
+                if (endsAt && endsAt < next) setEndsAt(next)
+              }}
             />
           </Field>
           <Field>
             <FieldLabel htmlFor={`${uid}-resp-end`}>Vigente hasta</FieldLabel>
-            <Input
+            <DatePickerButton
               id={`${uid}-resp-end`}
-              type="date"
+              className="w-56"
               value={endsAt}
-              onChange={(event) => setEndsAt(event.target.value)}
+              min={startsAt}
+              emptyLabel="Sin fecha final"
+              onChange={setEndsAt}
             />
           </Field>
           <Field>

@@ -82,11 +82,13 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
     title: "Plan de Lucía",
     originEncounterId: encounter.id,
   }, 201)
+  // Los hallazgos se registran dentro de una atención (fase 3, paso 5).
   const finding = await call<Array<{ id: string }>>(page, "POST", `${apiPath}/odontogram/entries`, slug, {
     toothNumber: 36,
     condition: "caries",
     surfaces: ["occlusal"],
     details: { variant: "dentin" },
+    encounterId: encounter.id,
   }, 201)
   const findingId = finding[0]?.id
   expect(findingId, "odontogram.entries devuelve el hallazgo creado").toBeTruthy()

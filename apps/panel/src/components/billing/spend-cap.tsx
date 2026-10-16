@@ -1,5 +1,5 @@
 /**
- * Cambiar el tope de gasto (ADR 0030, tablero C5): cuánto como mucho al mes
+ * Cambiar el tope de gasto (ADR 0031, tablero C5): cuánto como mucho al mes
  * por encima del crédito, con lo que se usará a este ritmo y lo que pasa al
  * llegar, dicho antes de guardar.
  */

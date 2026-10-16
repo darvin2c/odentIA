@@ -1,5 +1,6 @@
 import { maskitoTransform } from "@maskito/core"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
+import { setFormatRegion } from "../locale.js"
 import {
   type CountryCode,
   countryLabel,
@@ -12,6 +13,7 @@ import {
   phoneDigits,
   phoneMeta,
   readInternational,
+  regionCountry,
   toE164,
 } from "./phone.js"
 import { maskNationalDigits, phoneMaskOptions, phonePlaceholder } from "./phone-mask.js"
@@ -157,5 +159,25 @@ describe("máscara de teléfono", () => {
     expect(phonePlaceholder("AR")).toContain("011 15")
     expect(phonePlaceholder("CL")).not.toBe(phonePlaceholder("PE"))
     expect(phonePlaceholder("CL")).not.toBe("")
+  })
+})
+
+describe("regionCountry", () => {
+  afterEach(() => setFormatRegion({ locale: "es-PE", timeZone: "America/Lima" }))
+
+  it("parte del país de la clínica, aunque su formato sea de otro", () => {
+    setFormatRegion({ locale: "es-PE", timeZone: "America/Bogota", country: "co" })
+    expect(regionCountry()).toBe("CO")
+  })
+
+  it("sin país fijado, usa la región del formato de la clínica", () => {
+    setFormatRegion({ locale: "es-CL", timeZone: "America/Santiago" })
+    expect(regionCountry()).toBe("CL")
+  })
+
+  it("sin clínica, sale del entorno y nunca de un país escrito en el código", () => {
+    setFormatRegion({})
+    const fromEnvironment = regionCountry()
+    expect(normalizeCountry(fromEnvironment)).toBe(fromEnvironment)
   })
 })

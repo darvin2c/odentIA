@@ -1,7 +1,9 @@
 /**
  * Color, sigla, validación y vigencia de hallazgos del odontograma.
  * Reglas conservadoras fundadas en la NTS 188: todo valor desconocido,
- * incompatible o fuera de anatomía se rechaza (fail closed) con mensajes en español.
+ * incompatible o fuera de anatomía se rechaza (fail closed) con mensajes en
+ * español. La variante es obligatoria solo con odontograma oficial (Perú,
+ * `strictVariants`); fuera es opcional y se dice por su nombre clínico.
  */
 import {
   FDI_ADULT_ROWS,
@@ -13,7 +15,12 @@ import {
   surfacesForTooth,
 } from "./anatomy.js"
 import { findingDefinition } from "./catalog.js"
-import type { FindingDetails, FindingInput, FindingRecord } from "./types.js"
+import type {
+  FindingDetails,
+  FindingInput,
+  FindingRecord,
+  ValidateFindingOptions,
+} from "./types.js"
 
 interface ColorEntry {
   condition: string
@@ -193,8 +200,15 @@ function pushDrawingErrors(errors: string[], drawing: unknown, minPoints: number
  * variante/calidad/grado/dirección/posición incompatibles, superficies ajenas a la
  * pieza, tramos no contiguos, arcadas incompletas, evidencia clínica faltante,
  * dibujo ausente o campos no reconocidos producen error.
+ *
+ * `strictVariants` (por defecto, el criterio más estricto) exige la variante
+ * como la norma peruana; quien valida para una clínica lo toma de su país
+ * (`clinicalProfileFor(country).odontogram?.strictVariants ?? false`).
  */
-export function validateFinding(input: FindingInput): string[] {
+export function validateFinding(
+  input: FindingInput,
+  options: ValidateFindingOptions = { strictVariants: true },
+): string[] {
   const errors: string[] = []
   const toothOk = isValidTooth(input.toothNumber)
   if (!toothOk) {
@@ -242,13 +256,19 @@ export function validateFinding(input: FindingInput): string[] {
     errors.push(`El hallazgo "${def.label}" no admite superficies.`)
   }
 
-  // Variante: obligatoria cuando el catálogo la define; prohibida si no.
+  // Variante: con odontograma oficial, obligatoria cuando el catálogo la
+  // define; sin él, opcional. Siempre prohibida si el hallazgo no tiene.
   const variantPresent = isPresent(details.variant)
   if (def.variants) {
     if (!variantPresent) {
-      errors.push(`El hallazgo "${def.label}" requiere variante (sigla oficial).`)
+      if (options.strictVariants)
+        errors.push(`El hallazgo "${def.label}" requiere variante (sigla oficial).`)
     } else if (!def.variants.some((item) => item.value === details.variant)) {
-      errors.push(`Variante desconocida para "${def.label}": "${details.variant}".`)
+      errors.push(
+        options.strictVariants
+          ? `Variante desconocida para "${def.label}": "${details.variant}".`
+          : `${def.variantName ?? "Variante"} desconocida para "${def.label}": "${details.variant}".`,
+      )
     }
   } else if (variantPresent) {
     errors.push(`El hallazgo "${def.label}" no admite variante.`)

@@ -10,12 +10,13 @@ import {
 } from "@odentia/ui"
 import {
   ConfirmDialog,
+  dayMinutesIn,
   DetailDrawer,
   DetailField,
   DetailList,
+  hourLabel,
   internationalText,
   ResourceSelect,
-  SCHEDULE_AGENDA_LABELS,
   type ScheduleColumn,
   StatusIcon,
   statusSurfaceClass,
@@ -28,18 +29,24 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, MessageCircle } from "lucide-react"
 import * as React from "react"
-import type {
-  AgendaAppointment,
-  AgendaResources,
-  AgendaServiceOption,
-  AppointmentContext,
-  AppointmentStatus,
+import {
+  type AgendaAppointment,
+  type AgendaResources,
+  type AgendaServiceOption,
+  type AppointmentContext,
+  type AppointmentStatus,
+  professionalSaid,
+  visitLabel,
+  visitState,
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { usePermission } from "../../lib/crm"
-import { NewEncounterButton } from "../patient/new-encounter-button"
+import { filiationGapsText, type PatientFull } from "../../lib/patients"
+import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
+import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
+import { useAppointmentArrival } from "./arrival"
 import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
@@ -64,13 +71,16 @@ const STATUS_DONE: Record<AppointmentStatus, string> = {
   programada: "Cita por confirmar",
   confirmada: "Cita confirmada",
   atendida: "Cita atendida",
-  no_asistio: "Inasistencia registrada",
+  no_asistio: "Marcada como «No vino»",
   cancelada: "Cita cancelada",
 }
 
 /**
  * Detalle de una cita: quién y cuándo arriba, su estado junto al paso que le
- * toca, y lo que se hace poco (cancelar, editar) abajo y separado.
+ * toca, y lo que se hace poco (cancelar, editar) abajo y separado. El estado
+ * va en cuatro momentos (tablero 7): antes de llegar («Llegó»), llegó
+ * («Atender», «Deshacer»), en atención (con quién y desde cuándo) y atendida
+ * («Ver la atención»). «Atendida» no se pone a mano: la pone el cierre.
  */
 export function AppointmentDrawer({
   appointment,
@@ -104,6 +114,17 @@ export function AppointmentDrawer({
   const [writing, setWriting] = React.useState(false)
   const canMessage = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
+  const canAttend = usePermission("clinical.write")
+  const canReadClinical = usePermission("clinical.read")
+  // El cajón ya muestra «Deshacer» junto a la llegada: el aviso no lo repite.
+  const arrival = useAppointmentArrival({ onRebook, undoInToast: false })
+  const [completing, setCompleting] = React.useState(false)
+  const patientQuery = useQuery({
+    queryKey: ["patient", appointment.patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${appointment.patientId}`),
+    enabled: completing,
+  })
+  const attend = useAttendAppointment()
   // A quién se le escribe, de dónde salió y cuándo pedirá el agente confirmar.
   const contextQuery = useQuery({
     queryKey: ["agenda-appointment", appointment.id, "context", appointment.version, appointment.status],
@@ -112,6 +133,17 @@ export function AppointmentDrawer({
   const context = contextQuery.data?.data
   const active = appointment.status === "programada" || appointment.status === "confirmada"
   const started = Date.parse(appointment.startsAt) <= Date.parse(now)
+  const isToday = zonedDateOf(appointment.startsAt, timeZone) === today
+  /** Aún no llega: por confirmar o confirmada, sin llegada ni atención. */
+  const before = appointment.visit === "por_confirmar" || appointment.visit === "confirmada"
+  /** Ya pasó su día y nadie la cerró: «Registrar la atención» o «No vino». */
+  const unclosed = before && !isToday && Date.parse(appointment.endsAt) <= Date.parse(now)
+  const patient = { id: appointment.patientId, name: appointment.patientName }
+  const startAttention = () =>
+    attend.mutate({
+      patientId: appointment.patientId,
+      appointment: { id: appointment.id, dentistUserId: appointment.dentistUserId, dentistName: appointment.dentistName },
+    })
 
   // ----- Cancelar -----
   const [cancelReason, setCancelReason] = React.useState<CancelReason>("paciente")
@@ -246,7 +278,7 @@ export function AppointmentDrawer({
     onError: (cause) => setError(errorMessage(cause)),
   })
 
-  const busy = setStatus.isPending || move.isPending || save.isPending
+  const busy = setStatus.isPending || move.isPending || save.isPending || arrival.isPending || attend.isPending
   const back = () => {
     setError("")
     setMode("view")
@@ -282,7 +314,7 @@ export function AppointmentDrawer({
     ) : canWrite ? (
       <>
         {/* Lo que deshace la cita va aparte, lejos del paso habitual. */}
-        {active ? (
+        {before ? (
           <Button
             variant="ghost"
             className="order-first mr-auto text-destructive hover:text-destructive"
@@ -353,21 +385,46 @@ export function AppointmentDrawer({
             <div
               className={cn(
                 "grid gap-2.5 rounded-2xl p-3.5",
-                statusSurfaceClass(appointment.status),
+                statusSurfaceClass(visitState(appointment.visit)),
               )}
             >
               <span
                 className={cn(
                   "flex items-center gap-1.5 text-sm font-bold",
-                  statusTextClass(appointment.status),
+                  statusTextClass(visitState(appointment.visit)),
                 )}
               >
-                <StatusIcon status={appointment.status} />
-                {SCHEDULE_AGENDA_LABELS[appointment.status]}
+                <StatusIcon status={visitState(appointment.visit)} />
+                {appointment.visit === "en_atencion" && appointment.encounter
+                  ? `En atención con ${professionalSaid(appointment.encounter.dentistName)} desde ${hourLabel(dayMinutesIn(appointment.encounter.startedAt, timeZone))}`
+                  : appointment.visit === "llego" && appointment.arrivedAt
+                    ? visitLabel(appointment, { now, timeZone }).replace(/^Llegó /, "Llegó a las ")
+                    : visitLabel(appointment, { now, timeZone })}
               </span>
-              {canWrite && active && !started && appointment.status === "programada" ? (
+              {appointment.visit === "atendida" ? (
+                <span className="text-[13px] text-muted-foreground">Sus controles quedaron hechos.</span>
+              ) : null}
+              {appointment.visit === "en_atencion" ? (
+                <span className="text-[13px] text-muted-foreground">
+                  Lo ven quienes ven la agenda; no es parte de la historia.
+                </span>
+              ) : null}
+
+              {/* Antes de llegar: hoy, «Llegó»; otro día, confirmarla. */}
+              {canWrite && before && isToday ? (
                 <SubmitButton
                   className="h-11"
+                  disabled={busy}
+                  pending={arrival.isPending}
+                  onClick={() => arrival.mutate({ id: appointment.id, arrived: true, patient })}
+                >
+                  Llegó
+                </SubmitButton>
+              ) : null}
+              {canWrite && appointment.visit === "por_confirmar" && !started ? (
+                <SubmitButton
+                  className="h-11"
+                  variant={isToday ? "outline" : "default"}
                   disabled={busy}
                   pending={setStatus.isPending && setStatus.variables === "confirmada"}
                   onClick={() => setStatus.mutate("confirmada")}
@@ -378,38 +435,71 @@ export function AppointmentDrawer({
                   Confirmar cita
                 </SubmitButton>
               ) : null}
-              {canWrite && active && started ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <SubmitButton
-                    className="h-11"
-                    disabled={busy}
-                    pending={setStatus.isPending && setStatus.variables === "atendida"}
-                    onClick={() => setStatus.mutate("atendida")}
-                  >
-                    {setStatus.isPending && setStatus.variables === "atendida" ? null : (
-                      <Check aria-hidden />
-                    )}
-                    Atendida
-                  </SubmitButton>
-                  <SubmitButton
-                    variant="outline"
-                    className="h-11 bg-card"
-                    disabled={busy}
-                    pending={setStatus.isPending && setStatus.variables === "no_asistio"}
-                    onClick={() => setStatus.mutate("no_asistio")}
-                  >
-                    No asistió
-                  </SubmitButton>
-                </div>
+              {/* Ya pasó su día sin cerrarse: se registra la atención o se marca que no vino. */}
+              {unclosed && canAttend ? (
+                <SubmitButton className="h-11" disabled={busy} pending={attend.isPending} onClick={startAttention}>
+                  Registrar la atención
+                </SubmitButton>
               ) : null}
-              {canWrite && (appointment.status === "no_asistio" || appointment.status === "cancelada") ? (
-                <Button
+              {/* «No vino» solo cuando pasó la hora y no llegó. */}
+              {canWrite && before && started ? (
+                <SubmitButton
                   variant="outline"
                   className="h-11 bg-card"
-                  onClick={() =>
-                    onRebook({ id: appointment.patientId, name: appointment.patientName })
-                  }
+                  disabled={busy}
+                  pending={setStatus.isPending && setStatus.variables === "no_asistio"}
+                  onClick={() => setStatus.mutate("no_asistio")}
                 >
+                  No vino
+                </SubmitButton>
+              ) : null}
+
+              {/* Llegó: «Atender» para quien atiende y «Deshacer» mientras no empiece la atención. */}
+              {appointment.visit === "llego" ? (
+                <div className={cn("grid gap-2", canAttend && canWrite && "grid-cols-[1fr_auto]")}>
+                  {canAttend ? (
+                    <SubmitButton className="h-11" disabled={busy} pending={attend.isPending} onClick={startAttention}>
+                      Atender
+                    </SubmitButton>
+                  ) : null}
+                  {canWrite ? (
+                    <SubmitButton
+                      variant="outline"
+                      className="h-11 bg-card"
+                      disabled={busy}
+                      pending={arrival.isPending}
+                      onClick={() => arrival.mutate({ id: appointment.id, arrived: false })}
+                    >
+                      Deshacer
+                    </SubmitButton>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* En atención o atendida: la atención, para quien lee la historia. */}
+              {appointment.encounter && (appointment.visit === "en_atencion" || appointment.visit === "atendida") && canReadClinical ? (
+                <Link
+                  to="/patients/$patientId/encounters/$encounterId"
+                  params={{ patientId: appointment.patientId, encounterId: appointment.encounter.id }}
+                  className={cn(buttonVariants({ variant: "outline" }), "h-11 bg-card")}
+                >
+                  {appointment.visit === "en_atencion" ? "Seguir la atención" : "Ver la atención"}
+                </Link>
+              ) : null}
+
+              {/* No vino o cancelada: se reagenda; si llega tarde hoy, «Llegó» recupera la cita. */}
+              {canWrite && appointment.visit === "no_vino" && isToday ? (
+                <SubmitButton
+                  className="h-11"
+                  disabled={busy}
+                  pending={arrival.isPending}
+                  onClick={() => arrival.mutate({ id: appointment.id, arrived: true, patient })}
+                >
+                  Llegó
+                </SubmitButton>
+              ) : null}
+              {canWrite && (appointment.status === "no_asistio" || appointment.status === "cancelada") ? (
+                <Button variant="outline" className="h-11 bg-card" onClick={() => onRebook(patient)}>
                   Reagendar
                 </Button>
               ) : null}
@@ -420,6 +510,18 @@ export function AppointmentDrawer({
                 <DetailField label="Teléfono">
                   {context.person.phone ? internationalText(context.person.phone) : "Sin teléfono"}
                   {context.person.relationship !== "self" ? ` · de ${context.person.name}` : ""}
+                </DetailField>
+              ) : null}
+              {context?.missingData && context.missingData.length > 0 ? (
+                <DetailField label="Datos">
+                  {/* La misma regla y frase que su página: lo calcula el servidor. */}
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    Faltan datos para atenderla: {filiationGapsText(context.missingData).toLowerCase()}
+                    {/* Lo mismo que «Completar» en su Resumen: solo lo que falta, con «Enviarle su enlace». */}
+                    <Button type="button" variant="link" size="sm" className="h-auto p-0 font-semibold" onClick={() => setCompleting(true)}>
+                      Completar
+                    </Button>
+                  </span>
                 </DetailField>
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
@@ -464,7 +566,7 @@ export function AppointmentDrawer({
                   Escribirle
                 </Button>
               ) : null}
-              {canWrite && active ? (
+              {canWrite && before ? (
                 <Button variant="outline" className="h-11" onClick={() => setMode("move")}>
                   Reprogramar
                 </Button>
@@ -477,21 +579,23 @@ export function AppointmentDrawer({
               >
                 Abrir la ficha de {appointment.patientName.split(/\s+/)[0]}
               </PersonLink>
-              {active ? (
-                <NewEncounterButton
-                  patientId={appointment.patientId}
-                  appointment={{
-                    id: appointment.id,
-                    dentistUserId: appointment.dentistUserId,
-                    reason: appointment.reason,
-                    serviceName: appointment.serviceName,
-                  }}
-                />
-              ) : null}
             </div>
           </div>
         )}
       </DetailDrawer>
+
+      {completing && patientQuery.data ? (
+        <FiliacionSectionDrawer
+          patient={patientQuery.data.data.patient}
+          section="completar"
+          missing={patientQuery.data.data.missingData ?? []}
+          open
+          onClose={() => {
+            setCompleting(false)
+            void contextQuery.refetch()
+          }}
+        />
+      ) : null}
 
       <WriteToPersonDialog
         open={writing}

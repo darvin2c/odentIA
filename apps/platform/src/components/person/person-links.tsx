@@ -440,7 +440,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
               <p className="text-sm font-medium">Persona nueva</p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field>
-                  <FieldLabel htmlFor="new-person-paternal">Apellido paterno</FieldLabel>
+                  <FieldLabel htmlFor="new-person-paternal">Primer apellido</FieldLabel>
                   <Input
                     id="new-person-paternal"
                     maxLength={100}
@@ -451,7 +451,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="new-person-maternal">Apellido materno</FieldLabel>
+                  <FieldLabel htmlFor="new-person-maternal">Segundo apellido</FieldLabel>
                   <Input
                     id="new-person-maternal"
                     maxLength={100}

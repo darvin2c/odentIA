@@ -1,4 +1,4 @@
-import { pendingRegistrationFields, type RegistrationConfig } from "@odentia/clinical"
+import { composeDisplayName, pendingRegistrationFields, type RegistrationConfig, splitSurnames } from "@odentia/clinical"
 import {
   Button,
   Dialog,
@@ -26,6 +26,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import type { AgendaAppointment, AgendaServiceOption } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
+import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import { PersonPicker } from "../person-picker"
@@ -48,6 +49,13 @@ export interface BookingSeed {
   startsAt?: string
   /** Día en que se abre el selector. */
   date?: string
+  /** «Agendar» desde el Plan: el servicio de lo aceptado, ya elegido. */
+  serviceId?: string
+  /**
+   * Tratamientos aceptados que esta cita viene a hacer (`appointment_plan_item`):
+   * la atención de la cita los trae a «Hecho hoy».
+   */
+  planItemIds?: string[]
 }
 
 /**
@@ -86,7 +94,8 @@ export function BookingDrawer({
   const [registering, setRegistering] = React.useState(Boolean(seed.person))
   const [newPatient, setNewPatient] = React.useState(() => {
     const [first = "", ...rest] = (seed.person?.name ?? "").trim().split(/\s+/)
-    return { givenNames: first, surname: rest.join(" ") }
+    const { paternalSurname, maternalSurname } = splitSurnames(rest.join(" "))
+    return { givenNames: first, surname: paternalSurname, secondSurname: maternalSurname }
   })
   const [newPhone, setNewPhone] = React.useState<string | null>(seed.person?.phone ?? null)
   const [created, setCreated] = React.useState<{ id: string; name: string } | null>(null)
@@ -105,7 +114,11 @@ export function BookingDrawer({
     retry: false,
   })
 
-  const newName = `${newPatient.givenNames.trim()} ${newPatient.surname.trim()}`.trim()
+  const newName = composeDisplayName({
+    givenNames: newPatient.givenNames.trim(),
+    paternalSurname: newPatient.surname.trim(),
+    maternalSurname: newPatient.secondSurname.trim(),
+  })
   // Quien abrió el formulario, se eligió o se acaba de registrar: su nombre se conserva.
   const patientName = registering
     ? newName || undefined
@@ -127,7 +140,18 @@ export function BookingDrawer({
   const duplicates = registering ? (duplicatesQuery.data?.data ?? []) : []
 
   // ----- Qué -----
-  const [serviceId, setServiceId] = React.useState("")
+  const [serviceId, setServiceId] = React.useState(seed.serviceId ?? "")
+  // Los tratamientos que trae la cita: con su título, el que ve recepción (sin piezas ni precios).
+  const planItemIds = seed.planItemIds ?? []
+  const coordinationQuery = useQuery({
+    queryKey: ["treatment-coordination", seed.patient?.id],
+    queryFn: () => fetchTreatmentCoordination(seed.patient?.id ?? ""),
+    enabled: planItemIds.length > 0 && Boolean(seed.patient?.id),
+    retry: false,
+  })
+  const planItemTitles = planItemIds.map(
+    (id) => coordinationQuery.data?.data.treatments.find((row) => row.id === id)?.title ?? null,
+  )
   const [reason, setReason] = React.useState("")
   const servicesQuery = useQuery({
     queryKey: ["services", "agenda-picker"],
@@ -178,7 +202,7 @@ export function BookingDrawer({
       let id = patientId
       if (registering) {
         if (!newPatient.givenNames.trim() || !newPatient.surname.trim()) {
-          throw new Error("Escribe los nombres y los apellidos.")
+          throw new Error("Escribe los nombres y el primer apellido.")
         }
         // El mismo registro de pacientes de siempre, con lo mínimo: el resto de la ficha se completa después.
         const registered = await apiFetch<{
@@ -195,6 +219,7 @@ export function BookingDrawer({
                   displayName: newName,
                   givenNames: newPatient.givenNames.trim(),
                   paternalSurname: newPatient.surname.trim(),
+                  ...(newPatient.secondSurname.trim() ? { maternalSurname: newPatient.secondSurname.trim() } : {}),
                   ...(newPhone ? { phone: newPhone } : {}),
                 },
                 respondent: "staff",
@@ -256,6 +281,8 @@ export function BookingDrawer({
           patientId: id,
           dentistUserId: input.range.columnId,
           serviceId: serviceId || undefined,
+          // Solo si la cita sigue siendo de quien vino del Plan.
+          ...(planItemIds.length > 0 && id === seed.patient?.id ? { planItemIds } : {}),
           startsAt: input.range.start,
           endsAt: input.range.end,
           reason: reason.trim() || undefined,
@@ -320,7 +347,8 @@ export function BookingDrawer({
   const startRegistering = (typed = "") => {
     // Lo que ya se tecleó al buscar sirve de punto de partida.
     const [first = "", ...rest] = typed.trim().split(/\s+/)
-    setNewPatient({ givenNames: first, surname: rest.join(" ") })
+    const { paternalSurname, maternalSurname } = splitSurnames(rest.join(" "))
+    setNewPatient({ givenNames: first, surname: paternalSurname, secondSurname: maternalSurname })
     setRegistering(true)
   }
   const hasPatient = registering
@@ -356,9 +384,20 @@ export function BookingDrawer({
       >
         <div className="grid gap-4">
           {seed.lockedPatient && seed.patient ? (
-            <div>
-              <FieldLabel>Paciente del caso</FieldLabel>
+            <div className="grid gap-1">
+              <FieldLabel>{planItemIds.length > 0 ? "Paciente" : "Paciente del caso"}</FieldLabel>
               <p className="text-sm font-medium">{seed.patient.name}</p>
+              {planItemIds.length > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Para:{" "}
+                  {planItemTitles.every((title) => title)
+                    ? planItemTitles.join(", ")
+                    : planItemIds.length === 1
+                      ? "1 tratamiento aceptado"
+                      : `${planItemIds.length} tratamientos aceptados`}
+                  . La atención de esta cita los trae.
+                </p>
+              ) : null}
             </div>
           ) : registering ? (
             <div className="grid gap-3 rounded-2xl border bg-muted/40 p-3.5">
@@ -373,7 +412,7 @@ export function BookingDrawer({
                 )}
               </div>
               <div className="grid grid-cols-2 gap-2.5">
-                <div className="grid gap-1.5">
+                <div className="col-span-2 grid gap-1.5">
                   <FieldLabel htmlFor="cita-nuevo-nombres">Nombres</FieldLabel>
                   <Input
                     id="cita-nuevo-nombres"
@@ -385,13 +424,24 @@ export function BookingDrawer({
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <FieldLabel htmlFor="cita-nuevo-apellidos">Apellidos</FieldLabel>
+                  <FieldLabel htmlFor="cita-nuevo-apellidos">Primer apellido</FieldLabel>
                   <Input
                     id="cita-nuevo-apellidos"
                     maxLength={100}
                     value={newPatient.surname}
                     onChange={(event) =>
                       setNewPatient((current) => ({ ...current, surname: event.target.value }))
+                    }
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <FieldLabel htmlFor="cita-nuevo-segundo-apellido">Segundo apellido</FieldLabel>
+                  <Input
+                    id="cita-nuevo-segundo-apellido"
+                    maxLength={100}
+                    value={newPatient.secondSurname}
+                    onChange={(event) =>
+                      setNewPatient((current) => ({ ...current, secondSurname: event.target.value }))
                     }
                   />
                 </div>

@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
-import { contact, conversation, crmTask, TASK_AREAS, type TaskArea } from "@odentia/db/schema/crm"
+import { contact, conversation, crmTask, TASK_AREAS, type TaskArea, type TaskKind } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
@@ -16,7 +16,8 @@ async function notify(tx: Db, payload: { orgId: string; kind: string; at: string
 const STATUSES = ["open", "done", "cancelled"]
 // Quién deja una tarea: una persona, Recepción en una conversación o el
 // Administrador por una línea prendida.
-const CREATED_BY = ["user", "agent", "admin"]
+/** Quién deja una tarea: una persona, el agente, el Administrador o el sistema (lo que la persona hizo en su enlace). */
+const CREATED_BY = ["user", "agent", "admin", "sistema"]
 
 /**
  * Las partes del equipo de cada rol: además de las suyas, cada persona ve las
@@ -437,12 +438,14 @@ export async function createTask(
     idempotencyKey?: string | null
     /** Usuario real que crea la tarea; nulo cuando es el agente. */
     actorUserId?: string | null
+    /** Pendiente del sistema con su propia fila en «Te espera» (`TASK_KINDS`). */
+    kind?: TaskKind | null
   },
 ): Promise<TaskItem> {
   const title = input.title.trim()
   if (!title) throw validation("El título de la tarea es obligatorio")
   if (title.length > 200) throw validation("El título no puede superar 200 caracteres")
-  if (!CREATED_BY.includes(input.createdBy)) throw validation("createdBy inválido (user|agent|admin)")
+  if (!CREATED_BY.includes(input.createdBy)) throw validation("createdBy inválido (user|agent|admin|sistema)")
   if (input.area != null && !(TASK_AREAS as readonly string[]).includes(input.area)) throw validation("Área inválida")
   const reason = input.reason?.trim() ? input.reason.trim().slice(0, 480) : null
   const dueAt = cleanDueAt(input.dueAt) ?? null
@@ -512,6 +515,7 @@ export async function createTask(
     area,
     reason,
     idempotencyKey: idemKey,
+    kind: input.kind ?? null,
   }
   // El índice único es parcial (solo claves no nulas): el upsert aplica solo
   // cuando el llamador trae clave estable; el resto inserta directo.

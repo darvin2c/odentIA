@@ -1,16 +1,14 @@
 import type { Db } from "@odentia/db"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
+import { documentText } from "@odentia/clinical"
+import { channelConnection, contact, conversation, crmTask, } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { portalAccessLog, portalLink, portalSession } from "@odentia/db/schema/portal"
 import {
   portalChallenge,
   portalGrant,
   portalPasskey,
-  portalRequest,
   type PortalGrantStatus,
-  type PortalRequestChannel,
-  type PortalRequestStatus,
 } from "@odentia/db/schema/portal-access"
 import {
   generateAuthenticationOptions,
@@ -18,40 +16,43 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server"
-import { and, desc, eq, inArray, isNull, lte } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull } from "drizzle-orm"
 import { createHash, randomBytes } from "node:crypto"
-import { sendOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import {
   ensurePortalGrant,
   getPortalPolicy,
-  hasPriorVerification,
   isGrantUsable,
+  PORTAL_FIXED,
   portalDisabled,
   requireActivePortalGrant,
   type PortalGrantRow,
-  type PortalPolicy,
 } from "./portal-policy.js"
 import {
   assertScope,
+  assertShareRights,
+  issuePortalActivationQr,
   issuePortalLink,
   requireActiveGrant,
   toSessionView,
   type IssuePortalLinkInput,
-  type IssuedPortalLink,
   type PortalContext,
   type PortalSessionView,
+  type PortalShareRights,
 } from "./portal.js"
-import { completeTask, createTask, settleTask } from "./tasks.js"
+import { contactDecides } from "./responsibilities.js"
+import { createTask, settleTask } from "./tasks.js"
 
 /**
- * Portal del paciente: solicitudes iniciadas por el paciente, grants
- * persistentes, passkeys WebAuthn y gancho de canal oficial.
+ * Portal del paciente: dar acceso en un paso, grants persistentes y passkeys
+ * WebAuthn (decisión 9 de la fase 3, ADR 0037). No hay solicitudes: pedir el
+ * portal es un pedido más, que el agente deja en «Te espera» y atiende una
+ * persona del equipo (`requestPortalReentry`).
  *
  * Invariantes de acceso:
  * - La coincidencia de teléfono NUNCA verifica identidad: no otorga, aprueba
- *   ni autocompleta nada. Las solicitudes web ni siquiera referencian contactos.
+ *   ni autocompleta nada. Tener el chat de alguien no prueba que sea esa persona.
  * - Sin datos clínicos en mensajes de canal ni en títulos de tareas.
  * - El registro passkey exige sesión Bearer de un canje (nunca el token de
  *   activación crudo); challenges de 5 min y un solo uso con origin/rpID de
@@ -62,19 +63,6 @@ export interface PortalRpConfig {
   rpID: string
   rpName: string
   expectedOrigin: string
-}
-
-export interface PortalAccessRequest {
-  id: string
-  patientName: string | null
-  contactName: string
-  contactText: string | null
-  channel: PortalRequestChannel
-  status: PortalRequestStatus
-  conversationId: string | null
-  createdAt: Date
-  expiresAt: Date
-  decidedAt: Date | null
 }
 
 export interface PortalGrant {
@@ -104,15 +92,8 @@ type RegistrationVerifyInput = Parameters<typeof verifyRegistrationResponse>[0]
 type AuthenticationVerifyInput = Parameters<typeof verifyAuthenticationResponse>[0]
 type StoredCredential = NonNullable<AuthenticationVerifyInput["credential"]>
 
-const REQUEST_TTL_DAYS = 7
 const CHALLENGE_TTL_MINUTES = 5
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-/** Solicitud explícita de acceso en texto libre (intención + objeto). */
-const REQUEST_RES = [
-  /(solicit|quiero|necesito|necesitamos|pido|dame|denme|env[ií]ame|env[ií]enme|act[ií]vame|act[ií]venme|activar|darme de alta).{0,60}(portal|acceso|enlace|link|mi cuenta)/i,
-  /(portal|enlace|link).{0,30}(por favor|porfa|act[ií]valo|act[ií]venlo|quiero|necesito|solicito)/i,
-]
 
 async function auditPortal(
   tx: Db,
@@ -219,25 +200,6 @@ async function grantView(tx: Db, orgId: string, grant: PortalGrantRow): Promise<
   }
 }
 
-function requestView(row: typeof portalRequest.$inferSelect): PortalAccessRequest {
-  return {
-    id: row.id,
-    patientName: null,
-    contactName: row.contactName,
-    contactText: row.contactText,
-    channel: row.channel === "conversacion" ? "conversacion" : "web_publica",
-    status: (["pendiente", "aprobada", "rechazada", "expirada"] as const).includes(
-      row.status as PortalRequestStatus,
-    )
-      ? (row.status as PortalRequestStatus)
-      : "pendiente",
-    conversationId: row.conversationId,
-    createdAt: row.createdAt,
-    expiresAt: row.expiresAt,
-    decidedAt: row.decidedAt,
-  }
-}
-
 function passkeyView(row: typeof portalPasskey.$inferSelect): PortalPasskeyInfo {
   return {
     id: row.id,
@@ -246,269 +208,6 @@ function passkeyView(row: typeof portalPasskey.$inferSelect): PortalPasskeyInfo 
     lastUsedAt: row.lastUsedAt,
     revokedAt: row.revokedAt,
   }
-}
-
-/** Vencimiento perezoso: las pendientes vencidas pasan a expirada y liquidan su tarea. */
-async function expireStaleRequests(tx: Db, orgId: string): Promise<void> {
-  const now = new Date()
-  const stale = await tx
-    .update(portalRequest)
-    .set({ status: "expirada", updatedAt: now })
-    .where(
-      and(
-        eq(portalRequest.organizationId, orgId),
-        eq(portalRequest.status, "pendiente"),
-        lte(portalRequest.expiresAt, now),
-      ),
-    )
-    .returning({ taskId: portalRequest.taskId, id: portalRequest.id })
-  for (const row of stale) await settleRequestTask(tx, orgId, row.taskId, row.id, "la solicitud del portal venció")
-}
-
-/**
- * Solicitud web pública. Siempre responde { received: true } aunque el portal
- * esté deshabilitado (sin oráculo de existencia) y jamás referencia ni crea
- * pacientes o contactos: el texto libre nunca se matchea automáticamente.
- */
-export async function createPublicPortalRequest(
-  tx: Db,
-  orgId: string,
-  input: { contactName: string; contactText: string; patientHint?: string; idempotencyKey?: string },
-): Promise<{ received: true }> {
-  const policy = await getPortalPolicy(tx, orgId)
-  const contactName = input.contactName?.trim() ?? ""
-  const contactText = input.contactText?.trim() ?? ""
-  const patientHint = input.patientHint?.trim()?.slice(0, 200) || null
-  const idempotencyKey = input.idempotencyKey?.trim() || null
-  if (contactName.length < 2 || contactName.length > 120) throw validation("Indícanos tu nombre (2–120 caracteres)")
-  if (contactText.length < 2 || contactText.length > 200) {
-    throw validation("Indícanos un teléfono o correo de contacto (2–200 caracteres)")
-  }
-  if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
-    throw validation("La clave de idempotencia debe tener 8–128 caracteres")
-  }
-  if (!policy.enabled || !policy.requestsEnabled || !policy.publicRequestsEnabled) {
-    return { received: true }
-  }
-  if (idempotencyKey) {
-    const [existing] = await tx
-      .select({ id: portalRequest.id })
-      .from(portalRequest)
-      .where(and(eq(portalRequest.organizationId, orgId), eq(portalRequest.idempotencyKey, idempotencyKey)))
-      .limit(1)
-    if (existing) return { received: true }
-  }
-  const task = await createTask(tx, orgId, {
-    title: "Revisar solicitud de acceso al portal",
-    createdBy: "agent",
-  })
-  const [request] = await tx
-    .insert(portalRequest)
-    .values({
-      organizationId: orgId,
-      channel: "web_publica",
-      status: "pendiente",
-      contactName,
-      contactText,
-      patientHint,
-      taskId: task.id,
-      idempotencyKey,
-      expiresAt: new Date(Date.now() + REQUEST_TTL_DAYS * 86_400_000),
-    })
-    .returning()
-  if (!request) throw new Error("No se pudo registrar la solicitud")
-  await auditPortal(tx, orgId, null, "portal.request_created", "portal_request", request.id, {
-    channel: "web_publica",
-  })
-  return { received: true }
-}
-
-/**
- * Gancho de canal oficial: detecta solicitudes explícitas de acceso al portal
- * en mensajes entrantes ya persistidos. Funciona sin IA (solo servicios) y
- * solo en conexiones autorizadas por la política. Nunca usa coincidencia de
- * teléfono y nunca emite credenciales (sin token, sin PIN, sin ampliar grants).
- *
- * - Contacto ya verificado (grant activo y vigente + passkey vigente) con
- *   `autoApproveVerified`: responde el enlace genérico de ingreso con passkey
- *   y registra la solicitud como aprobada (sin tarea pendiente).
- * - Resto (no verificado, ambiguo o modo manual): crea la solicitud pendiente
- *   + tarea genérica y responde un texto genérico sin datos clínicos.
- * Devuelve si lo gestionó.
- */
-export async function handlePortalChannelRequest(
-  tx: Db,
-  orgId: string,
-  ids: { conversationId: string; messageId: string },
-  opts: { portalUrl: () => string },
-): Promise<boolean> {
-  const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled || !policy.requestsEnabled || !policy.channelRequestsEnabled) return false
-  const [msg] = await tx
-    .select()
-    .from(message)
-    .where(and(eq(message.id, ids.messageId), eq(message.organizationId, orgId)))
-    .limit(1)
-  if (!msg || msg.direction !== "in" || msg.conversationId !== ids.conversationId) return false
-  const body = msg.body ?? ""
-  if (!REQUEST_RES.some((re) => re.test(body))) return false
-  const [conv] = await tx
-    .select()
-    .from(conversation)
-    .where(and(eq(conversation.id, ids.conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1)
-  if (!conv || conv.status !== "open") return false
-  const [connection] = await tx
-    .select()
-    .from(channelConnection)
-    .where(eq(channelConnection.id, conv.channelConnectionId))
-    .limit(1)
-  if (!connection || connection.organizationId !== orgId) return false
-  if (connection.status !== "active" || !policy.allowedConnectionIds.includes(connection.id)) return false
-  const [contactRow] = await tx
-    .select()
-    .from(contact)
-    .where(and(eq(contact.id, conv.contactId), eq(contact.organizationId, orgId)))
-    .limit(1)
-  if (!contactRow || !contactRow.isActive) return false
-  const [duplicate] = await tx
-    .select({ id: portalRequest.id })
-    .from(portalRequest)
-    .where(
-      and(eq(portalRequest.organizationId, orgId), eq(portalRequest.triggerMessageId, ids.messageId)),
-    )
-    .limit(1)
-  if (duplicate) return true
-  // Ruta automática: contacto ya verificado (grant activo y vigente + passkey
-  // vigente) con autoApproveVerified. Sin credenciales nuevas: solo el enlace
-  // genérico de ingreso con passkey, sin token, sin PIN y sin ampliar grants.
-  if (policy.autoApproveVerified && policy.passkeysEnabled) {
-    const candidateGrants = await tx
-      .select()
-      .from(portalGrant)
-      .where(
-        and(
-          eq(portalGrant.organizationId, orgId),
-          eq(portalGrant.contactId, contactRow.id),
-          eq(portalGrant.status, "activo"),
-        ),
-      )
-    const usable = candidateGrants.filter((grant) => isGrantUsable(grant))
-    if (usable.length > 0) {
-      const creds = await tx
-        .select({ id: portalPasskey.id })
-        .from(portalPasskey)
-        .where(
-          and(
-            eq(portalPasskey.organizationId, orgId),
-            inArray(
-              portalPasskey.grantId,
-              usable.map((grant) => grant.id),
-            ),
-            isNull(portalPasskey.revokedAt),
-          ),
-        )
-        .limit(1)
-      if (creds.length > 0) {
-        const now = new Date()
-        const [auto] = await tx
-          .insert(portalRequest)
-          .values({
-            organizationId: orgId,
-            channel: "conversacion",
-            status: "aprobada",
-            contactName: contactRow.displayName,
-            contactId: contactRow.id,
-            conversationId: conv.id,
-            triggerMessageId: ids.messageId,
-            expiresAt: new Date(now.getTime() + REQUEST_TTL_DAYS * 86_400_000),
-            decidedAt: now,
-            decisionNote: "Acceso con passkey existente.",
-          })
-          .returning()
-        if (!auto) throw new Error("No se pudo registrar la solicitud")
-        await auditPortal(tx, orgId, null, "portal.request_auto_approved", "portal_request", auto.id, {
-          channel: "conversacion",
-          conversationId: conv.id,
-        })
-        try {
-          await sendOutbound(tx, orgId, {
-            conversationId: conv.id,
-            senderKind: "agent",
-            content: {
-              type: "text",
-              text: `Ya tienes acceso al portal: entra con tu passkey aquí: ${opts.portalUrl()}. Si perdiste tu dispositivo, avísanos por este medio y lo recuperamos en recepción.`,
-            },
-          })
-        } catch {
-          await auditPortal(tx, orgId, null, "portal.request_reply_failed", "portal_request", auto.id, {
-            conversationId: conv.id,
-          })
-        }
-        return true
-      }
-    }
-  }
-  const task = await createTask(tx, orgId, {
-    title: "Revisar solicitud de acceso al portal",
-    contactId: contactRow.id,
-    conversationId: conv.id,
-    createdBy: "agent",
-  })
-  const [request] = await tx
-    .insert(portalRequest)
-    .values({
-      organizationId: orgId,
-      channel: "conversacion",
-      status: "pendiente",
-      contactName: contactRow.displayName,
-      contactId: contactRow.id,
-      conversationId: conv.id,
-      triggerMessageId: ids.messageId,
-      taskId: task.id,
-      expiresAt: new Date(Date.now() + REQUEST_TTL_DAYS * 86_400_000),
-    })
-    .returning()
-  if (!request) throw new Error("No se pudo registrar la solicitud")
-  await auditPortal(tx, orgId, null, "portal.request_created", "portal_request", request.id, {
-    channel: "conversacion",
-    conversationId: conv.id,
-  })
-  try {
-    await sendOutbound(tx, orgId, {
-      conversationId: conv.id,
-      senderKind: "agent",
-      content: {
-        type: "text",
-        text: "Recibimos tu solicitud de acceso al portal. Te avisaremos por este medio cuando esté lista; no necesitas hacer nada más. Por este chat no compartas datos clínicos.",
-      },
-    })
-  } catch {
-    await auditPortal(tx, orgId, null, "portal.request_reply_failed", "portal_request", request.id, {
-      conversationId: conv.id,
-    })
-  }
-  return true
-}
-
-export async function listPortalRequests(
-  tx: Db,
-  orgId: string,
-  status?: PortalRequestStatus,
-): Promise<PortalAccessRequest[]> {
-  await expireStaleRequests(tx, orgId)
-  const rows = await tx
-    .select()
-    .from(portalRequest)
-    .where(
-      and(
-        eq(portalRequest.organizationId, orgId),
-        status ? eq(portalRequest.status, status) : undefined,
-      ),
-    )
-    .orderBy(desc(portalRequest.createdAt))
-    .limit(100)
-  return rows.map(requestView)
 }
 
 /** El vínculo representante↔paciente: sin fila no hay grant ni enlace. */
@@ -545,174 +244,6 @@ async function ensurePatientLink(
   }
 }
 
-/**
- * Evidencia de verificación: en modo manual siempre se exige nota fresca del
- * acto; en modo verificado-automático puede apoyarse en verificación previa.
- */
-async function assertApprovalEvidence(
-  tx: Db,
-  orgId: string,
-  policy: PortalPolicy,
-  patientId: string,
-  contactId: string,
-  note: string | null | undefined,
-): Promise<string | null> {
-  const fresh = note?.trim()?.slice(0, 500) || null
-  if (fresh) return fresh
-  if (policy.autoApproveVerified && (await hasPriorVerification(tx, orgId, patientId, contactId))) {
-    return null
-  }
-  throw validation("En modo manual, registra la evidencia de la verificación presencial (qué documento revisaste)")
-}
-
-/**
- * La tarea de revisar una solicitud: hecha cuando alguien la aprueba; si se
- * rechaza o vence, se cierra sola diciendo por qué (ADR 0028).
- */
-async function settleRequestTask(tx: Db, orgId: string, taskId: string | null, requestId: string, reason?: string): Promise<void> {
-  if (!taskId) return
-  try {
-    if (reason) await settleTask(tx, orgId, taskId, reason)
-    else await completeTask(tx, orgId, taskId)
-  } catch {
-    await auditPortal(tx, orgId, null, "portal.request_task_missing", "portal_request", requestId, {})
-  }
-}
-
-export interface DecidePortalRequestInput {
-  patientId: string
-  contactId: string
-  relationship?: "self" | "guardian" | "family" | "other"
-  scope: IssuePortalLinkInput["scope"]
-  verifiedMethod: string
-  evidenceNote?: string | null
-  conversationId: string
-  deliver: { linkUrl: (rawLinkToken: string) => string; canShareFinance: boolean }
-}
-
-/**
- * Aprueba una solicitud pendiente: verifica paciente+contacto, exige método
- * del enum con evidencia, crea el vínculo y el grant, y emite el enlace
- * asistido por la conversación indicada. La aprobación nunca usa coincidencia
- * de teléfono: las identidades vienen del staff en el input.
- */
-export async function approvePortalRequest(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  requestId: string,
-  input: DecidePortalRequestInput,
-): Promise<{ grant: PortalGrant; link: IssuedPortalLink }> {
-  const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled) throw portalDisabled()
-  const [request] = await tx
-    .select()
-    .from(portalRequest)
-    .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
-    .for("update")
-    .limit(1)
-  if (!request) throw notFound("Solicitud de acceso")
-  if (request.status !== "pendiente" || request.expiresAt.getTime() <= Date.now()) {
-    await tx
-      .update(portalRequest)
-      .set({ status: "expirada", updatedAt: new Date() })
-      .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
-    await settleRequestTask(tx, orgId, request.taskId, requestId, "la solicitud del portal venció")
-    throw new ServiceError("PORTAL_EXPIRED", 409, "Esta solicitud venció; crea una nueva")
-  }
-  const patientRow = await requirePatient(tx, orgId, input.patientId)
-  if (!patientRow.isActive) throw notFound("Paciente")
-  const [contactRow] = await tx
-    .select()
-    .from(contact)
-    .where(and(eq(contact.id, input.contactId), eq(contact.organizationId, orgId)))
-    .limit(1)
-  if (!contactRow) throw notFound("Contacto")
-  if (!contactRow.isActive) throw validation("El contacto está inactivo")
-  const evidenceNote = await assertApprovalEvidence(tx, orgId, policy, input.patientId, input.contactId, input.evidenceNote)
-  const [conv] = await tx
-    .select()
-    .from(conversation)
-    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1)
-  if (!conv) throw notFound("Conversación")
-  if (conv.contactId !== input.contactId) throw validation("La conversación no pertenece a este contacto")
-  // Una conversación cerrada no impide entregar el acceso: escribir en ella la reabre (ADR 0024).
-  await ensurePatientLink(tx, orgId, actorUserId, input.patientId, input.contactId, input.relationship ?? "other")
-  const scope = await assertScope(tx, orgId, input.patientId, input.scope)
-  const ensured = await ensurePortalGrant(tx, orgId, actorUserId, {
-    patientId: input.patientId,
-    contactId: input.contactId,
-    scope,
-    verifiedMethod: input.verifiedMethod,
-    evidenceNote,
-    requestId,
-    audit: (action, entityId, metadata) =>
-      auditPortal(tx, orgId, actorUserId, action, "portal_grant", entityId, metadata),
-  })
-  // El grant ya quedó verificado arriba; la emisión solo entrega.
-  const link = await issuePortalLink(
-    tx,
-    orgId,
-    actorUserId,
-    {
-      patientId: input.patientId,
-      contactId: input.contactId,
-      conversationId: input.conversationId,
-      scope: input.scope,
-    },
-    input.deliver,
-  )
-  const now = new Date()
-  await tx
-    .update(portalRequest)
-    .set({ status: "aprobada", decidedBy: actorUserId, decidedAt: now, updatedAt: now })
-    .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
-  await settleRequestTask(tx, orgId, request.taskId, requestId)
-  await auditPortal(tx, orgId, actorUserId, "portal.request_approved", "portal_request", requestId, {
-    patientId: input.patientId,
-    contactId: input.contactId,
-    grantId: ensured.grant.id,
-  })
-  return { grant: await grantView(tx, orgId, ensured.grant), link }
-}
-
-export async function rejectPortalRequest(
-  tx: Db,
-  orgId: string,
-  actorUserId: string,
-  requestId: string,
-  note?: string,
-): Promise<PortalAccessRequest> {
-  const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled) throw portalDisabled()
-  const [request] = await tx
-    .select()
-    .from(portalRequest)
-    .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
-    .for("update")
-    .limit(1)
-  if (!request) throw notFound("Solicitud de acceso")
-  if (request.status !== "pendiente") throw new ServiceError("PORTAL_STATUS", 409, "Esta solicitud ya fue decidida")
-  const now = new Date()
-  const [updated] = await tx
-    .update(portalRequest)
-    .set({
-      status: "rechazada",
-      decidedBy: actorUserId,
-      decidedAt: now,
-      decisionNote: note?.trim()?.slice(0, 500) || null,
-      updatedAt: now,
-    })
-    .where(and(eq(portalRequest.id, requestId), eq(portalRequest.organizationId, orgId)))
-    .returning()
-  if (!updated) throw notFound("Solicitud de acceso")
-  // Rechazar cierra su tarea, igual que aprobar o vencer: ya no hay nada que revisar.
-  await settleRequestTask(tx, orgId, request.taskId, requestId, "la solicitud del portal se rechazó")
-  await auditPortal(tx, orgId, actorUserId, "portal.request_rejected", "portal_request", requestId, {})
-  return requestView(updated)
-}
-
 export interface CreatePortalGrantInput {
   patientId: string
   contactId: string
@@ -723,8 +254,8 @@ export interface CreatePortalGrantInput {
 }
 
 /**
- * Grant directo del staff sin solicitud (activación en persona). Crea el
- * vínculo si falta; exige método del enum con evidencia según la política.
+ * Grant directo del staff (activación en persona). Crea el vínculo si falta;
+ * exige método del enum. La evidencia la escribe el sistema (qué documento vio).
  */
 export async function createPortalGrant(
   tx: Db,
@@ -743,7 +274,7 @@ export async function createPortalGrant(
     .limit(1)
   if (!contactRow) throw notFound("Contacto")
   if (!contactRow.isActive) throw validation("El contacto está inactivo")
-  const evidenceNote = await assertApprovalEvidence(tx, orgId, policy, input.patientId, input.contactId, input.evidenceNote)
+  const evidenceNote = input.evidenceNote?.trim()?.slice(0, 500) || null
   await ensurePatientLink(tx, orgId, actorUserId, input.patientId, input.contactId, input.relationship ?? "other")
   const scope = await assertScope(tx, orgId, input.patientId, input.scope)
   const ensured = await ensurePortalGrant(tx, orgId, actorUserId, {
@@ -866,8 +397,8 @@ export async function selectPortalGrant(
       "Cambia de acceso con tu passkey o pide un enlace nuevo en recepción",
     )
   }
-  const ttl = opts?.sessionTtlHours ?? policy.sessionTtlHours
-  const bounded = Math.max(1, Math.min(Math.floor(ttl), policy.sessionTtlHours))
+  const ttl = opts?.sessionTtlHours ?? PORTAL_FIXED.sessionTtlHours
+  const bounded = Math.max(1, Math.min(Math.floor(ttl), PORTAL_FIXED.sessionTtlHours))
   const sessionToken = rawToken()
   const now = new Date()
   const [session] = await tx
@@ -1002,7 +533,7 @@ export async function createPasskeyRegistrationOptions(
 ): Promise<{ challengeId: string; options: Record<string, unknown> }> {
   assertRp(rp)
   const policy = await getPortalPolicy(tx, ctx.orgId)
-  if (!policy.enabled || !policy.passkeysEnabled) throw portalDisabled()
+  if (!policy.enabled) throw portalDisabled()
   if (!ctx.session.grantId) {
     throw new ServiceError("PORTAL_GRANT_REQUIRED", 409, "Tu acceso es anterior; pide un enlace nuevo en recepción")
   }
@@ -1060,7 +591,7 @@ export async function verifyPasskeyRegistration(
 ): Promise<PortalPasskeyInfo> {
   assertRp(rp)
   const policy = await getPortalPolicy(tx, ctx.orgId)
-  if (!policy.enabled || !policy.passkeysEnabled) throw portalDisabled()
+  if (!policy.enabled) throw portalDisabled()
   if (!response || typeof response !== "object") throw validation("Respuesta de passkey inválida")
   const credentialId = extractCredentialId(response)
   if (!credentialId) throw validation("Respuesta de passkey inválida")
@@ -1071,8 +602,7 @@ export async function verifyPasskeyRegistration(
     .for("update")
     .limit(1)
   if (
-    !challenge ||
-    challenge.type !== "registro" ||
+    challenge?.type !== "registro" ||
     challenge.usedAt ||
     challenge.expiresAt.getTime() <= Date.now() ||
     challenge.sessionId !== ctx.session.id ||
@@ -1116,7 +646,8 @@ export async function verifyPasskeyRegistration(
     .returning()
   if (!created) throw new Error("No se pudo guardar la passkey")
   await tx.update(portalChallenge).set({ usedAt: new Date() }).where(eq(portalChallenge.id, challenge.id))
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.passkey_registered", "portal_passkey", created.id, {
+  // Lo guarda la persona en su dispositivo: queda a su nombre, no al de quien le dio el acceso.
+  await auditPortal(tx, ctx.orgId, `contact:${ctx.session.contactId}`, "portal.passkey_registered", "portal_passkey", created.id, {
     grantId: grant.id,
     sessionId: ctx.session.id,
   })
@@ -1135,7 +666,7 @@ export async function createPasskeyAuthOptions(
 ): Promise<{ challengeId: string; options: Record<string, unknown> }> {
   assertRp(rp)
   const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled || !policy.passkeysEnabled) throw portalDisabled()
+  if (!policy.enabled) throw portalDisabled()
   const options = await generateAuthenticationOptions({
     rpID: rp.rpID,
     timeout: 60_000,
@@ -1169,7 +700,7 @@ export async function verifyPasskeyAuth(
 ): Promise<{ sessionToken: string; session: PortalSessionView }> {
   assertRp(rp)
   const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled || !policy.passkeysEnabled) throw portalDisabled()
+  if (!policy.enabled) throw portalDisabled()
   if (!response || typeof response !== "object") throw validation("Respuesta de passkey inválida")
   const [challenge] = await tx
     .select()
@@ -1177,7 +708,7 @@ export async function verifyPasskeyAuth(
     .where(and(eq(portalChallenge.id, challengeId), eq(portalChallenge.organizationId, orgId)))
     .for("update")
     .limit(1)
-  if (!challenge || challenge.type !== "autenticacion" || challenge.usedAt) {
+  if (challenge?.type !== "autenticacion" || challenge.usedAt) {
     throw new ServiceError("PORTAL_CHALLENGE", 409, "La autenticación venció; inicia de nuevo")
   }
   if (challenge.expiresAt.getTime() <= Date.now()) {
@@ -1251,7 +782,7 @@ export async function verifyPasskeyAuth(
     .set({ counter: freshCounter, lastUsedAt: new Date() })
     .where(eq(portalPasskey.id, cred.id))
   await tx.update(portalChallenge).set({ usedAt: new Date() }).where(eq(portalChallenge.id, challenge.id))
-  const bounded = Math.max(1, Math.min(Math.floor(opts?.sessionTtlHours ?? policy.sessionTtlHours), policy.sessionTtlHours))
+  const bounded = Math.max(1, Math.min(Math.floor(opts?.sessionTtlHours ?? PORTAL_FIXED.sessionTtlHours), PORTAL_FIXED.sessionTtlHours))
   const sessionToken = rawToken()
   const now = new Date()
   const [session] = await tx
@@ -1343,4 +874,416 @@ export async function revokePortalPasskey(
     sessions: sessions.length,
   })
   return { revoked: true }
+}
+
+// ------------------------------------------------- el portal en un paso ---
+
+/** «4•••••04»: el documento a la vista sin decirlo entero. */
+function maskedDocument(docNumber: string): string {
+  const clean = docNumber.trim()
+  if (clean.length <= 3) return "•".repeat(clean.length)
+  return `${clean.slice(0, 1)}${"•".repeat(Math.max(clean.length - 3, 1))}${clean.slice(-2)}`
+}
+
+export interface PortalAccessCandidate {
+  contactId: string
+  name: string
+  /** La propia persona o su representante legal (si es menor). */
+  relation: "self" | "representante"
+  /**
+   * Lo que recepción comprueba en persona: el tipo de su documento y el número
+   * enmascarado («DNI 4•••••04»). Nulo si su ficha no tiene documento.
+   */
+  document: string | null
+  /** Escribió por WhatsApp en las últimas 24 horas: el enlace puede ir por ahí. */
+  whatsappReady: boolean
+}
+
+export interface PortalAccessRow {
+  grantId: string
+  contactId: string
+  name: string
+  relation: "self" | "representante"
+  scope: PortalGrantRow["scope"]
+  /** Guardó su acceso (llave) en algún teléfono. */
+  saved: boolean
+  /** La última vez que entró; nula si aún no entra. */
+  lastEntryAt: Date | null
+  /** Pidió volver a entrar y espera un enlace nuevo. */
+  reentryRequested: boolean
+}
+
+export interface PortalAccessSummary {
+  /** El portal está encendido en Configuración. */
+  enabled: boolean
+  /** Lo que la clínica deja ver (Configuración). */
+  allowedScope: { appointments: boolean; budgets: boolean; account: boolean; documents: boolean }
+  /** Una sola fila: quién entra, qué ve y su última entrada. */
+  access: PortalAccessRow[]
+  /** A quién se le puede dar acceso: la persona si es mayor de edad, o su representante legal. */
+  candidates: PortalAccessCandidate[]
+}
+
+async function whatsappReady(tx: Db, orgId: string, contactId: string): Promise<{ conversationId: string } | null> {
+  const [thread] = await tx
+    .select({ id: conversation.id, lastInboundAt: conversation.lastInboundAt })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(
+      and(
+        eq(conversation.organizationId, orgId),
+        eq(conversation.contactId, contactId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(desc(conversation.lastInboundAt))
+    .limit(1)
+  if (!thread?.lastInboundAt || Date.now() - thread.lastInboundAt.getTime() > 24 * 3600_000) return null
+  return { conversationId: thread.id }
+}
+
+/** Quién puede entrar al portal de este paciente: él mismo si es mayor de edad, si no su representante legal vigente. */
+async function portalCandidates(tx: Db, orgId: string, patientId: string): Promise<PortalAccessCandidate[]> {
+  await requirePatient(tx, orgId, patientId)
+  const rows = await tx
+    .select({
+      contactId: contact.id,
+      name: contact.displayName,
+      docType: contact.docType,
+      docNumber: contact.docNumber,
+      relationship: patientContact.relationship,
+      isActive: contact.isActive,
+    })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId)))
+  const candidates: PortalAccessCandidate[] = []
+  for (const row of rows) {
+    if (!row.isActive) continue
+    // La misma regla que vuelve a comprobar cada uso del portal (`requireActiveGrant`).
+    if (!(await contactDecides(tx, orgId, patientId, row.contactId))) continue
+    const relation: "self" | "representante" = row.relationship === "self" ? "self" : "representante"
+    candidates.push({
+      contactId: row.contactId,
+      name: row.name,
+      relation,
+      document: row.docNumber ? `${documentText(row.docType, "").trim() || "Documento"} ${maskedDocument(row.docNumber)}` : null,
+      whatsappReady: !!(await whatsappReady(tx, orgId, row.contactId)),
+    })
+  }
+  return candidates.sort((a, b) => (a.relation === b.relation ? a.name.localeCompare(b.name, "es") : a.relation === "self" ? -1 : 1))
+}
+
+/** La fila de acceso al portal de la página de la persona (Datos › Acceso al portal). */
+export async function getPortalAccessSummary(tx: Db, orgId: string, patientId: string): Promise<PortalAccessSummary> {
+  const policy = await getPortalPolicy(tx, orgId)
+  const grants = (
+    await tx
+      .select()
+      .from(portalGrant)
+      .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.patientId, patientId), eq(portalGrant.status, "activo")))
+      .orderBy(desc(portalGrant.createdAt))
+  ).filter((grant) => isGrantUsable(grant))
+  const access: PortalAccessRow[] = []
+  for (const grant of grants) {
+    const [person] = await tx
+      .select({ name: contact.displayName })
+      .from(contact)
+      .where(and(eq(contact.organizationId, orgId), eq(contact.id, grant.contactId)))
+      .limit(1)
+    const [own] = await tx
+      .select({ relationship: patientContact.relationship })
+      .from(patientContact)
+      .where(
+        and(
+          eq(patientContact.organizationId, orgId),
+          eq(patientContact.patientId, patientId),
+          eq(patientContact.contactId, grant.contactId),
+        ),
+      )
+      .limit(1)
+    const [saved] = await tx
+      .select({ id: portalPasskey.id })
+      .from(portalPasskey)
+      .where(and(eq(portalPasskey.organizationId, orgId), eq(portalPasskey.grantId, grant.id), isNull(portalPasskey.revokedAt)))
+      .limit(1)
+    // «Entró el …»: el registro de accesos, leído donde sirve (decisión 9).
+    const [entry] = await tx
+      .select({ at: portalSession.createdAt })
+      .from(portalSession)
+      .where(and(eq(portalSession.organizationId, orgId), eq(portalSession.grantId, grant.id)))
+      .orderBy(desc(portalSession.createdAt))
+      .limit(1)
+    const [reentry] = await tx
+      .select({ id: crmTask.id })
+      .from(crmTask)
+      .where(
+        and(
+          eq(crmTask.organizationId, orgId),
+          eq(crmTask.kind, "volver_al_portal"),
+          eq(crmTask.patientId, patientId),
+          eq(crmTask.contactId, grant.contactId),
+          eq(crmTask.status, "open"),
+        ),
+      )
+      .limit(1)
+    access.push({
+      grantId: grant.id,
+      contactId: grant.contactId,
+      name: person?.name ?? "",
+      relation: own?.relationship === "self" ? "self" : "representante",
+      scope: grant.scope,
+      saved: !!saved,
+      lastEntryAt: entry?.at ?? null,
+      reentryRequested: !!reentry,
+    })
+  }
+  return {
+    enabled: policy.enabled,
+    allowedScope: policy.allowedScope,
+    access,
+    candidates: await portalCandidates(tx, orgId, patientId),
+  }
+}
+
+export interface GivePortalAccessInput {
+  /** ¿Quién entra? La persona o su representante legal. */
+  contactId: string
+  /** ¿Qué verá? */
+  scope: { appointments?: boolean; budgets?: boolean; account?: boolean; documentIds?: string[] }
+  /** «Comprobé su identidad: vi su DNI 4•••••04». */
+  identityChecked: boolean
+  /** ¿Cómo le llega? Está aquí (QR) o por su WhatsApp. */
+  delivery: "qr" | "whatsapp"
+}
+
+export interface PortalAccessGiven {
+  grantId: string
+  /** Para el QR, una sola vez. */
+  activationUrlOnce: string | null
+  /** El código de 6 dígitos, que se le dice en persona o por teléfono: nunca va con el enlace. */
+  pinOnce: string
+  /** A quién se le envió el enlace por WhatsApp. */
+  sentTo: string | null
+}
+
+async function deliverPortalAccess(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { patientId: string; contactId: string; scope: GivePortalAccessInput["scope"]; delivery: "qr" | "whatsapp" },
+  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+): Promise<{ activationUrlOnce: string | null; pinOnce: string; sentTo: string | null }> {
+  if (input.delivery === "qr") {
+    const issued = await issuePortalActivationQr(tx, orgId, actorUserId, {
+      patientId: input.patientId,
+      contactId: input.contactId,
+      scope: input.scope,
+    })
+    return { activationUrlOnce: deliver.linkUrl(issued.rawTokenOnce), pinOnce: issued.pinOnce, sentTo: null }
+  }
+  const ready = await whatsappReady(tx, orgId, input.contactId)
+  if (!ready) {
+    throw new ServiceError(
+      "PORTAL_NO_WINDOW",
+      409,
+      "No escribió por WhatsApp en las últimas 24 horas: dale acceso con el QR o pídele que escriba primero",
+    )
+  }
+  const issued = await issuePortalLink(
+    tx,
+    orgId,
+    actorUserId,
+    { patientId: input.patientId, contactId: input.contactId, conversationId: ready.conversationId, scope: input.scope },
+    deliver,
+  )
+  if (!issued.pinOnce) throw new Error("No se pudo emitir el código")
+  return { activationUrlOnce: null, pinOnce: issued.pinOnce, sentTo: issued.link.contactName }
+}
+
+/**
+ * «Dar acceso al portal» en un paso (decisión 9): quién entra, qué verá, la
+ * comprobación en persona con su documento y cómo le llega, en una sola
+ * transacción. El grant se crea con el método que corresponde (su documento,
+ * o la representación de un menor), el enlace vale 3 días y el código de 6
+ * dígitos se le dice aparte. Recepción puede dar acceso a los presupuestos.
+ */
+export async function givePortalAccess(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: GivePortalAccessInput,
+  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+): Promise<PortalAccessGiven> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) throw portalDisabled()
+  const candidate = (await portalCandidates(tx, orgId, patientId)).find((item) => item.contactId === input.contactId)
+  if (!candidate) {
+    throw validation("Entra la propia persona si es mayor de edad, o su representante legal si es menor")
+  }
+  if (!candidate.document) throw validation("Primero completa su documento")
+  if (input.identityChecked !== true) throw validation("Marca que comprobaste su identidad con su documento")
+  const scope = await assertScope(tx, orgId, patientId, input.scope)
+  assertShareRights(scope, deliver)
+  const grant = await createPortalGrant(tx, orgId, actorUserId, {
+    patientId,
+    contactId: input.contactId,
+    scope: input.scope,
+    verifiedMethod: candidate.relation === "self" ? "presencial_documento" : "representacion_verificada",
+    // El tipo de documento que vio, sin su número.
+    evidenceNote: `Vio su ${candidate.document.split(" ")[0] ?? "documento"} en persona`,
+  })
+  const delivered = await deliverPortalAccess(tx, orgId, actorUserId, { patientId, contactId: input.contactId, scope: input.scope, delivery: input.delivery }, deliver)
+  await auditPortal(tx, orgId, actorUserId, "portal.access_given", "portal_grant", grant.id, {
+    patientId,
+    contactId: input.contactId,
+    delivery: input.delivery,
+  })
+  return { grantId: grant.id, ...delivered }
+}
+
+/** «Cambiar»: lo que verá. No vuelve a comprobar su identidad ni le envía nada. */
+export async function changePortalAccess(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  grantId: string,
+  input: { scope: GivePortalAccessInput["scope"] },
+  rights: PortalShareRights,
+): Promise<PortalGrant> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) throw portalDisabled()
+  const [grant] = await tx
+    .select()
+    .from(portalGrant)
+    .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.id, grantId)))
+    .limit(1)
+  if (!grant || !isGrantUsable(grant)) throw notFound("Acceso del portal")
+  const scope = await assertScope(tx, orgId, grant.patientId, input.scope)
+  assertShareRights(scope, rights)
+  const ensured = await ensurePortalGrant(tx, orgId, actorUserId, {
+    patientId: grant.patientId,
+    contactId: grant.contactId,
+    scope,
+    verifiedMethod: grant.verifiedMethod,
+    audit: (action, entityId, metadata) => auditPortal(tx, orgId, actorUserId, action, "portal_grant", entityId, metadata),
+  })
+  return grantView(tx, orgId, ensured.grant)
+}
+
+/**
+ * «Enviar nuevo enlace» (volver a entrar, decisión 9): lo hace una persona del
+ * equipo, sin volver a comprobar su identidad, para un acceso que sigue
+ * vigente. El enlace sale por su WhatsApp o en QR, y el código se le dice
+ * aparte: nunca juntos. Atiende el pedido que dejó el agente en «Te espera».
+ */
+export async function resendPortalAccess(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  grantId: string,
+  input: { delivery: "qr" | "whatsapp" },
+  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
+): Promise<PortalAccessGiven> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) throw portalDisabled()
+  const [grant] = await tx
+    .select()
+    .from(portalGrant)
+    .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.id, grantId)))
+    .limit(1)
+  if (!grant || !isGrantUsable(grant)) throw notFound("Acceso del portal")
+  // Volver a entrar exige lo mismo que darle acceso: mayor de edad o su representante legal vigente.
+  if (!(await contactDecides(tx, orgId, grant.patientId, grant.contactId))) {
+    throw new ServiceError(
+      "PORTAL_NOT_ALLOWED",
+      409,
+      "Ya no puede entrar al portal por este paciente: quita este acceso y, si corresponde, dale uno a quien decide por él",
+    )
+  }
+  const scope = grant.scope
+  const delivered = await deliverPortalAccess(
+    tx,
+    orgId,
+    actorUserId,
+    {
+      patientId: grant.patientId,
+      contactId: grant.contactId,
+      scope: { appointments: scope.appointments, budgets: scope.budgets, account: scope.account, documentIds: scope.documents },
+      delivery: input.delivery,
+    },
+    // El acceso ya existe: el enlace nuevo lleva lo mismo que ya veía.
+    { linkUrl: deliver.linkUrl, canShareBudgets: true, canShareAccount: true, canShareDocuments: true },
+  )
+  const pending = await tx
+    .select({ id: crmTask.id })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.kind, "volver_al_portal"),
+        eq(crmTask.patientId, grant.patientId),
+        eq(crmTask.contactId, grant.contactId),
+        eq(crmTask.status, "open"),
+      ),
+    )
+  for (const task of pending) await settleTask(tx, orgId, task.id, "le enviaron un enlace nuevo al portal")
+  await auditPortal(tx, orgId, actorUserId, "portal.access_resent", "portal_grant", grant.id, {
+    patientId: grant.patientId,
+    contactId: grant.contactId,
+    delivery: input.delivery,
+  })
+  return { grantId: grant.id, ...delivered }
+}
+
+/**
+ * Pedir volver a entrar al portal por el chat (decisión 9): el agente lo
+ * entiende y lo deja en «Te espera» de recepción, con «Enviar nuevo enlace».
+ * Nunca envía el enlace ni el código: tener el chat de alguien no prueba que
+ * sea esa persona. Sin acceso vigente no hay nada que reenviar: el acceso se
+ * da en la clínica, con su documento.
+ */
+export async function requestPortalReentry(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; conversationId: string },
+): Promise<{ status: "pedido" | "sin_acceso" | "portal_apagado"; names: string[] }> {
+  const policy = await getPortalPolicy(tx, orgId)
+  if (!policy.enabled) return { status: "portal_apagado", names: [] }
+  const grants = (
+    await tx
+      .select()
+      .from(portalGrant)
+      .where(and(eq(portalGrant.organizationId, orgId), eq(portalGrant.contactId, input.contactId), eq(portalGrant.status, "activo")))
+  ).filter((grant) => isGrantUsable(grant))
+  if (grants.length === 0) return { status: "sin_acceso", names: [] }
+  const [person] = await tx
+    .select({ name: contact.displayName })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
+    .limit(1)
+  const day = new Date().toISOString().slice(0, 10)
+  const names: string[] = []
+  for (const grant of grants) {
+    const [subject] = await tx
+      .select({ name: patient.displayName })
+      .from(patient)
+      .where(and(eq(patient.organizationId, orgId), eq(patient.id, grant.patientId)))
+      .limit(1)
+    names.push(subject?.name ?? "")
+    await createTask(tx, orgId, {
+      title: `${person?.name ?? "Una persona"} quiere volver a entrar al portal`,
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      patientId: grant.patientId,
+      area: "recepcion",
+      createdBy: "agent",
+      kind: "volver_al_portal",
+      reason: "Lo pidió por el chat. Su acceso sigue vigente: envíale un enlace nuevo y dile el código en persona o por teléfono.",
+      idempotencyKey: `volver-al-portal:${grant.id}:${day}`,
+    })
+  }
+  return { status: "pedido", names }
 }

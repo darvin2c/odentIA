@@ -1,17 +1,24 @@
 import { formatMoney } from "@odentia/clinical"
-import { Button, buttonVariants, cn } from "@odentia/ui"
-import { EmptyState } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
+import { EmptyState, StatusIcon, SubmitButton, statusTextClass, useScheduleNow } from "@odentia/ui-patterns"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { CalendarDays, Wallet } from "lucide-react"
 import { type ReactNode, useId } from "react"
 import type { BranchOption } from "../../lib/active-branch"
+import { visitLabel, visitName, visitState } from "../../lib/agenda"
+import { usePermission, useMyUserId } from "../../lib/crm"
 import { type DebtRow, debtConcepts, debtDue, formatClock } from "../../lib/finance-cash"
-import { agendaSummary, appointmentState, attendedPercent, patientsSummary } from "../../lib/home"
-import type { WorkspaceAppointment, WorkspaceCash, WorkspaceToday } from "../../lib/workspace"
+import { agendaSummary, attendedPercent, patientsSummary } from "../../lib/home"
+import type { WorkspaceAppointment, WorkspaceCash, WorkspaceToday, WorkspaceTodaySummary } from "../../lib/workspace"
+import { useAppointmentArrival } from "../agenda/arrival"
 import { BranchSwitcher } from "../branch-switcher"
+import { useAttendAppointment } from "../patient/new-encounter-button"
 
 const CARD = "enter elevated flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-4 sm:p-5"
 const MORE = "inline-flex min-h-11 items-center self-start font-semibold text-primary underline underline-offset-4 sm:min-h-8"
+/** Toda la fila abre algo; la acción rápida va en su propio botón, como en «Te espera». */
+const ROW =
+  "h-auto min-h-11 w-full min-w-0 flex-1 justify-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm font-normal whitespace-normal"
 
 /** La sede se elige en la tarjeta, y solo si hay más de una: «Te espera» es de toda la clínica. */
 export interface BranchChoice {
@@ -19,11 +26,17 @@ export interface BranchChoice {
   onChange: (id: string) => void
 }
 
-function CardHeader({ id, title, branch, choice }: { id: string; title: string; branch?: { id: string; name: string } | null; choice?: BranchChoice }) {
+function CardHeader({ id, title, count, branch, choice }: { id: string; title: string; count?: number; branch?: { id: string; name: string } | null; choice?: BranchChoice }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <h2 id={id} className="min-w-0 flex-1 text-[17px] font-bold tracking-tight">
+      <h2 id={id} className="flex min-w-0 flex-1 items-center gap-2 text-[17px] font-bold tracking-tight">
         {title}
+        {count ? (
+          <Badge variant="secondary" className="tabular-nums">
+            {count}
+            <span className="sr-only"> {count === 1 ? "paciente" : "pacientes"}</span>
+          </Badge>
+        ) : null}
       </h2>
       {branch && choice && choice.branches.length > 1 ? (
         <BranchSwitcher branches={choice.branches} value={branch.id} fallbackName={branch.name} onChange={choice.onChange} />
@@ -41,26 +54,47 @@ function DayProgress({ percent }: { percent: number }) {
   )
 }
 
-function StateText({ status }: { status: string }) {
+/** El momento de la cita en palabras, con su icono: nunca solo con color. */
+function VisitText({ item, now, timeZone }: { item: WorkspaceAppointment; now: string; timeZone: string }) {
+  const state = visitState(item.visit)
   return (
-    <span className={cn("shrink-0 text-[13px]", status === "programada" ? "font-semibold text-warning" : "text-muted-foreground")}>
-      {appointmentState(status)}
+    <span className={cn("flex shrink-0 items-center gap-1 text-[13px] font-semibold", statusTextClass(state))}>
+      <StatusIcon status={state} className="size-3.5" />
+      {visitLabel({ ...item, encounter: item.encounter ? { ...item.encounter, status: "borrador", endedAt: null } : null }, { now, timeZone })}
     </span>
   )
 }
 
 const detailOf = (parts: Array<string | null | false>) => parts.filter(Boolean).join(" · ")
 
-/** «Agenda de hoy» de una sede: lo que falta, con la siguiente cita marcada. */
+/**
+ * «Agenda de hoy» de una sede: quién está en la sala, lo que falta y quién no
+ * vino. Cada fila abre la cita; al lado, su paso: «Llegó», «Deshacer» o
+ * «Reagendar». Se refresca sola con cada cambio de la agenda.
+ */
 export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; locale: string; choice: BranchChoice }) {
   const headingId = useId()
   const navigate = useNavigate()
+  const now = useScheduleNow()
+  const canWrite = usePermission("appointments.write")
+  const rebook = (patient: { id: string; name: string }) => void navigate({ to: "/agenda", search: { patientId: patient.id, branch: branch?.id } })
+  const arrival = useAppointmentArrival({ onRebook: rebook })
   const { summary, branch } = today
   const agenda = { branch: branch?.id }
+  const actionOf = (item: WorkspaceAppointment): { label: string; run: () => void } | null => {
+    if (!canWrite) return null
+    const patient = { id: item.patientId, name: item.patientName }
+    if (item.visit === "por_confirmar" || item.visit === "confirmada") {
+      return { label: "Llegó", run: () => arrival.mutate({ id: item.id, arrived: true, patient }) }
+    }
+    if (item.visit === "llego") return { label: "Deshacer", run: () => arrival.mutate({ id: item.id, arrived: false }) }
+    if (item.visit === "no_vino") return { label: "Reagendar", run: () => rebook(patient) }
+    return null
+  }
   return (
     <section aria-labelledby={headingId} className={CARD}>
       <CardHeader id={headingId} title="Agenda de hoy" branch={branch} choice={choice} />
-      {summary.total === 0 ? (
+      {summary.total === 0 && today.appointments.length === 0 ? (
         <EmptyState
           icon={CalendarDays}
           className="p-5"
@@ -74,28 +108,43 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
           <p>{agendaSummary(summary)}</p>
           <DayProgress percent={attendedPercent(summary)} />
           {today.appointments.length > 0 ? (
-            <ul className="flex flex-col">
-              {today.appointments.map((item) => (
-                <li
-                  key={item.id}
-                  className={cn("flex items-center gap-2.5 px-2.5", item.next ? "rounded-lg bg-primary-soft py-2" : "border-b py-1.5 last:border-b-0")}
-                >
-                  <span className={cn("w-12 shrink-0 tabular-nums", item.next ? "font-bold" : "font-semibold")}>
-                    {formatClock(item.startsAt, locale, today.timezone)}
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-semibold">{item.patientName}</span>
-                    <span className={cn("truncate text-[13px]", item.next ? "text-primary-soft-foreground" : "text-muted-foreground")}>
-                      {detailOf([item.serviceName, item.dentistName, item.next && item.status === "programada" && "Sin confirmar"])}
-                    </span>
-                  </span>
-                  {item.next ? <span className="shrink-0 text-[13px] font-bold text-primary-soft-foreground">Sigue</span> : <StateText status={item.status} />}
-                </li>
-              ))}
+            <ul className="flex flex-col divide-y">
+              {today.appointments.map((item) => {
+                const action = actionOf(item)
+                const busy = arrival.isPending && arrival.variables?.id === item.id
+                return (
+                  <li key={item.id} className="flex items-center gap-2 py-0.5">
+                    <Link
+                      to="/agenda"
+                      search={{ appointmentId: item.id, branch: branch?.id }}
+                      className={cn(buttonVariants({ variant: "ghost" }), ROW)}
+                    >
+                      <span className="w-12 shrink-0 font-semibold tabular-nums">{formatClock(item.startsAt, locale, today.timezone)}</span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate font-semibold">{item.patientName}</span>
+                        <span className="truncate text-[13px] text-muted-foreground">{detailOf([item.dentistName, item.serviceName])}</span>
+                      </span>
+                      <VisitText item={item} now={now} timeZone={today.timezone} />
+                    </Link>
+                    {action ? (
+                      <SubmitButton
+                        size="sm"
+                        variant={action.label === "Llegó" ? "default" : "outline"}
+                        className="min-h-11 shrink-0 sm:min-h-8"
+                        pending={busy}
+                        aria-label={`${action.label}: ${item.patientName}`}
+                        onClick={action.run}
+                      >
+                        {action.label}
+                      </SubmitButton>
+                    ) : null}
+                  </li>
+                )
+              })}
             </ul>
           ) : null}
           <Link to="/agenda" search={agenda} className={MORE}>
-            {summary.upcoming > 1 ? `Ver las ${summary.upcoming} en la Agenda` : summary.upcoming === 1 ? "Ver la cita en la Agenda" : "Abrir la Agenda"}
+            {summary.total > 1 ? `Ver las ${summary.total} en la Agenda` : summary.total === 1 ? "Ver la cita en la Agenda" : "Abrir la Agenda"}
           </Link>
         </>
       )}
@@ -103,53 +152,92 @@ export function TodayAgenda({ today, locale, choice }: { today: WorkspaceToday; 
   )
 }
 
-function PatientRow({ item, locale, timezone, multiBranch }: { item: WorkspaceAppointment; locale: string; timezone: string; multiBranch: boolean }) {
-  const attended = item.status === "atendida"
-  const place = detailOf([item.serviceName, item.chairName, multiBranch && item.branchName])
+/** Una fila de «Mis pacientes de hoy»: el nombre abre su página y la acción va en su botón. */
+function PatientRow({
+  item,
+  locale,
+  timezone,
+  now,
+  multiBranch,
+  action,
+}: {
+  item: WorkspaceAppointment
+  locale: string
+  timezone: string
+  now: string
+  multiBranch: boolean
+  action: ReactNode
+}) {
+  const what = detailOf([item.serviceName, multiBranch && item.branchName])
+  const later = item.visit === "por_confirmar" || item.visit === "confirmada"
   return (
-    <li className={item.next ? undefined : "border-b last:border-b-0"}>
-      <Link
-        to="/patients/$patientId"
-        params={{ patientId: item.patientId }}
-        className={cn(
-          buttonVariants({ variant: "ghost" }),
-          "h-auto min-h-11 w-full justify-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm font-normal whitespace-normal",
-          item.next && "bg-primary-soft py-2.5 hover:bg-primary-soft",
-          attended && "text-muted-foreground",
-        )}
-      >
-        <span className={cn("w-12 shrink-0 tabular-nums", item.next ? "font-bold" : attended ? "" : "font-semibold")}>
-          {formatClock(item.startsAt, locale, timezone)}
+    <li className="flex items-center gap-2 py-0.5">
+      <Link to="/patients/$patientId" params={{ patientId: item.patientId }} className={cn(buttonVariants({ variant: "ghost" }), ROW)}>
+        {later ? <span className="w-12 shrink-0 font-semibold tabular-nums">{formatClock(item.startsAt, locale, timezone)}</span> : null}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-semibold">{detailOf([item.patientName, what])}</span>
+          <span className="truncate text-[13px]">
+            {later ? (
+              <span className={statusTextClass(visitState(item.visit))}>{visitName(item.visit)}</span>
+            ) : item.visit === "en_atencion" && item.encounter ? (
+              <span className="text-primary">En atención desde {formatClock(item.encounter.startedAt, locale, timezone)}</span>
+            ) : (
+              <VisitText item={item} now={now} timeZone={timezone} />
+            )}
+          </span>
         </span>
-        {attended ? (
-          <span className="min-w-0 flex-1 truncate">{detailOf([item.patientName, item.serviceName])}</span>
-        ) : (
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className={cn("truncate", item.next ? "font-bold" : "font-semibold")}>{item.patientName}</span>
-            <span className={cn("truncate text-[13px]", item.next ? "text-primary-soft-foreground" : "text-muted-foreground")}>
-              {item.next ? detailOf([place, appointmentState(item.status)]) : place}
-            </span>
-          </span>
-        )}
-        {item.next ? (
-          <span className="shrink-0 text-[13px] font-bold text-primary-soft-foreground">
-            Sigue<span className="sr-only sm:not-sr-only"> · Abrir su ficha</span>
-          </span>
-        ) : (
-          <StateText status={item.status} />
-        )}
       </Link>
+      {action}
     </li>
   )
 }
 
-/** «Mis pacientes de hoy»: las citas de quien atiende, también las atendidas; cada fila abre la ficha. */
+/**
+ * «Mis pacientes de hoy» de quien atiende, también la dueña: «Sala de espera»
+ * (quien llegó, con «Atender»), «Ahora» (lo que atiende, con «Seguir la
+ * atención») y «Más tarde». El nombre abre su página para mirarla antes de
+ * llamarla. Se actualiza solo con cada cambio de la agenda.
+ */
 export function TodayPatients({ today, locale, multiBranch }: { today: WorkspaceToday; locale: string; multiBranch: boolean }) {
   const headingId = useId()
   const navigate = useNavigate()
+  const now = useScheduleNow()
+  const myUserId = useMyUserId()
+  const canAttend = usePermission("clinical.write")
+  const attend = useAttendAppointment()
+  const mine = { who: myUserId }
+  const waiting = today.appointments.filter((item) => item.visit === "llego")
+  const attending = today.appointments.filter((item) => item.visit === "en_atencion")
+  const later = today.appointments.filter((item) => item.visit === "por_confirmar" || item.visit === "confirmada")
+  const attended = today.summary.attended
+  const attendButton = (item: WorkspaceAppointment) =>
+    canAttend ? (
+      <SubmitButton
+        size="sm"
+        className="min-h-11 shrink-0 sm:min-h-8"
+        pending={attend.isPending && attend.variables?.appointment.id === item.id}
+        aria-label={`Atender: ${item.patientName}`}
+        onClick={() =>
+          attend.mutate({ patientId: item.patientId, appointment: { id: item.id, dentistUserId: item.dentistUserId, dentistName: item.dentistName } })
+        }
+      >
+        Atender
+      </SubmitButton>
+    ) : null
+  const group = (title: string, items: WorkspaceAppointment[], actionOf: (item: WorkspaceAppointment, index: number) => ReactNode) =>
+    items.length > 0 ? (
+      <div className="flex flex-col gap-0.5">
+        <h3 className="pt-1 text-[13px] font-bold text-muted-foreground">{title}</h3>
+        <ul aria-label={title} className="flex flex-col divide-y">
+          {items.map((item, index) => (
+            <PatientRow key={item.id} item={item} locale={locale} timezone={today.timezone} now={now} multiBranch={multiBranch} action={actionOf(item, index)} />
+          ))}
+        </ul>
+      </div>
+    ) : null
   return (
     <section aria-labelledby={headingId} className={CARD}>
-      <CardHeader id={headingId} title="Mis pacientes de hoy" />
+      <CardHeader id={headingId} title="Mis pacientes de hoy" count={today.summary.total} />
       {today.summary.total === 0 ? (
         <EmptyState
           icon={CalendarDays}
@@ -157,23 +245,57 @@ export function TodayPatients({ today, locale, multiBranch }: { today: Workspace
           title="Hoy no tienes pacientes"
           description=""
           actionLabel="Ver mi agenda"
-          onAction={() => void navigate({ to: "/agenda", search: {} })}
+          onAction={() => void navigate({ to: "/agenda", search: mine })}
         />
       ) : (
         <>
-          <p>{patientsSummary(today.summary)}</p>
-          <DayProgress percent={attendedPercent(today.summary)} />
-          <ul className="flex flex-col">
-            {today.appointments.map((item) => (
-              <PatientRow key={item.id} item={item} locale={locale} timezone={today.timezone} multiBranch={multiBranch} />
-            ))}
-          </ul>
-          <Link to="/agenda" search={{}} className={MORE}>
+          <p className="sr-only">{patientsSummary(today.summary)}</p>
+          {group("Sala de espera", waiting, (item) => attendButton(item))}
+          {group("Ahora", attending, (item) =>
+            item.encounter ? (
+              <Link
+                to="/patients/$patientId/encounters/$encounterId"
+                params={{ patientId: item.patientId, encounterId: item.encounter.id }}
+                aria-label={`${item.encounter.dentistUserId === myUserId ? "Seguir la atención" : "Ver la atención"}: ${item.patientName}`}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-11 shrink-0 sm:min-h-8")}
+              >
+                {item.encounter.dentistUserId === myUserId ? "Seguir la atención" : "Ver la atención"}
+              </Link>
+            ) : null,
+          )}
+          {/* Si nadie espera ni se está atendiendo, la siguiente se atiende desde aquí: «Atender» marca la llegada. */}
+          {group("Más tarde", later, (item, index) => (index === 0 && waiting.length === 0 && attending.length === 0 ? attendButton(item) : null))}
+          {attended > 0 ? (
+            <p className="text-[13px] text-muted-foreground">
+              {attended === 1 ? "1 paciente atendido hoy" : `${attended} pacientes atendidos hoy`}
+            </p>
+          ) : null}
+          <Link to="/agenda" search={mine} className={MORE}>
             Ver mi agenda
           </Link>
         </>
       )}
     </section>
+  )
+}
+
+/** La agenda de la sede en una línea, para quien hoy atiende y además la ve: lleva a la Agenda de esa sede. */
+export function AgendaLine({ line }: { line: { branch: { id: string; name: string }; summary: WorkspaceTodaySummary } }) {
+  return (
+    <Link
+      to="/agenda"
+      search={{ branch: line.branch.id }}
+      className={cn(
+        buttonVariants({ variant: "ghost" }),
+        "enter elevated h-auto min-h-11 w-full justify-start gap-3 rounded-xl border-border bg-card px-4 py-4 text-left text-sm font-normal whitespace-normal hover:bg-card sm:px-5",
+      )}
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-[17px] font-bold tracking-tight">Agenda de {line.branch.name}</span>
+        <span>{line.summary.total === 0 ? "Hoy no hay citas" : agendaSummary(line.summary)}</span>
+      </span>
+      <span className="shrink-0 font-semibold text-primary">Abrir la Agenda</span>
+    </Link>
   )
 }
 

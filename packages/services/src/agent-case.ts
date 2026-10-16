@@ -13,7 +13,8 @@ import {
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
 import { and, count, desc, eq, inArray } from "drizzle-orm"
-import { CONFIRM_TTL_HOURS, listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
+import { listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
+import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
 import { notFound, validation } from "./errors.js"
 import { formatZoned, type OrgLocale } from "./locale.js"
 
@@ -29,7 +30,7 @@ const CASE_RECENT_MS = CONFIRM_TTL_HOURS * 60 * 60 * 1000
 const CASE_RECENT_LIMIT = 5
 
 /** Herramientas de lectura cuya última consulta se conserva entre turnos. */
-export const CASE_LOOKUP_TOOLS = ["buscar_huecos", "ver_contexto_paciente", "ver_resumen_paciente"] as const
+export const CASE_LOOKUP_TOOLS = ["buscar_huecos", "ver_contexto_paciente", "ver_resumen_paciente", "ver_presupuesto"] as const
 
 export interface AgentCaseProposal {
   id: string

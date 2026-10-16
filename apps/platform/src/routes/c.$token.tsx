@@ -1,10 +1,9 @@
-import { Button } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect } from "react"
 import { ApiError } from "../lib/api"
-import { fetchAutomationLink, submitAutomationLink } from "../lib/public-automations"
+import { personalLinkFromEmail } from "../lib/public-automations"
 
 export const Route = createFileRoute("/c/$token")({
   head: () => ({
@@ -13,123 +12,52 @@ export const Route = createFileRoute("/c/$token")({
       { name: "referrer", content: "no-referrer" },
     ],
   }),
-  component: PublicAppointmentPage,
+  component: EmailAppointmentLink,
 })
 
 /**
- * Página pública amable de confirmación/cancelación de cita (sin sesión).
- * El token opaco resuelve el tenant en el servidor; la página nunca recibe
- * ni muestra datos del paciente: solo fecha/hora y la acción del enlace.
+ * Los enlaces de confirmar o cancelar de un correo quedan como redirección a
+ * «Su enlace» (ADR 0037): ahí la persona confirma, cambia o cancela su cita,
+ * igual que desde WhatsApp. Esta página no muestra nada de la cita.
  */
-function PublicAppointmentPage() {
+function EmailAppointmentLink() {
   const { token } = Route.useParams()
-  const [done, setDone] = useState<"confirmada" | "cancelada" | null>(null)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-
-  const infoQuery = useQuery({
+  const query = useQuery({
     queryKey: ["public-automation-cita", token],
-    queryFn: () => fetchAutomationLink("cita", token),
+    queryFn: () => personalLinkFromEmail(token),
     enabled: typeof window !== "undefined",
     retry: false,
-    staleTime: 30_000,
+    staleTime: Number.POSITIVE_INFINITY,
   })
+  const url = query.data?.data.url ?? null
+  useEffect(() => {
+    if (url) window.location.replace(url)
+  }, [url])
 
-  if (done !== null) {
-    return (
-      <PageShell maxWidth="md">
-        <EmptyState
-          title={done === "confirmada" ? "Cita confirmada" : "Cita cancelada"}
-          description={
-            done === "confirmada"
-              ? "Tu asistencia quedó registrada. Te esperamos en la fecha indicada."
-              : "Tu cita quedó cancelada. Responde al mensaje de la clínica si deseas reprogramarla."
-          }
-        />
-      </PageShell>
-    )
-  }
-
-  if (infoQuery.isPending) {
-    return (
-      <PageShell maxWidth="md">
-        <LoadingState message="Cargando tu cita…" />
-      </PageShell>
-    )
-  }
-
-  if (infoQuery.isError) {
-    return (
-      <PageShell maxWidth="md">
-        <ErrorState
-          title="Enlace no disponible"
-          error={
-            infoQuery.error instanceof ApiError
-              ? infoQuery.error.shape
-              : infoQuery.error instanceof Error
-                ? infoQuery.error
-                : "No pudimos cargar la cita. Inténtalo más tarde."
-          }
-          onRetry={() => void infoQuery.refetch()}
-        />
-      </PageShell>
-    )
-  }
-
-  const info = infoQuery.data.data
-  if (info.expired || info.used || info.purpose === "baja") {
-    return (
-      <PageShell maxWidth="md">
-        <EmptyState
-          title="Enlace no disponible"
-          description="Este enlace ya fue usado o venció. Comunícate con recepción para confirmar tu cita."
-        />
-      </PageShell>
-    )
-  }
-
-  const isConfirm = info.purpose === "confirm"
-
-  async function handleAction() {
-    setSubmitError(null)
-    setSubmitting(true)
-    try {
-      await submitAutomationLink("cita", token, isConfirm ? "confirmar" : "cancelar")
-      setDone(isConfirm ? "confirmada" : "cancelada")
-    } catch (error) {
-      const shape = error instanceof ApiError ? error.shape : null
-      setSubmitError(shape?.message ?? "No pudimos completar la solicitud. Inténtalo de nuevo.")
-    } finally {
-      setSubmitting(false)
+  if (query.isError) {
+    if (query.error instanceof ApiError && (query.error.status === 404 || query.error.status === 409)) {
+      return (
+        <PageShell maxWidth="md">
+          <EmptyState title="Este enlace ya no sirve" description="Responde el mensaje y te enviamos uno nuevo." />
+        </PageShell>
+      )
     }
+    return (
+      <PageShell maxWidth="md">
+        <ErrorState title="No pudimos abrir tu cita" message="Revisa tu conexión y vuelve a intentarlo." onRetry={() => void query.refetch()} />
+      </PageShell>
+    )
   }
-
+  if (query.isSuccess && !url) {
+    return (
+      <PageShell maxWidth="md">
+        <EmptyState title="No pudimos abrir tu cita" description="Escribe a la clínica y te ayudamos." />
+      </PageShell>
+    )
+  }
   return (
     <PageShell maxWidth="md">
-      <PageHeader
-        title={isConfirm ? "Confirma tu cita" : "Cancela tu cita"}
-        subtitle={
-          info.when
-            ? `Cita programada para el ${info.when} (hora local). ${
-                isConfirm
-                  ? "Al confirmar, tu lugar queda reservado. Si no puedes asistir, usa el enlace de cancelación del mensaje."
-                  : "Al cancelar, tu lugar queda libre. Esta acción no se puede deshacer desde aquí."
-              }`
-            : isConfirm
-              ? "Al confirmar, tu lugar queda reservado. Si no puedes asistir, usa el enlace de cancelación del mensaje."
-              : "Al cancelar, tu lugar queda libre. Esta acción no se puede deshacer desde aquí."
-        }
-      />
-      {submitError ? (
-        <p role="alert" className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          {submitError}
-        </p>
-      ) : null}
-      <div className="mt-6">
-        <Button type="button" className="min-h-11 w-full" disabled={submitting} onClick={handleAction}>
-          {submitting ? "Procesando…" : isConfirm ? "Confirmar mi cita" : "Cancelar mi cita"}
-        </Button>
-      </div>
+      <LoadingState kind="indeterminate" message="Abriendo tu cita…" />
     </PageShell>
   )
 }

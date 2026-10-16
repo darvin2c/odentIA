@@ -2,7 +2,9 @@ import { canAccess } from "@odentia/auth/permissions"
 import { describe, expect, it } from "vitest"
 import {
   areaNav,
+  clinicalSummaryFor,
   defaultSection,
+  documentFilterFromSearch,
   resolveSection,
   sectionFromSearch,
   suggestedDentition,
@@ -16,14 +18,12 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
   const ids = (role: string, isPatient = true) =>
     visibleAreas(as(role), isPatient).map((area) => area.id)
 
-  it("recepción: resumen, conversaciones, citas y datos; ni clínica, ni plan, ni cobros", () => {
-    expect(ids("reception")).toEqual(["resumen", "conversaciones", "citas", "datos"])
+  it("recepción: resumen, conversaciones, citas, plan y datos; ni clínica ni cobros", () => {
+    expect(ids("reception")).toEqual(["resumen", "conversaciones", "citas", "plan", "datos"])
     expect(defaultSection(as("reception"))).toBe("resumen")
-    // Coordina el tratamiento sin leer la clínica.
-    expect(areaNav("citas", as("reception")).map((entry) => entry.label)).toEqual([
-      "Sus citas",
-      "Tratamiento",
-    ])
+    // Coordina el tratamiento en el mismo Plan, sin leer la clínica (ADR 0034).
+    expect(areaNav("citas", as("reception")).map((entry) => entry.label)).toEqual(["Sus citas"])
+    expect(resolveSection("plan", as("reception"))).toBe("plan")
   })
 
   it("odontología: conversaciones sin el CRM, clínica y plan; sin cobros", () => {
@@ -35,10 +35,10 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
       "plan",
       "datos",
     ])
-    // Quien lee la clínica tiene el plan completo: no ve la coordinación aparte.
-    expect(visibleSections(as("dentist")).map((section) => section.id)).not.toContain(
-      "coordinacion",
-    )
+    // Un solo Plan: ni la coordinación, ni Tratamientos, ni Controles aparte (ADR 0034).
+    const sections = visibleSections(as("dentist")).map((section) => section.id)
+    for (const retired of ["coordinacion", "recorrido", "controles"])
+      expect(sections).not.toContain(retired)
     // Ni canales ni portal: son del CRM y de quien edita la filiación.
     expect(areaNav("datos", as("dentist")).map((entry) => entry.label)).toEqual([
       "Datos personales",
@@ -92,30 +92,48 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("seguimiento")).toBe("conversaciones")
     expect(sectionFromSearch("odontograma")).toBe("odontograma")
     expect(sectionFromSearch("no-existe")).toBeUndefined()
+    // Tratamientos, Controles y la coordinación de recepción viven ahora en el Plan.
+    expect(sectionFromSearch("recorrido")).toBe("plan")
+    expect(sectionFromSearch("controles")).toBe("plan")
+    expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("los documentos se agrupan en una sola entrada de Clínica", () => {
-    const entries = areaNav("clinica", as("dentist"))
-    expect(entries.map((entry) => entry.label)).toEqual([
-      "Resumen clínico",
-      "Odontograma",
-      "Tratamientos",
-      "Controles",
-      "Atenciones",
-      "Historia",
+  it("Clínica en cuatro secciones; el odontólogo ve 11 y el propietario 15 (ADR 0035)", () => {
+    expect(areaNav("clinica", as("dentist")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
+      "Odontograma",
+      "Historia",
       "Documentos",
     ])
-    const documents = entries.at(-1)
-    expect(documents?.target).toBe("documentos")
-    expect(documents?.members.map((section) => section.id)).toEqual([
-      "documentos",
-      "imagenes",
-      "recetas",
-      "ordenes",
-      "formularios",
-      "consentimientos",
-    ])
+    expect(visibleSections(as("dentist"))).toHaveLength(11)
+    expect(visibleSections(as("owner"))).toHaveLength(15)
+    // Recepción y caja no cambian.
+    expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
+    expect(visibleSections(as("cashier")).map((section) => section.area)).not.toContain("clinica")
+  })
+
+  it("quien lee la clínica entra por el Resumen clínico; recepción por su Resumen y caja por Cobros", () => {
+    for (const role of ["dentist", "owner", "admin"]) {
+      expect(defaultSection(as(role))).toBe("resumen")
+      expect(clinicalSummaryFor(as(role))).toBe(true)
+    }
+    expect(clinicalSummaryFor(as("reception"))).toBe(false)
+    expect(clinicalSummaryFor(as("cashier"))).toBe(false)
+    expect(defaultSection(as("cashier"))).toBe("cuenta")
+    // Quien aún no es paciente no tiene historia: su Resumen no es clínico.
+    expect(clinicalSummaryFor(as("dentist"), false)).toBe(false)
+  })
+
+  it("las secciones retiradas de Clínica abren la que hace ese trabajo", () => {
+    expect(sectionFromSearch("clinico")).toBe("resumen")
+    expect(sectionFromSearch("atenciones")).toBe("historia")
+    for (const kind of ["imagenes", "recetas", "ordenes", "formularios", "consentimientos"]) {
+      expect(sectionFromSearch(kind)).toBe("documentos")
+      // El tipo de papel pasa a ser el filtro de Documentos.
+      expect(documentFilterFromSearch(kind, undefined)).toBe(kind)
+    }
+    expect(documentFilterFromSearch("documentos", "requieren")).toBe("requieren")
+    expect(documentFilterFromSearch("documentos", "otro")).toBeUndefined()
   })
 })
 

@@ -281,6 +281,13 @@ it("el cajón de la cita: a quién se le escribe y de dónde salió, para quien 
   expect(context.person).toMatchObject({ name: "Paciente API", relationship: "self" })
   expect(context.origin).toMatchObject({ source: "recepcion", conversationId: null })
   expect(context.confirmation).toBeNull()
+  // «Faltan datos para atenderla» lo calcula el servidor con la regla de la
+  // página (aquí, sin fecha de nacimiento ni apellidos) y solo lo recibe quien
+  // edita sus datos: el odontólogo ve la cita sin el aviso.
+  const missing = (context as unknown as { missingData: Array<{ key: string }> | null }).missingData
+  expect(missing?.map((datum) => datum.key)).toContain("birthDate")
+  const forDentist = await buildApp("dentist").request(`/appointments/${cita.id}/context`)
+  expect(((await forDentist.json()) as { data: { missingData: unknown } }).data.missingData).toBeNull()
   // Caja no ve la agenda: tampoco lo que dice la cita de la persona.
   expect((await buildApp("cashier").request(`/appointments/${cita.id}/context`)).status).toBe(403)
   await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "cancelada" }) })
@@ -333,4 +340,40 @@ it("sillones: administrarlos exige configuración; desactivado sale de la agenda
   expect(((await again.json()) as { data: { chairs: Array<{ label: string }> } }).data.chairs).toEqual([
     { id: chairId, label: "Sillón Uno" },
   ])
+})
+
+it("«Llegó»: lo marcan recepción y el odontólogo, caja no; el estado no se cambia por PATCH", async () => {
+  const owner = buildApp("owner")
+  // Una cita de hoy, a la hora actual: llegar solo vale para las de hoy.
+  const startsAt = new Date(Date.now() + 2 * 60_000).toISOString()
+  const created = await owner.request("/appointments", {
+    method: "POST",
+    headers: json,
+    body: JSON.stringify({ branchId, patientId, dentistUserId: DENTIST, chairId, startsAt, durationMin: 15, outsideSchedule: true }),
+  })
+  expect(created.status).toBe(201)
+  const cita = ((await created.json()) as { data: { id: string; version: number } }).data
+  const arrive = (role: string, arrived: boolean) =>
+    buildApp(role).request(`/appointments/${cita.id}/arrival`, { method: "POST", headers: json, body: JSON.stringify({ arrived }) })
+
+  expect((await arrive("cashier", true)).status).toBe(403)
+  const arrived = await arrive("reception", true)
+  expect(arrived.status).toBe(200)
+  expect(((await arrived.json()) as { data: { visit: string; status: string } }).data).toMatchObject({ visit: "llego", status: "confirmada" })
+  // Con la persona en la clínica, «No vino» se rechaza en palabras.
+  const noShow = await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "no_asistio" }) })
+  expect(noShow.status).toBe(409)
+  expect(await noShow.json()).toMatchObject({ error: { code: "APPOINTMENT_ARRIVED" } })
+  // «Atendida» solo la pone el cierre de la atención.
+  const attended = await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "atendida" }) })
+  expect(await attended.json()).toMatchObject({ error: { code: "ATTENDED_BY_ENCOUNTER" } })
+  const viaPatch = await owner.request(`/appointments/${cita.id}`, {
+    method: "PATCH",
+    headers: json,
+    body: JSON.stringify({ expectedVersion: 2, status: "atendida" }),
+  })
+  expect(viaPatch.status).toBe(400)
+  expect((await arrive("dentist", false)).status).toBe(200)
+  expect((await arrive("reception", "si" as unknown as boolean)).status).toBe(400)
+  await owner.request(`/appointments/${cita.id}/status`, { method: "POST", headers: json, body: JSON.stringify({ status: "cancelada" }) })
 })

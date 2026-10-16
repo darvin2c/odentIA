@@ -131,6 +131,7 @@ export const AUTONOMY_ACTIONS = [
   "crear_oportunidad",
   "actualizar_seguimiento",
   "cerrar_oportunidad",
+  "decidir_presupuesto",
 ] as const
 export type AutonomyAction = (typeof AUTONOMY_ACTIONS)[number]
 
@@ -147,6 +148,8 @@ export const PROPOSAL_ACTIONS = [
   "crear_oportunidad",
   "actualizar_seguimiento",
   "cerrar_oportunidad",
+  // La respuesta de la persona a su presupuesto, anotada con su sí (fase 3, decisión 5).
+  "decidir_presupuesto",
 ] as const
 export type ProposalAction = (typeof PROPOSAL_ACTIONS)[number]
 
@@ -214,7 +217,7 @@ export const agentProposal = pgTable(
     uniqueIndex("agent_proposal_org_key_uidx").on(table.organizationId, table.idempotencyKey),
     check(
       "agent_proposal_action_check",
-      sql`${table.action} in ('reservar_cita','reprogramar_cita','cancelar_cita','enviar_mensaje','mover_oportunidad','crear_oportunidad','actualizar_seguimiento','cerrar_oportunidad')`,
+      sql`${table.action} in ('reservar_cita','reprogramar_cita','cancelar_cita','enviar_mensaje','mover_oportunidad','crear_oportunidad','actualizar_seguimiento','cerrar_oportunidad','decidir_presupuesto')`,
     ),
     check(
       "agent_proposal_status_check",
@@ -305,7 +308,7 @@ export const agentRunLedger = pgTable(
 )
 
 /**
- * De dónde sale un uso de IA (ADR 0030). `recepcion` son las corridas reales;
+ * De dónde sale un uso de IA (ADR 0031). `recepcion` son las corridas reales;
  * `probar`, `simulacion` y `vista_previa`, las pruebas desde la plataforma;
  * `practica_dictado`, el dictado de práctica; `administrador`, lo que se le
  * pide con palabras; `ya_aviso`, la comprobación antes de un seguimiento;
@@ -705,6 +708,8 @@ export const DEFAULT_AUTONOMY_MODES: Record<AutonomyAction, AutonomyMode> = {
   crear_oportunidad: "directo",
   actualizar_seguimiento: "directo",
   cerrar_oportunidad: "directo",
+  // Lo que la persona acepta de su presupuesto se anota solo después de su sí a la lista.
+  decidir_presupuesto: "confirmar_usuario",
 }
 
 /* ---------- Búsqueda por significado (ADR 0021) ---------- */

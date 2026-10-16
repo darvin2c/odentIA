@@ -1,10 +1,10 @@
 /**
- * Tratamientos vinculados a la atención en curso.
+ * «Hecho hoy», dentro de «Plan y controles»: los tratamientos vinculados a la
+ * atención en curso (por una sesión registrada o porque los trajo la cita).
  *
- * Muestra qué indicaciones trae esta visita, en qué estado clínico están y
- * permite cerrarlas cuando el trabajo terminó. Completar aquí es explícito: la
- * atención puede finalizar con el tratamiento aún en curso para continuar en
- * una sesión posterior.
+ * Muestra en qué estado clínico están y permite cerrarlos cuando el trabajo
+ * terminó. Completar aquí es explícito: la atención puede finalizar con el
+ * tratamiento aún en curso para continuar en una sesión posterior.
  */
 import { Badge, Button } from "@odentia/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -75,23 +75,24 @@ export function EncounterTreatments({
     void navigate({
       to: "/patients/$patientId",
       params: { patientId },
-      search: { tab: "recorrido", itemId },
+      search: { tab: "plan", itemId },
     })
   }
 
   return (
     <div className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5">
-        <div className="font-heading text-base font-medium">Tratamientos de esta atención</div>
+        <h3 className="font-heading text-base font-medium">Hecho hoy</h3>
         <p className="text-sm text-muted-foreground">
-          Registrar una sesión de un tratamiento del plan lo deja en curso; completarlo es una
-          decisión aparte. Un servicio directo queda realizado al registrarlo.
+          Registrar una sesión lo deja en curso; «Completar» lo cierra. Un servicio directo queda
+          realizado al registrarlo.
         </p>
       </div>
 
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Esta atención no tiene tratamientos vinculados. Puedes indicarlos en la pestaña Plan.
+          Ningún tratamiento del plan en esta atención. Al registrar un procedimiento de un
+          tratamiento indicado, aparece aquí.
         </p>
       ) : (
         <ul className="flex flex-col divide-y">
@@ -136,7 +137,7 @@ export function EncounterTreatments({
                       disabled={completingId != null}
                       onClick={() => void complete(item.id)}
                     >
-                      {completingId === item.id ? "Completando…" : "Completar tratamiento"}
+                      {completingId === item.id ? "Completando…" : "Completar"}
                     </Button>
                   ) : null}
                 </div>

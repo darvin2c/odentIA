@@ -1,32 +1,23 @@
-import type { RegistrationConfig } from "@odentia/clinical"
 import { formatMoney } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
-import { AgentMark, EmptyState, LoadingState } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { AgentMark, EmptyState } from "@odentia/ui-patterns"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleCheck } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
-import { planDecisionLabel } from "../../lib/budgets"
-import { fetchFollowUps, formatDate, NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
-import { type TaskItem, timeAgo, useCan, usePermission } from "../../lib/crm"
+import { formatDate } from "../../lib/clinical-journey"
+import { type TaskItem, usePermission } from "../../lib/crm"
 import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useOrgProfile } from "../../lib/org"
 import type { PatientSectionId } from "../../lib/patient-areas"
-import type { PatientFull, PatientSummary } from "../../lib/patients"
-import {
-  fetchPatientHealth,
-  filiationGapsText,
-  hasHealthInfo,
-  isHealthReviewPending,
-  missingFiliation,
-  planStatusLabel,
-} from "../../lib/patients"
-import { QueryErrorState } from "../../lib/query-error"
-import { useTreatmentCoordination } from "./coordinacion-panel"
-import { NewPatientTaskButton } from "./new-patient-task-button"
-import { ClinicalAlertsCard, OpenEncounterCard, RecentImagesCard } from "./resumen-clinico"
+import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patients"
+import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
+import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
+import { TaskDrawer } from "../crm/task-drawer"
+import { usePlanNextStep } from "./plan/plan-next"
+import { SendPersonalLinkButton } from "./send-personal-link"
 
 interface Pending {
   id: string
@@ -90,31 +81,40 @@ function PendingList({ pending }: { pending: Pending[] }) {
 }
 
 /**
- * Pendientes del paciente que no son clínicos, para el Resumen: lo que el
- * agente dejó esperando el sí del paciente, controles por reservar, saldo,
- * datos que faltan y sus tareas. Cada bloque pide solo lo que su permiso
- * autoriza; lo clínico vive en la pestaña Clínica y el representante, en la
- * cabecera.
+ * Pendientes del paciente para el Resumen: lo que el agente dejó esperando el
+ * sí del paciente, «Qué sigue» del plan (para quien no lee la clínica: quien
+ * la lee lo tiene en su propia tarjeta), saldo, datos que faltan y sus tareas.
+ * Para quien atiende suma lo clínico que le toca (antecedentes declarados por
+ * revisar y consentimientos sin firmar). Cada bloque pide solo lo que su
+ * permiso autoriza; el representante va en la cabecera.
  */
 export function PatientPendingCard({
   patientId,
   detail,
+  clinical,
   onTabChange,
 }: {
   patientId: string
   detail: PatientFull
+  /** Lo clínico ya leído por el Resumen de quien atiende (no se pide aquí). */
+  clinical?: { summary?: PatientSummary; health?: PatientHealth | null }
   onTabChange: (section: PatientSectionId) => void
 }) {
   const canClinical = usePermission("clinical.read")
   const canFinance = usePermission("finance.read")
   const canAppointments = usePermission("appointments.read")
+  const canBudgets = usePermission("budgets.read")
   const canPatients = usePermission("patients.read")
   const canEditPatient = usePermission("patients.write")
   const canDecide = usePermission("agent.decide")
   const canReadAgent = usePermission("agent.read")
   const canTasks = usePermission("tasks.read")
-  const can = useCan()
-  const canConfig = can("crm.read") || can("settings.read")
+  const canWriteTasks = usePermission("tasks.write")
+  const queryClient = useQueryClient()
+  // «Completar» abre el cajón con solo lo que falta, sin salir del Resumen.
+  const [completing, setCompleting] = useState<FiliacionSectionKey | null>(null)
+  // Una tarea de la persona se crea con el mismo cajón que en Tareas (vence con «Día y hora»).
+  const [newTask, setNewTask] = useState(false)
 
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -140,17 +140,9 @@ export function PatientPendingCard({
     enabled: canTasks && canPatients,
     retry: false,
   })
-  const configQuery = useQuery({
-    queryKey: ["patient-registration-config"],
-    queryFn: () =>
-      apiFetch<{ data: RegistrationConfig; meta: { today: string } }>(
-        "/api/patient-registration/config",
-      ),
-    enabled: canEditPatient && canConfig,
-    retry: false,
-  })
-  // Quien lee la clínica tiene estos pendientes con su detalle en su pestaña.
-  const coordinationQuery = useTreatmentCoordination(patientId, canAppointments && !canClinical)
+  // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Quien
+  // lee la clínica lo tiene en su pestaña con el detalle clínico.
+  const nextStepQuery = usePlanNextStep(patientId, (canAppointments || canBudgets) && !canClinical)
 
   const go = (section: PatientSectionId, label: string) => (
     <Button size="sm" variant="outline" onClick={() => onTabChange(section)}>
@@ -159,6 +151,22 @@ export function PatientPendingCard({
   )
 
   const pending: Pending[] = []
+  if (canClinical && clinical) {
+    if (clinical.health && isHealthReviewPending(clinical.health))
+      pending.push({
+        id: "health-review",
+        title: "Antecedentes declarados por revisar",
+        detail: "El paciente o su responsable los declaró; falta la validación clínica.",
+        action: go("antecedentes", "Revisar"),
+      })
+    for (const consent of clinical.summary?.pendingConsents ?? [])
+      pending.push({
+        id: `consent-${consent.id}`,
+        title: `Consentimiento sin firmar: ${consent.title}`,
+        detail: "Emitido y pendiente de la firma de la persona o su representante.",
+        action: go("documentos", "Firmar"),
+      })
+  }
   for (const proposal of proposalsQuery.data?.data ?? [])
     pending.push({
       id: `proposal-${proposal.id}`,
@@ -176,35 +184,14 @@ export function PatientPendingCard({
         </Link>
       ),
     })
-  const coordination = coordinationQuery.data?.data
-  if (coordination) {
-    const toBook = coordination.followUps.filter(
-      (control) =>
-        control.status === "pendiente" &&
-        control.appointment?.status !== "programada" &&
-        control.appointment?.status !== "confirmada",
-    )
-    if (toBook.length > 0)
-      pending.push({
-        id: "coordination-follow-ups",
-        title:
-          toBook.length === 1
-            ? `Control por reservar: ${toBook[0].title}`
-            : `${toBook.length} controles por reservar`,
-        detail: `Corresponde el ${formatDate(toBook[0].dueAt)}.`,
-        action: go("coordinacion", "Reservar"),
-      })
-    if (coordination.budgetsAwaitingDecision.length > 0)
-      pending.push({
-        id: "coordination-budgets",
-        title:
-          coordination.budgetsAwaitingDecision.length === 1
-            ? `Presupuesto «${coordination.budgetsAwaitingDecision[0].title}» sin decisión`
-            : `${coordination.budgetsAwaitingDecision.length} presupuestos sin decisión`,
-        detail: "Presentado y pendiente de respuesta de quien decide.",
-        action: go("coordinacion", "Hacer seguimiento"),
-      })
-  }
+  const nextStep = nextStepQuery.data?.data
+  if (nextStep && nextStep.kind !== "ninguno")
+    pending.push({
+      id: "plan-next",
+      title: nextStep.text,
+      detail: nextStep.detail ?? "Lo que sigue en su plan de tratamiento.",
+      action: go("plan", "Ir al plan"),
+    })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
     if (balance.porCobrar > 0)
       pending.push({
@@ -218,31 +205,28 @@ export function PatientPendingCard({
       })
   }
   if (canEditPatient) {
-    const config = configQuery.data?.data
-    const gaps = config ? missingFiliation(config, detail.patient) : []
-    // Una ficha creada con lo mínimo (al reservar o desde el enlace) queda además
-    // con la identidad por revisar: se dice en el mismo pendiente.
-    const review = detail.patient.identityNeedsReview ? "Confirma apellidos y nombres." : ""
+    // «Faltan datos para atenderla»: lo calcula el servidor (la misma regla que
+    // la Agenda y la nota del caso). Una ficha creada con lo mínimo queda además
+    // con los apellidos por confirmar: guardar en «Completar» los confirma.
+    const gaps = detail.missingData ?? []
+    const review = detail.patient.identityNeedsReview ? "Confirma sus apellidos." : ""
     if (gaps.length > 0 || review)
       pending.push({
         id: "filiacion",
-        title: gaps.length > 0 ? "Faltan datos que la clínica pide" : "Identidad por revisar",
-        detail: [
-          gaps.length > 0
-            ? `${filiationGapsText(gaps).charAt(0).toUpperCase()}${filiationGapsText(gaps).slice(1)}.`
-            : "",
-          review,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        action: go("filiacion", "Completar"),
-      })
-    if (!detail.contacts.some((link) => link.phone || link.email))
-      pending.push({
-        id: "contacts",
-        title: "Sin datos de contacto",
-        detail: "Ni la persona ni quienes hablan por ella tienen teléfono o correo registrados.",
-        action: go("filiacion", "Completar"),
+        title: gaps.length > 0 ? "Faltan datos para atenderla" : "Apellidos por confirmar",
+        detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
+        action: (
+          <span className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCompleting(gaps.length > 0 ? "completar" : "identidad")}
+            >
+              Completar
+            </Button>
+            {gaps.length > 0 ? <SendPersonalLinkButton patientId={patientId} /> : null}
+          </span>
+        ),
       })
   }
   for (const task of tasksQuery.data?.data ?? [])
@@ -262,224 +246,36 @@ export function PatientPendingCard({
     })
 
   return (
-    <SummaryCard title="Pendientes" action={<NewPatientTaskButton patientId={patientId} />}>
+    <SummaryCard
+      title="Pendientes"
+      action={
+        canWriteTasks ? (
+          <Button size="sm" variant="outline" onClick={() => setNewTask(true)}>
+            Nueva tarea
+          </Button>
+        ) : null
+      }
+    >
       <PendingList pending={pending} />
+      {canWriteTasks ? (
+        <TaskDrawer
+          open={newTask}
+          patientId={patientId}
+          onClose={() => setNewTask(false)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["patient-tasks", patientId] })}
+        />
+      ) : null}
+      {completing ? (
+        <FiliacionSectionDrawer
+          key={completing}
+          patient={detail.patient}
+          section={completing}
+          missing={detail.missingData ?? []}
+          open
+          onClose={() => setCompleting(null)}
+        />
+      ) : null}
     </SummaryCard>
   )
 }
 
-/**
- * Resumen clínico, la primera sección de la pestaña Clínica: la atención en
- * curso, las alertas, lo clínico pendiente, los tratamientos, las imágenes
- * recientes y la última atención. Abrir esta pestaña es una lectura clínica
- * (el resumen deja su traza en la bitácora); abrir la página no lo es.
- */
-export function ClinicalSummaryTab({
-  patientId,
-  onTabChange,
-}: {
-  patientId: string
-  onTabChange: (section: PatientSectionId, tooth?: number, itemId?: string) => void
-}) {
-  const canClinical = usePermission("clinical.read")
-  const healthQuery = useQuery({
-    queryKey: ["patient-health", patientId],
-    queryFn: () => fetchPatientHealth(patientId),
-    enabled: canClinical,
-  })
-  const summaryQuery = useQuery({
-    queryKey: ["patient-summary", patientId],
-    queryFn: () => apiFetch<{ data: PatientSummary }>(`/api/patients/${patientId}/summary`),
-    enabled: canClinical,
-  })
-  const followUpsQuery = useQuery({
-    queryKey: ["follow-ups", patientId],
-    queryFn: () => fetchFollowUps(patientId),
-    enabled: canClinical,
-  })
-
-  const resolved = summaryQuery.data?.data ?? null
-  if (resolved == null) {
-    if (summaryQuery.isError)
-      return (
-        <QueryErrorState error={summaryQuery.error} onRetry={() => void summaryQuery.refetch()} />
-      )
-    return <LoadingState message="Cargando resumen clínico…" />
-  }
-
-  const go = (section: PatientSectionId, label: string) => (
-    <Button size="sm" variant="outline" onClick={() => onTabChange(section)}>
-      {label}
-    </Button>
-  )
-  const pending: Pending[] = []
-  const health = healthQuery.data?.data ?? null
-  if (healthQuery.isSuccess) {
-    if (isHealthReviewPending(health))
-      pending.push({
-        id: "health-review",
-        title: "Antecedentes declarados por revisar",
-        detail: "El paciente o su responsable los declaró; falta la validación clínica.",
-        action: go("antecedentes", "Revisar"),
-      })
-    else if (!hasHealthInfo(health))
-      pending.push({
-        id: "health-empty",
-        title: "Sin antecedentes registrados",
-        detail: "Alergias, condiciones, medicación y entrevista se registran en un solo guardado.",
-        action: go("antecedentes", "Registrar"),
-      })
-  }
-  if (resolved.openEncounterId && !resolved.openEncounter)
-    pending.push({
-      id: "open-encounter",
-      title: "Atención en borrador",
-      detail: "Hay una atención iniciada sin finalizar.",
-      action: (
-        <Link
-          to="/patients/$patientId/encounters/$encounterId"
-          params={{ patientId, encounterId: resolved.openEncounterId }}
-          className={buttonVariants({ size: "sm" })}
-        >
-          Continuar
-        </Link>
-      ),
-    })
-  for (const consent of resolved.pendingConsents ?? [])
-    pending.push({
-      id: `consent-${consent.id}`,
-      title: `Consentimiento sin firmar: ${consent.title}`,
-      detail: "Emitido y pendiente de la firma del paciente o su representante.",
-      action: go("consentimientos", "Firmar"),
-    })
-  if (resolved.proposedBudgets.length > 0)
-    pending.push({
-      id: "budgets",
-      title:
-        resolved.proposedBudgets.length === 1
-          ? `Presupuesto «${resolved.proposedBudgets[0].title}» sin decisión`
-          : `${resolved.proposedBudgets.length} presupuestos sin decisión`,
-      detail: "Presentado y pendiente de respuesta de quien decide.",
-      action: go("plan", "Ver presupuestos"),
-    })
-  const unscheduled = (followUpsQuery.data?.data ?? []).filter((row) => row.status === "pendiente")
-  if (unscheduled.length > 0)
-    pending.push({
-      id: "follow-ups",
-      title:
-        unscheduled.length === 1
-          ? `Control por programar: ${unscheduled[0].title}`
-          : `${unscheduled.length} controles por programar`,
-      detail: `Vence el ${formatDate(unscheduled[0].dueAt)}.`,
-      action: go("controles", "Programar"),
-    })
-  if (resolved.planPending.count > 0)
-    pending.push({
-      id: "plan-pending",
-      title: `${resolved.planPending.count} tratamiento(s) aceptado(s) por ejecutar`,
-      detail: "Aceptados por el paciente y aún sin realizar.",
-      action: go("recorrido", "Ver tratamientos"),
-    })
-
-  const lastVisit = resolved.lastVisit ?? null
-  const journeys = resolved.treatmentJourneys ?? []
-
-  return (
-    <div className="flex min-w-0 flex-col gap-4">
-      {resolved.openEncounter ? (
-        <OpenEncounterCard patientId={patientId} encounter={resolved.openEncounter} />
-      ) : null}
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
-          {healthQuery.isSuccess ? (
-            <ClinicalAlertsCard health={health} action={go("antecedentes", "Antecedentes")} />
-          ) : null}
-          <SummaryCard title="Pendiente en la clínica">
-            <PendingList pending={pending} />
-          </SummaryCard>
-          <SummaryCard
-            title="Tratamientos y seguimiento"
-            action={journeys.length > 0 ? go("odontograma", "Ver odontograma") : undefined}
-          >
-            {journeys.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Sin tratamientos indicados. Se indican durante una atención abierta.
-              </p>
-            ) : (
-              <ul className="flex flex-col divide-y">
-                {journeys.slice(0, 6).map((row) => (
-                  <li
-                    key={row.item.id}
-                    className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-                  >
-                    <span className="flex min-w-0 flex-col">
-                      <span className="font-medium">
-                        {row.item.toothNumber ? `Pieza ${row.item.toothNumber} · ` : "General · "}
-                        {row.item.title}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {row.nextAction
-                          ? NEXT_ACTION_LABELS[row.nextAction]
-                          : "Sin acción pendiente"}{" "}
-                        · decisión {planDecisionLabel(row.decision)} · ejecución{" "}
-                        {planStatusLabel(row.clinicalStatus)}
-                        {row.nextFollowUp ? ` · control ${formatDate(row.nextFollowUp.dueAt)}` : ""}
-                      </span>
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onTabChange("recorrido", undefined, row.item.id)}
-                    >
-                      Ver detalle
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </SummaryCard>
-        </div>
-        <div className="flex min-w-0 flex-col gap-4">
-          <RecentImagesCard
-            patientId={patientId}
-            documents={resolved.recentDocuments ?? []}
-            onOpen={(section) => onTabChange(section)}
-          />
-          <SummaryCard title="Última atención">
-            {lastVisit ? (
-              <div className="flex flex-col gap-2 text-sm">
-                <p className="font-medium">
-                  {lastVisit.reason || "Atención finalizada"}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    · {timeAgo(lastVisit.finalizedAt ?? "")}
-                  </span>
-                </p>
-                {lastVisit.evolution ? (
-                  <p className="whitespace-pre-wrap">
-                    {lastVisit.evolution.length > 280
-                      ? `${lastVisit.evolution.slice(0, 280)}…`
-                      : lastVisit.evolution}
-                  </p>
-                ) : null}
-                <div>
-                  <Link
-                    to="/patients/$patientId/encounters/$encounterId"
-                    params={{ patientId, encounterId: lastVisit.encounterId }}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
-                  >
-                    Abrir esta atención
-                  </Link>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Sin atenciones registradas. La atención se inicia desde la cabecera de la página.
-              </p>
-            )}
-          </SummaryCard>
-        </div>
-      </div>
-    </div>
-  )
-}

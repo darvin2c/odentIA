@@ -1,5 +1,7 @@
+import { clinicalProfileFor, type IdentityDocType } from "./country-profiles.js"
+
 /**
- * Catálogos de identidad del paciente (ADR 0004). Se guardan códigos estables;
+ * Catálogos de identidad del paciente (ADR 0004 y 0036). Se guardan códigos estables;
  * las etiquetas son para mostrar. Donde hay estándar se documenta su
  * correspondencia para exportar sin traducir.
  */
@@ -19,13 +21,14 @@ export const SEX_LABELS: Record<SexCode, string> = {
 }
 
 /**
- * Documentos de identidad usados en Perú: DNI (RENIEC), carné de extranjería
- * (Migraciones), pasaporte, certificado de nacido vivo (CNV) y documento de
- * identidad extranjero (DIE).
+ * Documentos de identidad. Los tipos y sus etiquetas valen en cualquier
+ * clínica (un DNI se lee «DNI» también en Bogotá); qué tipos se ofrecen y quién
+ * los emite lo dice el país de la clínica (`clinicalProfileFor`). En Perú: DNI
+ * (RENIEC), carné de extranjería (Migraciones), pasaporte, certificado de
+ * nacido vivo (CNV) y documento de identidad extranjero (DIE).
  */
-export const IDENTITY_DOC_TYPES = ["DNI", "CE", "PASAPORTE", "CNV", "DIE", "OTRO"] as const
-export type IdentityDocType = (typeof IDENTITY_DOC_TYPES)[number]
 export const DOC_TYPE_LABELS: Record<IdentityDocType, string> = {
+  NACIONAL: "Documento nacional",
   DNI: "DNI",
   CE: "Carné de extranjería",
   PASAPORTE: "Pasaporte",
@@ -41,8 +44,6 @@ export function documentText(docType: string | null | undefined, docNumber: stri
   const label = docType ? (DOC_TYPE_LABELS[docType as IdentityDocType] ?? docType) : ""
   return `${label} ${docNumber}`.trim()
 }
-/** Documentos emitidos fuera del Perú: exigen el país emisor (ISO 3166-1 alfa-2). */
-export const FOREIGN_DOC_TYPES: readonly IdentityDocType[] = ["PASAPORTE", "DIE"]
 
 /** Estado civil (catálogo de RENIEC/INEI). */
 export const MARITAL_STATUSES = [
@@ -115,9 +116,18 @@ export const KINSHIP_LABELS: Record<(typeof KINSHIP)[number], string> = {
 }
 
 export const ISO_COUNTRY_RE = /^[A-Z]{2}$/
-export const UBIGEO_RE = /^\d{6}$/
 
-/** Formato del número según el documento; null si es válido. */
+function lengthWords(what: string, count: number, expected: number, unit: string): string {
+  const diff = expected - count
+  return diff > 0
+    ? `${what} tiene ${expected} ${unit}; ${diff === 1 ? "falta 1" : `faltan ${diff}`}`
+    : `${what} tiene ${expected} ${unit}; ${-diff === 1 ? "sobra 1" : `sobran ${-diff}`}`
+}
+
+/**
+ * Formato del número según el documento; null si es válido. Los errores dicen
+ * qué arreglar («El DNI tiene 8 números; faltan 2»), nunca «formato inválido».
+ */
 export function identityDocumentError(
   docType: string | null | undefined,
   docNumber: string | null | undefined,
@@ -126,21 +136,31 @@ export function identityDocumentError(
   if (!value) return null
   switch (docType) {
     case "DNI":
-      return /^\d{8}$/.test(value) ? null : "El DNI tiene exactamente 8 dígitos"
+      if (!/^\d+$/.test(value)) return "El DNI solo lleva números"
+      return value.length === 8 ? null : lengthWords("El DNI", value.length, 8, "números")
     case "CE":
       return /^[A-Za-z0-9]{8,12}$/.test(value)
         ? null
-        : "El carné de extranjería tiene de 8 a 12 letras o dígitos"
+        : "El carné de extranjería tiene de 8 a 12 letras o números, sin espacios"
     case "PASAPORTE":
       return /^[A-Za-z0-9]{6,12}$/.test(value)
         ? null
-        : "El pasaporte tiene de 6 a 12 letras o dígitos"
+        : "El pasaporte tiene de 6 a 12 letras o números, sin espacios"
     case "CNV":
-      return /^\d{6,12}$/.test(value) ? null : "El CNV tiene de 6 a 12 dígitos"
+      return /^\d{6,12}$/.test(value) ? null : "El certificado de nacido vivo tiene de 6 a 12 números"
     case "DIE":
       return /^[A-Za-z0-9-]{4,20}$/.test(value)
         ? null
-        : "El documento extranjero tiene de 4 a 20 letras, dígitos o guiones"
+        : "El documento extranjero tiene de 4 a 20 letras, números o guiones"
+    case "NACIONAL":
+      // Admite puntos y guion: 12.345.678-5 se escribe así en Chile.
+      return /^[A-Za-z0-9][A-Za-z0-9.-]{3,19}$/.test(value)
+        ? null
+        : "El documento tiene de 4 a 20 letras o números; admite puntos y guion"
+    case "OTRO":
+      return /^[A-Za-z0-9][A-Za-z0-9. /-]{0,19}$/.test(value)
+        ? null
+        : "El documento tiene hasta 20 letras o números"
     default:
       return null
   }
@@ -174,18 +194,13 @@ export function splitSurnames(raw: string | null | undefined): {
 }
 
 /**
- * Perfil de país del teléfono: cómo se reconoce un número nacional escrito
- * sin código de país. Solo figuran los países cuyo formato se ha comprobado;
+ * Cómo se reconoce un número nacional escrito sin código de país: lo dice el
+ * país de la clínica. Solo figuran los países cuyo formato se ha comprobado;
  * en los demás el número se pide con su código de país (el campo de teléfono
  * de la interfaz ya lo entrega en E.164 para cualquier país).
  */
-const NATIONAL_PHONE: Record<string, { callingCode: string; national: RegExp; hint: string }> = {
-  // Perú: celular de 9 dígitos que empieza por 9.
-  PE: { callingCode: "51", national: /^9\d{8}$/, hint: "un celular de 9 dígitos" },
-}
-
 function nationalPhone(countryCode: string | null | undefined) {
-  return countryCode ? NATIONAL_PHONE[countryCode.trim().toUpperCase()] : undefined
+  return clinicalProfileFor(countryCode).phone ?? undefined
 }
 
 /**

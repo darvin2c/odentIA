@@ -7,6 +7,7 @@ import {
   patientDocument,
 } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
+import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import {
   portalAccessLog,
@@ -15,28 +16,45 @@ import {
   type PortalScope,
 } from "@odentia/db/schema/portal"
 import { portalPasskey } from "@odentia/db/schema/portal-access"
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, max } from "drizzle-orm"
 import { moveAppointment, setAppointmentStatus } from "./appointments.js"
-import {
-  listAvailableSlots,
-  type AvailableSlotsResult,
-} from "./availability.js"
+import { type BookingLinkSlot, listWeekSlots } from "./booking-links.js"
 import { decideBudget, getBudgetDetail, listBudgets, type BudgetWithTotals } from "./budgets.js"
 import { getPatientDocument, listPatientDocuments } from "./clinical.js"
 import { sendOutbound } from "./conversations.js"
 import {
-  branchNotFound,
   isUniqueViolation,
   notFound,
   ServiceError,
   validation,
 } from "./errors.js"
 import { requirePatient } from "./patients.js"
+import { contactDecides } from "./responsibilities.js"
 import { getPatientAccount } from "./payments.js"
-import { getOrgLocale } from "./locale.js"
+import { findOrgLocale, getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
-import { getPortalPolicy, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
+import { getPortalPolicy, PORTAL_FIXED, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
+
+/**
+ * Quién puede compartir qué en el portal: los presupuestos, quien los envía
+ * (recepción incluida, decisión 4); la cuenta, quien ve la caja; los
+ * documentos, quien lee la historia.
+ */
+export interface PortalShareRights {
+  canShareBudgets: boolean
+  canShareAccount: boolean
+  canShareDocuments: boolean
+}
+
+export function assertShareRights(scope: PortalScope, rights: PortalShareRights): void {
+  if (scope.budgets && !rights.canShareBudgets)
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Dar acceso a los presupuestos requiere poder enviarlos")
+  if (scope.account && !rights.canShareAccount)
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Dar acceso a la cuenta requiere permiso de caja")
+  if (scope.documents.length > 0 && !rights.canShareDocuments)
+    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Dar acceso a los documentos requiere leer la historia")
+}
 
 /**
  * Portal del paciente: enlaces de un solo uso + sesiones revocables.
@@ -46,17 +64,13 @@ import { getPortalPolicy, portalDisabled, requireActivePortalGrant } from "./por
  * - La entrega del enlace exige una conversación abierta del mismo contacto
  *   (canal ya validado por el operador): la API staff jamás devuelve el token.
  * - Cada sesión queda ligada a UN paciente + UN contacto + alcance congelado.
- * - Las acciones que escriben (confirmar/reprogramar/decidir) se firman con
- *   el operador emisor (issuedBy, usuario real) y el contacto verificado va
- *   en decidedByContactId / metadata; cada lectura sensible se registra en
- *   portal_access_log.
+ * - Lo que hace la persona en el portal (confirmar, reprogramar, decidir, abrir
+ *   un documento) queda a su nombre: el actor es `contact:<id>` (`portalActor`),
+ *   nunca quien emitió el enlace, que solo recibe el aviso. Cada lectura
+ *   sensible se registra en portal_access_log.
  */
 
 const LINK_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
-const SESSION_TTL_HOURS_DEFAULT = 48
-const SESSION_TTL_HOURS_MAX = 168
-const LINK_TTL_HOURS_DEFAULT = 72
-const LINK_TTL_HOURS_MAX = 720
 const RESCHEDULE_HORIZON_DAYS = 120
 
 function rawToken(): string {
@@ -160,6 +174,8 @@ export interface PortalSessionView {
   contactId: string
   scope: PortalScope
   expiresAt: Date
+  /** Cerrada por el equipo, por un acceso retirado o por la persona: ya no sirve aunque no haya vencido. */
+  revokedAt: Date | null
   grantId: string | null
   authMethod: "enlace_pin" | "passkey"
 }
@@ -171,6 +187,7 @@ export function toSessionView(row: PortalSessionRow): PortalSessionView {
     contactId: row.contactId,
     scope: row.scope,
     expiresAt: row.expiresAt,
+    revokedAt: row.revokedAt,
     grantId: row.grantId,
     authMethod: row.authMethod === "passkey" ? "passkey" : "enlace_pin",
   }
@@ -186,16 +203,7 @@ export interface IssuePortalLinkInput {
     account?: boolean
     documentIds?: string[]
   }
-  ttlHours?: number
   idempotencyKey?: string
-}
-
-function assertTtl(ttlHours: number | undefined, def: number, max: number, field: string): number {
-  const ttl = ttlHours ?? def
-  if (!Number.isFinite(ttl) || ttl < 1 || ttl > max) {
-    throw validation(`${field} debe estar entre 1 y ${max} horas`)
-  }
-  return Math.floor(ttl)
 }
 
 /** Vínculo representante↔paciente explícito: sin fila no hay enlace. */
@@ -214,20 +222,17 @@ async function requirePatientLink(tx: Db, orgId: string, patientId: string, cont
   if (!link) throw validation("El contacto no está vinculado a este paciente")
 }
 
-/** El vínculo puede retirarse tras emitir: sin fila el acceso equivale a revocado. */
+/**
+ * El acceso se vuelve a comprobar en cada uso, con la regla de quién puede
+ * entrar (`portalCandidates`): la propia persona mayor de edad o su
+ * representante legal vigente. Sin vínculo, con la tutela revocada o con la
+ * hija que ya cumplió 18 (su madre la representaba de menor), el acceso
+ * equivale a revocado.
+ */
 export async function requireActiveGrant(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
-  const [grant] = await tx
-    .select({ id: patientContact.id })
-    .from(patientContact)
-    .where(
-      and(
-        eq(patientContact.organizationId, orgId),
-        eq(patientContact.patientId, patientId),
-        eq(patientContact.contactId, contactId),
-      ),
-    )
-    .limit(1)
-  if (!grant) throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
+  if (!(await contactDecides(tx, orgId, patientId, contactId))) {
+    throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
+  }
 }
 
 export async function assertScope(
@@ -310,12 +315,11 @@ export async function issuePortalLink(
   orgId: string,
   actorUserId: string,
   input: IssuePortalLinkInput,
-  deliver: { linkUrl: (rawLinkToken: string) => string; canShareFinance: boolean },
+  deliver: { linkUrl: (rawLinkToken: string) => string } & PortalShareRights,
 ): Promise<IssuedPortalLink> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
-  const ttlHours = assertTtl(input.ttlHours, LINK_TTL_HOURS_DEFAULT, LINK_TTL_HOURS_MAX, "La vigencia")
-  const linkTtlMs = Math.min(ttlHours * 3600_000, policy.linkTtlMinutes * 60_000)
+  const linkTtlMs = PORTAL_FIXED.linkTtlHours * 3600_000
   const idempotencyKey = input.idempotencyKey?.trim() || null
   if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
     throw validation("La clave de idempotencia debe tener 8–128 caracteres")
@@ -343,9 +347,7 @@ export async function issuePortalLink(
   if (scope.documents.length > 0 && !policy.allowedScope.documents) {
     throw validation("Los documentos no están permitidos por la política del portal")
   }
-  if ((scope.budgets || scope.account) && !deliver.canShareFinance) {
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "El alcance financiero requiere permiso de finanzas")
-  }
+  assertShareRights(scope, deliver)
   if (idempotencyKey) {
     const [existing] = await tx
       .select()
@@ -365,9 +367,9 @@ export async function issuePortalLink(
       }
     }
   }
-  // La emisión exige el grant verificado ya creado (vía grants/solicitud
-  // aprobada): nunca crea grants implícitos ni toca las passkeys (la
-  // recuperación usa el endpoint dedicado de revocación).
+  // La emisión exige el grant verificado ya creado: nunca crea grants
+  // implícitos ni toca las passkeys (la recuperación usa el endpoint dedicado
+  // de revocación). Volver a dar acceso con el código siempre se puede.
   await requireActivePortalGrant(tx, orgId, input.patientId, input.contactId)
 
   const [conv] = await tx
@@ -380,18 +382,14 @@ export async function issuePortalLink(
     throw validation("La conversación no pertenece a este contacto")
   }
   // Cerrada no impide emitir: el envío por la conversación la reabre (ADR 0024).
-  // La emisión por canal exige conexión autorizada en la política.
+  // Sale por la conversación de la propia persona, con su conexión activa.
   const [issuanceConnection] = await tx
     .select({ id: channelConnection.id, status: channelConnection.status })
     .from(channelConnection)
     .where(eq(channelConnection.id, conv.channelConnectionId))
     .limit(1)
-  if (
-    !issuanceConnection ||
-    issuanceConnection.status !== "active" ||
-    !policy.allowedConnectionIds.includes(issuanceConnection.id)
-  ) {
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Esta conversación no está autorizada para el portal")
+  if (issuanceConnection?.status !== "active") {
+    throw new ServiceError("PORTAL_NO_CHANNEL", 409, "Su conversación ya no tiene un canal activo: dale acceso con el QR en recepción")
   }
 
   const token = rawToken()
@@ -460,7 +458,6 @@ export interface IssuePortalActivationQrInput {
   patientId: string
   contactId: string
   scope: IssuePortalLinkInput["scope"]
-  ttlHours?: number
   idempotencyKey?: string
 }
 
@@ -486,8 +483,7 @@ export async function issuePortalActivationQr(
 ): Promise<IssuedPortalActivationQr> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
-  const ttlHours = assertTtl(input.ttlHours, LINK_TTL_HOURS_DEFAULT, LINK_TTL_HOURS_MAX, "La vigencia")
-  const linkTtlMs = Math.min(ttlHours * 3600_000, policy.linkTtlMinutes * 60_000)
+  const linkTtlMs = PORTAL_FIXED.linkTtlHours * 3600_000
   const idempotencyKey = input.idempotencyKey?.trim() || null
   if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
     throw validation("La clave de idempotencia debe tener 8–128 caracteres")
@@ -673,7 +669,6 @@ export interface PortalExchangeResult {
 
 export interface ExchangePortalTokenInput {
   pin: string
-  sessionTtlHours?: number
 }
 
 const PIN_RE = /^\d{6}$/
@@ -705,7 +700,8 @@ export async function exchangePortalToken(
   input: ExchangePortalTokenInput,
 ): Promise<PortalExchangeResult> {
   const policy = await getPortalPolicy(tx, orgId)
-  if (!policy.enabled || !policy.assistedRecoveryEnabled) throw portalDisabled()
+  // El código siempre activa el acceso, también para volver a entrar (ADR 0037).
+  if (!policy.enabled) throw portalDisabled()
   const token = assertTokenFormat(rawLinkToken)
   if (typeof input?.pin !== "string" || !PIN_RE.test(input.pin)) {
     throw validation("El código de 6 dígitos es inválido")
@@ -760,10 +756,7 @@ export async function exchangePortalToken(
     throw conflict("PORTAL_USED", "Este enlace ya fue usado")
   }
 
-  const sessionTtl = Math.min(
-    assertTtl(input?.sessionTtlHours, SESSION_TTL_HOURS_DEFAULT, SESSION_TTL_HOURS_MAX, "La sesión"),
-    policy.sessionTtlHours,
-  )
+  const sessionTtl = PORTAL_FIXED.sessionTtlHours
   const sessionToken = rawToken()
   const [session] = await tx
     .insert(portalSession)
@@ -884,9 +877,12 @@ function requireDocumentInScope(session: PortalSessionRow, documentId: string): 
   if (!allowed) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este documento no está autorizado en tu acceso")
 }
 
-function requireIssuer(session: PortalSessionRow): string {
-  if (!session.issuedBy) throw conflict("PORTAL_ISSUER", "El acceso no tiene operador emisor")
-  return session.issuedBy
+/**
+ * Quien actúa en el portal es la persona de la sesión, no quien le emitió el
+ * enlace: «Actividad del equipo» lo dice como del paciente o su contacto.
+ */
+function portalActor(session: PortalSessionRow): string {
+  return `contact:${session.contactId}`
 }
 
 export interface PortalAppointmentView {
@@ -895,8 +891,89 @@ export interface PortalAppointmentView {
   endsAt: string
   serviceName: string | null
   status: string
+  branchId: string
   branchName: string
+  /** Quién la atiende: el bloque de la cita es el mismo de «Su enlace». */
+  dentistName: string
+  /** Zona de la sede (o de la clínica): la hora de la cita se dice en ella, no en la del teléfono. */
+  timeZone: string
   version: number
+}
+
+/**
+ * Lo que la página del portal necesita de su sesión: quién es y el formato y la
+ * zona de la clínica, para decir cada fecha como en la clínica y no como en el
+ * teléfono de la persona.
+ */
+export async function getPortalSessionInfo(tx: Db, ctx: PortalContext) {
+  const zone = await findOrgLocale(tx, ctx.orgId)
+  const [saved] = ctx.session.grantId
+    ? await tx
+        .select({ id: portalPasskey.id })
+        .from(portalPasskey)
+        .where(
+          and(
+            eq(portalPasskey.organizationId, ctx.orgId),
+            eq(portalPasskey.grantId, ctx.session.grantId),
+            isNull(portalPasskey.revokedAt),
+          ),
+        )
+        .limit(1)
+    : []
+  return {
+    session: {
+      id: ctx.session.id,
+      patientId: ctx.session.patientId,
+      contactId: ctx.session.contactId,
+      scope: ctx.session.scope,
+      expiresAt: ctx.session.expiresAt,
+      grantId: ctx.session.grantId,
+      authMethod: ctx.session.authMethod,
+    },
+    patientName: ctx.patientName,
+    /** Ya guardó su acceso en algún teléfono: no se le vuelve a proponer como paso principal. */
+    accessSaved: !!saved,
+    /** Esta sesión ya se recuerda 30 días en este teléfono. */
+    remembered: isRemembered(ctx.session),
+    locale: zone.locale,
+    timeZone: zone.timezone,
+  }
+}
+
+/** La sesión ya se alargó a los 30 días de «recordar en este teléfono». */
+function isRemembered(session: PortalSessionRow): boolean {
+  return session.expiresAt.getTime() - session.createdAt.getTime() > PORTAL_FIXED.sessionTtlHours * 3600_000 + 60_000
+}
+
+/**
+ * «Si tu teléfono no puede guardarlo, lo recordamos 30 días» (decisión 9): la
+ * sesión que se abrió con el enlace y el código se alarga a 30 días desde que
+ * se abrió, una sola vez. Lo pide la página cuando el teléfono no puede
+ * guardar la llave; una sesión que ya entró con su llave no lo necesita.
+ */
+export async function rememberPortalSession(tx: Db, ctx: PortalContext): Promise<{ expiresAt: Date }> {
+  if (ctx.session.authMethod !== "enlace_pin") {
+    throw conflict("PORTAL_REMEMBER", "Este acceso ya entra con tu huella o tu cara")
+  }
+  if (isRemembered(ctx.session)) return { expiresAt: ctx.session.expiresAt }
+  const expiresAt = new Date(ctx.session.createdAt.getTime() + PORTAL_FIXED.rememberDays * 86_400_000)
+  await tx
+    .update(portalSession)
+    .set({ expiresAt, updatedAt: new Date() })
+    .where(and(eq(portalSession.id, ctx.session.id), eq(portalSession.organizationId, ctx.orgId)))
+  await logAccess(tx, ctx.orgId, ctx.session.id, "session.remembered")
+  return { expiresAt }
+}
+
+/** Nombre y zona de la sede de una cita: sin zona propia, la de la clínica. */
+async function branchPlace(tx: Db, orgId: string, branchId: string): Promise<{ name: string; timeZone: string } | null> {
+  const [row] = await tx
+    .select({ name: branch.name, timezone: branch.timezone })
+    .from(branch)
+    .where(and(eq(branch.id, branchId), eq(branch.organizationId, orgId)))
+    .limit(1)
+  if (!row) return null
+  return { name: row.name, timeZone: row.timezone ?? (await findOrgLocale(tx, orgId)).timezone }
 }
 
 /** Próximas citas del paciente autorizado (sin datos del profesional). */
@@ -914,10 +991,14 @@ export async function getPortalAppointments(
       serviceName: appointment.serviceName,
       status: appointment.status,
       version: appointment.version,
+      branchId: appointment.branchId,
       branchName: branch.name,
+      branchTimeZone: branch.timezone,
+      dentistName: user.name,
     })
     .from(appointment)
     .innerJoin(branch, eq(branch.id, appointment.branchId))
+    .innerJoin(user, eq(user.id, appointment.dentistUserId))
     .where(
       and(
         eq(appointment.organizationId, ctx.orgId),
@@ -928,11 +1009,43 @@ export async function getPortalAppointments(
     .orderBy(asc(appointment.startsAt))
     .limit(50)
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointments.listed")
-  return rows.map((row) => ({
+  const clinicZone = (await findOrgLocale(tx, ctx.orgId)).timezone
+  return rows.map(({ branchTimeZone, ...row }) => ({
     ...row,
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
+    timeZone: branchTimeZone ?? clinicZone,
   }))
+}
+
+/** Una cita del paciente como la ve el portal. */
+async function portalAppointmentView(tx: Db, orgId: string, appointmentId: string): Promise<PortalAppointmentView> {
+  const [row] = await tx
+    .select({
+      id: appointment.id,
+      startsAt: appointment.startsAt,
+      endsAt: appointment.endsAt,
+      serviceName: appointment.serviceName,
+      status: appointment.status,
+      version: appointment.version,
+      branchId: appointment.branchId,
+      branchName: branch.name,
+      branchTimeZone: branch.timezone,
+      dentistName: user.name,
+    })
+    .from(appointment)
+    .innerJoin(branch, eq(branch.id, appointment.branchId))
+    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, appointmentId)))
+    .limit(1)
+  if (!row) throw notFound("Cita")
+  const { branchTimeZone, ...rest } = row
+  return {
+    ...rest,
+    startsAt: row.startsAt.toISOString(),
+    endsAt: row.endsAt.toISOString(),
+    timeZone: branchTimeZone ?? (await findOrgLocale(tx, orgId)).timezone,
+  }
 }
 
 async function requireOwnAppointment(tx: Db, ctx: PortalContext, appointmentId: string) {
@@ -964,8 +1077,8 @@ export async function confirmPortalAppointment(
   if (current.startsAt.getTime() <= Date.now()) {
     throw conflict("APPOINTMENT_STATUS", "Esta cita ya pasó; pide una nueva en recepción")
   }
-  const updated = await setAppointmentStatus(tx, ctx.orgId, requireIssuer(ctx.session), current.id, "confirmada")
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.appointment_confirmed", "appointment", current.id, {
+  const updated = await setAppointmentStatus(tx, ctx.orgId, portalActor(ctx.session), current.id, "confirmada", { via: "portal" })
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_confirmed", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
   })
@@ -976,32 +1089,22 @@ export async function confirmPortalAppointment(
     body: "Un paciente confirmó su cita desde el portal.",
     href: "/agenda",
   })
-  const [branchRow] = await tx
-    .select({ name: branch.name })
-    .from(branch)
-    .where(eq(branch.id, updated.branchId))
-    .limit(1)
-  if (!branchRow) throw branchNotFound()
-  return {
-    id: updated.id,
-    startsAt: updated.startsAt,
-    endsAt: updated.endsAt,
-    serviceName: updated.serviceName,
-    status: updated.status,
-    branchName: branchRow.name,
-    version: updated.version,
-  }
+  return portalAppointmentView(tx, ctx.orgId, updated.id)
 }
 
 export interface ReschedulePortalAppointmentInput {
   expectedVersion: number
   startsAt: string
+  /** El horario elegido en la semana: con quién y en qué sillón está libre. */
+  dentistUserId: string
+  chairId?: string
 }
 
 /**
- * Reprograma manteniendo profesional y sillón (reglas de Agenda: exclusión
+ * Cambia la cita a otro horario de la semana, como en «Su enlace»: misma sede
+ * y duración, con quien lo tenga libre (reglas de Agenda: exclusión
  * anti-solapamiento y bloqueo optimista). Sin disponibilidad ficticia: si el
- * recurso está ocupado, la cita no se mueve (APPOINTMENT_CONFLICT).
+ * horario se ocupó, la cita no se mueve (APPOINTMENT_CONFLICT).
  */
 export async function reschedulePortalAppointment(
   tx: Db,
@@ -1014,6 +1117,10 @@ export async function reschedulePortalAppointment(
   if (current.status !== "programada" && current.status !== "confirmada") {
     throw conflict("APPOINTMENT_STATUS", "Esta cita ya no puede reprogramarse")
   }
+  // Una cita que ya empezó o pasó no se mueve desde el portal.
+  if (current.startsAt.getTime() <= Date.now()) {
+    throw conflict("APPOINTMENT_STATUS", "Esta cita ya pasó: escríbenos para ver otra fecha")
+  }
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
     throw validation("La versión de la cita es inválida; recarga e intenta de nuevo")
   }
@@ -1025,11 +1132,21 @@ export async function reschedulePortalAppointment(
   if (startsAt.getTime() > Date.now() + RESCHEDULE_HORIZON_DAYS * 24 * 3600_000) {
     throw validation(`Solo puedes reprogramar dentro de ${RESCHEDULE_HORIZON_DAYS} días`)
   }
-  const moved = await moveAppointment(tx, ctx.orgId, requireIssuer(ctx.session), current.id, {
-    expectedVersion: input.expectedVersion,
-    startsAt: startsAt.toISOString(),
-  })
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.appointment_rescheduled", "appointment", current.id, {
+  // La movió la propia persona: no se le avisa lo que acaba de hacer (ADR 0027).
+  const moved = await moveAppointment(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    current.id,
+    {
+      expectedVersion: input.expectedVersion,
+      startsAt: startsAt.toISOString(),
+      dentistUserId: input.dentistUserId,
+      ...(input.chairId ? { chairId: input.chairId } : {}),
+    },
+    { notice: false },
+  )
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_rescheduled", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
     startsAt: startsAt.toISOString(),
@@ -1041,20 +1158,38 @@ export async function reschedulePortalAppointment(
     body: "Un paciente reprogramó su cita desde el portal.",
     href: "/agenda",
   })
-  const [branchRow] = await tx
-    .select({ name: branch.name })
-    .from(branch)
-    .where(eq(branch.id, moved.branchId))
-    .limit(1)
-  return {
-    id: moved.id,
-    startsAt: moved.startsAt,
-    endsAt: moved.endsAt,
-    serviceName: moved.serviceName,
-    status: moved.status,
-    branchName: branchRow?.name ?? "",
-    version: moved.version,
+  return portalAppointmentView(tx, ctx.orgId, moved.id)
+}
+
+/** Cancela su cita desde el portal: el mismo cambio de estado de la Agenda, con el motivo «paciente». */
+export async function cancelPortalAppointment(
+  tx: Db,
+  ctx: PortalContext,
+  appointmentId: string,
+): Promise<PortalAppointmentView> {
+  requireScope(ctx.session, "appointments")
+  const current = await requireOwnAppointment(tx, ctx, appointmentId)
+  if ((current.status !== "programada" && current.status !== "confirmada") || current.startsAt.getTime() <= Date.now()) {
+    throw conflict("APPOINTMENT_STATUS", "Esta cita ya no puede cancelarse desde aquí")
   }
+  // La canceló la propia persona: no se le avisa lo que acaba de hacer (ADR 0027).
+  await setAppointmentStatus(tx, ctx.orgId, portalActor(ctx.session), current.id, "cancelada", {
+    cancelReason: "paciente",
+    cancelNote: "La canceló la persona desde el portal",
+    notice: false,
+  })
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_cancelled", "appointment", current.id, {
+    sessionId: ctx.session.id,
+    contactId: ctx.session.contactId,
+  })
+  await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.cancelled", "appointment", current.id)
+  await notifyIssuer(tx, ctx.orgId, ctx.session, {
+    dedupeKey: `portal-cita-cancelada-${current.id}`,
+    title: "Cita cancelada desde el portal",
+    body: "Un paciente canceló su cita desde el portal.",
+    href: "/agenda",
+  })
+  return portalAppointmentView(tx, ctx.orgId, current.id)
 }
 
 export interface PortalRescheduleSlotsInput {
@@ -1063,8 +1198,8 @@ export interface PortalRescheduleSlotsInput {
 }
 
 /**
- * Huecos reales para reprogramar la cita, con sus mismos recursos
- * (sede, profesional, sillón y duración). Delega en Agenda
+ * La semana de horarios para cambiar su cita, la misma de «Su enlace»: su
+ * sede y su duración, con quien lo tenga libre. Delega en Agenda
  * (listAvailableSlots): el portal nunca calcula disponibilidad.
  */
 export async function getPortalRescheduleSlots(
@@ -1072,7 +1207,7 @@ export async function getPortalRescheduleSlots(
   ctx: PortalContext,
   appointmentId: string,
   input: PortalRescheduleSlotsInput,
-): Promise<AvailableSlotsResult> {
+): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
   if (current.status !== "programada" && current.status !== "confirmada") {
@@ -1081,15 +1216,11 @@ export async function getPortalRescheduleSlots(
   if (typeof input.from !== "string" || typeof input.to !== "string") {
     throw validation("Rango de fechas inválido")
   }
-  const slots = await listAvailableSlots(tx, ctx.orgId, {
+  const slots = await listWeekSlots(tx, ctx.orgId, {
     branchId: current.branchId,
-    dentistUserId: current.dentistUserId,
-    chairId: current.chairId,
     from: input.from,
     to: input.to,
     durationMin: current.durationMin,
-    // Al paciente no se le ofrece una hora que ya pasó.
-    notBefore: new Date().toISOString(),
   })
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.slots_viewed", "appointment", current.id)
   return slots
@@ -1097,6 +1228,8 @@ export async function getPortalRescheduleSlots(
 
 export interface PortalBudgetLineView {
   planItemId: string
+  /** La opción de la línea (con una sola opción, la única). */
+  optionId: string
   title: string
   scope: string | null
   toothNumber: number | null
@@ -1140,11 +1273,15 @@ export interface PortalBudgetView {
   decidedAt: Date | null
   acceptedByName: string | null
   decisionNote: string | null
+  /** El estado con su nombre de siempre («Enviado · espera respuesta», «Aceptó 2 de 3»). */
+  stateText: string
+  /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
+  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
   items: PortalBudgetLineView[]
 }
 
 /** Formato regional de la clínica para el portal; sin perfil no se inventa uno. */
-async function portalBudgetLocale(tx: Db, orgId: string): Promise<string | null> {
+export async function portalBudgetLocale(tx: Db, orgId: string): Promise<string | null> {
   try {
     return (await getOrgLocale(tx, orgId)).locale
   } catch (error) {
@@ -1153,7 +1290,7 @@ async function portalBudgetLocale(tx: Db, orgId: string): Promise<string | null>
   }
 }
 
-function toPortalBudget(budget: BudgetWithTotals, locale: string | null): PortalBudgetView {
+export function toPortalBudget(budget: BudgetWithTotals, locale: string | null): PortalBudgetView {
   return {
     id: budget.id,
     planId: budget.planId,
@@ -1172,8 +1309,17 @@ function toPortalBudget(budget: BudgetWithTotals, locale: string | null): Portal
     decidedAt: budget.decidedAt,
     acceptedByName: budget.acceptedByName,
     decisionNote: budget.decisionNote,
+    stateText: budget.stateText,
+    options: budget.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      isRecommended: option.isRecommended,
+      decision: option.decision,
+      totalCents: option.totalCents,
+    })),
     items: budget.items.map((line) => ({
       planItemId: line.planItemId,
+      optionId: line.optionId,
       title: line.title,
       scope: line.scope,
       toothNumber: line.toothNumber,
@@ -1203,6 +1349,8 @@ export async function listPortalBudgets(tx: Db, ctx: PortalContext): Promise<Por
 }
 
 export interface DecidePortalBudgetInput {
+  /** La opción elegida; obligatoria si el presupuesto tiene más de una. */
+  optionId?: string | null
   decisions: Array<{ planItemId: string; decision: "aceptado" | "rechazado" | "pospuesto" }>
   decisionNote?: string | null
 }
@@ -1212,6 +1360,45 @@ export interface DecidePortalBudgetInput {
  * Idempotente: si el mismo contacto ya decidió este presupuesto, se devuelve
  * el resultado sin reescribir (replay de red seguro).
  */
+/**
+ * La persona (o su representante) responde su presupuesto: la misma regla para
+ * el portal y para «Su enlace». Decide ella, no el equipo: el presupuesto no
+ * queda a nombre de nadie de la clínica. Responder después admite completar lo
+ * pospuesto con la misma autoridad; repetir lo ya decidido devuelve lo que hay.
+ */
+export async function decideBudgetByPerson(
+  tx: Db,
+  orgId: string,
+  input: { patientId: string; contactId: string; budgetId: string; decision: DecidePortalBudgetInput; via: "portal" | "enlace" },
+): Promise<{ budget: BudgetWithTotals; replay: boolean }> {
+  const current = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
+  const followUp =
+    (current.status === "parcial" || current.status === "pospuesto") && current.decisionContactId === input.contactId
+  if (current.status !== "presentado" && !followUp) {
+    const decided = ["aceptado", "parcial", "rechazado", "pospuesto"].includes(current.status)
+    if (decided && current.decisionContactId === input.contactId) return { budget: current, replay: true }
+    throw conflict("BUDGET_STATUS", "Este presupuesto ya no admite decisión")
+  }
+  if (!Array.isArray(input.decision.decisions) || input.decision.decisions.length === 0) {
+    throw validation("Debe decidir cada línea exactamente una vez")
+  }
+  try {
+    const budget = await decideBudget(tx, orgId, null, input.patientId, input.budgetId, {
+      optionId: input.decision.optionId ?? null,
+      decisions: input.decision.decisions,
+      decidedByContactId: input.contactId,
+      decisionNote: input.decision.decisionNote ?? null,
+    }, { skipOwnPlan: true, via: input.via })
+    return { budget, replay: false }
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === "BUDGET_STATUS") {
+      const again = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
+      if (again.decisionContactId === input.contactId) return { budget: again, replay: true }
+    }
+    throw error
+  }
+}
+
 export async function decidePortalBudget(
   tx: Db,
   ctx: PortalContext,
@@ -1220,41 +1407,19 @@ export async function decidePortalBudget(
 ): Promise<{ budget: PortalBudgetView; replay: boolean }> {
   requireScope(ctx.session, "budgets")
   const locale = await portalBudgetLocale(tx, ctx.orgId)
-  const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
-  // Responder después: parcial/pospuesto admite completar lo pospuesto con la
-  // misma autoridad (el contacto que decidió); otra autoridad no pisa.
-  const followUp =
-    (current.status === "parcial" || current.status === "pospuesto") &&
-    current.decisionContactId === ctx.session.contactId
-  if (current.status !== "presentado" && !followUp) {
-    const decided = ["aceptado", "parcial", "rechazado", "pospuesto"].includes(current.status)
-    if (decided && current.decisionContactId === ctx.session.contactId) {
-      await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
-      return { budget: toPortalBudget(current, locale), replay: true }
-    }
-    throw conflict("BUDGET_STATUS", "Este presupuesto ya no admite decisión")
+  const result = await decideBudgetByPerson(tx, ctx.orgId, {
+    patientId: ctx.session.patientId,
+    contactId: ctx.session.contactId,
+    budgetId,
+    decision: input,
+    via: "portal",
+  })
+  if (result.replay) {
+    await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
+    return { budget: toPortalBudget(result.budget, locale), replay: true }
   }
-  if (!Array.isArray(input.decisions) || input.decisions.length === 0) {
-    throw validation("Debe decidir cada línea exactamente una vez")
-  }
-  let decided: BudgetWithTotals
-  try {
-    decided = await decideBudget(tx, ctx.orgId, requireIssuer(ctx.session), ctx.session.patientId, budgetId, {
-      decisions: input.decisions,
-      decidedByContactId: ctx.session.contactId,
-      decisionNote: input.decisionNote ?? null,
-    }, { skipOwnPlan: true })
-  } catch (error) {
-    if (error instanceof ServiceError && error.code === "BUDGET_STATUS") {
-      const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
-      if (current.decisionContactId === ctx.session.contactId) {
-        await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
-        return { budget: toPortalBudget(current, locale), replay: true }
-      }
-    }
-    throw error
-  }
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.budget_decided", "treatment_budget", budgetId, {
+  const decided = result.budget
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.budget_decided", "treatment_budget", budgetId, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
     status: decided.status,
@@ -1269,6 +1434,40 @@ export async function decidePortalBudget(
     href: `/patients/${ctx.session.patientId}?tab=plan`,
   })
   return { budget: toPortalBudget(decided, locale), replay: false }
+}
+
+/**
+ * La persona abrió un presupuesto en el portal: «Lo vio en el portal el …» en
+ * su presupuesto, para quien lleva la venta (decisión 9). Solo se anota la
+ * lectura de lo que su acceso permite ver.
+ */
+export async function markPortalBudgetSeen(tx: Db, ctx: PortalContext, budgetId: string): Promise<void> {
+  requireScope(ctx.session, "budgets")
+  const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
+  if (current.status === "borrador") throw notFound("Presupuesto")
+  await logAccess(tx, ctx.orgId, ctx.session.id, "budget.viewed", "treatment_budget", budgetId)
+}
+
+/**
+ * «Lo vio en el portal el …» (decisión 9): la última vez que la persona abrió
+ * cada presupuesto en el portal, leída del registro de accesos, para quien
+ * lleva la venta. Sin lectura no hay fila.
+ */
+export async function budgetsSeenInPortal(tx: Db, orgId: string, budgetIds: readonly string[]): Promise<Map<string, Date>> {
+  if (budgetIds.length === 0) return new Map()
+  const rows = await tx
+    .select({ budgetId: portalAccessLog.entityId, at: max(portalAccessLog.createdAt) })
+    .from(portalAccessLog)
+    .where(
+      and(
+        eq(portalAccessLog.organizationId, orgId),
+        eq(portalAccessLog.action, "budget.viewed"),
+        eq(portalAccessLog.entityType, "treatment_budget"),
+        inArray(portalAccessLog.entityId, [...budgetIds]),
+      ),
+    )
+    .groupBy(portalAccessLog.entityId)
+  return new Map(rows.filter((row) => row.budgetId && row.at).map((row) => [row.budgetId as string, row.at as Date]))
 }
 
 export interface PortalDocumentView {
@@ -1310,7 +1509,7 @@ export async function getPortalDocumentUrl(
 ): Promise<{ url: string; expiresInSeconds: number }> {
   requireDocumentInScope(ctx.session, documentId)
   const doc = await getPatientDocument(tx, ctx.orgId, ctx.session.patientId, documentId)
-  await auditPortal(tx, ctx.orgId, ctx.session.issuedBy, "portal.document_read", "patient_document", documentId, {
+  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.document_read", "patient_document", documentId, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
   })

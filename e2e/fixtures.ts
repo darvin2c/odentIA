@@ -100,12 +100,12 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
 /**
  * Llena el nombre separado del registro (ADR 0004): la primera palabra son
- * los nombres y el resto el apellido paterno; el nombre visible se compone.
+ * los nombres y el resto el primer apellido; el nombre visible se compone.
  */
 export async function fillPatientNames(scope: Page | Locator, fullName: string) {
   const [given, ...rest] = fullName.trim().split(/\s+/)
   await scope.getByLabel(/^Nombres/).fill(given ?? "")
-  await scope.getByLabel(/^Apellido paterno/).fill(rest.join(" "))
+  await scope.getByLabel(/^Primer apellido/).fill(rest.join(" "))
 }
 
 /**
@@ -120,4 +120,33 @@ export async function chooseOption(trigger: Locator, choice: string | { label: s
       ? page.locator(`[role="option"][data-value="${choice}"]`)
       : page.getByRole("option", { name: choice.label, exact: true })
   await option.click()
+}
+
+/**
+ * Una fecha ISO (`1990-04-11`) como la escribe una persona en una clínica de
+ * Perú, que es la de las pruebas: día/mes/año (`11/04/1990`). El campo
+ * («Fecha de nacimiento») la guarda en ISO.
+ */
+export function writtenDate(iso: string): string {
+  const [year, month, day] = iso.split("-")
+  return `${day}/${month}/${year}`
+}
+
+/**
+ * Elige un día con el control «Día» (`DatePickerButton`): abre el calendario,
+ * pone el año y el mes en sus listas y toca el día. `iso` es `yyyy-mm-dd`.
+ */
+export async function chooseDay(trigger: Locator, iso: string) {
+  await trigger.click()
+  const page = trigger.page()
+  const [year = 0, month = 1, date = 1] = iso.split("-").map(Number)
+  const calendar = page.locator('[data-slot="calendar"]').last()
+  await calendar.getByRole("combobox", { name: "Elegir el año" }).selectOption(String(year))
+  await calendar.getByRole("combobox", { name: "Elegir el mes" }).selectOption(String(month - 1))
+  // Cada día lleva su fecha como la escribe el navegador en español («15/6/2018»).
+  const key = await page.evaluate(
+    ([y, m, d]) => new Date(y ?? 0, (m ?? 1) - 1, d ?? 1).toLocaleDateString("es"),
+    [year, month, date],
+  )
+  await calendar.locator(`button[data-day="${key}"]`).click()
 }

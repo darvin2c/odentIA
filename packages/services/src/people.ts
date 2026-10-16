@@ -8,7 +8,7 @@
  * conversaciones y sus notas. Cada bloque de la página se pide aparte con su
  * propio permiso; ninguna función de este módulo entrega todo junto.
  */
-import { validateDemographics } from "@odentia/clinical"
+import { clinicalProfileFor, documentIssuerCountry, validateDemographics } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
@@ -26,7 +26,7 @@ import {
 } from "./contacts.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
-import { patientOrganizationToday, patientPersonId, updatePatient } from "./patients.js"
+import { assertDocumentFree, patientOrganizationToday, patientPersonId, updatePatient } from "./patients.js"
 
 /** Permisos de quien mira: el servicio no entrega lo que su rol no lee. */
 export type PersonCan = (permission: string) => boolean
@@ -606,6 +606,11 @@ export async function updatePersonIdentity(
   if (trimmed.docCountry) trimmed.docCountry = trimmed.docCountry.toUpperCase()
   // Lo que ya tiene más lo que cambia: así un pasaporte guardado no exige
   // volver a escribir su país para cambiar el teléfono.
+  const stored = {
+    docType: locked.docType,
+    docNumber: locked.docNumber,
+    docCountry: locked.docCountry,
+  }
   const merged = {
     displayName: locked.displayName,
     givenNames: locked.givenNames,
@@ -620,9 +625,13 @@ export async function updatePersonIdentity(
     email: locked.email,
     ...trimmed,
   }
+  const countryCode = await findOrgCountry(tx, orgId)
   if (!merged.docNumber) {
     merged.docType = null
     merged.docCountry = null
+  } else {
+    // El documento con su país emisor: el del tipo o, si cualquiera lo emite, el de la clínica.
+    merged.docCountry = documentIssuerCountry(clinicalProfileFor(countryCode), merged.docType, merged.docCountry)
   }
   // El nombre visible se deriva del nombre separado; si solo cambia el nombre
   // separado, el visible provisional sale de él para validar.
@@ -630,12 +639,12 @@ export async function updatePersonIdentity(
     .filter(Boolean)
     .join(" ")
   if (composed && trimmed.displayName === undefined) merged.displayName = composed
-  if (!merged.displayName) throw validation("Indica el nombre de la persona")
-  const countryCode = await findOrgCountry(tx, orgId)
+  if (!merged.displayName) throw validation("Escribe el nombre de la persona")
   const errors = validateDemographics(
     merged,
     await patientOrganizationToday(tx, orgId),
     countryCode,
+    stored,
   )
   const first = Object.values(errors)[0]
   if (first) throw validation(first)
@@ -649,6 +658,7 @@ export async function updatePersonIdentity(
     set.docType = merged.docType
     set.docNumber = merged.docNumber
     set.docCountry = merged.docCountry
+    await assertDocumentFree(tx, orgId, merged, { exceptContactId: contactId })
   }
   if (!keys.includes("displayName") && composed) set.displayName = composed
   try {
@@ -658,11 +668,7 @@ export async function updatePersonIdentity(
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
   } catch (error) {
     if (isUniqueViolation(error))
-      throw new ServiceError(
-        "DUPLICATE_DOCUMENT",
-        409,
-        "Ya existe otra persona o paciente con ese documento",
-      )
+      throw new ServiceError("DUPLICATE_DOCUMENT", 409, "Ese documento ya es de otra persona")
     throw error
   }
   await tx.insert(auditEvent).values({

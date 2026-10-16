@@ -329,12 +329,14 @@ async function seedFullTimeline(app: Hono, tag: string): Promise<FullFixture> {
     label: `rx 36 ${tag}`,
     toothNumbers: [36],
   })
-  const odontoId = await postOdontogramEntry(app, patientId, {
-    toothNumber: 36,
-    condition: "caries",
-    surfaces: ["occlusal"],
-    details: { variant: "enamel" },
-  })
+  // Los hallazgos nuevos se registran dentro de una atención (fase 3, paso 5):
+  // uno suelto solo existe como registro anterior, y la línea de tiempo lo
+  // sigue mostrando como hecho propio.
+  const [odonto] = await ownerDb.execute<{ id: string }>(
+    sql`insert into "odontogram_entry" ("organization_id", "patient_id", "tooth_number", "surface", "condition", "status", "details")
+        values ('org_a', ${patientId}::uuid, 36, 'occlusal', 'caries', 'recorded', '{"variant":"enamel"}'::jsonb) returning "id"`,
+  )
+  const odontoId = odonto!.id
   const encounterId = await createEncounter(app, patientId, `control ${tag}`, [36])
   const linkedNoteId = await postNote(app, patientId, `nota vinculada ${tag}`, encounterId)
   const linkedEntryId = await postOdontogramEntry(app, patientId, {

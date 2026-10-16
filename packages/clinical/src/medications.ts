@@ -180,6 +180,35 @@ export function allergyConflicts(dci: string, allergySubstances: string[]): Alle
   return conflicts
 }
 
+/** Alergia de los antecedentes, con su verificación (HL7 FHIR AllergyIntolerance). */
+export interface AllergyOnRecord {
+  substance: string
+  /** `confirmada`, `no_confirmada` (declarada, por confirmar) o `descartada`. */
+  verification?: string | null
+}
+
+/**
+ * Avisos de alergia al prescribir una DCI, una línea por choque. Es la misma
+ * regla para la pantalla y el servidor: una alergia descartada ya no avisa
+ * (como en la cabecera de la persona) y una sin confirmar se dice declarada,
+ * para que quien prescribe sepa que nadie la verificó todavía.
+ */
+export function allergyWarnings(dci: string, allergies: AllergyOnRecord[]): string[] {
+  const name = dci.trim()
+  if (!name) return []
+  const considered = allergies.filter((allergy) => allergy.verification !== "descartada")
+  return allergyConflicts(
+    name,
+    considered.map((allergy) => allergy.substance),
+  ).map((conflict) => {
+    const declared = considered.some(
+      (allergy) =>
+        allergy.substance === conflict.substance && allergy.verification === "no_confirmada",
+    )
+    return `${name}: alergia a ${conflict.substance}${declared ? ", declarada y por confirmar" : ""} (${conflict.reason})`
+  })
+}
+
 /** Formas farmacéuticas habituales (vocabulario controlado de la receta). */
 export const DOSAGE_FORMS = [
   "tableta",

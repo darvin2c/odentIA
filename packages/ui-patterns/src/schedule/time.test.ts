@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   addDays,
@@ -6,11 +6,14 @@ import {
   dayMinutesIn,
   formatDateLong,
   formatDayMonthShort,
+  formatDayMonthYear,
   formatDayShort,
+  formatMonthLong,
   hourLabel,
   minutesToInstant,
   onDate,
   overlapsDay,
+  regionToday,
   snapMinutes,
   timeRangeLabel,
   weekDates,
@@ -23,6 +26,10 @@ const OCHO_LIMA = "2026-09-21T13:00:00.000Z"
 const NUEVE_LIMA = "2026-09-21T14:00:00.000Z"
 
 describe("tiempo de agenda", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("mide los minutos desde la medianoche de la sede, no del navegador", () => {
     expect(dayMinutesIn(OCHO_LIMA, LIMA)).toBe(480)
     expect(dayMinutesIn(NUEVE_LIMA, LIMA)).toBe(540)
@@ -80,11 +87,32 @@ describe("tiempo de agenda", () => {
   })
 
   it("rotula fechas y horas en español sin coma", () => {
+    vi.useFakeTimers({ now: new Date("2026-10-16T15:00:00.000Z"), toFake: ["Date"] })
     expect(formatDateLong("2026-09-21")).toBe("Lunes 21 de setiembre")
     expect(formatDayShort("2026-09-21")).toBe("lun 21")
     expect(formatDayMonthShort("2026-09-21")).toBe("lun 21 Set")
     expect(hourLabel(480)).toBe("08:00")
     expect(timeRangeLabel(OCHO_LIMA, NUEVE_LIMA, LIMA)).toBe("08:00 – 09:00")
+  })
+
+  it("una fecha de otro año lleva su año; la del año en curso, no", () => {
+    vi.useFakeTimers({ now: new Date("2026-10-16T15:00:00.000Z"), toFake: ["Date"] })
+    expect(formatDateLong("2027-01-04")).toBe("Lunes 4 de enero de 2027")
+    expect(formatDateLong("2025-12-31")).toBe("Miércoles 31 de diciembre de 2025")
+    expect(formatDateLong("2026-12-31")).toBe("Jueves 31 de diciembre")
+    expect(formatMonthLong("2027-01-04")).toBe("enero de 2027")
+    expect(formatMonthLong("2026-11-04")).toBe("noviembre")
+  })
+
+  it("el año en curso es el de la clínica, no el del navegador", () => {
+    // 31 de diciembre a las 23:00 en Lima: en UTC ya es 2027.
+    vi.useFakeTimers({ now: new Date("2027-01-01T04:00:00.000Z"), toFake: ["Date"] })
+    expect(regionToday()).toBe("2026-12-31")
+    expect(formatDateLong("2026-12-31")).toBe("Jueves 31 de diciembre")
+  })
+
+  it("el botón de un día escribe siempre el año", () => {
+    expect(formatDayMonthYear("2026-11-20")).toBe("Vie 20 nov 2026")
   })
 
   it("la fecha local de un instante es la de la sede", () => {

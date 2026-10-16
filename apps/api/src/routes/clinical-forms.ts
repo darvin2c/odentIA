@@ -5,8 +5,13 @@ import {
   archiveConsentTemplate,
   archiveFormTemplate,
   archiveSpecialty,
+  cancelClinicalOrder,
   cancelConsentDocument,
+  clinicalOrderPatientId,
+  confirmLinkSignedConsent,
   consentDocumentPatientId,
+  markConsentSentByLink,
+  sendPersonalLink,
   createClinicalOrder,
   createConsentDocument,
   createConsentTemplate,
@@ -19,10 +24,13 @@ import {
   formResponsePatientId,
   generateConsentPdf as generateConsentPdfService,
   getConsentPrint,
+  getEncounterConsentNeeds,
+  getOrderPrint,
   getProfessionalProfile,
   listClinicalOrders,
   listConsentDocuments,
   listConsentEvents,
+  listConsentTemplateServices,
   listConsentTemplates,
   listFormAddenda,
   listFormResponses,
@@ -32,9 +40,11 @@ import {
   listServiceSpecialties,
   listSpecialties,
   listSpecialtyProfessionals,
+  prepareEncounterConsents,
   publishConsentTemplate,
   publishFormTemplate,
   revokeConsentDocument,
+  setConsentTemplateServices,
   setProfessionalProfile,
   setProfessionalSpecialties,
   setServiceSpecialties,
@@ -229,20 +239,40 @@ const consentSign = z
     signerContactId: z.uuid({ message: "Elige a la persona que firma" }),
     signerDoc: z.string().trim().max(40).nullish(),
     representativeRelation: z.string().trim().max(120).nullish(),
-    signatureData: z.unknown(),
+    // En la clínica, el trazo de la persona; en papel, la foto de la hoja.
+    signatureData: z.unknown().optional(),
     comprehensionConfirmed: z.literal(true, {
       message: "La persona firmante debe confirmar que comprendió la información",
     }),
-    professionalSignature: z.unknown(),
+    // El profesional confirma con su perfil: el trazo es opcional.
+    professionalSignature: z.unknown().optional(),
     witness: z
       .object({ name: z.string().trim().min(1).max(200), doc: z.string().trim().max(40).nullish() })
       .nullish(),
     informedAt: z.iso.datetime({ offset: true }).nullish(),
+    method: z.enum(["clinica", "papel"]).optional(),
+    paperDocumentId: uuid.nullish(),
   })
   .strict()
-  .refine((d) => d.signatureData !== null && d.signatureData !== undefined, {
-    message: "La firma manuscrita es obligatoria",
+  .refine(
+    (d) => d.method === "papel" || (d.signatureData !== null && d.signatureData !== undefined),
+    { message: "La firma manuscrita es obligatoria" },
+  )
+  .refine((d) => d.method !== "papel" || Boolean(d.paperDocumentId), {
+    message: "Sube la foto de la hoja firmada",
   })
+
+const consentNeedsQuery = z.object({ patientId: uuid, encounterId: uuid })
+
+const consentPrepare = z
+  .object({
+    patientId: uuid,
+    encounterId: uuid,
+    templateKeys: z.array(z.string().trim().min(2).max(40)).max(20).optional(),
+  })
+  .strict()
+
+const consentTemplateServicesInput = z.object({ serviceIds: uuidList(100) }).strict()
 
 const consentRevoke = z
   .object({
@@ -256,22 +286,34 @@ const consentCancel = z.object({ reason: z.string().trim().min(1).max(2000) }).s
 
 const orderCreate = z
   .object({
-    kind: z.enum(["laboratorio", "interconsulta"]),
+    kind: z.enum(["imagen", "laboratorio", "interconsulta"]),
     specialtyId: uuid.nullish(),
     patientId: uuid,
     encounterId: uuid.nullish(),
-    recipient: z.string().trim().min(1).max(200),
+    recipient: z.string().trim().max(200).nullish(),
+    recipientUserId: z.string().min(1).max(200).nullish(),
     title: z.string().trim().min(1).max(200),
     detail: z.string().trim().max(5000).nullish(),
+    diagnosisCode: z.string().trim().max(10).nullish(),
   })
   .strict()
+  .refine((d) => Boolean(d.recipient?.trim() || d.recipientUserId), {
+    message: "Indica para quién es la orden",
+  })
 
 const orderStatus = z
   .object({
     toStatus: z.enum(["en_proceso", "completado", "cancelado"]),
     resultText: z.string().trim().max(10000).nullish(),
+    // El resultado subido a la propia orden (un documento de la persona).
+    resultDocumentId: uuid.nullish(),
+    // Cancelar pide motivo.
+    reason: z.string().trim().max(2000).nullish(),
   })
   .strict()
+  .refine((d) => d.toStatus !== "cancelado" || Boolean(d.reason?.trim()), {
+    message: "Cancelar la orden pide el motivo",
+  })
 
 export function createClinicalFormsRoute(deps: CrmDeps) {
   const app = new Hono()
@@ -437,7 +479,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
 
   // --- Plantillas de formulario ---
   app.get("/form-templates", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
     const query = c.req.query()
     return runService(c, 200, () =>
@@ -446,6 +488,8 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
           specialtyId: query.specialtyId,
           status: query.status,
           q: query.q,
+          // Desde la atención: primero los de las especialidades de quien atiende.
+          forUserId: query.forUser === "me" ? userId : query.forUser || undefined,
         }),
       ),
     )
@@ -682,6 +726,64 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     )
   })
 
+  // «Se pide para»: los servicios que piden cada plantilla (por su clave).
+  app.get("/consent-template-services", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read") && !canAccess(memberRole, "settings.read")) {
+      return forbidden(c, "Sin acceso a los consentimientos")
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listConsentTemplateServices(tx, orgId)),
+    )
+  })
+
+  app.put("/consent-templates/:id/services", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return forbidden(c, "Solo administración decide para qué se pide un consentimiento")
+    }
+    const parsed = consentTemplateServicesInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        setConsentTemplateServices(tx, orgId, userId, c.req.param("id"), parsed.data.serviceIds),
+      ),
+    )
+  })
+
+  // Lo que pide la atención: firmado, pendiente, sin preparar o sin publicar.
+  app.get("/consent-needs", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    const parsed = consentNeedsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { patientId, encounterId } = parsed.data
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getEncounterConsentNeeds(tx, orgId, patientId, encounterId),
+      ),
+    )
+    if (response.status === 200)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "consentimientos" })
+    return response
+  })
+
+  // «Preparar»: genera los que faltan, llenos con lo de la atención.
+  app.post("/consent-needs/prepare", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para preparar consentimientos")
+    }
+    const parsed = consentPrepare.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { patientId, encounterId, templateKeys } = parsed.data
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        prepareEncounterConsents(tx, orgId, userId, patientId, encounterId, templateKeys),
+      ),
+    )
+  })
+
   const generateConsentPdf = (orgId: string, userId: string, consentId: string) =>
     generateConsentPdfService({
       run: (fn) => withOrgContext(deps.db, orgId, fn),
@@ -732,6 +834,47 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
       )
       // El PDF se genera tras la firma; si falla, la firma queda registrada y
       // el PDF se reintenta con POST …/pdf (no se repite la firma).
+      try {
+        return await generateConsentPdf(orgId, userId, signed.id)
+      } catch (e) {
+        console.error("consent pdf", e)
+        return signed
+      }
+    })
+  })
+
+  // Antes de llegar (decisión 3): se envía a firmar por «Su enlace» de la
+  // persona (o de su representante legal), con la regla de envío de siempre.
+  app.post("/consents/:id/send-link", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para enviar consentimientos")
+    }
+    const parsed = z.strictObject({ requestId: z.uuid().optional() }).safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const consent = await markConsentSentByLink(tx, orgId, userId, c.req.param("id"))
+        return sendPersonalLink(
+          tx,
+          orgId,
+          userId,
+          { patientId: consent.patientId, requestId: parsed.data.requestId ?? null },
+          { secretsKey: deps.secretsKey },
+        )
+      }),
+    )
+  })
+
+  // En la cita, el profesional confirma lo que la persona firmó en su enlace.
+  app.post("/consents/:id/confirm", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.write")) {
+      return forbidden(c, "Sin permiso para firmar consentimientos")
+    }
+    return runService(c, 200, async () => {
+      const signed = await withOrgContext(deps.db, orgId, (tx) => confirmLinkSignedConsent(tx, orgId, userId, c.req.param("id")))
+      // Como al firmar en la clínica: el PDF se genera después y se reintenta aparte si falla.
       try {
         return await generateConsentPdf(orgId, userId, signed.id)
       } catch (e) {
@@ -823,6 +966,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
           status: query.status,
           kind: query.kind,
           specialtyId: query.specialtyId,
+          encounterId: query.encounterId,
         })
         for (const order of orders) served.add(order.patientId)
         if (query.patientId) served.add(query.patientId)
@@ -855,18 +999,32 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     }
     const parsed = orderStatus.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { toStatus, resultText, resultDocumentId, reason } = parsed.data
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        advanceClinicalOrder(
-          tx,
-          orgId,
-          userId,
-          c.req.param("id"),
-          parsed.data.toStatus,
-          parsed.data.resultText,
-        ),
+        toStatus === "cancelado"
+          ? cancelClinicalOrder(tx, orgId, userId, c.req.param("id"), reason ?? "")
+          : advanceClinicalOrder(tx, orgId, userId, c.req.param("id"), toStatus, resultText, {
+              resultDocumentId,
+            }),
       ),
     )
+  })
+
+  // La hoja de la orden para imprimir: qué se pide, para quién y quién la pide.
+  app.get("/orders/:id/print", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) return forbidden(c, "Sin acceso clínico")
+    let patientId: string | null = null
+    const response = await runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        patientId = await clinicalOrderPatientId(tx, orgId, c.req.param("id"))
+        return getOrderPrint(tx, orgId, c.req.param("id"))
+      }),
+    )
+    if (response.status === 200 && patientId)
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "ordenes" })
+    return response
   })
 
   return app

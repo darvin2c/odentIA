@@ -167,12 +167,22 @@ describe("fronteras económicas por rol", () => {
     }
   })
 
-  it("recepción consulta el tarifario sin ver cuentas, presupuestos económicos ni comisiones", () => {
+  it("recepción lee, envía y anota el presupuesto, pero no cambia precios ni ve cuentas o comisiones", () => {
     expect(canAccess("reception", "catalog.read")).toBe(true)
-    for (const permission of ["budgets.read", "budgets.write", "budgets.decide", "commissions.read"]) {
+    for (const permission of ["budgets.read", "budgets.send", "budgets.decide"]) {
+      expect(canAccess("reception", permission)).toBe(true)
+    }
+    for (const permission of ["budgets.write", "commissions.read", "finance.read"]) {
       expect(canAccess("reception", permission)).toBe(false)
     }
     expect(canAccess("member", "catalog.read")).toBe(false)
+  })
+
+  it("enviar el presupuesto es un permiso aparte de armarlo: caja anota, pero no envía", () => {
+    expect(ALL_PERMISSIONS).toContain("budgets.send")
+    expect(canAccess("dentist", "budgets.send")).toBe(true)
+    expect(canAccess("cashier", "budgets.send")).toBe(false)
+    expect(canAccess("member", "budgets.send")).toBe(false)
   })
 
   it("la entrada de comisiones no concede acceso a otros dominios", () => {
