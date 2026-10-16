@@ -88,8 +88,11 @@ test("bandeja: tomar, devolver, resolver con su confirmación, cerrar sin resolv
 
   // --- Tomar: un solo verbo; la conversación queda a nombre de quien la toma y el agente deja de responder ---
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${fresh.id}`))
-  // Las acciones de la cabecera del hilo (el panel de contexto repite «Tomar» y «Devolver al agente»).
+  // Las acciones viven solo en la cabecera del hilo: «Contexto» no las repite.
   const header = page.getByTestId("hilo")
+  await expect(
+    page.getByRole("region", { name: "Contexto del contacto" }).getByRole("button", { name: /^(Tomar|Devolver al agente|Resolver)$/ }),
+  ).toHaveCount(0)
   const take = header.getByRole("button", { name: "Tomar", exact: true })
   const release = header.getByRole("button", { name: "Devolver al agente", exact: true })
   const resolve = header.getByRole("button", { name: "Resolver", exact: true })
@@ -162,7 +165,7 @@ test("bandeja: tomar, devolver, resolver con su confirmación, cerrar sin resolv
   await page.getByRole("menuitem", { name: "Cerrar sin resolver" }).click()
   const confirmClose = page.getByRole("alertdialog", { name: "¿Cerrar sin resolver?" })
   await expect(confirmClose).toContainText("sin enviarle nada")
-  await expect(confirmClose).toContainText("También se cerrará sin resolver el caso que pasó al equipo.")
+  await expect(confirmClose).toContainText("También se cerrará sin resolver el caso que te pasó el agente.")
   await confirmClose.getByRole("button", { name: "Cerrar sin resolver", exact: true }).click()
   await expect(confirmClose).toBeHidden()
   await expect(page.getByText(new RegExp(`^Cerrada por ${owner.user.name} · hoy`))).toBeVisible()
@@ -224,13 +227,13 @@ test("agente: «Pendientes» reemplaza a «Aprobaciones» y la dirección vieja 
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
   await expect(tabs.getByRole("link", { name: /^Pendientes/ })).toHaveAttribute("aria-current", "page")
   await expect(tabs.getByRole("link", { name: /Aprobaciones/ })).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "Casos que pasó a tu equipo" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Casos del agente" })).toBeVisible()
 
   // Recepción decide por el agente sin supervisarlo: entra igual que antes.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Casos que pasó a tu equipo" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Casos del agente" })).toBeVisible()
   await page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/pendientes"))
 })

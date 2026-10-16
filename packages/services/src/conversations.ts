@@ -4,6 +4,7 @@ import {
   type NormalizedStatus,
   type ReplyButton,
 } from "@odentia/channels"
+import { normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
 import {
   agentConfig,
@@ -14,11 +15,13 @@ import {
   message,
 } from "@odentia/db/schema/crm"
 import { automationJob } from "@odentia/db/schema/automation"
+import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, lt, or, type SQL, sql } from "drizzle-orm"
-import { adminLineOf } from "./admin-lines.js"
+import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
 import {
+  claimWhatsAppNumber,
   findChannelIdentity,
   isDirectThread,
   isTelegramGroupThread,
@@ -28,7 +31,7 @@ import {
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
-import { createOpportunity } from "./opportunities.js"
+import { findOrgCountry } from "./locale.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
@@ -206,17 +209,8 @@ export async function ingestInbound(
       .returning({ id: contact.id })
     if (!created) throw new Error("No se pudo crear el contacto")
     contactId = created.id
-    // El embudo son oportunidades: el contacto entrante nace con su primera
-    // oportunidad en la etapa inicial (una por persona recién llegada).
-    await createOpportunity(
-      tx,
-      orgId,
-      {
-        contactId,
-        title: `Seguimiento · ${event.senderDisplayName ?? event.senderExternalId}`.slice(0, 200),
-      },
-      { userId: null },
-    )
+    // Un «hola» no es una oportunidad: la crea el agente o el equipo cuando la
+    // persona pide algo concreto (ADR 0028).
     const [insertedIdentity] = await tx
       .insert(contactIdentity)
       .values({
@@ -795,8 +789,37 @@ function conversationFilterConditions(orgId: string, input: ConversationFilters)
   } else if (input.assigned) {
     conditions.push(eq(conversation.assignedUserId, input.assigned))
   }
-  if (input.q) conditions.push(ilike(contact.displayName, `%${input.q}%`))
+  const q = input.q?.trim()
+  if (q) {
+    const byName = ilike(contact.displayName, `%${q}%`)
+    const digits = phoneDigitsOf(q)
+    // Por teléfono: los dígitos del número que la persona dio o del hilo de
+    // WhatsApp. Buscar solo filtra la lista; nunca identifica a nadie.
+    conditions.push(
+      digits
+        ? or(
+            byName,
+            sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`,
+            and(
+              eq(channelConnection.channel, "whatsapp"),
+              sql`regexp_replace(${conversation.externalThreadId}, '[^0-9]', '', 'g') like ${`%${digits}%`}`,
+            ),
+          )!
+        : byName,
+    )
+  }
   return conditions
+}
+
+/**
+ * Los dígitos de una búsqueda que parece un teléfono (al menos cuatro, entre
+ * espacios, guiones, paréntesis o «+»); null si busca otra cosa.
+ */
+export function phoneDigitsOf(query: string): string | null {
+  const trimmed = query.trim()
+  if (!/^[\d\s\-()+.]+$/.test(trimmed)) return null
+  const digits = trimmed.replace(/\D/g, "")
+  return digits.length >= 4 ? digits : null
 }
 
 /**
@@ -961,7 +984,9 @@ export async function listMessages(
   const lineOf = new Map(lines.map((row) => [row.messageId, row.kind]))
   const automaticOf = (id: string): MessageItem["automatic"] => {
     const key = lineOf.get(id)
-    return key ? { key, name: adminLineOf(key)?.name ?? key } : null
+    // Un aviso de cita sale por «Recordar la cita»: se dice esa línea.
+    const line = key ? lineOfJobKind(key) : null
+    return key ? { key: line?.key ?? key, name: line?.name ?? key } : null
   }
   return {
     items: page.reverse().map((row) => toMessageItem(row, automaticOf(row.id))),
@@ -1099,7 +1124,8 @@ export interface ConversationDetail {
     assignedUserId: string | null
     lastMessageAt: string | null
   }
-  contact: { id: string; displayName: string; isActive: boolean }
+  /** `isPatient`: su página la abre también quien solo ve pacientes (caja, odontología). */
+  contact: { id: string; displayName: string; isActive: boolean; isPatient: boolean }
   connection: {
     id: string
     channel: string
@@ -1115,6 +1141,22 @@ export interface ConversationDetail {
   whatsappWindow: { open: boolean; lastInboundAt: string | null } | null
   messages: MessageItem[]
   messagesCursor: string | null
+}
+
+/** La persona ya es paciente (tiene su ficha propia). */
+async function isSelfPatient(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+  const [own] = await tx
+    .select({ id: patientContact.id })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, contactId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .limit(1)
+  return !!own
 }
 
 export async function getConversationDetail(
@@ -1147,6 +1189,7 @@ export async function getConversationDetail(
       id: row.contact.id,
       displayName: row.contact.displayName,
       isActive: row.contact.isActive,
+      isPatient: await isSelfPatient(tx, orgId, row.contact.id),
     },
     connection: {
       id: row.connection.id,
@@ -1502,4 +1545,134 @@ export async function startContactConversation(
     )
   }
   return { id: retry.id, status: retry.status, created: false }
+}
+
+export interface WriteToPersonResult {
+  conversationId: string
+  /** Se abrió una conversación nueva (antes no había ninguna por ese canal). */
+  created: boolean
+  channel: string
+  /** El número de WhatsApp quedó como canal de la persona en este paso. */
+  identityCreated: boolean
+}
+
+/**
+ * «Escribirle»: la única vía para que una persona del equipo escriba a alguien
+ * desde la Bandeja, la ficha, la Agenda o Finanzas. Devuelve la conversación
+ * por la que se le escribe, sin enviar nada:
+ *
+ * 1. La conversación en la que la persona escribió en las últimas 24 horas, si
+ *    hay una: ahí se le responde con libertad.
+ * 2. Si no, WhatsApp: su hilo si ya existe o uno nuevo con su número. Si nunca
+ *    escribió, la Bandeja ofrece los mensajes aprobados para empezar.
+ * 3. Si no hay WhatsApp posible, la conversación más reciente que siga
+ *    conectada.
+ *
+ * El número que se usa es el que una persona del equipo eligió en este paso
+ * (`phone`) o el que la ficha tiene declarado y esa persona aceptó al pulsar
+ * «Escribirle». Es la única forma, junto al alta manual, en que un teléfono se
+ * convierte en canal de alguien; un mensaje que entra nunca se une a una ficha
+ * por coincidir su número (ADR 0027). Si ese número ya es de otra persona de
+ * la clínica, no se mueve: se dice.
+ */
+export async function writeToPerson(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  contactId: string,
+  input: { phone?: string | null } = {},
+): Promise<WriteToPersonResult> {
+  const [person] = await tx
+    .select({ id: contact.id, isActive: contact.isActive, phone: contact.phone })
+    .from(contact)
+    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+    .limit(1)
+  if (!person) throw notFound("Contacto")
+  if (!person.isActive) throw new ServiceError("CONTACT_ARCHIVED", 409, "Reactiva a la persona para escribirle")
+  const threads = await tx
+    .select({
+      id: conversation.id,
+      lastInboundAt: conversation.lastInboundAt,
+      externalThreadId: conversation.externalThreadId,
+      identityId: conversation.contactIdentityId,
+      channel: channelConnection.channel,
+      connectionId: channelConnection.id,
+    })
+    .from(conversation)
+    .innerJoin(channelConnection, eq(channelConnection.id, conversation.channelConnectionId))
+    .where(
+      and(
+        eq(conversation.organizationId, orgId),
+        eq(conversation.contactId, contactId),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(desc(sql`coalesce(${conversation.lastMessageAt}, ${conversation.createdAt})`), desc(conversation.id))
+  const now = Date.now()
+  const typedPhone = input.phone?.trim() || null
+  if (!typedPhone) {
+    const live = threads.find(
+      (row) => row.lastInboundAt && now - row.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS,
+    )
+    if (live) return { conversationId: live.id, created: false, channel: live.channel, identityCreated: false }
+  }
+  const [whatsapp] = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
+    .limit(1)
+  const fallback = threads[0]
+  if (!whatsapp) {
+    if (fallback && !typedPhone) {
+      return { conversationId: fallback.id, created: false, channel: fallback.channel, identityCreated: false }
+    }
+    throw new ServiceError(
+      "NO_WHATSAPP",
+      409,
+      "La clínica no tiene WhatsApp conectado. Pídele a quien administra la clínica que lo conecte en Configuración › Integraciones.",
+    )
+  }
+  let identityId: string | null = null
+  let identityCreated = false
+  if (!typedPhone) {
+    const [known] = await tx
+      .select({ id: contactIdentity.id })
+      .from(contactIdentity)
+      .where(
+        and(
+          eq(contactIdentity.organizationId, orgId),
+          eq(contactIdentity.contactId, contactId),
+          eq(contactIdentity.channel, "whatsapp"),
+        ),
+      )
+      .orderBy(desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
+      .limit(1)
+    identityId = known?.id ?? null
+  }
+  let phone = identityId ? null : person.phone
+  if (typedPhone) {
+    phone = normalizePhone(typedPhone) ?? normalizePhone(typedPhone, await findOrgCountry(tx, orgId))
+    if (!phone) throw validation("Escribe el número de WhatsApp con el código de su país.")
+  }
+  if (!identityId && phone) {
+    const claimed = await claimWhatsAppNumber(tx, orgId, actorUserId, contactId, phone)
+    identityId = claimed.identityId
+    identityCreated = claimed.created
+  }
+  if (!identityId) {
+    if (fallback) return { conversationId: fallback.id, created: false, channel: fallback.channel, identityCreated: false }
+    throw new ServiceError("NO_PHONE", 409, "Falta su número de WhatsApp: escríbelo para poder escribirle.")
+  }
+  const started = await startContactConversation(tx, orgId, actorUserId, contactId, {
+    identityId,
+    connectionId: whatsapp.id,
+  })
+  return { conversationId: started.id, created: started.created, channel: "whatsapp", identityCreated }
 }

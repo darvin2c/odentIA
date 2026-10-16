@@ -15,6 +15,11 @@ const MOVED: Record<string, string> = {
   "/settings/webchat": "/settings/integrations/webchat",
   "/settings/agent": "/settings/integrations/model",
   "/agent/approvals": "/agent/pendientes",
+  // Una persona, una página (ADR 0029): Contactos y la ficha redirigen a la persona.
+  "/contacts": "/people",
+  "/contacts/$contactId": "/people/$personId",
+  "/patients": "/people",
+  "/patients/$patientId": "/people/$personId",
 }
 
 /** Las pantallas bajo el layout de la clínica, tal como las declara el árbol generado. */
@@ -46,4 +51,10 @@ it("«Pendientes» la abre quien la abría como «Aprobaciones»: también quien
   // Recepción decide por el agente (`agent.decide`) sin supervisarlo (`agent.read`):
   // con la regla genérica de `/agent` se quedaría fuera de sus casos derivados.
   expect(platformPathPermission("/agent/pendientes")).toEqual(platformPathPermission("/agent/approvals"))
+})
+
+it("la ficha y Contactos redirigen con la misma regla que la página de la persona", () => {
+  // Odontología y caja no leen el CRM: una dirección vieja de Contactos no puede dejarlos fuera.
+  expect(platformPathPermission("/contacts/123")).toEqual(platformPathPermission("/people/123"))
+  expect(platformPathPermission("/patients/123")).toEqual(platformPathPermission("/people/123"))
 })

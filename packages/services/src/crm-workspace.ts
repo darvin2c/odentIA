@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { appointment } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { patientContact, patient as patientTable, treatmentBudget } from "@odentia/db/schema/clinical"
 import {
@@ -12,9 +13,11 @@ import {
 import { agentHandoff, agentProposal } from "@odentia/db/schema/agent"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { opportunity, opportunityEvent } from "@odentia/db/schema/opportunities"
-import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, or, sql, type SQL, type SQLWrapper } from "drizzle-orm"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { and, asc, desc, eq, gt, inArray, or, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
+import { getMessagePermissions } from "./automation.js"
+import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { getContact, requireContact, type ContactFull } from "./contacts.js"
 import { notFound, validation } from "./errors.js"
 import { agentAttendingSql, handoffOpenExistsSql, proposalPendingExistsSql } from "./conversation-state.js"
@@ -34,6 +37,8 @@ export interface CrmCapabilities {
   conversations: boolean
   tasks: boolean
   agent: boolean
+  /** Ve la agenda: recibe la próxima cita de la persona. */
+  appointments?: boolean
 }
 
 export type CrmActivityKind = "message" | "note" | "task" | "opportunity" | "proposal" | "handoff"
@@ -59,6 +64,21 @@ export interface CrmAgentState {
   reason: string | null
   /** Solo con agent.read; sin permiso informa el estado con lista vacía. */
   pendingProposalIds: string[]
+  /** Hay una cita propuesta que espera el sí del interlocutor, sea cual sea el estado. */
+  awaitingContact: boolean
+}
+
+/** La próxima cita en pie de la persona o de quien ella lleva, para «Contexto». */
+export interface CrmNextAppointment {
+  id: string
+  patientId: string
+  patientName: string
+  startsAt: string
+  status: string
+  branchName: string
+  timeZone: string
+  dentistName: string
+  serviceName: string | null
 }
 
 export interface CrmContactWorkspace {
@@ -67,6 +87,68 @@ export interface CrmContactWorkspace {
   tasks: TaskItem[]
   agent: CrmAgentState
   activity: { items: CrmActivityItem[]; nextCursor: string | null }
+  /** Solo para quien ve la agenda; null si no tiene ninguna por venir. */
+  nextAppointment: CrmNextAppointment | null
+  /**
+   * Lo que dijo de cada tipo de mensaje (null: nunca dijo nada). `recordatorio` y
+   * `seguimiento` son parte del servicio: solo cuenta si se dio de baja (false);
+   * `novedades` es el único que pide su permiso (ADR 0030).
+   */
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades: boolean | null }
+}
+
+/**
+ * La próxima cita en pie de los pacientes de esta persona (ella misma o a
+ * quien lleva): cuándo, dónde y con quién. Se calcula al leer.
+ */
+async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Promise<CrmNextAppointment | null> {
+  const [row] = await tx
+    .select({
+      id: appointment.id,
+      patientId: appointment.patientId,
+      patientName: patientTable.displayName,
+      startsAt: appointment.startsAt,
+      status: appointment.status,
+      branchName: branch.name,
+      branchZone: branch.timezone,
+      orgZone: orgProfile.timezone,
+      dentistName: user.name,
+      serviceName: appointment.serviceName,
+    })
+    .from(appointment)
+    .innerJoin(
+      patientContact,
+      and(
+        eq(patientContact.patientId, appointment.patientId),
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, contactId),
+      ),
+    )
+    .innerJoin(patientTable, and(eq(patientTable.id, appointment.patientId), eq(patientTable.organizationId, orgId)))
+    .innerJoin(branch, and(eq(branch.id, appointment.branchId), eq(branch.organizationId, orgId)))
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, appointment.organizationId))
+    .innerJoin(user, eq(user.id, appointment.dentistUserId))
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gt(appointment.startsAt, new Date()),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+    .limit(1)
+  if (!row) return null
+  return {
+    id: row.id,
+    patientId: row.patientId,
+    patientName: row.patientName,
+    startsAt: row.startsAt.toISOString(),
+    status: row.status,
+    branchName: row.branchName,
+    timeZone: row.branchZone ?? row.orgZone ?? NEUTRAL_TIMEZONE,
+    dentistName: row.dentistName,
+    serviceName: row.serviceName,
+  }
 }
 
 export interface CrmBudgetOption {
@@ -202,6 +284,7 @@ async function resolveAgentState(
       conversationId: null,
       reason: cfg.enabled ? "Sin conversación vinculada" : "Agente desactivado para la organización",
       pendingProposalIds: [],
+      awaitingContact: false,
     }
   }
   if (convRow.status === "closed") {
@@ -211,6 +294,7 @@ async function resolveAgentState(
       conversationId: convRow.id,
       reason: "Conversación cerrada",
       pendingProposalIds: [],
+      awaitingContact: false,
     }
   }
   // Lo que espera el hilo, con las mismas reglas que la Bandeja (`conversation-state.ts`).
@@ -224,37 +308,34 @@ async function resolveAgentState(
     .from(conversation)
     .where(and(eq(conversation.id, convRow.id), eq(conversation.organizationId, orgId)))
     .limit(1)
-  if (shared?.pending) {
-    // Estado operativo mínimo: la existencia de pendientes se informa aunque
-    // el rol no tenga agent.read; los ids solo con permiso.
-    const pending = caps.agent
-      ? await tx
-          .select({ id: agentProposal.id })
-          .from(agentProposal)
-          .where(
-            and(
-              eq(agentProposal.organizationId, orgId),
-              eq(agentProposal.conversationId, convRow.id),
-              proposalPendingSql(sql.raw('"agent_proposal"')),
-            ),
-          )
-          .limit(10)
-      : []
-    return {
-      state: "approval",
-      enabled: cfg.enabled,
-      conversationId: convRow.id,
-      reason: "Propuesta del agente que espera la confirmación del interlocutor",
-      pendingProposalIds: pending.map((p) => p.id),
-    }
-  }
+  // Estado operativo mínimo: la existencia de pendientes se informa aunque
+  // el rol no tenga agent.read; los ids solo con permiso. Viajan con cualquier
+  // estado: la cita que espera el sí puede registrarse aunque la lleve una persona.
+  const pending = shared?.pending && caps.agent
+    ? await tx
+        .select({ id: agentProposal.id })
+        .from(agentProposal)
+        .where(
+          and(
+            eq(agentProposal.organizationId, orgId),
+            eq(agentProposal.conversationId, convRow.id),
+            proposalPendingSql(sql.raw('"agent_proposal"')),
+          ),
+        )
+        .limit(10)
+    : []
+  const pendingProposalIds = pending.map((p) => p.id)
+  const awaitingContact = !!shared?.pending
+  // El mismo orden que la Bandeja (`conversationWords`): el caso que pasó el
+  // agente, después una persona a cargo y luego la cita que espera el sí.
   if (shared?.handoff) {
     return {
       state: "handoff",
       enabled: cfg.enabled,
       conversationId: convRow.id,
-      reason: "Derivado al equipo; seguimiento pendiente",
-      pendingProposalIds: [],
+      reason: "Te lo pasó el agente; falta resolverlo",
+      pendingProposalIds,
+      awaitingContact,
     }
   }
   if (convRow.agentStatus === "off" || convRow.assignedUserId !== null) {
@@ -263,7 +344,18 @@ async function resolveAgentState(
       enabled: cfg.enabled,
       conversationId: convRow.id,
       reason: "Atiende recepción",
-      pendingProposalIds: [],
+      pendingProposalIds,
+      awaitingContact,
+    }
+  }
+  if (awaitingContact) {
+    return {
+      state: "approval",
+      enabled: cfg.enabled,
+      conversationId: convRow.id,
+      reason: "Propuesta del agente que espera la confirmación del interlocutor",
+      pendingProposalIds,
+      awaitingContact,
     }
   }
   if (!shared?.attending) {
@@ -273,6 +365,7 @@ async function resolveAgentState(
       conversationId: convRow.id,
       reason: cfg.enabled ? "El agente no atiende este canal" : "Agente desactivado para la organización",
       pendingProposalIds: [],
+      awaitingContact: false,
     }
   }
   return {
@@ -281,6 +374,7 @@ async function resolveAgentState(
     conversationId: convRow.id,
     reason: "Atiende el agente",
     pendingProposalIds: [],
+    awaitingContact: false,
   }
 }
 
@@ -746,7 +840,7 @@ export async function listContactActivity(
         id: `handoff:${row.id}`,
         kind: "handoff",
         at,
-        title: "Derivación al equipo",
+        title: "Te lo pasó el agente",
         body: row.summary,
         actorName: "Agente",
         channel: null,
@@ -785,6 +879,9 @@ async function listContactTasks(tx: Db, orgId: string, contactId: string): Promi
       task: crmTask,
       contactName: contact.displayName,
       opportunityTitle: opportunity.title,
+      // La tarea de un caso del agente: completarla muestra antes lo que pasará.
+      casePriority: sql<string | null>`(select h.priority from agent_handoff h
+        where h.organization_id = ${orgId} and h.task_id = ${crmTask.id} order by h.created_at desc limit 1)`,
     })
     .from(crmTask)
     .leftJoin(
@@ -806,7 +903,6 @@ async function listContactTasks(tx: Db, orgId: string, contactId: string): Promi
     patientId: r.task.patientId,
     // El contexto comercial no resuelve nombres de pacientes: eso lo hace la ficha.
     patientName: null,
-    kind: r.task.kind === "opportunity_follow_up" ? "opportunity_follow_up" : "manual",
     assigneeUserId: r.task.assigneeUserId,
     dueAt: r.task.dueAt ? r.task.dueAt.toISOString() : null,
     status: r.task.status,
@@ -814,8 +910,12 @@ async function listContactTasks(tx: Db, orgId: string, contactId: string): Promi
     // El contexto comercial muestra la tarea, no a qué área va ni por qué se creó.
     area: null,
     reason: r.task.reason,
+    settledReason: r.task.settledReason,
     contactName: r.contactName,
     opportunityTitle: r.opportunityTitle,
+    agentCase: r.casePriority ? { priority: r.casePriority } : null,
+    createdAt: r.task.createdAt.toISOString(),
+    updatedAt: r.task.updatedAt.toISOString(),
   }))
 }
 
@@ -850,9 +950,10 @@ export async function getContactWorkspace(
           conversationId: null,
           reason: "Sin acceso a conversaciones",
           pendingProposalIds: [],
+          awaitingContact: false,
         }),
       )
-  const [opps, tasks, agent, activity] = await Promise.all([
+  const [opps, tasks, agent, activity, nextAppointment, permissions] = await Promise.all([
     listOpportunities(tx, orgId, { contactId, limit: opts.opportunitiesLimit ?? 30 }),
     caps.tasks ? listContactTasks(tx, orgId, contactId) : Promise.resolve([] as TaskItem[]),
     agentPromise,
@@ -860,13 +961,18 @@ export async function getContactWorkspace(
       limit: opts.activityLimit ?? ACTIVITY_DEFAULT_LIMIT,
       capabilities: caps,
     }),
+    caps.appointments ? nextAppointmentOf(tx, orgId, contactId) : Promise.resolve(null),
+    getMessagePermissions(tx, orgId, contactId),
   ])
+  const granted = (purpose: string) => permissions.find((item) => item.purpose === purpose)?.granted ?? null
   return {
     contact: scoped,
     opportunities: { items: opps.items, nextCursor: opps.nextCursor },
     tasks,
     agent,
     activity,
+    nextAppointment,
+    messages: { recordatorio: granted("recordatorio"), seguimiento: granted("seguimiento"), novedades: granted("novedades") },
   }
 }
 

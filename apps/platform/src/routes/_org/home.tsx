@@ -1,9 +1,11 @@
 import { DetailDrawer, EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
+import { invalidateAgentPanelQueries, takeCase } from "../../components/agent-panel"
+import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
 import { type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
@@ -14,7 +16,8 @@ import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
-import { daysAgo, longDay } from "../../lib/home"
+import { daysAgo, longDay, waitingKey } from "../../lib/home"
+import { mutationErrorMessage } from "../../lib/query-error"
 import { useOrgEvents } from "../../lib/org-events"
 import type { WaitingRow, WorkspaceCash, WorkspaceHome } from "../../lib/workspace"
 
@@ -45,6 +48,7 @@ const HOME_EVENTS = [
 ]
 
 type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
+type CaseRow = Extract<WaitingRow, { kind: "case" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -66,6 +70,24 @@ function HomePage() {
   })
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
   useOrgEvents(HOME_EVENTS, refresh)
+
+  const canDoTasks = usePermission("tasks.write")
+  // «Tomar» desde la fila: la misma acción que en la Bandeja y el panel (toma la conversación del caso).
+  const take = useMutation({
+    mutationFn: (row: CaseRow) => takeCase({ id: row.id, conversationId: row.conversationId }),
+    onSuccess: () => {
+      invalidateAgentPanelQueries(queryClient)
+      refresh()
+    },
+  })
+  // «Hecha»: si la tarea resolviera una conversación, antes se muestra lo mismo que «Resolver».
+  const completion = useCompleteTask(refresh)
+  const busyKey = take.isPending && take.variables
+    ? waitingKey(take.variables)
+    : completion.pendingId
+      ? `task:${completion.pendingId}`
+      : null
+  const actionError = (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ?? completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
@@ -91,11 +113,15 @@ function HomePage() {
           <WaitingList
             rows={data.waiting}
             context={context}
+            error={actionError}
             handlers={{
               onCase: (row) => row.conversationId && setBriefFor({ conversationId: row.conversationId, name: row.contactName ?? "Interlocutor" }),
               onAdvice: (row) => setAdvice(row.key),
               onUnreached: () => setUnreached(true),
               onBudgets: setBudgets,
+              onTake: canTake ? (row) => take.mutate(row) : undefined,
+              onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
+              busyKey,
             }}
           />
         </div>
@@ -120,6 +146,7 @@ function HomePage() {
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
+    {completion.dialog}
     <DetailDrawer
       open={budgets !== null}
       onClose={() => setBudgets(null)}

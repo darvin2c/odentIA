@@ -11,7 +11,7 @@
  * Moneda de la clínica (prop requerida) y formato del perfil; dinero con el
  * módulo compartido `@odentia/clinical`. Nada fijo de un país.
  */
-import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { documentText, formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import {
   Button,
   Checkbox,
@@ -47,7 +47,6 @@ import {
   fetchPatientAccount3,
   fetchPaymentMethods,
   formatAmountPlain,
-  searchPatientsApi,
   voidChargeApi,
   type AccountPendingItem,
   type CollectResultBody,
@@ -55,6 +54,7 @@ import {
   type PromotionItem,
   type PromotionOption,
 } from "../../lib/finance-collect"
+import { PersonPicker } from "../person-picker"
 
 const MAX_REASON = 2000
 const MAX_REFERENCE = 200
@@ -260,7 +260,6 @@ export function CollectDrawer({
   const canConfigure = usePermission("settings.write")
   const sede = useActiveBranch()
 
-  const [search, setSearch] = useState("")
   const [chosen, setChosen] = useState<{
     id: string
     name: string
@@ -309,7 +308,6 @@ export function CollectDrawer({
   // Sesión nueva al abrir: borrador limpio y clave de cobro nueva.
   useEffect(() => {
     if (!open) return
-    setSearch("")
     setChosen(null)
     resetDraft()
     setDirty(false)
@@ -330,13 +328,6 @@ export function CollectDrawer({
     queryKey: ["responsibilities", effectiveId],
     queryFn: () => fetchResponsibilities(effectiveId as string),
     enabled: open && effectiveId !== null,
-  })
-  const searchText = search.trim()
-  const searchQuery = useQuery({
-    queryKey: ["patients-search", searchText],
-    queryFn: () => searchPatientsApi(searchText),
-    enabled: open && patientId === null && chosen === null && searchText.length >= 2,
-    retry: false,
   })
 
   const data = account.data?.data ?? null
@@ -485,9 +476,7 @@ export function CollectDrawer({
 
   // Lo que ya sabe quien abre el cobro manda (sin parpadeo); lo demás lo trae la cuenta.
   const known = data?.patient ?? null
-  const knownDocument = known?.docNumber
-    ? `${known.docType ? `${known.docType} ` : ""}${known.docNumber}`
-    : null
+  const knownDocument = known?.docNumber ? documentText(known.docType, known.docNumber) : null
   const displayName = (patientId !== null ? patientName : chosen?.name) || known?.displayName || ""
   const displayDocument = (patientId !== null ? patientDocument : chosen?.document) || knownDocument
   const displaySex = (patientId !== null ? patientSex : chosen?.sex) ?? known?.sex ?? null
@@ -1071,80 +1060,19 @@ export function CollectDrawer({
     >
       <div className="flex flex-col gap-6">
         {patientId === null ? (
-          <Field>
-            <FieldLabel htmlFor={`${uid}-paciente`}>Paciente</FieldLabel>
-            <Input
-              id={`${uid}-paciente`}
-              autoComplete="off"
-              placeholder="Nombre o documento"
-              value={chosen ? chosen.name : search}
-              onChange={(event) => {
-                setSearch(event.target.value)
-                if (chosen) {
-                  setChosen(null)
-                  resetDraft()
-                }
-              }}
-              onKeyDown={onEnter(() => undefined)}
-            />
-            {!chosen && searchText.length >= 2 ? (
-              searchQuery.isPending ? (
-                <div className="flex flex-col gap-2" aria-busy="true">
-                  <Skeleton className="h-9 w-full" />
-                  <Skeleton className="h-9 w-full" />
-                </div>
-              ) : searchQuery.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {financeErrorMessage(searchQuery.error)}{" "}
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0"
-                    onClick={() => void searchQuery.refetch()}
-                  >
-                    Reintentar
-                  </Button>
-                </p>
-              ) : searchQuery.data.data.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Nadie coincide con «{searchText}». Prueba con otro nombre o con su documento.
-                </p>
-              ) : (
-                <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto">
-                  {searchQuery.data.data.map((row) => {
-                    const document = row.docNumber
-                      ? `${row.docType ? `${row.docType} ` : ""}${row.docNumber}`
-                      : null
-                    return (
-                      <li key={row.id}>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-auto min-h-10 w-full justify-between gap-3 whitespace-normal py-2 text-left"
-                          onClick={() => {
-                            resetDraft()
-                            setChosen({
-                              id: row.id,
-                              name: row.displayName,
-                              document,
-                              sex: row.sex ?? null,
-                            })
-                            setDirty(true)
-                          }}
-                        >
-                          <span className="min-w-0 break-words">{row.displayName}</span>
-                          {document ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">{document}</span>
-                          ) : null}
-                        </Button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )
-            ) : null}
-          </Field>
+          // El buscador de personas de toda la aplicación, solo con pacientes (ADR 0029).
+          <PersonPicker
+            label="Paciente"
+            patientsOnly
+            value={chosen ? { id: `ficha:${chosen.id}`, name: chosen.name, patientId: chosen.id, document: chosen.document } : null}
+            onChange={(person) => {
+              resetDraft()
+              if (person?.patientId) {
+                setChosen({ id: person.patientId, name: person.name, document: person.document ?? null, sex: person.sex ?? null })
+                setDirty(true)
+              } else setChosen(null)
+            }}
+          />
         ) : null}
 
         {!effectiveId ? (

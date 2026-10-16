@@ -217,6 +217,8 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     "Ninguna conversación queda abierta: cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo, ninguna pregunta suya sin responder), despídete en una sola línea cordial, en el tono de la clínica, diciendo que estamos atentos si quiere volver a escribir, y usa despedirse_y_cerrar en lugar de send_reply. Si su agradecimiento llega con algo pendiente o con otra pregunta, responde con send_reply y no cierres. Nunca digas «te dejo por ahora».",
     ...notes,
     "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
+    "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál.",
+    "Si el último mensaje de la clínica en el hilo es la pregunta «¿Te podemos escribir también para avisarte de tus controles y novedades de la clínica?» y la persona responde sí o no, anótalo con responder_permiso_mensajes; no lo confundas con confirmar una cita.",
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
@@ -467,8 +469,8 @@ export function compileAgentGraph(
         parts.push("sin oportunidades abiertas")
       } else {
         for (const o of items) {
-          const followup = o.nextActionAt
-            ? `; próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}`
+          const followup = o.nextTask
+            ? `; tarea «${o.nextTask.title}»${o.nextTask.dueAt ? ` para ${formatZoned(new Date(o.nextTask.dueAt), zone)}` : ""}`
             : ""
           // El valor de la oportunidad es una cifra interna de ventas, no un precio: no llega al
           // agente, que podría decirlo a la persona y la comprobación lo daría por bueno (ADR 0021).

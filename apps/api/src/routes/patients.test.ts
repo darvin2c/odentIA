@@ -1,7 +1,15 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
-import { createContact, createPatient, secretsKeyFromEnv } from "@odentia/services"
+import { contactIdentity, conversation } from "@odentia/db/schema/crm"
+import {
+  createConnection,
+  createContact,
+  createPatient,
+  getPatientRegistrationConfig,
+  savePatientRegistrationConfig,
+  secretsKeyFromEnv,
+} from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
@@ -176,6 +184,95 @@ it("pacientes: POST 201 y GET 200", async () => {
   })
 })
 
+it("recepción registra con lo mínimo al reservar a la persona de una conversación aunque la clínica exija más", async () => {
+  // La clínica publica su registro: exige la fecha de nacimiento.
+  await withOrgContext(appDb, "org_a", async (tx) => {
+    const current = await getPatientRegistrationConfig(tx, "org_a")
+    await savePatientRegistrationConfig(tx, "org_a", "u-1", {
+      expectedVersion: current.version,
+      enabled: false,
+      fields: current.fields,
+      privacyNotice: "Aviso.",
+    })
+  })
+  const person = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Carmen Huamán", phone: "+51987654100" }),
+  )
+  const conn = await withOrgContext(appDb, "org_a", (tx) =>
+    createConnection(
+      tx,
+      "org_a",
+      KEY,
+      { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } },
+      { fetch, validateExternal: false },
+    ),
+  )
+  const externalId = `tg:${crypto.randomUUID()}`
+  const [identity] = await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: "org_a", contactId: person.id, channel: "telegram", externalUserId: externalId })
+    .returning()
+  const [thread] = await ownerDb
+    .insert(conversation)
+    .values({
+      organizationId: "org_a",
+      contactId: person.id,
+      channelConnectionId: conn.id,
+      externalThreadId: externalId,
+      contactIdentityId: identity!.id,
+    })
+    .returning({ id: conversation.id })
+  const body = (top: Record<string, unknown>) =>
+    JSON.stringify(
+      registrationBody("Carmen Huamán", { givenNames: "Carmen", paternalSurname: "Huamán", phone: "+51987654100" }, {
+        contextContactId: person.id,
+        contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }],
+        ...top,
+      }),
+    )
+  const post = (role: string, top: Record<string, unknown>) =>
+    buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: body(top) })
+
+  // Sin lo mínimo, el alta interna exige lo que pide la clínica: lo que fallaba al reservar.
+  const full = await post("reception", { conversationId: thread!.id })
+  expect(full.status).toBe(400)
+  // Fuera de la conversación de la persona, lo mínimo no se acepta; sin permiso de pacientes, tampoco.
+  expect((await post("reception", { scope: "essentials" })).status).toBe(400)
+  expect((await post("dentist", { scope: "essentials", conversationId: thread!.id })).status).toBe(403)
+  expect((await post("reception", { scope: "otro", conversationId: thread!.id })).status).toBe(400)
+
+  const created = await post("reception", { scope: "essentials", conversationId: thread!.id })
+  expect(created.status).toBe(201)
+  const { data } = (await created.json()) as { data: { id: string } }
+  const detail = await buildApp("reception").request(`/patients/${data.id}`, { method: "GET" })
+  const detailBody = (await detail.json()) as {
+    data: { patient: { birthDate: string | null; identityNeedsReview: boolean }; contacts: { contactId: string; relationship: string }[] }
+  }
+  expect(detailBody.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
+  expect(detailBody.data.contacts).toEqual([expect.objectContaining({ contactId: person.id, relationship: "self" })])
+
+  // Desde la Agenda, sin conversación: alguien nuevo con nombres, apellidos y
+  // teléfono, aunque la clínica pida la fecha de nacimiento. Pide además agendar.
+  const fresh = (phone: string | null) =>
+    JSON.stringify({
+      ...registrationBody("Pedro Ríos", { givenNames: "Pedro", paternalSurname: "Ríos", ...(phone ? { phone } : {}) }),
+      scope: "essentials",
+    })
+  const postFresh = (role: string, phone: string | null) =>
+    buildApp(role).request("/patients", { method: "POST", headers: { "content-type": "application/json" }, body: fresh(phone) })
+  expect((await postFresh("dentist", "+51987111222")).status).toBe(403)
+  expect((await postFresh("reception", null)).status).toBe(400)
+  const agenda = await postFresh("reception", "+51987111222")
+  expect(agenda.status).toBe(201)
+  const agendaId = ((await agenda.json()) as { data: { id: string } }).data.id
+  const agendaDetail = (await (await buildApp("reception").request(`/patients/${agendaId}`, { method: "GET" })).json()) as {
+    data: { patient: { birthDate: string | null; identityNeedsReview: boolean } }
+  }
+  expect(agendaDetail.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
+  // Las demás pruebas registran sin configuración publicada (alta rápida).
+  await ownerDb.execute(sql`delete from patient_registration_config where organization_id = 'org_a'`)
+})
+
 it("cross-org: paciente de B responde 404 en A con rol legítimo; member 403", async () => {
   const other = await withOrgContext(appDb, "org_b", (tx) =>
     createPatient(tx, "org_b", "u-1", { displayName: "Paciente B" }),
@@ -230,10 +327,14 @@ it("cada subruta del paciente exige solo el permiso de su dominio", async () => 
   }
   const hitsOf = (entries: { resource: string; hits: number }[], resource: string) =>
     entries.find((entry) => entry.resource === resource)?.hits ?? 0
-  // La ficha completa lleva antecedentes para quien atiende: deja traza; para
-  // recepción llega sin salud y no la deja.
+  // Abrir la página de la persona pide la ficha administrativa: no es una
+  // lectura clínica y no deja traza (ADR 0029). Lo clínico de la ficha
+  // (condiciones, medicación, salud declarada) se pide con `?clinical=1`
+  // desde Clínica o la atención, y esa lectura sí la deja.
   const before = hitsOf(await readLog(), "antecedentes")
   expect((await get("dentist", "")).status).toBe(200)
+  expect(hitsOf(await readLog(), "antecedentes")).toBe(before)
+  expect((await get("dentist", "?clinical=1")).status).toBe(200)
   const afterDentist = hitsOf(await readLog(), "antecedentes")
   expect(afterDentist).toBe(before + 1)
   expect((await get("reception", "")).status).toBe(200)
@@ -323,7 +424,10 @@ it("salud PUT guarda el agregado; claves viejas de entrevista y endpoints retira
   const asReception = await buildApp("reception").request(`/patients/${patientId}`, { method: "GET" })
   const receptionBody = (await asReception.json()) as Trimmed
   expect(receptionBody.data.activeAllergies.map((item) => item.substance)).toEqual(["Penicilina"])
-  expect(receptionBody.data.registration).toBeNull()
+  // Del registro le llega lo administrativo, nunca la salud declarada.
+  const receptionRegistration = receptionBody.data.registration as { entryPoint: string; answers: Record<string, unknown> } | null
+  expect(receptionRegistration?.entryPoint).toBeTruthy()
+  expect(receptionRegistration?.answers).not.toHaveProperty("health")
   expect(receptionBody.data.activeConditions).toEqual([])
   const receptionHealth = await buildApp("reception").request(`/patients/${patientId}/health`, {
     method: "GET",

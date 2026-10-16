@@ -4,7 +4,7 @@ import { member } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, desc, eq, inArray, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { getBranchHours } from "./agent-clinic-info.js"
 import { claimHandoff } from "./agent-operations.js"
 import { type AgentConfig, getAgentConfig } from "./agentConfig.js"
@@ -15,7 +15,7 @@ import {
   proposalPendingExistsSql,
   unansweredSql,
 } from "./conversation-state.js"
-import { sendOutbound } from "./conversations.js"
+import { reopenIfClosed, sendOutbound } from "./conversations.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { handoffOpenSql } from "./handoff-state.js"
@@ -29,7 +29,6 @@ import {
 } from "./opportune-hours.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import { updateTask } from "./tasks.js"
-import { createWorkspaceNotification } from "./workspace.js"
 
 /**
  * Ninguna conversación queda abierta (ADR 0024): el agente la cierra con una
@@ -176,8 +175,8 @@ const CLOSE_ACTION: Record<ConversationCloseReason, string> = {
 
 /** Nota que queda en la ficha cuando un cierre resuelve los casos derivados del hilo. */
 const HANDOFF_CLOSE_NOTE: Partial<Record<ConversationCloseReason, string>> = {
-  equipo: "Caso derivado resuelto por el equipo al resolver la conversación.",
-  manual: "Caso derivado cerrado sin resolver: se cerró la conversación.",
+  equipo: "Caso del agente resuelto por el equipo al resolver la conversación.",
+  manual: "Caso del agente cerrado sin resolver: se cerró la conversación.",
 }
 
 /**
@@ -297,10 +296,12 @@ async function threadForWriting(tx: Db, orgId: string, id: string) {
   return row
 }
 
-async function countOpenHandoffsOf(tx: Db, orgId: string, id: string): Promise<number> {
+/** Casos abiertos del hilo; `besidesTask` deja fuera el de esa tarea. */
+async function countOpenHandoffsOf(tx: Db, orgId: string, id: string, besidesTask?: string): Promise<number> {
   const [row] = await tx.execute<{ n: number }>(sql`
     select count(*)::int as n from agent_handoff h
-    where h.organization_id = ${orgId} and h.conversation_id = ${id} and ${handoffOpenSql(sql.raw("h"))}`)
+    where h.organization_id = ${orgId} and h.conversation_id = ${id} and ${handoffOpenSql(sql.raw("h"))}
+      ${besidesTask ? sql`and h.task_id is distinct from ${besidesTask}::uuid` : sql``}`)
   return row?.n ?? 0
 }
 
@@ -362,24 +363,52 @@ export async function closeConversation(tx: Db, orgId: string, id: string, actor
 }
 
 /**
- * Tras completar la tarea de una derivación: si el hilo sigue abierto y no
- * le queda otra derivación sin resolver, el equipo lo resolvió.
+ * La conversación que resuelve completar esta tarea: la del caso que pasó el
+ * agente, si sigue abierta y no le queda otro caso sin resolver. Nula si
+ * completar la tarea no toca ninguna conversación.
  */
-export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: string, actorUserId: string | null): Promise<boolean> {
+async function conversationResolvedByTask(tx: Db, orgId: string, taskId: string): Promise<string | null> {
   const [handoff] = await tx
     .select({ conversationId: agentHandoff.conversationId })
     .from(agentHandoff)
     .where(and(eq(agentHandoff.organizationId, orgId), eq(agentHandoff.taskId, taskId)))
     .limit(1)
   const conversationId = handoff?.conversationId
-  if (!conversationId) return false
+  if (!conversationId) return null
   const [thread] = await tx
     .select({ status: conversation.status })
     .from(conversation)
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
-  if (thread?.status !== "open") return false
-  if ((await countOpenHandoffsOf(tx, orgId, conversationId)) > 0) return false
+  if (thread?.status !== "open") return null
+  if ((await countOpenHandoffsOf(tx, orgId, conversationId, taskId)) > 0) return null
+  return conversationId
+}
+
+/**
+ * Lo que pasará al completar la tarea de un caso que pasó el agente: lo mismo
+ * que «Resolver» (`getResolvePreview`), dicho antes en Tareas y en «Contexto».
+ * Nulo si completarla no cierra ninguna conversación.
+ */
+export async function getTaskResolvePreview(
+  tx: Db,
+  orgId: string,
+  taskId: string,
+  now = new Date(),
+): Promise<{ conversationId: string; contactName: string; preview: ResolvePreview } | null> {
+  const conversationId = await conversationResolvedByTask(tx, orgId, taskId)
+  if (!conversationId) return null
+  const thread = await threadForWriting(tx, orgId, conversationId)
+  return { conversationId, contactName: thread.contactName, preview: await getResolvePreview(tx, orgId, conversationId, now) }
+}
+
+/**
+ * Tras completar la tarea de una derivación: si el hilo sigue abierto y no
+ * le queda otra derivación sin resolver, el equipo lo resolvió.
+ */
+export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: string, actorUserId: string | null): Promise<boolean> {
+  const conversationId = await conversationResolvedByTask(tx, orgId, taskId)
+  if (!conversationId) return false
   await resolveConversationByTeam(tx, orgId, conversationId, actorUserId)
   return true
 }
@@ -388,7 +417,8 @@ export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: str
 
 /**
  * «Tomar»: la conversación pasa a quien la toma, el agente se apaga en el hilo
- * y las derivaciones abiertas quedan a su nombre.
+ * y las derivaciones abiertas quedan a su nombre. Tomar una cerrada la reabre
+ * antes (ADR 0024): nunca queda una conversación cerrada a cargo de alguien.
  */
 export async function takeConversation(tx: Db, orgId: string, id: string, userId: string): Promise<void> {
   const [membership] = await tx
@@ -398,6 +428,7 @@ export async function takeConversation(tx: Db, orgId: string, id: string, userId
     .limit(1)
   if (!membership) throw validation("Solo un miembro de la organización puede tomar la conversación")
   const thread = await threadForWriting(tx, orgId, id)
+  if (thread.status === "closed") await reopenIfClosed(tx, orgId, id, { userId, via: "equipo" })
   const now = new Date()
   await tx
     .update(conversation)
@@ -472,7 +503,6 @@ export interface ConversationCareDeps {
 export interface ConversationCareSummary {
   nudged: number
   closed: number
-  noticed: number
 }
 
 /** El horario oportuno de la clínica, leído una vez por ciclo. */
@@ -549,9 +579,8 @@ interface CareRow {
  *   oportuno y con ventana para escribir; y a `closeAfterHours` de silencio se
  *   despide y cierra con `sin_respuesta` (sin ventana, cierra sin mensaje);
  * - con una persona a cargo (asignada, agente apagado o canal que el agente no
- *   atiende) y sin derivación abierta: no se cierra sola; pasadas
- *   `closeAfterHours` sin mensajes, avisa una vez por atención a esa persona o
- *   a recepción.
+ *   atiende): no se cierra sola. Pasadas `closeAfterHours` sin mensajes la
+ *   muestra «Te espera» (`stillOpenWithPersonSql`), no la campana.
  */
 export async function tickConversationCare(
   tx: Db,
@@ -559,7 +588,7 @@ export async function tickConversationCare(
   now: Date,
   deps: ConversationCareDeps = {},
 ): Promise<ConversationCareSummary> {
-  const summary: ConversationCareSummary = { nudged: 0, closed: 0, noticed: 0 }
+  const summary: ConversationCareSummary = { nudged: 0, closed: 0 }
   const cfg = await getAgentConfig(tx, orgId)
   if (!cfg.enabled) return summary
   const conv = sql.raw('"conversation"')
@@ -597,7 +626,6 @@ export async function tickConversationCare(
   const schedule = await opportuneScheduleOf(tx, orgId, cfg, now)
   const zone = await findOrgLocale(tx, orgId)
   const voice = clinicVoiceOf(cfg)
-  const silenceMs = cfg.closeAfterHours * HOUR_MS
   for (const row of rows) {
     // Cada conversación en su propio punto de guardado: un envío que falla no deshace las demás.
     const outcome = await tx
@@ -608,19 +636,14 @@ export async function tickConversationCare(
       })
     if (outcome === "nudged") summary.nudged++
     if (outcome === "closed") summary.closed++
-    if (outcome === "noticed") summary.noticed++
   }
   return summary
 
-  async function careFor(inner: Db, row: CareRow): Promise<"nudged" | "closed" | "noticed" | null> {
+  async function careFor(inner: Db, row: CareRow): Promise<"nudged" | "closed" | null> {
     if (row.handoffOpen) return null
     const attended = cfg.channels === null || cfg.channels.includes(row.channel)
-    const personInCharge = row.assignedUserId !== null || row.agentStatus === "off" || !attended
-    if (personInCharge) {
-      const lastActivity = Math.max(row.lastMessageAt?.getTime() ?? 0, row.attentionStartedAt.getTime())
-      if (now.getTime() - lastActivity < silenceMs) return null
-      return (await noticeInCharge(inner, row)) ? "noticed" : null
-    }
+    // Con una persona a cargo no se cierra sola: la muestra «Te espera».
+    if (row.assignedUserId !== null || row.agentStatus === "off" || !attended) return null
     if (row.unanswered || !row.hasAcceptedOut) return null
     const silenceFrom = new Date(Math.max(row.lastInboundAt?.getTime() ?? 0, row.attentionStartedAt.getTime()))
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
@@ -651,40 +674,6 @@ export async function tickConversationCare(
   function format(text: string, channel: string): string {
     return deps.format ? deps.format(text, channel, { emojis: cfg.emojis }) : text
   }
-
-  async function noticeInCharge(inner: Db, row: CareRow): Promise<boolean> {
-    const recipients = row.assignedUserId ? [row.assignedUserId] : await receptionUserIds(inner, orgId)
-    const name = row.contactName.trim() || "la persona"
-    const hours = cfg.closeAfterHours
-    for (const userId of recipients) {
-      await createWorkspaceNotification(inner, orgId, {
-        userId,
-        // Una vez por atención: la misma clave no vuelve a avisar.
-        dedupeKey: `conversation-open:${row.id}:${row.attentionStartedAt.getTime()}`,
-        title: `La conversación con ${name} sigue abierta: ciérrala o continúa`.slice(0, 200),
-        body: `Pasaron ${hours} horas sin mensajes. Si ya terminó, ciérrala con «Resolver»; si no, escríbele.`,
-        href: `/inbox?conversation=${row.id}`,
-        permission: "conversations.read",
-      })
-    }
-    return recipients.length > 0
-  }
-}
-
-/** A quién avisar si nadie tiene la conversación: recepción; si no hay, quien administra. */
-async function receptionUserIds(tx: Db, orgId: string): Promise<string[]> {
-  const reception = await tx
-    .select({ userId: member.userId })
-    .from(member)
-    .where(and(eq(member.organizationId, orgId), eq(member.role, "reception")))
-    .limit(20)
-  if (reception.length) return reception.map((row) => row.userId)
-  const admins = await tx
-    .select({ userId: member.userId })
-    .from(member)
-    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
-    .limit(20)
-  return admins.map((row) => row.userId)
 }
 
 async function lastMessageOf(tx: Db, id: string) {

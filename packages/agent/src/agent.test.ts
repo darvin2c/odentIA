@@ -59,7 +59,7 @@ import { FAKE_REPLY_TEXT } from "./fake-model.js"
 import { type AgentRuntime, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
 import { compileAgentGraph } from "./graph.js"
 import { extractDictation } from "./dictation.js"
-import { makeAgentTools, type AgentToolCtx } from "./tools.js"
+import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
@@ -238,7 +238,8 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .from(crmTask)
       .where(eq(crmTask.conversationId, conversationId)),
   )
-  expect(tasks.some((t) => t.title.startsWith("Derivación"))).toBe(true)
+  // Un solo nombre para lo que el agente pasa al equipo, sin la prioridad en código.
+  expect(tasks.some((t) => t.title.startsWith("Te lo pasó el agente: "))).toBe(true)
   const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({
@@ -376,7 +377,7 @@ it("la respuesta cierra el turno: una sola llamada al modelo y sin derivar con m
   }
 })
 
-it("texto sin herramienta de envío queda como sin_respuesta y avisa al equipo sin derivar", async () => {
+it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin aviso en la campana", async () => {
   const stamp = Date.now()
   const receptionId = `agent-reception-${stamp}`
   await ownerDb.insert(user).values({ id: receptionId, name: "Recepción", email: `recepcion-${stamp}@example.test` })
@@ -395,9 +396,10 @@ it("texto sin herramienta de envío queda como sin_respuesta y avisa al equipo s
       .from(workspaceNotification)
       .where(eq(workspaceNotification.userId, receptionId)),
   )
-  expect(notices).toEqual([{ title: "El agente no respondió", href: `/inbox?conversation=${conversationId}` }])
+  // La campana no lo repite: la conversación espera respuesta y así la muestra «Te espera».
+  expect(notices).toEqual([])
   // Una corrida sin respuesta no da el mensaje por atendido: reprocesarlo
-  // vuelve a llamar al modelo, y no duplica el aviso.
+  // vuelve a llamar al modelo, y tampoco avisa en la campana.
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(model.seen).toHaveLength(2)
   const again = await withOrgContext(appDb, "org_a", (tx) =>
@@ -406,7 +408,7 @@ it("texto sin herramienta de envío queda como sin_respuesta y avisa al equipo s
       .from(workspaceNotification)
       .where(eq(workspaceNotification.userId, receptionId)),
   )
-  expect(again.length).toBe(1)
+  expect(again.length).toBe(0)
 })
 
 it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no reintenta la corrida", async () => {
@@ -1171,6 +1173,68 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   expect(lateConfirm).toMatch(/obsoleta|cancelada/)
 })
 
+it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra, y deja la cita como fuente", async () => {
+  const [createdBranch] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede Confirmar", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const branchId = createdBranch!.id
+  const stamp = Date.now()
+  const actorId = `agent-actor-confirma-${stamp}`
+  const dentistId = `agent-dentist-confirma-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: actorId, name: "Actor Confirma", email: `actor-confirma-${stamp}@example.test` },
+    { id: dentistId, name: "Dra. Confirma", email: `dentista-confirma-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
+      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
+  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: "Sillón Confirma" }))
+  const { conversationId } = await ingestText("tg:confirma-cita", "evt-confirma-cita", "Sí, ahí estaré")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const own = async (name: string, contact: string | null) => {
+    const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
+    const [row] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: name, patientNumber }).returning({ id: patient.id })
+    if (contact) {
+      await withOrgContext(appDb, "org_a", (tx) =>
+        setPatientContact(tx, "org_a", actorId, row!.id, { contactId: contact, relationship: "self", isPreferred: true }))
+    }
+    return row!.id
+  }
+  const mine = await own("Rosa Confirma", contactId)
+  const someoneElse = await own("Otra Persona", null)
+  const book = (patientId: string, inDays: number) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      createAppointment(tx, "org_a", actorId, {
+        patientId, dentistUserId: dentistId, chairId: chair!.id, branchId,
+        startsAt: new Date(Date.now() + inDays * 86_400_000).toISOString(), durationMin: 30, outsideSchedule: true, notice: false,
+      }))
+  const booked = await book(mine, 3)
+  const theirs = await book(someoneElse, 4)
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: "trig-confirma-1", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const confirm = makeAgentTools(ctx).find((t) => t.name === "confirmar_cita")!
+  // La de otra persona, nunca.
+  expect(String(await confirm.invoke({ appointmentId: theirs.id }))).toContain("No se pudo confirmar")
+  const said = String(await confirm.invoke({}))
+  expect(said).toContain("Cita confirmada:\n- Rosa Confirma")
+  expect(said).toContain("«¡Listo! Tu cita quedó confirmada. Te esperamos.»")
+  expect(said).toContain("Sede Confirmar con Dra. Confirma")
+  const statusOf = async (id: string) =>
+    (await withOrgContext(appDb, "org_a", (tx) => tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.id, id))))[0]?.status
+  expect(await statusOf(booked.id)).toBe("confirmada")
+  expect(await statusOf(theirs.id)).toBe("programada")
+  expect(String(await confirm.invoke({}))).toContain("ya estaba confirmada")
+  // Es fuente: la fecha que el agente repite se comprueba contra lo que devolvió.
+  expect(TOOL_SOURCES["confirmar_cita"]).toMatchObject({ kind: "agenda" })
+})
+
 it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper el turno", async () => {
   const { conversationId } = await ingestText("tg:doble-si", "evt-doble-si", "Quiero confirmar")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
@@ -1240,7 +1304,7 @@ it("create_task no duplica en reentrega y las escrituras directas auditan su ori
   expect(afterDry).toHaveLength(1)
 })
 
-it("la derivación tiene plazo, toma atómica de la cola y escalamiento único al vencer", async () => {
+it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena la campana", async () => {
   const stamp = Date.now()
   const ownerId = `ho-owner-${stamp}`
   const recepId = `ho-recep-${stamp}`
@@ -1276,7 +1340,7 @@ it("la derivación tiene plazo, toma atómica de la cola y escalamiento único a
   const winner = firstTry.status === "fulfilled" ? ownerId : recepId
   const loser = firstTry.status === "fulfilled" ? secondTry : firstTry
   expect(loser.status).toBe("rejected")
-  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otro miembro ya tomó esta derivación")
+  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otra persona ya tomó este caso")
   // La tarea vinculada pasa al mismo responsable.
   const [claimedTask] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
@@ -1285,18 +1349,12 @@ it("la derivación tiene plazo, toma atómica de la cola y escalamiento único a
   const again = await withOrgContext(appDb, "org_a", (tx) => claimHandoff(tx, "org_a", winner, handoff.id))
   expect(again.assigneeUserId).toBe(winner)
 
-  // Vencimiento: avisa al responsable una sola vez, sin duplicar avisos.
+  // Vencido sigue en «Te espera» con su urgencia; la campana no avisa ni al crearlo ni al vencer.
   await ownerDb.execute(sql`update "task" set due_at = now() - interval '1 hour' where id = ${handoff.taskId!}`)
   await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", {}))
-  const overdueNotifs = async () =>
-    withOrgContext(appDb, "org_a", (tx) =>
-      tx.select().from(workspaceNotification).where(
-        sql`dedupe_key like ${`agent-handoff-overdue:${handoff.id}:%`}`))
-  const firstWave = await overdueNotifs()
-  expect(firstWave).toHaveLength(1)
-  expect(firstWave[0]!.userId).toBe(winner)
-  await withOrgContext(appDb, "org_a", (tx) => listHandoffs(tx, "org_a", {}))
-  expect(await overdueNotifs()).toHaveLength(1)
+  const caseNotifs = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(workspaceNotification).where(sql`dedupe_key like ${`agent-handoff%:${handoff.id}:%`}`))
+  expect(caseNotifs).toHaveLength(0)
 
   // La resolución registra actor y no reactiva el agente.
   await withOrgContext(appDb, "org_a", (tx) =>
@@ -1739,7 +1797,7 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
     // Lo que otra función encendida necesita, y lo fijo, se queda.
     expect(off.tools).toEqual(expect.arrayContaining(["ver_sedes_y_servicios", "consultar_conocimiento", "request_human_handoff", "anotar_caso", "send_reply"]))
     expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat. Si piden una cita, envía el enlace de reserva")
-    expect(off.system).toContain("No creas ni cambias oportunidades ni seguimientos comerciales.")
+    expect(off.system).toContain("No creas ni cambias oportunidades ni sus tareas.")
     expect(off.system).not.toContain("reserva con proponer_cita")
     expect(off.system).toContain("Indicación de la clínica para «Informar»: En ortodoncia, pregunta primero si ya tiene evaluación.")
     // Sin «Informar» tampoco recibe tarifas ni respuestas oficiales.

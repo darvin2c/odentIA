@@ -1,30 +1,5 @@
 import { SEX_LABELS } from "@odentia/clinical"
-/** Presentación del perfil/listado de pacientes (filtros, orden y anamnesis legible). */
-import type { FilterDef, SortOption } from "@odentia/ui-patterns"
-import type { Patient } from "./patients"
-
-/** Fila del listado server: Patient + teléfono informativo. */
-export interface PatientListRow extends Patient {
-  phone: string | null
-}
-
-export const PATIENT_SORT_OPTIONS: SortOption[] = [
-  { value: "name", label: "Nombre" },
-  { value: "created", label: "Registro" },
-  { value: "number", label: "HC" },
-]
-
-export const PATIENT_FILTERS: FilterDef[] = [
-  {
-    key: "isActive",
-    label: "Estado",
-    type: "select",
-    options: [
-      { value: "true", label: "Activos" },
-      { value: "false", label: "Inactivos" },
-    ],
-  },
-]
+/** Palabras de la ficha: sexo, categorías de documento y anamnesis legible. */
 
 export function sexLabel(sex: string | null | undefined): string {
   return sex && sex in SEX_LABELS ? SEX_LABELS[sex as keyof typeof SEX_LABELS] : "No registrado"

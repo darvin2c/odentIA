@@ -1,3 +1,4 @@
+import { documentText } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
@@ -77,7 +78,7 @@ function ConsentPrintPage() {
           diagnosisDescription={diagnosisDescription}
           paper
           patientLabel={`Paciente: ${patient.displayName} · ${hcLabel(patient.patientNumber)}${
-            patient.docNumber ? ` · ${patient.docType ?? ""} ${patient.docNumber}` : ""
+            patient.docNumber ? ` · ${documentText(patient.docType, patient.docNumber)}` : ""
           }${patient.minor ? " · menor de edad: firma su representante legal" : ""}`}
         />
       </div>

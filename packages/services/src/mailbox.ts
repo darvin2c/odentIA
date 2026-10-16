@@ -26,9 +26,8 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { and, eq } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
-// Aviso dirigido del padre (services/workspace.ts): crea
-// createWorkspaceNotification(tx,orgId,{userId,dedupeKey,title,body,href,permission}).
-import { createWorkspaceNotification } from "./workspace.js"
+// Conectar o desconectar un buzón no avisa en la campana: lo hace quien lo ve
+// en su pantalla, y la campana no avisa a nadie de lo que hizo (ADR 0025).
 
 export const MAILBOX_CHANNEL = "email"
 
@@ -199,19 +198,6 @@ async function requireMembership(ownerDb: Db, orgId: string, userId: string): Pr
   if (!row) throw new ServiceError("FORBIDDEN", 403, "No eres miembro de esta organización")
 }
 
-async function notifyMailbox(
-  tx: Db,
-  orgId: string,
-  input: { userId: string; dedupeKey: string; title: string; body: string },
-): Promise<void> {
-  // Sin PII clínica: solo estado del buzón, con href a la página propia de correo.
-  await createWorkspaceNotification(tx, orgId, {
-    ...input,
-    href: "/settings/mail",
-    permission: "settings.read",
-  })
-}
-
 /** Guarda de frontera: violación de unicidad Postgres (p. ej. buzón en otra org). */
 function isUniqueViolation(error: unknown): boolean {
   if (!error || typeof error !== "object") return false
@@ -321,12 +307,6 @@ export async function completeMailboxOAuth(
         provider,
         emailAddress,
       })
-      await notifyMailbox(tx, pending.organizationId, {
-        userId: input.userId,
-        dedupeKey: `mailbox-connected-${existing.id}`,
-        title: "Correo reconectado",
-        body: `El buzón ${emailAddress} quedó activo para conversar.`,
-      })
       return { connectionId: existing.id, provider, emailAddress, reconnected: true }
     }
     let created: { id: string } | undefined
@@ -360,12 +340,6 @@ export async function completeMailboxOAuth(
     await auditMailbox(tx, pending.organizationId, input.userId, "mailbox.connected", created.id, {
       provider,
       emailAddress,
-    })
-    await notifyMailbox(tx, pending.organizationId, {
-      userId: input.userId,
-      dedupeKey: `mailbox-connected-${created.id}`,
-      title: "Correo conectado",
-      body: `El buzón ${emailAddress} quedó activo para conversar.`,
     })
     return { connectionId: created.id, provider, emailAddress, reconnected: false }
   })
@@ -570,12 +544,6 @@ export async function disconnectMailbox(
     provider,
     emailAddress: row.externalId,
     revoked,
-  })
-  await notifyMailbox(tx, orgId, {
-    userId,
-    dedupeKey: `mailbox-disconnected-${id}`,
-    title: "Correo desconectado",
-    body: `El buzón ${row.externalId ?? row.displayName} quedó desconectado y se borraron sus tokens.`,
   })
   return { provider, emailAddress: row.externalId, revoked }
 }

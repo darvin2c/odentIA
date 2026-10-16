@@ -10,6 +10,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   type AgentConfig,
   countAgentModelRunsToday,
+  askGeneralPermissionAfterBooking,
   getAgentSpendGate,
   hasOpenConversationAction,
   automationReplyOf,
@@ -555,10 +556,19 @@ async function attendAgentRun(
       await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
     } else {
       await invokeGraph()
+      // Tras reservar en esta corrida, la pregunta del permiso general, una sola
+      // vez por persona y después de la respuesta (ADR 0030). Texto y botones
+      // fijos, sin modelo; si no puede salir, la corrida sigue igual.
+      if (toolCtx.replySettled && !toolCtx.handedOff && !toolCtx.dryRun) {
+        await withOrgContext(db, orgId, (tx) =>
+          askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: startedAt }),
+        ).catch(() => false)
+      }
     }
-    // Sin envío ni derivación en esta corrida: se avisa al equipo salvo que
-    // el hilo ya tenga una respuesta posterior al disparador (reentrega o
-    // cola atrasada). Un fallo del aviso no reintenta la corrida: volvería a
+    // Sin envío ni derivación en esta corrida: queda como sin respuesta salvo
+    // que el hilo ya tenga una respuesta posterior al disparador (reentrega o
+    // cola atrasada). El equipo lo ve en «Te espera» (espera respuesta), no en
+    // la campana. Un fallo al comprobarlo no reintenta la corrida: volvería a
     // llamar al modelo.
     const attendedMessageId = inboundMessageId
     const unanswered =

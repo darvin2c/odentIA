@@ -789,6 +789,7 @@ export async function closeShift(
             : `En ${branchRow.name} faltaron ${amount} al contar el efectivo.`,
         href: `/finance?cierre=${shiftId}`,
         permission: "finance.read",
+        actorUserId,
       })
     }
   }
@@ -2047,6 +2048,7 @@ export async function payMonthCommission(
     body: `${monthLabel}: ${formatMoney(view.pendingCents, view.currency, view.locale)}.`,
     href: `/commissions?year=${input.year}&month=${input.month}`,
     permission: "commissions.read",
+    actorUserId,
   })
   return { settlement: paid ?? settlement, expense: paidExpense }
 }

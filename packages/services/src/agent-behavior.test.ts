@@ -14,7 +14,7 @@ import {
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, listMessages } from "./conversations.js"
-import { createOpportunity, getOpportunity, listOpportunities, updateOpportunity } from "./opportunities.js"
+import { createOpportunity, getOpportunity, listOpportunities, setOpportunityTask } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
@@ -93,7 +93,7 @@ async function openConversation(sender: string, eventId: string): Promise<{ conv
 async function openStages(): Promise<{ openA: string; openB: string }> {
   return withOrgContext(appDb, ORG, async (tx) => {
     const { stages } = await ensureDefaultPipeline(tx, ORG)
-    const open = stages.filter((s) => s.kind === "open")
+    const open = stages.filter((s) => s.moment !== "decidio")
     if (!open[0] || !open[1]) throw new Error("El pipeline semilla no trae dos etapas abiertas")
     return { openA: open[0].id, openB: open[1].id }
   })
@@ -141,6 +141,35 @@ describe("recorrido comercial directo", () => {
     expect(items.filter((o) => o.title === "Ortodoncia — seguimiento")).toHaveLength(1)
     expect(again.context.opportunityTitle).toBe("Ortodoncia — seguimiento")
     expect(again.context.contactName).not.toBeNull()
+  })
+
+  it("un «hola» no crea una oportunidad; el agente no duplica una abierta del mismo interés y la deja en Recepción", async () => {
+    const { conversationId, contactId } = await openConversation("comercial-hola", "evt-com-hola")
+    const before = await run((tx) => listOpportunities(tx, ORG, { contactId }))
+    expect(before.items).toEqual([])
+    const first = await run((tx) =>
+      createProposal(tx, ORG, {
+        conversationId, action: "crear_oportunidad",
+        payload: { title: "Blanqueamiento" },
+        idempotencyKey: "test:crm-agent:crear-unica-1",
+      }),
+    )
+    const second = await run((tx) =>
+      createProposal(tx, ORG, {
+        conversationId, action: "crear_oportunidad",
+        payload: { title: "  blanqueamiento " },
+        idempotencyKey: "test:crm-agent:crear-unica-2",
+      }),
+    )
+    expect(first.status).toBe("ejecutada")
+    expect(second.status).toBe("ejecutada")
+    expect(second.result).toMatchObject({ opportunityId: (first.result as { opportunityId: string }).opportunityId, reused: true })
+    const { items } = await run((tx) => listOpportunities(tx, ORG, { contactId, status: "open" }))
+    expect(items).toHaveLength(1)
+    // Sin responsable: es de Recepción. El historial dice que la creó el agente.
+    const detail = await run((tx) => getOpportunity(tx, ORG, items[0]!.id))
+    expect(detail).toMatchObject({ assignedUserId: null, moment: "interesado", conversationId })
+    expect(detail.history[0]).toMatchObject({ origin: "agente", who: "El agente" })
   })
 
   it("replay con la misma clave devuelve la propuesta sin reenviar el mensaje", async () => {
@@ -216,8 +245,9 @@ describe("evidencia congelada de lo aprobado", () => {
     const { conversationId, contactId } = await openConversation("evidencia-1", "evt-evi-1")
     const { openA } = await openStages()
     const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Ortodoncia", stageId: openA, nextActionNote: "Nota original" }, { userId: null }),
+      createOpportunity(tx, ORG, { contactId, title: "Ortodoncia" }, { userId: null }),
     )
+    await run((tx) => setOpportunityTask(tx, ORG, opp.id, { title: "Nota original" }, { userId: null, createdBy: "user" }))
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "actualizar_seguimiento",
@@ -235,8 +265,9 @@ describe("evidencia congelada de lo aprobado", () => {
     const { conversationId, contactId } = await openConversation("evidencia-2", "evt-evi-2")
     const { openA } = await openStages()
     const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Implante", stageId: openA, nextActionNote: "Nota base" }, { userId: null }),
+      createOpportunity(tx, ORG, { contactId, title: "Implante" }, { userId: null }),
     )
+    await run((tx) => setOpportunityTask(tx, ORG, opp.id, { title: "Nota base" }, { userId: null, createdBy: "user" }))
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "actualizar_seguimiento",
@@ -247,7 +278,7 @@ describe("evidencia congelada de lo aprobado", () => {
     expect(proposal.status).toBe("ejecutada")
     const executedBefore = proposal.context.beforeSummary
     const executedAfter = proposal.context.afterSummary
-    await run((tx) => updateOpportunity(tx, ORG, opp.id, { nextActionNote: "Nota posterior" }, { userId: null }))
+    await run((tx) => setOpportunityTask(tx, ORG, opp.id, { title: "Nota posterior" }, { userId: null, createdBy: "user" }))
     const reread = await run((tx) => getProposal(tx, ORG, proposal.id))
     expect(reread.context.beforeSummary).toBe(executedBefore)
     expect(reread.context.afterSummary).toBe(executedAfter)
@@ -258,19 +289,19 @@ describe("evidencia congelada de lo aprobado", () => {
     const { conversationId, contactId } = await openConversation("evidencia-3", "evt-evi-3")
     const { openA } = await openStages()
     const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Endodoncia", stageId: openA }, { userId: null }),
+      createOpportunity(tx, ORG, { contactId, title: "Endodoncia" }, { userId: null }),
     )
     const first = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "cerrar_oportunidad",
-        payload: { opportunityId: opp.id, outcome: "won", reason: "Aceptó el tratamiento" },
+        payload: { opportunityId: opp.id, outcome: "won", reason: "acepto" },
         idempotencyKey: "test:crm-agent:evi-3",
       }),
     )
     const replay = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "cerrar_oportunidad",
-        payload: { opportunityId: opp.id, outcome: "won", reason: "Aceptó el tratamiento" },
+        payload: { opportunityId: opp.id, outcome: "won", reason: "acepto" },
         idempotencyKey: "test:crm-agent:evi-3",
       }),
     )
@@ -284,7 +315,7 @@ describe("evidencia congelada de lo aprobado", () => {
     const { conversationId, contactId } = await openConversation("evidencia-4", "evt-evi-4")
     const { openA } = await openStages()
     const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Legada", stageId: openA }, { userId: null }),
+      createOpportunity(tx, ORG, { contactId, title: "Legada" }, { userId: null }),
     )
     await run((tx) =>
       tx.insert(agentProposal).values({
@@ -360,7 +391,7 @@ describe("obsolescencia y fallo transaccional", () => {
     const { conversationId, contactId } = await openConversation("stale-3", "evt-stale-3")
     const { openA } = await openStages()
     const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Corona", stageId: openA }, { userId: null }),
+      createOpportunity(tx, ORG, { contactId, title: "Corona" }, { userId: null }),
     )
     await run((tx) =>
       tx.insert(agentProposal).values({
@@ -387,7 +418,7 @@ describe("obsolescencia y fallo transaccional", () => {
     const { conversationId, contactId } = await openConversation("stale-4", "evt-stale-4")
     const { openA, openB } = await openStages()
     const opp = await run((tx) =>
-      createOpportunity(tx, ORG, { contactId, title: "Puente", stageId: openA }, { userId: null }),
+      createOpportunity(tx, ORG, { contactId, title: "Puente" }, { userId: null }),
     )
     const proposal = await run((tx) =>
       createProposal(tx, ORG, {

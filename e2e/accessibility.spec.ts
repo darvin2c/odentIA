@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises"
 import AxeBuilder from "@axe-core/playwright"
 import type { Page, TestInfo } from "@playwright/test"
 import { PANEL, tenant, tenantPattern } from "./env"
-import { expect, fillPatientNames, test } from "./fixtures"
+import { expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
@@ -147,6 +147,13 @@ for (const viewport of [
       await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()
       await theme(page, dark)
       await audit(page, info, "inicio")
+      // Avisos: la equis del diálogo compartido tiene nombre en español.
+      await page.getByRole("button", { name: /^Avisos/ }).click()
+      const notices = page.getByRole("dialog", { name: "Avisos" })
+      await expect(notices.getByRole("button", { name: "Cerrar", exact: true })).toBeVisible()
+      await expect(notices.getByRole("button", { name: "Close" })).toHaveCount(0)
+      await notices.getByRole("button", { name: "Cerrar", exact: true }).click()
+      await expect(notices).toBeHidden()
       if (viewport.width < 768) {
         const menu = page.getByRole("button", { name: /Abrir.*menú|Alternar menú lateral/ })
         await menu.focus()
@@ -188,17 +195,20 @@ for (const viewport of [
       await telegram.getByRole("button", { name: "Cancelar", exact: true }).click()
       await expect(telegram).toBeHidden()
 
-      await gotoHydrated(page, tenant(owner.org.slug, "/patients"))
+      await gotoHydrated(page, tenant(owner.org.slug, "/people"))
       await theme(page, dark)
-      const create = page.getByRole("button", { name: "Nuevo paciente", exact: true })
+      await audit(page, info, "personas")
+      // La acción de la cabecera; la lista vacía repite «Nueva persona» como su acción.
+      const create = page.locator("header").getByRole("button", { name: "Nueva persona", exact: true })
+      await expect(page.getByRole("button", { name: "Nueva persona", exact: true })).toHaveCount(2)
       await create.focus()
       await page.keyboard.press("Enter")
       const dialog = page.getByRole(viewport.width >= 1280 ? "region" : "dialog", {
-        name: "Nuevo paciente",
+        name: "Nueva persona",
         exact: true,
       })
       await expect(dialog).toBeVisible()
-      await audit(page, info, "alta-paciente")
+      await audit(page, info, "nueva-persona")
       if (viewport.width >= 1280) {
         const separator = page.getByRole("separator", { name: "Redimensionar panel", exact: true })
         const beforeValue = Number(await separator.getAttribute("aria-valuenow"))
@@ -224,26 +234,42 @@ for (const viewport of [
         await create.press("Enter")
         await expect(dialog).toBeVisible()
       }
-      await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
-      await expect(dialog.getByRole("alert").first()).toBeVisible()
-      await audit(page, info, "alta-paciente-error")
-      await fillPatientNames(dialog, "Paciente accesible")
-      await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
+      // Sin nombre no se crea: el botón espera a que esté.
+      await expect(dialog.getByRole("button", { name: "Crear y abrir su página", exact: true })).toBeDisabled()
+      await dialog.getByLabel("Apellido paterno", { exact: true }).fill("Accesible")
+      await dialog.getByLabel("Nombres", { exact: true }).fill("Paciente")
+      await audit(page, info, "nueva-persona-llena")
+      await dialog.getByRole("button", { name: "Crear y abrir su página", exact: true }).click()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/people/"))
+      await expect(page.getByRole("heading", { level: 1, name: "Paciente Accesible" })).toBeVisible()
+      await audit(page, info, "pagina-persona")
+
+      // Registrarla: el mismo formulario, con lo que ya se sabe escrito.
+      const register = page.getByRole("button", { name: "Registrar", exact: true })
+      await register.focus()
+      await page.keyboard.press("Enter")
+      const form = page.getByRole(viewport.width >= 1280 ? "region" : "dialog", {
+        name: "Nuevo paciente",
+        exact: true,
+      })
+      await expect(form).toBeVisible()
+      await audit(page, info, "alta-paciente")
+      await form.getByRole("button", { name: "Siguiente", exact: true }).click()
       await audit(page, info, "alta-paciente-contacto")
       for (const surface of ["salud", "salud-dental", "revision"]) {
-        await dialog.getByRole("button", { name: "Siguiente", exact: true }).click()
+        await form.getByRole("button", { name: "Siguiente", exact: true }).click()
         await audit(page, info, `alta-paciente-${surface}`)
       }
-      // Con cambios, cerrar pregunta con la confirmación propia; descartar
-      // permite comprobar el retorno del foco.
+      // Cerrar con Escape devuelve el foco a «Registrar»; si pregunta, se descarta.
       await page.keyboard.press("Escape")
       const confirmation = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
-      await expect(confirmation).toBeVisible()
-      await audit(page, info, "alta-paciente-salir-sin-guardar")
-      await confirmation.getByRole("button", { name: "Descartar y salir", exact: true }).click()
-      await expect(dialog).not.toBeVisible()
-      await expect(create).toBeFocused()
-      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/patients"))
+      if (await confirmation.isVisible()) {
+        await audit(page, info, "alta-paciente-salir-sin-guardar")
+        await confirmation.getByRole("button", { name: "Descartar y salir", exact: true }).click()
+      }
+      await expect(form).not.toBeVisible()
+      await expect(register).toBeFocused()
+      await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/people/"))
     })
   }
 }

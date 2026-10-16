@@ -114,10 +114,12 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
   )
   expect(granted).toMatchObject({ noticeVersion: 3, noticeText: "Aviso de privacidad v3" })
   // Lo aceptado en el consentimiento es el permiso de mensajes, sin otro paso:
-  // «comunicaciones» concede los demás mensajes; «recordatorios» no se aceptó.
+  // «comunicaciones» concede novedades y promociones, lo único que pide permiso
+  // (ADR 0030); lo de su atención no se pregunta y no se toca.
   expect(await f.run((tx) => getMessagePermissions(tx, "org_a", personId))).toMatchObject([
-    { purpose: "recordatorio", granted: false, source: "presencial" },
-    { purpose: "seguimiento", granted: true, source: "presencial" },
+    { purpose: "recordatorio", granted: true },
+    { purpose: "seguimiento", granted: null },
+    { purpose: "novedades", granted: true, source: "presencial" },
   ])
   await f.run((tx) =>
     revokeDataConsent(tx, "org_a", f.actor, f.patient.id, granted.id, { reason: "Lo pidió" }),
@@ -127,8 +129,9 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
   expect(await f.run((tx) => hasConsent(tx, "org_a", personId, "recordatorio"))).toBe(false)
   // Revocar el consentimiento de datos retira también lo que había aceptado recibir.
   expect(await f.run((tx) => getMessagePermissions(tx, "org_a", personId))).toMatchObject([
-    { purpose: "recordatorio", granted: false },
-    { purpose: "seguimiento", granted: false, source: "revocacion_datos" },
+    { purpose: "recordatorio", granted: false, source: "revocacion_datos" },
+    { purpose: "seguimiento", granted: null },
+    { purpose: "novedades", granted: false, source: "revocacion_datos" },
   ])
   expect(
     (await f.run((tx) => getPatient(tx, "org_a", f.patient.id))).patient.dataConsentAt,

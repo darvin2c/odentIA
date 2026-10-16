@@ -3,7 +3,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { agentLesson } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
-import { countAgentModelRunsToday, countOpenHandoffs } from "./agent-operations.js"
+import { countAgentModelRunsToday } from "./agent-operations.js"
 import { countLearningPending } from "./agent-learning.js"
 import { getAgentConfig } from "./agentConfig.js"
 import { countOpenKnowledgeGaps, getClinicInfoSnapshot, getKnowledgeBasics, listActiveKnowledge } from "./knowledge.js"
@@ -43,11 +43,11 @@ export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 export interface AgentOverview {
   enabled: boolean
   /**
-   * `approvals`: casos que el agente pasó a una persona y siguen sin resolver
-   * (lo que espera al equipo en Pendientes; ninguna propuesta lo espera).
-   * `review` y `lessons`: respuestas por revisar y lecciones por aprobar en Aprender.
+   * `review` y `lessons`: respuestas por revisar y lecciones por aprobar en
+   * Aprender. Los casos que pasó el agente no se cuentan aquí: su único
+   * contador es el del menú (`getAgentPanelSummary`).
    */
-  needsYou: { approvals: number; gaps: number; basicsMissing: number; review: number; lessons: number }
+  needsYou: { gaps: number; basicsMissing: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   /** Lo que aprendió en los últimos siete días. */
@@ -198,7 +198,6 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
   return {
     enabled: cfg.enabled,
     needsYou: {
-      approvals: await countOpenHandoffs(tx, orgId),
       gaps: await countOpenKnowledgeGaps(tx, orgId),
       basicsMissing: basics.total - basics.covered,
       ...(await countLearningPending(tx, orgId)),

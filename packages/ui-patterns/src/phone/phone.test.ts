@@ -5,6 +5,7 @@ import {
   countryLabel,
   countryOf,
   countryOptions,
+  internationalText,
   isValidE164,
   nationalText,
   normalizeCountry,
@@ -88,6 +89,11 @@ describe("helpers de teléfono", () => {
     expect(nationalText("+5491123456789")).toBe("011 15-2345-6789")
     // Dato heredado que no es un número: se devuelve tal cual.
     expect(nationalText("no es un número")).toBe("no es un número")
+  })
+
+  it("internationalText lo lee con su prefijo, para mostrarlo fuera de un campo", () => {
+    expect(internationalText("+51987654100")).toBe("+51 987 654 100")
+    expect(internationalText("no es un número")).toBe("no es un número")
   })
 
   it("readInternational solo interpreta textos con prefijo", () => {

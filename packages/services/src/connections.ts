@@ -412,7 +412,7 @@ async function registerTelegramWebhook(
 
 /**
  * Deja el catálogo de una conexión que usa mensajes aprobados y pide los que
- * faltan: los siete con los que viene la clínica y los que haya creado, de una
+ * faltan: los diez con los que viene la clínica y los que haya creado, de una
  * vez. Si la clave no puede administrarlos, la conexión sigue y se dice qué
  * corregir.
  */

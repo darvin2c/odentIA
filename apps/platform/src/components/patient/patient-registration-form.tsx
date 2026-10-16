@@ -54,7 +54,6 @@ import {
 } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { useEffect, useRef, useState } from "react"
-import type { ContactFull } from "../../lib/crm"
 import {
   DOC_TYPE_OPTIONS,
   INSURANCE_OPTIONS,
@@ -65,9 +64,16 @@ import {
 } from "./patient-demographics-form"
 import { RegistrationHealthFields } from "./patient-health-fields"
 export type RegistrationFormMode = "internal" | "public" | "preview"
+/** La persona desde cuya página se registra: quién es y si ya tiene ficha propia. */
+export interface RegistrationPerson {
+  id: string
+  displayName: string
+  selfPatient: { id: string; displayName: string } | null
+}
+
 export interface RegistrationFormContext {
   kind: "generic" | "contact" | "conversation"
-  contact?: ContactFull
+  contact?: RegistrationPerson
 }
 
 export interface RegistrationFormBranch {
@@ -101,6 +107,8 @@ export interface PatientRegistrationFormProps {
   context: RegistrationFormContext
   branches?: RegistrationFormBranch[]
   initialValues?: Partial<RegistrationAnswers>
+  /** Registrar a otra persona (un hijo) desde la página de quien responde por ella. */
+  defaultRecipient?: "self" | "other"
   /**
    * País de los teléfonos que se capturan: el de la organización en el alta
    * interna. En el formulario público (sin sesión) queda el de partida.
@@ -342,7 +350,6 @@ function buildAnswers(
     health: keptHealth as HealthValue,
     privacyAccepted: values.answers.privacyAccepted,
     // Solo viaja lo que el registro de la clínica pregunta: lo demás no se da por respondido.
-    ...(config.askReminders ? { acceptsReminders: values.answers.acceptsReminders === true } : {}),
     ...(config.askMessages ? { acceptsMessages: values.answers.acceptsMessages === true } : {}),
   }
 }
@@ -451,19 +458,21 @@ export function PatientRegistrationForm({
   context,
   branches,
   initialValues,
+  defaultRecipient,
   defaultCountry = DEFAULT_COUNTRY,
   onSubmit,
   children,
 }: PatientRegistrationFormProps): React.JSX.Element {
   const hasContact = context.kind !== "generic" && Boolean(context.contact)
   const contact = context.contact
-  const selfPatient = contact?.patients.find((entry) => entry.relationship === "self")
+  const selfPatient = contact?.selfPatient ?? null
 
   const [initialForm] = useState(() => {
     const defaults = buildDefaults(mode, initialValues)
-    if (selfPatient) defaults.recipient = "other"
+    if (selfPatient || defaultRecipient === "other") defaults.recipient = "other"
     return defaults
   })
+  const [blankForm] = useState(() => buildDefaults(mode, undefined))
   const form = useForm({ defaultValues: initialForm })
 
   const [current, setCurrent] = useState(0)
@@ -635,7 +644,7 @@ export function PatientRegistrationForm({
             const detail = trim(representative.relationshipDetail)
             contacts = [
               {
-                contactId: contact.contact.id,
+                contactId: contact.id,
                 relationship:
                   values.recipient === "self"
                     ? "self"
@@ -710,7 +719,15 @@ export function PatientRegistrationForm({
                             { value: "other", label: "Otra persona" },
                           ]}
                           onChange={(next) => {
-                            field.handleChange(next === "other" ? "other" : "self")
+                            const toOther = next === "other"
+                            field.handleChange(toOther ? "other" : "self")
+                            // Lo que se sabía de esta persona es suyo: al registrar a otra
+                            // (un hijo) los datos empiezan en blanco, y vuelven si se cambia de nuevo.
+                            if (initialValues?.demographics && !selfPatient)
+                              form.setFieldValue(
+                                "answers.demographics",
+                                toOther ? blankForm.answers.demographics : initialForm.answers.demographics,
+                              )
                             clearError("representative")
                           }}
                         />
@@ -1420,7 +1437,7 @@ export function PatientRegistrationForm({
                 today={today}
                 mode={mode}
                 config={config}
-                contactName={contact?.contact.displayName}
+                contactName={contact?.displayName}
                 branches={branches}
               />
               {config.privacyNotice.trim() ? (
@@ -1464,29 +1481,12 @@ export function PatientRegistrationForm({
                   )}
                 </form.Field>
               </div>
-              {config.askReminders || config.askMessages ? (
+              {/* Lo de su atención es parte del servicio (ADR 0030): solo se pregunta por novedades y promociones. */}
+              {config.askMessages ? (
                 <fieldset className="flex flex-col gap-3">
                   <legend className="mb-3 text-sm font-medium">
                     {pub ? "Mensajes de la clínica (opcional)" : "Mensajes de la clínica: lo que aceptó recibir"}
                   </legend>
-                  {config.askReminders ? (
-                    <form.Field name="answers.acceptsReminders">
-                      {(field) => (
-                        <label htmlFor="registration-reminders" className="flex cursor-pointer items-start gap-2 text-sm">
-                          <Checkbox
-                            id="registration-reminders"
-                            checked={field.state.value === true}
-                            onCheckedChange={(checked) => field.handleChange(checked === true)}
-                          />
-                          <span>
-                            {pub
-                              ? "Acepto recibir recordatorios de mis citas y controles."
-                              : "Recordatorios de citas y controles."}
-                          </span>
-                        </label>
-                      )}
-                    </form.Field>
-                  ) : null}
                   {config.askMessages ? (
                     <form.Field name="answers.acceptsMessages">
                       {(field) => (
@@ -1498,8 +1498,8 @@ export function PatientRegistrationForm({
                           />
                           <span>
                             {pub
-                              ? "Acepto recibir otros mensajes de la clínica, como avisos sobre un presupuesto o una cita pendiente."
-                              : "Otros mensajes de la clínica: inasistencias y presupuestos pendientes."}
+                              ? "¿Te podemos escribir para enviarte novedades y promociones de la clínica? Sí, acepto."
+                              : "Novedades y promociones de la clínica."}
                           </span>
                         </label>
                       )}

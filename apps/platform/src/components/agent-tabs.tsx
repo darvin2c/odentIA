@@ -17,9 +17,10 @@ const TABS = [
  * misma vista: se anuncian como navegación con `aria-current`, y cada pestaña
  * aparece solo con el permiso que su ruta ya exige en el servidor.
  *
- * Cada pestaña dice cuánto espera a una persona. Los números salen del mismo
- * resumen que «Necesita de ti» (`/api/agent/overview`, consulta compartida con
- * esa pantalla): no hay otra cuenta. En teléfono se dibujan como píldoras y
+ * Aprender y Conocimiento dicen cuánto espera a una persona. Los números salen
+ * del mismo resumen que «Necesita de ti» (`/api/agent/overview`, consulta
+ * compartida con esa pantalla): no hay otra cuenta. «Pendientes» no lleva
+ * número: el único contador de los casos del agente está en el menú. En teléfono se dibujan como píldoras y
  * «Pendientes» pasa al final de la fila (`phoneLast`): ahí el recorrido es
  * Resumen, Aprender, Conocimiento. El orden del documento, y con él el del
  * teclado, es el mismo en todos los anchos.
@@ -44,7 +45,7 @@ export function AgentTabs({ learnPending }: { learnPending?: number } = {}) {
   })
   const needs = overview.data?.data.needsYou
   const pending: Record<string, number> = needs
-    ? { "/agent/pendientes": needs.approvals, "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
+    ? { "/agent/learn": needs.review + needs.lessons, "/agent/knowledge": needs.gaps }
     : {}
   if (learnPending !== undefined) pending["/agent/learn"] = learnPending
   const visible = TABS.filter((tab) =>

@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
+import { CLOSE_REASON_LABEL, type CloseReason } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
@@ -65,7 +66,7 @@ export function SalesTab({ query, onOpenList, advice }: { query: ReportQuery; on
         title={`Sin pacientes nuevos ni ventas en ${period}`}
         description="No se atendió a nadie por primera vez, no se presentó ningún presupuesto y no se cerró ninguna atención."
         actionLabel="Ir a Pacientes"
-        onAction={() => void navigate({ to: "/patients" })}
+        onAction={() => void navigate({ to: "/people" })}
       />
     )
   }
@@ -234,6 +235,11 @@ export function SalesTab({ query, onOpenList, advice }: { query: ReportQuery; on
             <div className="flex min-w-0 flex-col gap-0.5">
               <span className="text-[13px] font-semibold text-muted-foreground">Perdidas</span>
               <span className="text-[22px] leading-7 font-bold tabular-nums">{opportunity("lost")}</span>
+              {data.lostReasons && data.lostReasons.length > 0 ? (
+                <span className="text-[13px] text-muted-foreground">
+                  Por qué: {data.lostReasons.map((row) => `${CLOSE_REASON_LABEL[row.reason as CloseReason] ?? "Otro"} ${row.count}`).join(" · ")}
+                </span>
+              ) : null}
             </div>
             <div className="flex min-w-0 flex-col gap-0.5">
               <span className="text-[13px] font-semibold text-muted-foreground">Siguen abiertas</span>

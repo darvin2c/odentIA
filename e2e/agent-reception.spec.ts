@@ -106,7 +106,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(does.getByRole("switch")).toHaveCount(3)
 
   // Apagar una función: queda dicho qué hará cuando se la pidan.
-  await does.getByRole("switch", { name: "Seguimiento comercial" }).click()
+  await does.getByRole("switch", { name: "Oportunidades" }).click()
   await expect(does).toContainText("Apagada: no crea ni mueve oportunidades.")
   await expect.poll(async () => (await config()).disabledFunctions).toEqual(["seguimiento"])
 
@@ -284,7 +284,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Versión compacta: el estado y las conversaciones de hoy van en la cabecera; la franja «Hoy» no ocupa sitio.
   await expect(page.getByText("Encendido · 0 conversaciones hoy")).toBeVisible()
   await expect(today).toBeHidden()
-  await expect(does.getByRole("switch", { name: "Seguimiento comercial" })).not.toBeChecked()
+  await expect(does.getByRole("switch", { name: "Oportunidades" })).not.toBeChecked()
   await expect(does.getByText("Busca horarios reales, reserva con el sí del paciente, reprograma y cancela.")).toBeHidden()
   await expect(knows.getByRole("link", { name: /^Qué sabe/ })).toContainText("lo que recuerda de cada persona")
   await expect(knows.getByRole("link", { name: /^Respuestas oficiales/ })).toBeHidden()

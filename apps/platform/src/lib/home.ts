@@ -4,9 +4,10 @@
  * las palabras de la pantalla. Ninguna regla de qué espera o qué se debe vive
  * en este archivo.
  */
+import { AGENT_CASE_ROW, urgencyWord } from "./agent"
 import { channelLabel } from "./channels"
 import { timeAgo } from "./crm"
-import { dayKeyOf, daysBetween } from "./finance-cash"
+import { dayKeyOf, daysBetween, formatClock, formatWeekdayDay } from "./finance-cash"
 import type { WaitingRow, WorkspaceToday } from "./workspace"
 
 /** Filas de «Te espera» a la vista en teléfono; el resto se abre con «Ver las otras N». */
@@ -39,27 +40,60 @@ function dueText(row: Extract<WaitingRow, { kind: "task" }>, context: HomeTextCo
   return `para el ${new Date(row.dueAt).toLocaleDateString(context.locale, { day: "numeric", month: "long", timeZone: context.timezone })}`
 }
 
+/** «hace 25 min», «ayer»…, o «hace un momento» si acaba de pasar. */
+function ago(iso: string): string {
+  const text = timeAgo(iso)
+  return !text || text === "ahora" ? "hace un momento" : text
+}
+
+/** «hoy 10:30», «mañana 10:30» o «jueves 17 de octubre, 10:30», con la hora y la zona de la clínica. */
+export function appointmentWhen(iso: string, context: Pick<HomeTextContext, "today" | "timezone" | "locale">): string {
+  const time = formatClock(iso, context.locale, context.timezone)
+  const days = daysBetween(context.today, dayKeyOf(iso, context.timezone))
+  if (days === 0) return `hoy ${time}`
+  if (days === 1) return `mañana ${time}`
+  return `${formatWeekdayDay(iso, context.locale, context.timezone)}, ${time}`
+}
+
 /** Título, detalle y acción de una fila de «Te espera». */
 export function waitingText(row: WaitingRow, context: HomeTextContext): { title: string; detail: string; action: string } {
   switch (row.kind) {
     case "case":
       return {
-        title: row.contactName ? `${row.contactName}: ${row.reason}` : row.reason,
-        detail: joined(["Caso que pasó el agente", row.channel ? channelLabel(row.channel) : null, timeAgo(row.createdAt)]),
-        action: row.conversationId ? "Ver el caso" : "Revisar",
+        title: row.contactName ? `${row.contactName} · ${row.reason}` : row.reason,
+        // Un solo nombre y una sola escala: «Te lo pasó el agente hace 25 min · Ahora».
+        detail: joined([`${AGENT_CASE_ROW} ${ago(row.createdAt)}`, urgencyWord(row.priority), row.channel ? channelLabel(row.channel) : null]),
+        action: !row.conversationId ? "Revisar" : row.unclaimed ? "Tomar" : "Ver el caso",
+      }
+    case "unconfirmed":
+      return {
+        title: `${row.patientName} no confirmó · llamar`,
+        detail: joined([row.phone, `Cita ${appointmentWhen(row.startsAt, context)}`, row.serviceName, row.branchName]),
+        action: "Ver la cita",
       }
     case "conversations":
       return {
         title: row.waiting === 1 ? "1 persona espera respuesta" : `${row.waiting} personas esperan respuesta`,
-        detail: row.oldestAt ? `${row.waiting === 1 ? "Escribió" : "La más antigua escribió"} ${timeAgo(row.oldestAt)}` : "Sin responder en la Bandeja",
-        action: "Abrir la Bandeja",
+        detail: row.oldestAt ? `${row.waiting === 1 ? "Escribió" : "La más antigua,"} ${ago(row.oldestAt)}` : "Sin responder en la Bandeja",
+        action: "Abrir Bandeja",
+      }
+    case "stillOpen":
+      return {
+        title: row.total === 1 && row.contactName
+          ? `La conversación con ${row.contactName} sigue abierta`
+          : `${row.total} conversaciones siguen abiertas`,
+        detail: joined([
+          row.quietSince ? `Sin mensajes desde ${ago(row.quietSince)}` : null,
+          row.total === 1 ? "ciérrala con «Resolver» o escríbele" : "ciérralas con «Resolver» o escríbeles",
+        ]),
+        action: row.total === 1 ? "Abrir" : "Abrir Bandeja",
       }
     case "task":
       return {
         title: row.title,
         detail: joined([
-          row.mine ? "Tarea tuya" : "Tarea",
-          dueText(row, context),
+          dueText(row, context).replace(/^./, (first) => first.toUpperCase()),
+          row.opportunityTitle ? `Oportunidad «${row.opportunityTitle}»` : null,
           row.mine ? null : (row.assigneeName ?? "Sin responsable"),
           row.more > 0 ? `y ${plural(row.more, "tarea", "tareas")} más${context.allTasks ? " del equipo" : ""}` : null,
         ]),
@@ -76,7 +110,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
       return {
         title: row.total === 1 ? "El agente no pudo escribirle a 1 persona" : `El agente no pudo escribirle a ${row.total} personas`,
         detail: joined([row.byCause.map((item) => `${item.total} ${item.reason}`).join(", "), "dice cómo habilitar a cada una"]),
-        action: "Ver cómo",
+        action: "Ver",
       }
     case "budgets":
       return {
@@ -89,22 +123,40 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
     case "more":
       if (row.of === "cases") {
         return {
-          title: row.count === 1 ? "1 caso más que pasó el agente" : `${row.count} casos más que pasó el agente`,
+          title: row.count === 1 ? "1 caso más del agente" : `${row.count} casos más del agente`,
           detail: "Siguen sin resolver",
           action: "Ver todos",
         }
       }
+      if (row.of === "unconfirmed") {
+        return {
+          title: row.count === 1 ? "1 cita más sin confirmar" : `${row.count} citas más sin confirmar`,
+          detail: "Tras el recordatorio del agente",
+          action: "Abrir la Agenda",
+        }
+      }
       return {
         title: row.count === 1 ? "1 tarea más" : `${row.count} tareas más`,
-        detail: context.allTasks ? "Abiertas en el equipo" : "Abiertas y asignadas a ti",
+        detail: context.allTasks ? "Abiertas en el equipo" : "Tuyas y de tu área",
         action: "Ver tareas",
       }
   }
 }
 
+/**
+ * Lo que hace pulsar la fila cuando la acción rápida («Tomar», «Hecha») va en
+ * su propio botón: la fila sigue nombrando a dónde lleva, también para el
+ * lector de pantalla. Un caso se abre con «Ver el caso» aunque nadie lo haya
+ * tomado: tomarlo es el botón de al lado.
+ */
+export function waitingOpenText(row: WaitingRow, context: HomeTextContext): string {
+  if (row.kind === "case" && row.conversationId) return "Ver el caso"
+  return waitingText(row, context).action
+}
+
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind

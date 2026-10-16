@@ -11,6 +11,9 @@ import {
   type AgentCaseProposal,
   buildAgentProposalKey,
   confirmProposalByContact,
+  answerGeneralPermission,
+  confirmAppointmentByContact,
+  type ContactAppointmentOption,
   BOOKING_LINK_TTL_HOURS,
   createBookingLink,
   annotateHandoff,
@@ -97,6 +100,9 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   ver_otros_canales: { kind: "otros_canales", label: "Conversaciones en otros canales" },
   listar_oportunidades: { kind: "comercial", label: "Oportunidades del contacto" },
   listar_tareas: { kind: "comercial", label: "Tareas del contacto" },
+  // Escribe (confirma la cita), pero lo que devuelve es la cita tal como quedó:
+  // con eso se comprueban la fecha y la hora que el agente le repite a la persona.
+  confirmar_cita: { kind: "agenda", label: "Cita que confirmó la persona" },
 }
 
 /**
@@ -133,9 +139,11 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   reprogramar_cita: "Propuso mover una cita.",
   cancelar_cita: "Propuso cancelar una cita.",
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
+  confirmar_cita: "Confirmó la cita que la persona dijo que no se perderá.",
+  responder_permiso_mensajes: "Anotó si acepta mensajes de controles y novedades.",
   enviar_enlace_cita: "Envió un enlace para que la persona elija su cita.",
   create_opportunity: "Propuso registrar una oportunidad.",
-  update_followup: "Propuso programar un seguimiento.",
+  update_followup: "Dejó la tarea de una oportunidad.",
   close_opportunity: "Propuso cerrar una oportunidad.",
   move_to_stage: "Propuso mover una oportunidad de etapa.",
   add_tags: "Etiquetó el contacto.",
@@ -272,8 +280,8 @@ export interface AgentToolCtx {
 
 /**
  * Derivación a humano: registro estructurado (resumen, motivo, prioridad,
- * tarea), apaga el agente y avisa al equipo. Misma vía para keyword, tool y
- * maxTurns.
+ * tarea), apaga el agente y lo deja en «Te espera» del equipo. Misma vía
+ * para keyword, tool y maxTurns.
  */
 export async function performHandoff(
   ctx: AgentToolCtx,
@@ -1111,6 +1119,80 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  /**
+   * La persona confirma por escrito una cita que ya tiene («sí, ahí estaré»).
+   * Es la misma operación que el botón «Confirmar» del recordatorio, sin
+   * propuesta: solo su propia cita (o la de quien lleva), nunca otra.
+   */
+  const confirmAppointment = tool(
+    async ({ appointmentId }: { appointmentId?: string }) => {
+      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se confirmaría la cita de la persona."
+      let result: Awaited<ReturnType<typeof confirmAppointmentByContact>>
+      try {
+        result = await inOrg((tx) =>
+          confirmAppointmentByContact(tx, ctx.orgId, {
+            contactId: ctx.contactId,
+            conversationId: ctx.conversationId,
+            ...(appointmentId ? { appointmentId } : {}),
+          }),
+        )
+      } catch (e) {
+        if (e instanceof ServiceError) {
+          return `No se pudo confirmar: ${e.message}. Pregúntale de qué cita habla o pasa el caso a una persona.`
+        }
+        throw e
+      }
+      const zone = await orgZone()
+      const said = (item: ContactAppointmentOption) =>
+        `${item.patientName}, el ${formatZoned(new Date(item.startsAt), { timezone: item.branchTimezone ?? zone.timezone, locale: zone.locale })}, en ${item.branchName} con ${item.dentistName}`
+      if (result.outcome === "ninguna") {
+        return "La persona no tiene citas por venir que confirmar. Si habla de otra cita, pregúntale cuál o pasa el caso a una persona."
+      }
+      if (result.outcome !== "varias") {
+        // Un padre confirma las citas de quienes lleva: se le dice de quiénes son.
+        const list = result.appointments
+          .map((item) => `- ${said(item)}${item.was === "ya_confirmada" ? " (ya estaba confirmada)" : ""}`)
+          .join("\n")
+        const head =
+          result.outcome === "confirmada"
+            ? result.appointments.length > 1 ? "Citas confirmadas:" : "Cita confirmada:"
+            : result.appointments.length > 1 ? "Esas citas ya estaban confirmadas:" : "Esa cita ya estaba confirmada:"
+        return `${head}\n${list}\nDíselo con send_reply, con estas palabras o parecidas: «${result.reply}»`
+      }
+      return `Tiene varias citas por confirmar: pregúntale cuál y vuelve a llamar con su id.\n${result.options.map((item) => `- ${said(item)} (id ${item.appointmentId})`).join("\n")}`
+    },
+    {
+      name: "confirmar_cita",
+      description:
+        "Confirma una cita que la persona ya tiene cuando ella lo dice por escrito («sí, ahí estaré», «confirmo»), por ejemplo al responder un recordatorio. No es una propuesta ni pide otro sí. Sin id confirma, como el botón, las citas del último recordatorio que recibió (si escribe por sus hijos, las de ellos); si no hay recordatorio, la única cita que espera confirmación, y si tiene varias te las devuelve para que preguntes cuál. Te devuelve qué confirmó y la frase para decírselo.",
+      schema: operationAgentSchema("cita.confirmar"),
+    },
+  )
+
+  /**
+   * La persona responde por escrito a la pregunta del permiso general que hizo
+   * el sistema tras reservar («¿Te podemos escribir también…?»). Es la misma
+   * operación que su botón (`answerGeneralPermission`): solo vale si se le
+   * preguntó y aún no respondió; queda con origen «conversación» (ADR 0030).
+   */
+  const answerPermission = tool(
+    async ({ granted }: { granted: boolean }) => {
+      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se anotaría su respuesta sobre los mensajes de controles y novedades."
+      const outcome = await inOrg((tx) => answerGeneralPermission(tx, ctx.orgId, { conversationId: ctx.conversationId, granted }))
+      if (outcome === "no_preguntado") return "No se le hizo esa pregunta: no hay nada que anotar. Sigue la conversación."
+      if (outcome === "ya_respondio") return "Ya había respondido antes; no cambia nada. Sigue la conversación."
+      return granted
+        ? "Anotado: aceptó que le escribamos por sus controles y novedades. Agradéceselo en una línea con send_reply."
+        : "Anotado: no quiere mensajes de controles y novedades. Dile en una línea que solo le escribiremos por sus citas, con send_reply."
+    },
+    {
+      name: "responder_permiso_mensajes",
+      description:
+        "Anota la respuesta de la persona a la pregunta que le hizo la clínica tras reservar: «¿Te podemos escribir también para avisarte de tus controles y novedades de la clínica?». Úsala solo si su último mensaje responde a esa pregunta (sí o no); nunca para confirmar una cita.",
+      schema: operationAgentSchema("mensajes.permiso"),
+    },
+  )
+
   const confirmProposal = tool(
     async ({ proposalId }: { proposalId: string }) => {
       if (ctx.sandbox) {
@@ -1205,15 +1287,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const createOpportunityTool = tool(
     async (input: {
       title: string
-      stageId?: string
-      pipelineId?: string
-      patientId?: string
-      serviceId?: string
-      interestText?: string
-      amountCents?: number
-      currency?: string
-      nextActionAt?: string
-      nextActionNote?: string
+      patientId?: string | null
+      serviceId?: string | null
+      interestText?: string | null
       reason?: string
     }) => {
       if (ctx.sandbox) return sandboxPropose("crear_oportunidad", `Nueva oportunidad: ${input.title}`)
@@ -1224,17 +1300,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "create_opportunity",
       description:
-        "Crea una oportunidad para el contacto de la conversación (propuesta si la política no es directa). El título es obligatorio; la etapa nace abierta.",
+        "Registra un interés concreto de la persona (pidió un precio, un tratamiento o una evaluación) como oportunidad; nunca por un saludo. Nace en «Interesado» y, sin responsable, queda en Recepción. Si ya tiene abierta una del mismo tratamiento, sigue con esa en vez de crear otra.",
       schema: operationAgentSchema("oportunidad.crear"),
     },
   )
 
   const updateFollowup = tool(
-    async (input: { opportunityId?: string; nextActionAt?: string; nextActionNote?: string; reason?: string }) => {
-      if (ctx.sandbox) return sandboxPropose("actualizar_seguimiento", input.nextActionNote?.trim() || "Nuevo seguimiento")
-      if (ctx.dryRun) return "[SIMULACIÓN] Se propondría actualizar el seguimiento de la oportunidad."
+    async (input: { opportunityId?: string; nextActionAt?: string | null; nextActionNote?: string; reason?: string }) => {
+      if (ctx.sandbox) return sandboxPropose("actualizar_seguimiento", input.nextActionNote?.trim() || "Nueva tarea")
+      if (ctx.dryRun) return "[SIMULACIÓN] Se propondría dejar la tarea de la oportunidad."
       if (input.nextActionAt === undefined && input.nextActionNote === undefined) {
-        return "Indica la fecha (nextActionAt ISO) o la nota (nextActionNote) del seguimiento."
+        return "Indica qué hay que hacer (nextActionNote) o cuándo (nextActionAt ISO)."
       }
       const chosen = await chooseOpportunity(input.opportunityId)
       if ("message" in chosen) return chosen.message
@@ -1246,32 +1322,27 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "update_followup",
       description:
-        "Programa o actualiza el seguimiento (próxima acción) de una oportunidad del contacto (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
-      schema: z.object({
-        opportunityId: z.string().uuid().optional(),
-        nextActionAt: z.string().optional(),
-        nextActionNote: z.string().max(500).optional(),
-        reason: z.string().max(500).optional(),
-      }),
+        "Deja o cambia la tarea de una oportunidad del contacto: su próxima acción, una sola (propuesta si la política no es directa). Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+      schema: operationAgentSchema("oportunidad.tarea"),
     },
   )
 
   const closeOpportunityTool = tool(
-    async (input: { opportunityId?: string; outcome: "won" | "lost"; reason: string }) => {
+    async (input: { opportunityId?: string; outcome: "won" | "lost"; reason: string; note?: string | null }) => {
       if (ctx.sandbox) return sandboxPropose("cerrar_oportunidad", input.outcome === "won" ? "Ganada" : "Perdida")
       if (ctx.dryRun) return `[SIMULACIÓN] Se propondría cerrar la oportunidad (${input.outcome}).`
       const chosen = await chooseOpportunity(input.opportunityId)
       if ("message" in chosen) return chosen.message
       return propose(
         "cerrar_oportunidad",
-        { opportunityId: chosen.id, outcome: input.outcome, reason: input.reason },
+        { opportunityId: chosen.id, outcome: input.outcome, reason: input.reason, ...(input.note ? { note: input.note } : {}) },
         "close_opportunity",
       )
     },
     {
       name: "close_opportunity",
       description:
-        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con motivo obligatorio. Como perdida, solo si la persona lo dijo claro en esta conversación (ya se atendió en otro lado, ya no le interesa); nunca porque dejó de responder. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
+        "Cierra una oportunidad del contacto como ganada (won) o perdida (lost) con un motivo de la lista. Como perdida, solo si la persona lo dijo claro en esta conversación (el precio, eligió otra clínica, ya no lo necesita); nunca porque dejó de responder. Aceptar o rechazar un presupuesto ya la cierra sola. Si no das opportunityId y hay varias abiertas, devuelve la lista para preguntar.",
       schema: operationAgentSchema("oportunidad.cerrar"),
     },
   )
@@ -1345,7 +1416,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const zone = await orgZone()
       const lines = items.map(
         (o) =>
-          `- ${o.title} (id ${o.id}, etapa ${o.stageName}, estado ${o.status}${o.nextActionAt ? `, próxima acción ${formatZoned(new Date(o.nextActionAt), zone)}` : ""})`,
+          `- ${o.title} (id ${o.id}, etapa ${o.stageName}, estado ${o.status}${o.nextTask ? `, tarea «${o.nextTask.title}»${o.nextTask.dueAt ? ` para ${formatZoned(new Date(o.nextTask.dueAt), zone)}` : ""}` : ""})`,
       )
       if (nextCursor) lines.push(`Hay más oportunidades: vuelve a llamar con cursor "${nextCursor}".`)
       return lines.join("\n")
@@ -1473,6 +1544,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     proposeBooking,
     rescheduleAppointment,
     cancelAppointmentProposal,
+    confirmAppointment,
+    answerPermission,
     confirmProposal,
     noteCase,
     rememberFact,

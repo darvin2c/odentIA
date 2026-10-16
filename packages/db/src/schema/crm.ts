@@ -248,11 +248,20 @@ export const pipelineStage = pgTable(
       .references(() => pipeline.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     position: integer("position").notNull(),
-    kind: text("kind").notNull().default("open"),
+    /**
+     * El paso fijo que es esta etapa (`SALE_MOMENTS`): de él depende que la
+     * oportunidad avance sola. La clínica cambia el nombre, nunca el paso.
+     */
+    moment: text("moment").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("pipeline_stage_pipeline_position_uidx").on(table.pipelineId, table.position),
+    uniqueIndex("pipeline_stage_pipeline_moment_uidx").on(table.pipelineId, table.moment),
+    check(
+      "pipeline_stage_moment_check",
+      sql`${table.moment} IN ('interesado','evaluacion_agendada','presupuesto_enviado','decidio')`,
+    ),
   ],
 )
 
@@ -438,9 +447,6 @@ export const message = pgTable(
 export const TASK_AREAS = ["recepcion", "caja", "clinico", "administracion"] as const
 export type TaskArea = (typeof TASK_AREAS)[number]
 
-/** Clases de tarea: manual o seguimiento comercial sincronizado con la próxima acción. */
-export const TASK_KINDS = ["manual", "opportunity_follow_up"] as const
-export type TaskKind = (typeof TASK_KINDS)[number]
 export const crmTask = pgTable(
   "task",
   {
@@ -458,7 +464,6 @@ export const crmTask = pgTable(
     title: text("title").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true }),
     status: text("status").notNull().default("open"),
-    kind: text("kind").notNull().default("manual"),
     // Quién la dejó: `user`, `agent` (Recepción, en una conversación) o `admin`
     // (el Administrador, por una línea prendida).
     createdBy: text("created_by").notNull(),
@@ -466,16 +471,22 @@ export const crmTask = pgTable(
     area: text("area"),
     // Por qué se creó, en una frase, cuando la deja el Administrador.
     reason: text("reason"),
+    /**
+     * Por qué se cerró sola, cuando su motivo desapareció (la cita pasó, la
+     * persona confirmó, la oportunidad se cerró…): «Rosa confirmó su cita».
+     * Nulo si la cerró una persona.
+     */
+    settledReason: text("settled_reason"),
     /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
     idempotencyKey: text("idempotency_key"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("task_org_id_uidx").on(table.organizationId, table.id),
-    // Un solo seguimiento abierto por oportunidad (índice único parcial en migración).
+    // La próxima acción de una oportunidad es una tarea, y solo una abierta.
     uniqueIndex("task_org_opp_open_uidx")
       .on(table.organizationId, table.opportunityId)
-      .where(sql`"opportunity_id" IS NOT NULL AND "kind" = 'opportunity_follow_up' AND "status" = 'open'`),
+      .where(sql`"opportunity_id" IS NOT NULL AND "status" = 'open'`),
     uniqueIndex("task_org_idempotency_uidx")
       .on(table.organizationId, table.idempotencyKey)
       .where(sql`"idempotency_key" IS NOT NULL`),

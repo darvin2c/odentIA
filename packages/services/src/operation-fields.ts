@@ -70,6 +70,7 @@ export const OPERATIONS = {
       opportunityId: { kind: "uuid", label: "Oportunidad", description: "La oportunidad a la que pertenece.", body: "optional", agent: "person" },
       patientId: { kind: "uuid", label: "Paciente", description: "El paciente al que se refiere.", body: "optional", agent: "person" },
       assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "Quién del equipo la lleva.", body: "optional", nullable: true, agent: "person" },
+      area: { kind: "enum", values: ["recepcion", "caja", "clinico", "administracion"], label: "Parte del equipo", description: "Sin responsable, a qué parte del equipo va: la ve quien trabaja en ella.", body: "optional", nullable: true, agent: "person" },
     },
   },
   "cita.reservar": {
@@ -102,21 +103,33 @@ export const OPERATIONS = {
       reason,
     },
   },
+  "cita.confirmar": {
+    label: "Confirmar una cita",
+    fields: {
+      appointmentId: { kind: "uuid", label: "Cita", description: "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirma la única cita suya que espera confirmación.", body: "path", agent: "fills" },
+    },
+  },
+  // Lo que la persona aceptó recibir. La pantalla elige el tipo y cómo lo dijo;
+  // el agente solo registra su respuesta a la pregunta de novedades y promociones.
+  "mensajes.permiso": {
+    label: "Permiso de mensajes",
+    strict: true,
+    fields: {
+      purpose: { kind: "enum", values: ["recordatorio", "seguimiento", "novedades"], label: "Qué mensajes", description: "Los de su cita y sus controles (recordatorio), los de sus presupuestos y seguimientos (seguimiento) o novedades y promociones (novedades).", body: "required", agent: "context" },
+      granted: { kind: "flag", label: "Lo aceptó", description: "true si la persona dijo que sí a recibir novedades y promociones de la clínica; false si dijo que no.", body: "required", agent: "requires" },
+      source: { kind: "enum", values: ["presencial", "telefono", "conversacion"], label: "Cómo lo dijo", description: "En persona, por teléfono o por la conversación.", body: "required", agent: "context" },
+    },
+  },
   "oportunidad.crear": {
     label: "Crear una oportunidad",
     fields: {
-      title: { kind: "text", min: 1, max: 200, label: "Título", description: "Qué le interesa a la persona, en una línea.", body: "required", agent: "requires" },
+      title: { kind: "text", min: 1, max: 200, label: "Título", description: "El interés concreto, en una línea: el tratamiento, el precio o la evaluación que pidió.", body: "required", agent: "requires" },
       contactId: { kind: "uuid", label: "Contacto", description: "La persona interesada.", body: "required", agent: "context" },
-      stageId: { kind: "uuid", label: "Etapa", description: "Etapa inicial; si falta, la primera del embudo.", body: "optional", agent: "fills" },
-      pipelineId: { kind: "uuid", label: "Embudo", description: "Embudo; si falta, el predeterminado.", body: "optional", agent: "fills" },
       patientId: { kind: "uuid", label: "Paciente", description: "El paciente, si el interés es para alguien ya registrado.", body: "optional", nullable: true, agent: "fills" },
-      serviceId: { kind: "uuid", label: "Servicio", description: "El servicio que le interesa, si está en el catálogo.", body: "optional", nullable: true, agent: "fills" },
+      serviceId: { kind: "uuid", label: "Servicio", description: "El servicio que le interesa, si está en el catálogo: su valor sale de la lista de precios.", body: "optional", nullable: true, agent: "fills" },
       interestText: { kind: "text", max: 500, label: "Interés", description: "Lo que pidió, en sus palabras.", body: "optional", nullable: true, agent: "fills" },
-      amountCents: { kind: "int", min: 0, label: "Monto en céntimos", description: "Solo si sale de un precio real del catálogo.", body: "optional", nullable: true, agent: "fills" },
-      currency: { kind: "text", min: 3, max: 3, label: "Moneda", description: "Código ISO 4217 del monto.", body: "optional", agent: "fills" },
-      nextActionAt: { kind: "text", max: 40, label: "Próxima acción", description: "Cuándo retomar el contacto, en ISO 8601.", body: "optional", nullable: true, agent: "fills" },
-      nextActionNote: { kind: "text", max: 500, label: "Nota de la próxima acción", description: "Qué hacer al retomarlo.", body: "optional", nullable: true, agent: "fills" },
-      assignedUserId: { kind: "text", max: 200, label: "Responsable", description: "Quién del equipo la lleva.", body: "optional", nullable: true, agent: "person" },
+      amountCents: { kind: "int", min: 0, label: "Valor", description: "Sin servicio, el valor estimado en la unidad menor de la moneda de la clínica. Con servicio sale de la lista de precios.", body: "optional", nullable: true, agent: "person" },
+      assignedUserId: { kind: "text", max: 200, label: "Responsable", description: "Quién del equipo la lleva; sin responsable es de Recepción.", body: "optional", nullable: true, agent: "person" },
       budgetId: { kind: "uuid", label: "Presupuesto", description: "El presupuesto del que nace.", body: "optional", nullable: true, agent: "person" },
       conversationId: { kind: "uuid", label: "Conversación", description: "La conversación donde surgió.", body: "optional", nullable: true, agent: "context" },
       reason,
@@ -126,7 +139,7 @@ export const OPERATIONS = {
     label: "Mover una oportunidad de etapa",
     fields: {
       opportunityId: { kind: "uuid", label: "Oportunidad", description: "Cuál mover; si la persona tiene una sola abierta puede omitirse.", body: "path", agent: "fills" },
-      stageId: { kind: "uuid", label: "Etapa", description: "La etapa de destino.", body: "required", agent: "requires" },
+      stageId: { kind: "uuid", label: "Etapa", description: "El paso de destino (Interesado, Evaluación agendada o Presupuesto enviado). Para cerrarla se usa cerrar.", body: "required", agent: "requires" },
     },
   },
   "oportunidad.cerrar": {
@@ -134,7 +147,24 @@ export const OPERATIONS = {
     fields: {
       opportunityId: { kind: "uuid", label: "Oportunidad", description: "Cuál cerrar; si la persona tiene una sola abierta puede omitirse.", body: "path", agent: "fills" },
       outcome: { kind: "enum", values: ["won", "lost"], label: "Resultado", description: "Ganada (won) o perdida (lost).", body: "required", agent: "requires" },
-      reason: { kind: "text", min: 1, max: 500, label: "Motivo", description: "Por qué se cierra así.", body: "required", agent: "requires" },
+      reason: {
+        kind: "enum",
+        values: ["precio", "otra_clinica", "no_responde", "no_lo_necesita", "otro", "acepto"],
+        label: "Motivo",
+        description: "Perdida: precio, otra_clinica (eligió otra clínica), no_responde, no_lo_necesita (ya no lo necesita) u otro. Ganada: acepto.",
+        body: "required",
+        agent: "requires",
+      },
+      note: { kind: "text", max: 500, label: "Nota", description: "Lo que añade al motivo, en una frase. Solo si hace falta (por ejemplo, con «otro»).", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
+  "oportunidad.tarea": {
+    label: "La tarea de una oportunidad",
+    fields: {
+      opportunityId: { kind: "uuid", label: "Oportunidad", description: "De qué oportunidad es; si la persona tiene una sola abierta puede omitirse.", body: "path", agent: "fills" },
+      nextActionNote: { kind: "text", min: 1, max: 200, label: "Tarea", description: "Qué hay que hacer, en una línea (llamar para confirmar la evaluación).", body: "optional", agent: "fills" },
+      nextActionAt: { kind: "instant", label: "Vence", description: "Cuándo, en ISO 8601 con zona. Solo si se acordó un momento.", body: "optional", nullable: true, agent: "fills" },
+      reason,
     },
   },
   "derivacion.crear": {
@@ -344,9 +374,12 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
   create_task: "tarea.crear",
   proponer_cita: "cita.reservar",
   reprogramar_cita: "cita.mover",
+  confirmar_cita: "cita.confirmar",
+  responder_permiso_mensajes: "mensajes.permiso",
   create_opportunity: "oportunidad.crear",
   move_to_stage: "oportunidad.mover",
   close_opportunity: "oportunidad.cerrar",
+  update_followup: "oportunidad.tarea",
   request_human_handoff: "derivacion.crear",
   recordar_dato: "persona.recordar",
 }
@@ -363,7 +396,6 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
-  update_followup: "Pendiente: comparte campos con editar la oportunidad, que aún declara los suyos en la ruta.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",
   update_contact: "Pendiente: la ruta de contactos aún declara sus campos; el agente solo toca nombre y campos personalizados.",
 }

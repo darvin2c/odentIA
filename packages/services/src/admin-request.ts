@@ -248,7 +248,6 @@ const LINE_WORDS: Array<[AdminLineKey, RegExp]> = [
   ["recordatorio_cita", /recuerd|recordator/],
   ["atenciones_sin_firmar", /firm/],
   ["cobranza_vencida", /deud|saldo|cobr|debe/],
-  ["seguimientos_sin_responsable", /sin responsable|asign/],
   ["seguimiento_comercial", /oportunidad|comercial/],
 ]
 

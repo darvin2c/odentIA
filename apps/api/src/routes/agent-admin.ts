@@ -2,6 +2,7 @@ import { asAdminDecider, createAdminDecisionModel, meterAiUse, type PlatformDeci
 import { withOrgContext } from "@odentia/db"
 import {
   ADMIN_MODEL_DOWN,
+  operationBodySchema,
   adminLineOf,
   applyAdminDraft,
   deleteAdminLine,
@@ -65,11 +66,7 @@ const peopleQuery = z.object({
 })
 
 /** Lo que una persona del equipo registra en la ficha: qué aceptó y cómo lo dijo. */
-const permissionInput = z.object({
-  purpose: z.enum(["recordatorio", "seguimiento"]),
-  granted: z.boolean(),
-  source: z.enum(["presencial", "conversacion"]),
-})
+const permissionInput = operationBodySchema("mensajes.permiso")
 
 /**
  * Administrador: su página (las líneas), lo que recomienda y lo que pasó con
@@ -141,9 +138,10 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
   })
 
   /** Las personas a las que el agente no pudo escribir hoy, con cómo habilitar a cada una. */
+  // Mismo permiso que la fila de Inicio que lo abre (`agent.read` o `agent.decide`): recepción lo ve.
   app.get("/unreached", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAdminUnreached(tx, orgId, canOf(memberRole))))
   })
 

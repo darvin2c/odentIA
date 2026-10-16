@@ -19,7 +19,7 @@ import {
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js"
-import { createOpportunity, getOpportunity } from "./opportunities.js"
+import { createOpportunity, setOpportunityTask } from "./opportunities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { updateTask } from "./tasks.js"
@@ -110,7 +110,7 @@ it("el resumen cuenta lo que espera al paciente y los casos por atender, y no cu
     { organizationId: ORG, model: "prueba", status: "omitida", startedAt: new Date() },
   ])
   expect(await run((tx) => countAwaitingContact(tx, ORG))).toBe(1)
-  const summary = await run((tx) => getAgentPanelSummary(tx, ORG))
+  const summary = await run((tx) => getAgentPanelSummary(tx, ORG, RECEP))
   expect(summary).toMatchObject({
     awaitingContact: 1, openHandoffs: 1, interventionsToday: 2, failedToday: 2, enabled: false,
   })
@@ -143,7 +143,7 @@ it("la actividad muestra la entrega real de lo enviado y solo lo que hizo el age
   expect(sent).toMatchObject({ kind: "mensaje", status: "queued", title: "Mensaje pendiente de envío", conversationId })
   expect(items.find((i) => i.id === automation.id)).toBeUndefined()
   expect(items.find((i) => i.id === human.id)).toBeUndefined()
-  expect(items.find((i) => i.id === byAgent.id)).toMatchObject({ kind: "derivacion", status: "abierta", title: "Derivó el caso al equipo" })
+  expect(items.find((i) => i.id === byAgent.id)).toMatchObject({ kind: "derivacion", status: "abierta", title: "Te pasó el caso" })
 
   // El proveedor rechaza el envío: la actividad deja de afirmar «envió».
   await ownerDb.update(message).set({ status: "failed" }).where(eq(message.id, messageId as string))
@@ -165,17 +165,19 @@ it("una derivación resuelta no se toma, y la de un seguimiento comercial asigna
   expect((await run((tx) => listHandoffs(tx, ORG, {}))).find((h) => h.id === handoff.id)?.status).toBe("resuelta")
   await expect(run((tx) => claimHandoff(tx, ORG, RECEP, handoff.id))).rejects.toThrow("ya se resolvió")
 
-  // Seguimiento comercial sin responsable: la tarea nace de la oportunidad y
-  // no admite asignación directa; tomar el caso asigna la oportunidad.
+  // La tarea de una oportunidad sin responsable (Recepción): tomar el caso que
+  // la usa se la asigna a quien lo toma, sin otra tarea.
   const commercial = await openConversation("comercial")
   const opportunity = await run((tx) => createOpportunity(tx, ORG, {
     contactId: commercial.contactId, conversationId: commercial.conversationId, title: "Implante",
-    nextActionAt: new Date(Date.now() + 86_400_000).toISOString(), nextActionNote: "Llamar",
   }, { userId: null }))
+  await run((tx) => setOpportunityTask(tx, ORG, opportunity.id, {
+    title: "Llamar", dueAt: new Date(Date.now() + 86_400_000).toISOString(),
+  }, { userId: null, createdBy: "agent" }))
   expect(opportunity.assignedUserId).toBeNull()
   const [followUp] = await run((tx) => tx.select().from(crmTask)
     .where(and(eq(crmTask.organizationId, ORG), eq(crmTask.opportunityId, opportunity.id), eq(crmTask.status, "open"))))
-  expect(followUp?.kind).toBe("opportunity_follow_up")
+  expect(followUp?.area).toBe("recepcion")
   const derived = await run((tx) => createHandoff(tx, ORG, null, {
     conversationId: commercial.conversationId, taskId: followUp?.id, reason: "La coordinación no pudo completarse",
     summary: "Dos intentos sin respuesta", createdBy: "agent",
@@ -184,7 +186,6 @@ it("una derivación resuelta no se toma, y la de un seguimiento comercial asigna
   const claimed = await run((tx) => claimHandoff(tx, ORG, RECEP, derived.id))
   expect(claimed.assigneeUserId).toBe(RECEP)
   expect(claimed.status).toBe("tomada")
-  expect((await run((tx) => getOpportunity(tx, ORG, opportunity.id))).assignedUserId).toBe(RECEP)
   const [task] = await run((tx) => tx.select().from(crmTask).where(eq(crmTask.id, followUp?.id as string)))
   expect(task?.assigneeUserId).toBe(RECEP)
 })

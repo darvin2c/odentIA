@@ -85,7 +85,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
     await tx.insert(supportMessage).values({ caseId, organizationId: org.id, authorKind: "staff", authorUserId: owner.user.id, body: answer })
     await tx.update(supportCase).set({ status: "esperando_clinica", lastPublicMessageAt: answeredAt }).where(eq(supportCase.id, caseId))
   })
-  await gotoHydrated(page, tenant(org.slug, "/patients"))
+  await gotoHydrated(page, tenant(org.slug, "/people"))
   const button = page.getByRole("button", { name: "Ayuda, 1 respuesta nueva" })
   await button.click()
   const answered = help.getByRole("region", { name: "Tus casos con soporte" })
@@ -110,7 +110,7 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   await expect.poll(async () => await fixtureDb.select({ question: helpRequest.question }).from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema"))))
     .toEqual([{ question: "La lista de pacientes se queda cargando" }])
   const reported = await fixtureDb.select().from(helpRequest).where(and(eq(helpRequest.organizationId, org.id), eq(helpRequest.kind, "problema")))
-  expect(reported.map((row) => [row.question, row.screen, row.role, row.detail])).toEqual([["La lista de pacientes se queda cargando", "/patients", "Propietario", null]])
+  expect(reported.map((row) => [row.question, row.screen, row.role, row.detail])).toEqual([["La lista de pacientes se queda cargando", "/people", "Propietario", null]])
 
   // --- Teléfono: el mismo botón y la hoja de ayuda, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })

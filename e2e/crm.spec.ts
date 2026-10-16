@@ -4,7 +4,7 @@ import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { simulateTelegramInbound, simulateWhatsAppInbound } from "./channels"
-import { API, tenant } from "./env"
+import { API, tenant, tenantPattern } from "./env"
 import { call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
@@ -105,7 +105,8 @@ test("crm telegram: inbound crea conversación y contacto visible en bandeja", a
   await expect(page.getByText("E2E Paciente").first()).toBeVisible()
   await expect(page.getByText("Hola, quiero una cita").first()).toBeVisible()
 
-  await gotoHydrated(page, tenant(org.slug, "/contacts"))
+  // Quien escribió por primera vez está en Pacientes, en «Por registrar», con su página.
+  await gotoHydrated(page, tenant(org.slug, "/people?ver=por_registrar"))
   await expect(page.getByText("E2E Paciente").first()).toBeVisible()
 })
 
@@ -300,7 +301,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
 
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
   const queueItem = page.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
-  await expect(queueItem).toContainText("En cola por recoger")
+  await expect(queueItem).toContainText("Nadie lo ha tomado")
   await expect(queueItem).toContainText("vence")
   // Qué tan pronto hay que atenderlo, con palabra además de color, y lo que la persona escribió, en orden.
   await expect(queueItem).toContainText("Ahora")
@@ -317,7 +318,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await expect(fromNotice).toBeHidden()
   // «Tomar» toma la conversación del caso: queda a su nombre y el caso, con responsable.
   await queueItem.getByRole("button", { name: "Tomar", exact: true }).click()
-  await expect(queueItem).toContainText("Responsable asignado")
+  await expect(queueItem).toContainText("Ya lo tomaron")
   await expect(queueItem.getByRole("button", { name: "Tomar", exact: true })).toHaveCount(0)
 
   const persisted = await call<Array<{ id: string; assigneeUserId: string | null }>>(
@@ -329,7 +330,7 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   expect(persisted.find(item => item.id === handoff.id)?.assigneeUserId).toBeTruthy()
 })
 
-test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona", async ({
+test("crm ventas: un «hola» no crea oportunidad; mover una no mueve las otras; cerrar pide el motivo de la lista", async ({
   owner,
   nextEventId,
 }) => {
@@ -340,39 +341,40 @@ test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona
     await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, {
       fromId: tgUser,
       chatId: tgUser,
-      text: "Hola, quiero una cita",
+      text: "Hola",
       updateId: nextEventId(),
     }),
   ).toBe(200)
   const conversation = await waitForConversation(page, org.slug, tg.id)
-  await waitForInboundText(page, org.slug, conversation.id, "Hola, quiero una cita")
+  await waitForInboundText(page, org.slug, conversation.id, "Hola")
   const contactId = conversation.contact.id
-  const pipes = await call<{ stages: { id: string; name: string }[] }[]>(page, "GET", "/api/pipelines", org.slug)
-  const stages = pipes.flatMap(p => p.stages)
-  const nuevo = stages.find(s => s.name === "Nuevo")
-  const contactado = stages.find(s => s.name === "Contactado")
-  expect(nuevo).toBeDefined()
-  expect(contactado).toBeDefined()
+  const person = conversation.contact.displayName
+  // Un saludo no es un interés: no hay oportunidad «Seguimiento · …».
+  expect(await call<unknown[]>(page, "GET", `/api/opportunities?contactId=${contactId}`, org.slug)).toEqual([])
+  const pipes = await call<{ stages: { id: string; name: string; moment: string }[] }[]>(page, "GET", "/api/pipelines", org.slug)
+  expect(pipes[0]?.stages.map((stage) => stage.name)).toEqual(["Interesado", "Evaluación agendada", "Presupuesto enviado", "Decidió"])
 
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
   await page.getByRole("button", { name: "Nueva oportunidad" }).click()
-  const dialog = surface(page)
-  await dialog.getByPlaceholder("Buscar por nombre, teléfono o correo").fill(conversation.contact.displayName)
-  await dialog.getByRole("button", { name: conversation.contact.displayName, exact: true }).click()
-  await page.getByLabel("Título", { exact: true }).fill("Evaluación de ortodoncia")
-  await page.getByRole("combobox", { name: "Etapa inicial", exact: true }).selectOption(nuevo!.id)
-  await page.getByRole("button", { name: "Crear", exact: true }).click()
-  const card = page.getByRole("link", { name: "Evaluación de ortodoncia", exact: true })
-  await expect(card).toBeVisible()
-  await call(page, "POST", "/api/opportunities", org.slug, {
-    contactId,
-    title: "Control preventivo",
-  }, 201)
+  const dialog = surface(page, { name: "Nueva oportunidad", exact: true })
+  // Un solo buscador de personas: se escribe y se elige.
+  await dialog.getByRole("combobox", { name: "Persona interesada", exact: true }).fill(person)
+  await page.getByRole("option", { name: new RegExp(person) }).first().click()
+  await dialog.getByLabel("Qué le interesa", { exact: true }).fill("Evaluación de ortodoncia")
+  await dialog.getByRole("button", { name: "Crear", exact: true }).click()
+  // Al crearla se abre al lado: nace en «Interesado», en Recepción hasta que alguien la tome.
+  const opened = surface(page, { name: `${person} · «Evaluación de ortodoncia»`, exact: true })
+  await expect(opened).toContainText("Interesado")
+  await expect(opened).toContainText("Recepción · sin persona asignada")
+  await opened.getByRole("button", { name: "Cerrar", exact: true }).click()
+  const cardName = `${person} · Evaluación de ortodoncia`
+  await expect(page.getByRole("button", { name: cardName, exact: true })).toBeVisible()
+  await call(page, "POST", "/api/opportunities", org.slug, { contactId, title: "Control preventivo" }, 201)
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
-  const destination = page.getByRole("region", { name: "Etapa Contactado", exact: true })
-  const origin = page.getByRole("region", { name: "Etapa Nuevo", exact: true })
+  const destination = page.getByRole("region", { name: "Paso Evaluación agendada", exact: true })
+  const origin = page.getByRole("region", { name: "Paso Interesado", exact: true })
   const handle = page.getByRole("button", { name: "Arrastrar Evaluación de ortodoncia", exact: true })
-  async function dragToContacted() {
+  async function dragToEvaluation() {
     await expect(handle).toBeEnabled()
     await handle.scrollIntoViewIfNeeded()
     await handle.hover()
@@ -382,7 +384,7 @@ test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona
     await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
     await page.mouse.down()
     await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 120, { steps: 20 })
-    await expect(destination.getByText("Soltar en Contactado", { exact: true })).toBeVisible()
+    await expect(destination.getByText("Soltar en Evaluación agendada", { exact: true })).toBeVisible()
     await page.mouse.up()
   }
   const responseGate = Promise.withResolvers<void>()
@@ -396,36 +398,51 @@ test("crm pipeline: mover una oportunidad no mueve las otras de la misma persona
     })
   })
   try {
-    await dragToContacted()
-    await expect(destination.getByRole("link", { name: "Evaluación de ortodoncia", exact: true })).toBeVisible()
-    await expect(origin.getByRole("link", { name: "Evaluación de ortodoncia", exact: true })).toHaveCount(0)
+    await dragToEvaluation()
+    await expect(destination.getByRole("button", { name: cardName, exact: true })).toBeVisible()
+    await expect(origin.getByRole("button", { name: cardName, exact: true })).toHaveCount(0)
   } finally {
     responseGate.resolve()
   }
   await expect(page.getByRole("alert")).toBeVisible()
-  await expect(origin.getByRole("link", { name: "Evaluación de ortodoncia", exact: true })).toBeVisible()
+  await expect(origin.getByRole("button", { name: cardName, exact: true })).toBeVisible()
   await page.unroute("**/api/opportunities/*/move")
   const saved = page.waitForResponse(response => response.url().endsWith("/move") && response.request().method() === "POST" && response.status() === 200)
-  await dragToContacted()
+  await dragToEvaluation()
   await saved
 
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
-  const contactadoCol = page.getByRole("region", { name: "Etapa Contactado", exact: true })
-  await expect(contactadoCol.getByRole("link", { name: "Evaluación de ortodoncia" })).toBeVisible()
-  const nuevoCol = page.getByRole("region", { name: "Etapa Nuevo", exact: true })
-  await expect(nuevoCol.getByRole("link", { name: "Control preventivo" })).toBeVisible()
+  await expect(destination.getByRole("button", { name: cardName })).toBeVisible()
+  // La tarjeta dice por qué está ahí.
+  await expect(destination.getByRole("article", { name: cardName })).toContainText(/La movió .+ hoy/)
+  await expect(origin.getByRole("button", { name: `${person} · Control preventivo` })).toBeVisible()
+
+  // «Mover a…» es la vía con teclado; cerrar pide el motivo de la lista.
+  await page.getByRole("button", { name: "Acciones de Control preventivo", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Perdida", exact: true }).click()
+  const closing = page.getByRole("alertdialog", { name: "Perdida: Control preventivo" })
+  await expect(closing.getByRole("button", { name: "Marcar perdida" })).toBeDisabled()
+  await closing.getByRole("radio", { name: "Precio" }).check()
+  await closing.getByRole("button", { name: "Marcar perdida" }).click()
+  await expect(closing).toBeHidden()
+  const decided = page.getByRole("region", { name: "Paso Decidió", exact: true })
+  await expect(decided.getByRole("article", { name: `${person} · Control preventivo` })).toContainText("Perdida: «Precio»")
+
   const closed = await call<{ id: string }>(page, "POST", "/api/opportunities", org.slug, {
     contactId, title: "Tratamiento cerrado",
   }, 201)
-  await call(page, "POST", `/api/opportunities/${closed.id}/close`, org.slug, {
-    outcome: "won", reason: "El paciente confirmó el tratamiento",
-  })
+  await call(page, "POST", `/api/opportunities/${closed.id}/close`, org.slug, { outcome: "won", reason: "acepto" })
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/pipeline"))
-  await expect(page.getByRole("link", { name: "Tratamiento cerrado", exact: true })).toBeAttached()
+  const closedCard = page.getByRole("button", { name: `${person} · Tratamiento cerrado`, exact: true })
+  await expect(closedCard).toBeAttached()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
-  await page.getByRole("link", { name: "Tratamiento cerrado", exact: true }).scrollIntoViewIfNeeded()
-  await expect(page.getByRole("link", { name: "Tratamiento cerrado", exact: true })).toBeVisible()
+  await closedCard.scrollIntoViewIfNeeded()
+  await expect(closedCard).toBeVisible()
+  // La ruta antigua de la oportunidad abre el tablero con ella al lado.
+  await gotoHydrated(page, tenant(org.slug, `/opportunities/${closed.id}`))
+  await expect(page).toHaveURL(tenantPattern(org.slug, `/pipeline?oportunidad=${closed.id}`))
+  await expect(surface(page, { name: `${person} · «Tratamiento cerrado»`, exact: true })).toContainText("Ganada")
 })
 
 test("crm whatsapp: firma válida crea conversación y firma inválida da 401", async ({

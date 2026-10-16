@@ -41,6 +41,7 @@ import {
 } from "react"
 import {
   ACTION_LABEL,
+  AGENT_CASES_TITLE,
   type AgentActivityItem,
   type AgentHandoff,
   type AgentPanelSummary,
@@ -52,7 +53,7 @@ import { usePermission } from "../lib/crm"
 import { activeOrgLocale } from "../lib/locale"
 
 /**
- * Panel lateral global del agente: los casos derivados, las citas que esperan
+ * Panel lateral global del agente: los casos del agente, las citas que esperan
  * el sí del paciente y la actividad, desde
  * cualquier pantalla. En pantalla grande es una columna fija a la derecha y la
  * página sigue usable al lado; cuando no cabe se superpone, sin cerrar la
@@ -293,13 +294,14 @@ function useCanSeePanel(): boolean {
   return canRead || canDecide
 }
 
-/** Botón «Agente · N» de la cabecera: abre el panel desde cualquier página. N son los casos por atender. */
+/**
+ * Botón «Agente» de la cabecera: abre el panel desde cualquier página. No
+ * lleva número: el único contador de los casos del agente está en el menú.
+ */
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
   const { open, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
-  const summary = useAgentPanelSummary(canSee)
   if (!canSee) return null
-  const pending = summary.data?.data.openHandoffs ?? 0
   return (
     <Button
       ref={buttonRef}
@@ -307,7 +309,7 @@ export function AgentPanelButton() {
       variant={open ? "default" : "outline"}
       className="elevated relative h-11 gap-2 rounded-full px-2 sm:pr-4"
       onClick={() => setOpen(!open)}
-      aria-label={`Agente${pending > 0 ? `, ${pending} por atender` : ""}`}
+      aria-label="Agente"
       aria-expanded={open}
       aria-controls={open && docked ? PANEL_ID : undefined}
     >
@@ -316,14 +318,7 @@ export function AgentPanelButton() {
       >
         <Bot className="size-4" aria-hidden />
       </span>
-      <span className="hidden sm:inline">
-        Agente{pending > 0 ? ` · ${pending} por atender` : ""}
-      </span>
-      {pending > 0 ? (
-        <span className="sm:hidden absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-background px-1 text-xs font-bold text-primary ring-2 ring-primary">
-          {pending > 99 ? "99+" : pending}
-        </span>
-      ) : null}
+      <span className="hidden sm:inline">Agente</span>
     </Button>
   )
 }
@@ -496,7 +491,6 @@ function PanelHeader({
 function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
   const { tab, setTab } = useContext(AgentPanelContext)
   const awaiting = summary?.awaitingContact ?? 0
-  const openHandoffs = summary?.openHandoffs ?? 0
   const when = whenFormatter(summary)
   return (
     // Controlada: con la columna abierta, la página puede pedir otra pestaña.
@@ -506,9 +500,8 @@ function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
       className="flex min-h-0 flex-1 flex-col"
     >
       <TabsList className="mx-4 mt-3 grid grid-cols-3 sm:mx-5">
-        <TabsTrigger value="derivadas">
-          Derivadas{openHandoffs > 0 ? ` · ${openHandoffs}` : ""}
-        </TabsTrigger>
+        {/* Sin número: el único contador de los casos está en el menú. */}
+        <TabsTrigger value="derivadas">{AGENT_CASES_TITLE}</TabsTrigger>
         <TabsTrigger value="paciente">Esperan al paciente{awaiting > 0 ? ` · ${awaiting}` : ""}</TabsTrigger>
         <TabsTrigger value="actividad">Actividad</TabsTrigger>
       </TabsList>
@@ -661,7 +654,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
   if (query.isError)
     return (
       <div role="alert" className="flex flex-col gap-2">
-        <p>No pudimos cargar las derivaciones.</p>
+        <p>No pudimos cargar los casos del agente.</p>
         <Button variant="outline" onClick={() => void query.refetch()}>
           Volver a intentar
         </Button>
@@ -683,8 +676,8 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
       ) : null}
       {handoffs.length === 0 ? (
         <EmptyState
-          title="Sin derivaciones abiertas"
-          description="Los casos que el agente pase al equipo esperan aquí hasta que alguien los tome y resuelva."
+          title="Ningún caso del agente espera"
+          description="Lo que el agente te pase espera aquí y en «Te espera» hasta que alguien lo tome y lo resuelva."
         />
       ) : null}
       <ul className="flex flex-col gap-3">
@@ -696,7 +689,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
             >
               <HandoffNotice handoff={handoff} onOpenCase={setBriefFor}>
                 <span className="text-xs text-muted-foreground">
-                  {handoff.status === "tomada" ? "Responsable asignado" : "En cola por recoger"}
+                  {handoff.status === "tomada" ? "Ya lo tomaron" : "Nadie lo ha tomado"}
                   {handoff.dueAt ? ` · vence ${when(handoff.dueAt)}` : ""}
                 </span>
                 {handoff.status === "abierta" && canTakeCase(handoff, canConversations, canTasks) ? (
@@ -720,7 +713,7 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
                 ) : null}
                 {handoff.taskId ? (
                   <Link to="/tasks" search={{ task: handoff.taskId }} className={INLINE_LINK}>
-                    Abrir pendiente
+                    Abrir la tarea
                   </Link>
                 ) : null}
               </HandoffNotice>

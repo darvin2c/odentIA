@@ -213,14 +213,7 @@ function AgentSummaryPage() {
                 <p className="text-sm text-muted-foreground max-sm:hidden">Lo que solo una persona puede decidir.</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
-              <NeedTile
-                count={overview.needsYou.approvals}
-                title="Pendientes"
-                pending="Casos que el agente pasó a tu equipo."
-                done="Ningún caso espera a una persona."
-                to="/agent/pendientes"
-              />
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-3">
               <NeedTile
                 count={overview.needsYou.review}
                 title="Respuestas por revisar"

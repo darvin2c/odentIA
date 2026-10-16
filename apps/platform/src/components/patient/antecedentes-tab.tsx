@@ -259,9 +259,10 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     queryFn: () => fetchAnamnesisHistory(patientId),
     enabled: canRead,
   })
+  // Con lo clínico (condiciones, medicación y salud declarada): es una lectura clínica y deja su traza.
   const patientQuery = useQuery({
-    queryKey: ["patient", patientId],
-    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    queryKey: ["patient", patientId, "clinical"],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}?clinical=1`),
     enabled: canRead,
   })
 

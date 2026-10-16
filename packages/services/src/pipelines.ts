@@ -1,28 +1,46 @@
 import type { Db } from "@odentia/db"
 import { pipeline, pipelineStage } from "@odentia/db/schema/crm"
-import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, eq } from "drizzle-orm"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { isUniqueViolation, notFound, validation } from "./errors.js"
 
-export type StageKind = "open" | "won" | "lost"
+/**
+ * Los cuatro pasos fijos de una venta (ADR 0028). Cada uno tiene su «momento»:
+ * lo que hace que la oportunidad llegue sola. La clínica puede cambiarles el
+ * nombre, nunca añadir ni quitar pasos, porque entonces ya no podrían avanzar
+ * solos.
+ *
+ * - `interesado`: la persona pidió algo concreto (precio, tratamiento, evaluación).
+ * - `evaluacion_agendada`: agendó una cita.
+ * - `presupuesto_enviado`: se le presentó un presupuesto.
+ * - `decidio`: aceptó (ganada) o no (perdida).
+ */
+export const SALE_MOMENTS = ["interesado", "evaluacion_agendada", "presupuesto_enviado", "decidio"] as const
+export type SaleMoment = (typeof SALE_MOMENTS)[number]
 
-const STAGE_KINDS: StageKind[] = ["open", "won", "lost"]
+/** El nombre con que nace cada paso. */
+export const SALE_MOMENT_NAMES: Record<SaleMoment, string> = {
+  interesado: "Interesado",
+  evaluacion_agendada: "Evaluación agendada",
+  presupuesto_enviado: "Presupuesto enviado",
+  decidio: "Decidió",
+}
 
-/** Etapas por defecto del pipeline "Ventas". */
-const DEFAULT_STAGES: { name: string; kind: StageKind }[] = [
-  { name: "Nuevo", kind: "open" },
-  { name: "Contactado", kind: "open" },
-  { name: "Cita agendada", kind: "open" },
-  { name: "Ganado", kind: "won" },
-  { name: "Perdido", kind: "lost" },
-]
+/** Orden de los pasos: una oportunidad avanza sola solo hacia adelante. */
+export function momentRank(moment: string): number {
+  const index = (SALE_MOMENTS as readonly string[]).indexOf(moment)
+  return index < 0 ? 0 : index
+}
+
+export function isSaleMoment(value: string): value is SaleMoment {
+  return (SALE_MOMENTS as readonly string[]).includes(value)
+}
 
 export interface Stage {
   id: string
   pipelineId: string
   name: string
   position: number
-  kind: string
+  moment: SaleMoment
 }
 
 function toStage(row: typeof pipelineStage.$inferSelect): Stage {
@@ -31,13 +49,22 @@ function toStage(row: typeof pipelineStage.$inferSelect): Stage {
     pipelineId: row.pipelineId,
     name: row.name,
     position: row.position,
-    kind: row.kind,
+    moment: isSaleMoment(row.moment) ? row.moment : "interesado",
   }
 }
 
+async function stagesOf(tx: Db, pipelineId: string): Promise<Stage[]> {
+  const rows = await tx
+    .select()
+    .from(pipelineStage)
+    .where(eq(pipelineStage.pipelineId, pipelineId))
+    .orderBy(asc(pipelineStage.position))
+  return rows.map(toStage)
+}
+
 /**
- * Devuelve el pipeline default de la org, creándolo con sus etapas si no
- * existe. Idempotente ante carreras (unique parcial en is_default).
+ * Devuelve el embudo de la organización, creándolo con sus cuatro pasos si no
+ * existe. Idempotente ante carreras (único parcial en `is_default`).
  */
 export async function ensureDefaultPipeline(
   tx: Db,
@@ -56,19 +83,19 @@ export async function ensureDefaultPipeline(
         .insert(pipeline)
         .values({ organizationId: orgId, name: "Ventas", isDefault: true })
         .returning()
-      if (!created) throw new Error("No se pudo crear el pipeline")
+      if (!created) throw new Error("No se pudo crear el embudo")
       await tx.insert(pipelineStage).values(
-        DEFAULT_STAGES.map((s, position) => ({
+        SALE_MOMENTS.map((moment, position) => ({
           organizationId: orgId,
           pipelineId: created.id,
-          name: s.name,
+          name: SALE_MOMENT_NAMES[moment],
           position,
-          kind: s.kind,
+          moment,
         })),
       )
       pipe = created
     } catch (error) {
-      // Carrera: otro worker creó el default; releer.
+      // Carrera: otro proceso creó el embudo; releer.
       if (!isUniqueViolation(error)) throw error
       const [retry] = await tx
         .select()
@@ -80,12 +107,7 @@ export async function ensureDefaultPipeline(
       pipe = retry
     }
   }
-  const rows = await tx
-    .select()
-    .from(pipelineStage)
-    .where(eq(pipelineStage.pipelineId, pipe.id))
-    .orderBy(asc(pipelineStage.position))
-  return { pipelineId: pipe.id, stages: rows.map(toStage) }
+  return { pipelineId: pipe.id, stages: await stagesOf(tx, pipe.id) }
 }
 
 export interface PipelineWithStages {
@@ -108,7 +130,7 @@ export async function listPipelines(tx: Db, orgId: string): Promise<PipelineWith
       .from(pipeline)
       .where(eq(pipeline.id, ensured.pipelineId))
       .limit(1)
-    if (!created) throw new Error("No se pudo crear el pipeline")
+    if (!created) throw new Error("No se pudo crear el embudo")
     return [
       { id: created.id, name: created.name, isDefault: created.isDefault, stages: ensured.stages },
     ]
@@ -126,182 +148,46 @@ export async function listPipelines(tx: Db, orgId: string): Promise<PipelineWith
   }))
 }
 
-export async function createPipeline(
-  tx: Db,
-  orgId: string,
-  input: { name: string },
-): Promise<PipelineWithStages> {
-  const name = input.name.trim()
-  if (!name) throw validation("El nombre del embudo de ventas es obligatorio")
-  const existing = await tx
-    .select({ id: pipeline.id })
-    .from(pipeline)
-    .where(eq(pipeline.organizationId, orgId))
-    .limit(1)
-  const [created] = await tx
-    .insert(pipeline)
-    .values({ organizationId: orgId, name, isDefault: existing.length === 0 })
-    .returning()
-  if (!created) throw new Error("No se pudo crear el pipeline")
-  return { id: created.id, name: created.name, isDefault: created.isDefault, stages: [] }
-}
-
-export async function renamePipeline(
-  tx: Db,
-  orgId: string,
-  id: string,
-  input: { name: string },
-): Promise<void> {
-  const name = input.name.trim()
-  if (!name) throw validation("El nombre del embudo de ventas es obligatorio")
-  const updated = await tx
-    .update(pipeline)
-    .set({ name })
-    .where(and(eq(pipeline.id, id), eq(pipeline.organizationId, orgId)))
-    .returning({ id: pipeline.id })
-  if (updated.length === 0) throw notFound("Pipeline")
-}
-
-async function requirePipeline(tx: Db, orgId: string, pipelineId: string): Promise<void> {
-  const [found] = await tx
-    .select({ id: pipeline.id })
-    .from(pipeline)
-    .where(and(eq(pipeline.id, pipelineId), eq(pipeline.organizationId, orgId)))
-    .limit(1)
-  if (!found) throw notFound("Pipeline")
-}
-
-async function requireStage(tx: Db, orgId: string, stageId: string): Promise<Stage> {
-  const [found] = await tx
-    .select()
-    .from(pipelineStage)
-    .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
-    .limit(1)
-  if (!found) throw notFound("Etapa")
-  return toStage(found)
-}
-
-export async function createStage(
+/** El paso de un embudo por su momento. */
+export async function stageOfMoment(
   tx: Db,
   orgId: string,
   pipelineId: string,
-  input: { name: string; kind?: string },
+  moment: SaleMoment,
 ): Promise<Stage> {
-  const name = input.name.trim()
-  if (!name) throw validation("El nombre de la etapa es obligatorio")
-  const kind = input.kind ?? "open"
-  if (!STAGE_KINDS.includes(kind as StageKind)) throw validation("Elige el tipo de la etapa: en curso, ganada o perdida")
-  const siblings = await tx
-    .select({ position: pipelineStage.position })
+  const [row] = await tx
+    .select()
     .from(pipelineStage)
-    .where(eq(pipelineStage.pipelineId, pipelineId))
-  const position = siblings.reduce((max, s) => Math.max(max, s.position), -1) + 1
-  // position es unique por pipeline: reintentar una vez ante carreras.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const [created] = await tx
-        .insert(pipelineStage)
-        .values({ organizationId: orgId, pipelineId, name, position: position + attempt, kind })
-        .returning()
-      if (!created) throw new Error("No se pudo crear la etapa")
-      return toStage(created)
-    } catch (error) {
-      if (!isUniqueViolation(error) || attempt === 1) throw error
-    }
-  }
-  throw new Error("No se pudo crear la etapa")
+    .where(
+      and(
+        eq(pipelineStage.organizationId, orgId),
+        eq(pipelineStage.pipelineId, pipelineId),
+        eq(pipelineStage.moment, moment),
+      ),
+    )
+    .limit(1)
+  if (!row) throw notFound("Etapa")
+  return toStage(row)
 }
 
-export async function updateStage(
+/**
+ * Cambiar el nombre de un paso: lo único que la clínica ajusta. El paso, su
+ * orden y su momento no cambian.
+ */
+export async function renameStage(
   tx: Db,
   orgId: string,
   stageId: string,
-  input: { name?: string; kind?: string },
+  input: { name: string },
 ): Promise<Stage> {
-  const stage = await requireStage(tx, orgId, stageId)
-  const patch: { name?: string; kind?: string } = {}
-  if (input.name !== undefined) {
-    const name = input.name.trim()
-    if (!name) throw validation("El nombre de la etapa es obligatorio")
-    patch.name = name
-  }
-  if (input.kind !== undefined) {
-    if (!STAGE_KINDS.includes(input.kind as StageKind))
-      throw validation("Elige el tipo de la etapa: en curso, ganada o perdida")
-    patch.kind = input.kind
-  }
-  if (Object.keys(patch).length === 0) return stage
+  const name = input.name.trim()
+  if (!name) throw validation("Escribe el nombre del paso")
+  if (name.length > 120) throw validation("El nombre del paso no puede superar 120 caracteres")
   const [updated] = await tx
     .update(pipelineStage)
-    .set(patch)
+    .set({ name })
     .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Etapa")
   return toStage(updated)
-}
-
-/** Reasigna posiciones en dos fases (negativos temporales) para no violar el unique. */
-async function reassignPositions(tx: Db, orderedIds: string[]): Promise<void> {
-  for (const [index, id] of orderedIds.entries()) {
-    await tx
-      .update(pipelineStage)
-      .set({ position: -(index + 1) })
-      .where(eq(pipelineStage.id, id))
-  }
-  for (const [index, id] of orderedIds.entries()) {
-    await tx.update(pipelineStage).set({ position: index }).where(eq(pipelineStage.id, id))
-  }
-}
-
-export async function deleteStage(tx: Db, orgId: string, stageId: string): Promise<void> {
-  const stage = await requireStage(tx, orgId, stageId)
-  const [usedByOpp] = await tx
-    .select({ id: opportunity.id })
-    .from(opportunity)
-    .where(and(eq(opportunity.stageId, stageId), eq(opportunity.organizationId, orgId)))
-    .limit(1)
-  if (usedByOpp) {
-    throw new ServiceError(
-      "STAGE_IN_USE",
-      409,
-      "La etapa tiene oportunidades y no se puede eliminar",
-    )
-  }
-  await tx
-    .delete(pipelineStage)
-    .where(and(eq(pipelineStage.id, stageId), eq(pipelineStage.organizationId, orgId)))
-  // Compactar posiciones restantes.
-  const siblings = await tx
-    .select({ id: pipelineStage.id })
-    .from(pipelineStage)
-    .where(eq(pipelineStage.pipelineId, stage.pipelineId))
-    .orderBy(asc(pipelineStage.position))
-  await reassignPositions(
-    tx,
-    siblings.map((s) => s.id),
-  )
-}
-
-export async function reorderStages(
-  tx: Db,
-  orgId: string,
-  pipelineId: string,
-  stageIds: string[],
-): Promise<Stage[]> {
-  await requirePipeline(tx, orgId, pipelineId)
-  const rows = await tx
-    .select()
-    .from(pipelineStage)
-    .where(and(eq(pipelineStage.pipelineId, pipelineId), eq(pipelineStage.organizationId, orgId)))
-  const current = new Set(rows.map((r) => r.id))
-  if (stageIds.length !== rows.length || !stageIds.every((id) => current.has(id))) {
-    throw validation("El orden debe incluir todas las etapas, una vez cada una")
-  }
-  await reassignPositions(tx, stageIds)
-  const updated = await tx
-    .select()
-    .from(pipelineStage)
-    .where(eq(pipelineStage.pipelineId, pipelineId))
-    .orderBy(asc(pipelineStage.position))
-  return updated.map(toStage)
 }

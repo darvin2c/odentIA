@@ -166,7 +166,8 @@ test("whatsapp: se conecta con los datos de la app de Meta en tres pasos que se 
   const connected = page.getByRole("region", { name: "WhatsApp quedó conectado" })
   await expect(connected).toBeVisible({ timeout: 30_000 })
   await expect(connected).toContainText("Ya recibe mensajes.")
-  await expect(connected).toContainText("7 mensajes están en revisión de WhatsApp.")
+  // Al conectar se piden los diez mensajes de odentIA (los nueve del agente y «Retomar la conversación»).
+  await expect(connected).toContainText("10 mensajes están en revisión de WhatsApp.")
   await expect(connected).toContainText("WhatsApp pide una forma de pago en tu cuenta para enviar mensajes aprobados")
   await expect(connected.getByRole("link", { name: /Abrir mi cuenta de Meta/ })).toHaveAttribute("href", /^https:\/\/business\.facebook\.com\//)
   await expect(finishing).toHaveCount(0)
@@ -210,17 +211,19 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   const messages = page.getByRole("region", { name: "Mensajes", exact: true })
   const byAgent = messages.getByRole("group", { name: "Los envía el agente" })
   const byTeam = messages.getByRole("group", { name: "Los envía tu equipo desde la Bandeja" })
-  await expect(byAgent.getByRole("listitem")).toHaveCount(6)
+  // Uno por línea que escribe y los tres avisos de «Recordar la cita» (reservada, cambio de fecha, cancelada).
+  await expect(byAgent.getByRole("listitem")).toHaveCount(9)
   // «Retomar una oportunidad» viene escrito como los demás del agente.
   await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("En revisión")
   await expect(byTeam.getByRole("listitem")).toHaveCount(1)
-  await expect(messages).toContainText("2 aprobados · 5 en revisión")
+  await expect(messages).toContainText("2 aprobados · 8 en revisión")
   // Nadie lee ni escribe nombres técnicos.
   await expect(messages).not.toContainText(/odentia_|plantilla|template/i)
-  const reminder = byAgent.getByRole("listitem").filter({ hasText: "Recordar la cita" })
+  const reminder = byAgent.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })
   await expect(reminder).toContainText("Aprobado")
-  // Recién creada la clínica, ninguna línea del Administrador está prendida.
-  await expect(reminder).toContainText("Línea apagada")
+  // Recién creada la clínica, «Recordar la cita» ya viene prendida (ADR 0026); las demás líneas, apagadas.
+  await expect(reminder).toContainText("Línea prendida")
+  await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("Línea apagada")
   await expect(byTeam.getByRole("listitem")).toContainText("Viene con odentIA")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("whatsapp-mensajes", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -442,7 +445,7 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
   await info.attach("bandeja-sin-mensaje-aprobado", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await none.getByRole("link", { name: "Ver los mensajes", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/whatsapp"))
-  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("7 en revisión")
+  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("10 en revisión")
 
   // Recepción atiende conversaciones pero no abre Configuración: lee a quién avisar, sin enlace.
   await fixtureDb
@@ -450,7 +453,8 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
     .set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${thread.id}`))
-  await expect(none).toContainText("Avísale a quien administra la clínica.")
+  // Dice a quién pedírselo: por su nombre, o quien administra la clínica si ya no queda nadie con ese rol.
+  await expect(none).toContainText(/Pídeselo a .+ administran? la clínica\./)
   await expect(none.getByRole("link")).toHaveCount(0)
   // Ocultar el enlace no es lo que protege: el servidor tampoco le entrega los mensajes de Configuración.
   expect((await api(page, "GET", `/api/channels/connections/${wa.id}/messages`, org.slug)).status).toBe(403)

@@ -45,6 +45,8 @@ import { Route as OrgInventoryProductIdRouteImport } from './routes/_org/invento
 import { Route as OrgOpportunitiesOpportunityIdRouteImport } from './routes/_org/opportunities.$opportunityId'
 import { Route as OrgPatientsIndexRouteImport } from './routes/_org/patients.index'
 import { Route as OrgPatientsPatientIdRouteImport } from './routes/_org/patients.$patientId'
+import { Route as OrgPeopleIndexRouteImport } from './routes/_org/people.index'
+import { Route as OrgPeoplePersonIdRouteImport } from './routes/_org/people.$personId'
 import { Route as OrgServicesIndexRouteImport } from './routes/_org/services.index'
 import { Route as OrgServicesBibliotecaRouteImport } from './routes/_org/services.biblioteca'
 import { Route as OrgServicesPromotionsRouteImport } from './routes/_org/services.promotions'
@@ -253,6 +255,16 @@ const OrgPatientsPatientIdRoute = OrgPatientsPatientIdRouteImport.update({
   path: '/patients/$patientId',
   getParentRoute: () => OrgRoute,
 } as any)
+const OrgPeopleIndexRoute = OrgPeopleIndexRouteImport.update({
+  id: '/people/',
+  path: '/people/',
+  getParentRoute: () => OrgRoute,
+} as any)
+const OrgPeoplePersonIdRoute = OrgPeoplePersonIdRouteImport.update({
+  id: '/people/$personId',
+  path: '/people/$personId',
+  getParentRoute: () => OrgRoute,
+} as any)
 const OrgServicesIndexRoute = OrgServicesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -427,6 +439,7 @@ export interface FileRoutesByFullPath {
   '/inventory/$productId': typeof OrgInventoryProductIdRoute
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
+  '/people/$personId': typeof OrgPeoplePersonIdRoute
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
@@ -447,6 +460,7 @@ export interface FileRoutesByFullPath {
   '/agent/': typeof OrgAgentIndexRoute
   '/contacts/': typeof OrgContactsIndexRoute
   '/patients/': typeof OrgPatientsIndexRoute
+  '/people/': typeof OrgPeopleIndexRoute
   '/services/': typeof OrgServicesIndexRoute
   '/settings/': typeof OrgSettingsIndexRoute
   '/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
@@ -488,6 +502,7 @@ export interface FileRoutesByTo {
   '/inventory/$productId': typeof OrgInventoryProductIdRoute
   '/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
+  '/people/$personId': typeof OrgPeoplePersonIdRoute
   '/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/services/promotions': typeof OrgServicesPromotionsRoute
   '/settings/agent': typeof OrgSettingsAgentRoute
@@ -508,6 +523,7 @@ export interface FileRoutesByTo {
   '/agent': typeof OrgAgentIndexRoute
   '/contacts': typeof OrgContactsIndexRoute
   '/patients': typeof OrgPatientsIndexRoute
+  '/people': typeof OrgPeopleIndexRoute
   '/services': typeof OrgServicesIndexRoute
   '/settings': typeof OrgSettingsIndexRoute
   '/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
@@ -553,6 +569,7 @@ export interface FileRoutesById {
   '/_org/inventory/$productId': typeof OrgInventoryProductIdRoute
   '/_org/opportunities/$opportunityId': typeof OrgOpportunitiesOpportunityIdRoute
   '/_org/patients/$patientId': typeof OrgPatientsPatientIdRouteWithChildren
+  '/_org/people/$personId': typeof OrgPeoplePersonIdRoute
   '/_org/services/biblioteca': typeof OrgServicesBibliotecaRoute
   '/_org/services/promotions': typeof OrgServicesPromotionsRoute
   '/_org/settings/agent': typeof OrgSettingsAgentRoute
@@ -573,6 +590,7 @@ export interface FileRoutesById {
   '/_org/agent/': typeof OrgAgentIndexRoute
   '/_org/contacts/': typeof OrgContactsIndexRoute
   '/_org/patients/': typeof OrgPatientsIndexRoute
+  '/_org/people/': typeof OrgPeopleIndexRoute
   '/_org/services/': typeof OrgServicesIndexRoute
   '/_org/settings/': typeof OrgSettingsIndexRoute
   '/_org/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
@@ -618,6 +636,7 @@ export interface FileRouteTypes {
     | '/inventory/$productId'
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
+    | '/people/$personId'
     | '/services/biblioteca'
     | '/services/promotions'
     | '/settings/agent'
@@ -638,6 +657,7 @@ export interface FileRouteTypes {
     | '/agent/'
     | '/contacts/'
     | '/patients/'
+    | '/people/'
     | '/services/'
     | '/settings/'
     | '/settings/integrations/model'
@@ -679,6 +699,7 @@ export interface FileRouteTypes {
     | '/inventory/$productId'
     | '/opportunities/$opportunityId'
     | '/patients/$patientId'
+    | '/people/$personId'
     | '/services/biblioteca'
     | '/services/promotions'
     | '/settings/agent'
@@ -699,6 +720,7 @@ export interface FileRouteTypes {
     | '/agent'
     | '/contacts'
     | '/patients'
+    | '/people'
     | '/services'
     | '/settings'
     | '/settings/integrations/model'
@@ -743,6 +765,7 @@ export interface FileRouteTypes {
     | '/_org/inventory/$productId'
     | '/_org/opportunities/$opportunityId'
     | '/_org/patients/$patientId'
+    | '/_org/people/$personId'
     | '/_org/services/biblioteca'
     | '/_org/services/promotions'
     | '/_org/settings/agent'
@@ -763,6 +786,7 @@ export interface FileRouteTypes {
     | '/_org/agent/'
     | '/_org/contacts/'
     | '/_org/patients/'
+    | '/_org/people/'
     | '/_org/services/'
     | '/_org/settings/'
     | '/_org/settings/integrations/model'
@@ -1037,6 +1061,20 @@ declare module '@tanstack/react-router' {
       path: '/patients/$patientId'
       fullPath: '/patients/$patientId'
       preLoaderRoute: typeof OrgPatientsPatientIdRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/people/': {
+      id: '/_org/people/'
+      path: '/people'
+      fullPath: '/people/'
+      preLoaderRoute: typeof OrgPeopleIndexRouteImport
+      parentRoute: typeof OrgRoute
+    }
+    '/_org/people/$personId': {
+      id: '/_org/people/$personId'
+      path: '/people/$personId'
+      fullPath: '/people/$personId'
+      preLoaderRoute: typeof OrgPeoplePersonIdRouteImport
       parentRoute: typeof OrgRoute
     }
     '/_org/services/': {
@@ -1345,9 +1383,11 @@ interface OrgRouteChildren {
   OrgContactsContactIdRoute: typeof OrgContactsContactIdRoute
   OrgOpportunitiesOpportunityIdRoute: typeof OrgOpportunitiesOpportunityIdRoute
   OrgPatientsPatientIdRoute: typeof OrgPatientsPatientIdRouteWithChildren
+  OrgPeoplePersonIdRoute: typeof OrgPeoplePersonIdRoute
   OrgAgentIndexRoute: typeof OrgAgentIndexRoute
   OrgContactsIndexRoute: typeof OrgContactsIndexRoute
   OrgPatientsIndexRoute: typeof OrgPatientsIndexRoute
+  OrgPeopleIndexRoute: typeof OrgPeopleIndexRoute
 }
 
 const OrgRouteChildren: OrgRouteChildren = {
@@ -1375,9 +1415,11 @@ const OrgRouteChildren: OrgRouteChildren = {
   OrgContactsContactIdRoute: OrgContactsContactIdRoute,
   OrgOpportunitiesOpportunityIdRoute: OrgOpportunitiesOpportunityIdRoute,
   OrgPatientsPatientIdRoute: OrgPatientsPatientIdRouteWithChildren,
+  OrgPeoplePersonIdRoute: OrgPeoplePersonIdRoute,
   OrgAgentIndexRoute: OrgAgentIndexRoute,
   OrgContactsIndexRoute: OrgContactsIndexRoute,
   OrgPatientsIndexRoute: OrgPatientsIndexRoute,
+  OrgPeopleIndexRoute: OrgPeopleIndexRoute,
 }
 
 const OrgRouteWithChildren = OrgRoute._addFileChildren(OrgRouteChildren)

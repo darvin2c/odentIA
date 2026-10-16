@@ -600,29 +600,43 @@
     {
       "idx": 85,
       "version": "7",
-      "when": 1792113996278,
-      "tag": "0085_uso_de_ia",
+      "when": 1792078045714,
+      "tag": "0085_un_pendiente_un_lugar",
       "breakpoints": true
     },
     {
       "idx": 86,
       "version": "7",
-      "when": 1792113996279,
-      "tag": "0086_cobro_por_accion",
+      "when": 1792084231417,
+      "tag": "0086_ventas_que_se_mueven_solas",
       "breakpoints": true
     },
     {
       "idx": 87,
       "version": "7",
-      "when": 1792113996280,
-      "tag": "0087_prueba_tope_y_negociacion",
+      "when": 1792113996278,
+      "tag": "0087_uso_de_ia",
       "breakpoints": true
     },
     {
       "idx": 88,
       "version": "7",
+      "when": 1792113996279,
+      "tag": "0088_cobro_por_accion",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1792113996280,
+      "tag": "0089_prueba_tope_y_negociacion",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
       "when": 1792113996281,
-      "tag": "0088_cargo_con_lineas",
+      "tag": "0090_cargo_con_lineas",
       "breakpoints": true
     }
   ]

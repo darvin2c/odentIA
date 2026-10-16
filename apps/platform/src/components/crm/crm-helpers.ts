@@ -1,43 +1,12 @@
-import { activeOrgLocale } from "../../lib/locale"
-/** Helpers puros de la UI comercial (sin red ni estado global). */
+import { formatMoney } from "@odentia/clinical"
+import { addDays, dayMinutesIn, formatDayShort, hourLabel, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 /**
- * Convierte un valor `datetime-local` ("2026-09-30T14:30") a ISO UTC.
- * La entrada se interpreta en la zona local del navegador, no en UTC.
- * Devuelve null si está vacío o es inválido.
+ * Helpers puros de la UI comercial (sin red ni estado global). Toda fecha se
+ * dice y se elige en la zona de la clínica, no en la del navegador: desde otro
+ * país, una tarea vence a la misma hora para todos.
  */
-export function localInputToIso(local: string): string | null {
-  const value = local.trim()
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return date.toISOString()
-}
-
-/** Convierte un ISO a valor `datetime-local` ("YYYY-MM-DDTHH:mm"). "" si ausente/inválido. */
-export function isoToLocalInput(iso: string | null | undefined): string {
-  if (!iso) return ""
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ""
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  )
-}
-
-/**
- * Convierte un valor `date` ("2026-09-30") a ISO (medianoche local).
- * Devuelve null si está vacío o no tiene forma de fecha calendario.
- */
-export function dateInputToIso(date: string): string | null {
-  const value = date.trim()
-  if (!value) return null
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
-  const parsed = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(parsed.getTime())) return null
-  return parsed.toISOString()
-}
 
 /** ¿La fecha ya pasó? null/ausente/inválido nunca vence. */
 export function isOverdue(iso: string | null | undefined, now: number = Date.now()): boolean {
@@ -47,11 +16,10 @@ export function isOverdue(iso: string | null | undefined, now: number = Date.now
 }
 
 /**
- * Fecha+hora corta, en el formato de la clínica, para vencimientos ("12/09/2026, 02:30 p. m.").
- * null/ausente/inválido → "Sin fecha" (nunca blanco). Pasado o futuro se
- * formatea igual; el vencido lo marca `isOverdue` por separado.
+ * Fecha y hora corta, en el formato y la zona de la clínica
+ * («12/09/2026, 02:30 p. m.»). null/ausente/inválido → "Sin fecha".
  */
-export function formatDueAt(iso: string | null | undefined): string {
+export function formatDueAt(iso: string | null | undefined, timeZone: string = activeOrgTimeZone()): string {
   if (!iso) return "Sin fecha"
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return "Sin fecha"
@@ -61,5 +29,54 @@ export function formatDueAt(iso: string | null | undefined): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
   })
+}
+
+/**
+ * Cuándo vence, con palabras y en la zona de la clínica: «hoy, 15:00»,
+ * «mañana», «ayer», «jue 17». Sin hora cuando es medianoche o el final del día.
+ */
+export function dueWords(
+  iso: string | null | undefined,
+  now: number = Date.now(),
+  timeZone: string = activeOrgTimeZone(),
+): string {
+  if (!iso || Number.isNaN(Date.parse(iso))) return "sin fecha"
+  const day = zonedDateOf(iso, timeZone)
+  const today = zonedDateOf(new Date(now).toISOString(), timeZone)
+  const minutes = dayMinutesIn(iso, timeZone)
+  const time = minutes > 0 && minutes < 23 * 60 + 59 ? `, ${hourLabel(minutes)}` : ""
+  if (day === today) return `hoy${time}`
+  if (day === addDays(today, 1)) return `mañana${time}`
+  if (day === addDays(today, -1)) return `ayer${time}`
+  return `${formatDayShort(day)}${time}`
+}
+
+/** Fecha («2026-10-17») y minutos del día de un instante, en la zona de la clínica. */
+export function dueParts(
+  iso: string | null | undefined,
+  timeZone: string = activeOrgTimeZone(),
+): { date: string; minutes: number } | null {
+  if (!iso || Number.isNaN(Date.parse(iso))) return null
+  return { date: zonedDateOf(iso, timeZone), minutes: dayMinutesIn(iso, timeZone) }
+}
+
+/** El instante de una fecha y una hora elegidas en la zona de la clínica. */
+export function dueFromParts(date: string, minutes: number, timeZone: string = activeOrgTimeZone()): string {
+  return minutesToInstant(date, minutes, timeZone)
+}
+
+/**
+ * Importe con la moneda congelada del registro y el formato de la clínica.
+ * Sin locale (perfil aún cargando) o sin importe devuelve null: cada
+ * superficie muestra su estado neutro en vez de inventar un precio.
+ */
+export function moneyText(amountCents: number | null, currency: string, locale?: string): string | null {
+  if (amountCents === null || !locale) return null
+  try {
+    return formatMoney(amountCents, currency, locale)
+  } catch {
+    return null
+  }
 }

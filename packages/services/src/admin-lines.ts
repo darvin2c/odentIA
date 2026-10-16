@@ -3,7 +3,7 @@ import type { TaskArea } from "@odentia/db/schema/crm"
 
 /**
  * Las líneas del agente Administrador: lo que puede pasar en la clínica y qué
- * se hace cuando pasa. Nueve vienen armadas (`ADMIN_LINES`) y otras solo
+ * se hace cuando pasa. Ocho vienen armadas (`ADMIN_LINES`) y otras solo
  * existen en la clínica que las pide (`CUSTOM_LINES`). Es un catálogo fijo,
  * sin base de datos y sin modelo: de aquí salen los textos de su página, el flujo de cada línea, las
  * tareas que deja y a qué parte del equipo van. El estado de cada línea
@@ -197,23 +197,24 @@ export const ADMIN_LINES: readonly AdminLine[] = [
   {
     key: "seguimiento_comercial",
     name: "Retomar una oportunidad",
-    area: "Seguimiento",
-    trigger: () => "Una oportunidad tiene su próxima acción vencida",
+    area: "Ventas",
+    trigger: () => "La tarea de una oportunidad vence",
     wait: () => null,
     actor: "agente",
     agent: {
       purpose: "seguimiento",
-      does: "le escribe para retomar la conversación",
-      would: "le escribiría para retomar la conversación",
+      does: "le escribe para retomar la conversación y da la tarea por hecha",
+      would: "le escribiría para retomar la conversación y daría la tarea por hecha",
       step: "Le escribe",
-      fallback: "Tarea de llamada",
+      fallback: "Su tarea sigue",
     },
-    // La tarea va a quien lleva la oportunidad; sin responsable, a recepción.
+    // No deja otra tarea: la misma tarea de la oportunidad queda para quien la
+    // lleva (sin responsable, Recepción) con el motivo de por qué no pudo.
     team: {
       area: "recepcion",
-      step: "Tarea de llamada",
-      does: "Queda una tarea de llamada para quien lleva la oportunidad",
-      would: "Quedaría una tarea de llamada para quien lleva la oportunidad",
+      step: "Su tarea sigue",
+      does: "La misma tarea queda para quien lleva la oportunidad",
+      would: "La misma tarea quedaría para quien lleva la oportunidad",
       taskTitle: (name) => `Llamar a ${name} para retomar su consulta`,
       toOwner: true,
     },
@@ -305,25 +306,6 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     defaultDays: 30,
     daysLabel: "Días de deuda",
   },
-  {
-    key: "seguimientos_sin_responsable",
-    name: "Seguimiento sin responsable",
-    area: "Seguimiento",
-    trigger: () => "Un seguimiento queda sin responsable",
-    wait: () => null,
-    actor: "persona",
-    agent: null,
-    team: {
-      area: "administracion",
-      step: "Tarea para asignarlo",
-      does: "Queda una tarea para quien administra la clínica",
-      would: "Quedaría una tarea para quien administra la clínica",
-      taskTitle: (name) => `Asignar responsable al seguimiento de ${name}`,
-    },
-    permission: "crm.read",
-    defaultDays: null,
-    daysLabel: null,
-  },
 ] as const
 
 /**
@@ -367,6 +349,26 @@ export function adminLineOf(key: string): AdminLine | null {
   return ADMIN_LINES.find((line) => line.key === key) ?? CUSTOM_LINES.find((line) => line.key === key) ?? null
 }
 
+/**
+ * Tipos de trabajo que pertenecen a una línea sin ser su clave: los avisos de
+ * cita (reservada, movida, cancelada) son de «Recordar la cita».
+ */
+const JOB_KIND_LINE: Record<string, AdminLineKey> = {
+  aviso_cita_reservada: "recordatorio_cita",
+  aviso_cita_movida: "recordatorio_cita",
+  aviso_cita_cancelada: "recordatorio_cita",
+}
+
+/** La línea de un trabajo (o de un mensaje del catálogo) por su tipo. */
+export function lineOfJobKind(kind: string): AdminLine | null {
+  return adminLineOf(JOB_KIND_LINE[kind] ?? kind)
+}
+
+/** Los tipos de trabajo de una línea: su clave y los que le pertenecen. */
+export function jobKindsOfLine(key: string): string[] {
+  return [key, ...Object.entries(JOB_KIND_LINE).filter(([, line]) => line === key).map(([kind]) => kind)]
+}
+
 /** Lo que dice la línea en la lista, según esté prendida o apagada y qué partes van. */
 export function describeLine(
   line: AdminLine,
@@ -379,7 +381,11 @@ export function describeLine(
   const notice = "Si no puede, avisa por qué y cómo habilitarlo"
   if (!state.teamPart) return `${writes} ${notice}.`
   const whom = team.toOwner ? "quien lo lleva" : TASK_AREA_LABELS[team.area].team
-  const fallback = `${state.enabled ? "queda" : "quedaría"} una tarea para ${whom}`
+  // «Retomar una oportunidad» no deja otra tarea: la suya sigue para quien la lleva.
+  const own = state.enabled ? team.does : team.would
+  const fallback = team.toOwner
+    ? own.charAt(0).toLowerCase() + own.slice(1)
+    : `${state.enabled ? "queda" : "quedaría"} una tarea para ${whom}`
   return `${writes} ${notice}, y ${fallback}.`
 }
 

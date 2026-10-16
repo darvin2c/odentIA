@@ -75,6 +75,7 @@ import {
   Copy,
   Hand,
   PanelRight,
+  SquarePen,
   UserPlus,
 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -105,9 +106,11 @@ import { ReceptionOffNotice } from "../../components/agent/reception-off-notice"
 import { CorrectDrawer, type CorrectionTarget } from "../../components/agent/correct-drawer"
 import type { AnswerTrace } from "../../lib/agent"
 import { ContactWorkspace } from "../../components/crm/contact-workspace"
+import { ResolvePreviewDetails } from "../../components/crm/resolve-preview"
 import { InboxApprovedMessages } from "../../components/integrations/whatsapp/inbox-approved-messages"
-import { ACTION_LABEL, type AgentProposal } from "../../lib/agent"
+import { ACTION_LABEL, type AgentProposal, permissionForAction, proposalErrorMessage } from "../../lib/agent"
 import { channelIcon, channelLabel } from "../../lib/channels"
+import { NewConversationDialog } from "../../components/inbox-new-conversation"
 import { useOrgEvents } from "../../lib/org-events"
 import { createRegistrationLink } from "../../lib/patient-registration"
 import { activeOrgLocale } from "../../lib/locale"
@@ -183,6 +186,10 @@ function InboxPage() {
   const canRead = usePermission("conversations.read")
   const canWrite = usePermission("conversations.write")
   const canRegister = usePermission("crm.write")
+  // «Contexto» y «Nueva conversación» leen a la persona en el CRM: quien no lo
+  // ve (odontología) no recibe el botón, en vez de abrir «Sin acceso».
+  const canReadCrm = usePermission("crm.read")
+  const [newConversation, setNewConversation] = useState(false)
   const navigate = useNavigate({ from: Route.fullPath })
   const listSearch = useListSearch()
   const channel = listSearch.get("channel")
@@ -370,7 +377,9 @@ function InboxPage() {
       onBack={() => selectConversation(null)}
       showBack={mode !== "panel"}
       onToggleContext={
-        mode === "panel"
+        !canReadCrm
+          ? undefined
+          : mode === "panel"
           ? () => {
               if (contextVisible) return requestCloseContext()
               setContextOpen(true)
@@ -394,7 +403,7 @@ function InboxPage() {
   }, [queryClient])
 
   const workspace =
-    selectedId && workspaceContactId ? (
+    canReadCrm && selectedId && workspaceContactId ? (
       <ContactWorkspace
         key={`${workspaceContactId}:${selectedId}`}
         contactId={workspaceContactId}
@@ -419,7 +428,23 @@ function InboxPage() {
     // abre desde aquí va en cajón, no en la columna lateral.
     <SideDockScopeProvider value="fixed">
     <PageShell fill className="gap-4">
-      <PageHeader title="Bandeja" subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)} />
+      <PageHeader
+        title="Bandeja"
+        subtitle={narrowed ? DEFAULT_SUBTITLE : waitingSubtitle(summary)}
+        actions={
+          canWrite && canReadCrm ? (
+            <Button className="min-h-11 sm:min-h-9" onClick={() => setNewConversation(true)}>
+              <SquarePen className="size-4" aria-hidden />
+              Nueva conversación
+            </Button>
+          ) : undefined
+        }
+      />
+      <NewConversationDialog
+        open={newConversation}
+        onClose={() => setNewConversation(false)}
+        initialQuery={search.trim()}
+      />
       {/* En angosto, con un hilo abierto, la pantalla es del hilo: vistas y filtros vuelven con la lista. */}
       <fieldset className={mode !== "panel" && selectedId ? "hidden" : "flex min-w-0 flex-wrap gap-1.5"}>
         <legend className="sr-only">Vista de la bandeja</legend>
@@ -463,7 +488,7 @@ function InboxPage() {
           },
         ]}
         sortOptions={[]}
-        searchPlaceholder="Buscar contacto"
+        searchPlaceholder="Buscar por nombre o teléfono"
         searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
         resetKeys={["channel", "assigned", "q"]}
       /> : null}
@@ -494,6 +519,8 @@ function InboxPage() {
               onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
+              onNew={canWrite && canReadCrm ? () => setNewConversation(true) : undefined}
+              searching={search.trim() !== ""}
             />
           </ResizablePanel>
           <ResizableHandle withHandle className="mx-1 w-4 bg-transparent" />
@@ -535,6 +562,8 @@ function InboxPage() {
               onSelect={(id) => selectConversation(id)}
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
+              onNew={canWrite && canReadCrm ? () => setNewConversation(true) : undefined}
+              searching={search.trim() !== ""}
             />
           ) : showContext ? (
             (workspace ?? (
@@ -603,9 +632,11 @@ function StateLabel({ words, className = "" }: { words: ConversationWords; class
 
 /**
  * Banda del hilo: el agente propuso una cita en esta conversación y espera el
- * sí del interlocutor. Dice qué y deja claro que nada se ejecuta sin ese sí;
- * «Ver» abre el panel del agente en «Esperan al paciente», donde esa propuesta
- * aparece primero.
+ * sí del interlocutor. Dice qué y deja claro que nada se ejecuta sin ese sí.
+ * Si el interlocutor ya dijo que sí en el chat, «Registrar confirmación» lo
+ * deja constancia aquí mismo (la misma operación que Pendientes y «Contexto»:
+ * el equipo no aprueba, solo registra lo que la persona ya dijo). «Ver» abre el
+ * panel del agente en «Esperan al paciente», donde esa propuesta aparece primero.
  */
 function AgentPendingBand({
   conversationId,
@@ -618,6 +649,11 @@ function AgentPendingBand({
   canSeeProposals: boolean
 }) {
   const { setOpen } = useAgentPanel()
+  const queryClient = useQueryClient()
+  const canDecide = usePermission("agent.decide")
+  const canConversations = usePermission("conversations.write")
+  const canAgenda = usePermission("appointments.write")
+  const canCrm = usePermission("crm.write")
   const hinted = attention ? attention.pendingContact : null
   // Misma clave y petición que el panel de contexto: comparten la caché.
   const query = useQuery({
@@ -627,6 +663,19 @@ function AgentPendingBand({
         `/api/agent/proposals?status=propuesta&conversationId=${encodeURIComponent(conversationId)}`,
       ),
     enabled: canSeeProposals && hinted !== 0,
+  })
+  const confirm = useMutation({
+    mutationFn: (proposal: AgentProposal) =>
+      apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${proposal.id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ contactId: proposal.contactId }),
+      }),
+    onSuccess: () => {
+      invalidateAgentPanelQueries(queryClient)
+      for (const key of ["agent-proposals", "conversations", "conversation", "crm-context", "workspace-home"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+    },
   })
   const proposals = query.data?.data ?? []
   // Sin la lista (enlace directo) manda lo que devuelve la consulta del hilo.
@@ -640,6 +689,19 @@ function AgentPendingBand({
     total === 1
       ? "Espera la confirmación del interlocutor en este hilo."
       : "Esperan la confirmación del interlocutor en este hilo."
+  // Registrar aquí la única propuesta pendiente: quien decide por el agente y puede hacer el acto.
+  const needed = first ? permissionForAction(first.action) : null
+  const canRegister =
+    total === 1 && !!first && first.mode === "confirmar_usuario" && first.status === "propuesta" && !!first.contactId &&
+    canDecide && canConversations &&
+    (needed === "appointments.write" ? canAgenda : needed === "conversations.write" ? canConversations : canCrm)
+  const failed = confirm.data ? proposalErrorMessage(confirm.data.data) : null
+  const error =
+    confirm.error instanceof ApiError
+      ? (confirm.error.shape.message ?? "No se pudo registrar la confirmación.")
+      : confirm.error
+        ? "No se pudo registrar la confirmación."
+        : failed
   return (
     <div
       role="status"
@@ -649,10 +711,28 @@ function AgentPendingBand({
       <p className="min-w-0 flex-1 basis-48">
         El agente propuso <span className="font-semibold">{what}</span>. {outcome}
       </p>
+      {canRegister && first ? (
+        <SubmitButton
+          size="sm"
+          className="min-h-11 rounded-full sm:min-h-9"
+          pending={confirm.isPending}
+          onClick={() => {
+            confirm.reset()
+            confirm.mutate(first)
+          }}
+        >
+          Registrar confirmación
+        </SubmitButton>
+      ) : null}
       {canSeeProposals ? (
         <Button type="button" size="sm" variant="outline" className="min-h-11 rounded-full sm:min-h-9" onClick={() => setOpen(true, "paciente")}>
           Ver
         </Button>
+      ) : null}
+      {error ? (
+        <p role="alert" className="basis-full text-destructive">
+          {error}
+        </p>
       ) : null}
     </div>
   )
@@ -671,6 +751,8 @@ function ConversationList({
   onSelect,
   onFetchNextPage,
   onRetry,
+  onNew,
+  searching = false,
 }: {
   items: ConversationListItem[]
   selectedId: string | null
@@ -683,6 +765,10 @@ function ConversationList({
   onSelect: (id: string) => void
   onFetchNextPage: () => void
   onRetry: () => void
+  /** «Nueva conversación»: el vacío ofrece escribirle a alguien. */
+  onNew?: () => void
+  /** Hay una búsqueda: el vacío dice que nadie coincide. */
+  searching?: boolean
 }) {
   return (
     <div className="elevated flex min-h-0 flex-1 flex-col divide-y overflow-y-auto rounded-xl border bg-card">
@@ -758,7 +844,16 @@ function ConversationList({
         </div>
       )}
       {!isError && !hasItems && !isLoading && (
-        <EmptyState title="Sin conversaciones" description="Los mensajes entrantes aparecen aquí." />
+        <EmptyState
+          title={searching ? "Nadie coincide con la búsqueda" : "Sin conversaciones"}
+          description={
+            searching
+              ? "Busca por nombre o por teléfono. Si aún no le escribiste, empieza una conversación."
+              : "Los mensajes entrantes aparecen aquí."
+          }
+          actionLabel={onNew ? "Nueva conversación" : undefined}
+          onAction={onNew}
+        />
       )}
       {isError && hasItems ? (
         <div className="flex flex-wrap items-center gap-2 p-4">
@@ -888,7 +983,9 @@ function ThreadView({
   // Resumen del caso para quien lo toma; guarda la conversación para que no siga abierto al cambiar de hilo.
   const canTakeCase = usePermission("conversations.write")
   const myUserId = useMyUserId()
-  const canOpenContact = usePermission("crm.read")
+  // Quien aún no es paciente solo lo ven recepción y quien dirige (`crm.read`); caja y odontología, solo pacientes.
+  const canOpenPeople = usePermission("patients.read")
+  const canSeeNonPatients = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1142,11 +1239,11 @@ function ThreadView({
           </Button>
         )}
         <div className="min-w-0 flex-1">
-          {/* Quien atiende conversaciones sin leer el CRM (odontología) ve el nombre, sin un enlace que rebota. */}
-          {canOpenContact ? (
+          {/* El nombre lleva a la página de la persona (ADR 0029): también para odontología, que la ve sin el CRM si es paciente. */}
+          {canOpenPeople && (canSeeNonPatients || detail.contact.isPatient) ? (
             <Link
-              to="/contacts/$contactId"
-              params={{ contactId: detail.contact.id }}
+              to="/people/$personId"
+              params={{ personId: detail.contact.id }}
               className="block truncate text-[15px] font-bold hover:underline"
             >
               {detail.contact.displayName}
@@ -1185,7 +1282,8 @@ function ThreadView({
             Tomar
           </SubmitButton>
         ) : null}
-        {canWrite && !closed && withPerson ? (
+        {/* Con un caso del agente abierto no se devuelve: antes se resuelve (el servidor responde HANDOFF_OPEN). */}
+        {canWrite && !closed && withPerson && !threadAttention?.handoffPriority ? (
           <SubmitButton
             variant="outline"
             size="sm"
@@ -1307,18 +1405,8 @@ function ThreadView({
         onClose={() => setConfirming(null)}
         onConfirm={() => actionMutation.mutate({ path: "/resolve" })}
       >
-        {resolveText && resolveText.also.length > 0 ? (
-          <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
-            {resolveText.also.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        ) : null}
-        {preview?.farewell && preview.farewellText ? (
-          <p className="rounded-lg bg-muted/60 p-3 text-sm">
-            <span className="font-semibold">Despedida: </span>«{preview.farewellText}»
-          </p>
-        ) : null}
+        {/* La misma pieza que completar la tarea de un caso en Tareas y en «Contexto». */}
+        {preview ? <ResolvePreviewDetails name={name} preview={preview} /> : null}
         {previewError || (confirming === "resolve" && actionError) ? (
           <p role="alert" className="text-sm text-destructive">
             {confirming === "resolve" && actionError ? actionError : previewError}

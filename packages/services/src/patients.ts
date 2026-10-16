@@ -16,6 +16,7 @@ import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
+import { setPersonArchived } from "./people.js"
 import { decodeCursor } from "./cursors.js"
 import {
   branchNotFound,
@@ -614,16 +615,29 @@ const PATCH_FIELDS = [
   "insuranceDetail",
   "referralSource",
   "registeredBranchId",
-  "isActive",
 ] as const
 
 export async function updatePatient(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   id: string,
   patch: UpdatePatientPatch,
 ): Promise<PatientRow> {
+  // Archivar es de la persona entera (`setPersonArchived`): la ficha no se
+  // archiva sola. Va antes que el resto para respetar su orden de bloqueo.
+  if (patch.isActive !== undefined) {
+    const { isActive, ...rest } = patch
+    const owner = await patientPersonId(tx, orgId, id)
+    if (owner) await setPersonArchived(tx, orgId, { userId: actorUserId }, owner, !isActive)
+    else
+      await tx
+        .update(patient)
+        .set({ isActive, updatedAt: new Date() })
+        .where(and(eq(patient.id, id), eq(patient.organizationId, orgId)))
+    patch = rest
+    if (Object.keys(rest).length === 0) return requirePatient(tx, orgId, id)
+  }
   // Mismo orden de bloqueo que la conciliación de identidad: persona y después ficha.
   const personId = await patientPersonId(tx, orgId, id)
   if (personId) await tx.select({ id: contact.id }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")

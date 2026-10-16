@@ -9,7 +9,8 @@ export interface WorkspaceHome {
   access: Record<"patients" | "appointments" | "conversations" | "tasks" | "finance" | "clinical" | "crm" | "agent" | "allTasks" | "configure" | "ownAppointments", boolean>
   /** Hay más de una sede activa: solo entonces se ofrece elegirla. */
   multiBranch: boolean
-  setup: { availability: boolean; chairs: boolean; patients: boolean } | null
+  /** `agent`: Recepción y el Administrador encendidos; solo viaja a quien puede encenderlos. */
+  setup: { availability: boolean; chairs: boolean; patients: boolean; agent?: boolean } | null
   activity: { recorded: boolean }
   /** Lo que necesita a una persona, en el orden en que se muestra. */
   waiting: WaitingRow[]
@@ -26,6 +27,8 @@ export interface WaitingTask {
   href: string
   mine: boolean
   assigneeName: string | null
+  /** La oportunidad de la que sale, si el rol puede verla. */
+  opportunityTitle: string | null
 }
 export interface WaitingBudgets {
   total: number
@@ -33,14 +36,38 @@ export interface WaitingBudgets {
   items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
 }
 export type WaitingRow =
-  | { kind: "case"; id: string; priority: string; reason: string; contactName: string | null; channel: string | null; createdAt: string; conversationId: string | null }
+  | {
+      kind: "case"
+      id: string
+      priority: string
+      reason: string
+      contactName: string | null
+      channel: string | null
+      createdAt: string
+      conversationId: string | null
+      /** Nadie lo tomó todavía: la fila ofrece «Tomar». */
+      unclaimed: boolean
+    }
+  /** Una cita sin confirmar después del primer recordatorio del agente: hay que llamar. */
+  | {
+      kind: "unconfirmed"
+      id: string
+      patientId: string
+      patientName: string
+      phone: string | null
+      startsAt: string
+      branchName: string
+      serviceName: string | null
+    }
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
+  /** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
+  | { kind: "stillOpen"; total: number; conversationId: string | null; contactName: string | null; quietSince: string | null }
   | ({ kind: "task"; more: number } & WaitingTask)
   | { kind: "advice"; key: string; title: string; detail: string; actor: "agente" | "persona" }
   /** Personas a las que el agente no pudo escribir hoy, por motivo. */
   | { kind: "unreached"; total: number; byCause: Array<{ total: number; reason: string }> }
   | ({ kind: "budgets" } & WaitingBudgets)
-  | { kind: "more"; of: "cases" | "tasks"; count: number }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed"; count: number }
 export interface WorkspaceAppointment {
   id: string
   patientId: string

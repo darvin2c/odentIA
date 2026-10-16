@@ -15,6 +15,9 @@
  * conversaciones). `agent.write` queda reservado a administrar el agente
  * (configuración, conocimiento, simulación); `agent.read` a supervisar.
  *
+ * `tasks.all` (ver las tareas de toda la clínica, no solo las propias y las de
+ * su área) es solo de propietario y administrador.
+ *
  * `clinical.alerts` es la única excepción acotada: quien recibe al paciente ve
  * sus alergias activas (declaradas en el registro o validadas), nunca el resto
  * de la ficha. No implica `clinical.read`.
@@ -55,6 +58,7 @@ export type Permission =
   | "budgets.decide"
   | "finance.close"
   | "finance.admin"
+  | "tasks.all"
   | "catalog.read";
 
 /** Etiquetas en español para la UI de miembros. */
@@ -88,6 +92,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "budgets.decide",
   "finance.close",
   "finance.admin",
+  "tasks.all",
   "catalog.read",
 ];
 
@@ -155,6 +160,7 @@ function isPermission(permission: string): permission is Permission {
     permission === "budgets.decide" ||
     permission === "finance.close" ||
     permission === "finance.admin" ||
+    permission === "tasks.all" ||
     permission === "catalog.read"
   ) return true;
   const separator = permission.lastIndexOf(".");
@@ -206,9 +212,15 @@ interface PlatformPathRule {
  */
 const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   { prefix: "/agenda", permissions: ["appointments.read"] },
+  // La página de cada persona y la lista única (ADR 0029): cada bloque pide
+  // su propio permiso al servidor; entrar es de quien ve a las personas.
+  { prefix: "/people", permissions: ["patients.read"] },
+  // La ficha del paciente redirige a su persona; la atención y las
+  // impresiones siguen colgando de aquí.
   { prefix: "/patients", permissions: ["patients.read"] },
   { prefix: "/inbox", permissions: ["conversations.read"] },
-  { prefix: "/contacts", permissions: ["crm.read"] },
+  // Dirección antigua de Contactos: solo redirige a la página de la persona.
+  { prefix: "/contacts", permissions: ["patients.read"] },
   { prefix: "/opportunities", permissions: ["crm.read"] },
   { prefix: "/pipeline", permissions: ["crm.read"] },
   { prefix: "/tasks", permissions: ["tasks.read"] },
