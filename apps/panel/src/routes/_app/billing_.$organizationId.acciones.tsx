@@ -104,19 +104,21 @@ function ActionsPage() {
         meta: { view: { role: "title" } },
       },
       {
-        id: "agente",
-        header: "Agente y canal",
+        id: "que",
+        header: "Qué hizo",
         cell: ({ row }) => {
           const channel = row.original.channel ? CHANNEL_WORDS[row.original.channel] ?? row.original.channel : null
           return (
-            <span>
-              {AGENT_OF[row.original.kind].agent}
-              {channel ? <span className="text-muted-foreground"> · {channel}</span> : null}
+            <span className="block min-w-48 whitespace-normal">
+              <span className="block text-xs text-muted-foreground">
+                {AGENT_OF[row.original.kind].agent}
+                {channel ? ` · ${channel}` : ""}
+              </span>
+              {row.original.detail}
             </span>
           )
         },
       },
-      { id: "que", header: "Qué hizo", cell: ({ row }) => <span>{row.original.detail}</span> },
       {
         id: "importe",
         header: "Importe",
@@ -132,7 +134,7 @@ function ActionsPage() {
             />
           ),
       },
-      { id: "estado", header: "Estado", cell: ({ row }) => <span className="text-sm">{STATE_WORDS[row.original.state]}</span> },
+      { id: "estado", header: "Estado", cell: ({ row }) => <span className="block min-w-32 whitespace-normal text-sm">{STATE_WORDS[row.original.state]}</span>, meta: { view: { primary: true } } },
     ],
     [slug],
   )

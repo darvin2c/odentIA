@@ -33,7 +33,7 @@ export function WhatsappRatesSection() {
   const [editing, setEditing] = useState<Partial<WhatsappRate> | null>(null)
   const rates = useQuery({
     queryKey: ["admin", "billing", "whatsapp-rates"],
-    queryFn: () => api<{ data: WhatsappRate[] }>("/api/admin/billing/whatsapp-rates").then((res) => res.data),
+    queryFn: () => api<WhatsappRate[]>("/api/admin/billing/whatsapp-rates"),
   })
   return (
     <section aria-labelledby="whatsapp-tarifas" className="flex flex-col gap-2">
@@ -159,7 +159,7 @@ export function NegotiationsSection({ organizationNames }: { organizationNames: 
   const queryClient = useQueryClient()
   const pending = useQuery({
     queryKey: ["admin", "billing", "negotiations"],
-    queryFn: () => api<{ data: Negotiation[] }>("/api/admin/billing/negotiations").then((res) => res.data),
+    queryFn: () => api<Negotiation[]>("/api/admin/billing/negotiations"),
   })
   const decide = useMutation({
     mutationFn: (input: { id: string; approve: boolean }) =>

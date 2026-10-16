@@ -65,13 +65,14 @@ function priceText(micros: number, currency: string): string {
   return new Intl.NumberFormat("es-PE", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
 }
 const discounted = (base: number, bps: number) => Math.round((base * (10_000 - bps)) / 10_000)
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 const errorText = (error: unknown) => (error instanceof ApiError ? (error.shape.message ?? "No se pudo guardar") : "No se pudo guardar")
 
 export function OrgBillingSection({ organizationId }: { organizationId: string }) {
   const queryClient = useQueryClient()
   const terms = useQuery({
     queryKey: ["admin", "organizations", organizationId, "billing"],
-    queryFn: () => api<{ data: BillingTerms | null }>(`/api/admin/organizations/${organizationId}/billing`).then((res) => res.data),
+    queryFn: () => api<BillingTerms | null>(`/api/admin/organizations/${organizationId}/billing`),
   })
   const [trialCredit, setTrialCredit] = useState("")
   const [trialDays, setTrialDays] = useState("")
@@ -89,24 +90,24 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
     setMessage(result.status === "pendiente" ? "Quedó pedido: la administración de odentIA debe aprobarlo." : "Guardado.")
   const saveTrial = useMutation({
     mutationFn: () =>
-      api<{ data: { status: "aplicado" | "pendiente" } }>(`/api/admin/organizations/${organizationId}/billing/trial`, {
+      api<{ status: "aplicado" | "pendiente" }>(`/api/admin/organizations/${organizationId}/billing/trial`, {
         method: "POST",
         body: JSON.stringify({ trialCreditCents: majorToCents(trialCredit, terms.data?.plan?.currency ?? "USD") ?? -1, trialDays: Number(trialDays) }),
       }),
     onSuccess: (res) => {
-      outcome(res.data)
+      outcome(res)
       refresh()
     },
     onError: (e) => setMessage(errorText(e)),
   })
   const saveDiscount = useMutation({
     mutationFn: () =>
-      api<{ data: { status: "aplicado" | "pendiente" } }>(`/api/admin/organizations/${organizationId}/billing/discount`, {
+      api<{ status: "aplicado" | "pendiente" }>(`/api/admin/organizations/${organizationId}/billing/discount`, {
         method: "POST",
         body: JSON.stringify({ discountBps: Math.round(Number(discount.replace(",", ".")) * 100) }),
       }),
     onSuccess: (res) => {
-      outcome(res.data)
+      outcome(res)
       refresh()
     },
     onError: (e) => setMessage(errorText(e)),
@@ -148,7 +149,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
           value={data.consumption.subtotalCents}
           total={data.consumption.creditCents}
           valueText={`${money(Math.min(data.consumption.subtotalCents, data.consumption.creditCents))} de ${money(data.consumption.creditCents)}`}
-          description={`Lo que hicieron los agentes: ${count("conversacion")} conversaciones, ${count("consulta")} consultas y ${count("cita")} citas, por ${money(data.consumption.subtotalCents)}.`}
+          description={`Lo que hicieron los agentes: ${plural(count("conversacion"), "conversación", "conversaciones")}, ${plural(count("consulta"), "consulta", "consultas")} y ${plural(count("cita"), "cita", "citas")}, por ${money(data.consumption.subtotalCents)}.`}
         />
       ) : null}
 
@@ -243,7 +244,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
         <Label htmlFor="org-cycle">Lo que pasa del crédito se factura</Label>
         <Select value={data.billingCycle} onValueChange={(value) => saveCycle.mutate(value as "mensual" | "quincenal")}>
           <SelectTrigger id="org-cycle" className="w-44">
-            <SelectValue />
+            <SelectValue>{data.billingCycle === "quincenal" ? "Cada 15 días" : "Cada mes"}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="mensual">Cada mes</SelectItem>

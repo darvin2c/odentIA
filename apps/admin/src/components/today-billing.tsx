@@ -39,12 +39,12 @@ function left(row: TrialRow): string {
 export function TodayBilling() {
   const trials = useQuery({
     queryKey: ["admin", "billing", "trial-watch"],
-    queryFn: () => api<{ data: TrialRow[] }>("/api/admin/billing/trial-watch").then((res) => res.data),
+    queryFn: () => api<TrialRow[]>("/api/admin/billing/trial-watch"),
     retry: false,
   })
   const margin = useQuery({
     queryKey: ["admin", "billing", "low-margin"],
-    queryFn: () => api<{ data: MarginRow[] }>("/api/admin/billing/low-margin").then((res) => res.data),
+    queryFn: () => api<MarginRow[]>("/api/admin/billing/low-margin"),
     retry: false,
   })
   // Soporte no ve importes: sin acceso, la sección no aparece.

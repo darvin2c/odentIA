@@ -100,10 +100,10 @@ export function PlanDrawer({ plan, onClose, onSaved }: { plan?: AdminPlan; onClo
   const check = useQuery({
     queryKey: ["admin", "billing", "plan-check", checked],
     queryFn: () =>
-      api<{ data: { checks: PriceCheck[]; margin: { atBase: number | null; atMinimum: number | null } } }>("/api/admin/billing/plans/check", {
+      api<{ checks: PriceCheck[]; margin: { atBase: number | null; atMinimum: number | null } }>("/api/admin/billing/plans/check", {
         method: "POST",
         body: JSON.stringify(checked),
-      }).then((res) => res.data),
+      }),
     enabled: /^[A-Z]{3}$/.test(checked.currency),
     retry: false,
   })

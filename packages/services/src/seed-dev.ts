@@ -329,6 +329,7 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
+    "help_request",
     "support_access_audit",
     "support_access_grant",
     "support_attachment",
@@ -354,11 +355,21 @@ async function wipeSeed(): Promise<void> {
     "automation_job",
     "automation_consent",
     "automation_rule",
+    // Lo que el agente aprende y recuerda referencia conversaciones y conocimiento:
+    // va antes que ellos, en el orden de sus referencias.
+    "agent_test_case",
+    "agent_lesson",
+    "agent_review_item",
+    "agent_answer_trace",
+    "agent_case_memory",
+    "agent_person_fact",
+    "appointment_booking_link",
     "agent_decision_log",
     "ai_usage",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
+    "agent_knowledge_gap",
     "agent_knowledge_revision",
     "agent_knowledge_entry",
     "crm_note",

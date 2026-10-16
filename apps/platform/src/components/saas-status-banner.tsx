@@ -48,6 +48,8 @@ const ACTION_WORDS: Record<SaasAlert["action"], string> = {
 }
 
 const SEVERITY = { limite: 0, alarma: 1, aviso: 2 } as const
+/** A igual nivel, lo que cambia el trabajo del día primero: el tope corta casos nuevos y sin saldo los agentes se pausan. */
+const FAMILY_ORDER = { tope: 0, saldo_prueba: 1, dias_prueba: 2, credito: 3 } as const
 
 export function SaasStatusBanner({ organizationId, role }: { organizationId: string; role: string }) {
   const [dismissed, setDismissed] = useState(false)
@@ -88,7 +90,7 @@ export function SaasStatusBanner({ organizationId, role }: { organizationId: str
   if (!data || data.isDemo) return null
   const blocked = data.status === "restringida" || data.status === "pausada" || data.status === "cancelada"
   const canPay = canManage
-  const top = [...(alerts.data ?? [])].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level])[0]
+  const top = [...(alerts.data ?? [])].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level] || FAMILY_ORDER[a.family] - FAMILY_ORDER[b.family])[0]
   const topKey = top ? `${top.family}:${top.level}:${top.periodKey}` : null
   if (!blocked && top && topKey !== hiddenAlert) {
     return (
