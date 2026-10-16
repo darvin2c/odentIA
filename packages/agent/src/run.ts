@@ -10,6 +10,8 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   type AgentConfig,
   countAgentModelRunsToday,
+  getAgentSpendGate,
+  hasOpenConversationAction,
   automationReplyOf,
   getAgentConfig,
   getLesson,
@@ -449,6 +451,31 @@ async function attendAgentRun(
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
     runUsage = toolCtx.usage
+    // Dinero (ADR 0030): sin saldo de prueba los agentes se pausan; con el tope
+    // del mes alcanzado, Recepción no toma casos nuevos (quien ya conversa hoy
+    // sigue: no cuesta otra conversación). La persona recibe el aviso fijo y el
+    // caso pasa al equipo, sin llamar al modelo.
+    const spend = await withOrgContext(db, orgId, async (tx) => {
+      const gate = await getAgentSpendGate(tx, orgId)
+      if (gate.trialExhausted) return "SALDO_PRUEBA" as const
+      if (gate.capReached && !(await hasOpenConversationAction(tx, orgId, toolCtx.contactId))) return "TOPE_GASTO" as const
+      return null
+    }).catch(() => null)
+    if (spend) {
+      await performHandoff(toolCtx, spend === "SALDO_PRUEBA" ? "agentes en pausa: se usó todo el saldo de prueba" : "se alcanzó el tope de gasto del mes")
+      await noticeAfterHandoff(toolCtx)
+      await ledger(db, orgId, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        model: effectiveModel,
+        status: "handoff",
+        startedAt,
+        endedAt: new Date(),
+        llmCalls: 0,
+        error: spend,
+      })
+      return "done"
+    }
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
     const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))

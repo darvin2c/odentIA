@@ -33,6 +33,12 @@ export interface Consumption {
   overCreditCents: number
   projectedCents: number | null
   spendCapCents?: number | null
+  tax?: { label: string; rateBps: number } | null
+  whatsapp?: {
+    templates: { marketing: number; utility: number; authentication: number }
+    currency: string | null
+    estimateMicros: number | null
+  }
 }
 
 export const AGENT_OF: Record<SaasActionKind, { agent: string; what: (count: number) => string }> = {
@@ -51,7 +57,8 @@ export function PriceWithDiscount({ base, price, currency, discountBps }: { base
   if (discountBps <= 0 || price === base) return <span className="tabular-nums">{formatMicros(base, currency)}</span>
   return (
     <span className="inline-flex flex-wrap items-baseline gap-x-1.5 tabular-nums">
-      <s className="text-muted-foreground" aria-label={`Precio base ${formatMicros(base, currency)}`}>
+      <s className="text-muted-foreground">
+        <span className="sr-only">Precio base </span>
         {formatMicros(base, currency)}
       </s>
       <span className="font-semibold text-primary">{formatMicros(price, currency)}</span>
@@ -60,7 +67,17 @@ export function PriceWithDiscount({ base, price, currency, discountBps }: { base
   )
 }
 
-export function ConsumptionCard({ data, exempt = false, onShowActions }: { data: Consumption; exempt?: boolean; onShowActions: () => void }) {
+export function ConsumptionCard({
+  data,
+  exempt = false,
+  onShowActions,
+  onChangeCap,
+}: {
+  data: Consumption
+  exempt?: boolean
+  onShowActions: () => void
+  onChangeCap?: () => void
+}) {
   const currency = data.currency ?? "USD"
   const money = (cents: number) => formatPlanMoney(cents, currency)
   const trial = data.period.credit === "prueba"
@@ -114,7 +131,7 @@ export function ConsumptionCard({ data, exempt = false, onShowActions }: { data:
         {data.priced ? (
           <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 bg-muted/40 px-4 py-3">
             <p className="text-sm">
-              Subtotal, sin impuestos
+              Subtotal, sin {data.tax?.label ?? "impuestos"}
               {savings > 0 ? (
                 <span className="text-muted-foreground"> · a precio base serían {money(data.baseSubtotalCents)}: ahorras {money(savings)}</span>
               ) : null}
@@ -141,6 +158,26 @@ export function ConsumptionCard({ data, exempt = false, onShowActions }: { data:
                   : "Lo que pase del crédito se cobra por acción, con tu precio."
             }
           />
+          {!trial && onChangeCap ? (
+            <div className="flex flex-col gap-1.5">
+              {data.spendCapCents ? (
+                <UsageMeter
+                  label="Tope por encima del crédito"
+                  value={data.overCreditCents}
+                  total={data.spendCapCents}
+                  valueText={`${money(data.overCreditCents)} de ${money(data.spendCapCents)}`}
+                  description="Al llegar, Recepción pasa los casos nuevos a tu equipo con un mensaje fijo."
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">Sin tope de gasto: los agentes siguen atendiendo y cada acción se cobra con tu precio.</p>
+              )}
+              <div>
+                <Button variant="link" size="sm" className="px-0" onClick={onChangeCap}>
+                  {data.spendCapCents ? "Cambiar tope" : "Poner un tope"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
           {data.projectedCents !== null ? (
             <div className="flex flex-col gap-1">
               <p className="text-sm font-medium">A este ritmo, al cierre</p>
@@ -148,6 +185,22 @@ export function ConsumptionCard({ data, exempt = false, onShowActions }: { data:
               <p className="text-xs text-muted-foreground">Estimado con lo que va del tramo; no es un cobro.</p>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {data.whatsapp && data.whatsapp.templates.marketing + data.whatsapp.templates.utility + data.whatsapp.templates.authentication > 0 ? (
+        <div className="rounded-lg border px-4 py-3 text-sm">
+          <p className="font-medium">
+            WhatsApp (Meta), estimado del tramo
+            {data.whatsapp.estimateMicros !== null && data.whatsapp.currency ? (
+              <span className="ml-2 tabular-nums">{formatMicros(data.whatsapp.estimateMicros, data.whatsapp.currency)}</span>
+            ) : null}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {data.whatsapp.templates.utility + data.whatsapp.templates.authentication} mensajes de servicio y {data.whatsapp.templates.marketing} de marketing enviados
+            como plantilla. Es solo una estimación: lo cobra Meta directo a tu cuenta y depende por completo de Meta. odentIA no cobra ni recibe ese pago.
+            {data.whatsapp.estimateMicros === null ? " Aún no tenemos la tarifa de Meta para tu país." : ""}
+          </p>
         </div>
       ) : null}
 

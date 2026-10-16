@@ -5,6 +5,8 @@
  *   permanente (no se deja acciones 403 sin contexto).
  * - Nunca rompe la pantalla por error: muestra reintento explícito.
  */
+import { Button } from "@odentia/ui"
+import { PageNotice } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { apiFetch } from "../lib/api"
@@ -29,8 +31,37 @@ function dateLabel(iso: string | null, locale: string, timeZone: string): string
   }
 }
 
+/** Aviso de cobro calculado por el servidor (ADR 0030, tablero C4). */
+interface SaasAlert {
+  family: "saldo_prueba" | "dias_prueba" | "credito" | "tope"
+  level: "aviso" | "alarma" | "limite"
+  periodKey: string
+  title: string
+  message: string
+  action: "elegir_plan" | "cambiar_tope" | "ver_consumo"
+}
+
+const ACTION_WORDS: Record<SaasAlert["action"], string> = {
+  elegir_plan: "Elegir plan",
+  cambiar_tope: "Cambiar tope",
+  ver_consumo: "Ver consumo",
+}
+
+const SEVERITY = { limite: 0, alarma: 1, aviso: 2 } as const
+
 export function SaasStatusBanner({ organizationId, role }: { organizationId: string; role: string }) {
   const [dismissed, setDismissed] = useState(false)
+  // Lo oculto vuelve al subir de nivel: se recuerda qué aviso se ocultó, no «todos».
+  const [hiddenAlert, setHiddenAlert] = useState<string | null>(null)
+  const canManage = role === "owner" || role === "admin"
+  const alerts = useQuery({
+    queryKey: ["saas", organizationId, "alerts"],
+    queryFn: () =>
+      apiFetch<{ data: SaasAlert[] }>(`/api/account/billing/alerts?orgId=${encodeURIComponent(organizationId)}`).then((res) => res.data),
+    enabled: canManage,
+    retry: false,
+    staleTime: 60_000,
+  })
   const profile = useOrgProfile()
   const locale = profile.data?.locale ?? "es-PE"
   const timeZone = profile.data?.timezone ?? "UTC"
@@ -56,7 +87,25 @@ export function SaasStatusBanner({ organizationId, role }: { organizationId: str
   const data = status.data
   if (!data || data.isDemo) return null
   const blocked = data.status === "restringida" || data.status === "pausada" || data.status === "cancelada"
-  const canPay = role === "owner" || role === "admin"
+  const canPay = canManage
+  const top = [...(alerts.data ?? [])].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level])[0]
+  const topKey = top ? `${top.family}:${top.level}:${top.periodKey}` : null
+  if (!blocked && top && topKey !== hiddenAlert) {
+    return (
+      <PageNotice
+        tone={top.level}
+        label={top.title}
+        action={
+          <Button size="sm" variant="outline" render={<a href={panelUrl(`/billing/${organizationId}`)} />}>
+            {ACTION_WORDS[top.action]}
+          </Button>
+        }
+        onDismiss={() => setHiddenAlert(topKey)}
+      >
+        {top.message}
+      </PageNotice>
+    )
+  }
   // Plan (prueba/gracia) solo para quien administra; restricción para todos.
   if (!blocked && !canPay) return null
   if (dismissed && !blocked) return null
@@ -74,7 +123,8 @@ export function SaasStatusBanner({ organizationId, role }: { organizationId: str
       ? `Tu prueba terminó: tienes hasta el ${dateLabel(data.graceEndsAt, locale, timeZone)} para confirmar tu plan.`
       : "Hay un pago pendiente: regularízalo antes de que el acceso se restrinja."
   } else if (data.status === "prueba" && data.trialEndsAt !== null) {
-    if (new Date(data.trialEndsAt).getTime() - Date.now() > 3 * 86400000) return null
+    // Los días de prueba ya los dice el aviso de cobro cuando corresponde.
+    if (top || new Date(data.trialEndsAt).getTime() - Date.now() > 3 * 86400000) return null
     message = `Tu prueba termina el ${dateLabel(data.trialEndsAt, locale, timeZone)}.`
   }
   if (!message) return null

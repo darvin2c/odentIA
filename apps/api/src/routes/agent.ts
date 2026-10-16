@@ -11,6 +11,7 @@ import {
   previewDictationSuggestions,
   upsertAgentConfig,
   assertAgentTestBudget,
+  assertAgentsNotPaused,
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -106,7 +107,10 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       return await runService(c, 200, async () => {
-        await withOrgContext(deps.db, orgId, (tx) => assertAgentTestBudget(tx, orgId))
+        await withOrgContext(deps.db, orgId, async (tx) => {
+          await assertAgentsNotPaused(tx, orgId)
+          await assertAgentTestBudget(tx, orgId)
+        })
         const extracted = await meterAiUse(deps.db, orgId, "practica_dictado", () =>
           extractDictation(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, transcript: parsed.data.transcript }),
         )

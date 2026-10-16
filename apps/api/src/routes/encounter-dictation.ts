@@ -1,6 +1,7 @@
 import { describeProviderProblem, extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
 import { withOrgContext } from "@odentia/db"
 import {
+  assertAgentsNotPaused,
   confirmDictationSuggestion,
   countConfirmedDictation,
   dictationModelLabel,
@@ -86,6 +87,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
         })
         if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], repeated: true, model: null }
+        // Sin saldo de prueba los agentes están en pausa (ADR 0030): no se gasta una llamada.
+        await withOrgContext(deps.db, orgId, (tx) => assertAgentsNotPaused(tx, orgId))
         const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
           extractDictation(
             deps.db,

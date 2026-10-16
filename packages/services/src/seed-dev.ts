@@ -335,6 +335,7 @@ async function wipeSeed(): Promise<void> {
     "support_message",
     "support_case",
     "saas_notice",
+    "saas_negotiation",
     "saas_action",
     "portal_challenge",
     "portal_passkey",

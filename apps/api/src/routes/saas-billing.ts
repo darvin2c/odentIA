@@ -20,7 +20,20 @@ import {
   createSaasCharge,
   createSaasPlan,
   decideSaasAccess,
+  checkActionPricing,
   currentSaasPeriod,
+  decideSaasNegotiation,
+  getSaasAlerts,
+  getSaasLowMargin,
+  getSaasTrialWatch,
+  getWhatsappEstimate,
+  isChargingPeriod,
+  listSaasNegotiations,
+  listWhatsappRates,
+  planMarginScenario,
+  saasTaxOf,
+  setSaasSpendCap,
+  upsertWhatsappRate,
   getOrganizationBillingSummary,
   getSaasConsumption,
   listPendingRecoveries,
@@ -108,6 +121,17 @@ const planInput = z
     maxBranches: z.number().int().positive().max(100000).nullish(),
     maxSeats: z.number().int().positive().max(1000000).nullish(),
     sortOrder: z.number().int().min(0).max(100000).optional(),
+    creditCents: cents.optional(),
+    conversationMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+    consultationMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+    recoveryMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
+    maxDiscountBps: z.number().int().min(0).max(9000).optional(),
+    sellerDiscountBps: z.number().int().min(0).max(9000).optional(),
+    trialCreditCents: cents.optional(),
+    trialDays: z.number().int().min(1).max(365).optional(),
+    trialMaxCreditCents: cents.optional(),
+    trialMaxDays: z.number().int().min(1).max(365).optional(),
+    isDefault: z.boolean().optional(),
   })
   .strict()
 
@@ -305,6 +329,93 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
       async (tx) => {
         const row = await updateSaasPlan(tx, actor.userId, c.req.param("id"), parsed.data)
         return row
+      },
+    )
+  })
+
+  // O1: la comprobación que el servidor exige al guardar, para verla antes.
+  app.post("/plans/check", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    const parsed = z
+      .object({
+        currency,
+        priceCents: cents,
+        creditCents: cents,
+        conversationMicros: z.number().int().min(0).nullable(),
+        consultationMicros: z.number().int().min(0).nullable(),
+        recoveryMicros: z.number().int().min(0).nullable(),
+        maxDiscountBps: z.number().int().min(0).max(9000),
+      })
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return c.json({
+      data: { checks: checkActionPricing(parsed.data), margin: planMarginScenario(parsed.data) },
+    })
+  })
+
+  // Tarifas de Meta para la estimación de WhatsApp que ve la clínica.
+  app.get("/whatsapp-rates", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => listWhatsappRates(deps.ownerDb))
+  })
+
+  app.put("/whatsapp-rates", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración carga las tarifas de WhatsApp")
+    const parsed = z
+      .object({
+        countryCode: z.string().regex(/^[A-Za-z]{2}$/),
+        category: z.enum(["marketing", "utility", "authentication"]),
+        currency,
+        priceMicros: z.number().int().min(0).max(1_000_000_000),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runStaffWrite(
+      c,
+      200,
+      actor,
+      { action: "saas.whatsapp_rate_set", metadata: { countryCode: parsed.data.countryCode, category: parsed.data.category } },
+      async (tx) => {
+        await upsertWhatsappRate(tx, actor, parsed.data)
+        return { ok: true }
+      },
+    )
+  })
+
+  // O3: pruebas por vencer o sin saldo, y clínicas con margen bajo.
+  app.get("/trial-watch", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => getSaasTrialWatch(deps.ownerDb))
+  })
+
+  app.get("/low-margin", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => getSaasLowMargin(deps.ownerDb))
+  })
+
+  app.get("/negotiations", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    return runService(c, 200, () => listSaasNegotiations(deps.ownerDb, { status: "pendiente" }))
+  })
+
+  app.post("/negotiations/:id/decide", async (c) => {
+    const actor = requireAdmin(c)
+    if (!actor) return forbid(c, "Solo administración aprueba descuentos y pruebas")
+    const parsed = z
+      .object({ approve: z.boolean() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runStaffWrite(
+      c,
+      200,
+      actor,
+      { action: parsed.data.approve ? "saas.negotiation_approved" : "saas.negotiation_rejected", entityId: c.req.param("id") },
+      async (tx) => {
+        await decideSaasNegotiation(tx, actor, c.req.param("id"), parsed.data.approve)
+        return { ok: true }
       },
     )
   })
@@ -851,7 +962,46 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     if (!membership)
       return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra ve el consumo"), 403)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getSaasConsumption(tx, orgId)),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const summary = await getOrganizationBillingSummary(tx, orgId)
+        const sub = await getSaasSubscription(tx, orgId)
+        return {
+          ...(await getSaasConsumption(tx, orgId)),
+          spendCapCents: sub?.spendCapCents ?? null,
+          charging: isChargingPeriod(summary.status, summary.isDemo),
+          whatsapp: await getWhatsappEstimate(tx, orgId),
+          tax: await saasTaxOf(tx, orgId),
+        }
+      }),
+    )
+  })
+
+  // C4: avisos de la prueba, del crédito y del tope; solo owner/admin los ve.
+  app.get("/alerts", async (c) => {
+    const orgId = c.req.query("orgId")
+    if (!orgId) return c.json(errorBody(c, "VALIDATION", "Falta la organización"), 400)
+    const membership = await accountMember(deps, c, orgId)
+    if (!membership)
+      return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
+    if (membership.role !== "owner" && membership.role !== "admin") return c.json({ data: [] })
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getSaasAlerts(tx, orgId)))
+  })
+
+  // C5: tope de gasto por encima del crédito.
+  app.post("/spend-cap", async (c) => {
+    const parsed = z
+      .object({ orgId: z.string().min(1), capCents: cents.nullable() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const membership = await accountOwnerOrAdmin(deps, c, parsed.data.orgId)
+    if (!membership)
+      return c.json(errorBody(c, "FORBIDDEN", "Solo quien administra cambia el tope"), 403)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, parsed.data.orgId, async (tx) => {
+        await setSaasSpendCap(tx, parsed.data.orgId, membership.userId, parsed.data.capCents)
+        return { ok: true }
+      }),
     )
   })
 

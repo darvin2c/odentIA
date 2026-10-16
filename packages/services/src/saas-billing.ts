@@ -32,9 +32,23 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql }
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale } from "./locale.js"
+import { assertActionPricingFloor } from "./saas-actions.js"
+import { getSaasAlerts, type SaasAlertFamily } from "./saas-terms.js"
+
+const SAAS_ALERT_SUBJECT: Record<SaasAlertFamily, string> = {
+  saldo_prueba: "tu saldo de prueba",
+  dias_prueba: "tu prueba termina pronto",
+  credito: "el crédito del mes",
+  tope: "tu tope de gasto",
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
 
 /** Días de prueba al crear la suscripción. */
-export const SAAS_TRIAL_DAYS = 14
+/** Prueba cuando ningún plan dice la suya (ADR 0030: 30 días). */
+export const SAAS_TRIAL_DAYS = 30
 /** Días de gracia tras el vencimiento antes de restringir. */
 export const SAAS_GRACE_DAYS = 7
 /** Prórroga máxima (días) por comprobante pendiente; acotada, no aplaza sin límite. */
@@ -292,6 +306,18 @@ export interface SaasPlanInput {
   maxBranches?: number | null
   maxSeats?: number | null
   sortOrder?: number
+  /** Cobro por acción (ADR 0030). */
+  creditCents?: number
+  conversationMicros?: number | null
+  consultationMicros?: number | null
+  recoveryMicros?: number | null
+  maxDiscountBps?: number
+  sellerDiscountBps?: number
+  trialCreditCents?: number
+  trialDays?: number
+  trialMaxCreditCents?: number
+  trialMaxDays?: number
+  isDefault?: boolean
 }
 
 export interface SaasPlanRow {
@@ -306,6 +332,17 @@ export interface SaasPlanRow {
   maxSeats: number | null
   isActive: boolean
   sortOrder: number
+  creditCents: number
+  conversationMicros: number | null
+  consultationMicros: number | null
+  recoveryMicros: number | null
+  maxDiscountBps: number
+  sellerDiscountBps: number
+  trialCreditCents: number
+  trialDays: number
+  trialMaxCreditCents: number
+  trialMaxDays: number
+  isDefault: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -323,9 +360,78 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     maxSeats: row.maxSeats,
     isActive: row.isActive,
     sortOrder: row.sortOrder,
+    creditCents: row.creditCents,
+    conversationMicros: row.conversationMicros,
+    consultationMicros: row.consultationMicros,
+    recoveryMicros: row.recoveryMicros,
+    maxDiscountBps: row.maxDiscountBps,
+    sellerDiscountBps: row.sellerDiscountBps,
+    trialCreditCents: row.trialCreditCents,
+    trialDays: row.trialDays,
+    trialMaxCreditCents: row.trialMaxCreditCents,
+    trialMaxDays: row.trialMaxDays,
+    isDefault: row.isDefault,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
+}
+
+function micros(value: number | null | undefined, field: string): number | null {
+  if (value === null || value === undefined) return null
+  if (!Number.isSafeInteger(value) || value < 0) throw validation(`${field} debe ser un importe válido`)
+  return value
+}
+
+function bps(value: number, field: string): number {
+  if (!Number.isInteger(value) || value < 0 || value > 9000) throw validation(`${field} debe estar entre 0 % y 90 %`)
+  return value
+}
+
+/** Campos del cobro por acción de un plan, validados; los ausentes no se tocan. */
+function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$inferInsert> {
+  const terms: Partial<typeof saasPlan.$inferInsert> = {}
+  if (value.creditCents !== undefined) terms.creditCents = assertCents(value.creditCents, "El crédito", false)
+  if (value.conversationMicros !== undefined) terms.conversationMicros = micros(value.conversationMicros, "El precio de la conversación")
+  if (value.consultationMicros !== undefined) terms.consultationMicros = micros(value.consultationMicros, "El precio de la consulta")
+  if (value.recoveryMicros !== undefined) terms.recoveryMicros = micros(value.recoveryMicros, "El precio de la cita recuperada")
+  if (value.maxDiscountBps !== undefined) terms.maxDiscountBps = bps(value.maxDiscountBps, "El descuento máximo")
+  if (value.sellerDiscountBps !== undefined) terms.sellerDiscountBps = bps(value.sellerDiscountBps, "Lo que da el vendedor")
+  if (value.trialCreditCents !== undefined) terms.trialCreditCents = assertCents(value.trialCreditCents, "El saldo de prueba", false)
+  if (value.trialMaxCreditCents !== undefined) terms.trialMaxCreditCents = assertCents(value.trialMaxCreditCents, "El saldo máximo de prueba", false)
+  if (value.trialDays !== undefined) terms.trialDays = value.trialDays
+  if (value.trialMaxDays !== undefined) terms.trialMaxDays = value.trialMaxDays
+  if (value.isDefault !== undefined) terms.isDefault = value.isDefault
+  return terms
+}
+
+const PLAN_TERM_DEFAULTS = {
+  creditCents: 0,
+  conversationMicros: null,
+  consultationMicros: null,
+  recoveryMicros: null,
+  maxDiscountBps: 6000,
+  sellerDiscountBps: 1000,
+  trialCreditCents: 0,
+  trialDays: 30,
+  trialMaxCreditCents: 0,
+  trialMaxDays: 60,
+}
+
+/** Lo que la base no comprueba con un mensaje claro: límites coherentes y el precio mínimo. Antes de escribir. */
+function assertPlanTerms(plan: Pick<typeof saasPlan.$inferSelect, keyof typeof PLAN_TERM_DEFAULTS | "currency">): void {
+  if (plan.sellerDiscountBps > plan.maxDiscountBps) throw validation("El vendedor no puede dar más que el descuento máximo")
+  if (plan.trialDays < 1 || plan.trialDays > 365) throw validation("La prueba debe durar entre 1 y 365 días")
+  if (plan.trialMaxDays < plan.trialDays) throw validation("Los días máximos de prueba no pueden ser menos que los de siempre")
+  if (plan.trialMaxCreditCents < plan.trialCreditCents) throw validation("El saldo máximo de prueba no puede ser menor que el de siempre")
+  assertActionPricingFloor(plan)
+}
+
+/** Un solo plan por defecto: marcar uno desmarca el anterior. */
+async function clearOtherDefaults(tx: Db, keepId: string | null): Promise<void> {
+  await tx
+    .update(saasPlan)
+    .set({ isDefault: false, updatedAt: new Date() })
+    .where(keepId ? and(eq(saasPlan.isDefault, true), sql`${saasPlan.id} <> ${keepId}`) : eq(saasPlan.isDefault, true))
 }
 
 function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
@@ -367,7 +473,10 @@ export async function createSaasPlan(
   actorUserId: string,
   input: SaasPlanInput,
 ): Promise<SaasPlanRow> {
-  const [row] = await tx.insert(saasPlan).values(planInput(input)).returning()
+  const values = { ...planInput(input), ...actionTerms(input) }
+  assertPlanTerms({ ...PLAN_TERM_DEFAULTS, ...values, currency: values.currency })
+  if (input.isDefault) await clearOtherDefaults(tx, null)
+  const [row] = await tx.insert(saasPlan).values(values).returning()
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo crear el plan")
   return toPlanRow(row)
 }
@@ -400,6 +509,12 @@ export async function updateSaasPlan(
   if (input.maxBranches !== undefined) patch.maxBranches = input.maxBranches
   if (input.maxSeats !== undefined) patch.maxSeats = input.maxSeats
   if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
+  Object.assign(patch, actionTerms(input))
+  const [current] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
+  if (!current) throw notFound("Plan")
+  assertPlanTerms({ ...current, ...patch })
+  if (input.isDefault) await clearOtherDefaults(tx, planId)
+  // Cambiar un precio rige lo que se cuenta desde ahora: lo ya contado y los cargos emitidos lo congelaron.
   const [row] = await tx
     .update(saasPlan)
     .set({ ...patch, updatedAt: new Date() })
@@ -517,6 +632,12 @@ export interface SaasSubscriptionRow {
   sellerStartedAt: Date | null
   sellerEndedAt: Date | null
   billingEmail: string | null
+  discountBps: number
+  trialCreditCents: number | null
+  trialDays: number | null
+  spendCapCents: number | null
+  billingCycle: "mensual" | "quincenal"
+  activatedAt: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -551,6 +672,12 @@ export async function getSaasSubscription(
     sellerStartedAt: row.sellerStartedAt,
     sellerEndedAt: row.sellerEndedAt,
     billingEmail: row.billingEmail,
+    discountBps: row.discountBps,
+    trialCreditCents: row.trialCreditCents,
+    trialDays: row.trialDays,
+    spendCapCents: row.spendCapCents,
+    billingCycle: row.billingCycle as "mensual" | "quincenal",
+    activatedAt: row.activatedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -659,7 +786,15 @@ export async function startSaasTrial(
     if (!created) throw new ServiceError("INTERNAL", 409, "No se pudo leer la suscripción")
     return created
   }
-  const trialEndsAt = addDays(now, SAAS_TRIAL_DAYS)
+  // La prueba dura lo que dice el plan (o el plan por defecto); sin ninguno, lo de siempre.
+  const [trialPlan] = plan
+    ? await tx.select({ trialDays: saasPlan.trialDays }).from(saasPlan).where(eq(saasPlan.id, plan.id)).limit(1)
+    : await tx
+        .select({ trialDays: saasPlan.trialDays })
+        .from(saasPlan)
+        .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
+        .limit(1)
+  const trialEndsAt = addDays(now, trialPlan?.trialDays ?? SAAS_TRIAL_DAYS)
   const [row] = await tx
     .insert(saasSubscription)
     .values({
@@ -2537,14 +2672,14 @@ export async function tickSaasBilling(
       .where(eq(saasSubscription.organizationId, orgId))
       .limit(1)
     if (sub?.billingEmail?.trim()) return sub.billingEmail.trim()
+    // Los avisos los reciben el propietario y el administrador (ADR 0030, decisión 9).
     const owners = await tx
       .select({ email: user.email })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
       .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
       .limit(5)
-    const [first] = owners
-    return first?.email ?? null
+    return owners.length ? owners.map((owner) => owner.email).join(", ") : null
   }
 
   async function recordNotice(
@@ -2580,38 +2715,35 @@ export async function tickSaasBilling(
     }
   }
 
-  // 1. Prueba que termina en 3 días: aviso.
-  const endingSoon = await tx
-    .select()
+  // 1. Avisos de la prueba, del crédito y del tope (ADR 0030): una vez por
+  // nivel y por tramo, en la plataforma (calculados al leer) y por correo.
+  const watched = await tx
+    .select({ organizationId: saasSubscription.organizationId })
     .from(saasSubscription)
-    .where(
-      and(
-        eq(saasSubscription.status, "prueba"),
-        eq(saasSubscription.isDemo, false),
-        lte(saasSubscription.trialEndsAt, addDays(now, 3)),
-        gte(saasSubscription.trialEndsAt, now),
-      ),
-    )
-  for (const sub of endingSoon) {
-    trialsEnding += 1
-    const emailTo = await orgEmail(sub.organizationId)
-    const day = sub.trialEndsAt?.toISOString().slice(0, 10) ?? ""
-    await recordNotice(
-      sub.organizationId,
-      "prueba_por_terminar",
-      `prueba-por-terminar:${sub.trialEndsAt?.toISOString().slice(0, 10) ?? "s/f"}`,
-      emailTo
-        ? {
-            to: emailTo,
-            subject: "Tu prueba de Odentia termina pronto",
-            text: `Tu período de prueba termina el ${day}. Elige tu plan y registra tu comprobante para seguir operando sin interrupciones.`,
-            html: `<p>Tu período de prueba termina el <strong>${day}</strong>. Elige tu plan y registra tu comprobante para seguir operando sin interrupciones.</p>`,
-            dedupeKey: `prueba-por-terminar:${sub.organizationId}:${day}`,
-            organizationId: sub.organizationId,
-            kind: "prueba_por_terminar",
-          }
-        : null,
-    )
+    .where(and(eq(saasSubscription.isDemo, false), inArray(saasSubscription.status, ["prueba", "activa", "gracia"])))
+  for (const sub of watched) {
+    const alerts = await getSaasAlerts(tx, sub.organizationId, now)
+    for (const alert of alerts) {
+      if (alert.family === "dias_prueba") trialsEnding += 1
+      const dedupeKey = `${alert.family}:${alert.level}:${alert.periodKey}`
+      const emailTo = await orgEmail(sub.organizationId)
+      await recordNotice(
+        sub.organizationId,
+        `${alert.family}_${alert.level}`,
+        dedupeKey,
+        emailTo
+          ? {
+              to: emailTo,
+              subject: `odentIA · ${alert.title}: ${SAAS_ALERT_SUBJECT[alert.family]}`,
+              text: `${alert.message} Revisa tu plan y lo que hicieron tus agentes en Plan y pagos.`,
+              html: `<p>${escapeHtml(alert.message)}</p><p>Revisa tu plan y lo que hicieron tus agentes en Plan y pagos.</p>`,
+              dedupeKey: `${dedupeKey}:${sub.organizationId}`,
+              organizationId: sub.organizationId,
+              kind: `${alert.family}_${alert.level}`,
+            }
+          : null,
+      )
+    }
   }
 
   // 2. Prueba vencida → gracia 7 días.
@@ -2644,6 +2776,25 @@ export async function tickSaasBilling(
         "saas.restricted_no_plan",
       )
       await notifyOrg(tx, sub.organizationId, "saas.subscription.updated")
+      // Antes pasaba a solo lectura sin decir nada: ahora se avisa una vez.
+      const emailTo = await orgEmail(sub.organizationId)
+      const day = now.toISOString().slice(0, 10)
+      await recordNotice(
+        sub.organizationId,
+        "prueba_vencida_sin_plan",
+        `prueba-vencida-sin-plan:${day}`,
+        emailTo
+          ? {
+              to: emailTo,
+              subject: "odentIA · Tu prueba terminó",
+              text: "Tu prueba terminó sin un plan elegido: el sistema queda en solo lectura hasta que lo elijas en Plan y pagos. No se pierde ningún dato.",
+              html: "<p>Tu prueba terminó sin un plan elegido: el sistema queda en solo lectura hasta que lo elijas en <strong>Plan y pagos</strong>. No se pierde ningún dato.</p>",
+              dedupeKey: `prueba-vencida-sin-plan:${sub.organizationId}:${day}`,
+              organizationId: sub.organizationId,
+              kind: "prueba_vencida_sin_plan",
+            }
+          : null,
+      )
       continue
     }
     const graceEndsAt = addDays(now, SAAS_GRACE_DAYS)

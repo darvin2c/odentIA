@@ -610,6 +610,13 @@
       "when": 1792071843227,
       "tag": "0086_cobro_por_accion",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1792071843228,
+      "tag": "0087_prueba_tope_y_negociacion",
+      "breakpoints": true
     }
   ]
 }

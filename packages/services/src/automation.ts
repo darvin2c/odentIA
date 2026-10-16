@@ -50,6 +50,7 @@ import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { updateOpportunity } from "./opportunities.js"
 import { createTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
+import { getAgentSpendGate } from "./saas-terms.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -338,6 +339,8 @@ export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Dat
 export interface AdminRuntime {
   adminOn: boolean
   receptionOn: boolean
+  /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0030). */
+  agentsPaused: boolean
   quietStart: string
   quietEnd: string
 }
@@ -351,9 +354,11 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
+  const gate = await getAgentSpendGate(tx, orgId)
   return {
     adminOn: row?.advisor?.enabled === true,
     receptionOn: row?.enabled === true,
+    agentsPaused: gate.trialExhausted,
     quietStart: row?.advisor?.quietStart ?? DEFAULT_QUIET_START,
     quietEnd: row?.advisor?.quietEnd ?? DEFAULT_QUIET_END,
   }
@@ -1596,7 +1601,8 @@ export async function deliverJob(
   }
 
   // ---- le toca a una persona -------------------------------------------------
-  if (!line.agent || !rule.agentPart) {
+  // También mientras los agentes están en pausa por el saldo de prueba: nada se pierde.
+  if (!line.agent || !rule.agentPart || runtime.agentsPaused) {
     const taskId = await leaveTask(tx, orgId, job, {
       reason: payload.detail ?? line.trigger(lineDays(rule, job.kind)),
       note: lineConfigOf(rule.config).taskNote,

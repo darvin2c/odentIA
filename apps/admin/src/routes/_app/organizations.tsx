@@ -33,9 +33,12 @@ import { useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { platformUrl } from "../../lib/host"
+import { OrgBillingSection } from "../../components/org-billing"
 
 export const Route = createFileRoute("/_app/organizations")({
   component: OrganizationsPage,
+  // Abre la ficha de una clínica desde otra pantalla (Hoy).
+  validateSearch: (search: Record<string, unknown>): { org?: string } => (typeof search.org === "string" ? { org: search.org } : {}),
 })
 
 const billingSchema = z
@@ -199,7 +202,8 @@ function OrganizationsPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState("")
   const [activeSearch, setActiveSearch] = useState("")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { org } = Route.useSearch()
+  const [selectedId, setSelectedId] = useState<string | null>(org ?? null)
   const [assistedOpen, setAssistedOpen] = useState(false)
   const [cancelTarget, setCancelTarget] = useState<{ id: string; email: string } | null>(null)
 
@@ -494,6 +498,7 @@ function OrganizationsPage() {
                     <p className="font-medium">{detail.usage.branches}</p>
                   </div>
                 </div>
+                <OrgBillingSection organizationId={detail.id} />
                 {detail.aiCost ? (
                   <div>
                     <h3 className="text-sm font-medium">Costo real de IA · {detail.aiCost.periodLabel}</h3>

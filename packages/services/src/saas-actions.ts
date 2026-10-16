@@ -5,6 +5,7 @@ import { channelConnection, contact, conversation } from "@odentia/db/schema/crm
 import { type SaasActionKind, saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
+import { ServiceError } from "./errors.js"
 
 /* ---------- Lo que hicieron los agentes, por acción (ADR 0030) ---------- */
 
@@ -294,7 +295,7 @@ export async function currentSaasPeriod(tx: Db, orgId: string, now = new Date())
   const pricing = await getActionPricing(tx, orgId)
   if (sub?.status === "prueba" && sub.trialStartedAt && sub.trialEndsAt) {
     const [plan] = pricing.planId ? await tx.select().from(saasPlan).where(eq(saasPlan.id, pricing.planId)).limit(1) : []
-    return { start: sub.trialStartedAt, end: sub.trialEndsAt, credit: "prueba", creditCents: plan?.trialCreditCents ?? 0 }
+    return { start: sub.trialStartedAt, end: sub.trialEndsAt, credit: "prueba", creditCents: sub.trialCreditCents ?? plan?.trialCreditCents ?? 0 }
   }
   if (sub?.currentPeriodStart && sub.currentPeriodEnd && sub.currentPeriodEnd > now) {
     return { start: sub.currentPeriodStart, end: sub.currentPeriodEnd, credit: "mes", creditCents: pricing.creditCents }
@@ -502,4 +503,163 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
     // Con menos de un día de tramo la proyección no dice nada.
     projectedCents: elapsed > 0 && now.getTime() - period.start.getTime() >= 24 * 60 * 60 * 1000 ? Math.round(subtotalCents / elapsed) : null,
   }
+}
+
+/* ---------- Precio mínimo: ningún precio por debajo del doble de su peor costo ---------- */
+
+/**
+ * Peor costo medido de cada acción en millonésimas de USD (estudio de precios
+ * del 2026-10-15, con los dos modelos y el caso más largo): conversación
+ * S/ 0,15, dictado S/ 0,19 y cita S/ 0,16, a 3,75 por dólar. Se actualiza
+ * con `eval:month` y el costo real de `ai_usage`.
+ */
+export const SAAS_WORST_COST_MICROS: Record<SaasActionKind, number> = {
+  conversacion: 40_000,
+  consulta: 51_000,
+  cita: 43_000,
+}
+/** Cuántas veces su peor costo debe valer como mínimo una acción, al precio más bajo negociable. */
+export const SAAS_PRICE_FLOOR_MULTIPLE = 2
+
+export interface ActionPriceCheck {
+  kind: SaasActionKind
+  baseMicros: number | null
+  minimumMicros: number | null
+  /** Veces su peor costo, a precio base y al mínimo. */
+  baseMultiple: number | null
+  minimumMultiple: number | null
+  ok: boolean
+}
+
+/**
+ * Comprobación del plan antes de guardar (tablero O1): cada precio base y su
+ * mínimo (el base con el descuento máximo) contra el peor costo. La pantalla
+ * la anticipa; el servidor la exige.
+ */
+export function checkActionPricing(plan: {
+  conversationMicros: number | null
+  consultationMicros: number | null
+  recoveryMicros: number | null
+  maxDiscountBps: number
+  currency: string
+}): ActionPriceCheck[] {
+  const bases: Record<SaasActionKind, number | null> = {
+    conversacion: plan.conversationMicros,
+    consulta: plan.consultationMicros,
+    cita: plan.recoveryMicros,
+  }
+  return (Object.keys(bases) as SaasActionKind[]).map((kind) => {
+    const base = bases[kind]
+    if (base === null) return { kind, baseMicros: null, minimumMicros: null, baseMultiple: null, minimumMultiple: null, ok: true }
+    const minimum = discountedMicros(base, plan.maxDiscountBps)
+    const worst = SAAS_WORST_COST_MICROS[kind]
+    // El peor costo está en dólares: en otra moneda no hay con qué comparar y no se afirma nada.
+    if (plan.currency !== "USD") return { kind, baseMicros: base, minimumMicros: minimum, baseMultiple: null, minimumMultiple: null, ok: true }
+    return {
+      kind,
+      baseMicros: base,
+      minimumMicros: minimum,
+      baseMultiple: Math.round((base / worst) * 10) / 10,
+      minimumMultiple: Math.round((minimum / worst) * 10) / 10,
+      ok: minimum >= worst * SAAS_PRICE_FLOOR_MULTIPLE,
+    }
+  })
+}
+
+const KIND_WORDS: Record<SaasActionKind, string> = { conversacion: "La conversación", consulta: "La consulta", cita: "La cita recuperada" }
+
+/** Lanza `SAAS_PRICE_BELOW_FLOOR` si algún precio, al descuento máximo, queda bajo el doble de su peor costo. */
+export function assertActionPricingFloor(plan: Parameters<typeof checkActionPricing>[0]): void {
+  const failed = checkActionPricing(plan).find((item) => !item.ok)
+  if (!failed) return
+  throw new ServiceError(
+    "SAAS_PRICE_BELOW_FLOOR",
+    409,
+    `${KIND_WORDS[failed.kind]} quedaría en ${new Intl.NumberFormat("es-PE", { style: "currency", currency: plan.currency, maximumFractionDigits: 3 }).format((failed.minimumMicros ?? 0) / 1_000_000)} con el descuento máximo: menos del doble de su peor costo. Sube el precio o baja el descuento máximo.`,
+  )
+}
+
+/**
+ * ¿Esta persona ya tiene su conversación contada en las últimas 24 horas?
+ * Seguir atendiéndola no cuesta otra: al llegar al tope solo se cortan los
+ * casos nuevos.
+ */
+export async function hasOpenConversationAction(tx: Db, orgId: string, contactId: string, now = new Date()): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: saasAction.id })
+    .from(saasAction)
+    .where(
+      and(
+        eq(saasAction.organizationId, orgId),
+        eq(saasAction.contactId, contactId),
+        eq(saasAction.kind, "conversacion"),
+        gt(saasAction.occurredAt, new Date(now.getTime() - CONVERSATION_WINDOW_MS)),
+      ),
+    )
+    .limit(1)
+  return Boolean(row)
+}
+
+/**
+ * IA que odentIA paga y no se cobra por acción (Administrador, Probar,
+ * vectores, transcripción) por clínica y mes: USD 1,62 en el estudio de
+ * precios del 2026-10-15. Entra en el margen del peor caso.
+ */
+export const SAAS_UNBILLED_AI_MICROS = 1_620_000
+
+/**
+ * El peor caso de un plan (tablero O1): una clínica que gasta todo su crédito
+ * en conversaciones del costo más alto. Margen sobre la cuota a precio base y
+ * negociada al mínimo; null si no hay con qué calcularlo.
+ */
+export function planMarginScenario(plan: {
+  priceCents: number
+  creditCents: number
+  conversationMicros: number | null
+  maxDiscountBps: number
+  currency: string
+}): { atBase: number | null; atMinimum: number | null } {
+  if (plan.currency !== "USD" || !plan.conversationMicros || plan.priceCents <= 0) return { atBase: null, atMinimum: null }
+  const margin = (price: number) => {
+    const conversations = (plan.creditCents * 10_000) / price
+    const cost = conversations * SAAS_WORST_COST_MICROS.conversacion + SAAS_UNBILLED_AI_MICROS
+    return Math.round((1 - cost / (plan.priceCents * 10_000)) * 100)
+  }
+  return { atBase: margin(plan.conversationMicros), atMinimum: margin(discountedMicros(plan.conversationMicros, plan.maxDiscountBps)) }
+}
+
+/**
+ * ¿Lo de este tramo se factura? Mientras el cobro por acción no emite cargos
+ * (fase 4 de la ADR 0030) la clínica ve «así sería tu factura».
+ */
+export function isChargingPeriod(status: string, isDemo: boolean): boolean {
+  void status
+  void isDemo
+  return false
+}
+
+/** Impuesto que se suma a la factura de odentIA según el país de la clínica. */
+export interface SaasTax {
+  label: string
+  rateBps: number
+}
+
+/**
+ * Perú: IGV de 18 % (16 % de IGV más 2 % del Impuesto de Promoción
+ * Municipal). Otro país entra con su perfil: mientras no esté, la factura se
+ * emite sin impuesto y la pantalla no lo menciona.
+ */
+export const SAAS_TAX_BY_COUNTRY: Record<string, SaasTax> = {
+  PE: { label: "IGV", rateBps: 1800 },
+}
+
+export async function saasTaxOf(tx: Db, orgId: string): Promise<SaasTax | null> {
+  const rows = (await tx.execute(sql`select country_code from org_profile where organization_id = ${orgId} limit 1`)) as unknown as Array<{ country_code: string }>
+  const country = rows[0]?.country_code
+  return country ? SAAS_TAX_BY_COUNTRY[country] ?? null : null
+}
+
+/** Impuesto de un importe sin impuestos, redondeado al centavo. */
+export function taxCents(amountCents: number, tax: SaasTax | null): number {
+  return tax ? Math.round((amountCents * tax.rateBps) / 10_000) : 0
 }

@@ -195,11 +195,24 @@ export const saasSubscription = pgTable(
     billingEmail: text("billing_email"),
     /** Descuento negociado sobre el precio base de cada acción (ADR 0030); la cuota no tiene descuento. */
     discountBps: integer("discount_bps").notNull().default(0),
+    /** Prueba negociada para esta clínica; null = la del plan. */
+    trialCreditCents: integer("trial_credit_cents"),
+    trialDays: integer("trial_days"),
+    /** Lo máximo que la clínica paga al mes por encima del crédito; al llegar, los casos nuevos pasan al equipo. */
+    spendCapCents: integer("spend_cap_cents"),
+    /** Cada cuánto se factura lo que pasa del crédito: `mensual` o `quincenal`. */
+    billingCycle: text("billing_cycle").notNull().default("mensual"),
+    /** Día en que la clínica activó el plan: su mes empieza ese día. */
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("saas_subscription_status_idx").on(table.status),
     check("saas_subscription_discount_check", sql`${table.discountBps} BETWEEN 0 AND 9000`),
+    check(
+      "saas_subscription_terms_check",
+      sql`(${table.trialCreditCents} IS NULL OR ${table.trialCreditCents} >= 0) AND (${table.trialDays} IS NULL OR ${table.trialDays} BETWEEN 1 AND 365) AND (${table.spendCapCents} IS NULL OR ${table.spendCapCents} >= 0) AND ${table.billingCycle} IN ('mensual','quincenal')`,
+    ),
     index("saas_subscription_period_end_idx").on(table.currentPeriodEnd),
     check(
       "saas_subscription_status_check",
@@ -445,6 +458,59 @@ export const saasNotice = pgTable(
   (table) => [
     uniqueIndex("saas_notice_dedupe_uidx").on(table.organizationId, table.dedupeKey),
     index("saas_notice_org_kind_idx").on(table.organizationId, table.kind),
+  ],
+)
+
+/**
+ * Negociación por clínica que pide aprobación (ADR 0030): un descuento por
+ * encima de lo que da el vendedor o una prueba más larga o con más saldo que
+ * la del plan. La pide soporte o el vendedor; la decide la administración.
+ * Solo owner (rutas admin) la escribe.
+ */
+export const saasNegotiation = pgTable(
+  "saas_negotiation",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    kind: text("kind").notNull(),
+    /** Descuento en puntos básicos, o saldo (centavos) y días de prueba. */
+    discountBps: integer("discount_bps"),
+    trialCreditCents: integer("trial_credit_cents"),
+    trialDays: integer("trial_days"),
+    note: text("note"),
+    status: text("status").notNull().default("pendiente"),
+    requestedBy: text("requested_by").references(() => user.id),
+    decidedBy: text("decided_by").references(() => user.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("saas_negotiation_org_status_idx").on(table.organizationId, table.status),
+    check("saas_negotiation_kind_check", sql`${table.kind} IN ('descuento','prueba')`),
+    check("saas_negotiation_status_check", sql`${table.status} IN ('pendiente','aprobada','rechazada')`),
+  ],
+)
+
+/**
+ * Tarifa de Meta por plantilla de WhatsApp, por país y categoría, para la
+ * estimación que ve la clínica. La carga la administración desde la tabla de
+ * Meta: odentIA no cobra WhatsApp ni recibe ese pago.
+ */
+export const saasWhatsappRate = pgTable(
+  "saas_whatsapp_rate",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    countryCode: char("country_code", { length: 2 }).notNull(),
+    category: text("category").notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    priceMicros: bigint("price_micros", { mode: "number" }).notNull(),
+    updatedBy: text("updated_by").references(() => user.id),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("saas_whatsapp_rate_country_category_uidx").on(table.countryCode, table.category),
+    check("saas_whatsapp_rate_category_check", sql`${table.category} IN ('marketing','utility','authentication')`),
+    check("saas_whatsapp_rate_price_check", sql`${table.priceMicros} >= 0`),
   ],
 )
 

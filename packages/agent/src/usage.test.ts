@@ -386,3 +386,28 @@ it("con Claude, la parte fija va marcada para su caché y la corrida guarda su c
     await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { llm: "chatgpt_6" }))
   }
 })
+
+it("sin saldo de prueba los agentes se pausan: el caso pasa al equipo sin llamar al modelo", async () => {
+  // Plan por defecto con precios y una prueba de USD 1 ya gastada.
+  await ownerDb.execute(sql`insert into saas_plan (code, name, currency, price_cents, credit_cents, conversation_micros, trial_credit_cents, trial_max_credit_cents, is_default)
+    values ('uso-pausa', 'Plan', 'USD', 2900, 2900, 500000, 100, 100, true) on conflict do nothing`)
+  await ownerDb.execute(sql`update saas_subscription set status = 'prueba', is_demo = false, trial_started_at = now() - interval '25 days',
+    trial_ends_at = now() + interval '5 days', current_period_start = now() - interval '25 days', current_period_end = now() + interval '5 days'
+    where organization_id = ${ORG}`)
+  await ownerDb.execute(sql`insert into saas_action (organization_id, kind, occurred_at, detail, currency, base_price_micros, price_micros, dedupe_key)
+    values (${ORG}, 'conversacion', now() - interval '1 hour', 'Atendió una conversación', 'USD', 1000000, 1000000, 'uso-pausa-1')`)
+  try {
+    const model = new RecordingModel()
+    const inbound = await ingest("tg:uso-pausa", "uso-pausa-1", "Hola, ¿tienen turno?")
+    expect(await run(model, inbound.conversationId, inbound.messageId)).toBe("done")
+    expect(model.calls).toHaveLength(0)
+    const [row] = await withOrgContext(appDb, ORG, (tx) =>
+      tx.select().from(agentRunLedger).where(eq(agentRunLedger.conversationId, inbound.conversationId)))
+    expect(row).toMatchObject({ status: "handoff", error: "SALDO_PRUEBA", llmCalls: 0 })
+    // La persona recibe el aviso fijo: nadie se queda sin respuesta.
+    expect(await repliesOf(inbound.conversationId)).toHaveLength(1)
+  } finally {
+    await ownerDb.execute(sql`delete from saas_action where dedupe_key = 'uso-pausa-1'`)
+    await ownerDb.execute(sql`update saas_plan set is_default = false where code = 'uso-pausa'`)
+  }
+})
