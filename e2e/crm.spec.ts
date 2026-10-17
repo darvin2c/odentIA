@@ -299,27 +299,32 @@ test("crm derivación: recepción ve plazo y toma un caso de la cola", async ({
   await info.attach("resumen-del-caso-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1280, height: 720 })
 
+  // «Esperan su sí» (decisión 21) solo lista citas propuestas: el caso no está ahí.
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  const queueItem = page.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
-  await expect(queueItem).toContainText("Nadie lo ha tomado")
-  await expect(queueItem).toContainText("vence")
-  // Qué tan pronto hay que atenderlo, con palabra además de color, y lo que la persona escribió, en orden.
-  await expect(queueItem).toContainText("Ahora")
-  await expect(queueItem).toContainText("Escribió 3 mensajes seguidos")
-  await expect(queueItem.getByRole("list").getByRole("listitem")).toHaveText(["Hola", "Tengo la cara hinchada desde anoche", "Necesito hablar con recepción"])
-  await expect(queueItem).toContainText("Se le dijo: «Ya avisé al equipo como urgencia")
-  await info.attach("derivacion-aprobaciones", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  // «Ver el caso» abre el resumen desde el propio aviso, sin entrar a la conversación.
-  await queueItem.getByRole("button", { name: "Ver el caso" }).click()
-  const fromNotice = surface(page, { name: "Resumen del caso" })
-  await expect(fromNotice).toContainText("Saber si puede venir hoy y darle una hora.")
-  await expect(fromNotice.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
+  await expect(page.getByText("El interlocutor pidió atención humana")).toHaveCount(0)
+
+  // El caso vive en «Te espera» de Inicio: una fila con quién lo pasó, hace cuánto y qué tan pronto atenderlo.
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  const waiting = page.getByRole("region", { name: /^Te espera/ })
+  const caseRow = waiting.getByRole("listitem").filter({ hasText: "El interlocutor pidió atención humana" })
+  await expect(caseRow).toHaveCount(1)
+  await expect(caseRow).toContainText("Te lo pasó el agente")
+  // El plazo se dice con palabra además de color: prioridad alta es «Ahora».
+  await expect(caseRow).toContainText("Ahora")
+  const takeButton = caseRow.getByRole("button", { name: /^Tomar/ })
+  await expect(takeButton).toBeVisible()
+  await info.attach("derivacion-te-espera", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  // La fila abre el resumen del caso sin entrar a la conversación.
+  await caseRow.getByRole("button").filter({ hasNotText: /^Tomar/ }).first().click()
+  const fromRow = surface(page, { name: "Resumen del caso" })
+  await expect(fromRow).toContainText("Saber si puede venir hoy y darle una hora.")
+  await expect(fromRow.getByRole("link", { name: "Ver la conversación completa" })).toBeVisible()
   await page.keyboard.press("Escape")
-  await expect(fromNotice).toBeHidden()
+  await expect(fromRow).toBeHidden()
   // «Tomar» toma la conversación del caso: queda a su nombre y el caso, con responsable.
-  await queueItem.getByRole("button", { name: "Tomar", exact: true }).click()
-  await expect(queueItem).toContainText("Ya lo tomaron")
-  await expect(queueItem.getByRole("button", { name: "Tomar", exact: true })).toHaveCount(0)
+  await takeButton.click()
+  await expect(caseRow.getByRole("button", { name: /^Tomar/ })).toHaveCount(0)
 
   const persisted = await call<Array<{ id: string; assigneeUserId: string | null }>>(
     page,

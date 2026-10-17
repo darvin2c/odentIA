@@ -314,13 +314,22 @@ it("el aviso de un envío fallido trae el motivo: en palabras si se conoce, con 
     metadata: { phone_number_id: "PNID" },
     statuses: [
       failed("wamid.PAGO", { code: 131042, title: "Business eligibility payment issue" }),
-      failed("wamid.OTRO", { code: 131026, title: "Message undeliverable" }),
+      failed("wamid.SINWA", { code: 131026, title: "Message undeliverable" }),
+      failed("wamid.OTRO", { code: 131047, title: "Re-engagement message" }),
     ],
   })
   expect(result.statuses).toEqual([
     { externalMessageId: "wamid.PAGO", status: "failed", error: SIN_FORMA_DE_PAGO },
-    { externalMessageId: "wamid.OTRO", status: "failed", error: "131026: Message undeliverable" },
+    // 131026: el número no tiene WhatsApp; se dice en palabras y se marca para la ficha.
+    {
+      externalMessageId: "wamid.SINWA",
+      status: "failed",
+      error: expect.stringMatching(/no tenga WhatsApp/),
+      notOnWhatsApp: true,
+    },
+    { externalMessageId: "wamid.OTRO", status: "failed", error: "131047: Re-engagement message" },
   ])
+  expect(result.statuses[1]?.error).not.toMatch(/undeliverable|131026/i)
 })
 
 it("un aviso de cambio de estado de plantilla no se confunde con un mensaje", () => {
