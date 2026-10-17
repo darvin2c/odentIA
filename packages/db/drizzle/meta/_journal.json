@@ -722,6 +722,13 @@
       "when": 1792113996293,
       "tag": "0102_diagnosticos_por_lista",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1792113996294,
+      "tag": "0103_bitacora_con_una_clave",
+      "breakpoints": true
     }
   ]
 }

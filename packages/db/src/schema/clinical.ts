@@ -596,11 +596,16 @@ export const patientDocument = pgTable(
  * Bitácora de consultas a la historia clínica: quién abrió qué parte de la
  * ficha de quién. Append-only; una fila por usuario, paciente, recurso y hora
  * para dejar traza sin registrar cada petición de la misma lectura.
+ *
+ * Un solo índice: la clave primaria es la propia franja, con `bucket` antes
+ * que `user_id` para servir también al listado por paciente. `last_at` y
+ * `hits` quedan fuera de todo índice para que contar «una vez más» sea una
+ * actualización HOT; la migración 0103 fija además `fillfactor = 90`, que
+ * drizzle no declara en tablas.
  */
 export const clinicalAccessLog = pgTable(
   "clinical_access_log",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
     patientId: uuid("patient_id").notNull(),
     userId: text("user_id")
@@ -619,18 +624,16 @@ export const clinicalAccessLog = pgTable(
       columns: [table.organizationId, table.patientId],
       foreignColumns: [patient.organizationId, patient.id],
     }),
-    uniqueIndex("clinical_access_log_bucket_uidx").on(
-      table.organizationId,
-      table.patientId,
-      table.userId,
-      table.resource,
-      table.bucket,
-    ),
-    index("clinical_access_log_org_patient_idx").on(
-      table.organizationId,
-      table.patientId,
-      table.lastAt,
-    ),
+    primaryKey({
+      name: "clinical_access_log_pkey",
+      columns: [
+        table.organizationId,
+        table.patientId,
+        table.bucket,
+        table.userId,
+        table.resource,
+      ],
+    }),
   ],
 )
 

@@ -8,8 +8,8 @@ import { formatDateTime } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 
+/** Sin identificador propio: la franja es la clave y la tabla usa el índice de fila. */
 interface AccessItem {
-  id: string
   userId: string
   userName: string | null
   resource: string
