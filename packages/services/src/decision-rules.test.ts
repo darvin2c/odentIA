@@ -4,7 +4,7 @@
  * aunque escriba él; y sin fecha de nacimiento no firma por enlace.
  */
 import { randomUUID } from "node:crypto"
-import { patient, patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
+import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -21,6 +21,7 @@ import { listHealthDocumentRecipients } from "./health-documents.js"
 import { patientPersonId } from "./patients.js"
 import { contactDecides, requireDecisionContact } from "./responsibilities.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { setTestPatientIdentity } from "./test-patient.js"
 
 setupTestDb()
 
@@ -29,7 +30,7 @@ const minorBirth = () => `${new Date().getUTCFullYear() - 12}-06-01`
 
 it("un menor no decide por sí mismo, ni su presupuesto se le envía a él", async () => {
   const f = await clinicalFixture()
-  await ownerDb.update(patient).set({ birthDate: minorBirth() }).where(eq(patient.id, f.patient.id))
+  await setTestPatientIdentity(ownerDb, f.patient.id, { birthDate: minorBirth() })
   const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
   await expect(f.run((tx) => requireDecisionContact(tx, ORG, f.patient.id, personId))).rejects.toMatchObject({
     code: "DECISION_CONTACT_NOT_AUTHORIZED",
@@ -47,7 +48,7 @@ it("un menor no decide por sí mismo, ni su presupuesto se le envía a él", asy
 
   // Ya mayor de edad, la representación que tuvo de menor terminó; la que se registra siendo adulta sí vale.
   // Cumplió 18 este 1 de enero: la madre la representaba desde 2020.
-  await ownerDb.update(patient).set({ birthDate: `${new Date().getUTCFullYear() - 18}-01-01` }).where(eq(patient.id, f.patient.id))
+  await setTestPatientIdentity(ownerDb, f.patient.id, { birthDate: `${new Date().getUTCFullYear() - 18}-01-01` })
   expect(await f.run((tx) => contactDecides(tx, ORG, f.patient.id, madre!.id))).toBe(false)
   expect(await f.run((tx) => contactDecides(tx, ORG, f.patient.id, personId))).toBe(true)
   await ownerDb
@@ -66,7 +67,7 @@ it("la receta de quien ya cumplió 18 no le llega a quien lo representó de niñ
   const f = await clinicalFixture()
   const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
   // Mateo cumplió 18 este 1 de enero; su madre lo representa desde 2020.
-  await ownerDb.update(patient).set({ birthDate: `${new Date().getUTCFullYear() - 18}-01-01` }).where(eq(patient.id, f.patient.id))
+  await setTestPatientIdentity(ownerDb, f.patient.id, { birthDate: `${new Date().getUTCFullYear() - 18}-01-01` })
   const [madre] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Madre de Mateo" }).returning({ id: contact.id })
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: madre!.id, relationship: "guardian" })
   await ownerDb.insert(patientResponsibility).values({

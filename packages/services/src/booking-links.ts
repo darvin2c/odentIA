@@ -25,6 +25,7 @@ import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPa
 import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
 import { contactDecides } from "./responsibilities.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * «Su enlace» (fase 3, decisión 8; ADR 0037, que amplía el 0014): la página
@@ -518,8 +519,9 @@ export async function linkContactFirstName(tx: Db, orgId: string, contactId: str
 /** Nombre de pila del paciente, para decir de quién es lo pendiente. */
 export async function patientFirstNameOf(tx: Db, orgId: string, patientId: string): Promise<string | null> {
   const [row] = await tx
-    .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+    .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
   return (row?.givenNames ?? row?.displayName ?? "").trim().split(/\s+/)[0] || null

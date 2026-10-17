@@ -1084,7 +1084,7 @@ it("consentimiento estructurado: firma con profesional, PDF con huella, menor y 
 
   // Menor de edad con representante legal vigente.
   const childId = await createPatient()
-  await ownerDb.execute(sql`update patient set birth_date = '2017-04-04' where id = ${childId}`)
+  await ownerDb.execute(sql`update contact set birth_date = '2017-04-04' where id = (select person_id from patient where id = ${childId})`)
   const guardianId = await linkContact(childId)
   await ownerDb.execute(sql`update contact set doc_type = 'DNI', doc_number = '44556677' where id = ${guardianId}`)
   await post(app, `/patients/${childId}/responsibilities`, {

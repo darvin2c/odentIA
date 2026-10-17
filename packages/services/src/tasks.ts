@@ -7,6 +7,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
 import { resolveAfterHandoffTask } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Aviso en vivo para el stream (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
@@ -222,12 +223,13 @@ function withNamesQuery(tx: Db, orgId: string) {
       task: crmTask,
       contactName: contact.displayName,
       opportunityTitle: opportunity.title,
-      patientName: patient.displayName,
+      patientName: patientPerson.displayName,
       // Un caso por tarea en la práctica; si hubiera dos, vale el último.
       casePriority: CASE_PRIORITY,
     })
     .from(crmTask)
     .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(opportunity, and(eq(opportunity.id, crmTask.opportunityId), eq(opportunity.organizationId, orgId)))
 }
@@ -356,7 +358,7 @@ export async function pageTasks(
   if (view === "vencidas") conditions.push(sql`${crmTask.dueAt} is not null and ${crmTask.dueAt} <= now()`)
   if (q) {
     const like = `%${q}%`
-    conditions.push(or(ilike(crmTask.title, like), ilike(contact.displayName, like), ilike(patient.displayName, like), ilike(opportunity.title, like))!)
+    conditions.push(or(ilike(crmTask.title, like), ilike(contact.displayName, like), ilike(patientPerson.displayName, like), ilike(opportunity.title, like))!)
   }
   const fingerprint = JSON.stringify({ view, sort, q, all: input.viewer.all })
   const total = await countTasks(tx, orgId, conditions)
@@ -410,6 +412,7 @@ async function countTasks(tx: Db, orgId: string, conditions: SQL[]): Promise<num
     .select({ n: sql<number>`count(*)::int` })
     .from(crmTask)
     .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(opportunity, and(eq(opportunity.id, crmTask.opportunityId), eq(opportunity.organizationId, orgId)))
     .where(and(...conditions))

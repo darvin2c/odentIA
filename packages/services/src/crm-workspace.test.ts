@@ -2,7 +2,6 @@ import { eq, sql } from "drizzle-orm"
 import { withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import {
-  patient,
   patientContact,
   treatmentBudget,
   treatmentPlan,
@@ -13,7 +12,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
-import { addContactIdentity, createContact, getContact } from "./contacts.js"
+import { addContactIdentity, createContact, } from "./contacts.js"
 import { createConnection } from "./connections.js"
 import { closeConversation } from "./conversation-close.js"
 import { startContactConversation } from "./conversations.js"
@@ -32,6 +31,7 @@ import { ensureDefaultPipeline } from "./pipelines.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { createTask } from "./tasks.js"
 import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 const KEY = secretsKeyFromEnv("ee".repeat(32))
@@ -584,10 +584,7 @@ it("nota: registra el nombre del autor miembro sin fugar otras orgs", async () =
 
 async function makePatientSetup(orgId: string, contactId: string, n: number) {
   return withOrgContext(appDb, orgId, async (tx) => {
-    const [p] = await tx
-      .insert(patient)
-      .values({ organizationId: orgId, displayName: tag("Paciente"), patientNumber: n })
-      .returning()
+    const [p] = await insertTestPatients(tx, { organizationId: orgId, displayName: tag("Paciente"), patientNumber: n })
     await tx.insert(patientContact).values({
       organizationId: orgId,
       patientId: p!.id,

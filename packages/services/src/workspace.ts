@@ -29,6 +29,7 @@ import {
   type WaitingUnconfirmed,
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -338,7 +339,7 @@ async function workspaceToday(
     encounterDentistName: string | null
   }
   const rows = await tx.execute<Row>(sql`
-    select a.id, a.patient_id as "patientId", p.display_name as "patientName",
+    select a.id, a.patient_id as "patientId", pp.display_name as "patientName",
       ${iso(sql`a.starts_at`)} as "startsAt", a.status, a.service_name as "serviceName",
       a.dentist_user_id as "dentistUserId", u.name as "dentistName", ch.name as "chairName", b.name as "branchName",
       case when a.arrived_at is null then null else ${iso(sql`a.arrived_at`)} end as "arrivedAt",
@@ -346,7 +347,7 @@ async function workspaceToday(
       e.id as "encounterId", e.status as "encounterStatus",
       case when e.id is null then null else ${iso(sql`e.started_at`)} end as "encounterStartedAt",
       e.dentist_user_id as "encounterDentistUserId", eu.name as "encounterDentistName"
-    from appointment a join patient p on p.id=a.patient_id and p.organization_id=${orgId}
+    from appointment a join patient p on p.id=a.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     join branch b on b.id=a.branch_id and b.organization_id=${orgId}
     join schedule_chair ch on ch.id=a.chair_id and ch.organization_id=${orgId}
     join "user" u on u.id=a.dentist_user_id
@@ -408,9 +409,10 @@ async function workspaceToday(
 async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, timezone: string): Promise<WaitingStaleEncounter[]> {
   const { start } = dayBounds(timezone)
   const rows = await tx
-    .select({ row: encounter, patientName: patient.displayName })
+    .select({ row: encounter, patientName: patientPerson.displayName })
     .from(encounter)
     .innerJoin(patient, and(eq(patient.id, encounter.patientId), eq(patient.organizationId, encounter.organizationId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(
       eq(encounter.organizationId, orgId),
       eq(encounter.dentistUserId, userId),
@@ -500,11 +502,11 @@ async function waitingStillOpen(tx: Db, orgId: string, userId: string, access: W
 async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
   const appt = sql.raw("a")
   const rows = await tx.execute<{ [K in keyof WaitingUnconfirmed]: WaitingUnconfirmed[K] } & { total: number }>(sql`
-    select a.id, a.patient_id as "patientId", p.display_name as "patientName", p.phone,
+    select a.id, a.patient_id as "patientId", pp.display_name as "patientName", pp.phone,
       ${iso(sql`a.starts_at`)} as "startsAt", b.name as "branchName", a.service_name as "serviceName",
       case when ${remindedUnconfirmedSql(appt)} then 'sin_confirmar' else 'sin_recordatorios' end as why,
       count(*) over ()::int as total
-    from appointment a join patient p on p.id = a.patient_id and p.organization_id = ${orgId}
+    from appointment a join patient p on p.id = a.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     join branch b on b.id = a.branch_id and b.organization_id = ${orgId}
     where a.organization_id = ${orgId}
       and (${remindedUnconfirmedSql(appt)} or ${noRemindersTomorrowSql(orgId)})
@@ -582,11 +584,11 @@ async function waitingSystemTasks(
     createdAt: string
     grantId: string | null
   }>(sql`
-    select t.id, t.kind, t.patient_id as "patientId", p.display_name as "patientName", ct.display_name as "contactName",
+    select t.id, t.kind, t.patient_id as "patientId", pp.display_name as "patientName", ct.display_name as "contactName",
       t.reason, ${iso(sql`t.created_at`)} as "createdAt",
       (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
         and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId"
-    from task t join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
+    from task t join patient p on p.id = t.patient_id and p.organization_id = t.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
     where t.organization_id = ${orgId} and t.status = 'open' and t.kind is not null
       and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
@@ -618,7 +620,7 @@ async function waitingUnsentBudgets(
   dayStart: SQL,
 ): Promise<{ items: WaitingUnsentBudget[]; total: number }> {
   const rows = await tx.execute<{ [K in keyof WaitingUnsentBudget]: WaitingUnsentBudget[K] } & { total: number }>(sql`
-    select b.id, b.patient_id as "patientId", p.display_name as "patientName", ${iso(sql`armado.at`)} as since,
+    select b.id, b.patient_id as "patientId", pp.display_name as "patientName", ${iso(sql`armado.at`)} as since,
       (select count(distinct l.plan_item_id)::int from treatment_budget_item l
         join treatment_budget_option o on o.id = l.option_id and o.organization_id = l.organization_id
         where l.organization_id = b.organization_id and l.budget_id = b.id and o.is_recommended) as "itemCount",
@@ -630,7 +632,7 @@ async function waitingUnsentBudgets(
       b.currency,
       (select count(*)::int from treatment_budget_option o where o.organization_id = b.organization_id and o.budget_id = b.id) as options,
       count(*) over ()::int as total
-    from treatment_budget b join patient p on p.id = b.patient_id and p.organization_id = ${orgId}
+    from treatment_budget b join patient p on p.id = b.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     -- Armado cuando entró su último tratamiento: lo que creció hoy aún no espera.
     cross join lateral (select max(l.created_at) as at from treatment_budget_item l
       where l.organization_id = b.organization_id and l.budget_id = b.id) armado
@@ -649,9 +651,9 @@ async function waitingBudgets(tx: Db, orgId: string, userId: string, ownOnly: bo
       join treatment_plan_item own_item on own_item.id=own_line.plan_item_id and own_item.organization_id=own_line.organization_id
       where own_line.organization_id=${orgId} and own_line.budget_id=b.id and own_item.created_by=${userId}))`
   const items = await tx.execute<WaitingBudgets["items"][number]>(sql`
-    select b.id, b.patient_id as "patientId", p.display_name as "patientName", b.title,
+    select b.id, b.patient_id as "patientId", pp.display_name as "patientName", b.title,
       ${iso(sql`b.presented_at`)} as "presentedAt"
-    from treatment_budget b join patient p on p.id=b.patient_id and p.organization_id=${orgId}
+    from treatment_budget b join patient p on p.id=b.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where ${scope} order by b.presented_at nulls last, b.id limit 20`)
   const [count] = await tx.execute<{ total: number; oldestPresentedAt: string | null }>(sql`
     select count(*)::int as total, ${iso(sql`min(b.presented_at)`)} as "oldestPresentedAt" from treatment_budget b where ${scope}`)

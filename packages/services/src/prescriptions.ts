@@ -16,6 +16,7 @@ import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Medicamento de la receta con los datos de la Guía de la buena prescripción
@@ -276,13 +277,14 @@ export async function getPrescriptionPrint(tx: Db, orgId: string, patientId: str
   const detail = await getPrescriptionDetail(tx, orgId, patientId, id)
   const [person] = await tx
     .select({
-      displayName: patient.displayName,
+      displayName: patientPerson.displayName,
       patientNumber: patient.patientNumber,
-      docType: patient.docType,
-      docNumber: patient.docNumber,
-      birthDate: patient.birthDate,
+      docType: patientPerson.docType,
+      docNumber: patientPerson.docNumber,
+      birthDate: patientPerson.birthDate,
     })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
   if (!person) throw notFound("Paciente")
   const [org] = await tx

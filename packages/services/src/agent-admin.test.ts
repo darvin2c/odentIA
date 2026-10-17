@@ -3,9 +3,8 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { encounter, patient, patientCharge, patientContact, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
-import { agentConfig, contact, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
-import { opportunity } from "@odentia/db/schema/opportunities"
+import { encounter, patientCharge, patientContact, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { agentConfig, crmTask, } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -29,6 +28,7 @@ import { nextPatientNumber } from "./patients.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { completeTask } from "./tasks.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * El Administrador: una sola lista de líneas, cada una prendida o apagada y
@@ -85,10 +85,7 @@ function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
 }
 
 async function person(c: Clinic, name: string): Promise<string> {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   return row!.id
 }
 

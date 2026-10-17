@@ -128,29 +128,16 @@ export const patient = pgTable(
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     organizationId: orgFk("organization_id"),
-    displayName: text("display_name").notNull(),
-    /** Nombre separado (ADR 0004); display_name se deriva de él en la base. */
-    givenNames: text("given_names"),
-    paternalSurname: text("paternal_surname"),
-    maternalSurname: text("maternal_surname"),
-    /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
-    identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
+    /**
+     * La persona que es este paciente (ADR 0001 y 0044): su identidad —nombre,
+     * documento, nacimiento, sexo, teléfono, correo y si está archivada— vive
+     * solo en ella. La base mantiene su vínculo `self` en `patient_contact`.
+     */
+    personId: uuid("person_id").notNull(),
     bloodGroup: text("blood_group").$type<BloodGroup>(),
     patientNumber: integer("patient_number").notNull(),
-    /**
-     * Tipo de documento: qué tipos se ofrecen lo dice el país de la clínica
-     * (`clinicalProfileFor`) y lo valida el servicio; la base no fija una lista
-     * nacional. El documento es único junto con su país emisor.
-     */
-    docType: text("doc_type"),
-    docNumber: text("doc_number"),
-    /** País emisor del documento y nacionalidad (ISO 3166-1 alfa-2). */
-    docCountry: char("doc_country", { length: 2 }),
+    /** Nacionalidad (ISO 3166-1 alfa-2). */
     nationality: char("nationality", { length: 2 }),
-    birthDate: date("birth_date"),
-    sex: text("sex"),
-    phone: text("phone"),
-    email: text("email"),
     avatarStorageKey: text("avatar_storage_key"),
     /** Lugar de nacimiento: país (ISO 3166-1 alfa-2) y ciudad o localidad escrita. */
     birthCountry: char("birth_country", { length: 2 }),
@@ -191,11 +178,17 @@ export const patient = pgTable(
       .default({ allergies: "unknown", conditions: "unknown", medications: "unknown" }),
     healthReviewedAt: timestamp("health_reviewed_at", { withTimezone: true }),
     healthReviewedBy: text("health_reviewed_by").references(() => user.id),
-    isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("patient_org_id_uidx").on(table.organizationId, table.id),
+    // Una persona tiene a lo sumo una ficha, siempre de su misma organización.
+    uniqueIndex("patient_org_person_uidx").on(table.organizationId, table.personId),
+    foreignKey({
+      name: "patient_person_fk",
+      columns: [table.organizationId, table.personId],
+      foreignColumns: [contact.organizationId, contact.id],
+    }),
     check(
       "patient_blood_group_check",
       sql`${table.bloodGroup} IS NULL OR ${table.bloodGroup} IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','unknown')`,
@@ -212,8 +205,6 @@ export const patient = pgTable(
       "patient_address_lengths_check",
       sql`(${table.addressCity} IS NULL OR char_length(${table.addressCity}) BETWEEN 1 AND 100) AND (${table.addressDistrict} IS NULL OR char_length(${table.addressDistrict}) BETWEEN 1 AND 100) AND (${table.addressRegion} IS NULL OR char_length(${table.addressRegion}) BETWEEN 1 AND 100) AND (${table.addressPostalCode} IS NULL OR char_length(${table.addressPostalCode}) BETWEEN 1 AND 20) AND (${table.birthPlace} IS NULL OR char_length(${table.birthPlace}) BETWEEN 1 AND 200)`,
     ),
-    // ISO/IEC 5218: M=1, F=2, I(indeterminado)=9, D(desconocido)=0.
-    check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
     check(
       "patient_marital_status_check",
       // HL7 v3 MaritalStatus o la palabra de un país con su prefijo ISO («PE:conviviente»).
@@ -229,10 +220,7 @@ export const patient = pgTable(
       sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,
     ),
     uniqueIndex("patient_org_number_uidx").on(table.organizationId, table.patientNumber),
-    // NULLS NOT DISTINCT en la migración 0095: sin país emisor tampoco se repite.
-    uniqueIndex("patient_org_doc_uidx")
-      .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
-      .where(sql`"doc_number" IS NOT NULL`),
+    // El documento es único en la persona (`contact_org_doc_uidx`).
   ],
 )
 

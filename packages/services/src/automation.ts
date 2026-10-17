@@ -81,6 +81,7 @@ import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
 import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -1804,11 +1805,12 @@ export async function settleTasks(
         taskId: crmTask.id,
         // Con sus microsegundos: el cursor no vuelve a tomar la misma tarea.
         createdAt: sql<string>`${crmTask.createdAt}::text`,
-        name: sql<string | null>`coalesce(${patient.displayName}, ${contact.displayName})`,
+        name: sql<string | null>`coalesce(${patientPerson.displayName}, ${contact.displayName})`,
       })
       .from(crmTask)
       .innerJoin(automationJob, and(eq(automationJob.organizationId, crmTask.organizationId), eq(automationJob.taskId, crmTask.id)))
       .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, crmTask.organizationId)))
+      .leftJoin(patientPerson, joinPatientPerson(patientPerson))
       .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, crmTask.organizationId)))
       .where(
         and(
@@ -1877,8 +1879,9 @@ async function leaveTask(
   let name: string | null = null
   if (job.patientId) {
     const [row] = await tx
-      .select({ name: patient.displayName })
+      .select({ name: patientPerson.displayName })
       .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patient.id, job.patientId), eq(patient.organizationId, orgId)))
       .limit(1)
     name = row?.name ?? null
@@ -3173,12 +3176,12 @@ export async function handleAutomationReply(
       .select({
         status: appointment.status,
         startsAt: appointment.startsAt,
-        patientName: patient.displayName,
-        self: sql<boolean>`exists (select 1 from patient_contact pc where pc.organization_id = ${orgId}
-          and pc.patient_id = ${appointment.patientId} and pc.contact_id = ${thread.contactId} and pc.relationship = 'self')`,
+        patientName: patientPerson.displayName,
+        self: sql<boolean>`${patient.personId} = ${thread.contactId}`,
       })
       .from(appointment)
       .innerJoin(patient, and(eq(patient.id, appointment.patientId), eq(patient.organizationId, orgId)))
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
       .for("update", { of: appointment })
       .limit(1)

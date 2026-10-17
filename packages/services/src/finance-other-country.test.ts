@@ -7,7 +7,6 @@ import { randomUUID } from "node:crypto"
 import { formatMoney } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { patient } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { eq } from "drizzle-orm"
@@ -19,6 +18,7 @@ import { listPaymentMethods } from "./payment-methods.js"
 import { nextPatientNumber } from "./patients.js"
 import { collectCharge, createCharge, getAccountSummary, type TicketFrozen, voidTicket } from "./payments.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 setupTestDb()
 
 /** Todo lo que delataría a Perú en un documento de otra clínica. */
@@ -42,14 +42,11 @@ async function chileanClinic() {
     .insert(branch)
     .values({ organizationId: orgId, name: "Sede Providencia", timezone: "America/Santiago" })
     .returning()
-  const [person] = await ownerDb
-    .insert(patient)
-    .values({
+  const [person] = await insertTestPatients(ownerDb, {
       organizationId: orgId,
       displayName: "Matías Fuentes",
       patientNumber: await nextPatientNumber(ownerDb, orgId),
     })
-    .returning()
   const methods = await run((tx) => listPaymentMethods(tx, orgId, { activeOnly: true }))
   return {
     orgId,
@@ -168,7 +165,7 @@ it("otra clínica, otro país: cobra, emite el ticket, anula y cierra sin nada p
   // Quedaron 4 000 del cierre; salen los 20 000 que se cobraron en efectivo.
   expect(after.cashOnHandCents).toBe(4000 - 20000)
   const account = await c.run((tx) => getAccountSummary(tx, c.orgId, c.patientId))
-  expect(account.byCurrency).toEqual([{ currency: "CLP", porCobrar: 45000, pagado: 0, aFavor: 0 }])
+  expect(account.byCurrency).toEqual([{ currency: "CLP", porCobrar: 45000, pagado: 0, aFavor: 0, saldo: 45000 }])
 })
 
 it("el ticket impreso no cambia aunque después cambien la clínica o su frase al pie", async () => {

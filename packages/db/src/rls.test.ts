@@ -96,15 +96,12 @@ async function insertPatient(
   number: number,
   displayName: string,
 ) {
+  // Persona única (ADR 0044): la identidad vive en el contacto, que es la
+  // persona del paciente; la base crea su vínculo propio.
+  await db.execute(sql`update "contact" set "display_name" = ${displayName} where "id" = ${contactId}::uuid`)
   await db.execute(
-    sql`insert into "patient" ("id", "organization_id", "display_name", "patient_number")
-        values (${id}::uuid, ${orgId}, ${displayName}, ${number})`,
-  )
-  // Persona única: el contacto pasa a ser la propia persona del paciente y
-  // comparte su identidad (sustituye a la provisional creada con la ficha).
-  await db.execute(
-    sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship, is_preferred)
-        values (${orgId}, ${id}::uuid, ${contactId}::uuid, 'self', true)`,
+    sql`insert into "patient" ("id", "organization_id", "person_id", "patient_number")
+        values (${id}::uuid, ${orgId}, ${contactId}::uuid, ${number})`,
   )
 }
 

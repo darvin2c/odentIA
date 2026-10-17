@@ -1,6 +1,6 @@
 import { withOrgContext } from "@odentia/db"
-import { member, user } from "@odentia/db/schema/auth"
-import { patient, patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
+import { user } from "@odentia/db/schema/auth"
+import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { portalLink, portalSession } from "@odentia/db/schema/portal"
 import { portalGrant, portalPasskey } from "@odentia/db/schema/portal-access"
@@ -38,6 +38,7 @@ import { patientPersonId } from "./patients.js"
 import { revokeResponsibility } from "./responsibilities.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients, setTestPatientIdentity } from "./test-patient.js"
 
 setupTestDb()
 
@@ -109,20 +110,11 @@ beforeAll(async () => {
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       ('m-portal-actor', ${ORG}, ${ACTOR}, 'owner', now()),
       ('m-portal-actor-off', ${ORG_OFF}, ${ACTOR}, 'owner', now())`)
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Portal", patientNumber: 9201 })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Portal", patientNumber: 9201 })
   patientId = createdPatient!.id
-  const [createdPatient2] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Portal Dos", patientNumber: 9202 })
-    .returning({ id: patient.id })
+  const [createdPatient2] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Portal Dos", patientNumber: 9202 })
   patient2Id = createdPatient2!.id
-  const [createdPatient3] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Portal Tres", patientNumber: 9203 })
-    .returning({ id: patient.id })
+  const [createdPatient3] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Portal Tres", patientNumber: 9203 })
   patient3Id = createdPatient3!.id
   const [createdContact] = await ownerDb
     .insert(contact)
@@ -441,10 +433,7 @@ it("cuestionario previo: lo responde quien tiene la sesión, se envía completo 
 })
 
 it("el código de 6 dígitos siempre activa el acceso, también para volver a entrar", async () => {
-  const [created] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Portal Cuatro", patientNumber: 9204 })
-    .returning({ id: patient.id })
+  const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Portal Cuatro", patientNumber: 9204 })
   const patient4Id = created!.id
   await withOrgContext(appDb, ORG, async (tx) => {
     await tx.insert(patientContact).values({ organizationId: ORG, patientId: patient4Id, contactId, relationship: "guardian", createdBy: ACTOR })
@@ -492,14 +481,11 @@ it("el código de 6 dígitos siempre activa el acceso, también para volver a en
 
 /** Una persona adulta con su ficha propia y su documento, que escribe por WhatsApp. */
 async function adultWithDocument(number: number, doc: string | null): Promise<{ patientId: string; personId: string }> {
-  const [created] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: `Adulta ${number}`, patientNumber: number, birthDate: "1990-05-05" })
-    .returning({ id: patient.id })
+  const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: `Adulta ${number}`, patientNumber: number, birthDate: "1990-05-05" })
   const personId = await withOrgContext(appDb, ORG, (tx) => patientPersonId(tx, ORG, created!.id))
   if (!personId) throw new Error("Sin persona propia")
   if (doc) {
-    await ownerDb.update(patient).set({ docType: "DNI", docNumber: doc, docCountry: "PE" }).where(eq(patient.id, created!.id))
+    await setTestPatientIdentity(ownerDb, created!.id, { docType: "DNI", docNumber: doc, docCountry: "PE" })
   }
   return { patientId: created!.id, personId }
 }
@@ -624,10 +610,7 @@ it("pedir volver al portal por el chat deja el pedido en «Te espera» y lo atie
 
 /** Una hija con su madre como representante legal y una sesión abierta en el portal. */
 async function daughterWithSession(number: number, birthDate: string) {
-  const [created] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: `Hija ${number}`, patientNumber: number, birthDate })
-    .returning({ id: patient.id })
+  const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: `Hija ${number}`, patientNumber: number, birthDate })
   const daughter = created!.id
   const grant = await withOrgContext(appDb, ORG, async (tx) => {
     await tx.insert(patientContact).values({ organizationId: ORG, patientId: daughter, contactId, relationship: "guardian", createdBy: ACTOR })
@@ -664,7 +647,7 @@ it("la hija cumple 18: la representación de menor termina y su madre ya no entr
   // Cumplió 18 ayer.
   const yesterday = new Date(Date.now() - 86_400_000)
   const eighteen = `${yesterday.getUTCFullYear() - 18}-${String(yesterday.getUTCMonth() + 1).padStart(2, "0")}-${String(yesterday.getUTCDate()).padStart(2, "0")}`
-  await ownerDb.update(patient).set({ birthDate: eighteen }).where(eq(patient.id, daughter))
+  await setTestPatientIdentity(ownerDb, daughter, { birthDate: eighteen })
   expect(await errorCode(withOrgContext(appDb, ORG, (tx) => requirePortalSession(tx, ORG, sessionToken)))).toBe("PORTAL_REVOKED")
   expect(
     await errorCode(
@@ -679,14 +662,8 @@ it("la hija cumple 18: la representación de menor termina y su madre ya no entr
 })
 
 it("la migración 0096 no revive lo vencido: lo revoca con su sesión, y solo lo vigente deja de vencer", async () => {
-  const [created] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Vencida", patientNumber: 9403 })
-    .returning({ id: patient.id })
-  const [fresh] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Vigente", patientNumber: 9404 })
-    .returning({ id: patient.id })
+  const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Vencida", patientNumber: 9403 })
+  const [fresh] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Vigente", patientNumber: 9404 })
   const grantOf = async (patientId: string, expiresAt: Date) => {
     await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId, contactId, relationship: "guardian", createdBy: ACTOR })
     const [row] = await ownerDb

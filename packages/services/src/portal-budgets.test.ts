@@ -4,7 +4,6 @@
  * la clínica, y su respuesta devuelve el presupuesto con esos mismos campos.
  */
 import { withOrgContext } from "@odentia/db"
-import { contact } from "@odentia/db/schema/crm"
 import { portalLink } from "@odentia/db/schema/portal"
 import { createHash, randomBytes } from "node:crypto"
 import { sql } from "drizzle-orm"
@@ -53,11 +52,8 @@ it("el portal entrega totales, líneas por sesión y el formato de la clínica",
   )
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
 
-  // Acceso del portal: política, persona vinculada verificada, enlace y canje.
-  const [person] = await ownerDb
-    .insert(contact)
-    .values({ organizationId: ORG, displayName: "Contacto del portal" })
-    .returning({ id: contact.id })
+  // Acceso del portal: política, la propia persona verificada, enlace y canje.
+  const person = { id: f.patient.personId }
   const raw = randomBytes(32).toString("base64url")
   await withOrgContext(appDb, ORG, async (tx) => {
     await upsertPortalPolicy(tx, ORG, actor, {

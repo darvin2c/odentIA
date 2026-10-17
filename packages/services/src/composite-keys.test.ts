@@ -2,13 +2,14 @@
  * Claves compuestas de la fase 3 (migración 0097): lo que nombra otra fila
  * clínica la nombra dentro de la misma organización y del mismo paciente.
  */
-import { odontogramAssessment, odontogramEntry, patient, treatmentBudgetOption } from "@odentia/db/schema/clinical"
+import { odontogramAssessment, odontogramEntry, treatmentBudgetOption } from "@odentia/db/schema/clinical"
 import { expect, it } from "vitest"
 import { createBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
 import { nextPatientNumber } from "./patients.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -26,10 +27,7 @@ async function rejects(promise: Promise<unknown>): Promise<string> {
 
 it("una opción, lo tratado que queda dibujado y el odontograma firmado no cruzan de paciente", async () => {
   const f = await clinicalFixture()
-  const [other] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Otra persona", patientNumber: await nextPatientNumber(ownerDb, ORG) })
-    .returning({ id: patient.id })
+  const [other] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Otra persona", patientNumber: await nextPatientNumber(ownerDb, ORG) })
   const item = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
   const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
 

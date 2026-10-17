@@ -102,10 +102,13 @@ beforeAll(async () => {
       (${DENTIST_A}, 'Odontóloga A', 'dentist-agenda-a@example.test'),
       (${DENTIST_A2}, 'Odontólogo A2', 'dentist-agenda-a2@example.test'),
       (${DENTIST_B}, 'Odontólogo B', 'dentist-agenda-b@example.test')`)
+  // La identidad vive en la persona (ADR 0044): cada ficha apunta a la suya.
   await ownerDb.execute(sql`
-    insert into "patient" ("id", "organization_id", "display_name", "patient_number") values
-      (${PATIENT_A}::uuid, ${ORG_A}, 'Paciente Agenda A', 9001),
-      (${PATIENT_B}::uuid, ${ORG_B}, 'Paciente Agenda B', 9002)`)
+    with a as (insert into "contact" ("organization_id", "display_name") values (${ORG_A}, 'Paciente Agenda A') returning id),
+      b as (insert into "contact" ("organization_id", "display_name") values (${ORG_B}, 'Paciente Agenda B') returning id)
+    insert into "patient" ("id", "organization_id", "person_id", "patient_number")
+      select ${PATIENT_A}::uuid, ${ORG_A}, a.id, 9001 from a
+      union all select ${PATIENT_B}::uuid, ${ORG_B}, b.id, 9002 from b`)
   await withOrgContext(appDb, ORG_A, async (tx) => {
     await tx.execute(sql`
       insert into "schedule_chair" ("id", "organization_id", "branch_id", "name") values

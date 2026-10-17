@@ -67,9 +67,9 @@ import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/mess
 import type { ChatResult } from "@langchain/core/outputs"
 import { user } from "@odentia/db/schema/auth"
 import { branch, auditEvent } from "@odentia/db/schema/org"
-import { patient } from "@odentia/db/schema/clinical"
 import { appointment } from "@odentia/db/schema/agenda"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
+import { insertTestPatients } from "@odentia/services/test-patient"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -975,10 +975,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(conv).toBeDefined()
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: "Paciente Reserva Agente", patientNumber })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Paciente Reserva Agente", patientNumber })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
@@ -1090,17 +1087,26 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: "Paciente Reprog Agente", patientNumber })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Paciente Reprog Agente", patientNumber })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
+  // Fechas relativas a hoy: la regla de la cita propia exige una cita por
+  // venir y a menos de 120 días. Lunes a jueves de la semana que viene o la
+  // siguiente, 15:00 UTC (10:00 en Lima, dentro del horario de 9 a 13).
+  const monday = new Date()
+  monday.setUTCHours(15, 0, 0, 0)
+  monday.setUTCDate(monday.getUTCDate() + 7 + ((8 - monday.getUTCDay()) % 7))
+  const dayAt = (offset: number, hour = 15) => {
+    const d = new Date(monday)
+    d.setUTCDate(d.getUTCDate() + offset)
+    d.setUTCHours(hour, 0, 0, 0)
+    return d.toISOString().replace(".000Z", "Z")
+  }
   const booked = await withOrgContext(appDb, "org_a", (tx) =>
     createAppointment(tx, "org_a", actorId, {
       patientId, dentistUserId: dentistId, chairId, branchId,
-      startsAt: "2026-10-05T15:00:00Z", durationMin: 45,
+      startsAt: dayAt(0), durationMin: 45,
     }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
@@ -1112,7 +1118,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   // Reprogramar (confirmar_usuario): propuesta → confirmación → agenda movida.
   const reprogram = tools.find((t) => t.name === "reprogramar_cita")!
   const proposed = String(await reprogram.invoke({
-    appointmentId: booked.id, startsAt: "2026-10-06T16:00:00Z", expectedVersion: booked.version,
+    appointmentId: booked.id, startsAt: dayAt(1, 16), expectedVersion: booked.version,
   }))
   expect(proposed).toContain("pide al interlocutor que confirme")
   const proposalId = /Propuesta ([0-9a-f-]{36})/.exec(proposed)?.[1]
@@ -1123,20 +1129,20 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   let rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
   expect(rows).toHaveLength(1)
-  expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-06T16:00:00.000Z")
+  expect(rows[0]!.startsAt.toISOString()).toBe(dayAt(1, 16).replace("Z", ".000Z"))
   expect(rows[0]!.version).toBe(booked.version + 1)
 
   // Obsolescencia: si la cita cambió desde la propuesta, confirmar no ejecuta.
   ctx.triggerId = "trig-reprog-2"
   const staleProposal = String(await reprogram.invoke({
-    appointmentId: booked.id, startsAt: "2026-10-07T15:00:00Z", expectedVersion: booked.version + 1,
+    appointmentId: booked.id, startsAt: dayAt(2), expectedVersion: booked.version + 1,
   }))
   const staleId = /Propuesta ([0-9a-f-]{36})/.exec(staleProposal)?.[1]
   expect(staleId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-2", "Si confirmo")
   await withOrgContext(appDb, "org_a", (tx) =>
     moveAppointment(tx, "org_a", actorId, booked.id, {
-      expectedVersion: booked.version + 1, startsAt: "2026-10-08T15:00:00Z",
+      expectedVersion: booked.version + 1, startsAt: dayAt(3),
     }))
   const staleConfirm = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: staleId! }))
   expect(staleConfirm).toContain("No se pudo ejecutar al confirmar")
@@ -1144,7 +1150,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
   expect(rows).toHaveLength(1)
-  expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
+  expect(rows[0]!.startsAt.toISOString()).toBe(dayAt(3).replace("Z", ".000Z"))
 
   // Cancelar también lo confirma el paciente; reentregar el mismo trigger no
   // duplica la propuesta.
@@ -1202,7 +1208,7 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
   const contactId = conv!.contactId
   const own = async (name: string, contact: string | null) => {
     const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-    const [row] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: name, patientNumber }).returning({ id: patient.id })
+    const [row] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: name, patientNumber })
     if (contact) {
       await withOrgContext(appDb, "org_a", (tx) =>
         setPatientContact(tx, "org_a", actorId, row!.id, { contactId: contact, relationship: "self", isPreferred: true }))
@@ -1404,10 +1410,7 @@ async function bookingFixture(conversationId: string, label: string) {
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: `Paciente ${label}`, patientNumber })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: `Paciente ${label}`, patientNumber })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))

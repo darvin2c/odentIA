@@ -1,6 +1,6 @@
 import { withOrgContext } from "@odentia/db"
-import { member, user } from "@odentia/db/schema/auth"
-import { patient, serviceCatalog } from "@odentia/db/schema/clinical"
+import { user } from "@odentia/db/schema/auth"
+import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
@@ -26,6 +26,7 @@ import {
 import { findFreeGaps } from "./agent-operations.js"
 import { listWeekSlots } from "./booking-links.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -69,10 +70,7 @@ beforeAll(async () => {
       ('m-agenda-actor', ${ORG}, ${ACTOR}, 'owner', now()),
       ('m-agenda-dentist', ${ORG}, ${DENTIST}, 'member', now()),
       ('m-agenda-dentist-2', ${ORG}, ${DENTIST_2}, 'member', now())`)
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Paciente Agenda", patientNumber: 9101 })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Agenda", patientNumber: 9101 })
   patientId = createdPatient!.id
   const [service] = await ownerDb
     .insert(serviceCatalog)
@@ -440,10 +438,7 @@ it("los huecos descartan lo ya pasado cuando se indica el corte", async () => {
 })
 
 it("la búsqueda de la agenda devuelve a la persona con sus próximas citas en pie", async () => {
-  const [other] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Zoila Sin Cita", patientNumber: 9102 })
-    .returning({ id: patient.id })
+  const [other] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Zoila Sin Cita", patientNumber: 9102 })
   const booked = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
       patientId: other!.id,
@@ -466,9 +461,7 @@ it("la búsqueda de la agenda devuelve a la persona con sus próximas citas en p
 })
 
 it("la Agenda busca con el mismo buscador de personas: el teléfono escrito con espacios", async () => {
-  await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Ana Teléfono", patientNumber: 9103, phone: "+51987654321" })
+  await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Ana Teléfono", patientNumber: 9103, phone: "+51987654321" })
   const found = await run((tx) => searchAgendaPatients(tx, ORG, { q: "987 654 321" }))
   expect(found.map((item) => item.patientName)).toEqual(["Ana Teléfono"])
 })

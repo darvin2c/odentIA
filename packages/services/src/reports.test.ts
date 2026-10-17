@@ -8,7 +8,7 @@ import { withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentHandoff } from "@odentia/db/schema/agent"
 import { user } from "@odentia/db/schema/auth"
-import { clinicalFollowUp, patient, patientPayment } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, patientPayment } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { sql } from "drizzle-orm"
@@ -36,6 +36,7 @@ import {
   getReportService,
 } from "./reports.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -54,7 +55,7 @@ async function clinic(profile?: { country: string; currency: string; timezone: s
   }
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const person = async (name: string, number: number) => {
-    const [row] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: name, patientNumber: number }).returning()
+    const [row] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: number })
     return row!.id
   }
   const dentist = async (name: string) => {

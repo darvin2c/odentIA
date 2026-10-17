@@ -3,7 +3,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { patient, patientContact, paymentTicket } from "@odentia/db/schema/clinical"
+import { patientContact, paymentTicket } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, channelTemplate, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq } from "drizzle-orm"
@@ -32,6 +32,7 @@ import type { Storage } from "./storage.js"
 import { getPersonalLinkPaper, getPersonalLinkView, setPersonalLinkMessages } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { setWritingHours } from "./writing-hours.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * WhatsApp y los mensajes que se pueden apagar (ADR 0040): tres tipos que la
@@ -99,10 +100,7 @@ function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
 
 /** Paciente con su persona y su WhatsApp; `openWindow`: escribió hace poco. */
 async function person(c: Clinic, name: string, options: { openWindow?: boolean; email?: string; wroteHoursAgo?: number } = {}) {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   const [link] = await ownerDb
     .select({ contactId: patientContact.contactId })
     .from(patientContact)

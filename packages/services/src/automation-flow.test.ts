@@ -5,10 +5,10 @@ import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
-import { clinicalFollowUp, patient, patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile, } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -47,12 +47,12 @@ import { createConnection } from "./connections.js"
 import { closeConversationWith } from "./conversation-close.js"
 import { ingestInbound } from "./conversations.js"
 import { closeOpportunity, createOpportunity, setOpportunityTask } from "./opportunities.js"
-import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { setWritingHours } from "./writing-hours.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * Automatizaciones de punta a punta contra la base: qué se programa al prender,
@@ -140,10 +140,7 @@ async function person(
   /** `refused`: pidió no recibir ese tipo de mensaje (su baja). */
   options: { whatsapp?: boolean; email?: string; consent?: Purpose[]; refused?: Purpose[]; openWindow?: boolean } = {},
 ) {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   const [link] = await ownerDb
     .select({ contactId: patientContact.contactId })
     .from(patientContact)

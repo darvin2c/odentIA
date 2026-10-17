@@ -56,6 +56,7 @@ import {
 } from "./opportunities.js"
 import { confirmationReply } from "./appointment-confirm-words.js"
 import { firstName } from "./automation-routing.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { type SendBudgetDeps, sendBudget } from "./budget-send.js"
 import { type BudgetLineWithStatus, type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
 import { OPERATIONS } from "./operation-fields.js"
@@ -756,8 +757,9 @@ export async function resendBudgetByContact(
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
       .limit(1)
     const [person] = await tx
-      .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+      .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
       .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patient.organizationId, orgId), eq(patient.id, input.patientId)))
       .limit(1)
     const who = asker ? firstName(asker) : "La persona"
@@ -1639,7 +1641,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
           .where(inArray(appointment.id, [...appointmentIds]))
       : [],
     patientIds.size
-      ? tx.select({ id: patient.id, displayName: patient.displayName }).from(patient).where(inArray(patient.id, [...patientIds]))
+      ? tx.select({ id: patient.id, displayName: patientPerson.displayName }).from(patient).innerJoin(patientPerson, joinPatientPerson(patientPerson)).where(inArray(patient.id, [...patientIds]))
       : [],
     branchIds.size
       ? tx.select({ id: branch.id, name: branch.name }).from(branch).where(inArray(branch.id, [...branchIds]))

@@ -1,7 +1,6 @@
 import { createStubFetch, gmailAdapter, microsoft365Adapter, splitColdSubject } from "@odentia/channels"
 import { withOrgContext } from "@odentia/db"
 import {
-  patient,
   patientCharge,
   patientContact,
   patientPayment,
@@ -17,6 +16,8 @@ import { getDocumentSendOptions, listDocumentRecipients, proposeChannel, sendFin
 import { nextPatientNumber } from "./patients.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
+import { eq } from "drizzle-orm"
 
 setupTestDb()
 
@@ -119,24 +120,14 @@ it("microsoft 365 envía nuevo con adjunto para mail:", async () => {
 })
 
 async function seedRecipients(orgId: string) {
-  const [person] = await ownerDb
-    .insert(patient)
-    .values({
+  // La persona del paciente (su vínculo propio lo pone la base), con correo.
+  const [person] = await insertTestPatients(ownerDb, {
       organizationId: orgId,
       displayName: "Paciente doctos",
+      email: "pac@example.com",
       patientNumber: await nextPatientNumber(ownerDb, orgId),
     })
-    .returning()
-  const [self] = await ownerDb
-    .insert(contact)
-    .values({ organizationId: orgId, displayName: "Paciente doctos", email: "pac@example.com" })
-    .returning()
-  await ownerDb.insert(patientContact).values({
-    organizationId: orgId,
-    patientId: person!.id,
-    contactId: self!.id,
-    relationship: "self",
-  })
+  const [self] = await ownerDb.select().from(contact).where(eq(contact.id, person!.personId))
   const [payer] = await ownerDb
     .insert(contact)
     .values({ organizationId: orgId, displayName: "Pagadora", email: "pag@example.com" })

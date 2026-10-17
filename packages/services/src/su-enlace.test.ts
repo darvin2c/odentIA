@@ -29,7 +29,7 @@ import {
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
 import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
-import { createPatient, patientPersonId, setPatientContact } from "./patients.js"
+import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import {
   decidePersonalLinkBudget,
@@ -40,6 +40,7 @@ import {
 } from "./su-enlace.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { selectTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -86,7 +87,7 @@ it("uno por persona; «Tus datos» pide solo lo que falta, se envía una vez y n
       data: { birthDate: "1988-02-14", docType: "DNI", docNumber: "47120836", phone: "+51900000000" },
     }),
   )
-  const [saved] = await ownerDb.select().from(patient).where(eq(patient.id, pedro.patientId))
+  const [saved] = await selectTestPatients(ownerDb).where(eq(patient.id, pedro.patientId))
   expect(saved).toMatchObject({ birthDate: "1988-02-14", phone: "+51987111222", identityNeedsReview: false })
   // Una sola vez: después dice «Recibido» y no se vuelve a llenar desde aquí.
   await expect(
@@ -131,7 +132,7 @@ it("un documento que ya es de otra ficha no se guarda y deja «Posible ficha rep
       submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1991-04-04", docType: "DNI", docNumber: "41231234" } }),
     ),
   ).toEqual({ received: true })
-  const [saved] = await ownerDb.select().from(patient).where(eq(patient.id, otro.patientId))
+  const [saved] = await selectTestPatients(ownerDb).where(eq(patient.id, otro.patientId))
   expect(saved).toMatchObject({ birthDate: "1991-04-04", docNumber: null })
   const tasks = await ownerDb
     .select({ title: crmTask.title, kind: crmTask.kind, area: crmTask.area, reason: crmTask.reason })
@@ -174,7 +175,7 @@ it("si la fecha dice que es menor, desde el enlace no se registra a nadie: queda
     }),
   )
   // Ni la fecha ni un representante: la ficha sigue con lo que falta.
-  const [saved] = await ownerDb.select().from(patient).where(eq(patient.id, nina.patientId))
+  const saved = await f.run((tx) => requirePatient(tx, ORG, nina.patientId))
   expect(saved?.birthDate).toBeNull()
   const reps = await ownerDb.select({ id: patientResponsibility.id }).from(patientResponsibility).where(eq(patientResponsibility.patientId, nina.patientId))
   expect(reps).toEqual([])

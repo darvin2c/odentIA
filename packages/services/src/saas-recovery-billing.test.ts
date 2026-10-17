@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
-import { patient, patientContact } from "@odentia/db/schema/clinical"
+import { patientContact } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { saasAction, saasCharge, saasChargeLine, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq } from "drizzle-orm"
@@ -12,6 +12,7 @@ import { countRecoveredAppointment, listPeriodActions } from "./saas-actions.js"
 import { createSaasPlan } from "./saas-billing.js"
 import { closeSaasPeriods } from "./saas-invoicing.js"
 import { insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * La conversación que llevó a una cita recuperada se cobra en su tramo y, si
@@ -56,10 +57,7 @@ async function clinic(start: Date, end: Date, billingCycle: "mensual" | "quincen
 async function recovery(orgId: string, input: { sentAt: Date; talkedAt: Date; bookedAt: Date; startsAt: Date }) {
   const dentist = randomUUID()
   await ownerDb.insert(user).values({ id: dentist, name: "Odontóloga", email: `${dentist}@recovery.test` })
-  const [person] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: orgId, displayName: "Rosa Quispe", patientNumber: await nextPatientNumber(ownerDb, orgId) })
-    .returning()
+  const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Rosa Quispe", patientNumber: await nextPatientNumber(ownerDb, orgId) })
   const [self] = await ownerDb
     .select({ contactId: patientContact.contactId })
     .from(patientContact)

@@ -32,6 +32,7 @@ import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -2075,11 +2076,12 @@ export async function getBudgetPrintPayload(
   if (!profile) throw notFound("Perfil de organización")
   const [patientRow] = await tx
     .select({
-      displayName: patient.displayName,
-      docType: patient.docType,
-      docNumber: patient.docNumber,
+      displayName: patientPerson.displayName,
+      docType: patientPerson.docType,
+      docNumber: patientPerson.docNumber,
     })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   if (!patientRow) throw notFound("Paciente")

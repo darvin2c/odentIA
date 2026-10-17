@@ -27,7 +27,6 @@ import { ownerDb, setupTestDb } from "./test-setup.js"
 setupTestDb()
 
 const LISTS: Array<[constraint: string, values: readonly string[]]> = [
-  ["patient_sex_check", SEX_CODES],
   ["contact_sex_check", SEX_CODES],
   ["patient_contact_kinship_check", KINSHIP],
   ["patient_contact_relationship_check", CONTACT_RELATIONSHIPS],

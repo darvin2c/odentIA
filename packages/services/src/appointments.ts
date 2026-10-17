@@ -49,6 +49,7 @@ import {
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { advanceForAppointment, returnForCancelledAppointment } from "./opportunities.js"
 import { listPatients } from "./patients.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { countRecoveredAppointment } from "./saas-actions.js"
 
 function conflict(code: string, message: string): ServiceError {
@@ -337,7 +338,7 @@ function appointmentRows(tx: Db, orgId: string) {
   return tx
     .select({
       appointment,
-      patientName: patient.displayName,
+      patientName: patientPerson.displayName,
       dentistName: user.name,
       chairName: scheduleChair.name,
       encounter: {
@@ -354,6 +355,7 @@ function appointmentRows(tx: Db, orgId: string) {
       patient,
       and(eq(patient.organizationId, orgId), eq(patient.id, appointment.patientId)),
     )
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .innerJoin(user, eq(user.id, appointment.dentistUserId))
     .innerJoin(scheduleChair, eq(scheduleChair.id, appointment.chairId))
     .leftJoin(
@@ -563,7 +565,7 @@ export async function listAppointments(
   if (query) {
     const like = `%${query}%`
     const match = or(
-      ilike(patient.displayName, like),
+      ilike(patientPerson.displayName, like),
       ilike(appointment.reason, like),
       ilike(appointment.serviceName, like),
     )

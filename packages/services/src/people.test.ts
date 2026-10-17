@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patient, patientContact } from "@odentia/db/schema/clinical"
+import { patientContact } from "@odentia/db/schema/clinical"
 import { contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
 import { createContactNote } from "./crm-workspace.js"
-import { createPatient, setPatientContact, updatePatient } from "./patients.js"
+import { createPatient, requirePatient, setPatientContact, updatePatient } from "./patients.js"
 import {
   createPerson,
   getPersonPage,
@@ -248,17 +248,14 @@ describe("un solo «Archivar»", () => {
       createPatient(tx, c.orgId, c.actor, { displayName: "Carlos Mendoza" }),
     )
     const person = await personOf(p.id)
+    // Un solo indicador (ADR 0044): la ficha lee el de su persona.
     const flags = async () => {
       const [row] = await ownerDb
-        .select({ contactActive: contact.isActive, patientActive: patient.isActive })
+        .select({ contactActive: contact.isActive })
         .from(contact)
-        .innerJoin(
-          patientContact,
-          and(eq(patientContact.contactId, contact.id), eq(patientContact.relationship, "self")),
-        )
-        .innerJoin(patient, eq(patient.id, patientContact.patientId))
         .where(eq(contact.id, person))
-      return row
+      const ficha = await c.run((tx) => requirePatient(tx, c.orgId, p.id))
+      return { contactActive: row?.contactActive, patientActive: ficha.isActive }
     }
     await c.run((tx) => setPersonArchived(tx, c.orgId, { userId: c.actor }, person, true))
     expect(await flags()).toEqual({ contactActive: false, patientActive: false })

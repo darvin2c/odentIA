@@ -6,7 +6,6 @@
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
@@ -19,6 +18,7 @@ import { collectCharge, createCharge, getAccountSummary, refundCredit } from "./
 import { createPaymentMethod } from "./payment-methods.js"
 import type { Storage } from "./storage.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { setTestPatientIdentity } from "./test-patient.js"
 setupTestDb()
 
 function capturingStorage() {
@@ -53,16 +53,8 @@ async function paidTicket() {
   const f = await clinicalFixture()
   const run = f.run as <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
   // La persona del paciente, con correo.
-  const [self] = await ownerDb
-    .insert(contact)
-    .values({ organizationId: "org_a", displayName: "Paciente de prueba", email: `paciente-${randomUUID()}@example.com` })
-    .returning()
-  await ownerDb.insert(patientContact).values({
-    organizationId: "org_a",
-    patientId: f.patient.id,
-    contactId: self!.id,
-    relationship: "self",
-  })
+  await setTestPatientIdentity(ownerDb, f.patient.id, { email: `paciente-${randomUUID()}@example.com` })
+  const [self] = await ownerDb.select().from(contact).where(eq(contact.id, f.patient.personId))
   const [sede] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: `Sede envío ${randomUUID()}` })

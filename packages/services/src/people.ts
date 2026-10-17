@@ -29,6 +29,7 @@ import {
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { personSearchCondition } from "./person-search.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import {
   assertDocumentFree,
   birthDateIsMinor,
@@ -120,15 +121,9 @@ export async function selfPatientOf(
   contactId: string,
 ): Promise<string | null> {
   const [row] = await tx
-    .select({ patientId: patientContact.patientId })
-    .from(patientContact)
-    .where(
-      and(
-        eq(patientContact.organizationId, orgId),
-        eq(patientContact.contactId, contactId),
-        eq(patientContact.relationship, "self"),
-      ),
-    )
+    .select({ patientId: patient.id })
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.personId, contactId)))
     .limit(1)
   return row?.patientId ?? null
 }
@@ -177,41 +172,27 @@ export async function getPersonPage(
   const row = await requireContact(tx, orgId, contactId)
   const [own] = await tx
     .select({ patient })
-    .from(patientContact)
-    .innerJoin(
-      patient,
-      and(eq(patient.id, patientContact.patientId), eq(patient.organizationId, orgId)),
-    )
-    .where(
-      and(
-        eq(patientContact.organizationId, orgId),
-        eq(patientContact.contactId, contactId),
-        eq(patientContact.relationship, "self"),
-      ),
-    )
+    .from(patient)
+    .where(and(eq(patient.organizationId, orgId), eq(patient.personId, contactId)))
     .limit(1)
   const responsibleRows = await tx
     .select({
       patientId: patient.id,
-      displayName: patient.displayName,
+      displayName: patientPerson.displayName,
       patientNumber: patient.patientNumber,
-      birthDate: patient.birthDate,
-      patientActive: patient.isActive,
+      birthDate: patientPerson.birthDate,
       relationship: patientContact.relationship,
       relationshipDetail: patientContact.relationshipDetail,
       kinship: patientContact.kinship,
-      personId: sql<
-        string | null
-      >`(select s.contact_id from patient_contact s where s.organization_id = ${orgId} and s.patient_id = ${patient.id} and s.relationship = 'self' limit 1)`,
-      personActive: sql<
-        boolean | null
-      >`(select c2.is_active from patient_contact s join contact c2 on c2.organization_id = s.organization_id and c2.id = s.contact_id where s.organization_id = ${orgId} and s.patient_id = ${patient.id} and s.relationship = 'self' limit 1)`,
+      personId: patient.personId,
+      personActive: patientPerson.isActive,
     })
     .from(patientContact)
     .innerJoin(
       patient,
       and(eq(patient.id, patientContact.patientId), eq(patient.organizationId, orgId)),
     )
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(
       and(
         eq(patientContact.organizationId, orgId),
@@ -219,7 +200,7 @@ export async function getPersonPage(
         sql`${patientContact.relationship} <> 'self'`,
       ),
     )
-    .orderBy(patient.displayName, patient.id)
+    .orderBy(patientPerson.displayName, patient.id)
   const readsConversations = can("conversations.read")
   const spokenRows = own
     ? await tx
@@ -227,7 +208,7 @@ export async function getPersonPage(
           personId: contact.id,
           displayName: contact.displayName,
           phone: contact.phone,
-          isPatient: sql<boolean>`exists (select 1 from patient_contact s where s.organization_id = ${orgId} and s.contact_id = ${contact.id} and s.relationship = 'self')`,
+          isPatient: sql<boolean>`exists (select 1 from patient s where s.organization_id = ${orgId} and s.person_id = ${contact.id})`,
           relationship: patientContact.relationship,
           relationshipDetail: patientContact.relationshipDetail,
           kinship: patientContact.kinship,
@@ -278,9 +259,9 @@ export async function getPersonPage(
     relationship: r.relationship,
     relationshipDetail: r.relationshipDetail,
     kinship: r.kinship,
-    archived: !r.patientActive || r.personActive === false,
+    archived: !r.personActive,
   }))
-  const archived = !row.isActive || (own ? !own.patient.isActive : false)
+  const archived = !row.isActive
   return {
     id: row.id,
     displayName: row.displayName,
@@ -307,7 +288,7 @@ export async function getPersonPage(
       ? {
           id: own.patient.id,
           patientNumber: own.patient.patientNumber,
-          identityNeedsReview: own.patient.identityNeedsReview,
+          identityNeedsReview: row.identityNeedsReview,
           avatarStorageKey: own.patient.avatarStorageKey,
         }
       : null,
@@ -373,9 +354,9 @@ export interface PeopleListInput {
 
 const PEOPLE_PAGE = 30
 
-/** Archivada entera: la persona o su ficha (lo que quedó de antes de unir los dos indicadores). */
-const ARCHIVED_SQL = sql`(not c.is_active or coalesce(not p.is_active, false))`
-const RESPONSIBLE_SQL = sql`exists (select 1 from patient_contact r join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rp.is_active)`
+/** Archivada entera: la persona, con su ficha si es paciente (ADR 0044). */
+const ARCHIVED_SQL = sql`(not c.is_active)`
+const RESPONSIBLE_SQL = sql`exists (select 1 from patient_contact r join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id join contact rc on rc.organization_id = rp.organization_id and rc.id = rp.person_id where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active)`
 
 function viewCondition(view: PeopleView) {
   switch (view) {
@@ -465,7 +446,6 @@ export async function listPeople(
     is_active: boolean
     patient_id: string | null
     patient_number: number | null
-    patient_active: boolean | null
     doc_type: string | null
     doc_number: string | null
     sex: string | null
@@ -475,17 +455,19 @@ export async function listPeople(
     responsible_count: number
     next_appointment_at: string | null
   }>(sql`
-    select c.id, c.display_name, c.is_active, p.id as patient_id, p.patient_number, p.is_active as patient_active,
+    select c.id, c.display_name, c.is_active, p.id as patient_id, p.patient_number,
       c.doc_type, c.doc_number, c.sex, c.phone,
       to_char(c.last_interaction_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as last_interaction_at,
       (select array_agg(n order by n) from (
-        select rp.display_name as n from patient_contact r
+        select rc.display_name as n from patient_contact r
           join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id
-          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rp.is_active
-          order by rp.display_name limit 2) names) as responsible_names,
+          join contact rc on rc.organization_id = rp.organization_id and rc.id = rp.person_id
+          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active
+          order by rc.display_name limit 2) names) as responsible_names,
       (select count(*)::int from patient_contact r
           join patient rp on rp.organization_id = r.organization_id and rp.id = r.patient_id
-          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rp.is_active) as responsible_count,
+          join contact rc on rc.organization_id = rp.organization_id and rc.id = rp.person_id
+          where r.organization_id = c.organization_id and r.contact_id = c.id and r.relationship <> 'self' and rc.is_active) as responsible_count,
       ${
         agenda
           ? sql`(select to_char(min(a.starts_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') from appointment a
@@ -494,8 +476,7 @@ export async function listPeople(
           : sql`null`
       } as next_appointment_at
     from contact c
-    left join patient_contact pc on pc.organization_id = c.organization_id and pc.contact_id = c.id and pc.relationship = 'self'
-    left join patient p on p.organization_id = pc.organization_id and p.id = pc.patient_id
+    left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
     where c.organization_id = ${orgId}
       and ${viewCondition(view)}
       and ${onlyPatients}
@@ -509,14 +490,13 @@ export async function listPeople(
   const [counted] = everyone
     ? await tx.execute<{ count: number }>(sql`
     select count(*)::int as count from contact c
-    left join patient_contact pc on pc.organization_id = c.organization_id and pc.contact_id = c.id and pc.relationship = 'self'
-    left join patient p on p.organization_id = pc.organization_id and p.id = pc.patient_id
+    left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
     where c.organization_id = ${orgId} and ${viewCondition("por_registrar")}
   `)
     : [{ count: 0 }]
   const items: PersonListItem[] = page.map((r) => {
     const responsibleCount = Number(r.responsible_count ?? 0)
-    const archived = !r.is_active || r.patient_active === false
+    const archived = !r.is_active
     return {
       id: r.id,
       displayName: r.display_name,
@@ -583,9 +563,10 @@ export function identityPatchOf(input: Record<string, unknown>): PersonIdentityP
  * Cambia la identidad de una persona con las reglas de la ficha (ADR 0004,
  * `validateDemographics`), venga de donde venga: la página, el CRM o el
  * agente. Si es paciente, el cambio es el de su ficha (`updatePatient`, con
- * la regla del menor) y la base lo copia a la persona; si no, se valida igual
- * sobre lo que ya tiene y se guarda en la persona. El agente no cambia la
- * identidad de quien ya es paciente.
+ * la regla del menor), que lo guarda en la persona; si no, se valida igual
+ * sobre lo que ya tiene y se guarda en la persona. En los dos casos vive solo
+ * en la persona (ADR 0044). El agente no cambia la identidad de quien ya es
+ * paciente.
  */
 export async function updatePersonIdentity(
   tx: Db,
@@ -718,6 +699,9 @@ export interface CreatePersonInput {
   docType?: string | null
   docNumber?: string | null
   docCountry?: string | null
+  /** Nacimiento y sexo: los trae el alta de un paciente, que crea su persona con ellos. */
+  birthDate?: string | null
+  sex?: string | null
 }
 
 /**
@@ -777,6 +761,8 @@ export async function createPerson(
       docType: clean(input.docType),
       docNumber: clean(input.docNumber),
       docCountry: clean(input.docCountry),
+      birthDate: clean(input.birthDate),
+      sex: clean(input.sex),
     },
     await patientOrganizationToday(tx, orgId),
     countryCode,
@@ -805,6 +791,8 @@ export async function createPerson(
         maternalSurname,
         phone: clean(input.phone),
         email: clean(input.email),
+        birthDate: clean(input.birthDate),
+        sex: clean(input.sex),
         ...(doc ?? {}),
       },
       actor,
@@ -819,9 +807,9 @@ export async function createPerson(
 
 /**
  * Un solo «Archivar»: la persona y su ficha se archivan y se recuperan juntas.
- * Los dos indicadores (`contact.is_active`, `patient.is_active`) siguen
- * existiendo, pero esta es la única operación que los cambia; archivar revoca
- * sus enlaces de registro pendientes (`applyContactActive`).
+ * Es un solo indicador, el de la persona (`contact.is_active`; la ficha no
+ * tiene otro, ADR 0044), y esta es la única operación que lo cambia; archivar
+ * revoca sus enlaces de registro pendientes (`applyContactActive`).
  */
 export async function setPersonArchived(
   tx: Db,
@@ -830,21 +818,15 @@ export async function setPersonArchived(
   contactId: string,
   archived: boolean,
 ): Promise<void> {
+  const [before] = await tx
+    .select({ isActive: contact.isActive })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
   await applyContactActive(tx, orgId, contactId, !archived, actor)
   const patientId = await selfPatientOf(tx, orgId, contactId)
   if (patientId) {
-    const [changed] = await tx
-      .update(patient)
-      .set({ isActive: !archived, updatedAt: new Date() })
-      .where(
-        and(
-          eq(patient.organizationId, orgId),
-          eq(patient.id, patientId),
-          eq(patient.isActive, archived),
-        ),
-      )
-      .returning({ id: patient.id })
-    if (changed)
+    // La ficha se archiva con su persona: es el mismo indicador (ADR 0044).
+    if (before && before.isActive === archived)
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: actor.userId,

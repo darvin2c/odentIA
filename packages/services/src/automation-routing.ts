@@ -24,6 +24,7 @@ import { openEmailThread } from "./financial-documents.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { acceptsPromotions } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Por dónde le llega un mensaje automático a cada persona y qué dice. El orden
@@ -108,8 +109,9 @@ async function isSelf(tx: Db, orgId: string, patientId: string, contactId: strin
 
 async function patientName(tx: Db, orgId: string, patientId: string): Promise<string> {
   const [row] = await tx
-    .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+    .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   return row ? firstName(row) : "tu familiar"

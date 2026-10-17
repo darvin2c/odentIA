@@ -15,8 +15,8 @@ import { detectedTimeZone, zonesForCountry } from "../time-zone/time-zone.js"
  * `libphonenumber-js`. No hay patrones de país escritos a mano: donde existe
  * estándar se usa el estándar (ver AGENTS.md).
  *
- * Por qué E.164 y no el texto con máscara: es lo que guardan `contact.phone` y
- * `patient.phone`, y de ahí dependen la deduplicación de pacientes
+ * Por qué E.164 y no el texto con máscara: es lo que guarda `contact.phone` (el
+ * teléfono de la persona, también si es paciente), y de ahí dependen la deduplicación de pacientes
  * (`findPatientDuplicates`) y la identidad de canal (`wa:51911222333`). La
  * máscara es solo presentación.
  */

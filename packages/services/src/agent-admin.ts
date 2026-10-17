@@ -177,10 +177,10 @@ function fresh(scope: Fresh | undefined, id: SQL, at: SQL): SQL {
 
 async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; service: string | null; starts_at: Date | string; total: number }>(sql`
-    select a.id, p.id as patient_id, p.display_name as name, a.service_name as service, a.starts_at,
+    select a.id, p.id as patient_id, pp.display_name as name, a.service_name as service, a.starts_at,
            count(*) over ()::int as total
     from appointment a
-    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
+    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where a.organization_id = ${orgId} and a.status = 'programada'
       and a.starts_at > now() and a.starts_at <= now() + interval '24 hours'
     order by a.starts_at asc
@@ -204,13 +204,13 @@ async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale, limi
 
 async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; due_at: Date | string; total: number; old: number }>(sql`
-    select f.id, p.id as patient_id, p.display_name as name, f.title, f.due_at,
+    select f.id, p.id as patient_id, pp.display_name as name, f.title, f.due_at,
            count(*) over ()::int as total,
            (count(*) filter (where f.due_at < now() - interval '30 days') over ())::int as old
     from clinical_follow_up f
-    join patient p on p.id = f.patient_id and p.organization_id = f.organization_id
+    join patient p on p.id = f.patient_id and p.organization_id = f.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where f.organization_id = ${orgId} and f.status = 'pendiente' and f.due_at < now()
-      and p.is_active and ${NO_FUTURE_APPOINTMENT}
+      and pp.is_active and ${NO_FUTURE_APPOINTMENT}
     order by f.due_at asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
@@ -233,13 +233,13 @@ async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: nu
 
 async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days: number, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; presented_at: Date | string; total: number }>(sql`
-    select b.id, p.id as patient_id, p.display_name as name, b.title, b.budget_number as number, b.presented_at,
+    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.presented_at,
            count(*) over ()::int as total
     from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id
+    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where b.organization_id = ${orgId} and b.status = 'presentado'
       and b.presented_at < now() - make_interval(days => ${days})
-      and p.is_active
+      and pp.is_active
     order by b.presented_at asc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
@@ -300,11 +300,11 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
       where m.organization_id = ${orgId} and m.status = 'no_asistio'
         and m.starts_at >= now() - make_interval(days => ${days}) and m.starts_at < now()
       order by m.patient_id, m.starts_at desc
-    ) select missed.id, p.id as patient_id, p.display_name as name, missed.service_name as service, missed.starts_at,
+    ) select missed.id, p.id as patient_id, pp.display_name as name, missed.service_name as service, missed.starts_at,
            count(*) over ()::int as total
     from missed
-    join patient p on p.id = missed.patient_id and p.organization_id = ${orgId}
-    where p.is_active and ${NO_FUTURE_APPOINTMENT}
+    join patient p on p.id = missed.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where pp.is_active and ${NO_FUTURE_APPOINTMENT}
     order by missed.starts_at desc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
@@ -326,13 +326,13 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
 
 async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; total: number }>(sql`
-    select b.id, p.id as patient_id, p.display_name as name, b.title, b.budget_number as number, b.decided_at,
+    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
            count(*) over ()::int as total
     from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id
+    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
       and b.decided_at < now() - make_interval(days => ${days})
-      and p.is_active and ${NO_FUTURE_APPOINTMENT}
+      and pp.is_active and ${NO_FUTURE_APPOINTMENT}
       ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
     order by b.decided_at asc
     limit ${limit}`)
@@ -359,10 +359,10 @@ const ATTENDING_ROLES = ORG_ROLES.filter((role) => canAccess(role, "clinical.wri
 
 async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; dentist: string | null; dentist_id: string | null; started_at: Date | string; total: number }>(sql`
-    select e.id, p.id as patient_id, p.display_name as name, u.name as dentist, e.dentist_user_id as dentist_id, e.started_at,
+    select e.id, p.id as patient_id, pp.display_name as name, u.name as dentist, e.dentist_user_id as dentist_id, e.started_at,
            count(*) over ()::int as total
     from encounter e
-    join patient p on p.id = e.patient_id and p.organization_id = e.organization_id
+    join patient p on p.id = e.patient_id and p.organization_id = e.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join "user" u on u.id = e.dentist_user_id
     where e.organization_id = ${orgId} and e.status = 'borrador'
       and e.started_at < now() - make_interval(days => ${days})
@@ -406,19 +406,19 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
 async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const credit = sql`greatest(${patientCreditSql(orgId, sql`p.id`, sql`c.currency`)}, 0)`
   const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; since_day: string; total: number }>(sql`
-    select p.id as patient_id, p.display_name as name, c.currency,
+    select p.id as patient_id, pp.display_name as name, c.currency,
            (sum(c.amount_cents - coalesce(a.applied, 0)) - ${credit})::int as owed, min(c.created_at) as since,
            to_char(min(c.created_at), 'YYYY-MM-DD') as since_day,
            count(*) over ()::int as total
     from patient_charge c
-    join patient p on p.id = c.patient_id and p.organization_id = c.organization_id
+    join patient p on p.id = c.patient_id and p.organization_id = c.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join lateral (
       select sum(app.amount_cents)::int as applied
       from patient_payment_application app
       where app.charge_id = c.id and app.organization_id = c.organization_id and app.voided_at is null
     ) a on true
     where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
-    group by p.id, p.display_name, p.organization_id, c.currency
+    group by p.id, pp.display_name, p.organization_id, c.currency
     having min(c.created_at) < now() - make_interval(days => ${days})
       and sum(c.amount_cents - coalesce(a.applied, 0)) > ${credit}
       ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
@@ -454,11 +454,11 @@ async function cancelledWithoutAppointment(tx: Db, orgId: string, zone: OrgLocal
           and e.action = 'appointment.status_cancelada' and e.created_at >= now() - make_interval(days => ${days})
           and (e.actor_user_id is null or e.metadata->>'cancelReason' = 'paciente'))
       order by m.patient_id, m.starts_at desc
-    ) select gone.id, p.id as patient_id, p.display_name as name, gone.service_name as service, gone.starts_at,
+    ) select gone.id, p.id as patient_id, pp.display_name as name, gone.service_name as service, gone.starts_at,
            count(*) over ()::int as total
     from gone
-    join patient p on p.id = gone.patient_id and p.organization_id = ${orgId}
-    where p.is_active and ${NO_FUTURE_APPOINTMENT}
+    join patient p on p.id = gone.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where pp.is_active and ${NO_FUTURE_APPOINTMENT}
     order by gone.starts_at desc
     limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
@@ -618,7 +618,7 @@ interface JobView extends Record<string, unknown> {
 function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
   return sql`
     select j.id, j.kind, j.status, j.cause, j.via, j.last_error, j.updated_at, j.scheduled_for,
-           j.patient_id, j.contact_id, coalesce(p.display_name, c.display_name) as name,
+           j.patient_id, j.contact_id, coalesce(pp.display_name, c.display_name) as name,
            m.status as message_status, m.conversation_id,
            a.status as appointment_status, t.status as task_status, t.area as task_area, t.settled_reason as task_settled,
            (m.id is not null and exists (select 1 from message r
@@ -628,7 +628,7 @@ function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
               where n.organization_id = j.organization_id and n.patient_id = j.patient_id
                 and n.created_at > j.updated_at and n.status in ('programada', 'confirmada', 'atendida'))) as booked
     from automation_job j
-    left join patient p on p.id = j.patient_id and p.organization_id = j.organization_id
+    left join patient p on p.id = j.patient_id and p.organization_id = j.organization_id left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact c on c.id = j.contact_id and c.organization_id = j.organization_id
     left join message m on m.id = j.sent_message_id and m.organization_id = j.organization_id
     left join appointment a on a.id = j.appointment_id and a.organization_id = j.organization_id

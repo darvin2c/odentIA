@@ -625,12 +625,12 @@ export async function getReportList(
           : sql`a.status in ('programada','confirmada') and a.ends_at < ${at(now)}`
     rows = [
       ...(await tx.execute<Row>(sql`
-        select a.id, a.starts_at as at, a.patient_id as "patientId", p.display_name as "personName",
+        select a.id, a.starts_at as at, a.patient_id as "patientId", pp.display_name as "personName",
           a.service_name as title, u.name as "professionalName", b.name as "branchName",
           ${nextAppointment(sql`a.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total
         from appointment a
-        join patient p on p.id=a.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=a.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=a.branch_id and b.organization_id=${orgId}
         join "user" u on u.id=a.dentist_user_id
         where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
@@ -640,12 +640,12 @@ export async function getReportList(
   } else if (query.list === "controls_pending") {
     rows = [
       ...(await tx.execute<Row>(sql`
-        select f.id, f.due_at as at, f.patient_id as "patientId", p.display_name as "personName",
+        select f.id, f.due_at as at, f.patient_id as "patientId", pp.display_name as "personName",
           f.title, null::text as "professionalName", null::text as "branchName",
           ${nextAppointment(sql`f.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total
         from clinical_follow_up f
-        join patient p on p.id=f.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=f.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         where f.organization_id=${orgId} and f.due_at >= ${start} and f.due_at < ${end}
           and f.status in ('pendiente','programado')
         order by f.due_at, f.id limit ${REPORT_LIST_LIMIT}`)),
@@ -659,12 +659,12 @@ export async function getReportList(
             case when bool_or(missing_price) then null else coalesce(sum(cents), 0) end as cents
           from budget_line where grp = 'waiting' group by id, patient_id, presented_at, title, currency
         )
-        select w.id, w.presented_at as at, w.patient_id as "patientId", p.display_name as "personName",
+        select w.id, w.presented_at as at, w.patient_id as "patientId", pp.display_name as "personName",
           w.title, null::text as "professionalName", null::text as "branchName",
           ${nextAppointment(sql`w.patient_id`)} as "hasNextAppointment",
           w.cents::text as cents, w.currency::text as currency, count(*) over()::int as total
         from waiting w
-        join patient p on p.id=w.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=w.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         order by w.presented_at, w.id limit ${REPORT_LIST_LIMIT}`)),
     ]
   } else {
@@ -674,12 +674,12 @@ export async function getReportList(
           select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, dentist_user_id
           from appointment where organization_id=${orgId} and status='atendida'
           order by patient_id, starts_at, id
-        ) select v.id, v.starts_at as at, v.patient_id as "patientId", p.display_name as "personName",
+        ) select v.id, v.starts_at as at, v.patient_id as "patientId", pp.display_name as "personName",
           v.service_name as title, u.name as "professionalName", b.name as "branchName",
           ${nextAppointment(sql`v.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total
         from first_visit v
-        join patient p on p.id=v.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=v.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=v.branch_id and b.organization_id=${orgId}
         join "user" u on u.id=v.dentist_user_id
         where v.starts_at >= ${start} and v.starts_at < ${end}

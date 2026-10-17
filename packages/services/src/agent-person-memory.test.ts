@@ -43,6 +43,7 @@ import { listPatientsByContact, nextPatientNumber, setPatientContact } from "./p
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients, selectTestPatients } from "./test-patient.js"
 
 /** Memoria de la persona: datos prácticos con fecha y origen, nunca clínicos, que se reemplazan o se quitan. */
 setupTestDb()
@@ -237,10 +238,7 @@ describe("memoria de la persona", () => {
     await ownerDb.insert(user).values([{ id: dentist, name: "Dra. Ana Torres", email: "ana.torres@ultima.test", emailVerified: true }])
     await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
     const chair = await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental U" }))
-    const [created] = await ownerDb
-      .insert(patient)
-      .values({ organizationId: ORG, displayName: "Rosa Díaz", givenNames: "Rosa", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
-      .returning({ id: patient.id })
+    const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Rosa Díaz", givenNames: "Rosa", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: rosa.contactId, relationship: "self", isPreferred: true }))
     const visit = (startsAt: Date, status: string) => ({
       organizationId: ORG, branchId: site!.id, patientId: created!.id, dentistUserId: dentist, chairId: chair.id,
@@ -343,10 +341,7 @@ describe("reservar desde un enlace", () => {
         dentistUserId: dentist,
         rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
       }))
-    const [created] = await ownerDb
-      .insert(patient)
-      .values({ organizationId: ORG, displayName: "Eva María Rojas", givenNames: "Eva María", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
-      .returning({ id: patient.id })
+    const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Eva María Rojas", givenNames: "Eva María", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: eva.contactId, relationship: "self", isPreferred: true }))
 
     const first = await run((tx) => createBookingLink(tx, ORG, { conversationId: eva.conversationId, branchId: site!.id }, { secretsKey: KEY }))
@@ -486,7 +481,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const linked = await run((tx) => listPatientsByContact(tx, ORG, nuevo.contactId))
     expect(linked).toHaveLength(1)
     const registered = linked[0]!
-    const [ficha] = await ownerDb.select().from(patient).where(eq(patient.id, registered.id))
+    const [ficha] = await selectTestPatients(ownerDb).where(eq(patient.id, registered.id))
     // Queda con lo esencial; lo demás vacío y la identidad por revisar, que es lo que ve recepción en la ficha.
     expect(ficha).toMatchObject({
       displayName: "Carla Núñez Prado", docType: "DNI", docNumber: "45678912", phone: "+51987654321",

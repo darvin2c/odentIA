@@ -6,7 +6,6 @@ import {
   encounter,
   encounterDiagnosis,
   odontogramEntry,
-  patient,
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -35,6 +34,7 @@ import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { drawTreatedFinding } from "./treated-findings.js"
 import { withOrgContext } from "@odentia/db"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -61,14 +61,11 @@ async function attending(orgId: string) {
       { code: "K02", title: "Caries dental" },
       { code: "K02.1", title: "Caries de la dentina" },
     ])
-  const [person] = await ownerDb
-    .insert(patient)
-    .values({
+  const [person] = await insertTestPatients(ownerDb, {
       organizationId: orgId,
       displayName: "Lucía Fernández",
       patientNumber: await nextPatientNumber(ownerDb, orgId),
     })
-    .returning()
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const open = async () => {
     const [row] = await ownerDb

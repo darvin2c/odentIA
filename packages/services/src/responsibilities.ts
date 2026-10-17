@@ -7,6 +7,7 @@ import { and, asc, eq, isNull, lte, gte, or } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { endPairAccess } from "./pair-access.js"
 import { patientOrganizationToday, requirePatient } from "./patients.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 export { RESPONSIBILITY_KINDS } from "@odentia/clinical"
 
@@ -44,7 +45,8 @@ export async function patientAge(
   orgId: string,
   patientId: string,
 ): Promise<{ today: string; birthDate: string | null; adultSince: string | null; isMinor: boolean }> {
-  const [subject] = await tx.select({ birthDate: patient.birthDate }).from(patient)
+  const [subject] = await tx.select({ birthDate: patientPerson.birthDate }).from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).limit(1)
   const today = await patientOrganizationToday(tx, orgId)
   const birthDate = subject?.birthDate ? String(subject.birthDate).slice(0, 10) : null

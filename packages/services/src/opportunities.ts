@@ -29,6 +29,7 @@ import { requirePatient } from "./patients.js"
 import { ensureDefaultPipeline, momentRank, type SaleMoment, stageOfMoment } from "./pipelines.js"
 import { createTask, settleTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 export type { OpportunityStatus }
 
@@ -707,7 +708,7 @@ function parseLastEvent(raw: string | null): LastEvent | null {
 const listColumns = {
   opp: opportunity,
   contactName: contact.displayName,
-  patientName: patient.displayName,
+  patientName: patientPerson.displayName,
   stageName: pipelineStage.name,
   moment: pipelineStage.moment,
   serviceName: serviceCatalog.name,
@@ -764,6 +765,7 @@ function baseListQuery(tx: Db, orgId: string) {
     .from(opportunity)
     .innerJoin(contact, and(eq(contact.id, opportunity.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(patient, and(eq(patient.id, opportunity.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
     .leftJoin(serviceCatalog, eq(serviceCatalog.id, opportunity.serviceId))
 }

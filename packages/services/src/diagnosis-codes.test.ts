@@ -23,6 +23,7 @@ import {
 } from "./encounters.js"
 import { updatePatient } from "./patients.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { selectTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -334,6 +335,6 @@ it("el estado civil se valida con el perfil del país: en Perú «Conviviente»,
       educationLevel: "3",
     }),
   )
-  const [row] = await ownerDb.select().from(patient).where(eq(patient.id, f.patient.id))
+  const [row] = await selectTestPatients(ownerDb).where(eq(patient.id, f.patient.id))
   expect(row).toMatchObject({ maritalStatus: "PE:conviviente", educationLevel: "3" })
 })

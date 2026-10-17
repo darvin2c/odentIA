@@ -18,7 +18,6 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
-  patient,
   patientContact,
   patientDataConsent,
   patientRegistration,
@@ -32,7 +31,7 @@ import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { createContactNote } from "./crm-workspace.js"
-import { createPatient, patientOrganizationToday, patientPersonId, requirePatient, type PatientRow } from "./patients.js"
+import { createPatient, patientOrganizationToday, requirePatient, type PatientRow } from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import { createPerson, findPersonByDocument } from "./people.js"
@@ -816,25 +815,23 @@ export async function registerPatient(
   // las notas de su persona, a nombre de quien la registró.
   if (essentials) {
     await tx
-      .update(patient)
+      .update(contact)
       .set({ identityNeedsReview: true })
-      .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
+      .where(and(eq(contact.id, created.personId), eq(contact.organizationId, orgId)))
     const who = publicContext
       ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
       : "El equipo creó su ficha con lo mínimo al reservar"
     const note = pendingRegistrationNote(who, config, answers)
     if (conversationId) await addAgentCaseNote(tx, orgId, conversationId, note)
     else {
-      // Su persona la crea la base al cerrar la transacción (disparador diferido,
-      // `ensure_patient_person`): se adelanta con la misma función para anotarle lo pendiente.
-      await tx.execute(sql`select ensure_patient_person(${orgId}, ${created.id}::uuid)`)
-      const personId = await patientPersonId(tx, orgId, created.id)
-      if (personId) await createContactNote(tx, orgId, personId, { body: note }, { userId: actorUserId })
+      // Lo pendiente se anota en su persona, que el alta ya creó (`person_id`).
+      const personId = created.personId
+      await createContactNote(tx, orgId, personId, { body: note }, { userId: actorUserId })
       // Registrarla en «Nueva cita» con su teléfono es un alta manual del equipo: ese
       // número pasa a ser su WhatsApp (ADR 0027), con la misma operación que
       // «Escribirle» y a nombre de quien la registra, para que le lleguen el aviso y
       // los recordatorios. Si ya es de otra persona no se mueve: la cita sigue y se dice.
-      if (personId && newPerson && created.phone && (await hasActiveWhatsApp(tx, orgId))) {
+      if (newPerson && created.phone && (await hasActiveWhatsApp(tx, orgId))) {
         try {
           await claimWhatsAppNumber(tx, orgId, actorUserId, personId, created.phone)
           whatsapp = "creado"

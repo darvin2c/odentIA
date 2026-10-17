@@ -114,8 +114,9 @@ beforeAll(async () => {
       ('m-api-actor', ${ORG}, 'api-agenda-actor', 'owner', now()),
       ('m-api-dentist', ${ORG}, ${DENTIST}, 'member', now())`)
   const [paciente] = await ownerDb.execute<{ id: string }>(sql`
-    insert into "patient" ("organization_id", "display_name", "patient_number")
-    values (${ORG}, 'Paciente API', 9201) returning "id"`)
+    with pp as (insert into "contact" ("organization_id", "display_name") values (${ORG}, 'Paciente API') returning "id")
+    insert into "patient" ("organization_id", "person_id", "patient_number")
+    select ${ORG}, pp."id", 9201 from pp returning "id"`)
   patientId = paciente!.id
 }, 180_000)
 

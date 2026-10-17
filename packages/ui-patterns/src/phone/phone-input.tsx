@@ -49,8 +49,8 @@ export interface PhoneInputProps {
 /**
  * Teléfono con máscara por país y valor canónico E.164. El texto que se ve lo
  * formatea `@maskito/phone` con los metadatos de `libphonenumber-js`; el valor
- * que emite es E.164, el mismo formato que guardan `contact.phone` y
- * `patient.phone` y del que dependen la deduplicación y la identidad de canal.
+ * que emite es E.164, el mismo formato que guarda `contact.phone` (el teléfono
+ * de la persona) y del que dependen la deduplicación y la identidad de canal.
  *
  * **El prefijo internacional lo lleva el selector, no el teclado**: el campo
  * muestra siempre el número nacional (`987 654 321`) y a su izquierda se lee

@@ -3,7 +3,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { portalSession } from "@odentia/db/schema/portal"
@@ -38,6 +38,7 @@ import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { getPersonalLinkView } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * Bandeja, Agenda y la confirmación de citas conectadas (fase 2, tablero 3):
@@ -118,10 +119,7 @@ async function person(
     phone?: string
   } = {},
 ) {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   const [link] = await ownerDb
     .select({ contactId: patientContact.contactId })
     .from(patientContact)

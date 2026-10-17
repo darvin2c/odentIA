@@ -30,7 +30,9 @@ async function twoMonths(db: Db, owner: OwnerFixture) {
   const people: Record<string, string> = {}
   for (const [index, name] of ["Ana Paz", "Bruno Díaz", "Carla Soto", "Diego Ruiz", "Elena Mora"].entries()) {
     people[name] = randomUUID()
-    await db.insert(patient).values({ id: people[name], organizationId, displayName: name, patientNumber: index + 1 })
+    // La identidad vive en la persona (ADR 0044).
+    const [person] = await db.insert(contact).values({ organizationId, displayName: name }).returning({ id: contact.id })
+    await db.insert(patient).values({ id: people[name], organizationId, personId: person!.id, patientNumber: index + 1 })
   }
   const visit = (name: string, startsAt: Date, status: string, source = "recepcion") =>
     db.insert(appointment).values({
@@ -139,7 +141,8 @@ for (const width of [1440, 390]) {
       const chairId = randomUUID()
       const patientId = randomUUID()
       await fixtureDb.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
-      await fixtureDb.insert(patient).values({ id: patientId, organizationId, displayName: "Gabriel Núñez", patientNumber: 1 })
+      const [person] = await fixtureDb.insert(contact).values({ organizationId, displayName: "Gabriel Núñez" }).returning({ id: contact.id })
+      await fixtureDb.insert(patient).values({ id: patientId, organizationId, personId: person!.id, patientNumber: 1 })
       // Faltó hace veinte minutos y no tiene otra cita.
       const startsAt = new Date(Date.now() - 20 * 60_000)
       await fixtureDb.insert(appointment).values({

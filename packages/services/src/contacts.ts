@@ -15,10 +15,11 @@ import {
   PREFERRED_CHANNELS,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { personSearchCondition } from "./person-search.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { findOrgCountry } from "./locale.js"
 import { identityPatchOf, setPersonArchived, updatePersonIdentity } from "./people.js"
 
@@ -338,14 +339,18 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       .where(and(eq(conversation.organizationId, orgId), eq(conversation.contactId, id)))
       .orderBy(sql`"conversation"."last_message_at" desc nulls last`),
     tx
-      .select({ link: patientContact, patient })
+      .select({
+        link: patientContact,
+        patient: { id: patient.id, patientNumber: patient.patientNumber, displayName: patientPerson.displayName, isActive: patientPerson.isActive },
+      })
       .from(patientContact)
       .innerJoin(
         patient,
         and(eq(patientContact.patientId, patient.id), eq(patient.organizationId, orgId)),
       )
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, id)))
-      .orderBy(desc(patientContact.isPreferred), asc(patient.displayName), asc(patient.id)),
+      .orderBy(desc(patientContact.isPreferred), asc(patientPerson.displayName), asc(patient.id)),
   ])
   const customFields =
     row.customFields && typeof row.customFields === "object" && !Array.isArray(row.customFields)
@@ -486,6 +491,8 @@ export async function createContact(
     docType?: string | null
     docNumber?: string | null
     docCountry?: string | null
+    birthDate?: string | null
+    sex?: string | null
     isActive?: boolean
     tags?: string[]
   },
@@ -506,6 +513,8 @@ export async function createContact(
       docType: input.docType ?? null,
       docNumber: input.docNumber ?? null,
       docCountry: input.docCountry ?? null,
+      birthDate: input.birthDate ?? null,
+      sex: input.sex ?? null,
       isActive: input.isActive ?? true,
       tags: normalizeContactTags(input.tags ?? []),
     })

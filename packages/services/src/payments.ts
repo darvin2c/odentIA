@@ -35,6 +35,7 @@ import { requirePromotionPrice } from "./promotions.js"
 import { budgetLineUnits } from "./budgets.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
@@ -966,8 +967,9 @@ export async function collectCharge(
     throw validation("No hay saldo a favor ni medios para cobrar")
   const ticketNumber = await nextTicketNumber(tx, orgId)
   const [person] = await tx
-    .select({ displayName: patient.displayName, docType: patient.docType, docNumber: patient.docNumber })
+    .select({ displayName: patientPerson.displayName, docType: patientPerson.docType, docNumber: patientPerson.docNumber })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
   const [payer] = input.payerContactId
     ? await tx
@@ -1357,8 +1359,9 @@ export async function refundCredit(
   // La constancia se congela al devolver: clínica, sede, a quién, cuánto y por
   // qué medio. El PDF se arma solo con esto, igual que el ticket.
   const [person] = await tx
-    .select({ displayName: patient.displayName, docType: patient.docType, docNumber: patient.docNumber })
+    .select({ displayName: patientPerson.displayName, docType: patientPerson.docType, docNumber: patientPerson.docNumber })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
   const [issuer] = await tx.select({ name: user.name }).from(user).where(eq(user.id, actorUserId))
   const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId))

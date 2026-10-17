@@ -41,6 +41,7 @@ import { requireProfessionalSignature } from "./professional-profiles.js"
 import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Especialidades dinámicas, formularios clínicos versionados, consentimientos
@@ -2383,13 +2384,14 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
   if (!doc) throw notFound("Consentimiento")
   const [person] = await tx
     .select({
-      displayName: patient.displayName,
+      displayName: patientPerson.displayName,
       patientNumber: patient.patientNumber,
-      docType: patient.docType,
-      docNumber: patient.docNumber,
-      birthDate: patient.birthDate,
+      docType: patientPerson.docType,
+      docNumber: patientPerson.docNumber,
+      birthDate: patientPerson.birthDate,
     })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, doc.patientId), eq(patient.organizationId, orgId)))
   if (!person) throw notFound("Paciente")
   const [org] = await tx
@@ -3259,13 +3261,14 @@ export async function getOrderPrint(tx: Db, orgId: string, orderId: string) {
   if (!order) throw notFound("Orden")
   const [person] = await tx
     .select({
-      displayName: patient.displayName,
+      displayName: patientPerson.displayName,
       patientNumber: patient.patientNumber,
-      docType: patient.docType,
-      docNumber: patient.docNumber,
-      birthDate: patient.birthDate,
+      docType: patientPerson.docType,
+      docNumber: patientPerson.docNumber,
+      birthDate: patientPerson.birthDate,
     })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, order.patientId), eq(patient.organizationId, orgId)))
   if (!person) throw notFound("Paciente")
   const [org] = await tx

@@ -40,6 +40,7 @@ import { findOrgLocale, getOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { getPortalPolicy, PORTAL_FIXED, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Quién puede compartir qué en el portal: los presupuestos, quien los envía
@@ -274,8 +275,9 @@ export async function assertScope(
 
 async function linkView(tx: Db, orgId: string, row: PortalLinkRow): Promise<PortalLinkView> {
   const [patientRow] = await tx
-    .select({ displayName: patient.displayName })
+    .select({ displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, row.patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   const [contactRow] = await tx

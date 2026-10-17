@@ -24,6 +24,7 @@ import { agentAttendingSql, handoffOpenExistsSql, proposalPendingExistsSql } fro
 import { listOpportunities, type OpportunityListItem } from "./opportunities.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import type { TaskItem } from "./tasks.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /* ------------------------------------------------------------------ */
 /* Superficie operativa del CRM (paso P1): contexto + actividad +      */
@@ -106,7 +107,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
     .select({
       id: appointment.id,
       patientId: appointment.patientId,
-      patientName: patientTable.displayName,
+      patientName: patientPerson.displayName,
       startsAt: appointment.startsAt,
       status: appointment.status,
       branchName: branch.name,
@@ -125,6 +126,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
       ),
     )
     .innerJoin(patientTable, and(eq(patientTable.id, appointment.patientId), eq(patientTable.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .innerJoin(branch, and(eq(branch.id, appointment.branchId), eq(branch.organizationId, orgId)))
     .leftJoin(orgProfile, eq(orgProfile.organizationId, appointment.organizationId))
     .innerJoin(user, eq(user.id, appointment.dentistUserId))

@@ -6,7 +6,6 @@ import {
   diagnosisCatalog,
   diagnosisCodeRelease,
   encounter,
-  patient,
   serviceCatalog,
   treatmentPlan,
 } from "@odentia/db/schema/clinical"
@@ -17,6 +16,7 @@ import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { updateEncounterDraft } from "./encounters.js"
 import { appDb, ownerDb } from "./test-setup.js"
 import { nextPatientNumber } from "./patients.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /** Miembro con colegiatura registrada: puede firmar el cierre de una atención. */
 export async function makeSigner(orgId: string, userId: string): Promise<void> {
@@ -114,14 +114,11 @@ export async function clinicalFixture() {
   const actor = randomUUID()
   await ownerDb.insert(user).values({ id: actor, name: "Clínico", email: `${actor}@example.test` })
   await makeSigner("org_a", actor)
-  const [person] = await ownerDb
-    .insert(patient)
-    .values({
+  const [person] = await insertTestPatients(ownerDb, {
       organizationId: "org_a",
       displayName: "Paciente de prueba",
       patientNumber: await nextPatientNumber(ownerDb, "org_a"),
     })
-    .returning()
   const [session] = await ownerDb
     .insert(encounter)
     .values({

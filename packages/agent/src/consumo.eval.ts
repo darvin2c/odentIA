@@ -32,7 +32,7 @@ import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext }
 import { appointment } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { clinicalFollowUp, patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -66,6 +66,7 @@ import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState } from "./adm
 import { createJevDecisionModel, type DecisionModel } from "./decision/index.js"
 import { LLM_CATALOG, platformLlmFromEnv } from "./llm.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
+import { insertTestPatients } from "@odentia/services/test-patient"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("cc".repeat(32))
@@ -377,15 +378,12 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   // ------------------------------------------------------------------ personas ---
   const names = ["Lucía", "Jorge", "Rosa", "Tomás", "Mariana", "Diego", "Elena", "Pablo", "Carmen", "Luis"]
   const surnames = ["Paredes", "Salas", "Medina", "Rivas", "Soto", "Vega", "Campos", "Núñez", "Flores", "Quispe"]
-  const created = await ownerDb
-    .insert(patient)
-    .values(
+  const created = await insertTestPatients(ownerDb, 
       Array.from({ length: CLINIC.patients }, (_, index) => {
         const given = names[index % names.length]!
         return { organizationId: ORG, displayName: `${given} ${surnames[Math.floor(index / names.length) % surnames.length]} ${index + 1}`, givenNames: given, patientNumber: index + 1 }
       }),
     )
-    .returning({ id: patient.id })
   const links = await ownerDb.select({ patientId: patientContact.patientId, contactId: patientContact.contactId }).from(patientContact).where(eq(patientContact.organizationId, ORG))
   const contactOf = new Map(links.map((row) => [row.patientId, row.contactId]))
   const people: Person[] = created.map((row, index) => ({

@@ -299,6 +299,8 @@ export const contact = pgTable("contact", {
   givenNames: text("given_names"),
   paternalSurname: text("paternal_surname"),
   maternalSurname: text("maternal_surname"),
+  /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
+  identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
   /** País emisor del documento (ISO 3166-1 alfa-2). */
   docCountry: char("doc_country", { length: 2 }),
   phone: text("phone"),
@@ -309,6 +311,7 @@ export const contact = pgTable("contact", {
   docNumber: text("doc_number"),
   birthDate: date("birth_date"),
   sex: text("sex"),
+  /** Archivada entera, con su ficha si es paciente (`setPersonArchived`). */
   isActive: boolean("is_active").notNull().default(true),
   // Las notas de la persona son `crm_note` (con autor y fecha); el responsable,
   // el de su conversación u oportunidad (fase 4, «un dato, un lugar»).
@@ -319,7 +322,8 @@ export const contact = pgTable("contact", {
 }, table => [
   uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id),
   // El documento, junto con su país emisor, identifica a una sola persona por
-  // organización (NULLS NOT DISTINCT en la migración 0095).
+  // organización (NULLS NOT DISTINCT en la migración 0095). Es el único índice
+  // de documento: la ficha de paciente no lo guarda (ADR 0044).
   uniqueIndex("contact_org_doc_uidx")
     .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
     .where(sql`"doc_number" IS NOT NULL`),

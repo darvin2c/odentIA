@@ -43,6 +43,7 @@ import {
 } from "./portal.js"
 import { contactDecides } from "./responsibilities.js"
 import { createTask, settleTask } from "./tasks.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Portal del paciente: dar acceso en un paso, grants persistentes y passkeys
@@ -175,8 +176,9 @@ function extractCredentialId(response: unknown): string | null {
 
 async function grantView(tx: Db, orgId: string, grant: PortalGrantRow): Promise<PortalGrant> {
   const [patientRow] = await tx
-    .select({ displayName: patient.displayName })
+    .select({ displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, grant.patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   const [contactRow] = await tx
@@ -347,8 +349,9 @@ export async function listMyPortalGrants(tx: Db, ctx: PortalContext): Promise<Po
       .limit(1)
     if (!link) continue
     const [patientRow] = await tx
-      .select({ isActive: patient.isActive })
+      .select({ isActive: patientPerson.isActive })
       .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patient.id, grant.patientId), eq(patient.organizationId, ctx.orgId)))
       .limit(1)
     const [contactRow] = await tx
@@ -1268,8 +1271,9 @@ export async function requestPortalReentry(
   const names: string[] = []
   for (const grant of grants) {
     const [subject] = await tx
-      .select({ name: patient.displayName })
+      .select({ name: patientPerson.displayName })
       .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patient.organizationId, orgId), eq(patient.id, grant.patientId)))
       .limit(1)
     names.push(subject?.name ?? "")

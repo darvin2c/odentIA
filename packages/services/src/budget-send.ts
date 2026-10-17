@@ -44,6 +44,7 @@ import { type DocumentRecipient, deliverDocumentPdf, type RecipientRelation } fr
 import { listDecisionRecipients } from "./responsibilities.js"
 import { findOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Estados en los que el presupuesto se puede enviar (o reenviar). */
 const SENDABLE = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"] as const
@@ -164,8 +165,9 @@ const OPTED_OUT =
 
 async function patientFirstName(tx: Db, orgId: string, patientId: string): Promise<string> {
   const [row] = await tx
-    .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+    .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   if (!row) throw notFound("Paciente")
