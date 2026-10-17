@@ -374,11 +374,13 @@ interface SourceFacts {
 }
 
 /**
- * Identificadores internos (sedes, servicios, pacientes, propuestas): sus
- * cifras no son importes, horas ni fechas. Sin taparlos, un precio inventado
- * pasaría la comprobación con solo coincidir con un trozo de un id.
+ * Identificadores internos (sedes, servicios, pacientes, propuestas y la
+ * referencia de un profesional, `professionalRef`: «pro-» y diez cifras
+ * hexadecimales): sus cifras no son importes, horas ni fechas. Sin taparlos,
+ * un precio inventado pasaría la comprobación con solo coincidir con un trozo
+ * de un id («pro-3a99f0c1d2» sustentaba «S/ 99»).
  */
-const INTERNAL_ID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
+const INTERNAL_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pro-[0-9a-f]{10})\b/gi
 
 function factsOf(item: Evidence, timeZone: string): SourceFacts {
   const text = normalize(item.text).replace(INTERNAL_ID, (id) => " ".repeat(id.length))
