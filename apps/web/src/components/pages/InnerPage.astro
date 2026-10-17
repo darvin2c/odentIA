@@ -1,0 +1,62 @@
+---
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import type { PageData } from "../../lib/pages-data"
+// Plantilla de las páginas interiores: portada (escena B2 o PageHero con ilustración), secciones,
+// enlaces relacionados, preguntas con FAQPage y el cierre. El contenido vive en src/lib/pages-data.ts.
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import PageHero from "../PageHero.astro"
+import AgentHero from "./AgentHero.astro"
+import ContentBlock from "./ContentBlock.astro"
+import HeroVisual from "./HeroVisual.astro"
+import Related from "./Related.astro"
+
+interface Props {
+  page: PageData
+}
+const { page } = Astro.props
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ...(page.parent ? [page.parent] : []),
+  [page.crumb, page.path],
+]
+const jsonLd = [
+  breadcrumbJsonLd(Astro.site, trail),
+  ...(page.faq.length ? [faqJsonLd(page.faq)] : []),
+]
+const h = page.hero
+// Las secciones alternan fondo claro y blanco; los enlaces y las preguntas siguen la alternancia.
+const n = page.blocks.length
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  {h.type === "scene" ? (
+    <AgentHero tag={h.tag} title={h.title} accent={h.accent} accentColor={h.accentColor} lead={h.lead} focus={h.focus} />
+  ) : (
+    <PageHero tag={h.tag} title={h.title} accent={h.accent} lead={h.lead} secondary={h.secondary}>
+      <HeroVisual slot="visual" kind={h.visual} />
+    </PageHero>
+  )}
+  <nav class="wrap crumbs" aria-label="Migas de pan">
+    <ol>
+      {trail.map(([name, path], i) => (
+        <li>{i < trail.length - 1 ? <a href={path}>{name}</a> : <span aria-current="page">{name}</span>}</li>
+      ))}
+    </ol>
+  </nav>
+  {page.blocks.map((b, i) => <ContentBlock block={b} white={i % 2 === 1} />)}
+  <Related hrefs={page.related} white={n % 2 === 1} />
+  <div class:list={["faqwrap", { white: n % 2 === 0 }]}>
+    <Faq items={page.faq} />
+  </div>
+  <CtaBand title={page.cta?.title} text={page.cta?.text} />
+</Base>
+
+<style>
+  .crumbs ol { list-style: none; margin: 0; padding: 18px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--soft); }
+  .crumbs li + li::before { content: "/"; margin-right: 6px; color: #cbd5e1; }
+  .crumbs a { color: var(--soft); text-decoration: none; display: inline-block; padding: 6px 0; }
+  .crumbs a:hover { color: var(--teal); }
+  .crumbs span { display: inline-block; padding: 6px 0; color: var(--ink-2); }
+  .faqwrap.white { background: var(--paper); }
+</style>

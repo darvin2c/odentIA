@@ -1,0 +1,383 @@
+/* Calculadora «Lo que pagas y lo que recuperas» (isla ValueCalculator), sobre fondo noche. */
+.vc {
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+.vc-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+}
+.vc-in {
+  border-radius: 22px;
+  padding: 22px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vc-l {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: #d6e8ec;
+  padding-top: 6px;
+}
+.vc-l small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--on-night-3);
+  margin-top: 2px;
+}
+.vc-num {
+  flex: none;
+  width: 96px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.2);
+  color: #fff;
+  padding: 0 10px;
+  font-family: var(--mono);
+  font-size: 15px;
+}
+.vc-num:focus {
+  border-color: var(--sky);
+}
+.vc-range {
+  width: 100%;
+  accent-color: var(--sky);
+  height: 26px;
+  cursor: pointer;
+}
+.vc-sup {
+  margin-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 8px;
+}
+.vc-sup summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: #9fd9e4;
+}
+.vc-col {
+  border-radius: 22px;
+  padding: 22px;
+  background: rgba(245, 196, 107, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(245, 196, 107, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vc-col.vc-us {
+  background: rgba(79, 195, 215, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(79, 195, 215, 0.35);
+}
+.vc-amber {
+  color: var(--amber);
+}
+.vc-sky {
+  color: var(--sky-2);
+}
+.vc-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: #d6e8ec;
+}
+.vc-row strong {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: #fff;
+  white-space: nowrap;
+}
+.vc-row.vc-sub {
+  color: #9fb8bf;
+  font-size: 14px;
+  padding: 8px 0;
+}
+.vc-row.vc-sub strong {
+  color: #9fd9e4;
+  font-weight: 500;
+}
+.vc-bill {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 16px;
+}
+.vc-bill span {
+  font-size: 14px;
+  color: #9fb8bf;
+}
+.vc-bill strong {
+  font-size: 22px;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.vc-res {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 22px 40px;
+  align-items: stretch;
+  padding: 36px 40px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.vc-left {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+.vc-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.vc-bl {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+}
+.vc-bl > span {
+  font-size: 17px;
+  font-weight: 600;
+  color: #d6e8ec;
+}
+.vc-big {
+  font-size: 72px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  white-space: nowrap;
+}
+.vc-track {
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.vc-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.6s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+.vc-diff {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.vc-diff span {
+  font-size: 17px;
+  color: var(--on-night-2);
+}
+.vc-diff strong {
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+  white-space: nowrap;
+  color: #fff;
+}
+.vc-ratio {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 30px 32px;
+  border-radius: 22px;
+  background: var(--sky);
+  color: #03252e;
+}
+.vc-rt {
+  font-size: 18px;
+  font-weight: 700;
+}
+.vc-ratio strong {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 0.85;
+  white-space: nowrap;
+  color: #03252e;
+}
+.vc-cur {
+  font-size: 34px;
+  letter-spacing: -0.02em;
+}
+.vc-n {
+  font-size: 120px;
+}
+.vc-rl {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.vc-note {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  color: var(--on-night-3);
+}
+
+@media (max-width: 1100px) {
+  .vc-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .vc-in {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 900px) {
+  .vc-res {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+  .vc-big {
+    font-size: 56px;
+  }
+}
+/* Teléfono: todo en una columna, sin deslizadores, cifras debajo de su etiqueta. */
+@media (max-width: 720px) {
+  .vc {
+    gap: 16px;
+  }
+  .vc-grid {
+    grid-template-columns: 1fr;
+  }
+  .vc-in,
+  .vc-col {
+    border-radius: 18px;
+    padding: 16px;
+  }
+  .vc-in {
+    gap: 6px;
+  }
+  .vc-l {
+    font-size: 13.5px;
+    line-height: 1.35;
+    gap: 10px;
+    padding-top: 4px;
+  }
+  .vc-l small {
+    font-size: 12px;
+  }
+  .vc-num {
+    width: 84px;
+    padding: 0 8px;
+  }
+  .vc-range {
+    display: none;
+  }
+  .vc-sup {
+    padding-top: 6px;
+    margin-top: 4px;
+  }
+  .vc-sup summary {
+    font-size: 12px;
+  }
+  .vc-row {
+    gap: 10px;
+    padding: 10px 0;
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+  .vc-row strong {
+    font-size: 14px;
+  }
+  .vc-row.vc-sub {
+    font-size: 13px;
+  }
+  .vc-bill {
+    padding-top: 12px;
+  }
+  .vc-bill span {
+    font-size: 13px;
+  }
+  .vc-bill strong {
+    font-size: 20px;
+  }
+  .vc-res {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px 18px;
+    border-radius: 20px;
+  }
+  .vc-left {
+    gap: 20px;
+  }
+  .vc-bar {
+    gap: 8px;
+  }
+  .vc-bl {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .vc-bl > span {
+    font-size: 14px;
+  }
+  .vc-big {
+    font-size: 46px;
+  }
+  .vc-track {
+    height: 14px;
+    margin-top: 4px;
+  }
+  .vc-diff {
+    padding-top: 12px;
+    gap: 10px;
+  }
+  .vc-diff span {
+    font-size: 14px;
+  }
+  .vc-diff strong {
+    font-size: 28px;
+  }
+  .vc-ratio {
+    gap: 8px;
+    padding: 20px;
+    border-radius: 18px;
+  }
+  .vc-rt,
+  .vc-rl {
+    font-size: 15px;
+  }
+  .vc-cur {
+    font-size: 26px;
+  }
+  .vc-n {
+    font-size: 88px;
+  }
+  .vc-note {
+    font-size: 11.5px;
+  }
+}

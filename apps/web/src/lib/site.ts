@@ -1,0 +1,76 @@
+// Mapa de la web, enlaces a la aplicación y textos que se repiten en varias páginas.
+
+const domain = import.meta.env.VITE_BASE_DOMAIN || "odentia.localhost"
+const port = import.meta.env.VITE_BASE_PORT ? `:${import.meta.env.VITE_BASE_PORT}` : ""
+
+/** La cuenta de la clínica vive en el panel; la web solo enlaza a registrarse e ingresar. */
+export const registerUrl = `https://app.${domain}${port}/register`
+export const loginUrl = `https://app.${domain}${port}/login`
+export const contactEmail = "hola@odentia.com"
+
+export const CTA = "Obtén USD 100 de crédito"
+
+export type NavLink = { href: string; label: string }
+
+export const mainNav: NavLink[] = [
+  { href: "/omnicanal", label: "Omnicanal" },
+  { href: "/agentes", label: "Agentes" },
+  { href: "/precios", label: "Precios" },
+  { href: "/seguridad", label: "Seguridad" },
+]
+
+export const footerGroups: { title: string; links: NavLink[] }[] = [
+  {
+    title: "Agentes",
+    links: [
+      { href: "/agentes", label: "Los tres agentes" },
+      { href: "/agentes/recepcion", label: "Recepción" },
+      { href: "/agentes/asistente-clinico", label: "Asistente clínico" },
+      { href: "/agentes/administrador", label: "Administrador" },
+    ],
+  },
+  {
+    title: "Omnicanal",
+    links: [
+      { href: "/omnicanal", label: "Todos los canales" },
+      { href: "/whatsapp-para-clinicas-dentales", label: "WhatsApp para clínicas" },
+    ],
+  },
+  {
+    title: "El sistema",
+    links: [
+      { href: "/agenda-odontologica", label: "Agenda" },
+      { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma" },
+      { href: "/presupuestos-dentales", label: "Presupuestos" },
+      { href: "/caja-y-cobros", label: "Caja y cobros" },
+      { href: "/portal-del-paciente", label: "Su enlace" },
+      { href: "/reportes", label: "Reportes" },
+      { href: "/varias-sedes", label: "Varias sedes" },
+    ],
+  },
+  {
+    title: "odentIA",
+    links: [
+      { href: "/precios", label: "Precios" },
+      { href: "/seguridad", label: "Seguridad" },
+      { href: "/contacto", label: "Habla con nosotros" },
+    ],
+  },
+]
+
+export const legalLinks: NavLink[] = [
+  { href: "/terminos", label: "Términos" },
+  { href: "/privacidad", label: "Privacidad" },
+  { href: "/cookies", label: "Cookies" },
+  { href: "/encargo-de-tratamiento", label: "Encargo de tratamiento" },
+  { href: "/subencargados", label: "Subencargados" },
+  { href: "/aviso-legal", label: "Aviso legal" },
+  { href: "/pe/libro-de-reclamaciones", label: "Libro de reclamaciones (Perú)" },
+]
+
+/** Colores de cada agente: sobre fondo oscuro y sobre fondo claro. */
+export const AGENT_COLORS = {
+  recepcion: { dark: "#4fc3d7", light: "#0e7490" },
+  clinico: { dark: "#a6f0d8", light: "#1f9d7a" },
+  administrador: { dark: "#f5c46b", light: "#c98a1c" },
+} as const

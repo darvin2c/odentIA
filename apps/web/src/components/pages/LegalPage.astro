@@ -1,0 +1,49 @@
+---
+// Plantilla de las páginas legales mientras no exista su texto: dice qué cubrirá y que lo redacta
+// un abogado. Van sin indexar y con la cabecera clara. No contiene cláusulas.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd } from "../../lib/faq"
+import type { LegalPageData } from "../../lib/pages-data"
+import { contactEmail, legalLinks } from "../../lib/site"
+
+interface Props {
+  page: LegalPageData
+}
+const { page } = Astro.props
+const jsonLd = breadcrumbJsonLd(Astro.site, [
+  ["Inicio", "/"],
+  [page.title, page.path],
+])
+const others = legalLinks.filter((l) => l.href !== page.path)
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd} header="light" noindex>
+  <section class="legal">
+    <div class="wrap in">
+      <span class="tag">[ Legal ]</span>
+      <h1 class="h2">{page.title}</h1>
+      <p class="lead">{page.covers}</p>
+      <div class="warn" role="note">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17.5v.01" /></svg>
+        <p><strong>Texto en preparación:</strong> lo redacta un abogado antes de publicar.</p>
+      </div>
+      <p class="contact">Si tienes una pregunta mientras tanto, escríbenos a <a href={`mailto:${contactEmail}`}>{contactEmail}</a>.</p>
+      <nav aria-label="Otras páginas legales" class="others">
+        <span class="tag">Otras páginas legales</span>
+        <ul>{others.map((l) => <li><a href={l.href}>{l.label}</a></li>)}</ul>
+      </nav>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .legal { padding: 80px 0 112px; }
+  .in { display: flex; flex-direction: column; gap: 22px; max-width: 820px; }
+  .warn { display: flex; gap: 14px; align-items: flex-start; padding: 18px 20px; border-radius: 16px; background: #fff4dc; color: #7a4a00; box-shadow: inset 0 0 0 1.5px var(--amber); }
+  .warn svg { flex: none; margin-top: 1px; }
+  .warn p { font-size: 17px; line-height: 1.5; }
+  .contact { color: var(--muted); }
+  .others { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+  .others ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
+  .others a { display: inline-block; padding: 8px 0; font-weight: 600; }
+  @media (max-width: 720px) { .legal { padding: 48px 0 72px; } }
+</style>

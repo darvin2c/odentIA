@@ -1,0 +1,46 @@
+---
+// Portada oscura de las páginas interiores: etiqueta, título, bajada y botones; a la derecha, la escena (slot "visual").
+import { CTA, registerUrl } from "../lib/site"
+
+interface Props {
+  tag: string
+  title: string
+  /** Parte del título que va en color, al final. */
+  accent?: string
+  lead: string
+  secondary?: { href: string; label: string }
+}
+const { tag, title, accent, lead, secondary } = Astro.props
+const hasVisual = Astro.slots.has("visual")
+---
+<section class:list={["hero", "ph", { split: hasVisual }]}>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="wrap in">
+    <div class="copy">
+      <span class="tag tag-d rise">[ {tag} ]</span>
+      <h1 class="h1 rise d1">{title}{accent && <> <span class="acc">{accent}</span></>}</h1>
+      <p class="lead lead-d rise d2">{lead}</p>
+      <div class="ctas rise d3">
+        <a class="btn btn-p" href={registerUrl}>{CTA}</a>
+        {secondary && <a class="btn btn-g" href={secondary.href}>{secondary.label}</a>}
+      </div>
+      <p class="mono note rise d4">Sin tarjeta para probar. Tú decides qué puede hacer cada agente.</p>
+    </div>
+    {hasVisual && <div class="visual"><slot name="visual" /></div>}
+  </div>
+</section>
+
+<style>
+  .ph { padding: 150px 0 96px; }
+  .in { position: relative; z-index: 2; display: grid; gap: 48px; align-items: center; }
+  .split .in { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .copy { display: flex; flex-direction: column; gap: 24px; max-width: 640px; }
+  .acc { color: var(--sky-2); }
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .note { font-size: 13px; color: var(--on-night-3); }
+  @media (max-width: 960px) {
+    .ph { padding: 110px 0 64px; }
+    .split .in { grid-template-columns: 1fr; }
+    .ctas .btn { flex: 1 1 100%; }
+  }
+</style>

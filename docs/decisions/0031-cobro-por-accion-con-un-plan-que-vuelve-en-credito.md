@@ -18,7 +18,7 @@ La suscripción de hoy (`saas_plan`) cobra una cuota fija por plan con topes de 
 - **Las cifras se configuran en la administración** (cuota, crédito, precio base, precio mínimo y cuánto descuenta el vendedor), sin tocar código y sin reescribir cargos ya emitidos.
 - **Precios en dólares y sin impuestos;** la factura muestra el total con el impuesto del país (IGV en Perú).
 - **El mes de cada clínica empieza el día que activa el plan.** Lo variable se factura cada mes o cada 15 días, según se configure por clínica.
-- **Prueba:** 30 días del sistema y USD 50 de crédito de regalo, configurables por clínica hasta USD 130 y 60 días con aprobación. Si el crédito se acaba, los agentes se pausan.
+- **Prueba:** 30 días del sistema y USD 100 de crédito de regalo, sin tarjeta, configurables por clínica hasta USD 130 y 60 días con aprobación. Si el crédito se acaba, los agentes se pausan. El crédito subió de USD 50 a USD 100 el 17 de octubre de 2026 para que la web lo ofrezca como llamada principal («Obtén USD 100 de crédito»); con las reglas de esta decisión (precio mínimo = 40 % del base y peor costo ≤ la mitad del mínimo), una prueba gastada entera en el peor caso le cuesta a odentIA como mucho USD 20.
 - **Tope de gasto por clínica,** con aviso y alarma antes de llegar. Al tope, los casos nuevos pasan al equipo y el paciente siempre recibe respuesta (ADR 0021).
 - **WhatsApp lo paga la clínica directo a Meta.** odentIA muestra una estimación y dice que depende por completo de Meta.
 

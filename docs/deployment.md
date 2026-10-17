@@ -18,7 +18,9 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   es su estado normal. API y worker dependen de su finalización.
 - API, admin, panel y platform publican únicamente en loopback. `admin.<dominio>`
   apunta a admin (host 3012, puerto interno 3000); `app.` a panel, `api.` a API,
-  y los hosts de organizaciones a platform. El dominio raíz queda para marketing.
+  y los hosts de organizaciones a platform. El dominio raíz queda para marketing:
+  la web de `apps/web` (ADR 0038) es HTML estático de `pnpm --filter @odentia/web build`
+  (carpeta `dist/`), servido tal cual por el borde con `WEB_URL` como dirección canónica.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 
