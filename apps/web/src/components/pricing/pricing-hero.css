@@ -136,7 +136,7 @@
 }
 .pz-chip {
   align-self: flex-start;
-  font-family: var(--mono);
+  font-family: var(--agent-font);
   font-size: 13px;
   font-weight: 600;
   padding: 6px 10px;
@@ -257,7 +257,7 @@
   color: #9fb8bf;
 }
 .pz-pr {
-  font-family: var(--mono);
+  font-family: var(--agent-font);
   font-weight: 600;
   color: #fff;
 }

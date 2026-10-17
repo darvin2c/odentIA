@@ -1,5 +1,9 @@
 /* Base de la web de marketing: colores de la marca, tipografía y piezas que repiten todas las páginas. */
 @import "@fontsource-variable/manrope";
+/* IBM Plex Mono solo para la voz de los agentes (ver --agent-font). */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
 
 :root {
   --ink: #0f172a;
@@ -22,7 +26,9 @@
   --mint: #a6f0d8;
   --amber: #f5c46b;
   --font: "Manrope Variable", "Manrope", system-ui, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* Lo que registran, envían o reciben los agentes: canales, horas del registro, mensajes que viajan. */
+  --agent-font: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
   --radius: 22px;
   --wrap: 1200px;
   color-scheme: light;
@@ -366,4 +372,10 @@ details.q p {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* La voz de los agentes en IBM Plex Mono; el resto de lo monoespaciado usa la del sistema, como la app. */
+.mono:is(.zmeta, .chstate, .at, .dtime, .dpend, .dict-org, .code, .pz-meta, .pz-ledtitle, .pz-time, .b2-hk, .b2-tm, .pm, .lt, .lw),
+.zcap .mono {
+  font-family: var(--agent-font);
 }
