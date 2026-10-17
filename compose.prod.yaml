@@ -1,7 +1,8 @@
 name: odentia-prod
 
 # Stack de producción: rutas relativas a este archivo, en la raíz del repo.
-# OpenShip aporta el borde HTTPS; las aplicaciones solo publican en loopback.
+# La entrada pública es Cloudflare Tunnel (servicio tunnel); las aplicaciones solo
+# publican en loopback, que queda como vuelta atrás por el borde de OpenShip.
 # Variables: entorno del proyecto en OpenShip o infra/prod/.env para Compose.
 # Los servicios con build no declaran image: un refresh reutiliza el artefacto.
 
@@ -127,6 +128,17 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3013:3000"
+
+  # Entrada pública por Cloudflare Tunnel: cloudflared solo abre conexiones de salida
+  # y entrega cada visita por la red del stack (api:3001, panel:3000…), así que nadie
+  # llega a odentIA sin pasar por Cloudflare. Rutas y cambio en docs/deployment.md.
+  # Sin clave, Compose rechaza el archivo: ponerla antes de desplegar.
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Falta CLOUDFLARE_TUNNEL_TOKEN (docs/deployment.md)}
+    restart: unless-stopped
 
   backup:
     build: infra/prod/backup

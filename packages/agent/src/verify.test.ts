@@ -32,6 +32,20 @@ it("las cifras de un identificador interno no sustentan un precio", () => {
   }
 })
 
+it("las cifras de la referencia de un profesional no sustentan un precio", () => {
+  // `professionalRef` llega en los datos de la clínica y en cada hueco de la agenda.
+  const clinic = (ref: string) => ({
+    source: "Conocimiento publicado de la clínica",
+    text: `- Dentista Agente. Sede Norte. [profesional ${ref}: solo para pedir sus horas; no lo escribas]`,
+  })
+  const slot = { ...AGENDA, text: AGENDA.text.replace("profesional d", "profesional pro-3a99f0c1d2") }
+  for (const evidence of [[clinic("pro-99d040905f")], [clinic("pro-e099abcdef")], [slot]]) {
+    expect(check("La limpieza cuesta S/ 99.", evidence).unsupported.map((item) => item.value)).toEqual(["S/ 99"])
+  }
+  // Lo que no tiene la forma exacta de una referencia se sigue leyendo.
+  expect(check("La limpieza cuesta S/ 99.", [clinic("pro-99")]).ok).toBe(true)
+})
+
 it("un precio que no está en ninguna fuente bloquea la respuesta", () => {
   const verdict = check("La limpieza cuesta S/ 120 y el blanqueamiento 480 soles.")
   expect(verdict.ok).toBe(false)

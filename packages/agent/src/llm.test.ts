@@ -234,6 +234,34 @@ it("Claude 5.5 recibe marcada para su caché la parte fija del sistema y devuelv
   }
 })
 
+it("ChatGPT 6 con caché explícita recibe el corte en la parte fija y devuelve lo que escribió en ella", async () => {
+  const provider = await fakeProvider((n, response) => {
+    json(response, 200, {
+      id: `chatcmpl-${n}`,
+      object: "chat.completion",
+      created: 1,
+      model: "gpt-6-luna",
+      choices: [{ index: 0, message: { role: "assistant", content: "Hola" }, finish_reason: "stop" }],
+      // Primera pausa del dictado medida el 2026-10-17: escribe la parte fija y no lee nada.
+      usage: { prompt_tokens: 2_093, completion_tokens: 90, total_tokens: 2_183, prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 2_022 } },
+    })
+  })
+  try {
+    const spec = resolveLlmSpec({ llm: "chatgpt_6" }, { openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
+    const fixed = { type: "text", text: "Lo de toda la atención", prompt_cache_breakpoint: { mode: "explicit" } }
+    const reply = await (await createConfiguredChatModel(spec, { explicitCache: true })).invoke([new SystemMessage({ content: [fixed] }), new HumanMessage("Lo de la pausa")])
+    expect(provider.requests[0]?.body).toMatchObject({ reasoning_effort: "none", prompt_cache_options: { mode: "explicit" } })
+    expect(((provider.requests[0]?.body.messages ?? []) as Array<{ content: unknown }>)[0]?.content).toEqual([fixed])
+    // Desde LangChain OpenAI 1.5.9 lo escrito llega como en Anthropic; antes se perdía y no se cobraba.
+    expect(reply.usage_metadata).toMatchObject({ input_tokens: 2_093, output_tokens: 90, input_token_details: { cache_read: 0, cache_creation: 2_022 } })
+    // Sin la opción (Recepción) OpenAI pone su corte solo: no se le pide otra cosa.
+    await (await createConfiguredChatModel(spec)).invoke([new HumanMessage("Hola")])
+    expect(provider.requests[1]?.body).not.toHaveProperty("prompt_cache_options")
+  } finally {
+    await provider.close()
+  }
+})
+
 it("los errores de Anthropic se reconocen como del proveedor: credencial rechazada y sin crédito, sin reintentar", async () => {
   const errors = [
     { status: 401, body: { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } } },

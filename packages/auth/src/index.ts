@@ -34,6 +34,27 @@ export interface CreateAuthOptions {
   ownerDb: Db
   /** Rechazar contraseñas filtradas (Have I Been Pwned); se apaga en pruebas sin red. */
   passwordBreachCheck?: boolean
+  /** Cabecera con la IP de quien pide; vacía, ninguna (ver `clientIpAddress`). */
+  clientIpHeader?: string
+}
+
+/**
+ * De dónde toma Better Auth la IP de quien pide: con ella separa el límite de
+ * intentos por persona (p. ej. 3 inicios de sesión cada 10 s) y anota la IP de
+ * cada sesión.
+ *
+ * Una sola cabecera, la que el proxy de delante reescribe siempre con la
+ * dirección que vio conectar. Cualquier otra la puede escribir el cliente y
+ * estrenar un límite en cada intento. Por eso no varias (la que el proxy no
+ * reescriba quedaría en manos del cliente) ni la lista por defecto de Better
+ * Auth (`x-forwarded-for`, que los proxies alargan con lo que trajo el cliente).
+ *
+ * Sin cabecera, o si la petición no la trae o trae varias direcciones, Better
+ * Auth no conoce la IP y aplica un único límite por ruta para todos: más
+ * estricto, nunca sin límite.
+ */
+export function clientIpAddress(header: string | undefined): { ipAddressHeaders: string[] } {
+  return { ipAddressHeaders: header ? [header.toLowerCase()] : [] }
 }
 
 function isChangeEmailToken(token: string): boolean {
@@ -59,6 +80,7 @@ export function createAuth({
   googleClientSecret,
   ownerDb,
   passwordBreachCheck: breachCheck = true,
+  clientIpHeader,
 }: CreateAuthOptions) {
   return betterAuth({
     appName: "odentIA",
@@ -108,6 +130,7 @@ export function createAuth({
     },
     advanced: {
       crossSubDomainCookies: { enabled: true, domain: cookieDomain },
+      ipAddress: clientIpAddress(clientIpHeader),
     },
     trustedOrigins,
     // Denial de sesiones para cuentas con bloqueo global (tabla user_global_block).

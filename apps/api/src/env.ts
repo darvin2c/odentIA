@@ -10,6 +10,23 @@ const envSchema = z.object({
   ADMIN_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
   TRUSTED_ORIGINS: z.string().min(1),
+  /**
+   * Cabecera con la IP de quien pide, para el límite de intentos de Better Auth
+   * (`clientIpAddress`). Solo una que reescriba siempre quien está delante. Con
+   * Cloudflare Tunnel, `cf-connecting-ip`: Cloudflare la reescribe y el túnel es la
+   * única entrada. Por el borde de OpenShip, `x-real-ip`: el borde la fija con la
+   * dirección que vio conectar, y ahí `cf-connecting-ip` no sirve porque el servidor
+   * acepta conexiones sin Cloudflare y el borde la deja pasar tal como llega.
+   * `x-forwarded-for` nunca: los proxies la alargan con lo que trajo el cliente.
+   * Vacía: ninguna, y todos comparten el límite. Detalle en docs/deployment.md.
+   */
+  CLIENT_IP_HEADER: z
+    .string()
+    .trim()
+    .toLowerCase()
+    // Un nombre de campo (token de RFC 9110): sin comas, una sola cabecera.
+    .regex(/^[!#$%&'*+.^_`|~0-9a-z-]*$/, "Una sola cabecera, p. ej. x-real-ip")
+    .default(""),
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
   SMTP_HOST: z.string().min(1),

@@ -199,8 +199,12 @@ const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, r
  * Modelo concreto del spec. No se leen variables del proceso que el SDK
  * tomaría por su cuenta (organización o proyecto de OpenAI, URL de
  * Anthropic): todo sale del spec. `fake` es el modelo determinista de dev/e2e.
+ * Con `explicitCache`, OpenAI guarda en su caché solo hasta lo marcado con
+ * `prompt_cache_breakpoint` (el dictado); sin él, además escribe lo último de
+ * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer. Anthropic
+ * siempre guarda solo lo marcado.
  */
-export async function createConfiguredChatModel(spec: LlmSpec) {
+export async function createConfiguredChatModel(spec: LlmSpec, options: { explicitCache?: boolean } = {}) {
   if (spec.provider === "fake") return new FakeChatModel({})
   if (spec.provider === "anthropic") {
     return new ChatAnthropic({
@@ -214,14 +218,19 @@ export async function createConfiguredChatModel(spec: LlmSpec) {
       clientOptions: { timeout: spec.timeoutMs, fetch: noRedirectFetch },
     })
   }
+  const modelKwargs = {
+    // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
+    // nombre (o1…, gpt-5…) y gpt-6-luna no está en esa lista.
+    ...(spec.reasoningEffort ? { reasoning_effort: spec.reasoningEffort } : {}),
+    // LangChain 1.5.3 no conoce esta opción: también va directo en la petición.
+    ...(options.explicitCache ? { prompt_cache_options: { mode: "explicit" } } : {}),
+  }
   return new ChatOpenAI({
     model: spec.modelName,
     apiKey: spec.apiKey,
     timeout: spec.timeoutMs,
     maxRetries: spec.maxRetries,
-    // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
-    // nombre (o1…, gpt-5…) y gpt-6-luna no está en esa lista.
-    ...(spec.reasoningEffort ? { modelKwargs: { reasoning_effort: spec.reasoningEffort } } : {}),
+    ...(Object.keys(modelKwargs).length ? { modelKwargs } : {}),
     configuration: {
       ...(spec.baseUrl ? { baseURL: spec.baseUrl } : {}),
       organization: null,
