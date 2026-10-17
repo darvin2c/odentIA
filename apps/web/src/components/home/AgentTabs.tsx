@@ -6,6 +6,8 @@ import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
 type Tab = "rec" | "cli" | "adm"
 type Tone = "cercano" | "neutro" | "formal"
+/** Emojis de la voz de la clínica, como en el producto: «No usar» (viene así) o «Pocos». */
+type Emojis = "no" | "pocos"
 
 const TABS: { id: Tab; label: string; sub: string; href: string }[] = [
   {
@@ -26,6 +28,10 @@ const TABS: { id: Tab; label: string; sub: string; href: string }[] = [
     sub: "Recuerda citas y trae de vuelta a los pacientes.",
     href: "/agentes/administrador",
   },
+]
+const EMOJI_OPTS: [Emojis, string][] = [
+  ["no", "Sin emojis"],
+  ["pocos", "Pocos emojis"],
 ]
 const TONE_OPTS: [Tone, string][] = [
   ["cercano", "Cercano"],
@@ -77,6 +83,7 @@ export default function AgentTabs() {
   const [wait, setWait] = useState(0)
   const [slotPick, setSlotPick] = useState("16:30")
   const [tone, setTone] = useState<Tone>("cercano")
+  const [emojis, setEmojis] = useState<Emojis>("no")
   const [note, setNote] = useState(END.note)
   const [noteDone, setNoteDone] = useState<"" | "ok" | "no">("")
   const [adm, setAdm] = useState(END.adm)
@@ -159,7 +166,9 @@ export default function AgentTabs() {
       cls: "bubble in",
       text: late ? "A las 16:30, por favor." : "A las 10:30, por favor.",
     })
-  if (chat >= 6) msgs.push({ id: "confirma", cls: "bubble out", text: TONES[tone][1] })
+  // Con «Pocos», uno como mucho y nunca donde se habla del dolor: solo va en la confirmación.
+  const confirmText = emojis === "pocos" ? `${TONES[tone][1]} 📅` : TONES[tone][1]
+  if (chat >= 6) msgs.push({ id: "confirma", cls: "bubble out", text: confirmText })
   if (chat >= 7) msgs.push({ id: "cita", cls: "sys", text: "Cita creada · Evaluación · 30 min" })
   const booked = chat >= 7
   const slots = [
@@ -238,6 +247,19 @@ export default function AgentTabs() {
                   </button>
                 ))}
               </fieldset>
+              <fieldset className="tones" aria-label="Emojis del asistente">
+                {EMOJI_OPTS.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={id === emojis ? "tone on" : "tone"}
+                    aria-pressed={id === emojis}
+                    onClick={() => setEmojis(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </fieldset>
               <div className="chatmsgs" aria-live="polite">
                 {msgs.map((m) => (
                   <div key={m.id} className={m.cls}>
@@ -291,7 +313,9 @@ export default function AgentTabs() {
                 </p>
                 <p className="d-only">
                   Tiene el nombre que tú le pongas y el tono de tu clínica: cercano, neutro o
-                  formal, de tú o de usted. Siempre dice que es un asistente virtual.
+                  formal, de tú o de usted, con o sin emojis. Con «Pocos» pone uno como mucho y
+                  nunca cuando hablan de dolor, urgencias, pagos o reclamos. Siempre dice que es un
+                  asistente virtual.
                 </p>
                 <p className="m-only">
                   Responde a cualquier hora, informa precios y horarios y agenda con el sí del
