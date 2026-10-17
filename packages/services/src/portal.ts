@@ -1095,7 +1095,7 @@ export async function confirmPortalAppointment(
 export interface ReschedulePortalAppointmentInput {
   expectedVersion: number
   startsAt: string
-  /** El horario elegido en la semana: con quién y en qué sillón está libre. */
+  /** El horario elegido en la semana: con quién y en qué unidad dental está libre. */
   dentistUserId: string
   chairId?: string
 }

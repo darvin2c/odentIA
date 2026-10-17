@@ -26,7 +26,7 @@ function inMonth(monthsBack: number, day: number, hour = 15): Date {
 async function twoMonths(db: Db, owner: OwnerFixture) {
   const organizationId = owner.org.id
   const chairId = randomUUID()
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Sillón de prueba" })
+  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   const people: Record<string, string> = {}
   for (const [index, name] of ["Ana Paz", "Bruno Díaz", "Carla Soto", "Diego Ruiz", "Elena Mora"].entries()) {
     people[name] = randomUUID()
@@ -138,7 +138,7 @@ for (const width of [1440, 390]) {
       const organizationId = owner.org.id
       const chairId = randomUUID()
       const patientId = randomUUID()
-      await fixtureDb.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Sillón de prueba" })
+      await fixtureDb.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
       await fixtureDb.insert(patient).values({ id: patientId, organizationId, displayName: "Gabriel Núñez", patientNumber: 1 })
       // Faltó hace veinte minutos y no tiene otra cita.
       const startsAt = new Date(Date.now() - 20 * 60_000)

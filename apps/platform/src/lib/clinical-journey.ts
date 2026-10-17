@@ -151,7 +151,7 @@ export type ScheduleFollowUpBody =
       appointment: {
         branchId?: string
         dentistUserId: string
-        /** Sin sillón, la agenda pone uno libre. */
+        /** Sin unidad dental, la agenda pone una libre. */
         chairId?: string
         serviceId?: string
         startsAt: string

@@ -67,7 +67,7 @@ async function clinic(options: { admin?: boolean; reception?: boolean } = {}): P
     advisor: options.admin === false ? {} : { enabled: true, quietStart: "00:00", quietEnd: "00:00" },
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id }
 }
 

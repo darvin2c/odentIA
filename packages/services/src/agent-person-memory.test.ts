@@ -236,7 +236,7 @@ describe("memoria de la persona", () => {
     const dentist = "dentista-ultima"
     await ownerDb.insert(user).values([{ id: dentist, name: "Dra. Ana Torres", email: "ana.torres@ultima.test", emailVerified: true }])
     await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
-    const chair = await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón U" }))
+    const chair = await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental U" }))
     const [created] = await ownerDb
       .insert(patient)
       .values({ organizationId: ORG, displayName: "Rosa Díaz", givenNames: "Rosa", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
@@ -336,7 +336,7 @@ describe("reservar desde un enlace", () => {
     const dentist = "dentista-enlace"
     await ownerDb.insert(user).values([{ id: dentist, name: "Dra. Lucía Salas", email: "lucia.salas@enlace.test", emailVerified: true }])
     await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
-    await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón 1" }))
+    await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
         branchId: site!.id,
@@ -426,7 +426,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const dentist = "dentista-nuevo"
     await ownerDb.insert(user).values([{ id: dentist, name: "Dr. Mario Paz", email: "mario.paz@enlace.test", emailVerified: true }])
     await ownerDb.insert(member).values([{ id: `m-${dentist}`, userId: dentist, organizationId: ORG, role: "member", createdAt: new Date() }])
-    await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón A" }))
+    await run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental A" }))
     await run((tx) =>
       setProfessionalSchedule(tx, ORG, OWNER, {
         branchId: site!.id,

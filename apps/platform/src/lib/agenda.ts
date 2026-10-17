@@ -166,12 +166,12 @@ export interface AgendaResources {
   defaultDurationMin: number
 }
 
-/** Un sillón en Configuración (`GET /api/agenda/chairs`): también los desactivados. */
+/** Una unidad dental en Configuración (`GET /api/agenda/chairs`): también las desactivadas. */
 export interface ChairSetting {
   id: string
   name: string
   isActive: boolean
-  /** Citas en pie que aún no terminan en ese sillón: no se mueven solas al desactivarlo. */
+  /** Citas en pie que aún no terminan en esa unidad dental: no se mueven solas al desactivarla. */
   upcomingAppointments: number
 }
 

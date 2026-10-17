@@ -6,8 +6,8 @@ import { apiFetch } from "../../lib/api"
 import { errorMessage } from "./shared"
 
 /**
- * El formulario de un sillón, el mismo en la agenda y en Configuración: da de
- * alta uno en la sede (sin al menos uno no se puede reservar) o, con `chair`,
+ * El formulario de una unidad dental, el mismo en la agenda y en Configuración: da de
+ * alta una en la sede (sin al menos una no se puede reservar) o, con `chair`,
  * le cambia el nombre.
  */
 export function ChairForm({
@@ -20,9 +20,9 @@ export function ChairForm({
 }: {
   branchId: string
   branchName: string
-  /** Nombre propuesto («Sillón 2»), para no empezar de cero. */
+  /** Nombre propuesto («Unidad dental 2»), para no empezar de cero. */
   suggestedName: string
-  /** El sillón que se renombra; sin él, el formulario crea uno nuevo. */
+  /** La unidad dental que se renombra; sin ella, el formulario crea una nueva. */
   chair?: { id: string; name: string }
   onClose: () => void
   onSaved: () => Promise<void>
@@ -42,7 +42,7 @@ export function ChairForm({
             body: JSON.stringify({ branchId, name: name.trim() }),
           }),
     onSuccess: async () => {
-      toast.success(chair ? "Sillón guardado" : "Sillón añadido")
+      toast.success(chair ? "Unidad dental guardada" : "Unidad dental añadida")
       await onSaved()
     },
     onError: (cause) => setError(errorMessage(cause)),
@@ -50,11 +50,11 @@ export function ChairForm({
   return (
     <FormDrawer
       open
-      title={chair ? `Renombrar ${chair.name}` : "Nuevo sillón"}
+      title={chair ? `Renombrar ${chair.name}` : "Nueva unidad dental"}
       description={
         chair
-          ? `Sillón de ${branchName}. Sus citas se verán con el nombre nuevo.`
-          : `Se añade a ${branchName}. Cada cita ocupa un sillón.`
+          ? `Unidad dental de ${branchName}. Sus citas se verán con el nombre nuevo.`
+          : `Se añade a ${branchName}. Cada cita ocupa una unidad dental.`
       }
       onClose={onClose}
       onSubmit={(event) => {
@@ -66,7 +66,7 @@ export function ChairForm({
       isDirty={name !== initialName}
       error={error || null}
       submitDisabled={!name.trim() || (chair !== undefined && name.trim() === chair.name)}
-      submitLabel={chair ? "Guardar" : "Añadir sillón"}
+      submitLabel={chair ? "Guardar" : "Añadir unidad dental"}
     >
       <div className="grid gap-2">
         <FieldLabel htmlFor="sillon-nombre">Nombre</FieldLabel>

@@ -17,7 +17,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
-import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, chairNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { type AttendingRule, attendingRule } from "./specialties.js"
 
@@ -175,7 +175,7 @@ async function requireChairInBranch(tx: Db, orgId: string, chairId: string, bran
       ),
     )
     .limit(1)
-  if (!row) throw notFound("Sillón")
+  if (!row) throw chairNotFound()
   return row
 }
 
@@ -360,7 +360,7 @@ export async function createScheduleBlock(
   if (endsAt <= startsAt) throw validation("El bloqueo debe terminar después de iniciar")
   if (input.dentistUserId) await requireDentist(tx, orgId, input.dentistUserId)
   if (input.chairId) await requireChairInBranch(tx, orgId, input.chairId, input.branchId)
-  // Sin profesional ni sillón, el bloqueo cierra la sede completa.
+  // Sin profesional ni unidad dental, el bloqueo cierra la sede completa.
   const kind = assertBlockKind(input.kind ?? "bloqueo")
   const [created] = await tx
     .insert(scheduleBlock)
@@ -529,7 +529,7 @@ export async function validateAvailability(
   if (clash) {
     throw conflict(
       "APPOINTMENT_CONFLICT",
-      "El profesional o el sillón ya están ocupados en ese horario",
+      "El profesional o la unidad dental ya están ocupados en ese horario",
     )
   }
 }
@@ -744,7 +744,7 @@ export async function listAvailableSlots(
             item.endsAt > startUtc,
         )
         if (dentistBusy) continue
-        // Cierra el hueco si un bloqueo alcanza al profesional sin importar el sillón.
+        // Cierra el hueco si un bloqueo alcanza al profesional sin importar la unidad dental.
         const dentistBlocked = blocks.some(
           (block) =>
             (block.dentistUserId === null || block.dentistUserId === entry.rule.dentistUserId) &&
@@ -872,7 +872,7 @@ export interface AgendaAvailability {
   /**
    * Tramos en que cada profesional puede recibir una cita: su horario menos
    * ausencias, citas en pie (en cualquier sede) y lo ya pasado, y solo mientras
-   * queda algún sillón libre.
+   * queda alguna unidad dental libre.
    */
   free: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
   /** Quienes atienden en la sede (tienen horario), con su próximo hueco reservable. */

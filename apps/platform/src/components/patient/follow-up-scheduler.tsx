@@ -202,7 +202,7 @@ function ScheduleForm({
         event.preventDefault()
         setError(null)
         if (!target) return
-        // Sin sillón: lo asigna la agenda, como en Nueva cita.
+        // Sin unidad dental: la asigna la agenda, como en Nueva cita.
         schedule.mutate({
           appointment: {
             branchId: resources.branchId,

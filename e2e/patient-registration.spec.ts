@@ -572,7 +572,7 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
   const { page, org } = owner
   // La clínica tiene activo su registro de pacientes: de ahí salen los datos que se piden y el aviso de privacidad.
   await publishConfig(page, org.slug)
-  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   await call(page, "PUT", "/api/agenda/schedules", org.slug, {
     branchId: owner.branchId,
     dentistUserId: owner.user.id,

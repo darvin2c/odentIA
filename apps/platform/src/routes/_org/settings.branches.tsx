@@ -531,8 +531,8 @@ function BranchesPage() {
         title={`Desactivar ${deactivating?.name ?? ""}`}
         description={
           lastActive
-            ? "Es la única sede activa: la agenda y las reservas dejarán de funcionar hasta que reactives una. Sus citas, horarios y sillones se conservan."
-            : "Dejará de aparecer en la agenda y no se podrán reservar citas en ella. Sus citas, horarios y sillones se conservan, y puedes reactivarla cuando quieras."
+            ? "Es la única sede activa: la agenda y las reservas dejarán de funcionar hasta que reactives una. Sus citas, horarios y unidades dentales se conservan."
+            : "Dejará de aparecer en la agenda y no se podrán reservar citas en ella. Sus citas, horarios y unidades dentales se conservan, y puedes reactivarla cuando quieras."
         }
         confirmLabel="Desactivar"
         variant="destructive"

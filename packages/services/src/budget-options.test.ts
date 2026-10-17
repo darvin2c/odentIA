@@ -269,7 +269,7 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
   expect(reader.action).toBeNull()
 
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede ${randomUUID()}` }).returning()
-  await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Sillón 1" })
+  await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" })
   const startsAt = new Date(Date.now() + 3 * 24 * 3_600_000)
   startsAt.setUTCMinutes(0, 0, 0)
   const cita = await f.run((tx) =>

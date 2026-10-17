@@ -66,7 +66,7 @@ async function recovery(orgId: string, input: { sentAt: Date; talkedAt: Date; bo
     .where(and(eq(patientContact.patientId, person!.id), eq(patientContact.relationship, "self")))
   const contactId = self!.contactId
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: `Sede ${randomUUID().slice(0, 6)}` }).returning()
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón" }).returning()
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental" }).returning()
   await ownerDb.insert(automationJob).values({
     organizationId: orgId,
     kind: "seguimiento_presupuesto",

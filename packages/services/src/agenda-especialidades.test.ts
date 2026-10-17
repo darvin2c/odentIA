@@ -77,8 +77,8 @@ beforeAll(async () => {
     })),
   )
   await run(async (tx) => {
-    for (const name of ["Sillón 1", "Sillón 2", "Sillón 3"]) await createChair(tx, ORG, { branchId: centro, name })
-    await createChair(tx, ORG, { branchId: norte, name: "Sillón Norte" })
+    for (const name of ["Unidad dental 1", "Unidad dental 2", "Unidad dental 3"]) await createChair(tx, ORG, { branchId: centro, name })
+    await createChair(tx, ORG, { branchId: norte, name: "Unidad dental Norte" })
     // Pérez, general, todos los días; Ríos, los martes por la mañana; Rojas, martes y jueves por la tarde.
     await setProfessionalSchedule(tx, ORG, OWNER, {
       branchId: centro,

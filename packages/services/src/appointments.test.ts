@@ -85,8 +85,8 @@ beforeAll(async () => {
     .returning({ id: serviceCatalog.id })
   serviceId = service!.id
   const [chair, chair2] = await withOrgContext(appDb, ORG, async (tx) => [
-    await createChair(tx, ORG, { branchId, name: "Sillón Uno" }),
-    await createChair(tx, ORG, { branchId, name: "Sillón Dos" }),
+    await createChair(tx, ORG, { branchId, name: "Unidad dental Uno" }),
+    await createChair(tx, ORG, { branchId, name: "Unidad dental Dos" }),
   ])
   chairId = chair!.id
   chair2Id = chair2!.id
@@ -132,7 +132,7 @@ it("crea una cita con duración del servicio y la lista con nombres resueltos", 
   expect(found).toMatchObject({
     patientName: "Paciente Agenda",
     dentistName: "Dra. Agenda Uno",
-    chairName: "Sillón Uno",
+    chairName: "Unidad dental Uno",
   })
 
   const own = await run((tx) => listAppointments(tx, ORG, { from: FROM, to: TO, patientId }))
@@ -147,7 +147,7 @@ it("crea una cita con duración del servicio y la lista con nombres resueltos", 
   expect(other).toEqual([])
 })
 
-it("rechaza profesional ajeno, paciente ajeno y sillón inexistente", async () => {
+it("rechaza profesional ajeno, paciente ajeno y unidad dental inexistente", async () => {
   await expect(
     run((tx) =>
       createAppointment(tx, ORG, ACTOR, {
@@ -183,7 +183,7 @@ it("rechaza profesional ajeno, paciente ajeno y sillón inexistente", async () =
   ).rejects.toMatchObject({ status: 404 })
 })
 
-it("la doble reserva del mismo sillón o profesional responde 409 APPOINTMENT_CONFLICT", async () => {
+it("la doble reserva de la misma unidad dental o profesional responde 409 APPOINTMENT_CONFLICT", async () => {
   await expect(
     run((tx) =>
       createAppointment(tx, ORG, ACTOR, {
@@ -304,12 +304,12 @@ it("editar congela el nuevo servicio y cancelar libera el recurso", async () => 
   expect(reuse.status).toBe("programada")
 })
 
-it("listScheduleResources devuelve miembros, sillones y la zona de la sede", async () => {
+it("listScheduleResources devuelve miembros, unidades dentales y la zona de la sede", async () => {
   const resources = await run((tx) => listScheduleResources(tx, ORG, {}))
   expect(resources.branchId).toBe(branchId)
   expect(resources.timeZone).toBe("America/Lima")
   expect(resources.professionals.map((p) => p.label)).toContain("Dra. Agenda Uno")
-  expect(resources.chairs.map((c) => c.label)).toEqual(["Sillón Dos", "Sillón Uno"])
+  expect(resources.chairs.map((c) => c.label)).toEqual(["Unidad dental Dos", "Unidad dental Uno"])
 })
 
 it("rechaza reserva fuera del horario y sin horario configurado", async () => {
@@ -337,7 +337,7 @@ it("ofrece huecos dentro del horario y respeta bloqueos", async () => {
       durationMin: 30,
     }),
   )
-  // 09:00 y 09:45 ocupadas por las citas previas; 10:30 libre con sillón.
+  // 09:00 y 09:45 ocupadas por las citas previas; 10:30 libre con unidad dental.
   expect(slots.slots.some((slot) => slot.startsAt === "2026-10-05T15:30:00.000Z")).toBe(true)
   expect(slots.slots.some((slot) => slot.startsAt === "2026-10-05T14:00:00.000Z")).toBe(false)
   expect(slots.truncated).toBe(false)
@@ -459,7 +459,7 @@ it("cancelar deja el motivo y la nota en la auditoría, y rechaza un motivo desc
   })
 })
 
-it("sin sillón indicado la agenda pone uno libre, y los tramos libres descuentan la cita", async () => {
+it("sin unidad dental indicada la agenda pone una libre, y los tramos libres descuentan la cita", async () => {
   // Lunes 2026-11-09, 10:00–11:00 de Lima.
   const booked = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
@@ -493,7 +493,7 @@ it("sin sillón indicado la agenda pone uno libre, y los tramos libres descuenta
     { dentistUserId: DENTIST_2, startsAt: "2026-11-09T19:00:00.000Z", endsAt: "2026-11-09T23:00:00.000Z" },
   ])
 
-  // Con los dos sillones ocupados a esa hora, nadie más queda libre ni se puede reservar.
+  // Con las dos unidades dentales ocupadas a esa hora, nadie más queda libre ni se puede reservar.
   await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
       branchId,
@@ -556,8 +556,8 @@ it("la duración de una cita regular se configura por sede", async () => {
   await run((tx) => setBranchDefaultDuration(tx, ORG, ACTOR, { branchId, minutes: 60 }))
 })
 
-it("al reprogramar, el hueco de la propia cita cuenta como libre y el sillón se reasigna si hace falta", async () => {
-  // Martes 2026-11-17: DENTIST 10:00–11:00 en el sillón 1; DENTIST_2 11:00–12:00 también en el sillón 1.
+it("al reprogramar, el hueco de la propia cita cuenta como libre y la unidad dental se reasigna si hace falta", async () => {
+  // Martes 2026-11-17: DENTIST 10:00–11:00 en la unidad dental 1; DENTIST_2 11:00–12:00 también en la unidad dental 1.
   const mine = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
       branchId,
@@ -600,7 +600,7 @@ it("al reprogramar, el hueco de la propia cita cuenta como libre y el sillón se
     endsAt: "2026-11-17T18:00:00.000Z",
   })
 
-  // A las 11:00 su sillón lo ocupa otra cita: la cita se mueve y pasa al sillón libre.
+  // A las 11:00 su unidad dental la ocupa otra cita: la cita se mueve y pasa a la unidad dental libre.
   const moved = await run((tx) =>
     moveAppointment(tx, ORG, ACTOR, mine.id, {
       expectedVersion: mine.version,
@@ -609,7 +609,7 @@ it("al reprogramar, el hueco de la propia cita cuenta como libre y el sillón se
   )
   expect(moved.startsAt).toBe("2026-11-17T16:00:00.000Z")
   expect(moved.chairId).toBe(chair2Id)
-  // Media hora después sigue libre su sillón de ahora: lo conserva.
+  // Media hora después sigue libre su unidad dental de ahora: la conserva.
   const again = await run((tx) =>
     moveAppointment(tx, ORG, ACTOR, mine.id, {
       expectedVersion: moved.version,
@@ -619,9 +619,9 @@ it("al reprogramar, el hueco de la propia cita cuenta como libre y el sillón se
   expect(again.chairId).toBe(chair2Id)
 })
 
-it("un sillón se renombra, se desactiva y se reactiva; desactivado sale de las reservas y conserva sus citas", async () => {
-  const extra = await run((tx) => createChair(tx, ORG, { branchId, name: "Sillón Tres" }))
-  // Miércoles 2026-12-02, 10:00 de Lima: una cita en pie en ese sillón.
+it("una unidad dental se renombra, se desactiva y se reactiva; desactivada sale de las reservas y conserva sus citas", async () => {
+  const extra = await run((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental Tres" }))
+  // Miércoles 2026-12-02, 10:00 de Lima: una cita en pie en esa unidad dental.
   const booked = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
       branchId,

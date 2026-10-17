@@ -99,7 +99,7 @@ async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefine
   const total = async (query: Promise<Array<{ total: number }>>) => Number((await query)[0]?.total ?? 0)
   if (topic.id === "agenda" || topic.id === "disponibilidad") {
     const chairs = await total(tx.select({ total: count() }).from(scheduleChair).where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.isActive, true))))
-    if (chairs === 0) out.push({ text: "No hay ningún sillón creado. Sin sillón no se puede reservar una cita.", ...at("disponibilidad") })
+    if (chairs === 0) out.push({ text: "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.", ...at("disponibilidad") })
     const schedules = await total(tx.select({ total: count() }).from(professionalSchedule).where(eq(professionalSchedule.organizationId, orgId)))
     if (schedules === 0) out.push({ text: "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.", ...at("disponibilidad") })
     const services = await total(tx.select({ total: count() }).from(serviceCatalog).where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true))))

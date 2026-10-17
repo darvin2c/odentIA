@@ -84,7 +84,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await call(page, "PUT", "/api/patient-registration/config", org.slug, {
     expectedVersion: registration.version, enabled: false, fields: registration.fields, privacyNotice: "Aviso de prueba.",
   })
-  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId, name: "Sillón 1" }, 201)
+  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId, name: "Unidad dental 1" }, 201)
   await call(page, "PUT", "/api/agenda/schedules", org.slug, {
     branchId, dentistUserId: owner.user.id,
     rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),

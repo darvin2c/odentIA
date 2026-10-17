@@ -815,7 +815,7 @@ const [miraflores] = await db
   .values([
     // Miraflores hereda la zona de la organización (`timezone` en null).
     { organizationId: ORG_A, name: "Sede Miraflores", department: "Lima", province: "Lima", district: "Miraflores" },
-    // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin sillones
+    // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin unidades dentales
     // ni horarios: es la sede limpia para probar la configuración desde cero.
     {
       organizationId: ORG_A,
@@ -2658,14 +2658,14 @@ await db.transaction((tx) =>
   }),
 )
 
-// --- Agenda: sillones y citas reales (la constraint impide sembrar solapes;
+// --- Agenda: unidades dentales y citas reales (la constraint impide sembrar solapes;
 // los avisos de la UI cubren datos históricos o importaciones, no este seed) ---
 const surco = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede Surco")),
 })
 if (!surco) throw new Error("Falta la Sede Surco")
 const chairsMiraflores = await Promise.all(
-  ["Sillón 1", "Sillón 2", "Sillón 3"].map((name) =>
+  ["Unidad dental 1", "Unidad dental 2", "Unidad dental 3"].map((name) =>
     createChair(db, ORG_A, { branchId: miraflores.id, name }),
   ),
 )
@@ -2677,7 +2677,7 @@ const domainSeed = {
   contactId: rosaContactId,
   conversationId: convRosa.id,
 }
-// Solo Miraflores lleva agenda: Surco se deja limpia (sin sillones, horarios ni ausencias)
+// Solo Miraflores lleva agenda: Surco se deja limpia (sin unidades dentales, horarios ni ausencias)
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
 await db.transaction((tx) => seedAvailability(tx, domainSeed))
 // La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
@@ -2689,7 +2689,7 @@ await setProfessionalSchedule(db, ORG_A, ANA_ID, {
 })
 const chairA = (index: number): string => {
   const chair = chairsMiraflores[index]
-  if (!chair) throw new Error("Faltan sillones semilla")
+  if (!chair) throw new Error("Faltan unidades dentales semilla")
   return chair.id
 }
 /** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO. */
@@ -2699,8 +2699,8 @@ const lima = (dayOffset: number, hhmm: string): string => {
   return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
 }
 // Ausencias claras en Miraflores, lejos de las citas sembradas (ayer, hoy y mañana):
-// un permiso y unas vacaciones de dos profesionales, un feriado de toda la sede y un
-// sillón en mantenimiento.
+// un permiso y unas vacaciones de dos profesionales, un feriado de toda la sede y una
+// unidad dental en mantenimiento.
 const limaDay = (dayOffset: number): string => lima(dayOffset, "00:00")
 for (const block of [
   { dentistUserId: ANA_ID, kind: "ausencia", reason: "Permiso", startsAt: lima(4, "15:00"), endsAt: lima(4, "18:00") },

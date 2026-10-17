@@ -541,7 +541,7 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   fixtureDb,
 }, info) => {
   const { page, org } = owner
-  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  await call(page, "POST", "/api/agenda/chairs", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
     submissionId: randomUUID(),
     answers: { demographics: { displayName: "Eva Rojas", docType: "DNI", docNumber: "45678902" }, respondent: "staff", privacyAccepted: false },

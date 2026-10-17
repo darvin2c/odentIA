@@ -570,7 +570,7 @@ export function createApp(deps: AppDeps) {
     )
   })
 
-  // Una sede desactivada vuelve con sus citas, horarios y sillones.
+  // Una sede desactivada vuelve con sus citas, horarios y unidades dentales.
   guarded.post("/branches/:id/reactivate", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {

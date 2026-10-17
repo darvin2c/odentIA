@@ -1,7 +1,7 @@
 /**
  * Aritmética de tramos de la agenda, en minutos del día local. Sirve para
  * pintar: qué parte de la jornada está cerrada, ocupada o libre. No decide qué
- * se puede reservar: esa regla (sillón libre, bloqueos de sede, concurrencia)
+ * se puede reservar: esa regla (unidad dental libre, bloqueos de sede, concurrencia)
  * vive en el servicio y la rejilla solo la refleja.
  */
 

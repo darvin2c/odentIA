@@ -169,7 +169,7 @@ it("firma en la clínica sin dibujar la del profesional, y en papel con la foto 
   const signer = await v.self()
   const [first, second] = created as [(typeof created)[number], (typeof created)[number]]
 
-  // En la silla: la persona dibuja; el profesional confirma con su perfil.
+  // En la unidad dental: la persona dibuja; el profesional confirma con su perfil.
   const inChair = await v.run((tx) =>
     signConsentDocument(tx, "org_a", v.actor, first.id, {
       signerKind: "paciente",

@@ -102,7 +102,7 @@ async function clinic(
     advisor: { enabled: true, ...(options.anyHour ? { quietStart: "00:00", quietEnd: "00:00" } : {}) },
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   const templates = (options.approved ?? []).map((key) => ({ name: AUTOMATION_MESSAGES[key].template, language: "es" }))
   const connection =
     options.whatsapp === false
@@ -323,7 +323,7 @@ describe("los lotes avanzan en orden y no repiten", () => {
     const c = await clinic()
     const p = await person(c, "Muchas citas")
     const enabledAt = new Date(NOW.getTime() - 6 * DAY)
-    // Las inasistencias liberan el sillón: pueden coincidir en hora.
+    // Las inasistencias liberan la unidad dental: pueden coincidir en hora.
     await ownerDb.insert(appointment).values(
       Array.from({ length: 205 }, (_, index) => {
         const startsAt = new Date(NOW.getTime() - 3 * DAY + index * 60_000)

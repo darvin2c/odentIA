@@ -90,7 +90,7 @@ export const OPERATIONS = {
     fields: {
       patientId: { kind: "uuid", label: "Paciente", description: "El paciente que se atiende; debe estar vinculado al interlocutor.", body: "required", agent: "requires" },
       dentistUserId: { kind: "ref", label: "Profesional", description: "El profesional del hueco elegido en buscar_huecos.", body: "required", agent: "requires" },
-      chairId: { kind: "uuid", label: "Sillón", description: "El sillón del hueco elegido en buscar_huecos; sin él, la agenda pone el primero libre de la sede.", body: "optional", agent: "fills" },
+      chairId: { kind: "uuid", label: "Unidad dental", description: "La unidad dental del hueco elegido en buscar_huecos; sin ella, la agenda pone la primera libre de la sede.", body: "optional", agent: "fills" },
       startsAt: { kind: "instant", label: "Inicio", description: "Inicio exacto del hueco elegido, en ISO 8601 con zona.", body: "required", agent: "requires" },
       branchId: { kind: "uuid", label: "Sede", description: "La sede del hueco elegido.", body: "optional", agent: "fills" },
       serviceId: { kind: "uuid", label: "Servicio", description: "El servicio que se va a atender, si se sabe.", body: "optional", agent: "fills" },
@@ -111,7 +111,7 @@ export const OPERATIONS = {
       expectedVersion: { kind: "int", min: 1, label: "Versión", description: "La versión de la cita que se leyó: evita pisar un cambio de otra persona.", body: "required", agent: "requires" },
       startsAt: { kind: "instant", label: "Nuevo inicio", description: "Inicio exacto del hueco nuevo, en ISO 8601 con zona.", body: "required", agent: "requires" },
       dentistUserId: { kind: "ref", label: "Profesional", description: "Solo si cambia de profesional.", body: "optional", agent: "fills" },
-      chairId: { kind: "uuid", label: "Sillón", description: "Solo si cambia de sillón.", body: "optional", agent: "fills" },
+      chairId: { kind: "uuid", label: "Unidad dental", description: "Solo si cambia de unidad dental.", body: "optional", agent: "fills" },
       endsAt: { kind: "instant", label: "Nuevo fin", description: "Fin exacto, cuando cambia la duración.", body: "optional", agent: "person" },
       reason,
     },

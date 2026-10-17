@@ -62,7 +62,7 @@ export interface BookingSeed {
 /**
  * Nueva cita: a quién y cuándo. El «cuándo» es el mismo de reprogramar
  * (`useWhen`): lo blanco está libre, y el bloque se arrastra y se estira. El
- * sillón lo pone la agenda. Quien aún no es paciente se registra aquí mismo
+ * unidad dental la pone la agenda. Quien aún no es paciente se registra aquí mismo
  * con lo mínimo.
  */
 export function BookingDrawer({
@@ -372,7 +372,7 @@ export function BookingDrawer({
       <FormDrawer
         open
         title="Nueva cita"
-        description="Elige a quién y cuándo. El sillón se asigna con el hueco."
+        description="Elige a quién y cuándo. La unidad dental se asigna con el hueco."
         onClose={onClose}
         onSubmit={(event) => {
           event.preventDefault()

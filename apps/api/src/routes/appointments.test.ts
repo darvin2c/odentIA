@@ -125,12 +125,12 @@ afterAll(async () => {
 
 const json = { "content-type": "application/json" }
 
-it("recursos: reception lee; member no crea sillón ni lee agenda, owner sí", async () => {
+it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner sí", async () => {
   const member = buildApp("member")
   const denied = await member.request("/agenda/chairs", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ branchId, name: "Sillón API" }),
+    body: JSON.stringify({ branchId, name: "Unidad dental API" }),
   })
   expect(denied.status).toBe(403)
   const memberReads = await member.request(`/agenda/resources?branchId=${branchId}`)
@@ -140,7 +140,7 @@ it("recursos: reception lee; member no crea sillón ni lee agenda, owner sí", a
   const created = await owner.request("/agenda/chairs", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ branchId, name: "Sillón API" }),
+    body: JSON.stringify({ branchId, name: "Unidad dental API" }),
   })
   expect(created.status).toBe(201)
   chairId = ((await created.json()) as { data: { id: string } }).data.id
@@ -198,7 +198,7 @@ it("cita: crear, listar con filtro, mover, conflicto 409 y cancelar", async () =
   const listBody = (await list.json()) as { data: Array<{ id: string }> }
   expect(listBody.data.map((item) => item.id)).toContain(cita.id)
 
-  // Solape del mismo sillón: la exclusión llega como 409 APPOINTMENT_CONFLICT.
+  // Solape de la misma unidad dental: la exclusión llega como 409 APPOINTMENT_CONFLICT.
   const overlap = await owner.request("/appointments", {
     method: "POST",
     headers: json,
@@ -305,13 +305,13 @@ it("valida el query y el body con 400", async () => {
   expect(badBody.status).toBe(400)
 })
 
-it("sillones: administrarlos exige configuración; desactivado sale de la agenda y sigue en la lista", async () => {
+it("unidades dentales: administrarlas exige configuración; desactivada sale de la agenda y sigue en la lista", async () => {
   const owner = buildApp("owner")
   const reception = buildApp("reception")
   const patch = (app: Hono, id: string, body: unknown) =>
     app.request(`/agenda/chairs/${id}`, { method: "PATCH", headers: json, body: JSON.stringify(body) })
 
-  // Recepción reserva, pero no ve la lista de administración ni cambia un sillón.
+  // Recepción reserva, pero no ve la lista de administración ni cambia una unidad dental.
   expect((await reception.request(`/agenda/chairs?branchId=${branchId}`)).status).toBe(403)
   expect((await patch(reception, chairId, { name: "Otro nombre" })).status).toBe(403)
   expect((await patch(reception, chairId, { isActive: false })).status).toBe(403)
@@ -320,12 +320,12 @@ it("sillones: administrarlos exige configuración; desactivado sale de la agenda
   expect((await patch(owner, chairId, {})).status).toBe(400)
   expect((await patch(owner, chairId, { name: "  " })).status).toBe(400)
   expect((await patch(owner, chairId, { color: "rojo" })).status).toBe(400)
-  expect((await patch(owner, "no-es-un-id", { name: "Sillón" })).status).toBe(404)
-  expect((await patch(owner, crypto.randomUUID(), { name: "Sillón" })).status).toBe(404)
+  expect((await patch(owner, "no-es-un-id", { name: "Unidad dental" })).status).toBe(404)
+  expect((await patch(owner, crypto.randomUUID(), { name: "Unidad dental" })).status).toBe(404)
 
-  const renamed = await patch(owner, chairId, { name: "Sillón Uno" })
+  const renamed = await patch(owner, chairId, { name: "Unidad dental Uno" })
   expect(renamed.status).toBe(200)
-  expect(await renamed.json()).toEqual({ data: { id: chairId, name: "Sillón Uno", isActive: true } })
+  expect(await renamed.json()).toEqual({ data: { id: chairId, name: "Unidad dental Uno", isActive: true } })
 
   expect((await patch(owner, chairId, { isActive: false })).status).toBe(200)
   const resources = await reception.request(`/agenda/resources?branchId=${branchId}`)
@@ -333,12 +333,12 @@ it("sillones: administrarlos exige configuración; desactivado sale de la agenda
   const listed = await owner.request(`/agenda/chairs?branchId=${branchId}`)
   expect(listed.status).toBe(200)
   const chairs = ((await listed.json()) as { data: Array<{ id: string; name: string; isActive: boolean }> }).data
-  expect(chairs).toMatchObject([{ id: chairId, name: "Sillón Uno", isActive: false }])
+  expect(chairs).toMatchObject([{ id: chairId, name: "Unidad dental Uno", isActive: false }])
 
   expect((await patch(owner, chairId, { isActive: true })).status).toBe(200)
   const again = await reception.request(`/agenda/resources?branchId=${branchId}`)
   expect(((await again.json()) as { data: { chairs: Array<{ label: string }> } }).data.chairs).toEqual([
-    { id: chairId, label: "Sillón Uno" },
+    { id: chairId, label: "Unidad dental Uno" },
   ])
 })
 

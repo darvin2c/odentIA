@@ -214,7 +214,7 @@ export function AppointmentDrawer({
   const move = useMutation({
     mutationFn: () => {
       if (!target) throw new Error("Elige una hora libre.")
-      // Sin sillón: la cita conserva el suyo o pasa a uno libre a la nueva hora.
+      // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
       return apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/move`, {
         method: "POST",
         body: JSON.stringify({
@@ -353,7 +353,7 @@ export function AppointmentDrawer({
             />
             <ResourceSelect
               id="cita-editar-sillon"
-              label="Sillón"
+              label="Unidad dental"
               options={resources.chairs.map((chair) => ({ id: chair.id, label: chair.label }))}
               value={draft.chairId}
               onChange={(chairId) =>
@@ -518,7 +518,7 @@ export function AppointmentDrawer({
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
               <DetailField label="Profesional">{appointment.dentistName}</DetailField>
-              <DetailField label="Sillón">{appointment.chairName}</DetailField>
+              <DetailField label="Unidad dental">{appointment.chairName}</DetailField>
               {appointment.reason ? (
                 <DetailField label="Motivo">{appointment.reason}</DetailField>
               ) : null}

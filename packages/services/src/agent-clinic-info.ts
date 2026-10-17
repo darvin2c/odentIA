@@ -135,7 +135,7 @@ export async function getBranchHours(tx: Db, orgId: string, now = new Date()): P
       ),
     )
   const until = new Date(now.getTime() + CLOSURE_DAYS * 86_400_000)
-  // Un cierre de sede es un bloqueo sin profesional ni sillón: afecta a todos.
+  // Un cierre de sede es un bloqueo sin profesional ni unidad dental: afecta a todos.
   const closures = await tx
     .select({
       branchId: scheduleBlock.branchId,

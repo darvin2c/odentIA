@@ -50,8 +50,8 @@ export function findScheduleConflicts(
 export function conflictLabel(conflict: ScheduleConflict | undefined): string | undefined {
   if (!conflict) return undefined
   return conflict.professional && conflict.chair
-    ? "Solapamiento de profesional y sillón"
+    ? "Solapamiento de profesional y unidad dental"
     : conflict.professional
       ? "Solapamiento de profesional"
-      : "Solapamiento de sillón"
+      : "Solapamiento de unidad dental"
 }

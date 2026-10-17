@@ -1134,13 +1134,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ...gaps.map((g) => {
           const start = new Date(g.startsAt)
           const end = new Date(g.endsAt)
-          const chair = g.chairId ?? "sin sillón asignado: filtra por un sillón real o deriva"
+          const chair = g.chairId ?? "sin unidad dental asignada: filtra por una unidad dental real o deriva"
           return (
             `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.dentistName ? ` con ${g.dentistName}` : ""}` +
-            ` [startsAt ${g.startsAt} · sede ${input.branchId} · sillón ${chair} · profesional ${g.dentistUserId}]`
+            ` [startsAt ${g.startsAt} · sede ${input.branchId} · unidad dental ${chair} · profesional ${g.dentistUserId}]`
           )
         }),
-        "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, sillón y profesional): nunca inventes IDs ni horas.",
+        "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, unidad dental y profesional): nunca inventes IDs ni horas.",
       ]
       if (truncated) lines.push("Hay más huecos que no van aquí: acota el rango por días o pide los de un profesional.")
       return lines.join("\n")
@@ -1148,7 +1148,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "buscar_huecos",
       description:
-        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, sillón, profesional, inicio, fin, zona y duración para proponer_cita.",
+        "Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, unidad dental, profesional, inicio, fin, zona y duración para proponer_cita.",
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -1261,7 +1261,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, sillón, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
+        "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, unidad dental, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
       schema: operationAgentSchema("cita.reservar"),
     },
   )

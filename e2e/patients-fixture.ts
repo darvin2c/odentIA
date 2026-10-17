@@ -132,7 +132,7 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
 }
 
 /**
- * Agenda mínima para reservar: un sillón y horario diario del propio usuario.
+ * Agenda mínima para reservar: una unidad dental y horario diario del propio usuario.
  * Sin horario explícito no se puede programar un control.
  */
 export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: string }> {
@@ -143,7 +143,7 @@ export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: stri
     "POST",
     "/api/agenda/chairs",
     slug,
-    { branchId: owner.branchId, name: "Sillón control" },
+    { branchId: owner.branchId, name: "Unidad dental control" },
     201,
   )
   await call(page, "PUT", "/api/agenda/schedules", slug, {

@@ -111,7 +111,7 @@ describe("responder", () => {
     const empty = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo reservar una cita?", screen: "/agenda" }))
     expect(empty.kind).toBe("estado")
     expect(empty.blockers.map((item) => item.text)).toEqual(expect.arrayContaining([
-      "No hay ningún sillón creado. Sin sillón no se puede reservar una cita.",
+      "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.",
       "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.",
     ]))
     expect(empty.blockers[0]).toMatchObject({ where: "Configuración › Horarios y ausencias", path: "/settings/availability" })
@@ -120,9 +120,9 @@ describe("responder", () => {
     expect(limited.blockers[0]?.text).toContain("Tu rol (Recepción) puede ver Agenda, pero no cambiar nada ahí.")
     expect(limited.blockers.filter((item) => item.where === "Configuración › Horarios y ausencias").every((item) => item.path === null)).toBe(true)
 
-    // Con sillón, horario y servicio ya no falta nada: responde con la guía.
+    // Con unidad dental, horario y servicio ya no falta nada: responde con la guía.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Sede Ayuda", timezone: "America/Lima" }).returning({ id: branch.id })
-    await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Sillón 1" })
+    await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental 1" })
     await ownerDb.insert(professionalSchedule).values({ organizationId: ORG, branchId: site!.id, dentistUserId: USER, weekday: 1, startMin: 540, endMin: 780 })
     const ready = await run((tx) => askHelp(tx, ORG, owner, { question: "¿Por qué no puedo mover esta cita?", screen: "/agenda" }))
     expect(ready.blockers.map((item) => item.text)).toEqual(["Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida."])

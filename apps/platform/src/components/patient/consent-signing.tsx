@@ -105,7 +105,7 @@ export function useSignAs(): { text: string | null; loading: boolean } {
 }
 
 /**
- * Firma en la silla (decisión 3): una pantalla completa para pasarle la tablet a
+ * Firma en la unidad dental (decisión 3): una pantalla completa para pasarle la tablet a
  * la persona, con letra grande, la casilla de comprensión y su firma con el
  * dedo; si son varios consentimientos van seguidos, sin volver a empezar. Al
  * terminar, el profesional confirma con su perfil, sin dibujar otra firma, y

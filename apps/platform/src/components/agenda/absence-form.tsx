@@ -36,7 +36,7 @@ const PERSON_REASONS: Reason[] = [
   { id: "permiso", label: "Permiso", kind: "ausencia" },
   { id: "otro", label: "Otro", kind: "ausencia" },
 ]
-/** Motivos habituales de la sede entera o de un sillón. */
+/** Motivos habituales de la sede entera o de una unidad dental. */
 const BRANCH_REASONS: Reason[] = [
   { id: "feriado", label: "Feriado", kind: "bloqueo" },
   { id: "cierre", label: "Cierre", kind: "bloqueo" },
@@ -85,7 +85,7 @@ export function AbsenceForm({
   timeZone: string
   today: string
   scope: AbsenceScope
-  /** Sillones de la sede: un cierre puede ser de uno solo (mantenimiento). */
+  /** Unidades dentales de la sede: un cierre puede ser de una sola (mantenimiento). */
   chairs: { id: string; label: string }[]
   onClose: () => void
   onSaved: () => Promise<void>

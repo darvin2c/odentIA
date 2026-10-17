@@ -514,7 +514,7 @@ it("presupuestos, contextos versionados y vínculos atención-plan se aíslan po
   // Lo agendado de un plan (ADR 0034) se aísla por tenant y es historia: no se borra.
   const [sillon] = await ownerDb.execute<{ id: string }>(sql`
     insert into schedule_chair (organization_id,branch_id,name)
-    values ('org_a','11111111-1111-1111-1111-111111111111','Sillón RLS') returning id`)
+    values ('org_a','11111111-1111-1111-1111-111111111111','Unidad dental RLS') returning id`)
   const [cita] = await ownerDb.execute<{ id: string }>(sql`
     insert into appointment (organization_id,branch_id,patient_id,dentist_user_id,chair_id,starts_at,ends_at,duration_min,status)
     values ('org_a','11111111-1111-1111-1111-111111111111','99999999-9999-9999-9999-999999999999','rls-dentist',${sillon!.id},

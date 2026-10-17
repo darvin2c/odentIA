@@ -114,7 +114,7 @@ export async function seedAgent(
   const first = convs[0]
   if (first) {
     // Referencias reales para que aprobar la propuesta en dev ejecute de
-    // verdad: sillón de la sede y una cita futura programada (su versión se
+    // verdad: unidad dental de la sede y una cita futura programada (su versión se
     // lee aquí porque el seed purga y recrea la org en cada ejecución).
     const [chair] = await tx
       .select({ id: scheduleChair.id })

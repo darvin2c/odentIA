@@ -150,7 +150,7 @@ describe("cita recuperada", () => {
       .from(patientContact)
       .where(and(eq(patientContact.patientId, fx.patient.id), eq(patientContact.relationship, "self")))
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}` }).returning()
-    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Sillón" }).returning()
+    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: ORG, branchId: site!.id, name: "Unidad dental" }).returning()
     const bookedAt = new Date(Date.now() - 2 * 86_400_000)
     await ownerDb.insert(automationJob).values({
       organizationId: ORG,

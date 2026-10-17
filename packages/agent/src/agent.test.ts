@@ -957,7 +957,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
   const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId, name: "Sillón Agente" }))
+    createChair(tx, "org_a", { branchId, name: "Unidad dental Agente" }))
   const chairId = createdChair!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
@@ -1002,7 +1002,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(out.split("\n")[0]).toContain("hora local de la sede")
   const firstLine = out.split("\n")[1] ?? ""
   const optionBranch = firstLine.match(/sede ([0-9a-f-]{36})/i)?.[1]
-  const optionChair = firstLine.match(/sillón ([0-9a-f-]{36})/i)?.[1]
+  const optionChair = firstLine.match(/unidad dental ([0-9a-f-]{36})/i)?.[1]
   const optionDentist = firstLine.match(/profesional ([^\]\s]+)/)?.[1]
   const optionStart = firstLine.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1]
   const [, startClock, endClock] = firstLine.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/) ?? []
@@ -1073,7 +1073,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
   const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId, name: "Sillón Reprog" }))
+    createChair(tx, "org_a", { branchId, name: "Unidad dental Reprog" }))
   const chairId = createdChair!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
@@ -1193,7 +1193,7 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: "Sillón Confirma" }))
+  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: "Unidad dental Confirma" }))
   const { conversationId } = await ingestText("tg:confirma-cita", "evt-confirma-cita", "Sí, ahí estaré")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
@@ -1373,7 +1373,7 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   expect(conv).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: winner, agentStatus: "on" })
 })
 
-/** Sede con sillón, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
+/** Sede con unidad dental, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
 async function bookingFixture(conversationId: string, label: string) {
   const [createdBranch] = await ownerDb
     .insert(branch)
@@ -1391,7 +1391,7 @@ async function bookingFixture(conversationId: string, label: string) {
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: `Sillón ${label}` }))
+  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: `Unidad dental ${label}` }))
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
       branchId,
@@ -1442,7 +1442,7 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
         {
           patientId: fx.patientId,
           dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-          chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+          chairId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
@@ -1950,7 +1950,7 @@ it("probar: una conversación de prueba reserva en dos turnos sin tocar la base"
         {
           patientId: "00000000-0000-4000-8000-0000000000aa",
           dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-          chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+          chairId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,

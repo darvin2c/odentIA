@@ -39,6 +39,7 @@ import {
 } from "./automation.js"
 import {
   branchNotFound,
+  chairNotFound,
   isExclusionViolation,
   notFound,
   ServiceError,
@@ -219,7 +220,7 @@ async function requireChair(tx: Db, orgId: string, chairId: string, branchId?: s
     .from(scheduleChair)
     .where(and(...conditions))
     .limit(1)
-  if (!row) throw notFound("Sillón")
+  if (!row) throw chairNotFound()
   return row
 }
 
@@ -574,7 +575,7 @@ export async function searchAgendaPatients(
   }))
 }
 
-/** Profesionales = miembros de la org; sillones = activos de la sede. */
+/** Profesionales = miembros de la org; unidades dentales = activas de la sede. */
 export async function listScheduleResources(
   tx: Db,
   orgId: string,
@@ -641,8 +642,8 @@ export async function setBranchDefaultDuration(
 }
 
 /**
- * Primer sillón libre de la sede para ese tramo: quien reserva elige persona y
- * hora, y el sillón lo pone la agenda.
+ * Primera unidad dental libre de la sede para ese tramo: quien reserva elige persona y
+ * hora, y la unidad dental la pone la agenda.
  */
 async function pickFreeChair(
   tx: Db,
@@ -651,7 +652,7 @@ async function pickFreeChair(
   dentistUserId: string,
   startsAt: Date,
   endsAt: Date,
-  /** Al mover una cita: no cuenta su propia ocupación y, si sigue libre, conserva su sillón. */
+  /** Al mover una cita: no cuenta su propia ocupación y, si sigue libre, conserva su unidad dental. */
   moving?: { appointmentId: string; chairId: string },
 ): Promise<string> {
   const chairs = await tx
@@ -665,7 +666,7 @@ async function pickFreeChair(
       ),
     )
     .orderBy(asc(scheduleChair.name))
-  if (chairs.length === 0) throw validation("La sede no tiene sillones: añade uno para reservar")
+  if (chairs.length === 0) throw validation("La sede no tiene unidades dentales: añade una para reservar")
   const ids = chairs.map((chair) => chair.id)
   const [taken, blocked] = await Promise.all([
     tx
@@ -703,7 +704,7 @@ async function pickFreeChair(
   const free =
     chairs.find((chair) => chair.id === moving?.chairId && !unavailable.has(chair.id)) ??
     chairs.find((chair) => !unavailable.has(chair.id))
-  if (!free) throw conflict("NO_CHAIR", "No hay un sillón libre a esa hora")
+  if (!free) throw conflict("NO_CHAIR", "No hay una unidad dental libre a esa hora")
   return free.id
 }
 
@@ -711,7 +712,7 @@ export interface CreateAppointmentInput {
   branchId?: string
   patientId: string
   dentistUserId: string
-  /** Sin sillón, la agenda pone el primero libre de la sede. */
+  /** Sin unidad dental, la agenda pone la primera libre de la sede. */
   chairId?: string
   serviceId?: string
   startsAt: string
@@ -779,7 +780,7 @@ export async function createAppointment(
   const chair = input.chairId ? await requireChair(tx, orgId, input.chairId) : null
   const resolved = await resolveBranch(tx, orgId, input.branchId ?? chair?.branchId)
   if (chair && chair.branchId !== resolved.id) {
-    throw validation("El sillón no pertenece a la sede de la cita")
+    throw validation("La unidad dental no pertenece a la sede de la cita")
   }
 
   const duration =
@@ -811,7 +812,7 @@ export async function createAppointment(
   }
   const status = assertStatus(input.status ?? "programada")
   const standing = status === "programada" || status === "confirmada"
-  // Serializar altas por recurso, siempre profesional → sillón. Dos inserciones
+  // Serializar altas por recurso, siempre profesional → unidad dental. Dos inserciones
   // simultáneas pueden interbloquear las exclusiones antes de devolver 23P01.
   const lockScope = `appointment:${orgId}`
   if (standing) {
@@ -889,7 +890,7 @@ export async function createAppointment(
     if (isExclusionViolation(error)) {
       throw conflict(
         "APPOINTMENT_CONFLICT",
-        "El profesional o el sillón ya están ocupados en ese horario",
+        "El profesional o la unidad dental ya están ocupados en ese horario",
       )
     }
     throw error
@@ -939,7 +940,7 @@ export async function moveAppointment(
   if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
   const dentistUserId = input.dentistUserId ?? current.dentistUserId
   const active = current.status === "programada" || current.status === "confirmada"
-  // Sin sillón indicado la cita conserva el suyo; si a la nueva hora está ocupado, pasa a uno libre.
+  // Sin unidad dental indicada la cita conserva la suya; si a la nueva hora está ocupada, pasa a una libre.
   const chairId =
     input.chairId ??
     (active
@@ -952,7 +953,7 @@ export async function moveAppointment(
   if (chairId !== current.chairId) {
     const chair = await requireChair(tx, orgId, chairId)
     if (chair.branchId !== current.branchId) {
-      throw validation("El sillón no pertenece a la sede de la cita")
+      throw validation("La unidad dental no pertenece a la sede de la cita")
     }
   }
   if (active) {
@@ -1013,7 +1014,7 @@ export async function moveAppointment(
     if (isExclusionViolation(error)) {
       throw conflict(
         "APPOINTMENT_CONFLICT",
-        "El profesional o el sillón ya están ocupados en ese horario",
+        "El profesional o la unidad dental ya están ocupados en ese horario",
       )
     }
     throw error
@@ -1021,7 +1022,7 @@ export async function moveAppointment(
 }
 
 /**
- * Detalles de la cita: motivo, servicio, profesional y sillón. El estado no se
+ * Detalles de la cita: motivo, servicio, profesional y unidad dental. El estado no se
  * cambia aquí: tiene sus propias operaciones y efectos (`setAppointmentStatus`,
  * `setAppointmentArrival` y el cierre de la atención).
  */
@@ -1058,7 +1059,7 @@ export async function updateAppointment(
   if (input.chairId !== undefined && input.chairId !== current.chairId) {
     const chair = await requireChair(tx, orgId, input.chairId)
     if (chair.branchId !== current.branchId) {
-      throw validation("El sillón no pertenece a la sede de la cita")
+      throw validation("La unidad dental no pertenece a la sede de la cita")
     }
     set.chairId = input.chairId
   }
@@ -1087,7 +1088,7 @@ export async function updateAppointment(
     if (isExclusionViolation(error)) {
       throw conflict(
         "APPOINTMENT_CONFLICT",
-        "El profesional o el sillón ya están ocupados en ese horario",
+        "El profesional o la unidad dental ya están ocupados en ese horario",
       )
     }
     throw error
@@ -1189,7 +1190,7 @@ export async function setAppointmentArrival(
       if (isExclusionViolation(error)) {
         throw conflict(
           "APPOINTMENT_CONFLICT",
-          "El profesional o el sillón ya están ocupados a esa hora: reagenda la cita",
+          "El profesional o la unidad dental ya están ocupados a esa hora: reagenda la cita",
         )
       }
       throw error
@@ -1331,41 +1332,41 @@ export async function setAppointmentStatus(
     if (isExclusionViolation(error)) {
       throw conflict(
         "APPOINTMENT_CONFLICT",
-        "El profesional o el sillón ya están ocupados en ese horario",
+        "El profesional o la unidad dental ya están ocupados en ese horario",
       )
     }
     throw error
   }
 }
 
-/** Alta de sillón (recepción no lo crea; lo hace owner/admin en configuración o seed). */
+/** Alta de unidad dental (recepción no la crea; la hace owner/admin en configuración o seed). */
 export async function createChair(
   tx: Db,
   orgId: string,
   input: { branchId: string; name: string },
 ): Promise<{ id: string }> {
   const name = input.name.trim()
-  if (!name) throw validation("El nombre del sillón es obligatorio")
+  if (!name) throw validation("El nombre de la unidad dental es obligatorio")
   await resolveBranch(tx, orgId, input.branchId)
   const [created] = await tx
     .insert(scheduleChair)
     .values({ organizationId: orgId, branchId: input.branchId, name })
     .returning({ id: scheduleChair.id })
-  if (!created) throw new Error("No se pudo crear el sillón")
+  if (!created) throw new Error("No se pudo crear la unidad dental")
   return created
 }
 
-/** Un sillón tal como lo administra Configuración: también los desactivados. */
+/** Una unidad dental tal como la administra Configuración: también las desactivadas. */
 export interface ChairItem {
   id: string
   name: string
   isActive: boolean
-  /** Citas en pie que aún no terminan en ese sillón: no se mueven solas al desactivarlo. */
+  /** Citas en pie que aún no terminan en esa unidad dental: no se mueven solas al desactivarla. */
   upcomingAppointments: number
 }
 
 /**
- * Sillones de la sede para administrarlos: activos y desactivados, con las
+ * Unidades dentales de la sede para administrarlas: activas y desactivadas, con las
  * citas en pie que cada uno tiene por delante. La agenda sigue leyendo solo
  * los activos (`listScheduleResources`).
  */
@@ -1400,9 +1401,9 @@ export async function listChairs(
 }
 
 /**
- * Cambia el nombre de un sillón o lo desactiva y reactiva. Desactivarlo lo saca
- * de las reservas nuevas; sus citas en pie se conservan en él y no se mueven
- * solas (quien lo desactiva ve cuántas son antes de confirmar).
+ * Cambia el nombre de una unidad dental o la desactiva y reactiva. Desactivarla la saca
+ * de las reservas nuevas; sus citas en pie se conservan en ella y no se mueven
+ * solas (quien la desactiva ve cuántas son antes de confirmar).
  */
 export async function updateChair(
   tx: Db,
@@ -1415,7 +1416,7 @@ export async function updateChair(
   const fields: string[] = []
   if (patch.name !== undefined) {
     const name = patch.name.trim()
-    if (!name || name.length > 120) throw validation("El nombre del sillón debe tener entre 1 y 120 caracteres")
+    if (!name || name.length > 120) throw validation("El nombre de la unidad dental debe tener entre 1 y 120 caracteres")
     set.name = name
     fields.push("name")
   }
@@ -1423,13 +1424,13 @@ export async function updateChair(
     set.isActive = patch.isActive
     fields.push("isActive")
   }
-  if (fields.length === 0) throw validation("Indica qué cambia del sillón")
+  if (fields.length === 0) throw validation("Indica qué cambia de la unidad dental")
   const [updated] = await tx
     .update(scheduleChair)
     .set({ ...set, updatedAt: new Date() })
     .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.id, id)))
     .returning({ id: scheduleChair.id, name: scheduleChair.name, isActive: scheduleChair.isActive })
-  if (!updated) throw notFound("Sillón")
+  if (!updated) throw chairNotFound()
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,

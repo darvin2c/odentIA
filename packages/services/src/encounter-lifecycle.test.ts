@@ -41,7 +41,7 @@ async function withAgenda() {
     })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Sillón" }))
+  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, "org_a", f.actor, {
       branchId: site.id,
@@ -94,7 +94,7 @@ async function withZoneAgenda() {
     .values({ organizationId: "org_a", name: `Sede ${randomUUID().slice(0, 6)}`, timezone: zone })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Sillón" }))
+  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
   const schedule = (dentistUserId: string) =>
     f.run((tx) =>
       setProfessionalSchedule(tx, "org_a", f.actor, {

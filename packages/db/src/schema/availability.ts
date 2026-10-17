@@ -63,7 +63,7 @@ export const professionalSchedule = pgTable(
 /**
  * Excepción puntual: bloqueo de agenda o ausencia del profesional. Con
  * `dentistUserId` nulo afecta a toda la sede; con `chairId` nulo, a todos
- * los sillones. El rango es UTC; la UI lo edita en la zona de la sucursal.
+ * las unidades dentales. El rango es UTC; la UI lo edita en la zona de la sucursal.
  */
 export const scheduleBlock = pgTable(
   "schedule_block",

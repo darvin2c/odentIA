@@ -317,8 +317,8 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   ])
   const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima", createdAt: new Date(Date.now() - 60_000) }).returning({ id: branch.id })
   const [norte] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Norte", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
-  const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Sillón 2" }).returning({ id: scheduleChair.id })
+  const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
+  const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
   // Horas fijas del día de la sede: lo atendido al empezar el día y lo pendiente al final,
   // para que «la siguiente» no dependa de la hora en que corre la prueba (salvo el último cuarto de hora).
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
@@ -353,7 +353,7 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
     ["Sin confirmar de Ana", "por_confirmar", false],
     ["No asistió", "no_vino", false],
   ])
-  expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Sillón 1", serviceName: "Control" })
+  expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Unidad dental 1", serviceName: "Control" })
 
   // La sede pedida filtra; una que no existe cae en la primera, sin mezclar sedes.
   const other = await home(reception, recipient, norte!.id)
@@ -566,7 +566,7 @@ it("una cita sin confirmar tras el primer recordatorio del agente aparece para l
   const dentist = randomUUID()
   await ownerDb.insert(user).values({ id: dentist, name: "Dra. Ruiz", email: `${dentist}@llamar.test`, emailVerified: true })
   const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Sillón 2" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
   const visit = async (name: string, status: string, reminder: "enviado" | "pendiente" | null, hours = 20) => {
     const [person] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000), phone: "+51987654100" }).returning({ id: patient.id })
     const startsAt = new Date(Date.now() + hours * 3_600_000)

@@ -109,13 +109,13 @@ beforeAll(async () => {
   await withOrgContext(appDb, ORG_A, async (tx) => {
     await tx.execute(sql`
       insert into "schedule_chair" ("id", "organization_id", "branch_id", "name") values
-        (${CHAIR_A}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Sillón A1'),
-        (${CHAIR_A2}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Sillón A2')`)
+        (${CHAIR_A}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Unidad dental A1'),
+        (${CHAIR_A2}::uuid, ${ORG_A}, ${BRANCH_A}::uuid, 'Unidad dental A2')`)
   })
   await withOrgContext(appDb, ORG_B, (tx) =>
     tx.execute(sql`
       insert into "schedule_chair" ("id", "organization_id", "branch_id", "name") values
-        (${CHAIR_B}::uuid, ${ORG_B}, ${BRANCH_B}::uuid, 'Sillón B1')`),
+        (${CHAIR_B}::uuid, ${ORG_B}, ${BRANCH_B}::uuid, 'Unidad dental B1')`),
   )
 }, 180_000)
 
@@ -123,7 +123,7 @@ afterAll(async () => {
   await container?.stop()
 })
 
-it("rechaza el solapamiento del mismo profesional aunque cambie el sillón", async () => {
+it("rechaza el solapamiento del mismo profesional aunque cambie la unidad dental", async () => {
   await withOrgContext(appDb, ORG_A, (tx) => insertAppointment(tx, ORG_A))
   await expect(
     withOrgContext(appDb, ORG_A, (tx) =>
@@ -136,7 +136,7 @@ it("rechaza el solapamiento del mismo profesional aunque cambie el sillón", asy
   ).rejects.toMatchObject({ cause: { code: "23P01" } })
 })
 
-it("rechaza el solapamiento del mismo sillón aunque cambie el profesional", async () => {
+it("rechaza el solapamiento de la misma unidad dental aunque cambie el profesional", async () => {
   await expect(
     withOrgContext(appDb, ORG_A, (tx) =>
       insertAppointment(tx, ORG_A, {

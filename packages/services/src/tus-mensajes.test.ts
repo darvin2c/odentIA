@@ -70,7 +70,7 @@ async function clinic(options: { approved?: string[]; email?: boolean } = {}): P
   ])
   await ownerDb.insert(agentConfig).values({ organizationId: orgId, enabled: true, advisor: { enabled: true } })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   const templates = (options.approved ?? []).map((name) => ({ name, language: "es" }))
   const connection = await withOrgContext(appDb, orgId, (tx) =>
     createConnection(tx, orgId, KEY, {

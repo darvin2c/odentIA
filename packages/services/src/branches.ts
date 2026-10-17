@@ -6,7 +6,7 @@ import { ServiceError } from "./errors.js"
 /**
  * Desactiva o reactiva una sede. Desactivarla la saca de la agenda, de las
  * reservas y de lo que responde el agente; no borra nada: sus citas, horarios
- * y sillones se conservan y vuelven tal cual al reactivarla. Repetir el mismo
+ * y unidades dentales se conservan y vuelven tal cual al reactivarla. Repetir el mismo
  * estado no cambia nada ni deja otra entrada de auditoría.
  */
 export async function setBranchActive(

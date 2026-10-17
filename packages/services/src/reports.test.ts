@@ -56,7 +56,7 @@ async function clinic(profile?: { country: string; currency: string; timezone: s
   }
   const site = async (name: string) => {
     const [row] = await ownerDb.insert(branch).values({ organizationId: orgId, name }).returning()
-    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: row!.id, name: "Sillón 1" }).returning()
+    const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: row!.id, name: "Unidad dental 1" }).returning()
     return { branchId: row!.id, chairId: chair!.id }
   }
   const visit = (

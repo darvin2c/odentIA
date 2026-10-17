@@ -335,7 +335,7 @@ it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace»
 
     // Un token de «confirmar» de un correo, aún vigente, da su enlace con esa cita.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-    const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón 1" }))
+    const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     const startsAt = new Date(Date.now() + 3 * 86_400_000)
     const [booked] = await ownerDb
       .insert(appointment)
@@ -383,7 +383,7 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   await f.run((tx) => decidePersonalLinkBudget(tx, ORG, link.token, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
 
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" }).returning({ id: branch.id })
-  await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón 1" }))
+  await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, ORG, f.actor, {
       branchId: site!.id,

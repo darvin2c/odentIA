@@ -28,7 +28,7 @@ const appointment = (id: string, patch: Partial<DemoAppointment> = {}): DemoAppo
 })
 
 describe("solapamientos de recursos ocupables", () => {
-  it("detecta conflictos independientes de profesional y sillón aunque el otro recurso cambie", () => {
+  it("detecta conflictos independientes de profesional y unidad dental aunque el otro recurso cambie", () => {
     const conflicts = findScheduleConflicts([
       base,
       appointment("b", { chairId: "two" }),

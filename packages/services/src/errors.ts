@@ -22,6 +22,11 @@ export function branchNotFound(): ServiceError {
   return new ServiceError("NOT_FOUND", 404, "Sede no encontrada")
 }
 
+/** La unidad dental no existe (o no es de la organización): también en femenino. */
+export function chairNotFound(): ServiceError {
+  return new ServiceError("NOT_FOUND", 404, "Unidad dental no encontrada")
+}
+
 /** true si el error es violación de unique (Postgres 23505, incluso envuelto por Drizzle). */
 export function isUniqueViolation(error: unknown): boolean {
   return pgCodeOf(error) === "23505"

@@ -43,11 +43,11 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("ayuda-respuesta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // --- Por qué no puedo: lo que falta de verdad en esta clínica, que aún no tiene sillones ni horarios ---
+  // --- Por qué no puedo: lo que falta de verdad en esta clínica, que aún no tiene unidades dentales ni horarios ---
   await ask("¿Por qué no puedo reservar una cita?")
   const why = help.getByRole("listitem").filter({ hasText: "¿Por qué no puedo reservar una cita?" })
   await expect(why).toContainText("Esto es lo que falta ahora:")
-  await expect(why).toContainText("No hay ningún sillón creado. Sin sillón no se puede reservar una cita.")
+  await expect(why).toContainText("No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.")
   await expect(why).toContainText("Ningún profesional tiene horario de atención.")
 
   // --- No sabe: lo dice, y la persona decide si lo envía a odentIA ---

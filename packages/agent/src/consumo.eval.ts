@@ -304,7 +304,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     ('m-owner-mes', ${ORG}, ${owner}, 'owner', now()), ('m-usuario-mes-2', ${ORG}, ${dentist}, 'dentist', now())`)
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
   const branchId = site!.id
-  const chair = await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Sillón 1" }))
+  const chair = await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental 1" }))
   await inOrg((tx) =>
     setProfessionalSchedule(tx, ORG, owner, {
       branchId,
@@ -317,7 +317,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-usuario-mes-3', ${ORG}, ${specialist}, 'dentist', now())`)
   const [endo] = await ownerDb.insert(orgSpecialty).values({ organizationId: ORG, key: "endodoncia", name: "Endodoncia" }).returning({ id: orgSpecialty.id })
   await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: endo!.id, userId: specialist })
-  await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Sillón 2" }))
+  await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental 2" }))
   await inOrg((tx) =>
     setProfessionalSchedule(tx, ORG, owner, {
       branchId,

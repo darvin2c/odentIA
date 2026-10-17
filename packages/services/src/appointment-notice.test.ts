@@ -80,7 +80,7 @@ async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessag
     advisor: { enabled: options.admin !== false, quietStart: "00:00", quietEnd: "00:00" },
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   // Atiende todo el día, toda la semana: mover una cita valida el horario.
   await withOrgContext(appDb, orgId, (tx) =>
     setProfessionalSchedule(tx, orgId, ownerId, {
