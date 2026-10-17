@@ -7,6 +7,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
 import { resolveAfterHandoffTask } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Aviso en vivo para el stream (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
@@ -222,12 +223,13 @@ function withNamesQuery(tx: Db, orgId: string) {
       task: crmTask,
       contactName: contact.displayName,
       opportunityTitle: opportunity.title,
-      patientName: patient.displayName,
+      patientName: patientPerson.displayName,
       // Un caso por tarea en la práctica; si hubiera dos, vale el último.
       casePriority: CASE_PRIORITY,
     })
     .from(crmTask)
     .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(opportunity, and(eq(opportunity.id, crmTask.opportunityId), eq(opportunity.organizationId, orgId)))
 }
@@ -356,7 +358,7 @@ export async function pageTasks(
   if (view === "vencidas") conditions.push(sql`${crmTask.dueAt} is not null and ${crmTask.dueAt} <= now()`)
   if (q) {
     const like = `%${q}%`
-    conditions.push(or(ilike(crmTask.title, like), ilike(contact.displayName, like), ilike(patient.displayName, like), ilike(opportunity.title, like))!)
+    conditions.push(or(ilike(crmTask.title, like), ilike(contact.displayName, like), ilike(patientPerson.displayName, like), ilike(opportunity.title, like))!)
   }
   const fingerprint = JSON.stringify({ view, sort, q, all: input.viewer.all })
   const total = await countTasks(tx, orgId, conditions)
@@ -410,6 +412,7 @@ async function countTasks(tx: Db, orgId: string, conditions: SQL[]): Promise<num
     .select({ n: sql<number>`count(*)::int` })
     .from(crmTask)
     .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(opportunity, and(eq(opportunity.id, crmTask.opportunityId), eq(opportunity.organizationId, orgId)))
     .where(and(...conditions))
@@ -440,6 +443,12 @@ export async function createTask(
     actorUserId?: string | null
     /** Pendiente del sistema con su propia fila en «Te espera» (`TASK_KINDS`). */
     kind?: TaskKind | null
+    /**
+     * `confirmar_representante`: el parentesco escrito y su código HL7, que se
+     * aplican al vínculo al confirmar.
+     */
+    relationshipDetail?: string | null
+    kinship?: string | null
   },
 ): Promise<TaskItem> {
   const title = input.title.trim()
@@ -516,6 +525,8 @@ export async function createTask(
     reason,
     idempotencyKey: idemKey,
     kind: input.kind ?? null,
+    relationshipDetail: input.relationshipDetail?.trim() ? input.relationshipDetail.trim().slice(0, 100) : null,
+    kinship: input.kinship ?? null,
   }
   // El índice único es parcial (solo claves no nulas): el upsert aplica solo
   // cuando el llamador trae clave estable; el resto inserta directo.
@@ -677,6 +688,26 @@ export async function completeTask(
   actor?: { userId: string | null },
 ): Promise<TaskItem> {
   return updateTask(tx, orgId, id, { status: "done", actorUserId: actor?.userId ?? null })
+}
+
+/**
+ * «Descartar» un pendiente del sistema en «Te espera»: queda cancelada a
+ * nombre de quien la descarta y con su motivo («No es su representante»).
+ */
+export async function discardTask(
+  tx: Db,
+  orgId: string,
+  id: string,
+  input: { userId: string; reason: string },
+): Promise<TaskItem> {
+  await updateTask(tx, orgId, id, { status: "cancelled", actorUserId: input.userId })
+  const [discarded] = await tx
+    .update(crmTask)
+    .set({ settledReason: input.reason.trim().slice(0, 300) })
+    .where(and(eq(crmTask.id, id), eq(crmTask.organizationId, orgId)))
+    .returning()
+  if (!discarded) throw notFound("Tarea")
+  return withNames(tx, orgId, discarded)
 }
 
 /**

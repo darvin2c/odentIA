@@ -1,4 +1,4 @@
-import { type AgentProviderProblem, PROVIDER_PROBLEM } from "./agent"
+import { type AgentModelStatus, MODEL_CHECK_TEXT, modelDownText } from "./agent"
 import { type AgentConfig, agentLlmLabel, type ConnectionItem } from "./crm"
 
 /**
@@ -587,32 +587,18 @@ export function mailRows(
 
 /* ---------- Modelo del agente ---------- */
 
-export function modelRow(
-  config: Pick<AgentConfig, "llm">,
-  provider: { problem: AgentProviderProblem | null; at: string | null } | undefined,
-  since: Since,
-): IntegrationRowModel {
+/**
+ * El modelo con la misma comprobación que el encendido de Recepción: una
+ * llamada mínima que hace el servidor. Sin ella todavía, la fila dice que se
+ * está comprobando y no afirma nada. Nunca dice por qué no responde: eso es
+ * de odentIA.
+ */
+export function modelRow(config: Pick<AgentConfig, "llm">, model: AgentModelStatus | undefined): IntegrationRowModel {
   const account = agentLlmLabel(config.llm)
-  const common = { ...base("model", "model"), review: [] }
-  if (provider?.problem) {
-    const when = provider.at ? since(provider.at) : ""
-    return {
-      ...common,
-      tone: "attention",
-      status: "Necesita atención",
-      detail: { kind: "account", account, activity: when ? `el último intento falló ${when}` : null },
-      problem: PROVIDER_PROBLEM[provider.problem],
-    }
-  }
-  // «Conectado», no «Funcionando»: que no haya un fallo registrado no prueba
-  // que el modelo responda, y el servidor no entrega su última respuesta.
-  return {
-    ...common,
-    tone: "ok",
-    status: "Conectado",
-    detail: { kind: "account", account, activity: null },
-    problem: null,
-  }
+  const common = { ...base("model", "model"), review: [], detail: { kind: "account" as const, account, activity: null } }
+  if (!model) return { ...common, tone: "off", status: MODEL_CHECK_TEXT.checking, problem: null }
+  if (model.responds) return { ...common, tone: "ok", status: "Responde", problem: null }
+  return { ...common, tone: "attention", status: "No responde", problem: modelDownText(model) }
 }
 
 /* ---------- Avisos que llegan en la dirección tras autorizar un buzón ---------- */

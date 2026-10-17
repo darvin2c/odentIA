@@ -4,7 +4,8 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
+import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureLibrarySpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -29,7 +30,7 @@ import { createAgentLearningRoute } from "./routes/agent-learning.js"
 import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
 import { createPublicAutomationsRoute } from "./routes/automations.js"
-import { createCie10Route } from "./routes/cie10.js"
+import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
 import { createConnectionsRoute } from "./routes/connections.js"
 import { createContactsRoute } from "./routes/contacts.js"
@@ -118,11 +119,10 @@ const branchPatch = branchInput.partial()
 
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
-  // `null` vacía el dato; una clave ausente lo deja como estaba.
-  tradeName: z.string().max(200).nullish(),
+  // El nombre que ve la persona en todo (decisión 19): obligatorio; ausente, queda como estaba.
+  tradeName: z.string().trim().min(1, "Escribe el nombre comercial: así te verán tus pacientes").max(200).optional(),
   fiscalDocType: z.string().max(20).nullish(),
   fiscalDocNumber: z.string().max(20).nullish(),
-  billingEmail: z.string().email().optional(),
   fiscalAddress: z.string().max(300).nullish(),
   countryCode: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
@@ -231,8 +231,8 @@ export function createApp(deps: AppDeps) {
     return c.json({ ok: true })
   })
 
-  // Subdominios reservados: nunca son slugs de tenant (colisionarían con app./api./www.).
-  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, storage: true }
+  // Subdominios reservados: nunca son slugs de tenant (la lista vive en services).
+  const RESERVED_SLUGS = RESERVED_ORG_SLUGS
   app.use("/api/auth/organization/create", async (c, next) => {
     if (c.req.method !== "POST") return next()
     const body = (await c.req.raw
@@ -357,7 +357,7 @@ export function createApp(deps: AppDeps) {
       ext,
     })
     if (previousImage) {
-      await deps.storage.deleteByUrl(previousImage).catch(() => {})
+      await deps.storage.deleteByUrl(previousImage, userId).catch(() => {})
     }
     return c.json({ data: { url } }, 201)
   })
@@ -422,9 +422,48 @@ export function createApp(deps: AppDeps) {
         .from(orgProfile)
         .where(eq(orgProfile.organizationId, orgId))
         .limit(1)
-      return found ?? null
+      // El logo de la clínica viaja con sus datos: se sube en «Datos de la clínica».
+      return found ? { ...found, logo: await getClinicLogo(tx, orgId) } : null
     })
     return c.json({ data: row })
+  })
+
+  // El logo de la clínica (decisión 19): imagen pública, en el bucket de avatares.
+  guarded.put("/org-profile/logo", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el logo"), 403)
+    }
+    const form = await c.req.formData().catch(() => null)
+    const file = form?.get("file")
+    if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta la imagen del logo"), 400)
+    const ext = CLINIC_LOGO_MIME_EXT[file.type]
+    if (!ext) return c.json(errorBody(c, "VALIDATION", "El logo debe ser PNG, JPG o WebP"), 400)
+    if (file.size > CLINIC_LOGO_MAX_BYTES) return c.json(errorBody(c, "VALIDATION", "El logo no puede superar 2 MB"), 400)
+    // Va a la carpeta de la clínica dentro del bucket público de imágenes.
+    const { url } = await deps.storage.putAvatar({
+      userId: clinicLogoFolder(orgId),
+      body: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type,
+      ext,
+    })
+    return runService(c, 200, async () => {
+      const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, url))
+      if (saved.previous) await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
+      return { logo: saved.logo }
+    })
+  })
+
+  guarded.delete("/org-profile/logo", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el logo"), 403)
+    }
+    return runService(c, 200, async () => {
+      const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, null))
+      if (saved.previous) await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
+      return { logo: null }
+    })
   })
 
   guarded.put("/org-profile", async (c) => {
@@ -464,6 +503,8 @@ export function createApp(deps: AppDeps) {
       })
       // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
       if (!current) await turnOnNewClinicLines(tx, orgId, userId)
+      // Y nace con las especialidades de la biblioteca, que puede renombrar (ADR 0039).
+      if (!current) await ensureLibrarySpecialties(tx, orgId)
       await tx.insert(auditEvent).values({
         organizationId: orgId,
         actorUserId: userId,
@@ -474,6 +515,22 @@ export function createApp(deps: AppDeps) {
       })
       return updated
     }))
+  })
+
+  // Lista de diagnósticos de la clínica (decisión 26): los nuevos se eligen en ella; nada se reescribe.
+  guarded.put("/org-profile/diagnosis-system", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar la lista de diagnósticos"), 403)
+    }
+    const parsed = z
+      .object({ diagnosisSystem: z.string().min(1).max(20) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => setOrgDiagnosisSystem(tx, orgId, userId, parsed.data.diagnosisSystem)),
+    )
   })
 
   // Ancho del ticket, tamaño de hoja y frase al pie: no tocan la región ni la identidad.
@@ -565,7 +622,7 @@ export function createApp(deps: AppDeps) {
     )
   })
 
-  // Una sede desactivada vuelve con sus citas, horarios y sillones.
+  // Una sede desactivada vuelve con sus citas, horarios y unidades dentales.
   guarded.post("/branches/:id/reactivate", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
@@ -670,11 +727,11 @@ export function createApp(deps: AppDeps) {
   guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
-  guarded.route("/cie10", createCie10Route(crmDeps))
+  guarded.route("/diagnosis-codes", createDiagnosisCodesRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))
-  guarded.route("/agent", createAgentRoute({ ...crmDeps, llm }))
+  guarded.route("/agent", createAgentRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
   guarded.route("/agenda", createAgendaRoute(crmDeps))
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
@@ -686,8 +743,8 @@ export function createApp(deps: AppDeps) {
   guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))
   guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
-  guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm }))
-  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, decisions: deps.decisions, embedder: deps.embedder }))
+  guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions }))
+  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions, embedder: deps.embedder }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(

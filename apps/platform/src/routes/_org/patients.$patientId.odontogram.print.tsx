@@ -1,4 +1,4 @@
-import { FDI_ADULT_ROWS, FDI_CHILD_ROWS, surfaceLabel, toothNameOf } from "@odentia/clinical"
+import { diagnosisCodeLabel, FDI_ADULT_ROWS, FDI_CHILD_ROWS, surfaceLabel, toothNameOf } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
@@ -132,7 +132,7 @@ function OdontogramPrintPage() {
                     <span key={entry.id}>
                       {findingWords(null, entry)}
                       {entry.surface ? ` · cara ${surfaceLabel(entry.surface).toLowerCase()}` : ""}
-                      {entry.diagnosisCode ? ` · CIE-10 ${entry.diagnosisCode}` : ""}
+                      {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                     </span>
                   ))}
                 </li>

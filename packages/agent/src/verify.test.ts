@@ -7,7 +7,7 @@ const NOW = new Date("2026-10-10T15:00:00Z")
 const SERVICES = { source: "Sedes y servicios", text: "- Servicio Limpieza (id x): S/ 150.00 (45 min)\n- Servicio Blanqueamiento (id y): S/ 480.00" }
 const AGENDA = {
   source: "Agenda",
-  text: "- 2026-10-12T14:00:00.000Z → 2026-10-12T14:45:00.000Z (45 min, zona America/Lima) · sede s · sillón c · profesional d",
+  text: "- 2026-10-12T14:00:00.000Z → 2026-10-12T14:45:00.000Z (45 min, zona America/Lima) · sede s · unidad dental c · profesional d",
 }
 
 function check(reply: string, evidence = [SERVICES, AGENDA]) {

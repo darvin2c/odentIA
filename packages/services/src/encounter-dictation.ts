@@ -1,7 +1,14 @@
-import { isValidTooth, surfaceLabel, surfacesForTooth } from "@odentia/clinical"
+import {
+  DIAGNOSIS_SYSTEM_INFO,
+  DIAGNOSIS_VERIFICATION_LABELS,
+  type DiagnosisSystemKey,
+  isDiagnosisVerification,
+  isValidTooth,
+  surfaceLabel,
+  surfacesForTooth,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
-  cie10Code,
   DICTATION_KINDS,
   type DictationKind,
   encounterDictationSuggestion,
@@ -10,6 +17,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
+import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch } from "./encounters.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -118,8 +126,15 @@ async function activeServices(tx: Db, orgId: string): Promise<ServiceOption[]> {
 }
 
 /** Lo que el asistente necesita saber de la clínica para entender un dictado: sus prestaciones. */
-export async function getDictationCatalog(tx: Db, orgId: string): Promise<{ services: Array<{ name: string }> }> {
-  return { services: (await activeServices(tx, orgId)).map((service) => ({ name: service.name })) }
+export async function getDictationCatalog(
+  tx: Db,
+  orgId: string,
+): Promise<{ services: Array<{ name: string }>; diagnosisSystem: { key: DiagnosisSystemKey; title: string } }> {
+  const system = await orgDiagnosisSystem(tx, orgId)
+  return {
+    services: (await activeServices(tx, orgId)).map((service) => ({ name: service.name })),
+    diagnosisSystem: { key: system, title: DIAGNOSIS_SYSTEM_INFO[system].title },
+  }
 }
 
 const words = (text: string) => normalizeForSearch(text).split(" ").filter((word) => word.length >= 3)
@@ -214,7 +229,8 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
       .join("\n")
   }
   if (kind === "diagnostico") {
-    return [`${payload["cie10Code"] ?? ""}${payload["description"] ? ` · ${payload["description"]}` : ""}`, [site(payload), payload["diagnosisType"]].filter(Boolean).join(" · ")]
+    const type = isDiagnosisVerification(payload["diagnosisType"]) ? DIAGNOSIS_VERIFICATION_LABELS[payload["diagnosisType"]] : ""
+    return [`${payload["diagnosisCode"] ?? ""}${payload["description"] ? ` · ${payload["description"]}` : ""}`, [site(payload), type].filter(Boolean).join(" · ")]
       .filter(Boolean)
       .join("\n")
   }
@@ -256,7 +272,7 @@ export function dictationModelLabel(item: Pick<DictationSuggestion, "kind" | "pa
     item.kind === "nota"
       ? Object.keys(payload).map((key) => NOTE_LABEL[key] ?? key).join(", ")
       : item.kind === "diagnostico"
-        ? [`${payload["cie10Code"] ?? ""}${payload["description"] ? ` ${payload["description"]}` : ""}`, site(payload)].filter(Boolean).join(", ")
+        ? [`${payload["diagnosisCode"] ?? ""}${payload["description"] ? ` ${payload["description"]}` : ""}`, site(payload)].filter(Boolean).join(", ")
         : item.kind === "plan"
           ? [String(payload["serviceName"] ?? payload["service"] ?? ""), site(payload)].filter(Boolean).join(", ")
           : String(payload["title"] ?? "Control")
@@ -272,6 +288,7 @@ async function prepare(
   tx: Db,
   draft: DictationDraft,
   services: ServiceOption[],
+  diagnosisSystem: DiagnosisSystemKey,
 ): Promise<{ payload: Record<string, unknown>; status: "lista" | "por_revisar"; note: string | null } | null> {
   if (!(DICTATION_KINDS as readonly string[]).includes(draft.kind)) return null
   const parsed = operationAgentSchema(DICTATION_OPERATION[draft.kind]).safeParse(draft.payload)
@@ -292,10 +309,13 @@ async function prepare(
     Object.assign(payload, site.payload)
   }
   if (draft.kind === "diagnostico") {
-    const code = String(payload["cie10Code"] ?? "").trim().toUpperCase()
-    const [known] = await tx.select().from(cie10Code).where(eq(cie10Code.code, code)).limit(1)
-    if (!known) return { payload: { ...payload, cie10Code: code }, status: "por_revisar", note: `El código ${code} no está en el catálogo CIE-10. Elige el diagnóstico.` }
-    return { payload: { ...payload, cie10Code: known.code, description: known.description }, status: "lista", note: null }
+    // Se valida contra la lista de la clínica: un código de otra lista no se acepta.
+    const code = String(payload["diagnosisCode"] ?? "").trim().toUpperCase()
+    const known = code ? await findDiagnosisCode(tx, diagnosisSystem, code) : null
+    const list = DIAGNOSIS_SYSTEM_INFO[diagnosisSystem].title
+    if (!known) return { payload: { ...payload, diagnosisCode: code, diagnosisSystem }, status: "por_revisar", note: `El código ${code} no está en la lista ${list} de la clínica. Elige el diagnóstico.` }
+    if (known.isCategory) return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "por_revisar", note: `${known.code} es una categoría: elige el subcódigo más específico.` }
+    return { payload: { ...payload, diagnosisCode: known.code, diagnosisSystem, description: known.description }, status: "lista", note: null }
   }
   if (draft.kind === "plan") {
     const spoken = String(payload["service"] ?? "")
@@ -353,6 +373,7 @@ async function revise(
   current: Record<string, unknown>,
   patch: Record<string, unknown>,
   services: ServiceOption[],
+  diagnosisSystem: DiagnosisSystemKey,
 ): Promise<Prepared | null> {
   // Un campo que llega vacío se quita de la sugerencia: el odontólogo lo borró.
   let payload: Record<string, unknown> = Object.fromEntries(
@@ -375,7 +396,7 @@ async function revise(
       ? { payload: fitted.payload, status: "por_revisar", note: `La pieza ${String(payload["toothNumber"])} no existe en la numeración FDI. Corrígela.` }
       : fitToScope(fitted.payload, chosenService.scope)
   }
-  return prepare(tx, { kind, payload }, services)
+  return prepare(tx, { kind, payload }, services, diagnosisSystem)
 }
 
 const FIELD_LABEL = Object.fromEntries(
@@ -394,7 +415,8 @@ function describeBefore(kind: DictationKind, before: Record<string, unknown>, af
     if (key === "toothNumber") parts.push(typeof old === "number" ? `pieza ${old}` : "sin pieza")
     else if (key === "surfaces") parts.push(Array.isArray(old) && old.length ? `cara ${(old as string[]).map((surface) => surfaceLabel(surface).toLowerCase()).join(", ")}` : "sin caras")
     else if (key === "service") parts.push(String(before["serviceName"] ?? old ?? "otra prestación"))
-    else if (key === "cie10Code" || key === "title" || key === "diagnosisType") parts.push(String(old ?? "sin dato"))
+    else if (key === "diagnosisCode" || key === "title") parts.push(String(old ?? "sin dato"))
+    else if (key === "diagnosisType") parts.push(isDiagnosisVerification(old) ? DIAGNOSIS_VERIFICATION_LABELS[old].toLowerCase() : "sin tipo")
     else parts.push(`otro texto en ${(FIELD_LABEL[kind][key] ?? key).toLowerCase()}`)
   }
   return parts.length ? parts.join(", ") : null
@@ -465,6 +487,7 @@ export async function saveDictationSegment(
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
   const services = await activeServices(tx, orgId)
+  const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
   const pendingRow = async (id: string) => {
     const [row] = await tx
       .select()
@@ -491,7 +514,7 @@ export async function saveDictationSegment(
     const schema = operationAgentSchema(DICTATION_OPERATION[row.kind])
     const patch = Object.fromEntries(Object.entries(correction.changes).filter(([key, value]) => key in schema.shape && value !== undefined && value !== null))
     if (Object.keys(patch).length === 0 || !schema.safeParse({ ...data, ...patch }).success) continue
-    const ready = await revise(tx, row.kind, data, patch, services)
+    const ready = await revise(tx, row.kind, data, patch, services, diagnosisSystem)
     if (!ready) continue
     const before = describeBefore(row.kind, data, ready.payload, Object.keys(patch))
     if (!before) continue
@@ -518,7 +541,7 @@ export async function saveDictationSegment(
 
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   for (const draft of segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const ready = await prepare(tx, draft, services)
+    const ready = await prepare(tx, draft, services, diagnosisSystem)
     if (!ready) continue
     rows.push({
       organizationId: orgId,
@@ -632,8 +655,9 @@ export async function updateDictationSuggestion(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   const services = await activeServices(tx, orgId)
+  const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
   const { data, meta } = splitMeta(row.payload)
-  const ready = await revise(tx, row.kind, data, patch, services)
+  const ready = await revise(tx, row.kind, data, patch, services, diagnosisSystem)
   if (!ready) throw validation("La sugerencia quedó vacía; descártala si no aplica")
   // Editada a mano, ya no es «corregida por voz»: no queda nada que deshacer.
   const [updated] = await tx
@@ -696,7 +720,8 @@ export async function confirmDictationSuggestion(
     await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, pick(payload, fields) as UpdateEncounterDraftPatch)
   } else if (row.kind === "diagnostico") {
     const created = await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
-      cie10Code: String(payload["cie10Code"]),
+      diagnosisCode: String(payload["diagnosisCode"]),
+      diagnosisSystem: typeof payload["diagnosisSystem"] === "string" ? payload["diagnosisSystem"] : null,
       diagnosisType: String(payload["diagnosisType"]),
       toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
       surfaces: (payload["surfaces"] as string[] | undefined) ?? null,
@@ -773,10 +798,11 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  */
 export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">>> {
   const services = await activeServices(tx, orgId)
+  const diagnosisSystem = await orgDiagnosisSystem(tx, orgId)
   const zone = await findOrgLocale(tx, orgId)
   const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice">> = []
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const ready = await prepare(tx, draft, services)
+    const ready = await prepare(tx, draft, services, diagnosisSystem)
     if (!ready) continue
     out.push({ kind: draft.kind, payload: ready.payload, sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS), status: ready.status, note: ready.note, summary: summarize(draft.kind, ready.payload, zone) })
   }

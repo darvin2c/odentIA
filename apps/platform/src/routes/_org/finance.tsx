@@ -624,6 +624,7 @@ function FinanceWorkspace() {
           <TicketView
             ticket={ticket.result.ticket}
             remainingCents={ticket.result.remainingCents}
+            receipt={ticket.result.receipt ?? null}
             patientName={ticket.result.ticket.snapshot.patient.displayName}
             branchName={ticket.result.ticket.snapshot.branch.name}
             locale={prof.locale}

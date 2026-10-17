@@ -3,6 +3,7 @@ import {
   channelAdapters,
   type NormalizedStatus,
   type ReplyButton,
+  type TemplateCategory,
 } from "@odentia/channels"
 import { normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
@@ -33,11 +34,10 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
 import { hidePersonalLinkRefs } from "./personal-link-token.js"
+import { windowOpen } from "./message-window.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
-/** Ventana de WhatsApp para texto libre: 24h desde el último inbound. */
-export const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /** Acepta las marcas UTC emitidas por nuestros cursores sin perder microsegundos. */
 function conversationCursor(value: string): { ts: string; id: string } {
@@ -201,6 +201,13 @@ export async function ingestInbound(
     // El archivado no bloquea la recepción entrante ni crea un contacto
     // nuevo: se reutiliza el contacto archivado (el badge lo muestra).
     contactId = identity.contactId
+    // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
+    if (identity.noWhatsappAt) {
+      await tx
+        .update(contactIdentity)
+        .set({ noWhatsappAt: null })
+        .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, identity.id)))
+    }
   } else {
     const [created] = await tx
       .insert(contact)
@@ -453,6 +460,21 @@ export async function ingestInbound(
  * sent/delivered/read en sent_at si sigue nulo; un fallo guarda el motivo que
  * entrega el adaptador (de ahí lo lee `reconcileDeliveries`).
  */
+/**
+ * WhatsApp no pudo entregar un mensaje porque el número no tiene WhatsApp
+ * (decisión 23, caso 1): su identidad queda marcada. La ficha lo dice y no se
+ * le vuelve a escribir por ahí hasta que escriba desde ese número o el equipo
+ * lo vuelva a marcar como su WhatsApp.
+ */
+async function markNotOnWhatsApp(tx: Db, orgId: string, conversationId: string): Promise<void> {
+  await tx.execute(sql`
+    update contact_identity ci set no_whatsapp_at = now()
+    from conversation cv
+    where cv.organization_id = ${orgId} and cv.id = ${conversationId}
+      and ci.organization_id = cv.organization_id and ci.id = cv.contact_identity_id
+      and ci.channel = 'whatsapp' and ci.no_whatsapp_at is null`)
+}
+
 export async function applyStatus(
   tx: Db,
   orgId: string,
@@ -473,6 +495,7 @@ export async function applyStatus(
           .set({ status: s.status, ...(s.error ? { error: s.error.slice(0, 500) } : {}) })
           .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
           .returning({ id: message.id, conversationId: message.conversationId })
+    if (updated && s.notOnWhatsApp) await markNotOnWhatsApp(tx, orgId, updated.conversationId)
     if (updated) {
       applied += 1
       await notify(tx, {
@@ -488,7 +511,11 @@ export async function applyStatus(
 }
 
 export type OutboundContent =
-  | { type: "text"; text: string; buttons?: ReplyButton[] }
+  /**
+   * `listUnsubscribe`: en un correo automático, el enlace de baja que el
+   * adaptador envía como cabecera `List-Unsubscribe` (RFC 2369).
+   */
+  | { type: "text"; text: string; buttons?: ReplyButton[]; listUnsubscribe?: string }
   // `preview` es el texto ya armado: lo que la persona lee, para mostrarlo en el hilo.
   | {
       type: "template"
@@ -593,8 +620,7 @@ function assertWindowAllows(
 ): void {
   // Los media salientes también son mensajes de sesión sujetos a la ventana.
   if (content.type === "template") return
-  const last = row.conversation.lastInboundAt
-  if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
+  if (!windowOpen(row.conversation.lastInboundAt)) {
     throw new ServiceError(
       "WINDOW_CLOSED",
       409,
@@ -607,8 +633,7 @@ function assertWindowAllows(
 function assertMetaWindowAllows(row: {
   conversation: typeof conversation.$inferSelect
 }): void {
-  const last = row.conversation.lastInboundAt
-  if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
+  if (!windowOpen(row.conversation.lastInboundAt)) {
     throw new ServiceError(
       "WINDOW_CLOSED",
       409,
@@ -681,6 +706,7 @@ export async function sendOutbound(
       templateParams: content.type === "template" ? content.params : null,
       templateLink: content.type === "template" ? (content.link ?? null) : null,
       replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
+      listUnsubscribe: content.type === "text" ? (content.listUnsubscribe ?? null) : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       status: "queued",
     })
@@ -706,8 +732,10 @@ export async function sendOutbound(
 
 /**
  * Envío de plantilla. La valida contra el catálogo de la conexión: tiene que
- * estar aprobada por el proveedor y llevar tantos datos como variables tiene.
- * Es la misma regla para una persona, una automatización y el agente.
+ * estar aprobada por el proveedor, llevar tantos datos como variables tiene y
+ * respetar su categoría (`category`, la que se pidió: lo que WhatsApp cuenta
+ * como promoción solo sale a quien aceptó novedades). Es la misma regla para
+ * una persona, una automatización y el sistema (ADR 0040).
  */
 export async function sendTemplateOutbound(
   tx: Db,
@@ -720,6 +748,8 @@ export async function sendTemplateOutbound(
     name: string
     language: string
     params: string[]
+    /** La categoría con la que se pidió el mensaje. */
+    category: TemplateCategory
     buttons?: ReplyButton[]
     /** Token de «Su enlace» para el botón de la plantilla que lo abre. */
     link?: string
@@ -728,7 +758,7 @@ export async function sendTemplateOutbound(
 ): Promise<MessageItem> {
   // Abierta o cerrada: el envío (sendOutbound) la reabre si hace falta.
   const [row] = await tx
-    .select({ connection: channelConnection })
+    .select({ connection: channelConnection, contactId: conversation.contactId })
     .from(conversation)
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
@@ -738,6 +768,8 @@ export async function sendTemplateOutbound(
     name: input.name,
     language: input.language,
     params: input.params.length,
+    category: input.category,
+    contactId: row.contactId,
   })
   // Sin texto armado por quien envía, se arma con el cuerpo del catálogo.
   const preview =
@@ -1209,9 +1241,7 @@ export async function getConversationDetail(
     whatsappWindow:
       row.connection.provider === "whatsapp_cloud_api"
         ? {
-            open:
-              !!row.conversation.lastInboundAt &&
-              Date.now() - row.conversation.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS,
+            open: windowOpen(row.conversation.lastInboundAt),
             lastInboundAt: row.conversation.lastInboundAt?.toISOString() ?? null,
           }
         : null,
@@ -1620,7 +1650,7 @@ export async function writeToPerson(
   const typedPhone = input.phone?.trim() || null
   if (!typedPhone) {
     const live = threads.find(
-      (row) => row.lastInboundAt && now - row.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS,
+      (row) => windowOpen(row.lastInboundAt, now),
     )
     if (live) return { conversationId: live.id, created: false, channel: live.channel, identityCreated: false }
   }

@@ -33,7 +33,7 @@ async function login(page: Page, user: UiUser): Promise<void> {
 
 async function onboard(page: Page, org: UiOrg): Promise<void> {
   await expect(page).toHaveURL(/onboarding/)
-  await page.getByLabel("Nombre de la organización").fill(org.name)
+  await page.getByLabel("Nombre comercial").fill(org.name)
   await page.getByLabel("Slug (subdominio)").fill(org.slug)
   await page.getByRole("button", { name: "Continuar" }).click()
   await page.getByLabel("Razón social").fill(`${org.name} S.A.C.`)

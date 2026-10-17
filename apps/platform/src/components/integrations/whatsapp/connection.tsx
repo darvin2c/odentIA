@@ -138,6 +138,7 @@ export function WhatsAppConnection({
   showAccount,
   canWrite,
   fixedCreate,
+  initialMessageId = null,
   onFreshRead,
 }: {
   connection: ConnectionItem
@@ -152,6 +153,8 @@ export function WhatsAppConnection({
   canWrite: boolean
   /** En teléfono «Nuevo mensaje» queda fijo al pie de la página. */
   fixedCreate: boolean
+  /** El mensaje que se abre al llegar (`?mensaje=`), si es de esta conexión. */
+  initialMessageId?: string | null
   onFreshRead: () => void
 }) {
   const queryClient = useQueryClient()
@@ -239,6 +242,14 @@ export function WhatsAppConnection({
     openings.current += 1
     setSurface({ kind: "message", id, opening: openings.current })
   }
+
+  // «Cambiar el texto» desde «Te espera»: el mensaje se abre una sola vez al llegar.
+  const openedInitial = useRef(false)
+  useEffect(() => {
+    if (openedInitial.current || !initialMessageId || !items) return
+    openedInitial.current = true
+    if (items.some((item) => item.id === initialMessageId)) openMessagePanel(initialMessageId)
+  }, [initialMessageId, items])
 
   /* ---- Acciones de la conexión ---- */
 

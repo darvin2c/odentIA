@@ -26,9 +26,9 @@ import type {
   OutboundMessage,
   WebhookParseResult,
 } from "./protocol.js"
+import { metaGraphVersion } from "./meta-graph.js"
 
 const GRAPH_HOST = "https://graph.facebook.com"
-const GRAPH_VERSION = "v21.0"
 const IG_HOST = "https://graph.instagram.com"
 const IG_VERSION = "v25.0"
 
@@ -236,7 +236,7 @@ async function graphCall(
   token: string,
   init: { method?: string; body?: unknown },
   deps: ChannelAdapterDeps,
-  base: string = `${GRAPH_HOST}/${GRAPH_VERSION}`,
+  base: string = `${GRAPH_HOST}/${metaGraphVersion()}`,
 ): Promise<{ status: number; json: unknown }> {
   const res = await deps.fetch(`${base}/${path}`, {
     method: init.method ?? "GET",
@@ -367,7 +367,7 @@ export const messengerAdapter: ChannelAdapter = {
     const cfg = messengerConfig(config)
     return sendViaGraph(
       "Messenger",
-      `${GRAPH_HOST}/${GRAPH_VERSION}`,
+      `${GRAPH_HOST}/${metaGraphVersion()}`,
       `${cfg.pageId}/messages`,
       cfg.pageAccessToken,
       stripPrefix(msg.to, "msgr"),

@@ -51,6 +51,7 @@ const HOME_EVENTS = [
 type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
 type CaseRow = Extract<WaitingRow, { kind: "case" }>
 type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
+type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -84,12 +85,39 @@ function HomePage() {
   })
   // «Hecha»: si la tarea resolviera una conversación, antes se muestra lo mismo que «Resolver».
   const completion = useCompleteTask(refresh)
+  // «Confirmar» el representante que nombró un registro en línea: vínculo y rol a nombre de quien confirma.
+  const canWritePatients = usePermission("patients.write")
+  const confirmRepresentative = useMutation({
+    mutationFn: (row: DuplicateRow) =>
+      apiFetch(`/api/patients/${row.patientId}/responsibilities/pending/${row.id}/confirm`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: (_result, row) => {
+      toast.success(`${row.personName ?? "La persona"} quedó como representante de ${row.patientName}`)
+      refresh()
+    },
+  })
+  // «No es ella» y «Descartar»: lo que dejó un registro en línea queda cerrado con su motivo, sin cambiar a nadie.
+  const discardRegistration = useMutation({
+    mutationFn: (row: DuplicateRow) => apiFetch(`/api/tasks/${row.id}/discard`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: (_result, row) => {
+      toast.success(row.source === "representante" ? `No se vinculó a ${row.personName ?? "esa persona"}` : "Se descartó")
+      refresh()
+    },
+  })
   const busyKey = take.isPending && take.variables
     ? waitingKey(take.variables)
-    : completion.pendingId
-      ? `task:${completion.pendingId}`
-      : null
-  const actionError = (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ?? completion.error
+    : confirmRepresentative.isPending && confirmRepresentative.variables
+      ? waitingKey(confirmRepresentative.variables)
+      : discardRegistration.isPending && discardRegistration.variables
+        ? waitingKey(discardRegistration.variables)
+        : completion.pendingId
+          ? `task:${completion.pendingId}`
+          : null
+  const busyAction = discardRegistration.isPending ? "descartar" : null
+  const actionError =
+    (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ??
+    (confirmRepresentative.error ? mutationErrorMessage(confirmRepresentative.error) ?? "No se pudo confirmar el representante." : null) ??
+    (discardRegistration.error ? mutationErrorMessage(discardRegistration.error) ?? "No se pudo descartar." : null) ??
+    completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
@@ -142,11 +170,14 @@ function HomePage() {
               onTake: canTake ? (row) => take.mutate(row) : undefined,
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
+              onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,
+              onDiscard: canDoTasks ? (row) => discardRegistration.mutate(row) : undefined,
               onVoidEncounter: (row) => {
                 setDiscardReason("")
                 setDiscarding(row)
               },
               busyKey,
+              busyAction,
             }}
           />
         </div>
@@ -259,6 +290,7 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
         <TicketView
           ticket={ticket.result.ticket}
           remainingCents={ticket.result.remainingCents}
+          receipt={ticket.result.receipt ?? null}
           patientName={ticket.result.ticket.snapshot.patient.displayName}
           branchName={ticket.result.ticket.snapshot.branch.name}
           locale={profile.locale}

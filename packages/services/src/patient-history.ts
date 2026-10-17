@@ -1,4 +1,4 @@
-import { isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { budgetStateText, diagnosisCodeLabel, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -40,6 +40,8 @@ export interface AcceptedPendingItem {
   title: string
   toothNumber: number | null
   diagnosisCode: string | null
+  /** «CIE-10 · K02.1»: el código con su lista, para leerlo. */
+  diagnosisLabel: string | null
   priceCents: number | null
   currency: string
   status: string
@@ -108,7 +110,7 @@ interface LastVisit {
   finalizedAt: Date | null
   teeth: number[]
   procedures: Array<
-    Pick<typeof encounterProcedure.$inferSelect, "description" | "toothNumber" | "diagnosisCode">
+    Pick<typeof encounterProcedure.$inferSelect, "description" | "toothNumber" | "diagnosisCode" | "diagnosisSystem">
   >
   diagnoses: string[]
   plannedItems: PlannedLink[]
@@ -279,6 +281,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       title: treatmentPlanItem.title,
       toothNumber: treatmentPlanItem.toothNumber,
       diagnosisCode: treatmentPlanItem.diagnosisCode,
+      diagnosisSystem: treatmentPlanItem.diagnosisSystem,
       priceCents: treatmentPlanItem.priceCents,
       currency: treatmentPlanItem.currency,
       status: treatmentPlanItem.status,
@@ -349,6 +352,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
           description: encounterProcedure.description,
           toothNumber: encounterProcedure.toothNumber,
           diagnosisCode: encounterProcedure.diagnosisCode,
+          diagnosisSystem: encounterProcedure.diagnosisSystem,
         })
         .from(encounterProcedure)
         .where(
@@ -360,7 +364,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         )
         .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id)),
       tx
-        .select({ diagnosisCode: encounterDiagnosis.cie10Code })
+        .select({ diagnosisCode: encounterDiagnosis.diagnosisCode, diagnosisSystem: encounterDiagnosis.diagnosisSystem })
         .from(encounterDiagnosis)
         .where(
           and(
@@ -377,8 +381,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     const diagnoses = [
       ...new Set(
         [
-          ...procedures.map((p) => p.diagnosisCode),
-          ...encounterNotes.map((n) => n.diagnosisCode),
+          ...procedures.map((p) => (p.diagnosisCode ? diagnosisCodeLabel(p.diagnosisSystem, p.diagnosisCode) : null)),
+          ...encounterNotes.map((n) => diagnosisCodeLabel(n.diagnosisSystem, n.diagnosisCode)),
         ].filter((code): code is string => !!code),
       ),
     ].sort()
@@ -401,6 +405,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     title: row.title,
     toothNumber: row.toothNumber,
     diagnosisCode: row.diagnosisCode,
+    diagnosisLabel: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
     priceCents: row.priceCents,
     currency: row.currency,
     status: row.status,
@@ -636,6 +641,7 @@ export interface TimelineItem {
   toothNumbers: number[]
   authorId?: string | null
   refId: string
+  /** «CIE-10 · K02.1»: el código con su lista, para leerlo. */
   diagnosisCode?: string | null
   category?: string
   version?: number
@@ -661,6 +667,8 @@ export interface TimelineItem {
   planId?: string | null
   /** Decisión vigente del tratamiento (aceptado, pendiente, etc.). */
   decision?: string | null
+  /** El estado dicho con el nombre único de la aplicación (`budgetStateText` para un presupuesto). */
+  statusText?: string | null
   /** Vencimiento de un control, para leerlo sin consultar otra pantalla. */
   dueAt?: Date | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
@@ -811,7 +819,8 @@ export async function getTimeline(
       tx
         .select({
           encounterId: encounterDiagnosis.encounterId,
-          diagnosisCode: encounterDiagnosis.cie10Code,
+          diagnosisCode: encounterDiagnosis.diagnosisCode,
+          diagnosisSystem: encounterDiagnosis.diagnosisSystem,
         })
         .from(encounterDiagnosis)
         .where(
@@ -833,8 +842,8 @@ export async function getTimeline(
       const diagnoses = [
         ...new Set(
           [
-            ...rowProcedures.map((p) => p.diagnosisCode),
-            ...rowNotes.map((n) => n.diagnosisCode),
+            ...rowProcedures.map((p) => (p.diagnosisCode ? diagnosisCodeLabel(p.diagnosisSystem, p.diagnosisCode) : null)),
+            ...rowNotes.map((n) => diagnosisCodeLabel(n.diagnosisSystem, n.diagnosisCode)),
           ].filter((code): code is string => !!code),
         ),
       ].sort()
@@ -875,7 +884,6 @@ export async function getTimeline(
         createdAt: row.createdAt,
         title: "Nota clínica",
         detail: row.note,
-        diagnosisCode: row.diagnosisCode,
         toothNumbers: [],
         authorId: row.authorUserId,
         encounterId: null,
@@ -947,7 +955,7 @@ export async function getTimeline(
         condition: row.condition,
         surface: row.surface,
         status: row.status,
-        diagnosisCode: row.diagnosisCode,
+        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: teeth,
         authorId: row.createdBy,
         // El hallazgo se registra dentro de una atención: la historia lo agrupa con ella.
@@ -1036,11 +1044,12 @@ export async function getTimeline(
       .where(
         and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds)),
       )) {
-      const [line] = await tx
+      const lines = await tx
         .select({
-          // Un tratamiento cuenta una vez aunque esté en varias opciones.
-          total: sql<number>`count(distinct ${treatmentBudgetItem.planItemId})::int`,
-          currency: sql<string>`min(${treatmentBudgetItem.currency})`,
+          planItemId: treatmentBudgetItem.planItemId,
+          currency: treatmentBudgetItem.currency,
+          decision: treatmentBudgetItem.decision,
+          optionId: treatmentBudgetItem.optionId,
         })
         .from(treatmentBudgetItem)
         .where(
@@ -1049,12 +1058,21 @@ export async function getTimeline(
             eq(treatmentBudgetItem.budgetId, row.id),
           ),
         )
+      const options = await tx
+        .select({ id: treatmentBudgetOption.id, decision: treatmentBudgetOption.decision })
+        .from(treatmentBudgetOption)
+        .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, row.id)))
+      // Un tratamiento cuenta una vez aunque esté en varias opciones.
+      const total = new Set(lines.map((line) => line.planItemId)).size
+      const currency = lines.map((line) => line.currency).sort()[0]
       hydrated.set(row.id, {
         ...hydrated.get(row.id)!,
         createdAt: row.createdAt,
         title: `Presupuesto N.º ${row.budgetNumber} · ${row.title}`,
-        detail: `Revisión ${row.revisionNumber} · ${line?.total ?? 0} tratamiento(s) · ${line?.currency ?? row.currency}`,
+        detail: `Revisión ${row.revisionNumber} · ${total} tratamiento(s) · ${currency ?? row.currency}`,
         status: row.status,
+        // Los mismos nombres que Plan (ADR 0034): «Enviado · espera respuesta», «Aceptó 2 de 3»…
+        statusText: budgetStateText({ status: row.status, items: lines, options }),
         authorId: row.createdBy,
         planId: row.planId,
         budgetId: row.id,
@@ -1158,7 +1176,7 @@ export async function getTimeline(
         title: `Se pidió: ${row.title}`,
         detail: `${ORDER_KIND_WORDS[row.kind] ?? "Orden"} · ${state}`,
         status: row.status,
-        diagnosisCode: row.diagnosisCode,
+        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: [],
         authorId: row.fromUserId,
         encounterId: row.encounterId,

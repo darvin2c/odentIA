@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { patient, patientContact } from "@odentia/db/schema/clinical"
+import { patientContact } from "@odentia/db/schema/clinical"
 import { contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
 import { createContactNote } from "./crm-workspace.js"
-import { createPatient, setPatientContact, updatePatient } from "./patients.js"
+import { createPatient, requirePatient, setPatientContact, updatePatient } from "./patients.js"
 import {
   createPerson,
   getPersonPage,
@@ -248,17 +248,14 @@ describe("un solo «Archivar»", () => {
       createPatient(tx, c.orgId, c.actor, { displayName: "Carlos Mendoza" }),
     )
     const person = await personOf(p.id)
+    // Un solo indicador (ADR 0044): la ficha lee el de su persona.
     const flags = async () => {
       const [row] = await ownerDb
-        .select({ contactActive: contact.isActive, patientActive: patient.isActive })
+        .select({ contactActive: contact.isActive })
         .from(contact)
-        .innerJoin(
-          patientContact,
-          and(eq(patientContact.contactId, contact.id), eq(patientContact.relationship, "self")),
-        )
-        .innerJoin(patient, eq(patient.id, patientContact.patientId))
         .where(eq(contact.id, person))
-      return row
+      const ficha = await c.run((tx) => requirePatient(tx, c.orgId, p.id))
+      return { contactActive: row?.contactActive, patientActive: ficha.isActive }
     }
     await c.run((tx) => setPersonArchived(tx, c.orgId, { userId: c.actor }, person, true))
     expect(await flags()).toEqual({ contactActive: false, patientActive: false })
@@ -364,11 +361,9 @@ describe("una lista y un buscador", () => {
 })
 
 describe("un sitio para las notas", () => {
-  it("las notas dicen quién las escribió y lo anotado antes sin autor queda al final", async () => {
+  it("las notas dicen quién las escribió: una sola lista, la de `crm_note`", async () => {
     const c = await clinic()
-    const person = await c.run((tx) =>
-      createContact(tx, c.orgId, { displayName: "Rosa Quispe", notes: "Prefiere la tarde" }),
-    )
+    const person = await c.run((tx) => createContact(tx, c.orgId, { displayName: "Rosa Quispe" }))
     await c.run((tx) =>
       createContactNote(
         tx,
@@ -380,12 +375,7 @@ describe("un sitio para las notas", () => {
     )
     const notes = await c.run((tx) => listPersonNotes(tx, c.orgId, person.id))
     expect(notes).toEqual([
-      expect.objectContaining({
-        body: "Llamó por el precio",
-        authorName: "Ana Recepción",
-        legacy: false,
-      }),
-      expect.objectContaining({ body: "Prefiere la tarde", authorName: null, legacy: true }),
+      expect.objectContaining({ body: "Llamó por el precio", authorName: "Ana Recepción" }),
     ])
   })
 })

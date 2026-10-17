@@ -25,8 +25,6 @@ import {
   activeSince,
   adminRuntime,
   CAUSE_WORDS,
-  DEFAULT_QUIET_END,
-  DEFAULT_QUIET_START,
   type DeliverDeps,
   deliverDueJobs,
   deliverJob,
@@ -57,8 +55,10 @@ import type { TemplateDeps } from "./channel-templates.js"
 import { shouldSkipSaasOrg } from "./saas-billing.js"
 import { type ConversationCareDeps, tickConversationCare } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
+import { getWritingHours, type WritingWeek } from "./writing-hours.js"
 
 /* ---------- Administrador: mira cómo va la clínica, recomienda qué prender y hace lo que le encargan ---------- */
 
@@ -76,42 +76,34 @@ import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
 export const ADMIN_MAX_RECOMMENDATIONS = 3
 /** Filas que viajan en el detalle; el total real va aparte. */
 const ADMIN_LIST_LIMIT = 200
+/** «Solo esta vez» atiende hasta esta cantidad de casos de una vez; si hay más, lo dice con la cifra real. */
+export const ADMIN_ONCE_LIMIT = 2000
 const ADMIN_PREVIEW_ITEMS = 4
 
 /* ---------- Ajustes ---------- */
 
 export interface AdminSettings {
   enabled: boolean
-  /** Horario en que no escribe por su cuenta, con la hora de cada sede. */
-  quietStart: string
-  quietEnd: string
 }
 
 export async function getAdminSettings(tx: Db, orgId: string): Promise<AdminSettings> {
   const [row] = await tx.select({ advisor: agentConfig.advisor }).from(agentConfig).where(eq(agentConfig.organizationId, orgId)).limit(1)
-  return {
-    enabled: row?.advisor?.enabled === true,
-    quietStart: row?.advisor?.quietStart ?? DEFAULT_QUIET_START,
-    quietEnd: row?.advisor?.quietEnd ?? DEFAULT_QUIET_END,
-  }
+  return { enabled: row?.advisor?.enabled === true }
 }
 
-const HOUR = /^([01]\d|2[0-3]):[0-5]\d$/
-
-/** Enciende o apaga al Administrador y cambia su horario de silencio. Encenderlo no prende ninguna línea. */
+/**
+ * Enciende o apaga al Administrador. Encenderlo no prende ninguna línea. A qué
+ * hora escribe ya no es un ajuste suyo: es el «Horario para escribir» de
+ * Agente (`writing-hours.ts`, decisión 18 v3), el mismo para todo.
+ */
 export async function updateAdminSettings(
   tx: Db,
   orgId: string,
   actorUserId: string,
-  input: { enabled?: boolean; quietStart?: string; quietEnd?: string },
+  input: { enabled?: boolean },
 ): Promise<AdminSettings> {
   const current = await getAdminSettings(tx, orgId)
-  const next: AdminSettings = {
-    enabled: input.enabled ?? current.enabled,
-    quietStart: input.quietStart ?? current.quietStart,
-    quietEnd: input.quietEnd ?? current.quietEnd,
-  }
-  if (!HOUR.test(next.quietStart) || !HOUR.test(next.quietEnd)) throw validation("El horario de silencio va como HH:MM")
+  const next: AdminSettings = { enabled: input.enabled ?? current.enabled }
   await tx
     .insert(agentConfig)
     .values({ organizationId: orgId, advisor: next })
@@ -122,7 +114,7 @@ export async function updateAdminSettings(
     action: "agent.admin_updated",
     entity: "agent_config",
     entityId: orgId,
-    metadata: { enabled: next.enabled, quietStart: next.quietStart, quietEnd: next.quietEnd },
+    metadata: { enabled: next.enabled },
   })
   return next
 }
@@ -183,16 +175,16 @@ function fresh(scope: Fresh | undefined, id: SQL, at: SQL): SQL {
       where j.organization_id = ${sql.raw("p")}.organization_id and j.dedupe_key = ${`${scope.kind}:`} || ${id})`
 }
 
-async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
+async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; service: string | null; starts_at: Date | string; total: number }>(sql`
-    select a.id, p.id as patient_id, p.display_name as name, a.service_name as service, a.starts_at,
+    select a.id, p.id as patient_id, pp.display_name as name, a.service_name as service, a.starts_at,
            count(*) over ()::int as total
     from appointment a
-    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
+    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where a.organization_id = ${orgId} and a.status = 'programada'
       and a.starts_at > now() and a.starts_at <= now() + interval '24 hours'
     order by a.starts_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -210,17 +202,17 @@ async function upcomingAppointments(tx: Db, orgId: string, zone: OrgLocale): Pro
   }
 }
 
-async function overdueControls(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
+async function overdueControls(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; due_at: Date | string; total: number; old: number }>(sql`
-    select f.id, p.id as patient_id, p.display_name as name, f.title, f.due_at,
+    select f.id, p.id as patient_id, pp.display_name as name, f.title, f.due_at,
            count(*) over ()::int as total,
            (count(*) filter (where f.due_at < now() - interval '30 days') over ())::int as old
     from clinical_follow_up f
-    join patient p on p.id = f.patient_id and p.organization_id = f.organization_id
+    join patient p on p.id = f.patient_id and p.organization_id = f.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where f.organization_id = ${orgId} and f.status = 'pendiente' and f.due_at < now()
-      and p.is_active and ${NO_FUTURE_APPOINTMENT}
+      and pp.is_active and ${NO_FUTURE_APPOINTMENT}
     order by f.due_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   const old = Number(rows[0]?.old ?? 0)
   return {
@@ -239,17 +231,17 @@ async function overdueControls(tx: Db, orgId: string, zone: OrgLocale): Promise<
   }
 }
 
-async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days: number): Promise<CaseResult> {
+async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days: number, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; presented_at: Date | string; total: number }>(sql`
-    select b.id, p.id as patient_id, p.display_name as name, b.title, b.budget_number as number, b.presented_at,
+    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.presented_at,
            count(*) over ()::int as total
     from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id
+    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where b.organization_id = ${orgId} and b.status = 'presentado'
       and b.presented_at < now() - make_interval(days => ${days})
-      and p.is_active
+      and pp.is_active
     order by b.presented_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -269,7 +261,7 @@ async function budgetsWithoutAnswer(tx: Db, orgId: string, zone: OrgLocale, days
 }
 
 /** Oportunidades abiertas con su tarea vencida: los casos de «Retomar una oportunidad». */
-async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
+async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; contact_id: string; name: string; title: string; task_title: string; due_at: Date | string; owner: string | null; total: number }>(sql`
     select o.id, c.id as contact_id, c.display_name as name, o.title, t.title as task_title, t.due_at, o.assigned_user_id as owner,
            count(*) over ()::int as total
@@ -278,7 +270,7 @@ async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Pro
     join task t on t.organization_id = o.organization_id and t.opportunity_id = o.id and t.status = 'open'
     where o.organization_id = ${orgId} and o.status = 'open' and t.due_at < now() and c.is_active
     order by t.due_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -299,7 +291,7 @@ async function overdueOpportunities(tx: Db, orgId: string, zone: OrgLocale): Pro
 }
 
 /** Quien faltó hace poco y no tiene otra cita: cada persona una vez, con su inasistencia más reciente. */
-async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
+async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const days = 30
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; service: string | null; starts_at: Date | string; total: number }>(sql`
     with missed as (
@@ -308,13 +300,13 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale)
       where m.organization_id = ${orgId} and m.status = 'no_asistio'
         and m.starts_at >= now() - make_interval(days => ${days}) and m.starts_at < now()
       order by m.patient_id, m.starts_at desc
-    ) select missed.id, p.id as patient_id, p.display_name as name, missed.service_name as service, missed.starts_at,
+    ) select missed.id, p.id as patient_id, pp.display_name as name, missed.service_name as service, missed.starts_at,
            count(*) over ()::int as total
     from missed
-    join patient p on p.id = missed.patient_id and p.organization_id = ${orgId}
-    where p.is_active and ${NO_FUTURE_APPOINTMENT}
+    join patient p on p.id = missed.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where pp.is_active and ${NO_FUTURE_APPOINTMENT}
     order by missed.starts_at desc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -332,18 +324,18 @@ async function noShowsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale)
   }
 }
 
-async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh): Promise<CaseResult> {
+async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; title: string; number: number; decided_at: Date | string; total: number }>(sql`
-    select b.id, p.id as patient_id, p.display_name as name, b.title, b.budget_number as number, b.decided_at,
+    select b.id, p.id as patient_id, pp.display_name as name, b.title, b.budget_number as number, b.decided_at,
            count(*) over ()::int as total
     from treatment_budget b
-    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id
+    join patient p on p.id = b.patient_id and p.organization_id = b.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     where b.organization_id = ${orgId} and b.status in ('aceptado', 'parcial')
       and b.decided_at < now() - make_interval(days => ${days})
-      and p.is_active and ${NO_FUTURE_APPOINTMENT}
+      and pp.is_active and ${NO_FUTURE_APPOINTMENT}
       ${fresh(scope, sql`b.id::text`, sql`b.decided_at + make_interval(days => ${days})`)}
     order by b.decided_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -365,12 +357,12 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
 /** Roles que escriben en la historia (`clinical.write`): ven sus atenciones de otro día en «Te espera». */
 const ATTENDING_ROLES = ORG_ROLES.filter((role) => canAccess(role, "clinical.write"))
 
-async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh): Promise<CaseResult> {
+async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; dentist: string | null; dentist_id: string | null; started_at: Date | string; total: number }>(sql`
-    select e.id, p.id as patient_id, p.display_name as name, u.name as dentist, e.dentist_user_id as dentist_id, e.started_at,
+    select e.id, p.id as patient_id, pp.display_name as name, u.name as dentist, e.dentist_user_id as dentist_id, e.started_at,
            count(*) over ()::int as total
     from encounter e
-    join patient p on p.id = e.patient_id and p.organization_id = e.organization_id
+    join patient p on p.id = e.patient_id and p.organization_id = e.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join "user" u on u.id = e.dentist_user_id
     where e.organization_id = ${orgId} and e.status = 'borrador'
       and e.started_at < now() - make_interval(days => ${days})
@@ -383,7 +375,7 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
       )
       ${fresh(scope, sql`e.id::text`, sql`e.started_at + make_interval(days => ${days})`)}
     order by e.started_at asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   const byDentist = new Map<string, number>()
   for (const row of rows) byDentist.set(row.dentist ?? "Sin profesional", (byDentist.get(row.dentist ?? "Sin profesional") ?? 0) + 1)
@@ -405,29 +397,33 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
 }
 
 /**
- * Deuda vieja: lo que la persona debe (conceptos vigentes menos lo aplicado)
- * cuando su concepto más antiguo sin pagar pasa del plazo. No hay cuotas con
- * fecha: la deuda es el saldo de la cuenta, igual que en Caja.
+ * Deuda vieja: lo que la persona debe (conceptos vigentes menos lo aplicado,
+ * menos lo que tiene a favor) cuando su concepto más antiguo sin pagar pasa
+ * del plazo. No hay cuotas con fecha: la deuda es el saldo de la cuenta, igual
+ * que en Caja (`accountBalances`, decisión 22); con lo que tiene a favor
+ * alcanzando, no hay saldo vencido.
  */
-async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh): Promise<CaseResult> {
+async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
+  const credit = sql`greatest(${patientCreditSql(orgId, sql`p.id`, sql`c.currency`)}, 0)`
   const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; since_day: string; total: number }>(sql`
-    select p.id as patient_id, p.display_name as name, c.currency,
-           sum(c.amount_cents - coalesce(a.applied, 0))::int as owed, min(c.created_at) as since,
+    select p.id as patient_id, pp.display_name as name, c.currency,
+           (sum(c.amount_cents - coalesce(a.applied, 0)) - ${credit})::int as owed, min(c.created_at) as since,
            to_char(min(c.created_at), 'YYYY-MM-DD') as since_day,
            count(*) over ()::int as total
     from patient_charge c
-    join patient p on p.id = c.patient_id and p.organization_id = c.organization_id
+    join patient p on p.id = c.patient_id and p.organization_id = c.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join lateral (
       select sum(app.amount_cents)::int as applied
       from patient_payment_application app
       where app.charge_id = c.id and app.organization_id = c.organization_id and app.voided_at is null
     ) a on true
     where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
-    group by p.id, p.display_name, p.organization_id, c.currency
+    group by p.id, pp.display_name, p.organization_id, c.currency
     having min(c.created_at) < now() - make_interval(days => ${days})
+      and sum(c.amount_cents - coalesce(a.applied, 0)) > ${credit}
       ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
     order by min(c.created_at) asc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -441,12 +437,12 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
     })),
     title: `${total} ${plural(total, "persona debe", "personas deben")} desde hace más de ${days} días`,
     detail: total > rows.length ? `Se muestran las ${rows.length} más antiguas.` : "Ordenadas de la deuda más antigua a la más reciente.",
-    how: `Conceptos por cobrar sin anular cuyo saldo sigue pendiente y que se anotaron hace más de ${days} días.`,
+    how: `Conceptos por cobrar sin anular cuyo saldo sigue pendiente, descontado lo que la persona tiene a favor, y que se anotaron hace más de ${days} días.`,
   }
 }
 
 /** Quien canceló su cita en la última semana y no tiene otra: cada persona una vez. */
-async function cancelledWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale): Promise<CaseResult> {
+async function cancelledWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
   const days = 7
   const rows = await tx.execute<{ id: string; patient_id: string; name: string; service: string | null; starts_at: Date | string; total: number }>(sql`
     with gone as (
@@ -458,13 +454,13 @@ async function cancelledWithoutAppointment(tx: Db, orgId: string, zone: OrgLocal
           and e.action = 'appointment.status_cancelada' and e.created_at >= now() - make_interval(days => ${days})
           and (e.actor_user_id is null or e.metadata->>'cancelReason' = 'paciente'))
       order by m.patient_id, m.starts_at desc
-    ) select gone.id, p.id as patient_id, p.display_name as name, gone.service_name as service, gone.starts_at,
+    ) select gone.id, p.id as patient_id, pp.display_name as name, gone.service_name as service, gone.starts_at,
            count(*) over ()::int as total
     from gone
-    join patient p on p.id = gone.patient_id and p.organization_id = ${orgId}
-    where p.is_active and ${NO_FUTURE_APPOINTMENT}
+    join patient p on p.id = gone.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    where pp.is_active and ${NO_FUTURE_APPOINTMENT}
     order by gone.starts_at desc
-    limit ${ADMIN_LIST_LIMIT}`)
+    limit ${limit}`)
   const total = Number(rows[0]?.total ?? 0)
   return {
     total,
@@ -483,16 +479,24 @@ async function cancelledWithoutAppointment(tx: Db, orgId: string, zone: OrgLocal
 }
 
 /** Los casos de una línea: todos los de hoy o, con `scope`, solo los nuevos desde que se prendió. */
-async function casesOf(tx: Db, orgId: string, key: AdminLineKey, zone: OrgLocale, days: number | null, scope?: Fresh): Promise<CaseResult> {
-  if (key === "recordatorio_cita") return upcomingAppointments(tx, orgId, zone)
-  if (key === "recordatorio_control") return overdueControls(tx, orgId, zone)
-  if (key === "seguimiento_presupuesto") return budgetsWithoutAnswer(tx, orgId, zone, days ?? 2)
-  if (key === "seguimiento_comercial") return overdueOpportunities(tx, orgId, zone)
-  if (key === "seguimiento_no_asistencia") return noShowsWithoutAppointment(tx, orgId, zone)
-  if (key === "cita_cancelada") return cancelledWithoutAppointment(tx, orgId, zone)
-  if (key === "presupuestos_sin_cita") return budgetsWithoutAppointment(tx, orgId, zone, days ?? 7, scope)
-  if (key === "atenciones_sin_firmar") return unsignedEncounters(tx, orgId, zone, days ?? 2, scope)
-  return overdueCollections(tx, orgId, zone, days ?? 30, scope)
+async function casesOf(
+  tx: Db,
+  orgId: string,
+  key: AdminLineKey,
+  zone: OrgLocale,
+  days: number | null,
+  scope?: Fresh,
+  limit: number = ADMIN_LIST_LIMIT,
+): Promise<CaseResult> {
+  if (key === "recordatorio_cita") return upcomingAppointments(tx, orgId, zone, limit)
+  if (key === "recordatorio_control") return overdueControls(tx, orgId, zone, limit)
+  if (key === "seguimiento_presupuesto") return budgetsWithoutAnswer(tx, orgId, zone, days ?? 2, limit)
+  if (key === "seguimiento_comercial") return overdueOpportunities(tx, orgId, zone, limit)
+  if (key === "seguimiento_no_asistencia") return noShowsWithoutAppointment(tx, orgId, zone, limit)
+  if (key === "cita_cancelada") return cancelledWithoutAppointment(tx, orgId, zone, limit)
+  if (key === "presupuestos_sin_cita") return budgetsWithoutAppointment(tx, orgId, zone, days ?? 7, scope, limit)
+  if (key === "atenciones_sin_firmar") return unsignedEncounters(tx, orgId, zone, days ?? 2, scope, limit)
+  return overdueCollections(tx, orgId, zone, days ?? 30, scope, limit)
 }
 
 function requireLine(key: string): AdminLine {
@@ -614,7 +618,7 @@ interface JobView extends Record<string, unknown> {
 function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
   return sql`
     select j.id, j.kind, j.status, j.cause, j.via, j.last_error, j.updated_at, j.scheduled_for,
-           j.patient_id, j.contact_id, coalesce(p.display_name, c.display_name) as name,
+           j.patient_id, j.contact_id, coalesce(pp.display_name, c.display_name) as name,
            m.status as message_status, m.conversation_id,
            a.status as appointment_status, t.status as task_status, t.area as task_area, t.settled_reason as task_settled,
            (m.id is not null and exists (select 1 from message r
@@ -624,7 +628,7 @@ function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
               where n.organization_id = j.organization_id and n.patient_id = j.patient_id
                 and n.created_at > j.updated_at and n.status in ('programada', 'confirmada', 'atendida'))) as booked
     from automation_job j
-    left join patient p on p.id = j.patient_id and p.organization_id = j.organization_id
+    left join patient p on p.id = j.patient_id and p.organization_id = j.organization_id left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact c on c.id = j.contact_id and c.organization_id = j.organization_id
     left join message m on m.id = j.sent_message_id and m.organization_id = j.organization_id
     left join appointment a on a.id = j.appointment_id and a.organization_id = j.organization_id
@@ -876,8 +880,8 @@ function linesOf(rules: Map<string, RuleRow>): AdminLine[] {
 
 export interface AdminPage {
   enabled: boolean
-  quietStart: string
-  quietEnd: string
+  /** El «Horario para escribir» de Agente: lo respeta todo lo que escribe el agente por su cuenta. */
+  writingHours: WritingWeek
   /** Recepción es quien escribe: apagada, las líneas que escriben quedan en pausa. */
   receptionOn: boolean
   /** Hay un WhatsApp conectado por el que escribir. */
@@ -964,8 +968,7 @@ export async function getAdminPage(tx: Db, orgId: string, can: (permission: stri
       exists (select 1 from channel_connection c where c.organization_id = ${orgId} and c.channel = 'whatsapp' and c.status = 'active') as whatsapp`)
   return {
     enabled: settings.enabled,
-    quietStart: settings.quietStart,
-    quietEnd: settings.quietEnd,
+    writingHours: await getWritingHours(tx, orgId),
     receptionOn: runtime.receptionOn,
     whatsapp: counts?.whatsapp === true,
     lines,
@@ -1118,11 +1121,17 @@ function toRecommendation(line: AdminLine, rule: RuleRow | null, result: CaseRes
       : writes
         ? {
             label: `Escribirles esta vez`,
-            detail: `El agente Recepción les escribe a ${total === 1 ? "esta persona" : `estas ${total} personas`}, por única vez. A quien no pueda, lo dice con el motivo.`,
+            detail:
+              total > ADMIN_ONCE_LIMIT
+                ? `El agente Recepción les escribe a ${ADMIN_ONCE_LIMIT} de estas ${total} personas, las primeras de la lista, por única vez. A quien no pueda, lo dice con el motivo.`
+                : `El agente Recepción les escribe a ${total === 1 ? "esta persona" : `estas ${total} personas`}, por única vez. A quien no pueda, lo dice con el motivo.`,
           }
         : {
-            label: `Crear ${total} ${plural(total, "tarea", "tareas")}`,
-            detail: `${total === 1 ? "Una tarea" : `${total} tareas`} para ${team}, una por persona. No se envía ningún mensaje.`,
+            label: `Crear ${Math.min(total, ADMIN_ONCE_LIMIT)} ${plural(Math.min(total, ADMIN_ONCE_LIMIT), "tarea", "tareas")}`,
+            detail:
+              total > ADMIN_ONCE_LIMIT
+                ? `${ADMIN_ONCE_LIMIT} tareas de ${total} para ${team}, una por persona y por orden de la lista. No se envía ningún mensaje.`
+                : `${total === 1 ? "Una tarea" : `${total} tareas`} para ${team}, una por persona. No se envía ningún mensaje.`,
           }
   return {
     key: line.key,
@@ -1218,7 +1227,7 @@ export async function runAdminLineOnce(
   can: (permission: string) => boolean,
   key: string,
   deps: { secretsKey: Buffer },
-): Promise<{ created: number; total: number; writes: boolean }> {
+): Promise<{ created: number; total: number; writes: boolean; all: number }> {
   const line = requireLine(key)
   if (!can(line.permission)) throw new ServiceError("FORBIDDEN", 403, "Tu rol no puede ver esta recomendación")
   const recommendation = await getAdminRecommendation(tx, orgId, can, key)
@@ -1227,8 +1236,12 @@ export async function runAdminLineOnce(
   const rule = (await findLineRule(tx, orgId, line.key)) ?? (await setLine(tx, orgId, actorUserId, line.key, {}))
   const writes = !!line.agent && rule.agentPart
   const now = new Date()
+  // Todos los casos, no solo los que caben en la lista de la pantalla: la
+  // recomendación promete escribirles a todas (hasta `ADMIN_ONCE_LIMIT`).
+  const zone = await getOrgLocale(tx, orgId)
+  const all = await casesOf(tx, orgId, line.key, zone, lineDays(rule, line.key), undefined, ADMIN_ONCE_LIMIT)
   let created = 0
-  for (const item of recommendation.items) {
+  for (const item of all.items) {
     const job = await enqueueCase(tx, orgId, rule, line, item, now, { once: true })
     if (!job) continue
     created++
@@ -1240,9 +1253,10 @@ export async function runAdminLineOnce(
     action: "agent.admin_once",
     entity: "agent_config",
     entityId: orgId,
-    metadata: { key, created, total: recommendation.items.length, writes },
+    metadata: { key, created, total: all.items.length, all: all.total, writes },
   })
-  return { created, total: recommendation.items.length, writes }
+  // `total`: los casos atendidos ahora; `all`: los que hay, para decir «a 2000 de 2300».
+  return { created, total: all.items.length, writes, all: all.total }
 }
 
 /* ---------- A quién no pudo escribirle ---------- */
@@ -1263,7 +1277,9 @@ export async function getAdminUnreached(tx: Db, orgId: string, can: (permission:
   const kinds = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.agent && can(line.permission)).map((line) => line.key)
   if (kinds.length === 0 || !(await getAdminSettings(tx, orgId)).enabled) return { total: 0, byCause: [], people: [] }
   const zone = await getOrgLocale(tx, orgId)
-  const where = sql`j.cause is not null and j.updated_at >= now() - interval '24 hours' and j.kind in ${kinds}`
+  // Quien no recibe recordatorios ya sale el día antes como una llamada (ADR 0040): no se cuenta dos veces.
+  const where = sql`j.cause is not null and j.updated_at >= now() - interval '24 hours' and j.kind in ${kinds}
+    and not (j.kind = 'recordatorio_cita' and j.cause = 'sin_permiso')`
   const rows = await tx.execute<JobView>(jobsQuery(orgId, where, ADMIN_LIST_LIMIT))
   const counts = await tx.execute<{ cause: string; n: number }>(sql`
     select j.cause, count(*)::int as n from automation_job j

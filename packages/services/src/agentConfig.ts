@@ -3,7 +3,7 @@ import { agentConfig } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { AGENT_ROLES, switchableFunctions } from "./agent-roles.js"
-import { validation } from "./errors.js"
+import { ServiceError, validation } from "./errors.js"
 
 export interface AgentConfig {
   organizationId: string
@@ -13,7 +13,6 @@ export interface AgentConfig {
   dailyRunLimit: number
   /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
   decisionProvider: DecisionProvider
-  systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number
   /** Comprueba precios, fechas y horas de cada respuesta contra lo consultado antes de enviarla. */
@@ -79,7 +78,6 @@ const DEFAULTS = {
   llm: DEFAULT_AGENT_LLM,
   dailyRunLimit: 500,
   decisionProvider: "none" as DecisionProvider,
-  systemPrompt: "",
   handoffKeywords: [] as string[],
   maxTurns: 10,
   replyCheckEnabled: true,
@@ -107,7 +105,6 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     decisionProvider: (DECISION_PROVIDERS as readonly string[]).includes(row.decisionProvider)
       ? (row.decisionProvider as DecisionProvider)
       : "none",
-    systemPrompt: row.systemPrompt,
     handoffKeywords: row.handoffKeywords,
     maxTurns: row.maxTurns,
     replyCheckEnabled: row.replyCheckEnabled,
@@ -142,7 +139,6 @@ export interface UpsertAgentConfigInput {
   llm?: AgentLlm
   dailyRunLimit?: number
   decisionProvider?: DecisionProvider
-  systemPrompt?: string
   handoffKeywords?: string[]
   maxTurns?: number
   replyCheckEnabled?: boolean
@@ -163,9 +159,25 @@ export interface UpsertAgentConfigInput {
   closeAfterHours?: number
 }
 
+/**
+ * «El modelo responde» (fase 4, tablero 3): la llamada mínima al modelo vive
+ * en el agente (`createModelChecker`, 10 minutos en caché); los servicios
+ * solo deciden con su resultado. La misma comprobación sirve al encendido,
+ * al resumen y a Integraciones.
+ */
+export type AgentModelCheck = (llm: AgentLlm) => Promise<{ responds: boolean; checkedAt: string }>
+
 export interface UpsertAgentConfigOpts {
   actorUserId?: string | null
+  /**
+   * Con ella, encender (o cambiar de modelo con el agente encendido) exige un
+   * modelo que responda. La API la pasa siempre: ocultar el botón no basta.
+   */
+  modelCheck?: AgentModelCheck
 }
+
+/** Encender Recepción con un modelo que no responde: cada paciente recibiría «una persona te va a responder». */
+export const MODEL_NOT_RESPONDING = "MODEL_NOT_RESPONDING"
 
 /**
  * Guarda la configuración. El modelo solo puede ser uno de `AGENT_LLMS`; su
@@ -240,6 +252,14 @@ export async function upsertAgentConfig(
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
+  const staysOn = input.enabled === true || (input.enabled === undefined && input.llm !== undefined && current?.enabled === true)
+  if (staysOn && opts.modelCheck) {
+    const currentLlm = current?.llm
+    const llm = input.llm ?? (isAgentLlm(currentLlm) ? currentLlm : DEFAULTS.llm)
+    if (!(await opts.modelCheck(llm)).responds) {
+      throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Recepción no se puede encender. Ya avisamos a odentIA.")
+    }
+  }
   if (input.activeFromMin !== undefined || input.activeUntilMin !== undefined) {
     const from = input.activeFromMin === undefined ? (current?.activeFromMin ?? null) : input.activeFromMin
     const until = input.activeUntilMin === undefined ? (current?.activeUntilMin ?? null) : input.activeUntilMin

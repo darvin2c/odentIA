@@ -315,7 +315,10 @@ export function PersonSummary({
                     : locale
                       ? outstanding
                           .map((balance) =>
-                            formatMoney(balance.porCobrar, balance.currency, locale),
+                            // El saldo descuenta lo que tiene a favor (decisión 22).
+                            balance.aFavor > 0
+                              ? `Debe: ${formatMoney(balance.porCobrar, balance.currency, locale)} · A favor: ${formatMoney(balance.aFavor, balance.currency, locale)} · Saldo: ${formatMoney(balance.saldo, balance.currency, locale)}`
+                              : formatMoney(balance.porCobrar, balance.currency, locale),
                           )
                           .join(" · ")
                       : "…"}

@@ -48,8 +48,10 @@ import {
   setPatientContact,
   setProfessionalSchedule,
   upsertAgentConfig,
+  addAgentGuidance,
+  removeAgentGuidance,
 } from "@odentia/services"
-import { closeConversationWith } from "@odentia/services"
+import { closeConversationWith, professionalRef } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -65,9 +67,9 @@ import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/mess
 import type { ChatResult } from "@langchain/core/outputs"
 import { user } from "@odentia/db/schema/auth"
 import { branch, auditEvent } from "@odentia/db/schema/org"
-import { patient } from "@odentia/db/schema/clinical"
 import { appointment } from "@odentia/db/schema/agenda"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
+import { insertTestPatients } from "@odentia/services/test-patient"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -416,11 +418,8 @@ it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no rei
   const { conversationId, messageId } = await ingestText("tg:ag-toolerr", "evt-ag-toolerr", "Necesito ayuda")
   const model = new ScriptedModel((_messages, call) =>
     call === 1
-      ? toolCall(
-          "request_human_handoff",
-          { reason: "Pide ayuda", summary: "Pide ayuda", priority: "media", assigneeUserId: "no-es-miembro" },
-          "call-1",
-        )
+      ? // Un paciente que no es suyo: el servicio lo rechaza y la herramienta lanza.
+        toolCall("ver_resumen_paciente", { patientId: "00000000-0000-4000-8000-0000000000ff" }, "call-1")
       : toolCall("send_reply", { text: "Enseguida te ayudamos." }, "call-2"),
   )
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
@@ -428,11 +427,11 @@ it("lo que lanza una herramienta vuelve al modelo como mensaje de error y no rei
   const second = model.seen[1] ?? []
   const last = second[second.length - 1]
   expect(last?.getType()).toBe("tool")
-  expect(String(last?.content)).toContain("El responsable no es miembro de la organización")
+  expect(String(last?.content)).toContain("Contacto activo vinculado al paciente")
   expect(await agentStatusOf(conversationId)).toBe("on")
   expect(await agentMessages(conversationId)).toEqual(["Enseguida te ayudamos."])
   expect(await ledgerRows(conversationId)).toEqual([
-    { status: "ok", llmCalls: 2, toolsUsed: ["request_human_handoff", "send_reply"] },
+    { status: "ok", llmCalls: 2, toolsUsed: ["ver_resumen_paciente", "send_reply"] },
   ])
 })
 
@@ -562,19 +561,25 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
         .from(agentHandoff)
         .where(eq(agentHandoff.conversationId, first.conversationId)),
     )
-    expect(handoff?.reason).toBe("El agente no puede usar el proveedor del modelo; revisa Configuración › Agente")
+    expect(handoff?.reason).toBe("El agente no puede usar el modelo ahora; ya avisamos a odentIA")
     expect(handoff?.summary).not.toContain("Incorrect API key")
     // Segunda conversación el mismo día: otra derivación, pero un solo aviso.
     const second = await ingestText("tg:ag-401-b", "evt-ag-401-b", "Buenas")
     expect(await runAgent(second.conversationId, second.messageId, 0, platform)).toBe("done")
     const notices = await withOrgContext(appDb, "org_a", (tx) =>
       tx
-        .select({ title: workspaceNotification.title, href: workspaceNotification.href })
+        .select({ title: workspaceNotification.title, body: workspaceNotification.body, href: workspaceNotification.href })
         .from(workspaceNotification)
-        .where(and(eq(workspaceNotification.userId, adminId), eq(workspaceNotification.href, "/settings/agent"))),
+        .where(and(eq(workspaceNotification.userId, adminId), eq(workspaceNotification.subject, "modelo-del-agente"))),
     )
-    // Las derivaciones generan sus propios avisos; el del proveedor es uno solo.
-    expect(notices).toEqual([{ title: "El agente no puede usar el modelo", href: "/settings/agent" }])
+    // Las derivaciones generan sus propios avisos; el del proveedor es uno solo, sin claves ni variables, y lleva a Recepción.
+    expect(notices).toEqual([
+      {
+        title: "El agente no puede usar el modelo",
+        body: "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+        href: "/agent/recepcion",
+      },
+    ])
   } finally {
     await provider.close()
   }
@@ -604,7 +609,7 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
       tx
         .select({ title: workspaceNotification.title })
         .from(workspaceNotification)
-        .where(and(eq(workspaceNotification.href, "/settings/agent"), eq(workspaceNotification.title, "El proveedor del agente no tiene saldo"))),
+        .where(and(eq(workspaceNotification.href, "/agent/recepcion"), eq(workspaceNotification.title, "El agente no puede usar el modelo"))),
     )
     expect(notices.length).toBeGreaterThan(0)
   } finally {
@@ -802,14 +807,14 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
     { messages: [], turnCount: 0 },
     { configurable: { thread_id: threadId } },
   )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    upsertAgentConfig(tx, "org_a", { systemPrompt: "PROMPT-TURNO-DOS" }))
+  // Lo que escribe la clínica en «Lo que el agente debe saber» le llega en el turno siguiente.
+  const written = await withOrgContext(appDb, "org_a", (tx) => addAgentGuidance(tx, "org_a", "u_indicaciones", "PROMPT-TURNO-DOS"))
   toolCtx.draftText = "segundo turno"
   await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
     { messages: [], turnCount: 0 },
     { configurable: { thread_id: threadId } },
   )
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { systemPrompt: "" }))
+  await withOrgContext(appDb, "org_a", (tx) => removeAgentGuidance(tx, "org_a", "u_indicaciones", written.id))
   expect(model.seen).toHaveLength(2)
   const first = model.seen[0] ?? []
   const second = model.seen[1] ?? []
@@ -954,7 +959,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
   const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId, name: "Sillón Agente" }))
+    createChair(tx, "org_a", { branchId, name: "Unidad dental Agente" }))
   const chairId = createdChair!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
@@ -970,10 +975,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(conv).toBeDefined()
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: "Paciente Reserva Agente", patientNumber })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Paciente Reserva Agente", patientNumber })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
@@ -999,13 +1001,15 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(out.split("\n")[0]).toContain("hora local de la sede")
   const firstLine = out.split("\n")[1] ?? ""
   const optionBranch = firstLine.match(/sede ([0-9a-f-]{36})/i)?.[1]
-  const optionChair = firstLine.match(/sillón ([0-9a-f-]{36})/i)?.[1]
+  const optionChair = firstLine.match(/unidad dental ([0-9a-f-]{36})/i)?.[1]
   const optionDentist = firstLine.match(/profesional ([^\]\s]+)/)?.[1]
   const optionStart = firstLine.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)?.[1]
   const [, startClock, endClock] = firstLine.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/) ?? []
   expect(optionBranch).toBe(branchId)
   expect(optionChair).toBe(chairId)
-  expect(optionDentist).toBe(dentistId)
+  // El agente ve la referencia del profesional, nunca su usuario.
+  expect(optionDentist).toBe(professionalRef("org_a", dentistId))
+  expect(out).not.toContain(dentistId)
   if (!optionStart || !startClock || !endClock || !optionDentist || !optionChair || !optionBranch) {
     throw new Error("El hueco no contiene los datos necesarios para reservar")
   }
@@ -1070,7 +1074,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
   const createdChair = await withOrgContext(appDb, "org_a", (tx) =>
-    createChair(tx, "org_a", { branchId, name: "Sillón Reprog" }))
+    createChair(tx, "org_a", { branchId, name: "Unidad dental Reprog" }))
   const chairId = createdChair!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
@@ -1085,17 +1089,26 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: "Paciente Reprog Agente", patientNumber })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Paciente Reprog Agente", patientNumber })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
+  // Fechas relativas a hoy: la regla de la cita propia exige una cita por
+  // venir y a menos de 120 días. Lunes a jueves de la semana que viene o la
+  // siguiente, 15:00 UTC (10:00 en Lima, dentro del horario de 9 a 13).
+  const monday = new Date()
+  monday.setUTCHours(15, 0, 0, 0)
+  monday.setUTCDate(monday.getUTCDate() + 7 + ((8 - monday.getUTCDay()) % 7))
+  const dayAt = (offset: number, hour = 15) => {
+    const d = new Date(monday)
+    d.setUTCDate(d.getUTCDate() + offset)
+    d.setUTCHours(hour, 0, 0, 0)
+    return d.toISOString().replace(".000Z", "Z")
+  }
   const booked = await withOrgContext(appDb, "org_a", (tx) =>
     createAppointment(tx, "org_a", actorId, {
       patientId, dentistUserId: dentistId, chairId, branchId,
-      startsAt: "2026-10-05T15:00:00Z", durationMin: 45,
+      startsAt: dayAt(0), durationMin: 45,
     }))
   const ctx: AgentToolCtx = {
     db: appDb, orgId: "org_a", conversationId, contactId,
@@ -1107,7 +1120,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   // Reprogramar (confirmar_usuario): propuesta → confirmación → agenda movida.
   const reprogram = tools.find((t) => t.name === "reprogramar_cita")!
   const proposed = String(await reprogram.invoke({
-    appointmentId: booked.id, startsAt: "2026-10-06T16:00:00Z", expectedVersion: booked.version,
+    appointmentId: booked.id, startsAt: dayAt(1, 16), expectedVersion: booked.version,
   }))
   expect(proposed).toContain("pide al interlocutor que confirme")
   const proposalId = /Propuesta ([0-9a-f-]{36})/.exec(proposed)?.[1]
@@ -1118,20 +1131,20 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   let rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
   expect(rows).toHaveLength(1)
-  expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-06T16:00:00.000Z")
+  expect(rows[0]!.startsAt.toISOString()).toBe(dayAt(1, 16).replace("Z", ".000Z"))
   expect(rows[0]!.version).toBe(booked.version + 1)
 
   // Obsolescencia: si la cita cambió desde la propuesta, confirmar no ejecuta.
   ctx.triggerId = "trig-reprog-2"
   const staleProposal = String(await reprogram.invoke({
-    appointmentId: booked.id, startsAt: "2026-10-07T15:00:00Z", expectedVersion: booked.version + 1,
+    appointmentId: booked.id, startsAt: dayAt(2), expectedVersion: booked.version + 1,
   }))
   const staleId = /Propuesta ([0-9a-f-]{36})/.exec(staleProposal)?.[1]
   expect(staleId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-2", "Si confirmo")
   await withOrgContext(appDb, "org_a", (tx) =>
     moveAppointment(tx, "org_a", actorId, booked.id, {
-      expectedVersion: booked.version + 1, startsAt: "2026-10-08T15:00:00Z",
+      expectedVersion: booked.version + 1, startsAt: dayAt(3),
     }))
   const staleConfirm = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: staleId! }))
   expect(staleConfirm).toContain("No se pudo ejecutar al confirmar")
@@ -1139,7 +1152,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   rows = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(appointment).where(eq(appointment.patientId, patientId)))
   expect(rows).toHaveLength(1)
-  expect(rows[0]!.startsAt.toISOString()).toBe("2026-10-08T15:00:00.000Z")
+  expect(rows[0]!.startsAt.toISOString()).toBe(dayAt(3).replace("Z", ".000Z"))
 
   // Cancelar también lo confirma el paciente; reentregar el mismo trigger no
   // duplica la propuesta.
@@ -1190,14 +1203,14 @@ it("confirmar_cita confirma por escrito la cita de la persona, nunca la de otra,
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: "Sillón Confirma" }))
+  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: "Unidad dental Confirma" }))
   const { conversationId } = await ingestText("tg:confirma-cita", "evt-confirma-cita", "Sí, ahí estaré")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
   const own = async (name: string, contact: string | null) => {
     const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-    const [row] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: name, patientNumber }).returning({ id: patient.id })
+    const [row] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: name, patientNumber })
     if (contact) {
       await withOrgContext(appDb, "org_a", (tx) =>
         setPatientContact(tx, "org_a", actorId, row!.id, { contactId: contact, relationship: "self", isPreferred: true }))
@@ -1246,9 +1259,11 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
+  // El agente solo conoce al profesional por su referencia: la de alguien con horario en la clínica.
+  const { dentistId } = await bookingFixture(conversationId, "doble-si")
   // La cita propuesta espera el sí del interlocutor (los datos solo tienen que validar).
   const booked = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
-    patientId: randomUUID(), dentistUserId: "dentista-doble-si", chairId: randomUUID(),
+    patientId: randomUUID(), dentistUserId: professionalRef("org_a", dentistId), chairId: randomUUID(),
     startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
   }))
   expect(booked).toContain("pide al interlocutor que confirme")
@@ -1370,7 +1385,7 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   expect(conv).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: winner, agentStatus: "on" })
 })
 
-/** Sede con sillón, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
+/** Sede con unidad dental, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
 async function bookingFixture(conversationId: string, label: string) {
   const [createdBranch] = await ownerDb
     .insert(branch)
@@ -1388,7 +1403,7 @@ async function bookingFixture(conversationId: string, label: string) {
     insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
       (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
       (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
-  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: `Sillón ${label}` }))
+  const chair = await withOrgContext(appDb, "org_a", (tx) => createChair(tx, "org_a", { branchId, name: `Unidad dental ${label}` }))
   await withOrgContext(appDb, "org_a", (tx) =>
     setProfessionalSchedule(tx, "org_a", actorId, {
       branchId,
@@ -1399,10 +1414,7 @@ async function bookingFixture(conversationId: string, label: string) {
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: "org_a", displayName: `Paciente ${label}`, patientNumber })
-    .returning({ id: patient.id })
+  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: `Paciente ${label}`, patientNumber })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
@@ -1439,7 +1451,7 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
         {
           patientId: fx.patientId,
           dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-          chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+          chairId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
@@ -1783,7 +1795,7 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
   }
   const before = await all("tg:funciones-0", "evt-fn-0")
   expect(before.tools).toEqual(expect.arrayContaining(["buscar_huecos", "proponer_cita", "consultar_conocimiento", "create_opportunity"]))
-  expect(before.system).toContain("reserva con proponer_cita")
+  expect(before.system).toContain("Reserva con proponer_cita")
   await withOrgContext(appDb, "org_a", (tx) =>
     upsertAgentConfig(tx, "org_a", {
       disabledFunctions: ["agendar", "seguimiento"],
@@ -1796,9 +1808,12 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
     }
     // Lo que otra función encendida necesita, y lo fijo, se queda.
     expect(off.tools).toEqual(expect.arrayContaining(["ver_sedes_y_servicios", "consultar_conocimiento", "request_human_handoff", "anotar_caso", "send_reply"]))
-    expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat. Si piden una cita, envía el enlace de reserva")
+    // Sin dirección pública no hay enlace de reserva: no lo manda a enviarlo, le dice que pase el caso.
+    expect(off.tools).not.toContain("enviar_enlace_cita")
+    expect(off.system).toContain("No reservas, mueves ni cancelas citas por el chat: si piden una cita, moverla o cancelarla, pasa el caso a una persona.")
+    expect(off.system).not.toContain("buscar_huecos")
     expect(off.system).toContain("No creas ni cambias oportunidades ni sus tareas.")
-    expect(off.system).not.toContain("reserva con proponer_cita")
+    expect(off.system).not.toContain("Reserva con proponer_cita")
     expect(off.system).toContain("Indicación de la clínica para «Informar»: En ortodoncia, pregunta primero si ya tiene evaluación.")
     // Sin «Informar» tampoco recibe tarifas ni respuestas oficiales.
     const entry = await publishKnowledge({ title: "Función: horario", body: "Atendemos de 9 a 19." })
@@ -1944,7 +1959,7 @@ it("probar: una conversación de prueba reserva en dos turnos sin tocar la base"
         {
           patientId: "00000000-0000-4000-8000-0000000000aa",
           dentistUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
-          chairId: line.match(/sillón ([0-9a-f-]{36})/i)?.[1],
+          chairId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
           startsAt: line.match(ISO_INSTANT)?.[0],
           branchId: fx.branchId,
           durationMin: 45,
@@ -2192,13 +2207,15 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     const decisions = await withOrgContext(appDb, "org_a", (tx) =>
       tx.select({ point: agentDecisionLog.point, mode: agentDecisionLog.mode, outcome: agentDecisionLog.outcome, error: agentDecisionLog.error })
         .from(agentDecisionLog).where(eq(agentDecisionLog.conversationId, conversationId)))
-    return { conversationId, calls: model.seen.length, offered: model.offered, system: systemTextOf(model.seen[0] ?? []), decisions, ledger: await ledgerRows(conversationId) }
+    // El interés en un servicio (decisión 15) tiene su propia prueba: aquí solo cuenta el camino.
+    const routing = decisions.filter((item) => item.point !== "interest.v1")
+    return { conversationId, calls: model.seen.length, offered: model.offered, system: systemTextOf(model.seen[0] ?? []), decisions: routing, ledger: await ledgerRows(conversationId) }
   }
   try {
     // Información: el que escribe recibe el camino y resuelve en una sola llamada.
     const info = await turn("tg:camino-info", "evt-camino-info", "¿Cuánto cuesta una limpieza?")
     expect(info.system).toContain("Camino de este turno, elegido por lo que escribió el interlocutor: pide información.")
-    expect(info.system).toContain("Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas.")
+    expect(info.system).toContain("Si con eso basta, responde ahora con send_reply, en este mismo paso.")
     expect(info.decisions).toEqual([
       expect.objectContaining({ point: "route.v3", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
     ])
@@ -2206,8 +2223,9 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
-        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "pedir_volver_al_portal",
-        "reenviar_presupuesto", "request_human_handoff", "send_reply", "send_template", "ver_presupuesto", "ver_sedes_y_servicios",
+        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "elegir_mensajes",
+        "enviar_comprobante", "pedir_volver_al_portal", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
+        "ver_sedes_y_servicios",
       ],
     )
 
@@ -2365,13 +2383,13 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
 
   const ok = await extract({
     nota: { reason: "Dolor al masticar", dicho: "Viene por dolor al masticar." },
-    diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16, dicho: "En la dieciséis hay caries en dentina" }],
+    diagnosticos: [{ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, dicho: "En la dieciséis hay caries en dentina" }],
     indicaciones: [{ service: "resina", toothNumber: 16 }],
     controles: [],
   })
   expect(ok.drafts).toEqual([
     { kind: "nota", payload: { reason: "Dolor al masticar" }, sourceText: "Viene por dolor al masticar." },
-    { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina" },
+    { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina" },
     { kind: "plan", payload: { service: "resina", toothNumber: 16 }, sourceText: "" },
   ])
   const system = systemTextOf(seen[0] ?? [])
@@ -2403,7 +2421,7 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
   expect(asked).toContain("Lo nuevo que dictó:")
 
   // Un tipo de diagnóstico que no existe, o ninguna llamada: no se ordena nada a medias.
-  await expect(extract({ diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
+  await expect(extract({ diagnosticos: [{ diagnosisCode: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
   await expect(extract(null)).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
   await expect(extractDictation(appDb, deps, { orgId: "org_a", transcript: "  " })).rejects.toMatchObject({ code: "VALIDATION" })
   // Con el modelo de demostración responde por reglas, sin proveedor.
@@ -2580,4 +2598,30 @@ it("pospuesta hasta que abre su horario, la corrida atiende todo lo que quedó s
       .where(eq(agentRunLedger.conversationId, first.conversationId)))
   expect(rows).toContainEqual({ trigger: first.messageId, status: "omitida", error: "burst-covered" })
   expect(rows).toContainEqual({ trigger: second.messageId, status: "ok", error: null })
+})
+
+it("buscar_huecos nunca muestra el usuario del profesional: proponer_cita recibe su referencia y el servidor la resuelve", async () => {
+  const { conversationId } = await ingestText("tg:ref-profesional", "evt-ref-profesional", "Quiero una cita")
+  const fx = await bookingFixture(conversationId, "ref-profesional")
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: fx.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const tools = makeAgentTools(ctx)
+  const day = upcomingMonday()
+  const gaps = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45,
+  }))
+  expect(gaps).not.toContain(fx.dentistId)
+  const line = gaps.split("\n").find((row) => row.startsWith("- "))!
+  const ref = line.match(/profesional (pro-[0-9a-f]{10})\]/)?.[1]
+  expect(ref).toBe(professionalRef("org_a", fx.dentistId))
+  const propose = tools.find((t) => t.name === "proponer_cita")!
+  const slot = { patientId: fx.patientId, chairId: fx.chairId, branchId: fx.branchId, startsAt: line.match(ISO_INSTANT)![0], durationMin: 45 }
+  // Un id de usuario escrito por el modelo no sirve.
+  expect(String(await propose.invoke({ ...slot, dentistUserId: fx.dentistId }))).toContain("no es de un hueco de buscar_huecos")
+  await propose.invoke({ ...slot, dentistUserId: ref })
+  const [proposal] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect(proposal?.payload).toMatchObject({ dentistUserId: fx.dentistId })
 })

@@ -487,6 +487,13 @@ it("documento duplicado público: 409 neutro sin filtrar la ficha", async () => 
   expect(raw).not.toContain("87654321")
   expect(raw).not.toContain(qrPatientSubmission)
   expect(await countPatients(ORG_A)).toBe(patientsBefore + 1)
+  // Lo que no se completó queda para recepción, aunque el alta se revirtió entera.
+  const held = await ownerDb.execute<{ reason: string; area: string }>(sql`
+    select t.reason, t.area from task t join contact c on c.id = t.contact_id and c.organization_id = t.organization_id
+    where t.organization_id = ${ORG_A} and c.doc_number = '87654321' and t.kind = 'registro_con_documento' and t.status = 'open'`)
+  expect([...held]).toEqual([
+    expect.objectContaining({ area: "recepcion", reason: expect.stringContaining("Alguien se registró con el documento de Paciente Duplicada: revisa si es ella") }),
+  ])
 })
 
 it.each(["https://app.odentia.localhost", "https://app.odentia.localhost:4463"])("enlace contextual (%s): crea, resuelve, vincula y se consume una sola vez", async (webURL) => {

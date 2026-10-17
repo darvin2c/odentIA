@@ -19,8 +19,10 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
     contacts: [],
   }, 201)
   const apiPath = `/api/patients/${patient.id}`
+  // La clínica nace con las especialidades de la biblioteca: el servicio apunta a la suya (ADR 0039).
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
   await call(page, "POST", "/api/services", org.slug, {
-    name: "Endodoncia multirradicular", specialty: "endodoncia", scope: "tooth", priceCents: 65000, currency: "PEN",
+    name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
   }, 201)
   const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Consulta" }, 201)
   await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {
@@ -126,7 +128,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(closing).toContainText("Diagnóstico: hay uno sugerido, sin confirmar")
   await expect(signButton).toBeDisabled()
   // Todavía no hay nada en la historia.
-  const detail = () => call<{ encounter: { reason: string | null; evolution: string | null; status: string }; diagnoses: Array<{ cie10Code: string; toothNumber: number | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
+  const detail = () => call<{ encounter: { reason: string | null; evolution: string | null; status: string }; diagnoses: Array<{ diagnosisCode: string; toothNumber: number | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
   expect((await detail()).diagnoses).toEqual([])
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictado-sugerencias", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
@@ -146,7 +148,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(idle).toBeVisible()
   const saved = await detail()
   expect(saved.encounter).toMatchObject({ reason: "Viene por dolor al masticar del lado derecho.", evolution: "Se realizó apertura cameral sin complicaciones." })
-  expect(saved.diagnoses).toEqual([expect.objectContaining({ cie10Code: "K02.1", toothNumber: 16 })])
+  expect(saved.diagnoses).toEqual([expect.objectContaining({ diagnosisCode: "K02.1", toothNumber: 16 })])
   // La pantalla refleja lo confirmado sin recargar.
   await expect(closing.getByRole("listitem").filter({ hasText: "diagnóstico" })).toContainText("listo")
 

@@ -1,3 +1,5 @@
+import type { AgentLlm } from "./crm"
+
 /**
  * La urgencia de un caso que pasó al equipo, en una palabra. La insignia
  * (`HandoffUrgency`) le suma icono y color; donde no cabe, va la palabra sola.
@@ -101,6 +103,8 @@ export interface AgentPanelSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
+  /** Citas propuestas que esperan el sí de la persona: el número de «Esperan su sí». */
+  awaitingAnswer: number
   /** Casos que el agente pasó a una persona y siguen sin resolver: lo que espera al equipo. */
   openHandoffs: number
   /** Corridas de hoy que respondieron o derivaron. */
@@ -238,15 +242,41 @@ export interface AgentLearned {
 /** Clase del problema del proveedor del modelo; nunca su texto. */
 export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
-/** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
 /**
- * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede arreglarla,
- * así que se dice qué pasa con los mensajes y qué sí puede hacer.
+ * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede
+ * arreglar una clave, un saldo o un rechazo, así que nunca ve cuál fue. Se
+ * dice qué pasa con los mensajes y que odentIA ya lo sabe (el caso
+ * automático en Soporte lleva el motivo técnico).
  */
-export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
-  rechazado: "El modelo no está respondiendo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
-  sin_saldo: "La cuenta de odentIA para este modelo se quedó sin saldo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
-  sin_configurar: "Este modelo no está disponible por ahora. Elige el otro en Modelo del agente.",
+export const AGENT_MODEL_DOWN = {
+  title: "El agente no puede responder ahora",
+  body: "Los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+  /** En una línea: «El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.» */
+  line: "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+} as const
+
+/**
+ * «El modelo responde» (`GET /api/agent/model`): el modelo elegido y, si no
+ * responde, si el otro sí. El servidor lo guarda 10 minutos; nunca entrega el
+ * motivo técnico.
+ */
+export interface AgentModelStatus {
+  llm: AgentLlm
+  responds: boolean
+  other: { llm: AgentLlm; responds: boolean } | null
+  checkedAt: string
+}
+
+export const MODEL_CHECK_TEXT = {
+  checking: "Comprobando el modelo…",
+  otherWorks: "El modelo de odentIA no está disponible ahora. Ya avisamos a odentIA; mientras tanto puedes usar el otro.",
+  noneWorks: "Ningún modelo de odentIA responde ahora. Ya avisamos a odentIA y te escribimos cuando vuelva.",
+  unreachable: "No pudimos comprobar el modelo. Revisa tu conexión y vuelve a intentarlo.",
+} as const
+
+/** Lo que dice la comprobación cuando el modelo elegido no responde. */
+export function modelDownText(status: AgentModelStatus): string {
+  return status.other?.responds ? MODEL_CHECK_TEXT.otherWorks : MODEL_CHECK_TEXT.noneWorks
 }
 
 export interface AgentOverview {
@@ -407,6 +437,8 @@ export interface LearningOverview {
   learned: LessonItem[]
   withdrawn: LessonItem[]
   cases: number
+  /** Cuántas reglas de un agente le llegan como mucho; pasado el tope, las más antiguas no le llegan. */
+  ruleLimit: number
 }
 
 export interface LessonPreview {
@@ -497,31 +529,43 @@ export interface TestCaseItem {
   createdAt: string
 }
 
-/**
- * Las indicaciones de la clínica se guardan como un solo texto; la página las
- * presenta una por línea. `line` es la posición en el texto guardado, para
- * cambiar una sin tocar las demás.
- */
-export function splitInstructions(text: string): Array<{ line: number; text: string }> {
-  return text
-    .split(/\r?\n/)
-    .map((raw, line) => ({ line, text: raw.trim() }))
-    .filter((item) => item.text.length > 0)
+/** Una línea de «Lo que el agente debe saber» (decisión 24), como la entrega `/api/agent/learning/guidance`. */
+export interface GuidanceItem {
+  id: string
+  body: string
+  source: "escrita" | "aprendida"
+  /** Escrita: quién la escribió. Aprendida: quién la aprobó. */
+  byName: string | null
+  at: string
+  conversationId: string | null
+  contactName: string | null
 }
 
-/**
- * El texto guardado con una indicación cambiada, quitada (texto vacío) o
- * añadida al final (`line` nulo). Las demás líneas quedan como estaban; una
- * indicación ocupa una sola línea, así que sus saltos se vuelven espacios.
- */
-export function withInstruction(text: string, line: number | null, next: string): string {
-  const value = next.replace(/\s*\r?\n\s*/g, " ").trim()
-  const lines = text.split(/\r?\n/)
-  if (line === null) {
-    if (!value) return text
-    return text.trim() ? `${text.replace(/\s+$/, "")}\n${value}` : value
-  }
-  if (value) lines[line] = value
-  else lines.splice(line, 1)
-  return lines.join("\n")
+export interface GuidanceList {
+  items: GuidanceItem[]
+  counts: { all: number; escrita: number; aprendida: number }
 }
+
+export const GUIDANCE_KEY = ["agent-guidance"] as const
+
+/** Una cita que el agente propuso y espera el sí de la persona (`/api/agent/awaiting`). */
+export interface AwaitingAnswerItem {
+  id: string
+  conversationId: string
+  contactId: string | null
+  contactName: string | null
+  channel: string | null
+  action: "reservar_cita" | "reprogramar_cita" | "cancelar_cita"
+  /** «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas». */
+  text: string
+  createdAt: string
+  /** El horario se ocupó (o la cita cambió) mientras esperaba. */
+  taken: boolean
+}
+
+export interface AwaitingAnswerList {
+  items: AwaitingAnswerItem[]
+  total: number
+}
+
+export const AWAITING_ANSWER_KEY = ["agent-awaiting"] as const

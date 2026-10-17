@@ -121,7 +121,8 @@ interface ServiceItem {
   source: string
   code: string | null
   name: string
-  specialty: string | null
+  specialtyId: string | null
+  specialtyName?: string | null
   scope: string | null
   priceCents: number | null
   currency: string
@@ -138,6 +139,18 @@ async function getJson(app: Hono, path: string): Promise<Response> {
 const PREVENCION_KEY = "cpms:RM-550-2023-MINSA:D1110" // Profilaxis dental
 const RESTAURADORA_KEY = "cpms:RM-550-2023-MINSA:D2391" // Resina, 1 superficie
 
+/**
+ * La especialidad de la clínica con esa clave (ADR 0039): las organizaciones
+ * de la prueba se crean a mano, así que nace aquí si falta.
+ */
+async function sp(key: string, orgId = "org_a"): Promise<string> {
+  const rows = (await ownerDb.execute(
+    sql`insert into "org_specialty" ("organization_id", "key", "name") values (${orgId}, ${key}, ${key})
+      on conflict ("organization_id", "key") do update set "key" = excluded."key" returning "id"`,
+  )) as unknown as Array<{ id: string }>
+  return rows[0]!.id
+}
+
 async function templateIdByKey(key: string): Promise<string> {
   const rows = (await ownerDb.execute(
     sql`select "id" from "treatment_template" where "key" = ${key}`,
@@ -150,9 +163,9 @@ it("services: leer un tarifario vacío no crea ofertas (recepción; member 403)"
   const app = buildApp("reception")
   const res = await getJson(app, "/services")
   expect(res.status).toBe(200)
-  expect(await res.json()).toEqual({ data: [], nextCursor: null })
+  expect(await res.json()).toEqual({ data: [], nextCursor: null, total: 0 })
   const legacy = await getJson(app, "/services?state=legacy")
-  expect(await legacy.json()).toEqual({ data: [], nextCursor: null })
+  expect(await legacy.json()).toEqual({ data: [], nextCursor: null, total: 0 })
   const member = buildApp("member")
   expect((await getJson(member, "/services")).status).toBe(403)
 })
@@ -176,7 +189,7 @@ it("services: POST crea y PATCH edita con owner/admin; member 403", async () => 
     body: JSON.stringify({
       code: "car-01",
       name: "Carilla propia",
-      specialty: "estetica",
+      specialtyId: await sp("estetica"),
       scope: "tooth",
       priceCents: 150000,
     }),
@@ -199,7 +212,7 @@ it("services: POST crea y PATCH edita con owner/admin; member 403", async () => 
   const deniedCreate = await member.request("/services", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "X", specialty: "estetica", scope: "tooth" }),
+    body: JSON.stringify({ name: "X", specialtyId: await sp("estetica"), scope: "tooth" }),
   })
   expect(deniedCreate.status).toBe(403)
   const deniedPatch = await member.request(`/services/${createdBody.data.id}`, {
@@ -221,7 +234,8 @@ it("services: oferta desde plantilla hereda especialidad y ámbito", async () =>
   expect(res.status).toBe(201)
   const body = (await res.json()) as { data: ServiceItem }
   expect(body.data.source).toBe("template")
-  expect(body.data.specialty).toBe("prevencion")
+  // La especialidad de la clínica con la clave de la plantilla.
+  expect(body.data.specialtyId).toBe(await sp("prevencion"))
   expect(body.data.scope).toBe("general")
   expect(body.data.name).toBe("Profilaxis dental")
 
@@ -273,6 +287,44 @@ it("services: incorporar otra vez una plantilla conserva su tarifa configurada",
   expect(secondBody.data.existing[0]?.priceCents).toBe(18000)
 })
 
+it("services: «Cómo dice el precio» se elige al agregar y se cambia para varios a la vez; member 403", async () => {
+  const app = buildApp("owner")
+  const added = await app.request("/services/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      items: [
+        { kind: "custom", name: "Férula de descarga propia", specialtyId: await sp("disfuncion"), scope: "general", priceCents: 25000 },
+        { kind: "custom", name: "Guarda nocturna propia", specialtyId: await sp("disfuncion"), scope: "general", priceCents: 30000 },
+      ],
+      priceDisclosure: "exacto",
+    }),
+  })
+  expect(added.status).toBe(201)
+  const created = ((await added.json()) as { data: { created: Array<ServiceItem & { priceDisclosure: string }> } }).data.created
+  expect(created.map((row) => row.priceDisclosure)).toEqual(["exacto", "exacto"])
+  const ids = created.map((row) => row.id)
+  const changed = await app.request("/services/price-disclosure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceIds: ids, priceDisclosure: "desde" }),
+  })
+  expect(changed.status).toBe(200)
+  expect(await changed.json()).toEqual({ data: { updated: 2 } })
+  const denied = await buildApp("member").request("/services/price-disclosure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceIds: ids, priceDisclosure: "evaluacion" }),
+  })
+  expect(denied.status).toBe(403)
+  const invalid = await app.request("/services/price-disclosure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serviceIds: ids, priceDisclosure: "gratis" }),
+  })
+  expect(invalid.status).toBe(400)
+})
+
 it("services: state filtra activas e inactivas", async () => {
   const app = buildApp("owner")
   const created = await app.request("/services", {
@@ -280,7 +332,7 @@ it("services: state filtra activas e inactivas", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       name: "Temporal",
-      specialty: "cirugia",
+      specialtyId: await sp("cirugia"),
       scope: "general",
       priceCents: 0,
     }),
@@ -315,7 +367,7 @@ it("services: aislamiento por org y moneda desde el perfil", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       name: "Oferta sur",
-      specialty: "cirugia",
+      specialtyId: await sp("cirugia", "org_b"),
       scope: "general",
       priceCents: 5000,
     }),
@@ -352,7 +404,7 @@ async function mostUsed(app: Hono): Promise<MostUsedConcept[]> {
 
 it("services: «Más usados» sugiere por concepto a una clínica sin servicios", async () => {
   const app = buildApp("owner", "org_c")
-  expect(await (await getJson(app, "/services")).json()).toEqual({ data: [], nextCursor: null })
+  expect(await (await getJson(app, "/services")).json()).toEqual({ data: [], nextCursor: null, total: 0 })
 
   const concepts = await mostUsed(app)
   // Conceptos generales, no códigos: la biblioteca disponible los resuelve.
@@ -413,7 +465,7 @@ it("services: lo incorporado no se repite en «Más usados» y guarda nombre, pr
         {
           kind: "custom",
           name: "Control de ortodoncia",
-          specialty: "ortodoncia",
+          specialtyId: await sp("ortodoncia", "org_c"),
           scope: "general",
           priceCents: 25000,
           billingMode: "session",
@@ -434,7 +486,7 @@ it("services: lo incorporado no se repite en «Más usados» y guarda nombre, pr
   expect(limpieza).toMatchObject({
     name: "Limpieza dental",
     source: "template",
-    specialty: "prevencion",
+    specialtyId: await sp("prevencion", "org_c"),
     priceCents: 35000,
     durationMin: 30,
   })
@@ -483,7 +535,8 @@ it("services: la carga rápida es todo o nada", async () => {
     body: JSON.stringify({
       items: [
         { kind: "template", templateId, priceCents: 90000 },
-        { kind: "custom", name: "Sin área", specialty: "no-existe", scope: "general", priceCents: 1 },
+        // Una especialidad de otra clínica no sirve: todo o nada.
+        { kind: "custom", name: "Sin área", specialtyId: await sp("cirugia", "org_a"), scope: "general", priceCents: 1 },
       ],
     }),
   })
@@ -525,7 +578,7 @@ it("services: sin región configurada no se pone precio a un servicio", async ()
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       name: "Sin moneda",
-      specialty: "cirugia",
+      specialtyId: await sp("cirugia", "org_d"),
       scope: "general",
       priceCents: 5000,
     }),
@@ -544,7 +597,7 @@ it("services: sin región configurada no se pone precio a un servicio", async ()
     }),
   })
   expect(fromLibrary.status).toBe(409)
-  expect(await (await getJson(app, "/services")).json()).toEqual({ data: [], nextCursor: null })
+  expect(await (await getJson(app, "/services")).json()).toEqual({ data: [], nextCursor: null, total: 0 })
 })
 
 it("services: código duplicado responde 409 DUPLICATE_CODE", async () => {
@@ -552,7 +605,7 @@ it("services: código duplicado responde 409 DUPLICATE_CODE", async () => {
   const payload = {
     code: "dup",
     name: "Duplicado",
-    specialty: "cirugia",
+    specialtyId: await sp("cirugia"),
     scope: "general",
     priceCents: 100,
   }
@@ -569,4 +622,90 @@ it("services: código duplicado responde 409 DUPLICATE_CODE", async () => {
   })
   expect(second.status).toBe(409)
   expect(((await second.json()) as { error: { code: string } }).error.code).toBe("DUPLICATE_CODE")
+})
+
+it("services: con más de 100 servicios la lista pagina y dice el total; lo elegido se nombra por id", async () => {
+  // Una clínica mediana aparte: 105 servicios activos y uno inactivo.
+  await ownerDb.execute(
+    sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_e', 'Clínica Grande', 'grande', now())`,
+  )
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale")
+      values ('org_e', 'Grande', 'PE', 'PEN', 'America/Lima', 'es-PE')`,
+  )
+  const endo = await sp("endodoncia", "org_e")
+  const general = await sp("general", "org_e")
+  await ownerDb.execute(sql`
+    insert into "service_catalog" ("organization_id", "source", "name", "specialty_id", "scope", "price_cents", "currency", "is_active")
+    select 'org_e', 'custom', 'Servicio ' || lpad(n::text, 3, '0'), case when n <= 6 then ${endo}::uuid else ${general}::uuid end, 'general', 1000, 'PEN', n <> 106
+    from generate_series(1, 106) as n`)
+  const app = buildApp("reception", "org_e")
+  const first = (await (await getJson(app, "/services?limit=100")).json()) as {
+    data: ServiceItem[]
+    nextCursor: string | null
+    total: number
+  }
+  expect(first.total).toBe(105)
+  expect(first.data).toHaveLength(100)
+  expect(first.nextCursor).not.toBeNull()
+  const second = (await (
+    await getJson(app, `/services?limit=100&cursor=${encodeURIComponent(first.nextCursor!)}`)
+  ).json()) as { data: ServiceItem[]; nextCursor: string | null; total: number }
+  expect(second.data.map((row) => row.name)).toEqual(["Servicio 101", "Servicio 102", "Servicio 103", "Servicio 104", "Servicio 105"])
+  expect(second.nextCursor).toBeNull()
+  expect(second.total).toBe(105)
+  // El buscador encuentra el último aunque no esté en la primera página.
+  const found = (await (await getJson(app, "/services?q=105&limit=30")).json()) as { data: ServiceItem[]; total: number }
+  expect(found.data.map((row) => row.name)).toEqual(["Servicio 105"])
+  expect(found.total).toBe(1)
+  // Filtrado por la especialidad de la clínica, con su nombre en cada fila.
+  const byEndo = (await (await getJson(app, `/services?specialtyId=${endo}`)).json()) as { data: ServiceItem[]; total: number }
+  expect(byEndo.total).toBe(6)
+  expect(byEndo.data.every((row) => row.specialtyId === endo && row.specialtyName === "endodoncia")).toBe(true)
+  // Lo ya elegido se nombra aunque no esté en la primera página ni siga activo.
+  const all = [...first.data, ...second.data]
+  const last = all.find((row) => row.name === "Servicio 105")!
+  const inactive = ((await ownerDb.execute(
+    sql`select "id" from "service_catalog" where "organization_id" = 'org_e' and not "is_active"`,
+  )) as unknown as Array<{ id: string }>)[0]!.id
+  const named = (await (await getJson(app, `/services?ids=${last.id},${inactive}`)).json()) as { data: ServiceItem[] }
+  expect(named.data.map((row) => row.name).sort()).toEqual(["Servicio 105", "Servicio 106"])
+  const one = await getJson(app, `/services/${last.id}`)
+  expect(one.status).toBe(200)
+  expect(((await one.json()) as { data: ServiceItem }).data).toMatchObject({ name: "Servicio 105", specialtyName: "general" })
+  // Otra clínica no lo ve.
+  expect((await getJson(buildApp("owner", "org_a"), `/services/${last.id}`)).status).toBe(404)
+  expect((await getJson(app, "/services?ids=no-es-un-id")).status).toBe(400)
+})
+
+it("services: cada servicio tiene una sola especialidad de la clínica, también el de la biblioteca", async () => {
+  const app = buildApp("owner")
+  const tpl = await templateIdByKey(RESTAURADORA_KEY)
+  // De la biblioteca: la especialidad de la clínica con la clave de la plantilla.
+  const listed = (await (await getJson(app, "/services?limit=100")).json()) as { data: ServiceItem[] }
+  const fromLibrary = listed.data.find((row) => row.templateId === tpl)!
+  expect(fromLibrary.specialtyId).toBe(await sp("restauradora"))
+  // La clínica la cambia en el formulario del servicio: una sola, la nueva.
+  const estetica = await sp("estetica")
+  const moved = await app.request(`/services/${fromLibrary.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ specialtyId: estetica }),
+  })
+  expect(moved.status).toBe(200)
+  expect(((await moved.json()) as { data: ServiceItem }).data.specialtyId).toBe(estetica)
+  // Una especialidad de otra clínica no sirve.
+  const foreign = await app.request(`/services/${fromLibrary.id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ specialtyId: await sp("estetica", "org_b") }),
+  })
+  expect(foreign.status).toBe(400)
+  // Un servicio propio sin especialidad no se crea.
+  const missing = await app.request("/services", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Sin especialidad", scope: "general", priceCents: 100 }),
+  })
+  expect(missing.status).toBe(400)
 })

@@ -68,9 +68,11 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
     conditions: [],
     medications: [],
   })
+  // La clínica nace con las especialidades de la biblioteca: el servicio apunta a la suya (ADR 0039).
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", slug)
   const service = await call<{ id: string }>(page, "POST", "/api/services", slug, {
     name: "Endodoncia unirradicular",
-    specialty: "endodoncia",
+    specialtyId: specialties.find((item) => item.key === "endodoncia")!.id,
     scope: "tooth",
     priceCents: 45000,
     currency: "PEN",
@@ -104,10 +106,10 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
   await call(page, "PATCH", `${apiPath}/encounters/${encounter.id}`, slug, {
     evolution: "Se evalúa pieza 36 con caries oclusal; se indica endodoncia.",
   })
-  // El cierre exige diagnóstico CIE-10 con tipo y la colegiatura de quien firma (ADR 0003).
+  // El cierre exige un diagnóstico de la lista con tipo y la colegiatura de quien firma (ADR 0003).
   await call(page, "POST", `${apiPath}/encounters/${encounter.id}/diagnoses`, slug, {
-    cie10Code: "K02.1",
-    diagnosisType: "definitivo",
+    diagnosisCode: "K02.1",
+    diagnosisType: "confirmed",
     toothNumber: 36,
     surfaces: ["occlusal"],
   }, 201)
@@ -130,7 +132,7 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
 }
 
 /**
- * Agenda mínima para reservar: un sillón y horario diario del propio usuario.
+ * Agenda mínima para reservar: una unidad dental y horario diario del propio usuario.
  * Sin horario explícito no se puede programar un control.
  */
 export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: string }> {
@@ -141,7 +143,7 @@ export async function enableAgenda(owner: OwnerFixture): Promise<{ chairId: stri
     "POST",
     "/api/agenda/chairs",
     slug,
-    { branchId: owner.branchId, name: "Sillón control" },
+    { branchId: owner.branchId, name: "Unidad dental control" },
     201,
   )
   await call(page, "PUT", "/api/agenda/schedules", slug, {

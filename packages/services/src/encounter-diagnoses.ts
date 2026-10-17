@@ -1,5 +1,7 @@
 /**
- * Diagnósticos de la atención (ADR 0002): CIE-10 con tipo HIS y sitio dental.
+ * Diagnósticos de la atención (ADR 0002 y 0041): lista y código (CIE-10 o
+ * CIE-11, la de la clínica), su certeza (FHIR verificationStatus) y sitio
+ * dental. «Ya diagnosticado antes» lo marca el sistema (decisión 11).
  * Se registran y se anulan con motivo mientras la atención está en borrador;
  * su estado clínico (activo o resuelto) sigue al paciente y forma su lista de
  * problemas.
@@ -8,10 +10,11 @@
 import { isValidTooth, surfacesForTooth } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
-import { cie10Code, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
+import { diagnosisCatalog, encounter, encounterDiagnosis } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, isNull } from "drizzle-orm"
-import { assertCodableCie10, DIAGNOSIS_TYPES } from "./clinical.js"
+import { DIAGNOSIS_TYPES } from "./clinical.js"
+import { resolveDiagnosisCode, wasDiagnosedBefore } from "./diagnosis-codes.js"
 import { assertOpenDraft, type EncounterDiagnosisRow, lockEncounter } from "./encounters.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
@@ -19,7 +22,11 @@ import { requirePatient } from "./patients.js"
 export const DIAGNOSIS_STATUSES = ["activo", "resuelto"] as const
 
 export interface AddDiagnosisInput {
-  cie10Code: string
+  /** Código de la lista de la clínica: los diagnósticos nuevos se eligen en ella. */
+  diagnosisCode: string
+  /** Si viene, debe ser la lista de la clínica. */
+  diagnosisSystem?: string | null
+  /** provisional («Presuntivo») o confirmed («Definitivo»). */
   diagnosisType: string
   toothNumber?: number | null
   surfaces?: string[] | null
@@ -75,17 +82,15 @@ export async function addEncounterDiagnosis(
   await requirePatient(tx, orgId, patientId)
   const locked = await lockEncounter(tx, orgId, patientId, encounterId)
   assertOpenDraft(locked, actorUserId)
-  const code = input.cie10Code?.trim()
-  if (!code) throw validation("El código CIE-10 es obligatorio")
-  const [known] = await tx
-    .select({ code: cie10Code.code })
-    .from(cie10Code)
-    .where(eq(cie10Code.code, code))
-    .limit(1)
-  if (!known) throw validation(`Código CIE-10 inexistente: ${code}`)
-  await assertCodableCie10(tx, code)
+  const found = await resolveDiagnosisCode(
+    tx,
+    orgId,
+    { code: input.diagnosisCode, system: input.diagnosisSystem },
+    { newDiagnosis: true, codable: true },
+  )
   if (!(DIAGNOSIS_TYPES as readonly string[]).includes(input.diagnosisType))
-    throw validation("Tipo de diagnóstico inválido: presuntivo, definitivo o repetido")
+    throw validation("Elige si el diagnóstico es presuntivo o definitivo")
+  const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
   const toothNumber = input.toothNumber ?? null
   if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
     throw validation("Pieza FDI inválida")
@@ -98,8 +103,10 @@ export async function addEncounterDiagnosis(
       organizationId: orgId,
       patientId,
       encounterId,
-      cie10Code: code,
+      diagnosisSystem: found.system,
+      diagnosisCode: found.code,
       diagnosisType: input.diagnosisType,
+      previouslyDiagnosed,
       toothNumber,
       surfaces,
       note,
@@ -110,7 +117,8 @@ export async function addEncounterDiagnosis(
   await audit(tx, orgId, actorUserId, "encounter.diagnosis_added", row.id, {
     patientId,
     encounterId,
-    cie10Code: code,
+    diagnosisSystem: found.system,
+    diagnosisCode: found.code,
   })
   return row
 }
@@ -203,7 +211,7 @@ export async function setDiagnosisStatus(
 
 /**
  * Lista de problemas del paciente: diagnósticos no anulados de atenciones no
- * anuladas, con su descripción CIE-10, primero los activos y los más recientes.
+ * anuladas, con la descripción de su lista, primero los activos y los más recientes.
  */
 export async function listPatientDiagnoses(
   tx: Db,
@@ -217,13 +225,19 @@ export async function listPatientDiagnoses(
   const rows = await tx
     .select({
       diagnosis: encounterDiagnosis,
-      description: cie10Code.description,
+      description: diagnosisCatalog.title,
       encounterStatus: encounter.status,
       encounterStartedAt: encounter.startedAt,
       authorName: user.name,
     })
     .from(encounterDiagnosis)
-    .innerJoin(cie10Code, eq(cie10Code.code, encounterDiagnosis.cie10Code))
+    .innerJoin(
+      diagnosisCatalog,
+      and(
+        eq(diagnosisCatalog.systemKey, encounterDiagnosis.diagnosisSystem),
+        eq(diagnosisCatalog.code, encounterDiagnosis.diagnosisCode),
+      ),
+    )
     .leftJoin(
       encounter,
       and(

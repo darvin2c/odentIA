@@ -12,14 +12,14 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
-import { cie10Code, encounter, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
+import { diagnosisCodeRef, encounter, orgSpecialty, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
 import { orgFk, timestamps } from "./crm.js"
 
 /**
  * Especialidades y formularios clínicos por organización.
  *
- * - Las especialidades las crea cada organización (sin enum fijo): todo lo
- *   demás cuelga de `org_specialty`.
+ * - Las especialidades son las de cada organización (`org_specialty`, que
+ *   nace con las de la biblioteca): todo lo demás cuelga de ella.
  * - Las plantillas de formulario y de consentimiento se versionan por filas
  *   nuevas (nunca se muta una versión publicada): los registros capturados
  *   guardan snapshot de versión + contenido para no alterarse.
@@ -27,24 +27,8 @@ import { orgFk, timestamps } from "./crm.js"
  *   hallazgos dentales; estos formularios no lo reemplazan.
  */
 
-/** Especialidad creada por la organización (p. ej. "Endodoncia"). */
-export const orgSpecialty = pgTable(
-  "org_specialty",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    /** Clave estable por organización (slug). */
-    key: text("key").notNull(),
-    name: text("name").notNull(),
-    description: text("description"),
-    isActive: boolean("is_active").notNull().default(true),
-    ...timestamps,
-  },
-  (table) => [
-    uniqueIndex("org_specialty_org_key_uidx").on(table.organizationId, table.key),
-    index("org_specialty_org_active_idx").on(table.organizationId, table.isActive),
-  ],
-)
+/** La especialidad vive junto al servicio que apunta a ella; aquí se reexporta. */
+export { orgSpecialty } from "./clinical.js"
 
 /** Profesionales (usuarios miembros) adscritos a una especialidad. */
 export const professionalSpecialty = pgTable(
@@ -104,30 +88,6 @@ export const professionalProfile = pgTable(
   ],
 )
 
-/** Prestaciones del tarifario vinculadas a una especialidad dinámica. */
-export const serviceSpecialty = pgTable(
-  "service_specialty",
-  {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    specialtyId: uuid("specialty_id")
-      .notNull()
-      .references(() => orgSpecialty.id, { onDelete: "cascade" }),
-    serviceId: uuid("service_id")
-      .notNull()
-      .references(() => serviceCatalog.id, { onDelete: "cascade" }),
-    ...timestamps,
-  },
-  (table) => [
-    uniqueIndex("service_specialty_uidx").on(
-      table.organizationId,
-      table.specialtyId,
-      table.serviceId,
-    ),
-    index("service_specialty_org_service_idx").on(table.organizationId, table.serviceId),
-  ],
-)
-
 export const FORM_TEMPLATE_STATUSES = ["borrador", "publicado", "archivado"] as const
 
 /**
@@ -176,7 +136,8 @@ export const clinicalFormTemplate = pgTable(
   ],
 )
 
-export const FORM_RESPONSE_STATUSES = ["borrador", "finalizado"] as const
+/** Igual que su CHECK (`catalog-checks.test.ts`): «descartado» es el borrador que se dejó. */
+export const FORM_RESPONSE_STATUSES = ["borrador", "finalizado", "descartado"] as const
 
 /**
  * Captura de un formulario por paciente/atención. Guarda snapshot de la
@@ -371,7 +332,8 @@ export const consentDocument = pgTable(
     revokeReason: text("revoke_reason"),
     /** Snapshot de las secciones aceptadas (inmutable). */
     sectionsSnapshot: jsonb("sections_snapshot"),
-    /** CIE-10 que motiva el procedimiento. */
+    /** Diagnóstico que motiva el procedimiento: lista y código. */
+    diagnosisSystem: text("diagnosis_system"),
     diagnosisCode: text("diagnosis_code"),
     /** Profesional que informa: snapshot de su perfil y firma manuscrita. */
     informedAt: timestamp("informed_at", { withTimezone: true }),
@@ -413,6 +375,7 @@ export const consentDocument = pgTable(
     ...timestamps,
   },
   (table) => [
+    ...diagnosisCodeRef("consent_document", table),
     index("consent_document_org_patient_idx").on(table.organizationId, table.patientId),
     index("consent_document_org_status_idx").on(table.organizationId, table.status),
     index("consent_document_org_template_idx").on(table.organizationId, table.templateId),
@@ -493,8 +456,9 @@ export const clinicalOrder = pgTable(
     resultText: text("result_text"),
     resultAt: timestamp("result_at", { withTimezone: true }),
     completedBy: text("completed_by").references(() => user.id),
-    /** CIE-10 de la atención que motiva la orden. */
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    /** Diagnóstico de la atención que motiva la orden: lista y código. */
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     /** Resultado subido a la propia orden (FK compuesta en la migración). */
     resultDocumentId: uuid("result_document_id"),
     /** Derivación a un colega de la clínica: recibe la tarea. */
@@ -506,6 +470,7 @@ export const clinicalOrder = pgTable(
   },
   (table) => [
     index("clinical_order_org_patient_idx").on(table.organizationId, table.patientId),
+    ...diagnosisCodeRef("clinical_order", table),
     index("clinical_order_org_status_idx").on(table.organizationId, table.status),
     index("clinical_order_org_specialty_idx").on(table.organizationId, table.specialtyId),
     check(
@@ -535,7 +500,6 @@ export type ClinicalOrderRow = typeof clinicalOrder.$inferSelect
 export const CLINICAL_FORMS_TABLES = [
   "org_specialty",
   "professional_specialty",
-  "service_specialty",
   "clinical_form_template",
   "clinical_form_response",
   "clinical_form_addendum",

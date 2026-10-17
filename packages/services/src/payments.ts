@@ -19,7 +19,7 @@ import { cashClosure } from "@odentia/db/schema/finance"
 import { auditEvent } from "@odentia/db/schema/org"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { user } from "@odentia/db/schema/auth"
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, or, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { orgProfileRequired } from "./locale.js"
 import {
@@ -32,8 +32,10 @@ import {
 } from "./finance.js"
 import { isCashLike, requirePaymentMethod } from "./payment-methods.js"
 import { requirePromotionPrice } from "./promotions.js"
+import { budgetLineUnits } from "./budgets.js"
 import { requirePatient } from "./patients.js"
 import { requireLinkedActiveContact } from "./responsibilities.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Aviso en vivo para el stream del home (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
 async function notify(tx: Db, payload: { orgId: string; kind: string; at: string }): Promise<void> {
@@ -61,7 +63,7 @@ function instant(value: string): Date {
     throw validation("Fecha ISO inválida")
   return date
 }
-function sum(rows: Array<{ amountCents: number }>): number {
+function sum(rows: ReadonlyArray<{ amountCents: number }>): number {
   let total = 0
   for (const row of rows) {
     total += row.amountCents
@@ -965,8 +967,9 @@ export async function collectCharge(
     throw validation("No hay saldo a favor ni medios para cobrar")
   const ticketNumber = await nextTicketNumber(tx, orgId)
   const [person] = await tx
-    .select({ displayName: patient.displayName, docType: patient.docType, docNumber: patient.docNumber })
+    .select({ displayName: patientPerson.displayName, docType: patientPerson.docType, docNumber: patientPerson.docNumber })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
   const [payer] = input.payerContactId
     ? await tx
@@ -1092,7 +1095,6 @@ export async function collectCharge(
         amountCents: item.amountCents,
         currency: unit,
         paidAt,
-        method: item.name,
         reference: item.reference,
         createdBy: actorUserId,
       })
@@ -1142,7 +1144,7 @@ export async function collectCharge(
       paymentId: payment.id,
       amountCents: payment.amountCents,
       currency: payment.currency,
-      methodName: payment.methodName ?? payment.method,
+      methodName: payment.methodName,
       methodTypeCode: payment.methodTypeCode,
       concept: `Ticket ${ticketNumber}`,
     })
@@ -1357,8 +1359,9 @@ export async function refundCredit(
   // La constancia se congela al devolver: clínica, sede, a quién, cuánto y por
   // qué medio. El PDF se arma solo con esto, igual que el ticket.
   const [person] = await tx
-    .select({ displayName: patient.displayName, docType: patient.docType, docNumber: patient.docNumber })
+    .select({ displayName: patientPerson.displayName, docType: patientPerson.docType, docNumber: patientPerson.docNumber })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
   const [issuer] = await tx.select({ name: user.name }).from(user).where(eq(user.id, actorUserId))
   const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId))
@@ -1492,6 +1495,59 @@ export interface AccountPending {
  * pendiente por concepto y cobros (tickets con estado). Sin selector de
  * moneda: cada fila trae la suya.
  */
+/**
+ * Lo que debe, lo que pagó, lo que tiene a favor y el saldo, por moneda. Una
+ * sola fórmula para Caja, la página de la persona, el portal y los mensajes
+ * (decisión 22): el saldo descuenta lo que tiene a favor, nunca baja de cero.
+ * «Debe: S/ 100 · A favor: S/ 100 · Saldo: S/ 0».
+ */
+export function accountBalances(rows: {
+  charges: ReadonlyArray<{ currency: string; amountCents: number; voidedAt: Date | null }>
+  payments: ReadonlyArray<{ id: string; currency: string; amountCents: number; voidedAt: Date | null }>
+  applications: ReadonlyArray<{ paymentId: string; amountCents: number; voidedAt: Date | null }>
+  refunds: ReadonlyArray<{ paymentId: string; amountCents: number }>
+}): Array<{ currency: string; porCobrar: number; pagado: number; aFavor: number; saldo: number }> {
+  const liveCharges = rows.charges.filter((c) => !c.voidedAt)
+  const livePayments = rows.payments.filter((p) => !p.voidedAt)
+  const currencyOf = new Map(livePayments.map((p) => [p.id, p.currency]))
+  const units = [...new Set([...liveCharges.map((c) => c.currency), ...livePayments.map((p) => p.currency)])].sort()
+  return units.map((unit) => {
+    const charged = sum(liveCharges.filter((c) => c.currency === unit))
+    const paid = sum(livePayments.filter((p) => p.currency === unit))
+    const applied = sum(rows.applications.filter((a) => !a.voidedAt && currencyOf.get(a.paymentId) === unit))
+    const refunded = sum(rows.refunds.filter((r) => currencyOf.get(r.paymentId) === unit))
+    const porCobrar = charged - applied
+    const aFavor = paid - applied - refunded
+    return {
+      currency: unit,
+      porCobrar,
+      // Neto que conserva la clínica: lo cobrado menos lo devuelto.
+      pagado: paid - refunded,
+      aFavor,
+      // Lo que de verdad falta: lo que debe menos lo que ya tiene a favor.
+      saldo: Math.max(porCobrar - Math.max(aFavor, 0), 0),
+    }
+  })
+}
+
+/**
+ * Lo que la persona tiene a favor en una moneda, en SQL: lo pagado menos lo
+ * aplicado y lo devuelto (la misma cuenta que `accountBalances`). Lo que avisa
+ * de un saldo vencido lo resta de lo que debe: con lo que tiene a favor
+ * alcanzando, no hay saldo vencido (decisión 22).
+ */
+export function patientCreditSql(orgId: SQLWrapper | string, patientId: SQLWrapper, currency: SQLWrapper): SQL {
+  return sql`(select coalesce(sum(credit_payment.amount_cents
+      - coalesce((select sum(credit_app.amount_cents) from patient_payment_application credit_app
+          where credit_app.organization_id = credit_payment.organization_id and credit_app.payment_id = credit_payment.id
+            and credit_app.voided_at is null), 0)
+      - coalesce((select sum(credit_refund.amount_cents) from patient_payment_refund credit_refund
+          where credit_refund.organization_id = credit_payment.organization_id and credit_refund.payment_id = credit_payment.id), 0)), 0)
+    from patient_payment credit_payment
+    where credit_payment.organization_id = ${orgId} and credit_payment.patient_id = ${patientId}
+      and credit_payment.currency = ${currency} and credit_payment.voided_at is null)`
+}
+
 export async function getAccountSummary(tx: Db, orgId: string, patientId: string) {
   const patientRow = await requirePatient(tx, orgId, patientId)
   const charges = await tx
@@ -1542,28 +1598,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     refundedByPayment[refund.paymentId] = (refundedByPayment[refund.paymentId] ?? 0) + refund.amountCents
   const liveCharges = charges.filter((c) => !c.voidedAt)
   const livePayments = payments.filter((p) => !p.voidedAt)
-  const units = [...new Set([...liveCharges.map((c) => c.currency), ...livePayments.map((p) => p.currency)])].sort()
-  const byCurrency = units.map((unit) => {
-    const charged = sum(liveCharges.filter((c) => c.currency === unit))
-    const paid = sum(livePayments.filter((p) => p.currency === unit))
-    const applied = sum(
-      applications.filter((a) => {
-        if (a.voidedAt) return false
-        const payment = livePayments.find((p) => p.id === a.paymentId)
-        return payment?.currency === unit
-      }),
-    )
-    const refunded = sum(
-      refunds.filter((r) => livePayments.find((p) => p.id === r.paymentId)?.currency === unit),
-    )
-    return {
-      currency: unit,
-      porCobrar: charged - applied,
-      // Neto que conserva la clínica: lo cobrado menos lo devuelto.
-      pagado: paid - refunded,
-      aFavor: paid - applied - refunded,
-    }
-  })
+  const byCurrency = accountBalances({ charges, payments, applications, refunds })
   // Servicio de cada concepto vivo, en dos consultas (actos y líneas).
   const procedureIds = liveCharges.map((c) => c.encounterProcedureId).filter((v): v is string => !!v)
   const lineIds = liveCharges.map((c) => c.budgetItemId).filter((v): v is string => !!v)
@@ -1701,7 +1736,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     snapshot: ticket.snapshot,
     payments: (ticketPayments[ticket.id] ?? []).map((p) => ({
       id: p.id,
-      methodName: p.methodName ?? p.method,
+      methodName: p.methodName,
       amountCents: p.amountCents,
       voidedAt: p.voidedAt,
     })),
@@ -1713,7 +1748,7 @@ export async function getAccountSummary(tx: Db, orgId: string, patientId: string
     .map((p) => ({
       paymentId: p.id,
       currency: p.currency,
-      methodName: p.methodName ?? p.method,
+      methodName: p.methodName,
       methodTypeCode: p.methodTypeCode,
       amountCents: p.amountCents,
       appliedCents: appliedByPayment[p.id] ?? 0,
@@ -1869,7 +1904,12 @@ export async function getPatientAccount(tx: Db, orgId: string, patientId: string
     )
     .orderBy(asc(patientPaymentRefund.refundedAt), asc(patientPaymentRefund.id))
   const agreed = await tx
-    .select({ amountCents: treatmentBudgetItem.priceCents, currency: treatmentBudgetItem.currency })
+    .select({
+      priceCents: treatmentBudgetItem.priceCents,
+      currency: treatmentBudgetItem.currency,
+      billingMode: treatmentBudgetItem.billingMode,
+      sessionsPlanned: treatmentBudgetItem.sessionsPlanned,
+    })
     .from(treatmentBudgetItem)
     .innerJoin(
       treatmentPlanItem,
@@ -1896,27 +1936,18 @@ export async function getPatientAccount(tx: Db, orgId: string, patientId: string
         eq(treatmentBudgetItem.decision, "aceptado"),
       ),
     )
-  const units = [...new Set([...charges, ...payments, ...agreed].map((r) => r.currency))].sort()
+  // Los mismos montos que Caja (`accountBalances`); lo aceptado cuenta todas
+  // las visitas de lo que se cobra por sesión, como el presupuesto.
+  const balances = accountBalances({ charges, payments, applications, refunds })
+  const units = [...new Set([...balances.map((b) => b.currency), ...agreed.map((r) => r.currency)])].sort()
   const byCurrency = units.map((unit) => {
-    const unitCharges = charges.filter((r) => r.currency === unit && !r.voidedAt)
-    const unitPayments = payments.filter((r) => r.currency === unit && !r.voidedAt)
-    const paymentIds = new Set(unitPayments.map((p) => p.id))
-    const agreedCents = sum(
-      agreed.filter((r) => r.currency === unit).map((r) => ({ amountCents: r.amountCents ?? 0 })),
-    )
-    const chargedCents = sum(unitCharges)
-    const paidCents = sum(unitPayments)
-    const appliedCents = sum(applications.filter((a) => paymentIds.has(a.paymentId) && !a.voidedAt))
-    const refundedCents = sum(refunds.filter((r) => paymentIds.has(r.paymentId)))
+    const balance = balances.find((b) => b.currency === unit) ?? { porCobrar: 0, pagado: 0, aFavor: 0, saldo: 0 }
     return {
       currency: unit,
-      agreedCents,
-      chargedCents,
-      paidCents,
-      appliedCents,
-      refundedCents,
-      outstandingCents: chargedCents - appliedCents,
-      availableCreditCents: paidCents - appliedCents - refundedCents,
+      agreedCents: agreed
+        .filter((r) => r.currency === unit)
+        .reduce((total, r) => total + (r.priceCents ?? 0) * budgetLineUnits(r), 0),
+      ...balance,
     }
   })
   return { byCurrency, charges, payments, applications, refunds }

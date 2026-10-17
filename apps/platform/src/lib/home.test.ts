@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { agendaSummary, attendedPercent, daysAgo, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
+import { agendaSummary, attendedPercent, daysAgo, duplicateActions, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
 const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false }
@@ -47,14 +47,23 @@ describe("textos de «Te espera»", () => {
 
   it("una cita que no confirmó tras el recordatorio pide llamar, con el teléfono a la vista", () => {
     expect(waitingText({
-      kind: "unconfirmed", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
+      kind: "unconfirmed", why: "sin_confirmar", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
       startsAt: "2026-10-13T15:30:00.000Z", branchName: "Centro", serviceName: "Evaluación",
     }, context)).toMatchObject({ title: "Rosa Quispe no confirmó · llamar", action: "Ver la cita" })
     // La hora sale con el formato de la clínica; el día, en su zona.
     expect(waitingText({
-      kind: "unconfirmed", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
+      kind: "unconfirmed", why: "sin_confirmar", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
       startsAt: "2026-10-13T15:30:00.000Z", branchName: "Centro", serviceName: "Evaluación",
     }, context).detail).toMatch(/^\+51 987 654 100 · Cita mañana 10:30.* · Evaluación · Centro$/)
+  })
+
+  it("quien no recibe recordatorios sale el día antes para llamarla (ADR 0040)", () => {
+    const row = waitingText({
+      kind: "unconfirmed", why: "sin_recordatorios", id: "a1", patientId: "p1", patientName: "Lucía", phone: "+51 987 654 100",
+      startsAt: "2026-10-13T15:00:00.000Z", branchName: "Centro", serviceName: null,
+    }, context)
+    expect(row.title).toMatch(/^Lucía no recibe recordatorios: llámala para confirmar su cita de mañana 10:00/)
+    expect(row.action).toBe("Ver la cita")
   })
 
   it("una atención de otro día sin cerrar dice de quién es, cuándo empezó y qué le falta", () => {
@@ -84,12 +93,30 @@ describe("textos de «Te espera»", () => {
   it("lo que dejaron «Su enlace» y el portal dice qué hacer, sin datos de la otra ficha", () => {
     const createdAt = new Date(Date.now() - 20 * 60_000).toISOString()
     const duplicate: WaitingRow = {
-      kind: "possibleDuplicate", id: "t1", patientId: "p1", patientName: "Pedro Ríos",
+      kind: "possibleDuplicate", id: "t1", source: "enlace", patientId: "p1", personId: null, patientName: "Pedro Ríos", personName: null,
       detail: "El documento ya está en otra ficha", createdAt,
     }
     expect(waitingText(duplicate, context)).toEqual({
       title: "Posible ficha repetida: Pedro Ríos", detail: "Desde su enlace hace 20 min · El documento ya está en otra ficha", action: "Revisar",
     })
+    // Alguien se registró en línea con el documento de una persona que ya estaba.
+    const held: WaitingRow = { ...duplicate, id: "t3", source: "registro", patientId: null, personId: "c1", patientName: "Rosa Ochoa", detail: "Escribió: Juan, +51999" }
+    expect(waitingText(held, context)).toEqual({
+      title: "Alguien se registró con el documento de Rosa Ochoa: revisa si es ella",
+      detail: "Desde el registro en línea hace 20 min · Escribió: Juan, +51999",
+      action: "Ver a Rosa Ochoa",
+    })
+    // La fila lleva a la persona; el botón la descarta.
+    expect(duplicateActions(held as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.label)).toEqual(["Descartar"])
+    // El registro de un menor nombró como representante a alguien que ya estaba.
+    const representative: WaitingRow = { ...duplicate, id: "t4", source: "representante", personId: "c2", personName: "Rosa Ochoa", patientName: "Sofía Ochoa", detail: "" }
+    expect(waitingText(representative, context).title).toBe("¿Rosa Ochoa es representante de Sofía Ochoa?")
+    // Confirmar la vincula; «No es ella» la descarta sin vincular.
+    expect(duplicateActions(representative as Extract<WaitingRow, { kind: "possibleDuplicate" }>)).toEqual([
+      { id: "confirmar", label: "Confirmar", primary: true },
+      { id: "descartar", label: "No es ella", primary: false },
+    ])
+    expect(duplicateActions(duplicate as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.id)).toEqual(["revisada"])
     const reentry: WaitingRow = { kind: "portalReentry", id: "t2", patientId: "p2", contactName: "Lucía Fernández", grantId: "g1", createdAt }
     expect(waitingText(reentry, context)).toEqual({
       title: "Lucía Fernández quiere volver a entrar al portal", detail: "Lo pidió hace 20 min · su acceso sigue vigente", action: "Enviar nuevo enlace",

@@ -1,5 +1,7 @@
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import { sql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/postgres-js"
+import postgres from "postgres"
 import { beforeAll, expect, it } from "vitest"
 import { addClinicalNote, getPatientHealth, savePatientHealth } from "./clinical.js"
 import { listClinicalAccess, recordClinicalAccess } from "./clinical-access.js"
@@ -31,7 +33,7 @@ import { createEncounter } from "./encounters.js"
 import { createPatient, getPatient } from "./patients.js"
 import { createPrescription } from "./prescriptions.js"
 import { grantResponsibility } from "./responsibilities.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, container, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -45,8 +47,15 @@ beforeAll(async () => {
         on conflict ("id") do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values
-        ('I10', 'Hipertensión esencial'), ('K04.0', 'Pulpitis') on conflict ("code") do nothing`,
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values
+        ('I10', 'Hipertensión esencial'), ('K04.0', 'Pulpitis')) as v(code, title)
+    on conflict do nothing`,
   )
 })
 
@@ -56,7 +65,7 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
     expectedRevision: 0,
     reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
     allergies: [{ substance: "Lidocaína", category: "anestesico", severity: "severa" }],
-    conditions: [{ name: "Hipertensión arterial", cie10Code: "i10", status: "activa" }],
+    conditions: [{ name: "Hipertensión arterial", diagnosisCode: "i10", status: "activa" }],
     medications: [{ name: "Cozaar 50 mg", genericName: "Losartán" }],
   }
   await run((tx) => savePatientHealth(tx, "org_a", ACTOR, patient.id, base))
@@ -64,7 +73,7 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
   expect(health.allergies).toEqual([
     expect.objectContaining({ substance: "Lidocaína", category: "anestesico", severity: "severa" }),
   ])
-  expect(health.conditions).toEqual([expect.objectContaining({ cie10Code: "I10" })])
+  expect(health.conditions).toEqual([expect.objectContaining({ diagnosisCode: "I10" })])
   expect(health.medications).toEqual([expect.objectContaining({ genericName: "Losartán" })])
 
   // Fuera de catálogo o código inexistente: se rechaza sin escribir nada.
@@ -82,7 +91,7 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
       savePatientHealth(tx, "org_a", ACTOR, patient.id, {
         ...base,
         expectedRevision: health.revision,
-        conditions: [{ name: "Otra", cie10Code: "ZZ99", status: "activa" }],
+        conditions: [{ name: "Otra", diagnosisCode: "ZZ99", status: "activa" }],
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })
@@ -98,25 +107,25 @@ it("diagnóstico: entidad de la atención con tipo, pieza y catálogo; la nota n
   )
   const dx = await run((tx) =>
     addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, {
-      cie10Code: "K04.0",
-      diagnosisType: "presuntivo",
+      diagnosisCode: "K04.0",
+      diagnosisType: "provisional",
       toothNumber: 46,
       surfaces: ["occlusal"],
     }),
   )
   expect(dx).toMatchObject({
-    cie10Code: "K04.0",
-    diagnosisType: "presuntivo",
+    diagnosisCode: "K04.0",
+    diagnosisType: "provisional",
     toothNumber: 46,
     surfaces: ["occlusal"],
     status: "activo",
   })
   for (const bad of [
-    { cie10Code: "K04.0", diagnosisType: "probable" },
-    { cie10Code: "K04.0", diagnosisType: "definitivo", toothNumber: 99 },
-    { cie10Code: "Z99.9", diagnosisType: "definitivo" },
-    { cie10Code: "K04.0", diagnosisType: "definitivo", surfaces: ["occlusal"] },
-    { cie10Code: "K04.0", diagnosisType: "definitivo", toothNumber: 11, surfaces: ["occlusal"] },
+    { diagnosisCode: "K04.0", diagnosisType: "probable" },
+    { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 99 },
+    { diagnosisCode: "Z99.9", diagnosisType: "confirmed" },
+    { diagnosisCode: "K04.0", diagnosisType: "confirmed", surfaces: ["occlusal"] },
+    { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 11, surfaces: ["occlusal"] },
   ]) {
     await expect(
       run((tx) => addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, bad)),
@@ -143,8 +152,8 @@ it("diagnóstico: entidad de la atención con tipo, pieza y catálogo; la nota n
   )
   const kept = await run((tx) =>
     addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, {
-      cie10Code: "K04.0",
-      diagnosisType: "definitivo",
+      diagnosisCode: "K04.0",
+      diagnosisType: "confirmed",
       toothNumber: 47,
     }),
   )
@@ -227,7 +236,8 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     grantResponsibility(tx, "org_a", ACTOR, child.id, {
       contactId: mother.id,
       kind: "representante_legal",
-      startsAt: new Date().toISOString().slice(0, 10),
+      // Hoy en la clínica (Lima): lo vigente se cuenta con su día, no con UTC.
+      startsAt: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date()),
       endsAt: null,
       evidenceDocumentId: null,
     }),
@@ -364,6 +374,71 @@ it("bitácora: registra quién consultó qué parte de la ficha, una fila por ho
   await expect(
     withOrgContext(appDb, "org_b", (tx) => listClinicalAccess(tx, "org_b", patient.id)),
   ).rejects.toMatchObject({ status: 404 })
+  // Los permisos siguen como en 0035: consulta, inserta y solo cuenta.
+  const [grants] = await ownerDb.execute<Record<string, boolean>>(sql`select
+    has_table_privilege('dentalagent_app', 'clinical_access_log', 'SELECT') as "select",
+    has_table_privilege('dentalagent_app', 'clinical_access_log', 'INSERT') as "insert",
+    has_table_privilege('dentalagent_app', 'clinical_access_log', 'UPDATE') as "update",
+    has_table_privilege('dentalagent_app', 'clinical_access_log', 'DELETE') as "delete",
+    has_table_privilege('dentalagent_app', 'clinical_access_log', 'TRUNCATE') as "truncate",
+    has_column_privilege('dentalagent_app', 'clinical_access_log', 'last_at', 'UPDATE') as "lastAt",
+    has_column_privilege('dentalagent_app', 'clinical_access_log', 'hits', 'UPDATE') as "hits",
+    has_column_privilege('dentalagent_app', 'clinical_access_log', 'user_id', 'UPDATE') as "userId",
+    has_column_privilege('dentalagent_app', 'clinical_access_log', 'bucket', 'UPDATE') as "bucket"`)
+  expect(grants).toEqual({
+    select: true,
+    insert: true,
+    update: false,
+    delete: false,
+    truncate: false,
+    lastAt: true,
+    hits: true,
+    userId: false,
+    bucket: false,
+  })
+  // Lo de una hora anterior va después, aunque se haya contado más tarde.
+  await ownerDb.execute(sql`insert into clinical_access_log
+    (organization_id, patient_id, user_id, resource, bucket, first_at, last_at)
+    values ('org_a', ${patient.id}, ${ACTOR}, 'recetas', date_trunc('hour', now()) - interval '2 hours',
+      now() - interval '2 hours', now() + interval '1 minute')`)
+  const ordered = await run((tx) => listClinicalAccess(tx, "org_a", patient.id))
+  expect(ordered.map((entry) => entry.resource).at(-1)).toBe("recetas")
+})
+
+it("bitácora: contar una consulta más se escribe en su sitio (HOT), sin tocar el índice", async () => {
+  const patient = await run((tx) => createPatient(tx, "org_a", ACTOR, { displayName: "Recargada" }))
+  // Una sola conexión del rol de la aplicación: al cerrarla, Postgres vuelca
+  // sus estadísticas y `pg_stat_user_tables` las refleja sin esperar.
+  const client = postgres(
+    `postgres://dentalagent_app:dentalagent_app@${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`,
+    { max: 1 },
+  )
+  const single = drizzle(client) as unknown as Db
+  // Cada recarga es su propia transacción, como en la API: `now()` cambia y
+  // `last_at` se reescribe de verdad.
+  for (let i = 0; i < 11; i++)
+    await withOrgContext(single, "org_a", (tx) =>
+      recordClinicalAccess(tx, "org_a", ACTOR, patient.id, "odontograma"),
+    )
+  await client.end()
+  const stats = async () => {
+    const rows = await ownerDb.execute<{ upd: string; hot: string }>(
+      sql`select n_tup_upd::text as upd, n_tup_hot_upd::text as hot
+          from pg_stat_user_tables where relname = 'clinical_access_log'`,
+    )
+    return { upd: Number(rows[0]!.upd), hot: Number(rows[0]!.hot) }
+  }
+  let current = await stats()
+  for (let waited = 0; current.hot < 10 && waited < 10_000; waited += 200) {
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    current = await stats()
+  }
+  // Las diez repeticiones fueron HOT, y ninguna actualización de la tabla
+  // dejó de serlo: `last_at` y `hits` no están en ningún índice.
+  expect(current.hot).toBeGreaterThanOrEqual(10)
+  expect(current.upd).toBe(current.hot)
+  const log = await run((tx) => listClinicalAccess(tx, "org_a", patient.id))
+  expect(log).toEqual([expect.objectContaining({ resource: "odontograma", hits: 11 })])
 })
 
 it("formularios: versión real al publicar, título congelado, tipos clínicos, condición y descarte", async () => {

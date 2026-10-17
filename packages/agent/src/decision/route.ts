@@ -76,7 +76,7 @@ export function routeOutcome(route: AgentRoute): Record<string, unknown> {
  * turno, y con WIDEN_TOOL recupera el resto si el camino se eligió mal. Los
  * caminos que no figuran aquí reciben todas.
  */
-const ALWAYS = ["send_reply", "send_template", "request_human_handoff"] as const
+const ALWAYS = ["send_reply", "request_human_handoff"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   derivar: ["request_human_handoff"],
@@ -84,24 +84,39 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // pregunta de precios: el presupuesto de la persona va en este camino.
   informacion: [
     ...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica",
-    "ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto",
+    "ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto", "enviar_comprobante",
     // «Cambié de teléfono y no puedo entrar al portal»: se pide como información.
     "pedir_volver_al_portal",
+    // «Ya no me manden promociones» se pide como información: elegir_mensajes (ADR 0040).
+    "elegir_mensajes",
   ],
   // Un agradecimiento o una despedida pueden cerrar la conversación (ADR 0024).
   // «Sí, ahí estaré» a un recordatorio puede llegar como saludo: confirmar_cita la confirma.
   // «Sí» a la pregunta del permiso general tras reservar también: responder_permiso_mensajes.
-  saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes"],
+  // «Ya no me manden recordatorios» como respuesta a uno: elegir_mensajes.
+  saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes", "elegir_mensajes"],
   clinico: [...ALWAYS],
   cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
-    "responder_permiso_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
+    "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
   ],
   cambio_cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "reprogramar_cita", "cancelar_cita", "confirmar_propuesta", "confirmar_cita",
-    "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso",
+    "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso",
   ],
 }
+/**
+ * Las herramientas del camino con las que de verdad tiene el turno. Con
+ * «Presupuestos» apagada, «¿me mandas mi presupuesto?» se atiende dejando una
+ * tarea a recepción: `create_task` viaja en el camino «información».
+ */
+export function routeToolsFor(path: RoutePath, available: ReadonlySet<string>): readonly string[] | undefined {
+  const base = ROUTE_TOOLS[path]
+  if (!base) return undefined
+  if (path === "informacion" && !available.has("ver_presupuesto") && available.has("create_task")) return [...base, "create_task"]
+  return base
+}
+
 /** Con esta herramienta el modelo que escribe pide el resto cuando el camino no alcanza. */
 export const WIDEN_TOOL = "ampliar_herramientas"
 /**
@@ -159,13 +174,20 @@ export function guardBurst(route: AgentRoute, messages: number): AgentRoute {
  * Respuesta fija a lo que no es de la clínica: no se llama al modelo que
  * escribe (no se usa el agente como chat gratis) y siempre dice lo mismo.
  */
-export function offTopicReply(treatment: "tu" | "usted" | null, persona: string | null, name: string): string {
+export function offTopicReply(treatment: "tu" | "usted" | null, persona: string | null, name: string, informs = true): string {
   // Sin punto final propio: «S.A.C.» no deja «S.A.C..».
   const clinic = name.trim().replace(/\.+$/, "")
   const who = persona ? `Soy ${persona}, asistente virtual de ${clinic}` : `Soy el asistente virtual de ${clinic}`
-  return treatment === "usted"
-    ? `${who}. Solo puedo ayudarle con temas de la clínica: citas, tratamientos, precios o sedes. ¿En qué le ayudo?`
-    : `${who}. Solo puedo ayudarte con temas de la clínica: citas, tratamientos, precios o sedes. ¿En qué te ayudo?`
+  // Con «Informar» apagado no se ofrecen precios ni tratamientos: el agente no responde eso.
+  const usted = treatment === "usted"
+  const topics = informs
+    ? "citas, tratamientos, precios o sedes"
+    : usted
+      ? "sus citas y lo que tenga pendiente con nosotros"
+      : "tus citas y lo que tengas pendiente con nosotros"
+  return usted
+    ? `${who}. Solo puedo ayudarle con temas de la clínica: ${topics}. ¿En qué le ayudo?`
+    : `${who}. Solo puedo ayudarte con temas de la clínica: ${topics}. ¿En qué te ayudo?`
 }
 
 export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string {
@@ -174,20 +196,59 @@ export function handoffFallbackNotice(treatment: "tu" | "usted" | null): string 
     : "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí."
 }
 
+/** Lo que el turno de verdad tiene, para que la indicación del camino no diga otra cosa. */
+export interface RouteFacts {
+  /** «Presupuestos» encendida (están sus herramientas). */
+  budgets?: boolean
+  /** Herramientas del turno; sin indicarlas se dan por todas las del camino. */
+  tools?: ReadonlySet<string>
+  /** Cómo van los servicios en el bloque de la clínica: con su id y precio, solo su índice o ninguno. */
+  services?: "lista" | "indice" | "ninguno"
+  /** «Informar» encendida. */
+  informs?: boolean
+}
+
 /**
  * Lo que se le dice al modelo que escribe sobre el camino del turno. Va con lo
  * propio del turno, después de lo estable. Es una indicación: si el dato no
  * está, el modelo aún puede consultar, pedir el resto de herramientas
- * (ROUTE_TOOLS) o pasar el caso.
+ * (ROUTE_TOOLS) o pasar el caso. Se arma con lo que el turno recibe de verdad
+ * (`RouteFacts`): nunca dice «arriba tienes» algo que no está ni nombra una
+ * herramienta que no tiene.
  */
-export function routeInstruction(path: RoutePath, prefetched?: string | null, options: { budgets?: boolean } = {}): string | null {
+export function routeInstruction(path: RoutePath, prefetched?: string | null, facts: RouteFacts = {}): string | null {
   const head = "Camino de este turno, elegido por lo que escribió el interlocutor:"
+  const has = (name: string) => (facts.tools ? facts.tools.has(name) : true)
+  const informs = facts.informs !== false
+  const services = facts.services ?? "lista"
   if (path === "informacion") {
-    // Con «Presupuestos» apagada no se nombran herramientas que no tiene: su indicación ya va arriba.
-    const budgets = options.budgets === false
-      ? ""
-      : " Si pide su propio presupuesto o responde a uno (qué acepta, qué deja para después), usa ver_presupuesto y después reenviar_presupuesto o anotar_respuesta_presupuesto."
-    return `${head} pide información. Arriba ya tienes las sedes, los servicios con sus tarifas, los medios de pago que acepta la clínica y las respuestas oficiales que aplican. Responde ahora con send_reply, en este mismo paso y sin llamar otras herramientas. Solo si el dato no está arriba, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona.${budgets}`
+    // Con «Presupuestos» apagada no se nombran herramientas que no tiene: deja la tarea a recepción.
+    const budgets =
+      facts.budgets === false
+        ? has("create_task")
+          ? " Si pide su propio presupuesto o responde a uno, deja una tarea a recepción con create_task (por ejemplo «Lucía pidió su presupuesto: enviarlo») y dile que el equipo se encargará."
+          : ""
+        : " Si pide su propio presupuesto o responde a uno (qué acepta, qué deja para después), usa ver_presupuesto y después reenviar_presupuesto o anotar_respuesta_presupuesto."
+    if (!informs) {
+      return `${head} pide información. «Informar» está apagada: no respondes precios, servicios, promociones ni horarios de atención. Pasa el caso a una persona con request_human_handoff y avísale en message.${budgets}`
+    }
+    const above = [
+      "las sedes",
+      services === "lista" ? "los servicios con cómo decir su precio" : null,
+      "los medios de pago que acepta la clínica",
+      "las respuestas oficiales (o su índice)",
+    ].filter((item): item is string => item !== null)
+    const listed = `${above.slice(0, -1).join(", ")} y ${above[above.length - 1]}`
+    const search =
+      services === "indice" && has("buscar_en_la_clinica")
+        ? " De los servicios, arriba va solo el índice, sin precios: si pregunta por uno, búscalo antes con buscar_en_la_clinica y responde con lo que encuentres; nunca digas que la clínica no lo ofrece sin haberlo buscado."
+        : services === "ninguno"
+          ? " La clínica no tiene servicios cargados: no des precios de tratamientos."
+          : ""
+    const knowledge = has("consultar_conocimiento")
+      ? " Si un tema está solo en el índice o su respuesta aparece recortada, pide su texto con consultar_conocimiento antes de citarla. Si un dato no está arriba ni en lo que buscaste, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona."
+      : " Si un dato no está arriba, dilo y ofrece pasar el caso a una persona."
+    return `${head} pide información. Arriba ya tienes ${listed}.${search} Si con eso basta, responde ahora con send_reply, en este mismo paso.${knowledge}${budgets}`
   }
   if (path === "saludo") {
     return `${head} un saludo, un agradecimiento o un cierre. Responde en este mismo paso, breve, sin consultar nada: si agradece o se despide y no queda nada pendiente, despídete con despedirse_y_cerrar; si no, con send_reply.`
@@ -198,8 +259,23 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, op
   if (path === "clinico") {
     return `${head} una consulta clínica. No des consejo clínico ni diagnóstico. En este mismo paso, pasa el caso a una persona con request_human_handoff y avisa al interlocutor en su campo message.`
   }
+  if (path === "cita" && !has("buscar_huecos")) {
+    // Con «Agendar» apagado no hay huecos ni propuestas: la cita la elige la persona en su enlace.
+    return has("enviar_enlace_cita")
+      ? `${head} reservar una cita. Por aquí no reservas: envíale su enlace con enviar_enlace_cita para que elija el día y la hora, y díselo con send_reply.`
+      : `${head} reservar una cita. Por aquí no reservas ni tienes su enlace: pasa el caso a una persona con request_human_handoff y avísale en message.`
+  }
+  if (path === "cambio_cita" && !has("reprogramar_cita") && !has("cancelar_cita")) {
+    return `${head} cambiar o cancelar una cita. Por aquí no mueves ni cancelas citas: pasa el caso a una persona con request_human_handoff y avísale en message.`
+  }
   if (path === "cita" && prefetched) {
-    return `${head} reservar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\nLas sedes y los servicios, con sus ids, están arriba: no llames a ver_sedes_y_servicios para eso. Si el interlocutor aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; proponer_cita va solo cuando ya eligió uno.`
+    const ids =
+      services === "lista"
+        ? "Las sedes y los servicios, con sus ids, están arriba: no llames a ver_sedes_y_servicios para eso."
+        : services === "indice" && has("buscar_en_la_clinica")
+          ? "Las sedes, con su id, están arriba; de los servicios va solo el índice: si ya sabe qué servicio quiere, búscalo con buscar_en_la_clinica para tener su id y pásalo a buscar_huecos, así el hueco dura lo que dura ese servicio."
+          : "Las sedes, con su id, están arriba. Sin el id del servicio, buscar_huecos usa la duración de una cita regular."
+    return `${head} reservar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n${ids} Si el interlocutor aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; proponer_cita va solo cuando ya eligió uno.`
   }
   if (path === "cambio_cita" && prefetched) {
     return `${head} cambiar o cancelar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo:\n${prefetched}\nUsa los ids y las versiones exactos de ahí.`

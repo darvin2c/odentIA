@@ -1,10 +1,9 @@
 /**
- * Horario oportuno (ADR 0024): cuándo es razonable que la clínica le escriba a
- * una persona por su cuenta (insistir o despedirse). Es el horario de atención
- * de la clínica ese día —la suma de los de sus sedes, que salen de los horarios
- * del equipo (`getBranchHours`)— y, si ese día no atiende nadie, de 8:00 a
- * 21:00. Si el agente tiene horario propio, también lo acota. Todo en la zona
- * de la clínica.
+ * Horas de un horario semanal: si un instante cae dentro, el primero y el
+ * último momento permitido. Sirve al «Horario para escribir» (decisión 18 v3,
+ * `writing-hours.ts`): cuándo odentIA le escribe a alguien por su cuenta, por
+ * día y con la hora de cada sede; un día sin tramos no se escribe. También al
+ * horario propio del agente («A qué horas responde»), que va aparte.
  *
  * Funciones puras: reciben el horario ya leído y el instante; nunca la hora real.
  */
@@ -14,14 +13,11 @@ export type MinuteRange = [number, number]
 
 export interface OpportuneSchedule {
   timeZone: string
-  /** Por día de la semana (0 = domingo), los tramos en que atiende la clínica; vacío = no atiende. */
+  /** Por día de la semana (0 = domingo), los tramos permitidos; vacío = ese día no. */
   week: MinuteRange[][]
-  /** Horario del agente (`activeFromMin`/`activeUntilMin`); puede cruzar la medianoche. Nulo = a toda hora. */
-  agent: { fromMin: number; untilMin: number } | null
+  /** Horario del agente (`activeFromMin`/`activeUntilMin`) que lo acota; puede cruzar la medianoche. Nulo = sin acotar. */
+  agent?: { fromMin: number; untilMin: number } | null
 }
-
-/** Horario que se usa el día en que la clínica no atiende: de 8:00 a 21:00. */
-export const DEFAULT_OPPORTUNE_RANGE: MinuteRange = [8 * 60, 21 * 60]
 
 /** Cuántos días se busca hacia adelante o atrás antes de rendirse (un horario sin tramos). */
 const SEARCH_DAYS = 9
@@ -29,6 +25,10 @@ const SEARCH_DAYS = 9
 const DAY_MS = 86_400_000
 
 /** Suma de tramos que se tocan o se pisan. */
+export function mergeRanges(ranges: MinuteRange[]): MinuteRange[] {
+  return merge(ranges)
+}
+
 function merge(ranges: MinuteRange[]): MinuteRange[] {
   const sorted = [...ranges].filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0])
   const out: MinuteRange[] = []
@@ -52,10 +52,9 @@ function intersect(a: MinuteRange[], b: MinuteRange[]): MinuteRange[] {
   return merge(out)
 }
 
-/** Los tramos oportunos de un día de la semana, ya recortados por el horario del agente. */
+/** Los tramos permitidos de un día de la semana, ya recortados por el horario del agente. */
 export function opportuneRangesOn(schedule: OpportuneSchedule, weekday: number): MinuteRange[] {
-  const clinic = merge(schedule.week[weekday] ?? [])
-  const day = clinic.length ? clinic : [DEFAULT_OPPORTUNE_RANGE]
+  const day = merge(schedule.week[weekday] ?? [])
   const agent = schedule.agent
   if (!agent) return day
   const agentRanges: MinuteRange[] =
@@ -129,6 +128,12 @@ function shiftedDay(at: Date, timeZone: string, offset: number): LocalDay {
   }
 }
 
+/** Las 0:00 del día local siguiente al de `at`. */
+export function startOfNextLocalDay(at: Date, timeZone: string): Date {
+  const next = shiftedDay(at, timeZone, 1)
+  return localToInstant(timeZone, next.year, next.month, next.day, 0)
+}
+
 /** Tramos oportunos de un día local, como instantes. */
 function windowsOf(schedule: OpportuneSchedule, day: LocalDay): Array<{ start: Date; end: Date }> {
   return opportuneRangesOn(schedule, day.weekday).map(([start, end]) => ({
@@ -172,14 +177,14 @@ export function lastOpportuneAtOrBefore(at: Date, schedule: OpportuneSchedule): 
  * Cuándo vuelve a responder el agente con su horario propio: el próximo inicio
  * de su franja desde `at`, o `at` si ya está dentro. Sin horario, `at`.
  */
-export function nextAgentOpening(at: Date, timeZone: string, agent: OpportuneSchedule["agent"]): Date {
+export function nextAgentOpening(at: Date, timeZone: string, agent: OpportuneSchedule["agent"] = null): Date {
   if (!agent) return at
   const always: OpportuneSchedule = { timeZone, week: Array.from({ length: 7 }, () => [[0, 1440]]), agent }
   return nextOpportuneFrom(at, always) ?? at
 }
 
 /** ¿Está el agente dentro de su horario propio en `at`? Sin horario, siempre. */
-export function insideAgentHours(at: Date, timeZone: string, agent: OpportuneSchedule["agent"]): boolean {
+export function insideAgentHours(at: Date, timeZone: string, agent: OpportuneSchedule["agent"] = null): boolean {
   if (!agent) return true
   const { minute } = localDayOf(at, timeZone)
   return agent.fromMin < agent.untilMin

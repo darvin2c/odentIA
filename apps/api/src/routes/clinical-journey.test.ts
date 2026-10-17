@@ -157,8 +157,8 @@ async function createEncounter(patientId: string, reason: string): Promise<strin
 async function finalizeEncounter(patientId: string, encounterId: string): Promise<void> {
   // El cierre exige diagnóstico CIE-10 con tipo y evolución (ADR 0003).
   const dx = await post(app, `/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
-    cie10Code: "K02.1",
-    diagnosisType: "definitivo",
+    diagnosisCode: "K02.1",
+    diagnosisType: "confirmed",
   })
   expect(dx.status).toBe(201)
   const proc = await post(app, `/patients/${patientId}/encounters/${encounterId}/procedures`, {
@@ -266,12 +266,19 @@ beforeAll(async () => {
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values ('K02.1', 'Caries de la dentina')) as v(code, title)
+    on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values
-        ('c1111111-1111-4111-8111-111111111111', 'org_a', 'custom', 'CORONA', 'Corona cerámica', 'protesis', 'tooth', 90000, 'PEN', 60, true),
-        ('d5555555-5555-4555-8555-555555555555', 'org_b', 'custom', 'OTRO', 'Otro servicio', 'protesis', 'tooth', 999, 'PEN', 15, true)
+    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "duration_min", "is_active") values
+        ('c1111111-1111-4111-8111-111111111111', 'org_a', 'custom', 'CORONA', 'Corona cerámica', 'tooth', 90000, 'PEN', 60, true),
+        ('d5555555-5555-4555-8555-555555555555', 'org_b', 'custom', 'OTRO', 'Otro servicio', 'tooth', 999, 'PEN', 15, true)
         on conflict ("id") do nothing`,
   )
   app = buildApp("owner")
@@ -583,7 +590,8 @@ it("cuenta: concepto manual, cobro parcial, anulación, devolución y límites",
 it("responsables: vigencia, duplicado y revocación con motivo", async () => {
   const { patientId } = await setupAcceptedItem()
   const contactId = await linkContact(patientId)
-  const startsAt = new Date().toISOString().slice(0, 10)
+  // Hoy en la clínica (Lima): lo vigente se cuenta con su día, no con UTC.
+  const startsAt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
 
   const granted = await post(app, `/patients/${patientId}/responsibilities`, {
     contactId,
@@ -1076,13 +1084,13 @@ it("consentimiento estructurado: firma con profesional, PDF con huella, menor y 
 
   // Menor de edad con representante legal vigente.
   const childId = await createPatient()
-  await ownerDb.execute(sql`update patient set birth_date = '2017-04-04' where id = ${childId}`)
+  await ownerDb.execute(sql`update contact set birth_date = '2017-04-04' where id = (select person_id from patient where id = ${childId})`)
   const guardianId = await linkContact(childId)
   await ownerDb.execute(sql`update contact set doc_type = 'DNI', doc_number = '44556677' where id = ${guardianId}`)
   await post(app, `/patients/${childId}/responsibilities`, {
     contactId: guardianId,
     kind: "representante_legal",
-    startsAt: new Date().toISOString().slice(0, 10),
+    startsAt: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date()),
   })
   const create = async () => {
     const res = await post(app, "/clinical-forms/consents", {

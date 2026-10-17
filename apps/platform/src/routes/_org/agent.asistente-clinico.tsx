@@ -72,7 +72,7 @@ function ClinicalAssistantPage() {
   if (!canRead) {
     return (
       <PageShell>
-        <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica. Tus pendientes siguen en su pestaña." />
+        <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica. Las citas que esperan su sí siguen en «Esperan su sí»." />
       </PageShell>
     )
   }

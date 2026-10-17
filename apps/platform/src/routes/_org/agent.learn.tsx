@@ -228,6 +228,15 @@ function AgentLearnPage() {
   const review = (data?.review ?? []).filter((item) => agent === null || item.agent === agent)
   const proposed = (data?.proposed ?? []).filter(ofAgent)
   const learned = (data?.learned ?? []).filter(ofAgent)
+  // Las reglas son de cada agente: pasado el tope, las más antiguas dejan de llegarle. Cuenta el que más tiene.
+  const rulesOfAgent = Math.max(
+    0,
+    ...Object.values(
+      learned
+        .filter((lesson) => lesson.kind === "regla")
+        .reduce<Record<string, number>>((byAgent, lesson) => ({ ...byAgent, [lesson.scope]: (byAgent[lesson.scope] ?? 0) + 1 }), {}),
+    ),
+  )
   const withdrawn = (data?.withdrawn ?? []).filter(ofAgent)
   // Los agentes que la clínica enciende o apaga: son los que aprenden de ella.
   const agents = (rolesQuery.data?.data.roles ?? [])
@@ -469,6 +478,12 @@ function AgentLearnPage() {
             fold={isMobile}
           >
             <div className="elevated flex flex-col rounded-xl border bg-card">
+              {data && rulesOfAgent > data.ruleLimit ? (
+                <p role="status" className="border-b px-4 py-3 text-sm sm:px-5">
+                  El agente usa tus {data.ruleLimit} reglas más recientes: las {rulesOfAgent - data.ruleLimit} más antiguas ya no le
+                  llegan. Retira las que ya no hagan falta para que vuelvan a entrar todas.
+                </p>
+              ) : null}
               {learned.length === 0 ? (
                 <p className="px-4 py-3 text-sm text-muted-foreground sm:px-5">Todavía no aprobaste ninguna lección.</p>
               ) : (

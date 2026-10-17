@@ -3,9 +3,8 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { encounter, patient, patientCharge, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
-import { agentConfig, contact, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
-import { opportunity } from "@odentia/db/schema/opportunities"
+import { encounter, patientCharge, patientContact, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { agentConfig, crmTask, } from "@odentia/db/schema/crm"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -29,6 +28,7 @@ import { nextPatientNumber } from "./patients.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { completeTask } from "./tasks.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * El Administrador: una sola lista de líneas, cada una prendida o apagada y
@@ -64,10 +64,12 @@ async function clinic(options: { admin?: boolean; reception?: boolean } = {}): P
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: options.reception !== false,
-    advisor: options.admin === false ? {} : { enabled: true, quietStart: "00:00", quietEnd: "00:00" },
+    advisor: options.admin === false ? {} : { enabled: true },
+    // A toda hora: el reloj de la prueba es el real.
+    writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   return { orgId, ownerId, dentistId, branchId: site!.id, chairId: chair!.id }
 }
 
@@ -83,10 +85,7 @@ function run<T>(c: Clinic, fn: (tx: Db) => Promise<T>): Promise<T> {
 }
 
 async function person(c: Clinic, name: string): Promise<string> {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   return row!.id
 }
 
@@ -117,13 +116,12 @@ async function turnedOn(c: Clinic, key: string, daysAgo: number, days?: number) 
 }
 
 describe("ajustes", () => {
-  it("empieza apagado, con su horario de silencio, y encenderlo no prende ninguna línea", async () => {
+  it("empieza apagado y encenderlo no prende ninguna línea; a qué hora escribe lo dice el horario de Agente", async () => {
     const c = await clinic({ admin: false })
-    expect(await run(c, (tx) => getAdminSettings(tx, c.orgId))).toEqual({ enabled: false, quietStart: "21:00", quietEnd: "08:00" })
-    await expect(run(c, (tx) => updateAdminSettings(tx, c.orgId, c.ownerId, { quietStart: "9pm" }))).rejects.toThrow(/HH:MM/)
+    expect(await run(c, (tx) => getAdminSettings(tx, c.orgId))).toEqual({ enabled: false })
     // Con él apagado no se puede prender una línea: no haría nada.
     await expect(run(c, (tx) => updateAdminLine(tx, c.orgId, c.ownerId, all, "cobranza_vencida", { enabled: true }))).rejects.toMatchObject({ code: "ADMIN_OFF" })
-    expect(await run(c, (tx) => updateAdminSettings(tx, c.orgId, c.ownerId, { enabled: true, quietStart: "20:30" }))).toEqual({ enabled: true, quietStart: "20:30", quietEnd: "08:00" })
+    expect(await run(c, (tx) => updateAdminSettings(tx, c.orgId, c.ownerId, { enabled: true }))).toEqual({ enabled: true })
     const page = await run(c, (tx) => getAdminPage(tx, c.orgId, all))
     expect(page.lines.every((line) => !line.enabled)).toBe(true)
     expect(await ownerDb.select().from(automationRule).where(eq(automationRule.organizationId, c.orgId))).toEqual([])
@@ -272,8 +270,8 @@ describe("lo que recomienda", () => {
     const patientId = await person(c, "Camila Ortiz")
     await acceptedBudget(c, patientId, 20)
     const once = () => run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "presupuestos_sin_cita", { secretsKey: KEY }))
-    expect(await once()).toEqual({ created: 1, total: 1, writes: false })
-    expect(await once()).toEqual({ created: 0, total: 1, writes: false })
+    expect(await once()).toEqual({ created: 1, total: 1, writes: false, all: 1 })
+    expect(await once()).toEqual({ created: 0, total: 1, writes: false, all: 1 })
     expect(await tasksOf(c)).toMatchObject([
       { title: "Llamar a Camila Ortiz para agendar su tratamiento", createdBy: "admin", area: "recepcion", patientId, status: "open" },
     ])
@@ -281,7 +279,7 @@ describe("lo que recomienda", () => {
     expect((await run(c, (tx) => getAdminPage(tx, c.orgId, all))).lines.find((line) => line.key === "presupuestos_sin_cita")?.enabled).toBe(false)
     // Donde escribe el agente, los mensajes quedan para el siguiente ciclo, con sus comprobaciones.
     await noShow(c, await person(c, "Rosa Medina"), 3)
-    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true })
+    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true, all: 1 })
     expect((await jobsOf(c)).find((job) => job.kind === "seguimiento_no_asistencia")).toMatchObject({ status: "pendiente", payload: { once: true } })
     // Una línea que solo tiene sentido prendida no ofrece «solo esta vez».
     await expect(run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "recordatorio_cita", { secretsKey: KEY }))).rejects.toThrow(/solo se puede prender/)
@@ -368,6 +366,83 @@ describe("las líneas que dejan trabajo al equipo", () => {
     expect(line.people[0]).toMatchObject({ outcome: "tarea_resuelta", text: "Se cerró sola: Rosa Quispe ya tiene otra cita reservada." })
     // Repetir el ciclo no la toca otra vez.
     expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(0)
+  })
+
+  it("las tareas que siguen en pie no tapan a las siguientes: la revisión avanza con un cursor entre ciclos", async () => {
+    const c = await clinic()
+    for (const name of ["Uno Pérez", "Dos Pérez", "Tres Pérez"]) await acceptedBudget(c, await person(c, name), 8)
+    await turnedOn(c, "presupuestos_sin_cita", 2, 7)
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(3)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea", "tarea", "tarea"])
+    // La tarea más nueva deja de hacer falta: su paciente ya tiene cita.
+    const tasks = (await tasksOf(c)).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+    const last = tasks.at(-1)!
+    const startsAt = new Date(Date.now() + 2 * DAY)
+    await ownerDb.insert(appointment).values({
+      organizationId: c.orgId, branchId: c.branchId, patientId: last.patientId!, dentistUserId: c.dentistId, chairId: c.chairId,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada",
+    })
+    // Con dos por ciclo, el primero revisa las dos más viejas (siguen en pie) y el siguiente sigue desde ahí.
+    const cycle = () => run(c, (tx) => settleTasks(tx, c.orgId, new Date(), { batch: 1, perCycle: 2 }))
+    expect(await cycle()).toBe(0)
+    expect(await cycle()).toBe(1)
+    expect((await tasksOf(c)).find((task) => task.id === last.id)).toMatchObject({ status: "done" })
+    // Al llegar al final vuelve a empezar: nada más que cerrar.
+    expect(await cycle()).toBe(0)
+  })
+})
+
+describe("saldo vencido descuenta lo que la persona tiene a favor (decisión 22)", () => {
+  const charge = (c: Clinic, patientId: string, amountCents: number) =>
+    ownerDb.insert(patientCharge).values({
+      organizationId: c.orgId, patientId, description: "Cargo", amountCents, currency: "PEN", createdAt: new Date(Date.now() - 45 * DAY),
+    })
+  const credit = (c: Clinic, patientId: string, amountCents: number) =>
+    ownerDb.insert(patientPayment).values({
+      organizationId: c.orgId, patientId, branchId: c.branchId, methodName: "Efectivo", methodTypeCode: "10", amountCents, currency: "PEN", paidAt: new Date(),
+    })
+
+  it("con lo que tiene a favor alcanzando no hay caso; si no alcanza, dice lo que falta, y la tarea se cierra cuando alcanza", async () => {
+    const c = await clinic()
+    const pedro = await person(c, "Pedro Lara")
+    await charge(c, pedro, 25000)
+    const lucia = await person(c, "Lucía Soto")
+    await charge(c, lucia, 25000)
+    await credit(c, lucia, 30000)
+    const mario = await person(c, "Mario Cruz")
+    await charge(c, mario, 25000)
+    await credit(c, mario, 10000)
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "cobranza_vencida"))
+    expect(advice.total).toBe(2)
+    expect(advice.items.map((item) => item.personName).sort()).toEqual(["Mario Cruz", "Pedro Lara"])
+    expect(advice.items.find((item) => item.personName === "Mario Cruz")?.line).toMatch(/^Debe S\/\s?150\.00 · /)
+
+    // La tarea de Mario se cierra sola cuando lo que tiene a favor cubre lo que debe.
+    await turnedOn(c, "cobranza_vencida", 0, 30)
+    await ownerDb.update(automationRule).set({ enabledAt: new Date(Date.now() - 20 * DAY) }).where(eq(automationRule.organizationId, c.orgId))
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(2)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea", "tarea"])
+    expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(0)
+    await credit(c, mario, 15000)
+    expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(1)
+    const settled = (await tasksOf(c)).find((task) => task.patientId === mario)
+    expect(settled).toMatchObject({ status: "done" })
+    expect(settled?.settledReason).toMatch(/pagó/)
+  })
+})
+
+describe("«Escribirles esta vez» escribe a todas las personas, como promete", () => {
+  it("con más casos de los que caben en la lista, escribe a todos y dice el número real", async () => {
+    const c = await clinic()
+    for (let index = 0; index < 205; index++) await noShow(c, await person(c, `Persona ${index}`), 3)
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "seguimiento_no_asistencia"))
+    // La lista de la pantalla se corta en 200; lo que promete el botón, no.
+    expect(advice.total).toBe(205)
+    expect(advice.items).toHaveLength(200)
+    expect(advice.once?.detail).toContain("estas 205 personas")
+    const result = await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))
+    expect(result).toEqual({ created: 205, total: 205, writes: true, all: 205 })
+    expect((await jobsOf(c)).filter((job) => job.kind === "seguimiento_no_asistencia")).toHaveLength(205)
   })
 })
 

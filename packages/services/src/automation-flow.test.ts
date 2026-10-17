@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto"
 import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
-import { clinicalFollowUp, patient, patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, channelTemplate, clinicMessageVersion, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile, } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -15,7 +16,7 @@ import { applyAdminDraft, deleteAdminLine, discardAdminDraft, saveAdminDraft, se
 import { adminLineOf } from "./admin-lines.js"
 import { type AdminDecider, interpretAdminRequest, keywordAdminDecider, readNumbers } from "./admin-request.js"
 import { getAdminLine, getAdminPage, getAdminRecommendation, listAdminLinePeople, runAdminLineOnce } from "./agent-admin.js"
-import { confirmAppointmentByContact } from "./agent-operations.js"
+import { confirmAppointmentByContact, confirmProposalByPhone, countAwaitingAnswer, createHandoff, createProposal, listAwaitingAnswer } from "./agent-operations.js"
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
@@ -46,11 +47,12 @@ import { createConnection } from "./connections.js"
 import { closeConversationWith } from "./conversation-close.js"
 import { ingestInbound } from "./conversations.js"
 import { closeOpportunity, createOpportunity, setOpportunityTask } from "./opportunities.js"
-import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { nextPatientNumber } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { setWritingHours } from "./writing-hours.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * Automatizaciones de punta a punta contra la base: qué se programa al prender,
@@ -65,7 +67,7 @@ configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odenti
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
-// 15:00Z son las 10:00 en Lima: fuera del horario de silencio.
+// 15:00Z son las 10:00 en Lima de un martes: dentro del «Horario para escribir».
 const NOW = new Date("2026-10-06T15:00:00.000Z")
 const all = () => true
 
@@ -94,15 +96,16 @@ async function clinic(
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
   ])
-  // Recepción (quien escribe) y el Administrador, encendidos. Sin horario de
-  // silencio cuando el caso usa el reloj real.
+  // Recepción (quien escribe) y el Administrador, encendidos. Con el horario
+  // para escribir a toda hora cuando el caso usa el reloj real.
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: options.reception !== false,
-    advisor: { enabled: true, ...(options.anyHour ? { quietStart: "00:00", quietEnd: "00:00" } : {}) },
+    advisor: { enabled: true },
+    ...(options.anyHour ? { writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]) } : {}),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   const templates = (options.approved ?? []).map((key) => ({ name: AUTOMATION_MESSAGES[key].template, language: "es" }))
   const connection =
     options.whatsapp === false
@@ -137,10 +140,7 @@ async function person(
   /** `refused`: pidió no recibir ese tipo de mensaje (su baja). */
   options: { whatsapp?: boolean; email?: string; consent?: Purpose[]; refused?: Purpose[]; openWindow?: boolean } = {},
 ) {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   const [link] = await ownerDb
     .select({ contactId: patientContact.contactId })
     .from(patientContact)
@@ -323,7 +323,7 @@ describe("los lotes avanzan en orden y no repiten", () => {
     const c = await clinic()
     const p = await person(c, "Muchas citas")
     const enabledAt = new Date(NOW.getTime() - 6 * DAY)
-    // Las inasistencias liberan el sillón: pueden coincidir en hora.
+    // Las inasistencias liberan la unidad dental: pueden coincidir en hora.
     await ownerDb.insert(appointment).values(
       Array.from({ length: 205 }, (_, index) => {
         const startsAt = new Date(NOW.getTime() - 3 * DAY + index * 60_000)
@@ -345,7 +345,7 @@ describe("por dónde le llega a cada persona", () => {
   it("escribió hace poco: sale como respuesta por WhatsApp, con sus datos y sus botones", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento"], openWindow: true })
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento", "novedades"], openWindow: true })
     await dueBudget(c, p.patientId, "Ortodoncia")
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
@@ -372,7 +372,7 @@ describe("por dónde le llega a cada persona", () => {
     const [job] = await jobsOf(c)
     expect(job).toMatchObject({ status: "enviado", via: "plantilla", channel: "whatsapp" })
     const sent = await messageOf(job!.sentMessageId)
-    expect(sent).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_v1", templateLanguage: "es" })
+    expect(sent).toMatchObject({ contentType: "template", templateName: "odentia_recordatorio_cita_v2", templateLanguage: "es" })
     const params = sent.templateParams as string[]
     expect(params.slice(0, 2)).toEqual(["Lucía", "Clínica Sonríe, sede Centro"])
     // Fecha y hora en la zona de la sede (10:00 en Lima), con el profesional.
@@ -401,7 +401,9 @@ describe("por dónde le llega a cada persona", () => {
     expect(lines[0]).toBe("Recordatorio de cita · Clínica Sonríe")
     expect(sent.body).toContain("Hola, Jorge. Te recordamos la cita en Clínica Sonríe, sede Centro: mañana, miércoles 7 de octubre")
     expect(sent.body).toMatch(/Para confirmar: https:\/\/clinica\.test\/c\/\S+\nSi no podrás ir: https:\/\/clinica\.test\/c\/\S+/)
-    expect(sent.body).toMatch(/Si no quieres recibir más estos mensajes: https:\/\/clinica\.test\/baja\/\S+$/)
+    // Al pie, su página «Tus mensajes»; la baja de un toque va en la cabecera del correo (ADR 0040).
+    expect(sent.body).toMatch(/Elegir mis mensajes: https:\/\/auto-\S+\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}#mensajes$/)
+    expect(sent.listUnsubscribe).toMatch(/^https:\/\/clinica\.test\/baja\/\S+$/)
     expect(sent.replyButtons).toBeNull()
     const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, sent.conversationId))
     expect(thread?.externalThreadId).toBe("mail:jorge@example.com")
@@ -410,7 +412,7 @@ describe("por dónde le llega a cada persona", () => {
   it("mientras WhatsApp no aprueba el mensaje usa el correo de quien lo tiene", async () => {
     const c = await clinic({ email: true })
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    const p = await person(c, "Con correo", { email: "con@example.com", consent: ["seguimiento"] })
+    const p = await person(c, "Con correo", { email: "con@example.com", consent: ["seguimiento", "novedades"] })
     await dueBudget(c, p.patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     await deliver(c)
@@ -420,10 +422,10 @@ describe("por dónde le llega a cada persona", () => {
   it("nunca termina en blanco: cada motivo cierra el trabajo y dice cómo habilitarlo", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    const noWay = await person(c, "Sin número ni correo", { whatsapp: false, consent: ["seguimiento"] })
-    const cold = await person(c, "Nunca escribió", { consent: ["seguimiento"] })
-    // Retomar un presupuesto es parte del servicio: solo no sale si se dio de baja (ADR 0030).
-    const refused = await person(c, "No aceptó", { refused: ["seguimiento"] })
+    const noWay = await person(c, "Sin número ni correo", { whatsapp: false, consent: ["seguimiento", "novedades"] })
+    const cold = await person(c, "Nunca escribió", { consent: ["seguimiento", "novedades"] })
+    // Retomar un presupuesto es promoción para WhatsApp: solo sale con el sí de novedades (ADR 0040).
+    const refused = await person(c, "No aceptó", { refused: ["novedades"] })
     for (const p of [noWay, cold, refused]) await dueBudget(c, p.patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     await deliver(c)
@@ -451,7 +453,7 @@ describe("por dónde le llega a cada persona", () => {
 
     const other = await clinic({ whatsapp: false })
     await ruleOn(other, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    const p = await person(other, "Clínica sin WhatsApp", { consent: ["seguimiento"] })
+    const p = await person(other, "Clínica sin WhatsApp", { consent: ["seguimiento", "novedades"] })
     await dueBudget(other, p.patientId)
     await run(other, (tx) => syncBudgetFollowUps(tx, other.orgId, NOW))
     await deliver(other)
@@ -461,7 +463,7 @@ describe("por dónde le llega a cada persona", () => {
   it("tres personas que se dieron de baja no llenan la campana: cada caso queda con su motivo para «Te espera»", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR), { teamPart: false })
-    for (const name of ["Uno", "Dos", "Tres"]) await dueBudget(c, (await person(c, name, { refused: ["seguimiento"] })).patientId)
+    for (const name of ["Uno", "Dos", "Tres"]) await dueBudget(c, (await person(c, name, { refused: ["novedades"] })).patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido", "omitido", "omitido"])
     expect(await noticesOf(c)).toEqual([])
@@ -474,8 +476,8 @@ describe("por dónde le llega a cada persona", () => {
   it("«enviado» no es «entregado»: se sigue al mensaje y, si el canal lo rechaza, queda como «no pudo»", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    const ok = await person(c, "Escribió hoy", { consent: ["seguimiento"], openWindow: true })
-    const bounced = await person(c, "Número dado de baja", { consent: ["seguimiento"], openWindow: true })
+    const ok = await person(c, "Escribió hoy", { consent: ["seguimiento", "novedades"], openWindow: true })
+    const bounced = await person(c, "Número dado de baja", { consent: ["seguimiento", "novedades"], openWindow: true })
     await dueBudget(c, ok.patientId)
     await dueBudget(c, bounced.patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
@@ -551,7 +553,7 @@ describe("como mucho un mensaje al día por persona", () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
     await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
-    const p = await person(c, "Dos motivos", { consent: ["recordatorio", "seguimiento"], openWindow: true })
+    const p = await person(c, "Dos motivos", { consent: ["recordatorio", "seguimiento", "novedades"], openWindow: true })
     await appointmentFor(c, p.patientId, new Date(NOW.getTime() + 24 * HOUR))
     await dueBudget(c, p.patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
@@ -565,7 +567,7 @@ describe("como mucho un mensaje al día por persona", () => {
     expect(jobs.find((job) => job.kind === "recordatorio_cita")?.status).toBe("enviado")
     const followUp = jobs.find((job) => job.kind === "seguimiento_presupuesto")!
     expect(followUp.status).toBe("pendiente")
-    // Mañana a las 8:00 de Lima, cuando termina el horario de silencio.
+    // Mañana a las 8:00 de Lima, cuando empieza el horario para escribir.
     expect(followUp.scheduledFor.toISOString()).toBe("2026-10-07T13:00:00.000Z")
   })
 })
@@ -698,9 +700,11 @@ describe("los botones que resuelve el sistema, sin modelo", () => {
       { purpose: "recordatorio", granted: false, source: "baja" },
       { purpose: "seguimiento", granted: true, source: "conversacion" },
       { purpose: "novedades", granted: null },
+      // Los avisos de su cita siguen: «No más recordatorios» no los apaga (ADR 0040).
+      { purpose: "avisos", granted: null },
     ])
     const thread = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
-    expect(thread.at(-1)?.body).toBe("Listo: no te enviaremos más recordatorios. Si cambias de opinión, dínoslo por aquí.")
+    expect(thread.at(-1)?.body).toBe("Listo, Lucía, ya no te enviaremos recordatorios. Si tu cita cambia, te avisamos igual.")
   })
 })
 
@@ -714,9 +718,11 @@ describe("los enlaces del correo pasan por la agenda", () => {
     await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, now))
     await deliver(c, now)
     const [job] = await jobsOf(c)
-    const body = (await messageOf(job!.sentMessageId)).body ?? ""
+    const sent = await messageOf(job!.sentMessageId)
+    const body = sent.body ?? ""
     const [confirmToken, cancelToken] = [...body.matchAll(/https:\/\/clinica\.test\/c\/(\S+)/g)].map((match) => match[1]!)
-    const bajaToken = /https:\/\/clinica\.test\/baja\/(\S+)/.exec(body)![1]!
+    // La baja de un toque va en la cabecera `List-Unsubscribe` (RFC 2369).
+    const bajaToken = /https:\/\/clinica\.test\/baja\/(\S+)/.exec(sent.listUnsubscribe ?? "")![1]!
     return { c, p, appointmentId, confirmToken: confirmToken!, cancelToken: cancelToken!, bajaToken }
   }
 
@@ -751,6 +757,7 @@ describe("los enlaces del correo pasan por la agenda", () => {
       { purpose: "recordatorio", granted: false, source: "baja" },
       { purpose: "seguimiento", granted: true },
       { purpose: "novedades", granted: null },
+      { purpose: "avisos", granted: null },
     ])
   })
 })
@@ -777,7 +784,7 @@ describe("quién lo hace: el agente, una persona o los dos", () => {
   it("con Recepción apagada no sale nada, y lo que quedó atrás no se envía", async () => {
     const c = await clinic({ reception: false })
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
-    const p = await person(c, "En pausa", { consent: ["seguimiento"], openWindow: true })
+    const p = await person(c, "En pausa", { consent: ["seguimiento", "novedades"], openWindow: true })
     await dueBudget(c, p.patientId)
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     expect(await deliver(c)).toMatchObject([{ outcome: "cancelado", detail: "Recepción apagada" }])
@@ -799,9 +806,10 @@ describe("retirar un permiso", () => {
     await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
     await run(c, (tx) => syncCheckupReminders(tx, c.orgId, NOW))
     await run(c, (tx) => setConsent(tx, c.orgId, c.ownerId, p.contactId, { purpose: "seguimiento", granted: false }))
+    // El control es de «Controles y seguimiento»; retomar el presupuesto, de novedades (ADR 0040).
     expect((await jobsOf(c)).map((job) => [job.kind, job.status]).sort()).toEqual([
-      ["recordatorio_control", "pendiente"],
-      ["seguimiento_presupuesto", "cancelado"],
+      ["recordatorio_control", "cancelado"],
+      ["seguimiento_presupuesto", "pendiente"],
     ])
     await expect(
       run(c, (tx) => setConsent(tx, c.orgId, c.ownerId, p.contactId, { purpose: "recordatorio", granted: true, source: "por_ahi" })),
@@ -833,13 +841,13 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
   it("al conectar quedan pedidos los trece, sin esperar a que se prenda una línea", async () => {
     const c = await clinic()
     expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).map((item) => [item.name, item.status, item.messageKey])).toEqual([
-      ["odentia_aviso_cita_cancelada_v1", "en_revision", "aviso_cita_cancelada"],
-      ["odentia_aviso_cita_datos_v1", "en_revision", "aviso_cita_reservada_datos"],
-      ["odentia_aviso_cita_movida_v1", "en_revision", "aviso_cita_movida"],
-      ["odentia_aviso_cita_reservada_v1", "en_revision", "aviso_cita_reservada"],
+      ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada"],
+      ["odentia_aviso_cita_datos_v2", "en_revision", "aviso_cita_reservada_datos"],
+      ["odentia_aviso_cita_movida_v2", "en_revision", "aviso_cita_movida"],
+      ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada"],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada"],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo"],
-      ["odentia_recordatorio_cita_v1", "en_revision", "recordatorio_cita"],
+      ["odentia_recordatorio_cita_v2", "en_revision", "recordatorio_cita"],
       ["odentia_recordatorio_control_v1", "en_revision", "recordatorio_control"],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion"],
       ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia"],
@@ -863,20 +871,20 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     expect(meta.calls[0]).toMatchObject({
       method: "POST",
       body: {
-        name: "odentia_recordatorio_cita_v1",
+        name: "odentia_recordatorio_cita_v2",
         language: "es",
         category: "UTILITY",
         components: [
           { type: "BODY", text: AUTOMATION_MESSAGES.recordatorio_cita.body, example: { body_text: [["Lucía", "Clínica Sonríe, sede Centro", "mañana, martes 13 de octubre, a las 10:00, con Dra. Ana Torres"]] } },
-          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Confirmar" }, { type: "QUICK_REPLY", text: "No podré ir" }, { type: "QUICK_REPLY", text: "No enviar más" }] },
+          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Confirmar" }, { type: "QUICK_REPLY", text: "No podré ir" }, { type: "QUICK_REPLY", text: "No más recordatorios" }] },
         ],
       },
     })
-    expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).find((item) => item.name === "odentia_recordatorio_cita_v1")).toMatchObject(
+    expect((await run(c, (tx) => listChannelTemplates(tx, c.orgId, c.whatsappId!))).find((item) => item.name === "odentia_recordatorio_cita_v2")).toMatchObject(
       { status: "en_revision", category: "utility", variables: 3, messageKey: "recordatorio_cita" },
     )
     expect(
-      (await ownerDb.select().from(channelTemplate).where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, "odentia_recordatorio_cita_v1"))))[0]?.externalId,
+      (await ownerDb.select().from(channelTemplate).where(and(eq(channelTemplate.connectionId, c.whatsappId!), eq(channelTemplate.name, "odentia_recordatorio_cita_v2"))))[0]?.externalId,
     ).toBe("950")
     // Ya está pedido: el siguiente tick no vuelve a llamar.
     expect(await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, NOW, { fetch: meta.fetch }))).toBe(0)
@@ -891,7 +899,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     expect((await jobsOf(c))[0]?.lastError).toContain("WhatsApp aún no aprueba el mensaje")
 
     // WhatsApp avisa que la aprobó: quien administra se entera y el siguiente recordatorio sale.
-    const update = { externalId: "950", name: "odentia_recordatorio_cita_v1", language: "es", status: "aprobada" as const, reason: null }
+    const update = { externalId: "950", name: "odentia_recordatorio_cita_v2", language: "es", status: "aprobada" as const, reason: null }
     expect(await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [update]))).toBe(1)
     expect(await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [update]))).toBe(0)
     expect((await noticesOf(c)).map((notice) => [notice.title, notice.href])).toContainEqual([
@@ -930,14 +938,14 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     const c = await clinic({ approved: ["seguimiento_presupuesto"] })
     const name = AUTOMATION_MESSAGES.seguimiento_presupuesto.template
     const sendable = (params: number) =>
-      run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name, language: "es", params }))
+      run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name, language: "es", params, category: "marketing", contactId: null }))
     await expect(sendable(3)).resolves.toMatchObject({ status: "aprobada" })
     await run(c, (tx) => applyTemplateUpdates(tx, c.orgId, c.whatsappId!, [{ externalId: null, name, language: "es", status: "pausada", reason: "Calidad baja" }]))
     await expect(sendable(3)).rejects.toThrow(`La plantilla «${name}» está pausada (Calidad baja): no se puede enviar`)
     expect((await noticesOf(c)).map((notice) => [notice.title, notice.body])).toEqual([
       ["WhatsApp pausó un mensaje: «Retomar un presupuesto»", "Motivo: Calidad baja. Mientras tanto solo sale como respuesta o por correo. WhatsApp lo reactiva solo si mejora su calidad."],
     ])
-    await expect(run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "inventada", language: "es", params: 0 }))).rejects.toThrow("Plantilla no autorizada en esta conexión")
+    await expect(run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "inventada", language: "es", params: 0, category: "utility", contactId: null }))).rejects.toThrow("Plantilla no autorizada en esta conexión")
   })
 
   it("si WhatsApp pausa un mensaje, el aviso dice a cuántas personas les toca ya", async () => {
@@ -962,7 +970,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
       json: {
         data: [
           { id: "1", name: "bienvenida", language: "es", status: "APPROVED", category: "MARKETING", components: [{ type: "BODY", text: "Hola, {{1}}." }] },
-          { id: "2", name: "odentia_recordatorio_cita_v1", language: "es", status: "REJECTED", category: "UTILITY", rejected_reason: "INVALID_FORMAT", components: [{ type: "BODY", text: "x {{1}} {{2}} {{3}}" }] },
+          { id: "2", name: "odentia_recordatorio_cita_v2", language: "es", status: "REJECTED", category: "UTILITY", rejected_reason: "INVALID_FORMAT", components: [{ type: "BODY", text: "x {{1}} {{2}} {{3}}" }] },
         ],
       },
     })
@@ -970,13 +978,13 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     // Lo recién pedido puede no aparecer aún en la lectura de la cuenta: sigue en revisión.
     expect(synced.map((item) => [item.name, item.status, item.messageKey, item.variables])).toEqual([
       ["bienvenida", "aprobada", null, 1],
-      ["odentia_aviso_cita_cancelada_v1", "en_revision", "aviso_cita_cancelada", 3],
-      ["odentia_aviso_cita_datos_v1", "en_revision", "aviso_cita_reservada_datos", 3],
-      ["odentia_aviso_cita_movida_v1", "en_revision", "aviso_cita_movida", 3],
-      ["odentia_aviso_cita_reservada_v1", "en_revision", "aviso_cita_reservada", 3],
+      ["odentia_aviso_cita_cancelada_v2", "en_revision", "aviso_cita_cancelada", 3],
+      ["odentia_aviso_cita_datos_v2", "en_revision", "aviso_cita_reservada_datos", 3],
+      ["odentia_aviso_cita_movida_v2", "en_revision", "aviso_cita_movida", 3],
+      ["odentia_aviso_cita_reservada_v2", "en_revision", "aviso_cita_reservada", 3],
       ["odentia_cita_cancelada_v1", "en_revision", "cita_cancelada", 3],
       ["odentia_presupuesto_listo_v2", "en_revision", "presupuesto_listo", 2],
-      ["odentia_recordatorio_cita_v1", "rechazada", "recordatorio_cita", 3],
+      ["odentia_recordatorio_cita_v2", "rechazada", "recordatorio_cita", 3],
       ["odentia_recordatorio_control_v1", "deshabilitada", "recordatorio_control", 0],
       ["odentia_retomar_conversacion_v1", "en_revision", "retomar_conversacion", 2],
       ["odentia_seguimiento_inasistencia_v1", "en_revision", "seguimiento_no_asistencia", 3],
@@ -987,7 +995,7 @@ describe("odentIA pide a WhatsApp la aprobación de sus mensajes", () => {
     expect(synced.find((item) => item.status === "rechazada")?.reason).toBe("INVALID_FORMAT")
     // Con el cuerpo conocido, se exige un dato por variable.
     await expect(
-      run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0 })),
+      run(c, (tx) => assertTemplateSendable(tx, c.orgId, c.whatsappId!, { name: "bienvenida", language: "es", params: 0, category: "marketing", contactId: null })),
     ).rejects.toThrow("La plantilla «bienvenida» lleva 1 dato y se enviaron 0")
     const rows = await ownerDb.select().from(channelTemplate).where(eq(channelTemplate.connectionId, c.whatsappId!))
     expect(rows).toHaveLength(14)
@@ -1355,7 +1363,7 @@ describe("el texto de un mensaje es de cada clínica", () => {
     await deliver(c)
     const before = await sentTo(first.contactId)
     expect(before.job).toMatchObject({ status: "enviado", via: "plantilla" })
-    expect(before.sent.templateName).toBe("odentia_recordatorio_cita_v1")
+    expect(before.sent.templateName).toBe("odentia_recordatorio_cita_v2")
     expect(before.sent.body).toContain("Hola, Lucía. Te recordamos la cita en Clínica Sonríe, sede Centro")
 
     // WhatsApp lo aprueba: desde ahora el texto de la clínica, por donde salga.
@@ -1383,7 +1391,7 @@ describe("el texto de un mensaje es de cada clínica", () => {
     expect(byTemplate.sent.replyButtons).toEqual([
       { id: replyId("confirmar", byTemplate.job.id), title: "Confirmar" },
       { id: replyId("responder", byTemplate.job.id), title: "No podré ir" },
-      { id: replyId("baja", byTemplate.job.id), title: "No enviar más" },
+      { id: replyId("baja", byTemplate.job.id), title: "No más recordatorios" },
     ])
 
     const asReply = await sentTo(warm.contactId)
@@ -1445,7 +1453,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
   it("escribió hace poco: le escribe por WhatsApp con el título de la oportunidad, y el hilo queda en la oportunidad", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
-    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento"], openWindow: true })
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento", "novedades"], openWindow: true })
     const oppId = await opportunityFor(c, p.contactId, new Date(NOW.getTime() - HOUR), { title: "Ortodoncia" })
     expect((await opportunityRow(oppId)).conversationId).toBeNull()
     await sync(c)
@@ -1473,7 +1481,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
   it("no escribió hace poco: sale el mensaje aprobado, con cada dato en su variable", async () => {
     const c = await clinic({ approved: ["seguimiento_comercial"] })
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
-    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento"] })
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento", "novedades"] })
     const oppId = await opportunityFor(c, p.contactId, new Date(NOW.getTime() - HOUR), { title: "Implantes" })
     await sync(c)
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
@@ -1491,7 +1499,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
   it("sin WhatsApp: sale por el correo de la clínica, con el enlace de baja", async () => {
     const c = await clinic({ whatsapp: false, email: true })
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
-    const p = await person(c, "Jorge Salas", { whatsapp: false, email: "jorge@example.com", consent: ["seguimiento"] })
+    const p = await person(c, "Jorge Salas", { whatsapp: false, email: "jorge@example.com", consent: ["seguimiento", "novedades"] })
     await opportunityFor(c, p.contactId, new Date(NOW.getTime() - HOUR), { title: "Blanqueamiento" })
     await sync(c)
     await deliver(c)
@@ -1500,15 +1508,16 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const body = (await messageOf(job!.sentMessageId)).body ?? ""
     expect(body.split("\n")[0]).toBe("¿Seguimos conversando? · Clínica Sonríe")
     expect(body).toContain("Hola, Jorge. Te escribimos de Clínica Sonríe sobre tu consulta de «Blanqueamiento». ¿Seguimos conversando?")
-    expect(body).toMatch(/Si no quieres recibir más estos mensajes: https:\/\/clinica\.test\/baja\/\S+$/)
+    expect(body).toMatch(/Elegir mis mensajes: \S+#mensajes$/)
+    expect((await messageOf(job!.sentMessageId)).listUnsubscribe).toMatch(/^https:\/\/clinica\.test\/baja\/\S+$/)
   })
 
   it("con su baja: cierra el caso con su causa y la misma tarea queda para quien lleva la oportunidad, sin otra", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
-    // Se dieron de baja de estos mensajes: retomar es parte del servicio, pero la baja se respeta.
-    const owned = await person(c, "Con responsable", { refused: ["seguimiento"] })
-    const loose = await person(c, "Sin responsable", { refused: ["seguimiento"] })
+    // Dijeron que no a las novedades: retomar es promoción para WhatsApp y pide su sí (ADR 0040).
+    const owned = await person(c, "Con responsable", { refused: ["novedades"] })
+    const loose = await person(c, "Sin responsable", { refused: ["novedades"] })
     const ownedId = await opportunityFor(c, owned.contactId, new Date(NOW.getTime() - HOUR), { owner: c.dentistId })
     const looseId = await opportunityFor(c, loose.contactId, new Date(NOW.getTime() - HOUR))
     await sync(c)
@@ -1533,8 +1542,8 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
   it("si la oportunidad se cerró o su tarea se reprogramó antes de escribir, no se escribe", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_comercial", new Date(NOW.getTime() - DAY))
-    const closed = await person(c, "Ya decidió", { consent: ["seguimiento"], openWindow: true })
-    const moved = await person(c, "Ya la llamaron", { consent: ["seguimiento"], openWindow: true })
+    const closed = await person(c, "Ya decidió", { consent: ["seguimiento", "novedades"], openWindow: true })
+    const moved = await person(c, "Ya la llamaron", { consent: ["seguimiento", "novedades"], openWindow: true })
     const closedId = await opportunityFor(c, closed.contactId, new Date(NOW.getTime() - HOUR))
     const movedId = await opportunityFor(c, moved.contactId, new Date(NOW.getTime() - HOUR))
     await sync(c)
@@ -1547,11 +1556,11 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect((await noticesOf(c)).filter((notice) => notice.href.startsWith("/agent/administrador"))).toHaveLength(0)
   })
 
-  it("«Sí, continuemos» sigue la conversación sin fijar camino; «No enviar más» apaga el seguimiento y no los recordatorios", async () => {
+  it("«Sí, continuemos» sigue la conversación sin fijar camino; «No enviar más» apaga las novedades y no los recordatorios", async () => {
     const c = await clinic({ anyHour: true })
     const now = new Date()
     await ruleOn(c, "seguimiento_comercial", new Date(now.getTime() - DAY))
-    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento", "recordatorio"], openWindow: true })
+    const p = await person(c, "Lucía Paredes", { consent: ["seguimiento", "recordatorio", "novedades"], openWindow: true })
     await opportunityFor(c, p.contactId, new Date(now.getTime() - HOUR))
     await sync(c, now)
     expect((await deliver(c, now)).map((result) => result.outcome)).toEqual(["enviado"])
@@ -1564,13 +1573,15 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     })
     expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("responder", job!.id) }))).toBe(false)
     expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: p.conversationId!, replyId: replyId("baja", job!.id) }))).toBe(true)
+    // «No enviar más» de un retomar apaga las novedades: los recordatorios siguen.
     expect(await run(c, (tx) => getMessagePermissions(tx, c.orgId, p.contactId))).toMatchObject([
       { purpose: "recordatorio", granted: true },
-      { purpose: "seguimiento", granted: false, source: "baja" },
-      { purpose: "novedades", granted: null },
+      { purpose: "seguimiento", granted: true },
+      { purpose: "novedades", granted: false, source: "baja" },
+      { purpose: "avisos", granted: null },
     ])
     const thread = await ownerDb.select().from(message).where(eq(message.conversationId, p.conversationId!)).orderBy(asc(message.createdAt))
-    expect(thread.filter((item) => item.direction === "out").at(-1)?.body).toBe("Listo: no te enviaremos más estos mensajes. Si cambias de opinión, dínoslo por aquí.")
+    expect(thread.filter((item) => item.direction === "out").at(-1)?.body).toBe("Listo, Lucía, ya no te enviaremos novedades ni promociones. Si tu cita cambia, te avisamos igual.")
   })
 
   it("se ve como las demás: sus dos partes se apagan por separado, avisa cuando no puede y tiene «Solo esta vez»", async () => {
@@ -1590,7 +1601,140 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const oppId = await opportunityFor(c, p.contactId, new Date(Date.now() - 2 * HOUR))
     const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "seguimiento_comercial"))
     expect(advice).toMatchObject({ total: 1, actor: "agente", once: { label: "Escribirles esta vez" } })
-    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_comercial", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true })
+    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_comercial", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true, all: 1 })
     expect(await jobsOf(c)).toMatchObject([{ kind: "seguimiento_comercial", status: "pendiente", opportunityId: oppId, payload: { once: true } }])
+  })
+})
+
+describe("una puerta para escribirle a alguien (ADR 0042)", () => {
+  it("«Probar línea» cuenta a cada persona con la misma regla que el envío real", async () => {
+    const c = await clinic({ approved: ["seguimiento_no_asistencia"], anyHour: true })
+    const line = adminLineOf("seguimiento_no_asistencia")!
+    // Nunca dijo nada de los mensajes de seguimiento: es parte del servicio y le llega.
+    const silent = await person(c, "Nunca dijo nada")
+    // Pidió no recibirlos: no le llega ni en la prueba ni de verdad.
+    const refused = await person(c, "Pidió que no", { refused: ["seguimiento"] })
+    const now = new Date()
+    for (const p of [silent, refused]) await appointmentFor(c, p.patientId, new Date(now.getTime() - 2 * DAY), "no_asistio", 10)
+    const test = await run(c, (tx) => testAdminLine(tx, c.orgId, line, { agentPart: true, teamPart: false, days: null }))
+    expect(test!.rows.map((row) => [row.route, row.total])).toEqual([
+      ["plantilla", 1],
+      ["no_pudo", 1],
+    ])
+    // El envío real dice lo mismo, persona por persona.
+    await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))
+    const sent = await run(c, (tx) => deliverDueJobs(tx, c.orgId, new Date(), { secretsKey: KEY }))
+    expect(sent.map((result) => result.outcome).sort()).toEqual(["enviado", "omitido"])
+    const jobs = await jobsOf(c)
+    expect(jobs.find((job) => job.patientId === silent.patientId)).toMatchObject({ status: "enviado", via: "plantilla" })
+    expect(jobs.find((job) => job.patientId === refused.patientId)).toMatchObject({ status: "omitido", cause: "sin_permiso" })
+  })
+
+  it("quien escribió hace poco tiene la ventana abierta aunque su conversación esté cerrada", async () => {
+    const c = await clinic({ anyHour: true })
+    const line = adminLineOf("seguimiento_no_asistencia")!
+    const p = await person(c, "Escribió y se cerró", { openWindow: true })
+    await ownerDb.update(conversation).set({ status: "closed", closedAt: new Date(), closeReason: "resuelta" }).where(eq(conversation.id, p.conversationId!))
+    await appointmentFor(c, p.patientId, new Date(Date.now() - 2 * DAY), "no_asistio", 10)
+    const test = await run(c, (tx) => testAdminLine(tx, c.orgId, line, { agentPart: true, teamPart: false, days: null }))
+    expect(test!.rows.map((row) => [row.route, row.total])).toEqual([["respuesta", 1]])
+  })
+})
+
+describe("el horario para escribir", () => {
+  // Domingo 11 de octubre, 8:00 en Lima: el domingo no se escribe (el horario que viene).
+  const SUNDAY = new Date("2026-10-11T13:00:00.000Z")
+
+  it("un recordatorio que toca el domingo sale el lunes a las 8:00 si aún falta una hora para la cita; si no, no sale", async () => {
+    const c = await clinic()
+    await ruleOn(c, "recordatorio_cita", new Date(SUNDAY.getTime() - DAY), { hoursBefore: [24] })
+    const early = await person(c, "Cita a las 9")
+    const tooEarly = await person(c, "Cita a las 8 y media")
+    const nine = await appointmentFor(c, early.patientId, new Date("2026-10-12T14:00:00.000Z"))
+    await appointmentFor(c, tooEarly.patientId, new Date("2026-10-12T13:30:00.000Z"))
+    expect(await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, SUNDAY))).toMatchObject({ programados: 1 })
+    expect((await jobsOf(c)).map((job) => [job.appointmentId, job.scheduledFor.toISOString()])).toEqual([[nine, "2026-10-12T13:00:00.000Z"]])
+  })
+
+  it("lo que vence fuera del horario espera; los avisos de lo que pasó salen al momento", async () => {
+    const c = await clinic({ approved: ["seguimiento_no_asistencia", "aviso_cita_cancelada"] })
+    const p = await person(c, "Faltó el viernes")
+    await appointmentFor(c, p.patientId, new Date(SUNDAY.getTime() - 2 * DAY), "no_asistio", 10)
+    await ruleOn(c, "seguimiento_no_asistencia", new Date(SUNDAY.getTime() - 3 * DAY))
+    await run(c, (tx) => syncVisitFollowUps(tx, c.orgId, SUNDAY))
+    // Al programarlo ya se corre al primer momento permitido.
+    const [job] = await jobsOf(c)
+    expect(job!.scheduledFor.toISOString()).toBe("2026-10-12T13:00:00.000Z")
+    // Si vence igual en domingo (el horario cambió después), el envío lo pospone.
+    await ownerDb.update(automationJob).set({ scheduledFor: SUNDAY }).where(eq(automationJob.id, job!.id))
+    expect(await deliver(c, SUNDAY)).toMatchObject([{ outcome: "pospuesto", detail: "Fuera del horario para escribir" }])
+    expect((await jobsOf(c))[0]!.scheduledFor.toISOString()).toBe("2026-10-12T13:00:00.000Z")
+    // Con el domingo abierto para escribir, sale.
+    await run(c, (tx) => setWritingHours(tx, c.orgId, c.ownerId, Array.from({ length: 7 }, (): Array<[number, number]> => [[480, 1200]])))
+    await ownerDb.update(automationJob).set({ scheduledFor: SUNDAY }).where(eq(automationJob.id, job!.id))
+    expect((await deliver(c, SUNDAY)).map((result) => result.outcome)).toEqual(["enviado"])
+  })
+})
+
+describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () => {
+  /** Una cita propuesta por el agente en la conversación de la persona, con el profesional que atiende ese día. */
+  async function proposed(c: Clinic, startsAt: string) {
+    // El profesional atiende todos los días de 8:00 a 20:00 en la sede.
+    await ownerDb.insert(professionalSchedule).values(
+      Array.from({ length: 7 }, (_, weekday) => ({ organizationId: c.orgId, branchId: c.branchId, dentistUserId: c.dentistId, weekday, startMin: 480, endMin: 1200 })),
+    ).onConflictDoNothing()
+    const p = await person(c, "Pedro Ruiz", { openWindow: true })
+    const proposal = await run(c, (tx) =>
+      createProposal(tx, c.orgId, {
+        conversationId: p.conversationId!, action: "reservar_cita",
+        payload: { patientId: p.patientId, branchId: c.branchId, dentistUserId: c.dentistId, chairId: c.chairId, startsAt, durationMin: 30 },
+        idempotencyKey: `prueba:${randomUUID()}`,
+      }),
+    )
+    return { p, proposal }
+  }
+
+  it("muestra solo las citas propuestas abiertas, con lo que se le propuso, y cuenta solo esas", async () => {
+    const c = await clinic({ anyHour: true })
+    const startsAt = new Date(Date.now() + 3 * DAY)
+    startsAt.setUTCHours(21, 30, 0, 0) // 16:30 en Lima
+    const { p, proposal } = await proposed(c, startsAt.toISOString())
+    const list = await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))
+    expect(list.total).toBe(1)
+    expect(list.items).toMatchObject([{ id: proposal.id, conversationId: p.conversationId, contactName: "Pedro Ruiz", action: "reservar_cita", taken: false }])
+    expect(list.items[0]!.text).toMatch(/^Le propuse el \S+ \d+ a las 16:30 con Dra\. Ana Torres$/)
+    expect(await run(c, (tx) => countAwaitingAnswer(tx, c.orgId))).toBe(1)
+    // Un caso derivado no está aquí ni en el número.
+    await run(c, (tx) => createHandoff(tx, c.orgId, null, { conversationId: p.conversationId!, reason: "Dolor", summary: "Dolor", createdBy: "agent" }))
+    expect(await run(c, (tx) => countAwaitingAnswer(tx, c.orgId))).toBe(1)
+  })
+
+  it("«Confirmó por teléfono» reserva con la misma regla que el agente; si el horario se ocupó, lo dice y no hace nada", async () => {
+    const c = await clinic({ anyHour: true })
+    const startsAt = new Date(Date.now() + 3 * DAY)
+    startsAt.setUTCHours(15, 0, 0, 0) // 10:00 en Lima
+    const { p, proposal } = await proposed(c, startsAt.toISOString())
+    const done = await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, proposal.id))
+    expect(done.status).toBe("ejecutada")
+    const booked = await ownerDb.select().from(appointment).where(eq(appointment.patientId, p.patientId))
+    expect(booked).toMatchObject([{ startsAt, chairId: c.chairId, dentistUserId: c.dentistId, status: "programada" }])
+    expect(await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).toEqual({ items: [], total: 0 })
+    // Otra persona: le proponen el mismo horario, que ya no está libre.
+    const other = await person(c, "Ana Gómez", { openWindow: true })
+    const late = await run(c, (tx) =>
+      createProposal(tx, c.orgId, {
+        conversationId: other.conversationId!, action: "reservar_cita",
+        payload: { patientId: other.patientId, branchId: c.branchId, dentistUserId: c.dentistId, chairId: c.chairId, startsAt: startsAt.toISOString(), durationMin: 30 },
+        idempotencyKey: `prueba:${randomUUID()}`,
+      }),
+    )
+    expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items).toMatchObject([{ id: late.id, taken: true }])
+    await expect(run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, late.id))).rejects.toMatchObject({
+      code: "SLOT_TAKEN",
+      message: "Ese horario ya no está libre: elige otro en la Agenda",
+    })
+    // La propuesta sigue esperando; nada quedó a medias.
+    expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items.map((item) => item.id)).toEqual([late.id])
+    expect(await ownerDb.select().from(appointment).where(eq(appointment.patientId, other.patientId))).toHaveLength(0)
   })
 })

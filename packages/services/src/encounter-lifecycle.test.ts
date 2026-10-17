@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
-import { cie10Code, encounter, odontogramEntry, patientCharge } from "@odentia/db/schema/clinical"
+import { encounter, odontogramEntry, patientCharge } from "@odentia/db/schema/clinical"
 import { branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { createAppointment, createChair, getAppointment } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { addClinicalNote, addOdontogramEntries } from "./clinical.js"
-import { clinicalFixture, makeSigner } from "./clinical-test-fixture.js"
+import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
   addEncounterProcedure,
@@ -31,10 +31,7 @@ setupTestDb()
 
 async function withAgenda() {
   const f = await clinicalFixture()
-  await ownerDb
-    .insert(cie10Code)
-    .values({ code: "K02.1", description: "Caries de la dentina" })
-    .onConflictDoNothing()
+  await seedDiagnosisCodes([{ code: "K02.1", title: "Caries de la dentina" }])
   const [site] = await ownerDb
     .insert(branch)
     .values({
@@ -44,7 +41,7 @@ async function withAgenda() {
     })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Sillón" }))
+  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, "org_a", f.actor, {
       branchId: site.id,
@@ -97,7 +94,7 @@ async function withZoneAgenda() {
     .values({ organizationId: "org_a", name: `Sede ${randomUUID().slice(0, 6)}`, timezone: zone })
     .returning()
   if (!site) throw new Error("Sin sede")
-  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Sillón" }))
+  const chair = await f.run((tx) => createChair(tx, "org_a", { branchId: site.id, name: "Unidad dental" }))
   const schedule = (dentistUserId: string) =>
     f.run((tx) =>
       setProfessionalSchedule(tx, "org_a", f.actor, {
@@ -356,8 +353,8 @@ it("anular el borrador lo cierra con motivo y anula sus actos sin cargos; la cit
   )
   await f.run((tx) =>
     addEncounterDiagnosis(tx, ...f.args, draft.id, {
-      cie10Code: "K02.1",
-      diagnosisType: "definitivo",
+      diagnosisCode: "K02.1",
+      diagnosisType: "confirmed",
     }),
   )
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, draft.id, { serviceId: f.service.id }))
@@ -546,18 +543,15 @@ it("la nota normativa valida signos vitales y el cargo multiplica la cantidad", 
 
 it("una categoría CIE-10 con subcódigos no se registra como diagnóstico", async () => {
   const f = await clinicalFixture()
-  await ownerDb
-    .insert(cie10Code)
-    .values([
-      { code: "K04", description: "Enfermedades de la pulpa y de los tejidos periapicales" },
-      { code: "K04.0", description: "Pulpitis" },
+  await seedDiagnosisCodes([
+      { code: "K04", title: "Enfermedades de la pulpa y de los tejidos periapicales" },
+      { code: "K04.0", title: "Pulpitis" },
     ])
-    .onConflictDoNothing()
   await expect(
     f.run((tx) =>
       addEncounterDiagnosis(tx, ...f.args, f.encounter.id, {
-        cie10Code: "K04",
-        diagnosisType: "definitivo",
+        diagnosisCode: "K04",
+        diagnosisType: "confirmed",
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })

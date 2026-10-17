@@ -1,3 +1,4 @@
+import { RESPONSIBILITY_KINDS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient, patientContact, patientDocument, patientResponsibility } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
@@ -5,9 +6,10 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, isNull, lte, gte, or } from "drizzle-orm"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { endPairAccess } from "./pair-access.js"
-import { requirePatient } from "./patients.js"
+import { patientOrganizationToday, requirePatient } from "./patients.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
-export const RESPONSIBILITY_KINDS = ["representante_legal", "autorizado_informacion", "responsable_economico"] as const
+export { RESPONSIBILITY_KINDS } from "@odentia/clinical"
 
 function validDate(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw validation("Fecha inválida: usa AAAA-MM-DD")
@@ -34,35 +36,109 @@ function adulthoodDay(birthDate: string): string {
 }
 
 /**
+ * La edad y la mayoría de edad de un paciente, con el día de hoy en la zona
+ * horaria de la clínica (no la del servidor ni UTC). Sin fecha de nacimiento
+ * no se presume menor.
+ */
+export async function patientAge(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{ today: string; birthDate: string | null; adultSince: string | null; isMinor: boolean }> {
+  const [subject] = await tx.select({ birthDate: patientPerson.birthDate }).from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).limit(1)
+  const today = await patientOrganizationToday(tx, orgId)
+  const birthDate = subject?.birthDate ? String(subject.birthDate).slice(0, 10) : null
+  const adultSince = birthDate ? adulthoodDay(birthDate) : null
+  return { today, birthDate, adultSince, isMinor: adultSince !== null && adultSince > today }
+}
+
+/** Es menor de edad hoy, en la zona horaria de la clínica. La pantalla recibe esto del servidor. */
+export async function patientIsMinor(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  return (await patientAge(tx, orgId, patientId)).isMinor
+}
+
+/** Representación legal vigente hoy; si ya es mayor de edad, solo la que se dio siendo adulto. */
+function currentRepresentationSql(
+  orgId: string,
+  patientId: string,
+  age: { today: string; adultSince: string | null },
+) {
+  return and(eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId),
+    eq(patientResponsibility.kind, "representante_legal"),
+    isNull(patientResponsibility.revokedAt), lte(patientResponsibility.startsAt, age.today),
+    or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, age.today)),
+    // Ya es mayor de edad: la representación que tuvo de menor terminó.
+    ...(age.adultSince && age.adultSince <= age.today ? [gte(patientResponsibility.startsAt, age.adultSince)] : []))
+}
+
+/**
  * Quién decide por un paciente (presupuesto, consentimientos, sus datos, su
  * portal): la propia persona si es mayor de edad, o su representante legal
  * vigente. Sin fecha de nacimiento no se presume menor. La representación de
  * un menor termina al cumplir 18: después solo cuenta la que se registró
  * siendo ya mayor de edad (la de un adulto que la necesita). Un familiar, un
- * autorizado de información o «otro» nunca deciden.
+ * autorizado de información o «otro» nunca deciden. La edad se cuenta con el
+ * día de la clínica.
  */
 export async function requireDecisionContact(tx: Db, orgId: string, patientId: string, contactId: string) {
   const linked = await requireLinkedActiveContact(tx, orgId, patientId, contactId)
-  const [subject] = await tx.select({ birthDate: patient.birthDate }).from(patient)
-    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).limit(1)
-  const today = new Date().toISOString().slice(0, 10)
-  const birth = subject?.birthDate ? String(subject.birthDate).slice(0, 10) : null
-  const adultSince = birth ? adulthoodDay(birth) : null
+  const age = await patientAge(tx, orgId, patientId)
   if (linked.relationship === "self") {
-    if (adultSince && adultSince > today) {
+    if (age.isMinor) {
       throw new ServiceError("DECISION_CONTACT_NOT_AUTHORIZED", 409, "Es menor de edad: decide su representante legal vigente")
     }
     return linked.contact
   }
   const [responsibility] = await tx.select({ id: patientResponsibility.id }).from(patientResponsibility)
-    .where(and(eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId),
-      eq(patientResponsibility.contactId, contactId), eq(patientResponsibility.kind, "representante_legal"),
-      isNull(patientResponsibility.revokedAt), lte(patientResponsibility.startsAt, today),
-      or(isNull(patientResponsibility.endsAt), gte(patientResponsibility.endsAt, today)),
-      // Ya es mayor de edad: la representación que tuvo de menor terminó.
-      ...(adultSince && adultSince <= today ? [gte(patientResponsibility.startsAt, adultSince)] : []))).for("share")
+    .where(and(currentRepresentationSql(orgId, patientId, age), eq(patientResponsibility.contactId, contactId))).for("share")
   if (!responsibility) throw new ServiceError("DECISION_CONTACT_NOT_AUTHORIZED", 409, "El contacto no es paciente ni representante legal vigente")
   return linked.contact
+}
+
+/** A quién se le puede mandar algo de un paciente. */
+export interface DecisionRecipient {
+  contactId: string
+  displayName: string
+  relation: "paciente" | "representante_legal"
+  email: string | null
+  phone: string | null
+  /** El primero: la propia persona si es mayor de edad; si no, su representante. */
+  isDefault: boolean
+}
+
+/**
+ * A quién se le manda algo de un paciente: una sola regla para recetas,
+ * órdenes y consentimientos, presupuestos, «Su enlace» y el portal. Es la de
+ * `requireDecisionContact`: la propia persona si es mayor de edad y sus
+ * representantes legales vigentes (al cumplir 18, la representación de su
+ * infancia termina). Nunca un familiar, un autorizado de información ni el
+ * responsable económico: son cosas de su salud y de sus decisiones.
+ */
+export async function listDecisionRecipients(tx: Db, orgId: string, patientId: string): Promise<DecisionRecipient[]> {
+  await requirePatient(tx, orgId, patientId)
+  const age = await patientAge(tx, orgId, patientId)
+  const out: DecisionRecipient[] = []
+  const push = (row: typeof contact.$inferSelect, relation: DecisionRecipient["relation"]) => {
+    if (out.some((item) => item.contactId === row.id)) return
+    out.push({ contactId: row.id, displayName: row.displayName, relation, email: row.email, phone: row.phone, isDefault: false })
+  }
+  if (!age.isMinor) {
+    const [self] = await tx.select({ contact }).from(patientContact)
+      .innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
+      .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId),
+        eq(patientContact.relationship, "self"), eq(contact.isActive, true)))
+      .limit(1)
+    if (self) push(self.contact, "paciente")
+  }
+  const representatives = await tx.select({ contact }).from(patientResponsibility)
+    .innerJoin(contact, and(eq(contact.id, patientResponsibility.contactId), eq(contact.organizationId, orgId)))
+    .where(and(currentRepresentationSql(orgId, patientId, age), eq(contact.isActive, true)))
+    .orderBy(asc(patientResponsibility.startsAt), asc(patientResponsibility.id))
+  for (const row of representatives) push(row.contact, "representante_legal")
+  if (out[0]) out[0].isDefault = true
+  return out
 }
 
 /** Igual que `requireDecisionContact`, como sí o no: para decidir qué se muestra. */
@@ -128,6 +204,7 @@ export async function listResponsibilities(tx: Db, orgId: string, patientId: str
     .innerJoin(contact, and(eq(contact.id, patientResponsibility.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(patientDocument, and(eq(patientDocument.id, patientResponsibility.evidenceDocumentId), eq(patientDocument.organizationId, orgId), eq(patientDocument.patientId, patientId)))
     .where(and(eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId))).orderBy(asc(patientResponsibility.startsAt), asc(patientResponsibility.id))
-  const today = new Date().toISOString().slice(0, 10)
+  // Vigente hoy, con el día de la clínica (la misma cuenta que `listDecisionRecipients`).
+  const today = await patientOrganizationToday(tx, orgId)
   return rows.map(({ responsibility: r, ...rest }) => ({ ...r, ...rest, isCurrent: !r.revokedAt && r.startsAt <= today && (!r.endsAt || r.endsAt >= today) && rest.contact.isActive }))
 }

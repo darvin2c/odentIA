@@ -232,7 +232,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
     expect(reminder.buttons).toEqual([
       { title: "Confirmar", does: "La cita queda confirmada al momento." },
       { title: "No podré ir", does: "Recepción le busca otra fecha en la conversación." },
-      { title: "No enviar más", does: "Deja de recibir recordatorios; lo demás no cambia." },
+      { title: "No más recordatorios", does: "Deja de recibir recordatorios; lo demás no cambia." },
     ])
     expect(reminder.variables.map((item) => [item.key, item.required])).toEqual([["persona", true], ["lugar", true], ["citas", true]])
     // Los avisos de la cita son de «Recordar la cita»: prendida ella, salen ellos.
@@ -240,17 +240,14 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
       when: "Al reservar una cita desde la Agenda, la ficha o la conversación.",
       line: { key: "recordatorio_cita", title: "Recordar la cita", enabled: true },
       category: "Utilidad",
-      buttons: [
-        { title: "No podré ir", does: "Recepción le busca otra fecha en la conversación." },
-        { title: "No enviar más", does: "Deja de recibir recordatorios; lo demás no cambia." },
-      ],
+      // Un aviso de lo que pasó no tiene botón de baja (ADR 0040).
+      buttons: [{ title: "No podré ir", does: "Recepción le busca otra fecha en la conversación." }],
     })
-    // El aviso de reserva con «Su enlace»: su botón abre el enlace, antes de la baja.
+    // El aviso de reserva con «Su enlace»: su botón abre el enlace.
     expect(items[2]).toMatchObject({
       line: { key: "recordatorio_cita", enabled: true },
       buttons: [
         { title: "Ver mi cita y mis datos", does: "Abre su enlace: lo que tiene pendiente con la clínica, sin ver nada de lo guardado." },
-        { title: "No enviar más", does: "Deja de recibir recordatorios; lo demás no cambia." },
       ],
     })
     expect(items[4]!.current.body).toBe("Hola, {{persona}}. Tu cita del {{cita_pasada}} en {{clinica}} quedó cancelada. ¿Te buscamos otra fecha?")
@@ -335,7 +332,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
 describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
   it("con el texto vigente aprobado, sigue saliendo hasta que WhatsApp aprueba el nuevo", async () => {
     const c = await clinic()
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     const edited = await save(c, "recordatorio_cita", FORMAL)
     const [version] = await versionsOf(c)
     expect(version).toMatchObject({ number: 1, body: FORMAL })
@@ -345,11 +342,11 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
     expect(edited).toMatchObject({ meanwhile: "Tu cambio de texto está en revisión; sigue saliendo el anterior.", canRevert: true })
     // Lo que envía el agente sigue siendo el texto y la plantilla de antes.
     expect(await run(c, (tx) => currentAutomationMessage(tx, c.orgId, "recordatorio_cita"))).toMatchObject({
-      template: "odentia_recordatorio_cita_v1",
+      template: "odentia_recordatorio_cita_v2",
       variables: ["persona", "lugar", "citas"],
     })
     expect(await run(c, (tx) => findMessageTemplate(tx, c.orgId, c.whatsappId, "recordatorio_cita"))).toMatchObject({
-      name: "odentia_recordatorio_cita_v1",
+      name: "odentia_recordatorio_cita_v2",
       status: "aprobada",
     })
 
@@ -361,7 +358,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
       template: version!.templateName,
       body: "Estimada {{1}}: le recordamos su cita en {{2}}: {{3}}. Si necesita cambiarla, responda a este mensaje.",
       // Los botones no cambian con el texto: de ellos depende que la cita se confirme sola.
-      buttons: [{ action: "confirmar", title: "Confirmar" }, { action: "responder", title: "No podré ir", asks: "cambiar" }, { action: "baja", title: "No enviar más" }],
+      buttons: [{ action: "confirmar", title: "Confirmar" }, { action: "responder", title: "No podré ir", asks: "cambiar" }, { action: "baja", title: "No más recordatorios" }],
     })
     expect((await noticesOf(c)).map((notice) => [notice.title, notice.body, notice.href])).toEqual([
       ["WhatsApp aprobó un mensaje: «Recordar la cita»", "Ya puede salir a quien no escribió en las últimas 24 horas.", "/settings/integrations/whatsapp"],
@@ -371,7 +368,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
 
   it("si WhatsApp rechaza el cambio, se queda el anterior y dice por qué; otro texto lo reemplaza", async () => {
     const c = await clinic()
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     await save(c, "recordatorio_cita", FORMAL)
     const [first] = await versionsOf(c)
     await whatsappSays(c, first!.templateName, "rechazada", "INVALID_FORMAT")
@@ -405,7 +402,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
 
   it("volver al texto de odentIA no pide otra revisión si ya estaba aprobado", async () => {
     const c = await clinic()
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     await save(c, "recordatorio_cita", FORMAL)
     const [version] = await versionsOf(c)
     await whatsappSays(c, version!.templateName, "aprobada")
@@ -416,7 +413,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
     expect(meta.calls).toHaveLength(0)
     expect(reverted.current).toMatchObject({ body: REMINDER, status: "aprobada", isDefault: true })
     expect(reverted).toMatchObject({ pending: null, canRevert: false })
-    expect((await run(c, (tx) => currentAutomationMessage(tx, c.orgId, "recordatorio_cita"))).template).toBe("odentia_recordatorio_cita_v1")
+    expect((await run(c, (tx) => currentAutomationMessage(tx, c.orgId, "recordatorio_cita"))).template).toBe("odentia_recordatorio_cita_v2")
     await expect(
       run(c, (tx) => revertMessageText(tx, c.orgId, c.whatsappId, c.ownerId, "recordatorio_cita", OFFLINE)),
     ).rejects.toThrow("Ya tiene el texto de odentIA.")
@@ -433,7 +430,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
     const reverting = await run(c, (tx) => revertMessageText(tx, c.orgId, c.whatsappId, c.ownerId, "recordatorio_cita", OFFLINE))
     expect(reverting.current).toMatchObject({ body: FORMAL, status: "aprobada" })
     expect(reverting.pending).toMatchObject({ body: REMINDER, status: "en_revision", isDefault: true })
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     expect((await messageOf(c, "recordatorio_cita")).current).toMatchObject({ body: REMINDER, isDefault: true })
   })
 
@@ -450,7 +447,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
     expect(meta.calls).toHaveLength(1)
     expect(meta.calls[0]).toMatchObject({
       method: "POST",
-      url: "https://graph.facebook.com/v21.0/WABA/message_templates",
+      url: "https://graph.facebook.com/v25.0/WABA/message_templates",
       body: {
         name: version!.templateName,
         language: "es",
@@ -461,7 +458,7 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
             text: "Tu cita: {{1}} es tu cita en {{2}}, {{3}}, te esperamos. Si necesitas cambiarla, responde a este mensaje.",
             example: { body_text: [["mañana, martes 13 de octubre, a las 10:00, con Dra. Ana Torres", "Clínica Sonríe, sede Centro", "Lucía"]] },
           },
-          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Confirmar" }, { type: "QUICK_REPLY", text: "No podré ir" }, { type: "QUICK_REPLY", text: "No enviar más" }] },
+          { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Confirmar" }, { type: "QUICK_REPLY", text: "No podré ir" }, { type: "QUICK_REPLY", text: "No más recordatorios" }] },
         ],
       },
     })
@@ -480,9 +477,9 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
 
   it("sin WhatsApp activo vale el último texto guardado, y el ciclo lo deja vigente", async () => {
     const c = await clinic()
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     await save(c, "recordatorio_cita", FORMAL)
-    expect((await run(c, (tx) => currentAutomationMessage(tx, c.orgId, "recordatorio_cita"))).template).toBe("odentia_recordatorio_cita_v1")
+    expect((await run(c, (tx) => currentAutomationMessage(tx, c.orgId, "recordatorio_cita"))).template).toBe("odentia_recordatorio_cita_v2")
     await run(c, (tx) => setConnectionStatus(tx, c.orgId, c.whatsappId, "disabled"))
     await run(c, (tx) => requestNeededTemplates(tx, c.orgId, KEY, new Date(), { fetch, validateExternal: false }))
     // Lo que sale por correo ya es el texto de la clínica.
@@ -557,7 +554,7 @@ describe("mensajes creados por la clínica", () => {
       await run(c, (tx) => deleteClinicMessage(tx, c.orgId, c.whatsappId, c.ownerId, created.id, { fetch: meta.fetch, validateExternal: true, secretsKey: KEY })),
     ).toEqual({ ok: true })
     expect(meta.of("DELETE", "/message_templates").map((call) => call.url)).toEqual([
-      `https://graph.facebook.com/v21.0/WABA/message_templates?name=${names[0]}`,
+      `https://graph.facebook.com/v25.0/WABA/message_templates?name=${names[0]}`,
     ])
     expect((await messages(c)).map((item) => item.origin)).toEqual([...Array(10).fill("agente"), "bandeja", "plan", "plan"])
     const [row] = await ownerDb.select().from(clinicMessage).where(eq(clinicMessage.id, created.id))
@@ -655,7 +652,7 @@ describe("Bandeja, pasadas las 24 horas", () => {
       { organizationId: c.orgId, connectionId: c.whatsappId, name: "promo_mes", language: "es_PE", status: "aprobada", category: "marketing", body: "Este mes tenemos {{1}} en la clínica.", variables: 1 },
       { organizationId: c.orgId, connectionId: c.whatsappId, name: "en_espera", language: "es", status: "en_revision", body: "Todavía no.", variables: 0 },
     ])
-    for (const name of ["odentia_retomar_conversacion_v1", "odentia_recordatorio_cita_v1", version!.templateName]) await whatsappSays(c, name, "aprobada")
+    for (const name of ["odentia_retomar_conversacion_v1", "odentia_recordatorio_cita_v2", version!.templateName]) await whatsappSays(c, name, "aprobada")
     const { data, none } = await offered(c, id)
     expect(none).toBeNull()
     expect(data.map((item) => [item.title, item.buttons, item.fields])).toEqual([
@@ -761,11 +758,11 @@ describe("la conexión de WhatsApp", () => {
     expect(created.webhookSecret).toBeTruthy()
     expect(created).not.toHaveProperty("templatesError")
     expect(meta.of("POST", "/message_templates").map((call) => (call.body as { name: string }).name)).toEqual([
-      "odentia_recordatorio_cita_v1",
-      "odentia_aviso_cita_reservada_v1",
-      "odentia_aviso_cita_datos_v1",
-      "odentia_aviso_cita_movida_v1",
-      "odentia_aviso_cita_cancelada_v1",
+      "odentia_recordatorio_cita_v2",
+      "odentia_aviso_cita_reservada_v2",
+      "odentia_aviso_cita_datos_v2",
+      "odentia_aviso_cita_movida_v2",
+      "odentia_aviso_cita_cancelada_v2",
       "odentia_recordatorio_control_v1",
       "odentia_seguimiento_presupuesto_v1",
       "odentia_seguimiento_oportunidad_v1",
@@ -776,7 +773,7 @@ describe("la conexión de WhatsApp", () => {
       "odentia_su_enlace_v1",
     ])
     const c: Clinic = { orgId, ownerId: `owner-${orgId}`, whatsappId: created.id }
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     await whatsappSays(c, "odentia_cita_cancelada_v1", "rechazada", "INVALID_FORMAT")
     await thread(c, "Lucía Paredes", 3)
     const [overview] = await run(c, (tx) => listConnectionsOverview(tx, orgId))
@@ -911,7 +908,7 @@ describe("la conexión de WhatsApp", () => {
     const meta = fakeMeta((call) => (call.url.includes("fields=display_phone_number") ? { json: { id: `PNID-${orgId}`, display_phone_number: "+51 944 555 666", verified_name: "Clínica Sonríe" } } : undefined))
     const created = await connect(orgId, meta)
     const c: Clinic = { orgId, ownerId, whatsappId: created.id }
-    await whatsappSays(c, "odentia_recordatorio_cita_v1", "aprobada")
+    await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
     await run(c, (tx) => saveMessageText(tx, orgId, created.id, ownerId, "recordatorio_cita", FORMAL, { fetch: meta.fetch, secretsKey: KEY }))
     const [version] = await versionsOf(c)
     // El aviso de WhatsApp no llegó: la aprobación se ve al leer la cuenta.
@@ -920,7 +917,7 @@ describe("la conexión de WhatsApp", () => {
         return {
           json: {
             data: [
-              { id: "1", name: "odentia_recordatorio_cita_v1", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "BODY", text: "x {{1}} {{2}} {{3}}" }] },
+              { id: "1", name: "odentia_recordatorio_cita_v2", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "BODY", text: "x {{1}} {{2}} {{3}}" }] },
               { id: "2", name: version!.templateName, language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "BODY", text: "y {{1}} {{2}} {{3}}" }] },
               { id: "3", name: "bienvenida_clinica", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "BODY", text: "Gracias por escribir." }] },
             ],

@@ -1,1 +1,0 @@
-ALTER TABLE "agent_config" ADD COLUMN "advisor" jsonb DEFAULT '{}'::jsonb NOT NULL;

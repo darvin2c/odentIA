@@ -20,6 +20,8 @@ export interface ConsentNeed {
   procedureRef: string | null
   planItemId: string | null
   diagnosisCode: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   services: string[]
 }
 

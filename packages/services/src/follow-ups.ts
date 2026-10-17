@@ -1,3 +1,4 @@
+import { FOLLOW_UP_STATUSES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -64,7 +65,7 @@ function present(row: {
   }
 }
 
-export const FOLLOW_UP_STATUSES = ["pendiente", "programado", "realizado", "cancelado"] as const
+export { FOLLOW_UP_STATUSES } from "@odentia/clinical"
 export interface CreateFollowUpInput {
   planItemId?: string | null
   encounterProcedureId?: string | null

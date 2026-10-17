@@ -529,7 +529,7 @@ describe("la dirección de avisos de la app de odentIA", () => {
       messages("7999", "9999", [text("wamid.nadie", "51933333333")]),
       // El número de una conexión hecha a mano no recibe por aquí: sigue con su propia dirección.
       messages("7005", "9005", [text("wamid.a-mano", "51944444444")]),
-      templateChange("7999", "odentia_recordatorio_cita_v1", "APPROVED"),
+      templateChange("7999", "odentia_recordatorio_cita_v2", "APPROVED"),
     )
     const res = await deliver(raw)
     expect(res.status).toBe(200)
@@ -543,16 +543,16 @@ describe("la dirección de avisos de la app de odentIA", () => {
   })
 
   it("una plantilla que cambia de estado se aplica a la cuenta que la tiene, y solo a esa", async () => {
-    expect(await templateOf("org_a", "odentia_recordatorio_cita_v1")).toEqual({ status: "en_revision", reason: null })
+    expect(await templateOf("org_a", "odentia_recordatorio_cita_v2")).toEqual({ status: "en_revision", reason: null })
     const raw = body(
-      templateChange("7001", "odentia_recordatorio_cita_v1", "APPROVED"),
+      templateChange("7001", "odentia_recordatorio_cita_v2", "APPROVED"),
       templateChange("7003", "odentia_cita_cancelada_v1", "REJECTED", "INVALID_FORMAT"),
     )
     expect((await deliver(raw)).status).toBe(200)
-    expect(await templateOf("org_a", "odentia_recordatorio_cita_v1")).toEqual({ status: "aprobada", reason: null })
+    expect(await templateOf("org_a", "odentia_recordatorio_cita_v2")).toEqual({ status: "aprobada", reason: null })
     expect(await templateOf("org_c", "odentia_cita_cancelada_v1")).toEqual({ status: "rechazada", reason: "INVALID_FORMAT" })
     // La misma plantilla en la otra clínica no se movió.
-    expect(await templateOf("org_c", "odentia_recordatorio_cita_v1")).toEqual({ status: "en_revision", reason: null })
+    expect(await templateOf("org_c", "odentia_recordatorio_cita_v2")).toEqual({ status: "en_revision", reason: null })
     expect(await templateOf("org_a", "odentia_cita_cancelada_v1")).toEqual({ status: "en_revision", reason: null })
   })
 

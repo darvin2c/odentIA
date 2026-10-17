@@ -65,6 +65,8 @@ export interface WhenInput {
   moving?: { id: string; dentistUserId: string; startsAt: string; endsAt: string }
   /** Falso mientras el «cuándo» no está a la vista: no se consulta nada. */
   enabled?: boolean
+  /** Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039). */
+  serviceId?: string
 }
 
 export interface WhenState {
@@ -83,6 +85,8 @@ export interface WhenState {
   chosenMinutes: number
   /** Próximo hueco de quien se eligió, desde ahora. */
   nextFree: { startsAt: string; endsAt: string } | null
+  /** Si el servicio tiene quien lo atienda en la sede: la agenda solo ofrece a esas personas. */
+  attending: { specialtyName: string } | null
   /** «09:00 a 13:00» por cada turno de quien se eligió ese día. */
   hoursThatDay: string[]
   loading: boolean
@@ -120,11 +124,12 @@ export function useWhen(input: WhenInput): WhenState {
   const from = minutesToInstant(week[0] ?? date, 0, timeZone)
   const to = minutesToInstant(addDays(week[6] ?? date, 1), 0, timeZone)
   const ignore = moving?.id
+  const serviceId = input.serviceId
   const availabilityQuery = useQuery({
-    queryKey: ["agenda-availability", branchId, from, to, ignore ?? null],
+    queryKey: ["agenda-availability", branchId, from, to, ignore ?? null, serviceId ?? null],
     queryFn: () =>
       apiFetch<{ data: AgendaAvailability }>(
-        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${ignore ? `&ignoreAppointmentId=${ignore}` : ""}`,
+        `/api/agenda/availability?branchId=${branchId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${ignore ? `&ignoreAppointmentId=${ignore}` : ""}${serviceId ? `&serviceId=${serviceId}` : ""}`,
       ),
     enabled: input.enabled ?? true,
     placeholderData: (previous) => previous,
@@ -139,8 +144,12 @@ export function useWhen(input: WhenInput): WhenState {
       })),
     [availability, toneOf],
   )
+  // Si quien se miraba no atiende el servicio elegido, se ve a quienes sí lo atienden.
   const lanes = React.useMemo(
-    () => (dentistFilter ? team.filter((item) => item.id === dentistFilter) : team),
+    () =>
+      dentistFilter && team.some((item) => item.id === dentistFilter)
+        ? team.filter((item) => item.id === dentistFilter)
+        : team,
     [team, dentistFilter],
   )
   const free = React.useMemo(
@@ -280,6 +289,7 @@ export function useWhen(input: WhenInput): WhenState {
     chosenMinutes: shown ? minutesBetween(shown.start, shown.end) : duration,
     nextFree:
       availability?.professionals.find((item) => item.id === shown?.columnId)?.nextFree ?? null,
+    attending: availability?.attending ? { specialtyName: availability.attending.specialtyName } : null,
     hoursThatDay: shown
       ? open
           .filter((item) => item.columnId === shown.columnId)
@@ -347,7 +357,7 @@ export function WhenFields({ when }: { when: WhenState }) {
             label="Profesional"
             resources={when.team}
             formatLabel={(item) => shortName(item.label)}
-            value={when.dentistFilter}
+            value={when.dentistFilter && when.team.some((item) => item.id === when.dentistFilter) ? when.dentistFilter : null}
             allLabel="Cualquiera"
             onChange={when.pickDentist}
           />

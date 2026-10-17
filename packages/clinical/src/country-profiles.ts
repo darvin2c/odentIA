@@ -15,6 +15,9 @@
  * documento guarda la suya (p. ej. `odontogram_assessment.standard`).
  */
 
+import type { DiagnosisSystemKey } from "./diagnoses.js"
+import type { MaritalStatus } from "./identity.js"
+
 /** Tipos de documento de identidad. Las etiquetas valen en cualquier clínica. */
 export const IDENTITY_DOC_TYPES = ["NACIONAL", "DNI", "CE", "PASAPORTE", "CNV", "DIE", "OTRO"] as const
 export type IdentityDocType = (typeof IDENTITY_DOC_TYPES)[number]
@@ -122,6 +125,24 @@ export interface ClinicalCountryProfile {
   origin: boolean
   /** Título y colegio que se proponen al completar el perfil profesional. */
   professional: { title: string; registrationBody: string } | null
+  /** Estados civiles que se ofrecen, en el orden de la lista (HL7 o la palabra del país). */
+  maritalStatuses: readonly MaritalStatus[]
+  /**
+   * Lista de diagnósticos (decisión 26 de la fase 4): la que se propone al
+   * crear la clínica y, por lista, lo que se le avisa si elige otra.
+   */
+  diagnosis: DiagnosisProfile
+}
+
+export interface DiagnosisProfile {
+  recommended: DiagnosisSystemKey
+  /** Aviso al elegir una lista que no es la recomendada; sin texto propio, uno general. */
+  notices: Partial<Record<DiagnosisSystemKey, string>>
+  /**
+   * La hoja del registro oficial del país dice el tipo del diagnóstico como
+   * su norma (en Perú, el HIS: P, D o R, con R para «ya diagnosticado antes»).
+   */
+  officialRecordTypes: boolean
 }
 
 /** Documentos del núcleo: el nacional, el pasaporte u otro, siempre con su país emisor. */
@@ -130,6 +151,24 @@ const CORE_DOCUMENTS: readonly DocumentTypeProfile[] = [
   { code: "PASAPORTE", issuer: { kind: "chosen" } },
   { code: "OTRO", issuer: { kind: "any" } },
 ]
+
+/** HL7 v3 MaritalStatus, sin palabras de un país. */
+const CORE_MARITAL: readonly MaritalStatus[] = ["S", "M", "T", "L", "D", "W"]
+
+/**
+ * La CIE-10 sigue siendo la lista de casi todos los países de habla hispana
+ * (Perú, Chile, México, Argentina…): es la que se propone sin perfil propio.
+ */
+const CORE_DIAGNOSIS: DiagnosisProfile = { recommended: "ICD-10", notices: {}, officialRecordTypes: false }
+
+/**
+ * Lista recomendada en países sin otro perfil. Colombia adopta la CIE-11 por
+ * norma (Resolución 1442 de 2024 del Ministerio de Salud, con hasta 36 meses
+ * de transición).
+ */
+const DIAGNOSIS_BY_COUNTRY: Record<string, DiagnosisProfile> = {
+  CO: { recommended: "ICD-11", notices: {}, officialRecordTypes: false },
+}
 
 const CORE_ADDRESS: AddressProfile = {
   regionLabel: "Región",
@@ -149,6 +188,8 @@ const CORE: Omit<ClinicalCountryProfile, "country"> = {
   phone: null,
   origin: false,
   professional: null,
+  maritalStatuses: CORE_MARITAL,
+  diagnosis: CORE_DIAGNOSIS,
 }
 
 /**
@@ -225,6 +266,16 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
   phone: { callingCode: "51", national: /^9\d{8}$/, hint: "un celular de 9 dígitos" },
   origin: true,
   professional: { title: "Cirujano dentista", registrationBody: "COP" },
+  // «Conviviente» es la palabra del país; al enviarse a otro sistema sale como HL7 T.
+  maritalStatuses: ["S", "M", "PE:conviviente", "L", "D", "W"],
+  // El registro HIS del MINSA codifica los diagnósticos con la CIE-10.
+  diagnosis: {
+    recommended: "ICD-10",
+    notices: {
+      "ICD-11": "En Perú, el registro oficial (HIS) pide la CIE-10. Con la CIE-11, esa hoja no se podrá llenar.",
+    },
+    officialRecordTypes: true,
+  },
 }
 
 const PROFILES: Record<string, Omit<ClinicalCountryProfile, "country">> = { PE: PERU }
@@ -241,7 +292,9 @@ export function normalizeCountryCode(country: string | null | undefined): string
  */
 export function clinicalProfileFor(country: string | null | undefined): ClinicalCountryProfile {
   const code = normalizeCountryCode(country)
-  return { country: code, ...(code && PROFILES[code] ? PROFILES[code] : CORE) }
+  const base = code && PROFILES[code] ? PROFILES[code] : CORE
+  const diagnosis = code && !PROFILES[code] && DIAGNOSIS_BY_COUNTRY[code] ? DIAGNOSIS_BY_COUNTRY[code] : base.diagnosis
+  return { country: code, ...base, diagnosis }
 }
 
 /** El tipo de documento que se ofrece en ese país, o undefined. */

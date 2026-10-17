@@ -92,6 +92,14 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         action: !row.conversationId ? "Revisar" : row.unclaimed ? "Tomar" : "Ver el caso",
       }
     case "unconfirmed":
+      // Quien no recibe recordatorios se llama el día antes (ADR 0040).
+      if (row.why === "sin_recordatorios") {
+        return {
+          title: `${row.patientName} no recibe recordatorios: llámala para confirmar su cita de mañana ${formatClock(row.startsAt, context.locale, context.timezone)}`,
+          detail: joined([row.phone, row.serviceName, row.branchName]),
+          action: "Ver la cita",
+        }
+      }
       return {
         title: `${row.patientName} no confirmó · llamar`,
         detail: joined([row.phone, `Cita ${appointmentWhen(row.startsAt, context)}`, row.serviceName, row.branchName]),
@@ -158,6 +166,20 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         action: "Enviar",
       }
     case "possibleDuplicate":
+      if (row.source === "registro") {
+        return {
+          title: `Alguien se registró con el documento de ${row.patientName}: revisa si es ella`,
+          detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
+          action: `Ver a ${row.patientName}`,
+        }
+      }
+      if (row.source === "representante") {
+        return {
+          title: `¿${row.personName ?? "Esta persona"} es representante de ${row.patientName}?`,
+          detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
+          action: "Revisar",
+        }
+      }
       return {
         title: `Posible ficha repetida: ${row.patientName}`,
         detail: joined([`Desde su enlace ${ago(row.createdAt)}`, row.detail]),
@@ -174,6 +196,12 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         title: `Publicar el consentimiento de «${row.title}»`,
         detail: row.requestedByName ? `Lo pidió ${row.requestedByName}` : "Lo pidió una atención",
         action: "Abrir los consentimientos",
+      }
+    case "promotion":
+      return {
+        title: `WhatsApp considera "${row.title}" como promoción: solo se enviará a quien aceptó novedades.`,
+        detail: "Cambia el texto para que sea solo el aviso.",
+        action: "Cambiar el texto",
       }
     case "more":
       if (row.of === "cases") {
@@ -216,11 +244,31 @@ export function waitingOpenText(row: WaitingRow, context: HomeTextContext): stri
   return waitingText(row, context).action
 }
 
+type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
+
+/**
+ * Los botones de una fila de documento repetido, además de la fila que lleva
+ * a la persona: el representante por confirmar ofrece «Confirmar» y «No es
+ * ella»; quien se registró con el documento de otra, «Descartar»; la posible
+ * ficha repetida de «Su enlace», «Revisada».
+ */
+export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descartar" | "revisada"; label: string; primary: boolean }[] {
+  if (row.source === "representante") {
+    return [
+      { id: "confirmar", label: "Confirmar", primary: true },
+      { id: "descartar", label: "No es ella", primary: false },
+    ]
+  }
+  if (row.source === "registro") return [{ id: "descartar", label: "Descartar", primary: false }]
+  return [{ id: "revisada", label: "Revisada", primary: false }]
+}
+
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
   if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry") return `${row.kind}:${row.id}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
+  if (row.kind === "promotion") return `promotion:${row.messageId}`
   if (row.kind === "more") return `more:${row.of}`
   return row.kind
 }

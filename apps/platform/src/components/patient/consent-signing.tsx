@@ -30,7 +30,7 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { fetchMyProfessionalProfile, registrationLabel } from "../../lib/encounters"
-import { ageFrom, type PatientFull } from "../../lib/patients"
+import type { PatientFull } from "../../lib/patients"
 import { FirmaPad } from "./firma-pad"
 
 export interface SignerChoice {
@@ -55,8 +55,8 @@ export function useSignerChoices(patientId: string) {
   })
   const detail = patientQuery.data?.data
   const own = detail?.contacts.find((link) => link.relationship === "self")
-  const age = Number(ageFrom(detail?.patient.birthDate))
-  const isMinor = detail?.patient.birthDate != null && Number.isFinite(age) && age < 18
+  // Menor de edad según el servidor (el día de la clínica), no la hora de este equipo.
+  const isMinor = detail?.isMinor ?? false
   const representatives = (responsibilitiesQuery.data?.data ?? []).filter(
     (row) => row.isCurrent && row.kind === "representante_legal",
   )
@@ -105,7 +105,7 @@ export function useSignAs(): { text: string | null; loading: boolean } {
 }
 
 /**
- * Firma en la silla (decisión 3): una pantalla completa para pasarle la tablet a
+ * Firma en la unidad dental (decisión 3): una pantalla completa para pasarle la tablet a
  * la persona, con letra grande, la casilla de comprensión y su firma con el
  * dedo; si son varios consentimientos van seguidos, sin volver a empezar. Al
  * terminar, el profesional confirma con su perfil, sin dibujar otra firma, y

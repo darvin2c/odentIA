@@ -4,7 +4,7 @@
  * «Controles». De arriba abajo: el plan en corto con lo indicado hoy marcado e
  * «Indicar un tratamiento», «Hecho hoy» con «Completar», «Próximo control» con
  * «Reservar» y, si hay un presupuesto por enviar y la persona sigue en el
- * sillón, «Enviar presupuesto».
+ * unidad dental, «Enviar presupuesto».
  *
  * Indicar no ejecuta ni cobra, y no se elige plan: va al plan abierto de la
  * persona, que se crea solo con la primera indicación.
@@ -37,7 +37,7 @@ import { useOrgProfile } from "../../lib/org"
 import { type OdontogramState, type PlanItem, planStatusLabel } from "../../lib/patients"
 import { type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { ControlesPanel } from "./clinical-panels"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 import { EncounterTreatments } from "./encounter-treatments"
 import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
@@ -231,7 +231,7 @@ export function EncounterPlanPanel({
 }
 
 /**
- * «Enviar presupuesto» mientras la persona sigue en el sillón: el borrador que
+ * «Enviar presupuesto» mientras la persona sigue en la unidad dental: el borrador que
  * ya está armado (de una atención anterior o revisado). Lo de esta atención se
  * suma al firmar, y el cierre pregunta «¿Enviárselo ahora?». La misma regla de
  * «Qué sigue» decide si hay algo que enviar.
@@ -263,7 +263,7 @@ function EncounterBudgetSend({
   )
 }
 
-/** «Indicar un tratamiento»: ámbito y sitio, prestación con su tarifa, hallazgo, detalle y CIE-10. */
+/** «Indicar un tratamiento»: ámbito y sitio, prestación con su tarifa, hallazgo, detalle y diagnóstico. */
 function IndicationForm({
   patientId,
   encounterId,
@@ -504,7 +504,7 @@ function IndicationForm({
           onChange={(e) => setDetail(e.target.value)}
         />
       </Field>
-      <Cie10Search value={cie} onChange={(code) => setCie(code)} disabled={blocked} />
+      <DiagnosisSearch value={cie} onChange={(code) => setCie(code)} label="Diagnóstico (opcional)" disabled={blocked} />
 
       <div className="flex flex-col gap-1">
         <Button

@@ -1,6 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import {
   createTask,
+  discardRegistrationTask,
   getTask,
   getTaskResolvePreview,
   listTasks,
@@ -185,6 +186,16 @@ export function createTasksRoute(deps: CrmDeps) {
       )
       return visibleTask(memberRole, created)
     })
+  })
+
+  // «No es ella» y «Descartar» en «Te espera»: lo que dejó un registro en línea queda cerrado con su motivo (tasks.write).
+  app.post("/:id/discard", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => discardRegistrationTask(tx, orgId, userId, params.data.id)),
+    )
   })
 
   app.patch("/:id", async (c) => {

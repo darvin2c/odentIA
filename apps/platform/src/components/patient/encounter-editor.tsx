@@ -374,7 +374,7 @@ export function EncounterEditor({
   const [justAdded, setJustAdded] = useState<SectionKey | null>(null)
   // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
   const [skipReason, setSkipReason] = useState("")
-  // Consentimientos que se firman en la silla desde el cierre.
+  // Consentimientos que se firman en la unidad dental desde el cierre.
   const [signingDocs, setSigningDocs] = useState<ConsentDocument[] | null>(null)
   const myUserId = useMyUserId()
   // El borrador ocupa la página: el agente se abre como cajón, sin desmontarlo.
@@ -956,7 +956,7 @@ export function EncounterEditor({
     {
       key: "hallazgos",
       title: "Diagnóstico",
-      description: "Diagnósticos CIE-10 con su tipo y pieza. Al menos uno para cerrar.",
+      description: "Diagnósticos de la lista de la clínica con su tipo y pieza. Al menos uno para cerrar.",
       summary:
         activeDiagnoses === 0
           ? "Sin diagnósticos registrados"
@@ -1148,7 +1148,7 @@ export function EncounterEditor({
     }
   }
   const signer = firstNameOf(patient)
-  /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la silla. */
+  /** «Firmar ahora» desde el cierre: prepara lo que falta y abre la firma en la unidad dental. */
   const signConsentsNow = async (need: ConsentNeed) => {
     try {
       if (need.status === "sin_preparar") {

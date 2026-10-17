@@ -32,6 +32,7 @@ import { ServiceError } from "./errors.js"
 // ---------------------------------------------------------------------------
 
 import { initialOrgRegion } from "./organization-profile.js"
+import { ensureLibrarySpecialties } from "./specialties.js"
 import { type OrganizationBillingSummary, usageMonthBounds } from "./saas-billing.js"
 import { type AiCostByOrigin, getAiCostByOrigin } from "./ai-usage.js"
 
@@ -188,7 +189,8 @@ export interface OrganizationDetail {
 }
 /**
  * Subdominios reservados: nunca son slugs de tenant (colisionarían con las
- * apps/infra). El panel y la API la reutilizan en vez de copiarla.
+ * apps/infra). La API la reutiliza; el alta del panel la repite porque el panel
+ * no depende de ningún paquete del dominio (y el servidor vuelve a validarla).
  */
 export const RESERVED_ORG_SLUGS: Record<string, true> = {
   api: true,
@@ -746,7 +748,10 @@ export async function createAssistedOrganization(
     currency: region.currency,
     timezone: region.timezone,
     locale: region.locale,
+    diagnosisSystem: region.diagnosisSystem,
   })
+  // La clínica nace con las especialidades de la biblioteca (ADR 0039).
+  await ensureLibrarySpecialties(tx, organizationId)
   if (loaders.startTrial) {
     await loaders.startTrial(tx, organizationId, {
       planCode: input.planCode,

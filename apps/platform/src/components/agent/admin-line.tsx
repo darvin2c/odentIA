@@ -399,7 +399,7 @@ export function AdminLineOpen({
               ))}
             </SelectContent>
           </Select>
-          <FieldDescription>Al día siguiente, con la hora de la sede. Respeta el horario de silencio.</FieldDescription>
+          <FieldDescription>Al día siguiente, con la hora de la sede. Respeta el horario para escribir.</FieldDescription>
         </Field>
       ) : null}
 

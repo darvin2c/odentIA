@@ -69,6 +69,7 @@ import {
   insuranceChoices,
   insuranceFromChoice,
   insuranceText,
+  maritalChoices,
 } from "../../lib/person-data"
 import { SearchSelect } from "../settings/search-select"
 import {
@@ -199,10 +200,6 @@ function emptyRepresentative(profile: ClinicalCountryProfile): RepresentativeVal
   }
 }
 
-const MARITAL_OPTIONS = [
-  { value: "", label: "—" },
-  ...MARITAL_STATUSES.map((value) => ({ value, label: MARITAL_STATUS_LABELS[value] })),
-]
 const EDUCATION_OPTIONS = [
   { value: "", label: "—" },
   ...EDUCATION_LEVELS.map((value) => ({ value, label: EDUCATION_LEVEL_LABELS[value] })),
@@ -1385,7 +1382,7 @@ export function PatientRegistrationForm({
                           label={label("Estado civil", "maritalStatus")}
                           value={field.state.value ?? ""}
                           error={errors["demographics.maritalStatus"]}
-                          options={MARITAL_OPTIONS}
+                          options={[{ value: "", label: "—" }, ...maritalChoices(profile)]}
                           onChange={(next) => {
                             field.handleChange(next as never)
                             clearError("demographics.maritalStatus")

@@ -28,15 +28,17 @@ import {
 } from "./conversation-close.js"
 import { reopenConversation, sendOutbound } from "./conversations.js"
 import { completeTask } from "./tasks.js"
+import { setWritingHours } from "./writing-hours.js"
 import { getWorkspaceHome } from "./workspace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /**
  * Ninguna conversación queda abierta (ADR 0024): cerrar con su motivo y sus
  * efectos, escribir reabre, «Resolver», «Tomar» y «Devolver», y el ciclo que
- * insiste una vez y cierra por silencio en horario oportuno. Lima es UTC−5 y
- * el 12 de octubre de 2026 es lunes; la clínica de prueba no tiene sedes, así
- * que su horario oportuno es de 8:00 a 21:00 todos los días.
+ * insiste una vez y cierra por silencio dentro del «Horario para escribir»
+ * (ADR 0042). Lima es UTC−5 y el 12 de octubre de 2026 es lunes; la clínica de
+ * prueba tiene el horario que viene: lunes a viernes de 8:00 a 20:00, sábado
+ * de 8:00 a 14:00 y domingo sin mensajes.
  */
 setupTestDb()
 
@@ -163,7 +165,7 @@ describe("cerrar y reabrir", () => {
 })
 
 describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
-  it("resolver envía la despedida, resuelve los casos y cierra con el equipo; pasadas 23 horas no hay despedida", async () => {
+  it("resolver envía la despedida, resuelve los casos y cierra con el equipo; pasada la ventana no hay despedida", async () => {
     const c = await clinic({ provider: "whatsapp_cloud_api" })
     const conv = await c.thread("Diana Ríos", { lastInboundAt: new Date(Date.now() - HOUR) })
     await c.say(conv.id, "in", "Gracias por todo", new Date(Date.now() - HOUR))
@@ -254,7 +256,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await ownerDb.update(conversation).set({ lastMessageAt: at, lastOutboundAt: at }).where(eq(conversation.id, conversationId))
   }
 
-  it("insiste una vez a las 3 horas si preguntó algo, y cierra en la última hora oportuna antes de las 22 horas", async () => {
+  it("insiste una vez a las 3 horas si preguntó algo, y cierra en el último momento para escribir antes de las 22 horas", async () => {
     const c = await clinic()
     const conv = await c.thread("Hugo Díaz", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(conv.id, "in", "¿Atienden sábados?", IN)
@@ -268,9 +270,10 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     // Una sola vez por atención, aunque el recordatorio ya salió.
     await settle(conv.id, new Date("2026-10-12T17:05:00Z"))
     expect(await tick(c, new Date("2026-10-12T20:30:00Z"))).toMatchObject({ nudged: 0, closed: 0 })
-    // Las 22 horas caen el martes a las 7:00 (antes de las 8:00): se adelanta al lunes a las 20:59.
-    expect(await tick(c, new Date("2026-10-13T01:30:00Z"))).toMatchObject({ closed: 0 })
-    expect(await tick(c, new Date("2026-10-13T02:00:00Z"))).toMatchObject({ closed: 1 })
+    // Las 22 horas caen el martes a las 7:00 (antes de las 8:00): se adelanta al lunes a las 19:59,
+    // el último momento del «Horario para escribir» (de 8:00 a 20:00), no el de atención.
+    expect(await tick(c, new Date("2026-10-13T00:30:00Z"))).toMatchObject({ closed: 0 })
+    expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
     expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta", closedByUserId: null })
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Hugo, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
   })
@@ -311,6 +314,45 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await ownerDb.insert(agentRunLedger).values({ organizationId: c.orgId, conversationId: conv.id, model: "fake", status: "ok", startedAt: IN, toolsUsed: ["proponer_cita"] })
     expect(await tick(c, new Date("2026-10-12T17:05:00Z"))).toMatchObject({ nudged: 1 })
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Lucía, ¿te reservo el jueves, 15 de octubre a las 10:00? Si prefieres otro horario, dime.")
+  })
+
+  it("al despedirse con una cita propuesta sin confirmar, dice que dejó libre ese horario (tablero 2c)", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Pedro Ruiz", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "¿El jueves a las 10?", IN)
+    await c.say(conv.id, "out", "Te propongo el jueves a las 10:00. ¿Te lo reservo?", OUT)
+    await ownerDb.insert(agentProposal).values({
+      organizationId: c.orgId, conversationId: conv.id, contactId: conv.contactId, action: "reservar_cita",
+      payload: { startsAt: "2026-10-15T15:00:00.000Z" }, afterSummary: "Cita", idempotencyKey: randomUUID(),
+    })
+    // Lo que dice «Resolver» antes de cerrar, y lo que sale al cerrar por silencio: el mismo texto.
+    const said = "Pedro, como no alcanzamos a confirmar, dejé libre el jueves, 15 de octubre a las 10:00. Cuando quieras una cita, escríbenos y te busco un horario: estamos atentos."
+    await c.run((tx) => upsertAgentConfig(tx, c.orgId, { closeAfterHours: 8 }))
+    expect(await tick(c, new Date("2026-10-12T22:00:00Z"))).toMatchObject({ closed: 1 })
+    expect((await c.messages(conv.id)).at(-1)?.body).toBe(said)
+    // De usted, con el trato de la clínica.
+    await c.run((tx) => upsertAgentConfig(tx, c.orgId, { treatment: "usted" }))
+    const other = await c.thread("Ana Gómez", { lastInboundAt: new Date(Date.now() - HOUR) })
+    await ownerDb.insert(agentProposal).values({
+      organizationId: c.orgId, conversationId: other.id, contactId: other.contactId, action: "reservar_cita",
+      payload: { startsAt: "2026-10-15T15:00:00.000Z" }, afterSummary: "Cita", idempotencyKey: randomUUID(),
+    })
+    expect((await c.run((tx) => getResolvePreview(tx, c.orgId, other.id))).farewellText).toBe(
+      "Ana, como no alcanzamos a confirmar, dejé libre el jueves, 15 de octubre a las 10:00. Cuando desee una cita, escríbanos y le busco un horario: estamos atentos.",
+    )
+  })
+
+  it("insistir y despedirse siguen el «Horario para escribir» de la clínica, por día", async () => {
+    const c = await clinic()
+    // El domingo no se escribe: con el horario que viene, el agente no insiste.
+    const sunday = new Date("2026-10-11T14:00:00Z") // domingo 9:00 en Lima
+    const conv = await c.thread("Sara", { lastInboundAt: sunday, lastMessageAt: new Date(sunday.getTime() + 60_000), attentionStartedAt: sunday })
+    await c.say(conv.id, "in", "¿Precio de limpieza?", sunday)
+    await c.say(conv.id, "out", "Son 80 soles. ¿Te reservo?", new Date(sunday.getTime() + 60_000))
+    expect(await tick(c, new Date("2026-10-11T17:05:00Z"))).toMatchObject({ nudged: 0 })
+    // La clínica abre el domingo para escribir: ahora sí insiste.
+    await c.run((tx) => setWritingHours(tx, c.orgId, c.ownerId, [[[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 840]]]))
+    expect(await tick(c, new Date("2026-10-11T17:06:00Z"))).toMatchObject({ nudged: 1 })
   })
 
   it("sin ventana para escribir cierra sin mensaje", async () => {

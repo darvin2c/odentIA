@@ -5,8 +5,8 @@ import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { countAgentModelRunsToday } from "./agent-operations.js"
 import { countLearningPending } from "./agent-learning.js"
-import { getAgentConfig } from "./agentConfig.js"
-import { countOpenKnowledgeGaps, getClinicInfoSnapshot, getKnowledgeBasics, listActiveKnowledge } from "./knowledge.js"
+import { type AgentModelCheck, getAgentConfig } from "./agentConfig.js"
+import { countOpenKnowledgeGaps, getKnowledgeBasics, getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
 import { getOrgLocale } from "./locale.js"
 
 /* ---------- Resumen del agente: cómo va y qué necesita de la clínica ---------- */
@@ -55,10 +55,15 @@ export interface AgentOverview {
   /** `at`: cuándo falló ese último intento. */
   provider: { problem: AgentProviderProblem | null; at: string | null }
   knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
-  /** Comprobaciones para encender el agente; ninguna lo impide, todas dicen qué falta. */
+  /**
+   * Comprobaciones para encender el agente; dicen qué falta. El canal y el
+   * modelo impiden encender (el modelo lo comprueba aparte, `GET /api/agent/model`);
+   * lo demás solo avisa.
+   */
   readiness: {
     channels: string[]
     receivers: string[]
+    /** Pruebas que el modelo respondió. */
     sandboxTurns: number
   }
   /** Corridas con llamada al modelo hoy frente al tope diario. */
@@ -115,7 +120,13 @@ async function agentOutcomes(tx: Db, orgId: string, since: Date): Promise<AgentO
  * no arma las fichas completas de «Aprender».
  */
 async function learnedSince(tx: Db, orgId: string, since: Date): Promise<AgentLearned> {
-  const approved = and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), gte(agentLesson.approvedAt, since))
+  // Lo que escribió la clínica no es algo que aprendió (decisión 24).
+  const approved = and(
+    eq(agentLesson.organizationId, orgId),
+    eq(agentLesson.status, "activa"),
+    eq(agentLesson.source, "aprendida"),
+    gte(agentLesson.approvedAt, since),
+  )
   const kinds = await tx.select({ kind: agentLesson.kind, total: count() }).from(agentLesson).where(approved).groupBy(agentLesson.kind)
   const of = (kind: string) => kinds.find((row) => row.kind === kind)?.total ?? 0
   const [latest] = await tx
@@ -145,22 +156,34 @@ const PROVIDER_PROBLEM_OF: Record<string, AgentProviderProblem> = {
 /**
  * ¿El proveedor del modelo sirve ahora? Lo dice el último intento real de
  * usarlo: una corrida que llamó al modelo, o una que terminó en error. Si fue
- * un problema del proveedor y nadie cambió la configuración del agente después,
- * sigue sin poder responder. El tope diario no es un problema del proveedor y
- * tiene su propio aviso. Sin corridas no se afirma nada; y un arreglo hecho
- * fuera de esta configuración (la credencial de la plataforma) solo se nota
- * con la siguiente corrida.
+ * un problema del proveedor, el aviso sigue hasta que el modelo vuelva a
+ * responder: una corrida posterior que lo use, o la comprobación «El modelo
+ * responde» hecha después del fallo. Guardar otro ajuste del agente no lo
+ * retira: la clave de la plataforma no se arregla desde la clínica. El tope
+ * diario no es un problema del proveedor y tiene su propio aviso. Sin corridas
+ * no se afirma nada.
  */
-async function providerProblem(tx: Db, orgId: string): Promise<AgentOverview["provider"]> {
-  const [last] = await tx.execute<{ status: string; error: string | null; started_at: Date | string; stale: boolean }>(sql`
-    select l.status, l.error, l.started_at,
-           exists (select 1 from agent_config c where c.organization_id = ${orgId} and c.updated_at > l.started_at) as stale
+async function providerProblem(
+  tx: Db,
+  orgId: string,
+  llm: Parameters<AgentModelCheck>[0],
+  modelCheck: AgentModelCheck | undefined,
+): Promise<AgentOverview["provider"]> {
+  const [last] = await tx.execute<{ status: string; error: string | null; started_at: Date | string }>(sql`
+    select l.status, l.error, l.started_at
     from agent_run_ledger l
     where l.organization_id = ${orgId} and (l.status = 'error' or l.llm_calls > 0)
     order by l.started_at desc limit 1`)
-  if (!last || last.status !== "error" || last.stale) return { problem: null, at: null }
+  if (!last || last.status !== "error") return { problem: null, at: null }
   const problem = PROVIDER_PROBLEM_OF[(last.error ?? "").split(":")[0] ?? ""] ?? null
-  return problem ? { problem, at: new Date(last.started_at).toISOString() } : { problem: null, at: null }
+  if (!problem) return { problem: null, at: null }
+  const at = new Date(last.started_at)
+  if (modelCheck) {
+    // Un fallo de la comprobación no inventa ni retira nada: se queda lo que dice el libro.
+    const check = await modelCheck(llm).catch(() => null)
+    if (check?.responds && new Date(check.checkedAt) > at) return { problem: null, at: null }
+  }
+  return { problem, at: at.toISOString() }
 }
 
 /** Inicio del día de hoy en la zona de la clínica, como instante. */
@@ -171,11 +194,19 @@ async function startOfOrgDay(tx: Db, timezone: string): Promise<Date> {
   return new Date(row?.start ?? Date.now())
 }
 
-export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOverview> {
+export async function getAgentOverview(
+  tx: Db,
+  orgId: string,
+  opts: {
+    /** Con ella, el aviso del proveedor se retira cuando el modelo vuelve a responder. */
+    modelCheck?: AgentModelCheck
+  } = {},
+): Promise<AgentOverview> {
   const cfg = await getAgentConfig(tx, orgId)
   const zone = await getOrgLocale(tx, orgId)
   const basics = await getKnowledgeBasics(tx, orgId)
-  const snapshot = await getClinicInfoSnapshot(tx, orgId)
+  // Todos los servicios, sin el tope del prompt; con precio cuentan solo los que el agente puede decir.
+  const sources = await getKnowledgeDataSources(tx, orgId)
   const connections = await tx
     .selectDistinct({ channel: channelConnection.channel })
     .from(channelConnection)
@@ -205,11 +236,11 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
     today: await agentOutcomes(tx, orgId, await startOfOrgDay(tx, zone.timezone)),
     week: await agentOutcomes(tx, orgId, weekAgo),
     learned: await learnedSince(tx, orgId, weekAgo),
-    provider: await providerProblem(tx, orgId),
+    provider: await providerProblem(tx, orgId, cfg.llm, opts.modelCheck),
     knows: {
       answers: (await listActiveKnowledge(tx, orgId)).length,
-      servicesWithPrice: snapshot.services.filter((service) => service.priceCents > 0).length,
-      branches: snapshot.branches.length,
+      servicesWithPrice: sources.pricedServices,
+      branches: sources.branches,
       basicsCovered: basics.covered,
       basicsTotal: basics.total,
     },
@@ -222,7 +253,11 @@ export async function getAgentOverview(tx: Db, orgId: string): Promise<AgentOver
   }
 }
 
-/** Cuenta un mensaje de prueba: solo sirve para saber si la clínica ya probó a su agente. */
+/**
+ * Cuenta un mensaje de prueba que el modelo respondió: solo sirve para saber
+ * si la clínica ya probó a su agente («Lo probaste»). Quien llama lo anota
+ * solo si el modelo contestó (`SandboxResult.modelAnswered`).
+ */
 export async function noteSandboxTurn(tx: Db, orgId: string): Promise<void> {
   await tx
     .insert(agentConfig)

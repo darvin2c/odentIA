@@ -1,13 +1,14 @@
-import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { type ReactNode, useState } from "react"
+import type { ReactNode } from "react"
 import { AdminRequest } from "../../components/agent/admin-draft"
 import { AdminLine } from "../../components/agent/admin-line"
 import { AdminPreview } from "../../components/agent/admin-recommendation"
 import { ADMIN_PAGE_KEY, type AdminLineView, type AdminPage, refreshAdmin } from "../../lib/admin"
+import { writingWeekRows } from "../../lib/writing-hours"
 import type { AgentRoles } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -29,8 +30,6 @@ export const Route = createFileRoute("/_org/agent/administrador")({
 })
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8"
-/** Horas en punto y medias, para elegir el horario de silencio sin un campo de hora del navegador. */
-const HOURS = Array.from({ length: 48 }, (_, index) => `${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 === 0 ? "00" : "30"}`)
 
 function Card({ id, title, hint, children }: { id: string; title: string; hint: string; children: ReactNode }) {
   return (
@@ -100,67 +99,22 @@ function LineBlock({
   )
 }
 
-function QuietHours({ page, canWrite }: { page: AdminPage; canWrite: boolean }) {
-  const queryClient = useQueryClient()
-  const [draft, setDraft] = useState<{ quietStart: string; quietEnd: string } | null>(null)
-  const save = useMutation({
-    retry: false,
-    mutationFn: (input: { quietStart: string; quietEnd: string }) =>
-      apiFetch("/api/agent/admin/settings", { method: "PUT", body: JSON.stringify(input) }),
-    onSuccess: () => {
-      setDraft(null)
-      refreshAdmin(queryClient)
-    },
-  })
-  const none = page.quietStart === page.quietEnd
+/**
+ * A qué hora escribe: el «Horario para escribir» de Agente (decisión 18 v3),
+ * el mismo para todo lo que sale solo. Aquí solo se dice y se lleva ahí.
+ */
+function WritingHoursNote({ page }: { page: AdminPage }) {
+  const rows = writingWeekRows(page.writingHours)
   return (
-    <section aria-label="Horario de silencio" className="flex flex-col gap-3 rounded-xl bg-muted p-4 text-sm">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="min-w-0 flex-1 basis-64">
-          <span className="font-semibold">Horario de silencio:</span>{" "}
-          {none
-            ? "el agente puede escribir por su cuenta a cualquier hora."
-            : `el agente no escribe por su cuenta entre las ${page.quietStart} y las ${page.quietEnd}, con la hora de cada sede.`}{" "}
-          Como mucho un mensaje al día por persona.
-        </p>
-        {canWrite && !draft ? (
-          <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setDraft({ quietStart: page.quietStart, quietEnd: page.quietEnd })}>
-            Cambiar
-          </Button>
-        ) : null}
-      </div>
-      {draft ? (
-        <div className="flex flex-wrap items-end gap-3">
-          {(["quietStart", "quietEnd"] as const).map((field) => (
-            <label key={field} className="flex flex-col gap-1 text-xs font-semibold">
-              {field === "quietStart" ? "No escribe desde las" : "Hasta las"}
-              <Select value={draft[field]} onValueChange={(value) => setDraft({ ...draft, [field]: String(value) })}>
-                <SelectTrigger className="w-28" aria-label={field === "quietStart" ? "Inicio del horario de silencio" : "Fin del horario de silencio"}>
-                  <SelectValue>{draft[field]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {HOURS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-          ))}
-          <Button type="button" size="sm" className="min-h-11 sm:min-h-9" disabled={save.isPending} onClick={() => save.mutate(draft)}>
-            {save.isPending ? "Guardando…" : "Guardar"}
-          </Button>
-          <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" disabled={save.isPending} onClick={() => setDraft(null)}>
-            Cancelar
-          </Button>
-          {save.isError ? (
-            <p role="alert" className="basis-full text-destructive">
-              {mutationErrorMessage(save.error)}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
+    <section aria-label="Horario para escribir" className="flex flex-wrap items-center gap-3 rounded-xl bg-muted p-4 text-sm">
+      <p className="min-w-0 flex-1 basis-64">
+        <span className="font-semibold">Horario para escribir:</span>{" "}
+        {rows.map((row) => `${row.days} ${row.hours ?? "no escribimos"}`).join(" · ")}, con la hora de cada sede. Como mucho un mensaje al día por
+        persona.
+      </p>
+      <Link to="/agent" hash="horario-para-escribir" className={LINK}>
+        Ver o cambiar
+      </Link>
     </section>
   )
 }
@@ -262,7 +216,7 @@ function MissingNotices({
             <p className="font-semibold">Sin WhatsApp conectado: solo puede escribir por correo</p>
             <p>A quien no tenga correo no le llega nada: avisa por qué y, si la línea tiene su tarea prendida, queda la tarea de llamada.</p>
           </div>
-          <Link to="/settings/integrations/whatsapp" className={LINK}>
+          <Link to="/settings/integrations/whatsapp" search={{ mensaje: undefined }} className={LINK}>
             Conectar WhatsApp
           </Link>
         </div>
@@ -299,7 +253,7 @@ function AdministratorPage() {
   if (!canRead) {
     return (
       <PageShell>
-        <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica. Tus pendientes siguen en su pestaña." />
+        <ErrorState title="No tienes acceso a esta sección" message="Pídelo a quien administra la clínica. Las citas que esperan su sí siguen en «Esperan su sí»." />
       </PageShell>
     )
   }
@@ -432,7 +386,7 @@ function AdministratorPage() {
             unreachedOnly={ver === "no-pudo"}
           />
 
-          <QuietHours page={page} canWrite={canWrite} />
+          <WritingHoursNote page={page} />
           {page.monthTemplates > 0 ? (
             <p className="text-sm text-muted-foreground">
               Este mes salieron {page.monthTemplates} {page.monthTemplates === 1 ? "mensaje aprobado" : "mensajes aprobados"} por WhatsApp. WhatsApp cobra

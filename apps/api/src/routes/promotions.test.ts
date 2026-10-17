@@ -68,8 +68,8 @@ beforeAll(async () => {
   )
   await ownerDb.execute(sql`
     insert into "service_catalog"
-      ("id", "organization_id", "source", "name", "specialty", "scope", "price_cents", "currency", "billing_mode", "is_active")
-    values (${SERVICE}, ${ORG}, 'custom', 'Limpieza', 'prevencion', 'general', 35000, 'CLP', 'treatment', true)`)
+      ("id", "organization_id", "source", "name", "scope", "price_cents", "currency", "billing_mode", "is_active")
+    values (${SERVICE}, ${ORG}, 'custom', 'Limpieza', 'general', 35000, 'CLP', 'treatment', true)`)
 }, 180_000)
 
 afterAll(async () => {

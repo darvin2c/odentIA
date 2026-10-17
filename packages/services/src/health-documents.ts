@@ -7,13 +7,13 @@
  *   de salud.
  * - WhatsApp primero (el de su ficha, con la conversación abierta); sin
  *   WhatsApp, por correo; sin ninguno de los dos, solo se imprime y se dice.
+ *   Una receta pasadas las 24 horas de WhatsApp sale con «Su enlace», la
+ *   plantilla ya aprobada, y se descarga en «Tus papeles» (decisión 8).
  * - El envío es el mismo de los documentos de cobro (`deliverDocumentPdf`): el
  *   PDF queda en la conversación de la persona y vuelve encolado; el worker lo
  *   entrega. Encolado nunca se presenta como entregado.
  */
 import type { Db } from "@odentia/db"
-import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
-import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
@@ -31,6 +31,8 @@ import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { MUTED, safe, when, Writer, type Zone } from "./pdf-writer.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
+import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
+import { sendPersonalLink } from "./su-enlace.js"
 
 export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent"] as const
 export type HealthDocumentType = (typeof HEALTH_DOCUMENT_TYPES)[number]
@@ -40,91 +42,31 @@ function assertHealthType(value: string): HealthDocumentType {
   throw validation("Documento inválido: receta, orden o consentimiento")
 }
 
-export interface HealthDocumentRecipient {
-  contactId: string
-  displayName: string
-  relation: "paciente" | "representante_legal"
-  email: string | null
-  phone: string | null
-  isDefault: boolean
-}
-
-function ageOn(birthDate: string, on: Date): number {
-  const [y, m, d] = birthDate.split("-").map(Number) as [number, number, number]
-  let age = on.getUTCFullYear() - y
-  const month = on.getUTCMonth() + 1
-  if (month < m || (month === m && on.getUTCDate() < d)) age -= 1
-  return age
-}
+export type HealthDocumentRecipient = DecisionRecipient
 
 /**
- * Quién puede recibir un papel de salud: la propia persona si es mayor de edad
- * y su representante legal vigente. Un menor no lo recibe en su propio chat.
+ * Quién puede recibir un papel de salud: la regla única de a quién se le
+ * manda algo (`listDecisionRecipients`): la propia persona si es mayor de
+ * edad y su representante legal vigente. Un menor no lo recibe en su propio
+ * chat, y al cumplir 18 deja de recibirlo quien lo representó de niño.
  */
-export async function listHealthDocumentRecipients(
-  tx: Db,
-  orgId: string,
-  patientId: string,
-): Promise<HealthDocumentRecipient[]> {
-  const subject = await requirePatient(tx, orgId, patientId)
-  const minor = subject.birthDate ? ageOn(subject.birthDate, new Date()) < 18 : false
-  const today = new Date().toISOString().slice(0, 10)
-  const out: HealthDocumentRecipient[] = []
-  if (!minor) {
-    const [self] = await tx
-      .select({ contact })
-      .from(patientContact)
-      .innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
-      .where(
-        and(
-          eq(patientContact.organizationId, orgId),
-          eq(patientContact.patientId, patientId),
-          eq(patientContact.relationship, "self"),
-          eq(contact.isActive, true),
-        ),
-      )
-      .limit(1)
-    if (self)
-      out.push({
-        contactId: self.contact.id,
-        displayName: self.contact.displayName,
-        relation: "paciente",
-        email: self.contact.email,
-        phone: self.contact.phone,
-        isDefault: false,
-      })
-  }
-  const representatives = await tx
-    .select({ contact })
-    .from(patientResponsibility)
-    .innerJoin(contact, and(eq(contact.id, patientResponsibility.contactId), eq(contact.organizationId, orgId)))
-    .where(
-      and(
-        eq(patientResponsibility.organizationId, orgId),
-        eq(patientResponsibility.patientId, patientId),
-        eq(patientResponsibility.kind, "representante_legal"),
-        isNull(patientResponsibility.revokedAt),
-        sql`${patientResponsibility.startsAt} <= ${today}`,
-        sql`(${patientResponsibility.endsAt} IS NULL OR ${patientResponsibility.endsAt} >= ${today})`,
-        eq(contact.isActive, true),
-      ),
-    )
-  for (const row of representatives) {
-    if (out.some((r) => r.contactId === row.contact.id)) continue
-    out.push({
-      contactId: row.contact.id,
-      displayName: row.contact.displayName,
-      relation: "representante_legal",
-      email: row.contact.email,
-      phone: row.contact.phone,
-      isDefault: false,
-    })
-  }
-  if (out[0]) out[0].isDefault = true
-  return out
+export function listHealthDocumentRecipients(tx: Db, orgId: string, patientId: string): Promise<HealthDocumentRecipient[]> {
+  return listDecisionRecipients(tx, orgId, patientId)
 }
 
 /** WhatsApp primero; sin WhatsApp, el correo. Ningún otro canal lleva papeles de salud. */
+/** Lo que dice la opción de WhatsApp de una receta pasadas las 24 horas. */
+export const RECIPE_BY_LINK = "Pasaron 24 horas: le llega «Su enlace» y descarga la receta en «Tus papeles»"
+
+/**
+ * Una receta fuera de las 24 horas de WhatsApp no espera a que la persona
+ * escriba: sale «Su enlace» (ya aprobado) y la receta queda en «Tus papeles».
+ */
+function viaPersonalLink(option: DocumentChannelOption): DocumentChannelOption {
+  if (option.channel !== "whatsapp" || option.usable || !option.reason?.startsWith("Fuera de la ventana")) return option
+  return { ...option, usable: true, reason: RECIPE_BY_LINK }
+}
+
 export function proposeHealthChannel<T extends { channel: string; usable: boolean }>(options: T[]): T | null {
   return (
     options.find((o) => o.channel === "whatsapp" && o.usable) ??
@@ -221,7 +163,9 @@ export async function getHealthDocumentSendOptions(
     }
   }
   const { channels: all } = await documentChannelsFor(tx, orgId, recipient)
-  const channels = all.filter((option) => option.channel === "whatsapp" || option.channel === "email")
+  const channels = all
+    .filter((option) => option.channel === "whatsapp" || option.channel === "email")
+    .map((option) => (type === "prescription" ? viaPersonalLink(option) : option))
   const proposed = proposeHealthChannel(channels)
   if (proposed) proposed.isProposed = true
   const person = await requirePatient(tx, orgId, patientId)
@@ -446,7 +390,8 @@ export async function sendHealthDocument(
   orgId: string,
   actorUserId: string,
   input: SendHealthDocumentInput,
-  deps: SendDeps,
+  /** `secretsKey`: para «Su enlace» cuando una receta sale pasadas las 24 horas. */
+  deps: SendDeps & { secretsKey?: Buffer },
 ): Promise<SendHealthDocumentResult> {
   const type = assertHealthType(input.documentType)
   if (!input.connectionId) throw validation("Elige por dónde enviarlo")
@@ -499,6 +444,46 @@ export async function sendHealthDocument(
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
     throw validation("Un papel de salud se envía por WhatsApp o por correo")
+  // Receta pasadas las 24 horas: «Su enlace» y la descarga en «Tus papeles» (decisión 8).
+  if (type === "prescription" && conn.channel === "whatsapp" && deps.secretsKey) {
+    const { channels } = await documentChannelsFor(tx, orgId, recipient)
+    const option = channels.find((item) => item.connectionId === conn.id)
+    if (option && viaPersonalLink(option).reason === RECIPE_BY_LINK) {
+      const sent = await sendPersonalLink(
+        tx,
+        orgId,
+        actorUserId,
+        { patientId: input.patientId, ...(input.requestId ? { requestId: input.requestId } : {}) },
+        { secretsKey: deps.secretsKey },
+      )
+      await tx.insert(auditEvent).values({
+        organizationId: orgId,
+        actorUserId,
+        action: "health_document.sent",
+        entity: "message",
+        entityId: sent.messageId,
+        metadata: {
+          patientId: input.patientId,
+          documentType: type,
+          documentId: input.documentId,
+          recipientContactId: sent.recipientName ? recipient.contactId : null,
+          recipientName: sent.recipientName,
+          conversationId: sent.conversationId,
+          channel: sent.channel,
+          via: "su_enlace",
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+        },
+      })
+      return {
+        conversationId: sent.conversationId,
+        messageId: sent.messageId,
+        status: "queued",
+        channel: sent.channel,
+        documentLabel: meta.label,
+        recipientName: sent.recipientName,
+      }
+    }
+  }
   const rendered = await renderHealthDocumentPdf(tx, orgId, input.patientId, type, input.documentId)
   const message = input.message?.trim()
   if (message && message.length > 500) throw validation("El mensaje admite hasta 500 caracteres")

@@ -1,4 +1,9 @@
-import { currencyFractionDigits } from "@odentia/clinical"
+import {
+  clinicalProfileFor,
+  currencyFractionDigits,
+  isSelectableDiagnosisSystem,
+  type SelectableDiagnosisSystem,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
@@ -182,6 +187,8 @@ export interface InitialOrgRegion {
   timezone: string
   locale: string
   sheetSize: SheetSize
+  /** La lista de diagnósticos que recomienda su país (decisión 26); la clínica la puede cambiar. */
+  diagnosisSystem: SelectableDiagnosisSystem
 }
 
 /**
@@ -216,7 +223,14 @@ export function initialOrgRegion(
     timezone: assertTimezone(input.timezone || preset.timezone),
     locale: assertLocale(input.locale || preset.locale),
     sheetSize: input.sheetSize ? assertSheetSize(input.sheetSize) : preset.sheetSize,
+    diagnosisSystem: recommendedSelectableSystem(countryCode),
   }
+}
+
+/** La lista que recomienda el país, entre las que una clínica puede elegir. */
+function recommendedSelectableSystem(countryCode: string): SelectableDiagnosisSystem {
+  const recommended = clinicalProfileFor(countryCode).diagnosis.recommended
+  return isSelectableDiagnosisSystem(recommended) ? recommended : "ICD-10"
 }
 
 /**

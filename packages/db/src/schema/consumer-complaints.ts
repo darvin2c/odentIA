@@ -16,7 +16,7 @@ import {
  *
  * Tablas globales de la plataforma, sin organización ni RLS: quien reclama es
  * cliente o visitante de odentIA, no de una clínica. Solo el rol owner las
- * toca (la migración 0099 revoca el acceso del rol app); la API pública
+ * toca (la migración 0004 revoca el acceso del rol app); la API pública
  * escribe con `ownerDb`.
  *
  * - `consumerComplaint`: una Hoja de Reclamación con los campos del Anexo I.

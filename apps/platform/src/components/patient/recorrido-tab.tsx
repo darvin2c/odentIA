@@ -8,7 +8,7 @@
  */
 
 import { label } from "../../lib/glossary"
-import { surfacesForTooth } from "@odentia/clinical"
+import { diagnosisCodeLabel, surfacesForTooth } from "@odentia/clinical"
 import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
 import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -45,7 +45,7 @@ import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
 import { type ServiceCatalogItem } from "../../lib/services"
 import { ChoiceSelect } from "../ui/choice-select"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
 import { DocumentOpenButton } from "./document-open-button"
 import { PlanPhases } from "./plan-fases"
@@ -502,7 +502,9 @@ export function RecorridoClinicoTab({
               </div>
             ) : null}
             {journey.item.diagnosisCode ? (
-              <p className="text-sm">Diagnóstico: {journey.item.diagnosisCode}</p>
+              <p className="text-sm">
+                Diagnóstico: {diagnosisCodeLabel(journey.item.diagnosisSystem, journey.item.diagnosisCode)}
+              </p>
             ) : null}
             {journey.item.detail ? <p className="text-sm">{journey.item.detail}</p> : null}
             <div className="flex flex-wrap gap-2">
@@ -954,7 +956,7 @@ export function RecorridoClinicoTab({
               onChange={(event) => setToothNumber(event.target.value)}
             />
           </Field>
-          <Cie10Search value={diagnosis} onChange={setDiagnosis} label="Diagnóstico CIE-10" />
+          <DiagnosisSearch value={diagnosis} onChange={(code) => setDiagnosis(code)} label="Diagnóstico" />
           <Field>
             <FieldLabel htmlFor={`${uid}-revise-detail`}>Detalle clínico</FieldLabel>
             <Textarea

@@ -2,7 +2,6 @@ import { Button } from "@odentia/ui"
 import {
   FormDrawer,
   LoadingState,
-  ResourceSelect,
   scheduleToneAt,
   SubmitButton,
   useScheduleNow,
@@ -13,7 +12,6 @@ import { useMemo, useState } from "react"
 import {
   type AgendaAppointment,
   type AgendaResources,
-  type AgendaServiceOption,
   invalidateAppointmentQueries,
 } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
@@ -26,8 +24,10 @@ import {
   scheduleFollowUpFromCoordinationApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import type { ServiceCatalogItem } from "../../lib/services"
 import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
 import { useWhen, WhenFields } from "../agenda/when"
+import { ServiceSelect } from "../service-select"
 
 /** Hasta cuándo se miran las citas en pie del paciente para ofrecer «Usar esa cita». */
 const STANDING_DAYS = 90
@@ -118,13 +118,9 @@ function ScheduleForm({
   const timeZone = resources.timeZone
   const now = useScheduleNow()
   const today = zonedDateOf(now, timeZone)
-  const [serviceId, setServiceId] = useState("")
+  const [service, setService] = useState<ServiceCatalogItem | null>(null)
+  const serviceId = service?.id ?? ""
   const [error, setError] = useState<string | null>(null)
-  const services = useQuery({
-    queryKey: ["services", "agenda-picker"],
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
-  })
-  const service = (services.data?.data ?? []).find((item) => item.id === serviceId)
   const toneOf = useMemo(() => {
     const index = new Map(resources.professionals.map((item, at) => [item.id, at]))
     return (id: string) => scheduleToneAt(index.get(id) ?? 0)
@@ -138,6 +134,8 @@ function ScheduleForm({
     duration: service?.durationMin ?? resources.defaultDurationMin,
     // Se abre en el día en que toca el control, si aún no pasó.
     date: zonedDateOf(control.dueAt, timeZone),
+    // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
+    serviceId: serviceId || undefined,
   })
   // Si ya tiene citas en pie, se ofrece usar una en vez de reservar otra.
   const [range] = useState(() => ({
@@ -204,7 +202,7 @@ function ScheduleForm({
         event.preventDefault()
         setError(null)
         if (!target) return
-        // Sin sillón: lo asigna la agenda, como en Nueva cita.
+        // Sin unidad dental: la asigna la agenda, como en Nueva cita.
         schedule.mutate({
           appointment: {
             branchId: resources.branchId,
@@ -256,22 +254,14 @@ function ScheduleForm({
             </SubmitButton>
           </div>
         ))}
-        <ResourceSelect
+        <ServiceSelect
           id="control-servicio"
           label="Servicio (opcional)"
-          options={(services.data?.data ?? []).map((item) => ({
-            id: item.id,
-            label: item.name,
-            detail: item.durationMin ? `${item.durationMin} min` : undefined,
-          }))}
           value={serviceId}
           onChange={(next) => {
-            setServiceId(next)
+            setService(next)
             // Con servicio, el bloque toma lo que dura el servicio.
-            when.resize(
-              (services.data?.data ?? []).find((item) => item.id === next)?.durationMin ??
-                resources.defaultDurationMin,
-            )
+            when.resize(next?.durationMin ?? resources.defaultDurationMin)
           }}
         />
         <WhenFields when={when} />

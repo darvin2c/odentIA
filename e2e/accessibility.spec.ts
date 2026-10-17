@@ -121,7 +121,7 @@ for (const viewport of [
         await page.getByRole("button", { name: "Continuar", exact: true }).click()
         await expect(page.getByRole("alert").first()).toBeVisible()
         await audit(page, info, "onboarding-error")
-        await page.getByLabel("Nombre de la organización").fill("Clínica accesible")
+        await page.getByLabel("Nombre comercial").fill("Clínica accesible")
         await page.getByLabel("Slug (subdominio)").fill(`a11y-${id}`)
         await page.getByRole("button", { name: "Continuar", exact: true }).click()
         await audit(page, info, "onboarding-fiscal")

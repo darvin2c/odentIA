@@ -102,8 +102,8 @@ export const cashMovement = pgTable(
     methodTypeCode: text("method_type_code"),
     concept: text("concept").notNull(),
     patientPaymentId: uuid("patient_payment_id").references(() => patientPayment.id),
-    // FK cash_movement.expense_id → expense.id la crea la migración conjunta
-    // (expense se declara después; ver local://finance-constraints.sql).
+    // FK cash_movement.expense_id → expense.id en `0001_base_reglas.sql`
+    // (expense se declara después).
     expenseId: uuid("expense_id"),
     createdBy: text("created_by").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

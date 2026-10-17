@@ -8,7 +8,7 @@ import {
 } from "@odentia/channels"
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
-import { applyStatus, applyTemplateUpdates, decryptConfig, markWebhookVerified } from "@odentia/services"
+import { applyStatus, applyTemplateCategories, applyTemplateUpdates, decryptConfig, markWebhookVerified } from "@odentia/services"
 import { and, eq, isNotNull } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -79,6 +79,14 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       const updates = parsed.templateStatuses
       await withOrgContext(deps.db, orgId, (tx) =>
         applyTemplateUpdates(tx, orgId, connection.id, updates).then(() => {}),
+      )
+    }
+
+    // La categoría manda (ADR 0040): un aviso que Meta pasa a promoción solo sale a quien aceptó novedades.
+    if (parsed.templateCategories?.length) {
+      const updates = parsed.templateCategories
+      await withOrgContext(deps.db, orgId, (tx) =>
+        applyTemplateCategories(tx, orgId, connection.id, updates).then(() => {}),
       )
     }
 
@@ -197,6 +205,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
           messages: [],
           statuses: [],
           templateStatuses: delivery.templateStatuses,
+          templateCategories: delivery.templateCategories,
         })
       }
     }

@@ -1,4 +1,6 @@
 import {
+  ALLERGY_SEVERITIES,
+  PATIENT_DOCUMENT_CATEGORIES,
   activeFindingsAsOf,
   BLOOD_GROUPS,
   type BloodGroup,
@@ -21,10 +23,11 @@ import {
   registrationAnswersSchema,
   type SignedOdontogramPurpose,
   validateFinding,
+  DIAGNOSIS_VERIFICATION,
+  FAMILY_KINSHIP,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
-  cie10Code,
   clinicalFollowUp,
   clinicalNote,
   encounter,
@@ -50,6 +53,7 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { decodeCursor, encodeCursor } from "./cursors.js"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { orgClinicalProfile } from "./locale.js"
 import { requirePatient } from "./patients.js"
@@ -78,18 +82,8 @@ async function requireDraftLink(
   return row
 }
 
-const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
-/** Parentescos de los antecedentes familiares. */
-export const FAMILY_RELATIONSHIPS = [
-  "madre",
-  "padre",
-  "hijo",
-  "conyuge",
-  "hermano",
-  "abuelo",
-  "tio",
-  "otro_familiar",
-] as const
+/** Parentescos de los antecedentes familiares (HL7 v3 RoleCode, solo familiares). */
+export const FAMILY_RELATIONSHIPS = FAMILY_KINSHIP
 /** Clasificación del estado físico de la American Society of Anesthesiologists. */
 export const ASA_CLASSES: readonly string[] = ["I", "II", "III", "IV", "V", "VI"]
 const CONDITION_STATUSES = ["activa", "resuelta", "inactiva"] as const
@@ -102,19 +96,13 @@ export const ALLERGY_CATEGORIES = [
   "ambiental",
   "otro",
 ] as const
-/** Certeza de un diagnóstico codificado (registro HIS: P, D, R). */
-export const DIAGNOSIS_TYPES = ["presuntivo", "definitivo", "repetido"] as const
+/**
+ * Certeza de un diagnóstico codificado (HL7 FHIR Condition.verificationStatus).
+ * «Ya diagnosticado antes» no es un tipo: lo marca el sistema (decisión 11).
+ */
+export const DIAGNOSIS_TYPES = DIAGNOSIS_VERIFICATION
 const HEALTH_REVIEW_STATES = ["unknown", "none", "recorded"] as const
-const DOCUMENT_CATEGORIES = [
-  "consentimiento",
-  "radiografia",
-  "foto_clinica",
-  "informe",
-  "presupuesto",
-  "receta",
-  "comprobante_pago",
-  "otro",
-] as const
+const DOCUMENT_CATEGORIES = PATIENT_DOCUMENT_CATEGORIES
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -139,14 +127,6 @@ async function audit(
   })
 }
 
-async function assertDiagnosisCode(tx: Db, code: string): Promise<void> {
-  const [row] = await tx
-    .select({ code: cie10Code.code })
-    .from(cie10Code)
-    .where(eq(cie10Code.code, code))
-    .limit(1)
-  if (!row) throw validation(`Código CIE-10 inexistente: ${code}`)
-}
 
 function todayDate(): string {
   return new Date().toISOString().slice(0, 10)
@@ -180,15 +160,19 @@ export interface HealthAllergyInput {
 export interface FamilyHistoryInput {
   relationship: string
   condition: string
-  cie10Code?: string | null
+  diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
   notes?: string | null
 }
 
 export interface HealthConditionInput {
   id?: string
   name: string
-  /** Código CIE-10 que precisa la condición; opcional. */
-  cie10Code?: string | null
+  /** Código de la lista de diagnósticos que precisa la condición; opcional. */
+  diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica (un código ya guardado viaja con la suya). */
+  diagnosisSystem?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -341,7 +325,8 @@ interface ValidatedAllergy {
 interface ValidatedCondition {
   id: string | null
   name: string
-  cie10Code: string | null
+  diagnosisCode: string | null
+  diagnosisSystem: string | null
   status: string
   startDate: string | null
   endDate: string | null
@@ -399,8 +384,9 @@ function validateConditionRow(input: HealthConditionInput): ValidatedCondition {
   if (!endDate && input.status === "resuelta") endDate = todayDate()
   assertDateRange(startDate, endDate)
   const notes = assertText(input.notes, 2000, "notes", false)
-  const cie10Code = input.cie10Code?.trim().toUpperCase() || null
-  return { id: input.id ?? null, name, cie10Code, status: input.status, startDate, endDate, notes }
+  const diagnosisCode = input.diagnosisCode?.trim() || null
+  const diagnosisSystem = diagnosisCode ? input.diagnosisSystem?.trim() || null : null
+  return { id: input.id ?? null, name, diagnosisCode, diagnosisSystem, status: input.status, startDate, endDate, notes }
 }
 
 function validateMedicationRow(input: HealthMedicationInput): ValidatedMedication {
@@ -826,8 +812,12 @@ async function persistPatientHealth(
     interviewBaseVersion = latest?.version ?? 0
     interviewChanged = !latest || canonicalJson(latest.answers) !== canonicalJson(interviewAnswers)
   }
-  // Un código CIE-10 inexistente se rechaza antes de escribir nada.
-  for (const row of conditions) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
+  // Un código que no está en su lista se rechaza antes de escribir nada.
+  for (const row of conditions) {
+    const resolved = await resolveOptionalDiagnosisCode(tx, orgId, { code: row.diagnosisCode, system: row.diagnosisSystem })
+    row.diagnosisCode = resolved.diagnosisCode
+    row.diagnosisSystem = resolved.diagnosisSystem
+  }
   // Aplicación de diffs (todo ya validado: cualquier fallo revierte todo).
   for (const row of allergies) {
     if (!row.id) {
@@ -873,7 +863,8 @@ async function persistPatientHealth(
         organizationId: orgId,
         patientId,
         name: row.name,
-        cie10Code: row.cie10Code,
+        diagnosisCode: row.diagnosisCode,
+        diagnosisSystem: row.diagnosisSystem,
         status: row.status,
         startDate: row.startDate,
         endDate: row.endDate,
@@ -885,7 +876,8 @@ async function persistPatientHealth(
         .update(patientCondition)
         .set({
           name: row.name,
-          cie10Code: row.cie10Code,
+          diagnosisCode: row.diagnosisCode,
+          diagnosisSystem: row.diagnosisSystem,
           status: row.status,
           startDate: row.startDate,
           endDate: row.endDate,
@@ -963,21 +955,21 @@ async function persistPatientHealth(
     }
   }
   // Antecedentes familiares: se reemplazan cuando se envían (parentesco del
-  // catálogo, condición y CIE-10 opcional).
+  // catálogo, condición y código de diagnóstico opcional).
   if (input.familyHistory !== undefined) {
     if (!Array.isArray(input.familyHistory) || input.familyHistory.length > 50)
       throw validation("familyHistory debe ser un arreglo de hasta 50 antecedentes")
-    const rows = input.familyHistory.map((row) => {
+    const rows = []
+    for (const row of input.familyHistory) {
       if (!(FAMILY_RELATIONSHIPS as readonly string[]).includes(row.relationship))
-        throw validation(`Parentesco inválido: ${row.relationship}`)
-      return {
+        throw validation("Elige el parentesco de la lista")
+      rows.push({
         relationship: row.relationship,
         condition: assertText(row.condition, 200, "condition", true) as string,
-        cie10Code: row.cie10Code?.trim() || null,
+        ...(await resolveOptionalDiagnosisCode(tx, orgId, { code: row.diagnosisCode, system: row.diagnosisSystem })),
         notes: assertText(row.notes, 2000, "notes", false),
-      }
-    })
-    for (const row of rows) if (row.cie10Code) await assertDiagnosisCode(tx, row.cie10Code)
+      })
+    }
     await tx
       .delete(patientFamilyHistory)
       .where(
@@ -1103,7 +1095,6 @@ export async function addClinicalNote(
   if (input.diagnosisCode || input.diagnosisType?.trim()) {
     throw validation("Registra el diagnóstico en la sección Diagnóstico de la atención")
   }
-  const diagnosisType = null
   const toothNumber = input.toothNumber ?? null
   if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
     throw validation("Pieza FDI inválida")
@@ -1114,8 +1105,6 @@ export async function addClinicalNote(
       patientId,
       authorUserId: actorUserId,
       note,
-      diagnosisCode: input.diagnosisCode ?? null,
-      diagnosisType,
       toothNumber,
       encounterId: input.encounterId ?? null,
       kind: "evolucion",
@@ -1179,6 +1168,8 @@ export interface AddOdontogramInput {
   details?: FindingDetails
   note?: string | null
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
   /** Atención en borrador donde se observa: obligatoria. */
   encounterId: string
 }
@@ -1242,7 +1233,7 @@ export async function insertOdontogramFinding(
   actorUserId: string,
   patientId: string,
   encounterId: string,
-  input: Omit<FindingInput, "encounterId">,
+  input: Omit<FindingInput, "encounterId"> & { diagnosisSystem?: string | null },
   options: { strictVariants: boolean; leftByPlanItemId?: string | null },
 ): Promise<OdontogramRow[]> {
   const finding: FindingInput = {
@@ -1256,7 +1247,7 @@ export async function insertOdontogramFinding(
   }
   const errors = validateFinding(finding, { strictVariants: options.strictVariants })
   if (errors.length) throw validation(errors.join("; "))
-  if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
+  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   // Hallazgo de grupo/tramo (puente, dentadura, supernumerario): UNA sola fila
   // con relatedTeeth incluyendo la principal; se proyecta a cada participante.
   const related = normalizeRelatedTeeth(
@@ -1273,7 +1264,7 @@ export async function insertOdontogramFinding(
     surface,
     condition: input.condition,
     status: "recorded",
-    diagnosisCode: input.diagnosisCode ?? null,
+    ...diagnosis,
     note: input.note ?? null,
     details,
     needsReview: false,
@@ -2603,35 +2594,3 @@ export async function listEncounterDocuments(
     .map((entry) => mergeDocumentContext(entry.doc, entry.ctx))
 }
 
-/**
- * Búsqueda por código o descripción. Cada fila dice si es una categoría de
- * tres caracteres con subcódigos: esas no se registran como diagnóstico, se
- * usa el subcódigo más específico (regla de codificación de la CIE-10).
- */
-export async function searchCie10(tx: Db, q: string, limit = 20) {
-  const like = `%${q}%`
-  return tx
-    .select({
-      code: cie10Code.code,
-      description: cie10Code.description,
-      isCategory: sql<boolean>`exists (select 1 from ${cie10Code} as sub where sub.code like ${cie10Code.code} || '.%')`,
-    })
-    .from(cie10Code)
-    .where(sql`${cie10Code.code} ilike ${like} or ${cie10Code.description} ilike ${like}`)
-    .orderBy(asc(cie10Code.code))
-    .limit(Math.min(Math.max(limit, 1), 50))
-}
-
-/** Falla si el código es una categoría con subcódigos (no es codificable). */
-export async function assertCodableCie10(tx: Db, code: string): Promise<void> {
-  if (code.includes(".")) return
-  const [sub] = await tx
-    .select({ code: cie10Code.code })
-    .from(cie10Code)
-    .where(sql`${cie10Code.code} like ${`${code}.%`}`)
-    .limit(1)
-  if (sub)
-    throw validation(
-      `${code} es una categoría: registra el subcódigo más específico (p. ej. ${sub.code})`,
-    )
-}

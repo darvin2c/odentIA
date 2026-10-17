@@ -48,6 +48,7 @@ import {
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
 import { monthStart } from "./report-periods.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
 
@@ -272,8 +273,7 @@ export async function ensureOpenShift(
 
 /**
  * Un cobro es electrónico por su tipo UN/CEFACT 4461 (10 = efectivo). El
- * nombre del medio nunca decide: la migración 0048 dejó el tipo en todo
- * movimiento con medio.
+ * nombre del medio nunca decide: todo movimiento con medio lleva el tipo.
  */
 function isElectronic(m: { kind: string; methodTypeCode: string | null }): boolean {
   if (m.kind !== "cobro") return false
@@ -630,7 +630,7 @@ export async function reverseCashIncome(
     kind: "devolucion",
     amountCents: payment.amountCents,
     currency: payment.currency,
-    methodName: payment.methodName ?? payment.method,
+    methodName: payment.methodName,
     methodTypeCode: payment.methodTypeCode,
     concept: `Compensación por anulación`,
     allowNegative: true,
@@ -1366,7 +1366,7 @@ async function collectedApplications(
     paymentId: r.payment.id,
     paymentCents: r.payment.amountCents,
     paidAt: r.payment.paidAt,
-    methodLabel: r.payment.methodName ?? r.payment.method,
+    methodLabel: r.payment.methodName,
     cashMethod: methodCashOf(r.payment),
     patientId: r.app.patientId,
     dentistUserId: r.dentistUserId,
@@ -1653,8 +1653,9 @@ async function patientNames(tx: Db, orgId: string, ids: string[]): Promise<Map<s
   const unique = [...new Set(ids)]
   if (unique.length === 0) return new Map()
   const rows = await tx
-    .select({ id: patient.id, displayName: patient.displayName })
+    .select({ id: patient.id, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.organizationId, orgId), inArray(patient.id, unique)))
   return new Map(rows.map((r) => [r.id, r.displayName]))
 }
@@ -2252,7 +2253,7 @@ async function financeBuckets(
   }
   const methodAdd = (curr: string, payment: typeof payments[number], cents: number): void => {
     const entry = bucket(curr)
-    const key = payment.methodName ?? payment.method
+    const key = payment.methodName
     const slot = entry.byMethod.get(key) ?? { label: key, cash: methodCashOf(payment), cents: 0 }
     slot.cents = addCents(slot.cents, cents)
     entry.byMethod.set(key, slot)
@@ -2650,8 +2651,9 @@ export async function getDebts(
   if (list.length === 0) return []
   const patientIds = [...new Set(list.map((row) => row.patientId))]
   const people = await tx
-    .select({ id: patient.id, displayName: patient.displayName })
+    .select({ id: patient.id, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.organizationId, orgId), inArray(patient.id, patientIds)))
   const names = new Map(people.map((person) => [person.id, person.displayName]))
   // Saldo a favor por persona y moneda: pagado − aplicado − devuelto.
@@ -2864,10 +2866,11 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
         ticketId: patientPayment.ticketId,
         ticketNumber: paymentTicket.ticketNumber,
         patientId: patientPayment.patientId,
-        patientName: patient.displayName,
+        patientName: patientPerson.displayName,
       })
       .from(patientPayment)
       .innerJoin(patient, and(eq(patient.id, patientPayment.patientId), eq(patient.organizationId, orgId)))
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .leftJoin(
         paymentTicket,
         and(eq(paymentTicket.id, patientPayment.ticketId), eq(paymentTicket.organizationId, orgId)),
@@ -2926,9 +2929,10 @@ async function voidedTicketsOfDay(
   ]
   if (unit) filters.push(eq(paymentTicket.currency, currency(unit)))
   const rows = await tx
-    .select({ ticket: paymentTicket, patientName: patient.displayName })
+    .select({ ticket: paymentTicket, patientName: patientPerson.displayName })
     .from(paymentTicket)
     .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(...filters))
     .orderBy(asc(paymentTicket.createdAt), asc(paymentTicket.id))
   return rows.map(({ ticket, patientName }) => {

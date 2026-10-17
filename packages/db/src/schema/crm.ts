@@ -90,6 +90,12 @@ export const channelConnection = pgTable(
     accountExternalId: text("account_external_id"),
     /** Los pasos de «Conectar con Facebook» y cómo quedaron. Nulo: conexión hecha a mano. */
     signup: jsonb("signup").$type<ConnectionSignup>(),
+    /**
+     * Cuándo se leyeron por última vez sus plantillas en la cuenta del
+     * proveedor: la revisión diaria pone al día estados y categorías por si se
+     * perdió un aviso. Nulo: aún no se leyeron.
+     */
+    templatesSyncedAt: timestamp("templates_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -142,6 +148,12 @@ export const channelTemplate = pgTable(
     /** Cuándo la pidió odentIA; nulo si ya existía en la cuenta. */
     requestedAt: timestamp("requested_at", { withTimezone: true }),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
+    /**
+     * Por qué odentIA no sabe enviarla: `encabezado` (lleva encabezado) o
+     * `datos_por_nombre` (sus datos van por nombre). Se muestra y no se ofrece.
+     * Nulo: se puede enviar.
+     */
+    unsupported: text("unsupported"),
     ...timestamps,
   },
   (table) => [
@@ -267,9 +279,9 @@ export const pipelineStage = pgTable(
 
 /**
  * Persona que la clínica conoce: quien escribe, paga, representa o se atiende.
- * Todo paciente es exactamente una persona (su vínculo `self`); la identidad
- * (nombre, documento, nacimiento, sexo, teléfono, correo) se mantiene igual en
- * ambos registros por triggers de la migración de persona única.
+ * Todo paciente es exactamente una persona (`patient.person_id`); la identidad
+ * (nombre, documento, nacimiento, sexo, teléfono, correo) vive solo aquí
+ * (ADR 0044).
  */
 /**
  * Medio preferido de la persona para avisos y documentos (Fase 7 Finanzas).
@@ -287,6 +299,8 @@ export const contact = pgTable("contact", {
   givenNames: text("given_names"),
   paternalSurname: text("paternal_surname"),
   maternalSurname: text("maternal_surname"),
+  /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
+  identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
   /** País emisor del documento (ISO 3166-1 alfa-2). */
   docCountry: char("doc_country", { length: 2 }),
   phone: text("phone"),
@@ -297,17 +311,19 @@ export const contact = pgTable("contact", {
   docNumber: text("doc_number"),
   birthDate: date("birth_date"),
   sex: text("sex"),
+  /** Archivada entera, con su ficha si es paciente (`setPersonArchived`). */
   isActive: boolean("is_active").notNull().default(true),
-  notes: text("notes"),
+  // Las notas de la persona son `crm_note` (con autor y fecha); el responsable,
+  // el de su conversación u oportunidad (fase 4, «un dato, un lugar»).
   tags: text("tags").array().notNull().default(sql`'{}'`),
   customFields: jsonb("custom_fields").notNull().default(sql`'{}'::jsonb`),
-  assignedUserId: text("assigned_user_id").references(() => user.id),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,
 }, table => [
   uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id),
   // El documento, junto con su país emisor, identifica a una sola persona por
-  // organización (NULLS NOT DISTINCT en la migración 0095).
+  // organización (NULLS NOT DISTINCT en `0001_base_reglas.sql`: Drizzle no lo declara en un índice). Es el único índice
+  // de documento: la ficha de paciente no lo guarda (ADR 0044).
   uniqueIndex("contact_org_doc_uidx")
     .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
     .where(sql`"doc_number" IS NOT NULL`),
@@ -331,6 +347,12 @@ export const contactIdentity = pgTable(
     externalUserId: text("external_user_id").notNull(),
     displayName: text("display_name"),
     isPrimary: boolean("is_primary").notNull().default(false),
+    /**
+     * WhatsApp rechazó un mensaje porque el número no tiene WhatsApp (decisión
+     * 23, caso 1): la ficha lo dice y no se le escribe por aquí. Vuelve a vacío
+     * si la persona escribe desde ese número o el equipo lo vuelve a marcar.
+     */
+    noWhatsappAt: timestamp("no_whatsapp_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -432,6 +454,9 @@ export const message = pgTable(
     // Botones de respuesta que acompañan al mensaje: `id` es lo que vuelve
     // cuando la persona toca uno. Nulo si no lleva.
     replyButtons: jsonb("reply_buttons").$type<{ id: string; title: string }[]>(),
+    // Enlace de baja de un correo automático (RFC 2369): el adaptador de correo
+    // lo envía como cabecera `List-Unsubscribe`. Nulo en lo demás.
+    listUnsubscribe: text("list_unsubscribe"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -449,9 +474,13 @@ export type TaskArea = (typeof TASK_AREAS)[number]
 /**
  * Pendientes que deja el sistema para recepción, cada uno con su fila en «Te
  * espera»: el documento escrito en «Su enlace» ya es de otra ficha
- * (`ficha_repetida`) y quien pide volver a entrar al portal (`volver_al_portal`).
+ * (`ficha_repetida`), quien pide volver a entrar al portal (`volver_al_portal`),
+ * alguien que se registró en línea con el documento de una persona que ya
+ * estaba (`registro_con_documento`) y el representante que nombró el registro
+ * en línea de un menor y espera que recepción lo confirme
+ * (`confirmar_representante`).
  */
-export const TASK_KINDS = ["ficha_repetida", "volver_al_portal"] as const
+export const TASK_KINDS = ["ficha_repetida", "volver_al_portal", "registro_con_documento", "confirmar_representante"] as const
 export type TaskKind = (typeof TASK_KINDS)[number]
 
 export const crmTask = pgTable(
@@ -462,10 +491,10 @@ export const crmTask = pgTable(
     contactId: uuid("contact_id").references(() => contact.id),
     conversationId: uuid("conversation_id").references(() => conversation.id),
     // Oportunidad vinculada. Sin FK en TS para evitar el ciclo con opportunities.ts;
-    // la migración del coordinador añade la FK con ON DELETE SET NULL.
+    // `0001_base_reglas.sql` añade la FK con ON DELETE SET NULL.
     opportunityId: uuid("opportunity_id"),
     // Paciente al que se refiere la tarea. Sin FK en TS para evitar el ciclo con
-    // clinical.ts; la migración añade la FK compuesta por organización.
+    // clinical.ts; `0001_base_reglas.sql` añade la FK compuesta por organización.
     patientId: uuid("patient_id"),
     assigneeUserId: text("assignee_user_id").references(() => user.id),
     title: text("title").notNull(),
@@ -479,9 +508,11 @@ export const crmTask = pgTable(
     // Por qué se creó, en una frase, cuando la deja el Administrador.
     reason: text("reason"),
     /**
-     * Por qué se cerró sola, cuando su motivo desapareció (la cita pasó, la
-     * persona confirmó, la oportunidad se cerró…): «Rosa confirmó su cita».
-     * Nulo si la cerró una persona.
+     * Por qué se cerró sin hacerse. Hecha (`done`): se cerró sola porque su
+     * motivo desapareció (la cita pasó, la persona confirmó, la oportunidad se
+     * cerró…): «Rosa confirmó su cita». Descartada (`cancelled`): el motivo con
+     * que recepción descartó un pendiente del sistema («No es su
+     * representante»). Nulo si una persona la hizo, la cerró o la reabrió.
      */
     settledReason: text("settled_reason"),
     /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
@@ -491,9 +522,25 @@ export const crmTask = pgTable(
      * (`TASK_KINDS`, ADR 0037); nulo en una tarea cualquiera.
      */
     kind: text("kind"),
+    /**
+     * `confirmar_representante`: el parentesco que escribió el registro en
+     * línea («Madre») y su código HL7 RoleCode (`KINSHIP`) si se reconoce. Se
+     * aplican al vínculo `guardian` al confirmar; nulos en cualquier otra tarea.
+     */
+    relationshipDetail: text("relationship_detail"),
+    kinship: text("kinship"),
     ...timestamps,
   },
   (table) => [
+    check("task_relationship_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
+    check(
+      "task_kinship_check",
+      sql`${table.kinship} IS NULL OR ${table.kinship} IN ('MTH','FTH','CHILD','SPS','DOMPART','SIB','MGRPRN','PGRPRN','GRNDCHILD','AUNT','UNCLE','COUSN','FAMMEMB','FRND','NBOR')`,
+    ),
+    check(
+      "task_relationship_kind_check",
+      sql`(${table.relationshipDetail} IS NULL AND ${table.kinship} IS NULL) OR ${table.kind} = 'confirmar_representante'`,
+    ),
     uniqueIndex("task_org_id_uidx").on(table.organizationId, table.id),
     // La próxima acción de una oportunidad es una tarea, y solo una abierta.
     uniqueIndex("task_org_opp_open_uidx")
@@ -537,10 +584,14 @@ export const customFieldDef = pgTable(
  */
 export interface AgentAdvisorSettings {
   enabled?: boolean
-  /** Horario en que no escribe por su cuenta, con la hora de cada sede («HH:MM»). */
-  quietStart?: string
-  quietEnd?: string
 }
+
+/**
+ * «Horario para escribir» (decisión 18 v3, ADR 0042): por día de la semana
+ * (0 = domingo), los tramos en minutos locales en que odentIA escribe por su
+ * cuenta; vacío = ese día no. Se lee con la hora de cada sede.
+ */
+export type AgentWritingHours = Array<Array<[number, number]>>
 
 export const agentConfig = pgTable(
   "agent_config",
@@ -564,14 +615,15 @@ export const agentConfig = pgTable(
      * conocimiento y opina en sombra.
      */
     decisionRoutingEnabled: boolean("decision_routing_enabled").notNull().default(true),
-    /**
-     * Administrador: si está encendido y en qué horario no escribe por su
-     * cuenta. Vacío = apagado, todo por defecto.
-     */
+    /** Administrador: si está encendido. Vacío = apagado. */
     advisor: jsonb("advisor").$type<AgentAdvisorSettings>().notNull().default(sql`'{}'::jsonb`),
+    /** «Horario para escribir»: vale para todo lo que odentIA envía por su cuenta. */
+    writingHours: jsonb("writing_hours")
+      .$type<AgentWritingHours>()
+      .notNull()
+      .default(sql`'[[],[[480,1200]],[[480,1200]],[[480,1200]],[[480,1200]],[[480,1200]],[[480,840]]]'::jsonb`),
     /** Asistente clínico: dictado en la atención. Apagado hasta que la clínica lo encienda. */
     clinicalAssistantEnabled: boolean("clinical_assistant_enabled").notNull().default(false),
-    systemPrompt: text("system_prompt").notNull().default(""),
     handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
     maxTurns: integer("max_turns").notNull().default(10),
     /** Comprueba precios, fechas y horas de cada respuesta contra lo consultado antes de enviarla. */
@@ -614,6 +666,10 @@ export const agentConfig = pgTable(
     check("agent_config_llm_check", sql`${table.llm} in ('chatgpt_6','claude_5_5')`),
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
     check("agent_config_close_after_hours_check", sql`${table.closeAfterHours} between 6 and 23`),
+    check(
+      "agent_config_writing_hours_check",
+      sql`jsonb_typeof(${table.writingHours}) = 'array' and jsonb_array_length(${table.writingHours}) = 7`,
+    ),
     check(
       "agent_config_decision_provider_check",
       sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,

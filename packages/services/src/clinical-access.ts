@@ -50,19 +50,20 @@ export async function recordClinicalAccess(
       bucket: sql`date_trunc('hour', now())`,
     })
     .onConflictDoUpdate({
+      // La clave primaria es la franja: repetir la lectura en la misma
+      // hora solo suma, sin tocar ningún índice (actualización HOT).
       target: [
         clinicalAccessLog.organizationId,
         clinicalAccessLog.patientId,
+        clinicalAccessLog.bucket,
         clinicalAccessLog.userId,
         clinicalAccessLog.resource,
-        clinicalAccessLog.bucket,
       ],
       set: { lastAt: sql`now()`, hits: sql`${clinicalAccessLog.hits} + 1` },
     })
 }
 
 export interface ClinicalAccessItem {
-  id: string
   userId: string
   userName: string | null
   resource: string
@@ -81,7 +82,6 @@ export async function listClinicalAccess(
   const limit = Math.min(Math.max(input.limit ?? 100, 1), 200)
   return tx
     .select({
-      id: clinicalAccessLog.id,
       userId: clinicalAccessLog.userId,
       userName: user.name,
       resource: clinicalAccessLog.resource,
@@ -97,6 +97,8 @@ export async function listClinicalAccess(
         eq(clinicalAccessLog.patientId, patientId),
       ),
     )
-    .orderBy(desc(clinicalAccessLog.lastAt), desc(clinicalAccessLog.id))
+    // Recorre la clave primaria desde la franja más reciente; dentro de la
+    // misma hora, lo último consultado primero.
+    .orderBy(desc(clinicalAccessLog.bucket), desc(clinicalAccessLog.lastAt))
     .limit(limit)
 }

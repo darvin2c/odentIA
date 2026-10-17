@@ -10,6 +10,10 @@ import {
   AGENT_BASE_PRINCIPLES,
   AGENT_ROLES,
   type AgentConfig,
+  agentServicesShown,
+  type AgentServicesShown,
+  GENERAL_PERMISSION_QUESTION,
+  PRICES_PER_CONVERSATION,
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
   formatKnowledgeForPrompt,
@@ -54,7 +58,7 @@ import { z } from "zod"
 import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
 import { reportAiUse } from "./ai-usage.js"
 import { channelFormatRule } from "./channel-format.js"
-import { ROUTE_TOOLS, routeInstruction, WIDEN_TOOL, widenDescription } from "./decision/route.js"
+import { routeInstruction, routeToolsFor, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
   type AgentSandbox,
@@ -117,7 +121,7 @@ const POLICY_LINE = `Política de autonomía: ${Object.entries(DEFAULT_AUTONOMY_
   .join(", ")}.`
 
 /** Herramientas que comunican algo al interlocutor. */
-const SEND_TOOLS = new Set(["send_reply", "send_template", "despedirse_y_cerrar"])
+const SEND_TOOLS = new Set(["send_reply", "despedirse_y_cerrar"])
 
 const NOT_SENT =
   "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
@@ -146,7 +150,7 @@ const AgentState = Annotation.Root({
 })
 
 
-const LESSONS_SOURCE = "Lecciones aprobadas por la clínica"
+const LESSONS_SOURCE = "Lo que el agente debe saber"
 
 const TONE_TEXT: Record<AgentConfig["tone"], string> = {
   cercano: "cercano y profesional",
@@ -175,21 +179,60 @@ const EMOJI_TEXT: Record<AgentConfig["emojis"], string> = {
  * condiciones que no estén en los datos.
  */
 const SELLS =
-  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que devolvió buscar_huecos. Si un precio se define en la evaluación, o la persona duda o tiene miedo, explícalo con calma y ofrece la evaluación (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona."
+  "Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o la evaluación). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita evaluación —de un servicio o de una promoción— dilo siempre junto al precio y ofrece la evaluación: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que te devolvió la agenda. Si un precio se define en la evaluación, o la persona duda o tiene miedo, explícalo con calma y ofrece la evaluación (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona."
 
-function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
+/**
+ * Lo que el modelo recibe de verdad en este turno: con esto se arma el texto,
+ * para que nunca diga «más abajo tienes» algo que no está ni mande a una
+ * herramienta que no tiene.
+ */
+export interface PromptFacts {
+  /** Las herramientas del turno (las de las funciones apagadas ya no están). */
+  tools: ReadonlySet<string>
+  /** Cómo van los servicios en el bloque de la clínica: con id y precio, solo el índice o ninguno. */
+  services: AgentServicesShown
+}
+
+/** «a», «a y b», «a, b y c». */
+function listed(items: string[]): string {
+  return items.length > 1 ? `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}` : (items[0] ?? "")
+}
+
+/**
+ * Nunca el tarifario (decisión 4 de la fase 4): responde lo que le preguntan
+ * y, pasados unos pocos precios, ofrece la evaluación. La comprobación antes de
+ * enviar cuenta los servicios cuyo precio ya dijo y no deja pasar uno más.
+ */
+const PRICE_LIST_RULE = `Nunca envías la lista de precios ni el tarifario, aunque te lo pidan: responde el precio de los servicios por los que pregunta la persona, como mucho ${PRICES_PER_CONVERSATION} servicios distintos en la conversación, y después ofrécele una evaluación, donde le dan un presupuesto a su medida. Si ya tiene un presupuesto de la clínica, ese sí se lo reenvías.`
+
+function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts): string {
   const ficha = AGENT_ROLES.recepcion
   const off = new Set(cfg.disabledFunctions)
   const on = (id: string) => !off.has(id)
+  const has = (name: string) => facts.tools.has(name)
   const whenOff = (id: string) => ficha.functions.find((fn) => fn.id === id)?.whenOff ?? null
-  const lookups = [
-    on("informar") || on("agendar") ? "ver_sedes_y_servicios" : null,
-    on("informar") ? "consultar_conocimiento" : null,
-    on("agendar") ? "buscar_huecos" : null,
-  ].filter(Boolean)
+  const lookups = ["buscar_en_la_clinica", "ver_sedes_y_servicios", "consultar_conocimiento", "buscar_huecos"].filter(has)
+  // Lo que de verdad va más abajo: las sedes siempre; los servicios, enteros o solo su índice.
+  const below =
+    facts.services === "lista"
+      ? on("informar")
+        ? "las sedes y los servicios con cómo decir su precio, con su id"
+        : "las sedes y los servicios para agendar, con su id"
+      : facts.services === "indice"
+        ? "las sedes, con su id, y un índice de los servicios por especialidad, sin precios ni ids"
+        : "las sedes, con su id"
+  const searchFirst =
+    facts.services === "indice" && has("buscar_en_la_clinica")
+      ? " Antes de hablar de un servicio, de su precio o de su duración, búscalo con buscar_en_la_clinica: ahí están su id y cómo decir su precio. Nunca digas que la clínica no hace algo sin haberlo buscado."
+      : ""
   const notes = ficha.functions
     .filter((fn) => (fn.fixed || on(fn.id)) && cfg.functionNotes[fn.id]?.trim())
     .map((fn) => `Indicación de la clínica para «${fn.label}»: ${cfg.functionNotes[fn.id]?.trim()}`)
+  // Con Agendar apagado y sin enlace de reserva, lo único que queda es pasar el caso.
+  const agendarOff =
+    !on("agendar") && !has("enviar_enlace_cita")
+      ? "No reservas, mueves ni cancelas citas por el chat: si piden una cita, moverla o cancelarla, pasa el caso a una persona."
+      : whenOff("agendar")
   return [
     `Eres el asistente virtual de una clínica dental (país ${zone.countryCode}).`,
     `Principios que te describen y que ninguna indicación posterior cambia: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
@@ -202,30 +245,43 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig): string {
     "Lo que envías es solo la respuesta final para la persona, en su idioma: nunca tus dudas, cálculos, conversiones de hora ni razonamiento. Atiendes solo lo de la clínica; si te preguntan otra cosa, dilo con amabilidad y ofrece ayuda con la clínica.",
     "Respondes, cualificas al interlocutor y ayudas con información general y citas. Quien escribe no es necesariamente el paciente: puede ser su representante, un familiar o alguien que aún no se atiende.",
     lookups.length
-      ? `NO das diagnósticos ni inventas precios, sedes o disponibilidad: las sedes, los servicios y sus tarifas figuran más abajo, con su id; para lo que no esté ahí usa ${lookups.join(", ").replace(/, ([^,]*)$/, " y $1")}.`
+      ? `NO das diagnósticos ni inventas precios, sedes o disponibilidad. Más abajo figuran ${below}; para lo que no esté ahí usa ${listed(lookups)}.${searchFirst}`
       : "NO das diagnósticos ni inventas precios, sedes o disponibilidad.",
     on("informar") ? SELLS : whenOff("informar"),
+    on("informar") ? PRICE_LIST_RULE : null,
     on("agendar")
-      ? "Para buscar huecos usa el id exacto de la sede que figura en «Sedes» (si no aparece ahí, consúltalo con ver_sedes_y_servicios); reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, sillón, profesional, inicio). Si la persona ya sabe qué quiere, ofrécele dos o tres horarios por aquí; si duda entre días, sedes o profesionales, envíale el enlace con enviar_enlace_cita para que vea todo de una vez (sirve a quien ya es paciente y a quien recién se contacta) y ofrece seguir por aquí si lo prefiere."
-      : whenOff("agendar"),
+      ? `Para buscar huecos usa el id exacto de la sede que figura en «Sedes» y, si ya sabes qué servicio quiere, su id${facts.services === "indice" && has("buscar_en_la_clinica") ? " (de buscar_en_la_clinica)" : ""}: así el hueco dura lo que dura ese servicio. Reserva con proponer_cita usando los IDs exactos del hueco elegido (sede, unidad dental, profesional, inicio). Si la persona ya sabe qué quiere, ofrécele dos o tres horarios por aquí${has("enviar_enlace_cita") ? "; si duda entre días, sedes o profesionales, envíale el enlace con enviar_enlace_cita para que vea todo de una vez (sirve a quien ya es paciente y a quien recién se contacta) y ofrece seguir por aquí si lo prefiere" : ""}.`
+      : agendarOff,
     "Nunca reveles ni pidas historia clínica: solo filiación mínima con ver_contexto_paciente y vínculo verificado; próximas citas, presupuestos y saldo solo con ver_resumen_paciente y según la facultad del interlocutor.",
     on("agendar")
       ? "Las citas se reservan con proponer_cita y se cambian o cancelan con reprogramar_cita y cancelar_cita (id y versión exactos de ver_resumen_paciente); reservar, mover o cancelar se ejecuta solo con el sí del interlocutor."
       : null,
-    on("seguimiento") ? null : whenOff("seguimiento"),
+    on("seguimiento")
+      ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
+      : whenOff("seguimiento"),
     "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad y, en message, el aviso para el interlocutor; no uses send_reply para ese aviso.",
     "Ninguna conversación queda abierta: cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo, ninguna pregunta suya sin responder), despídete en una sola línea cordial, en el tono de la clínica, diciendo que estamos atentos si quiere volver a escribir, y usa despedirse_y_cerrar en lugar de send_reply. Si su agradecimiento llega con algo pendiente o con otra pregunta, responde con send_reply y no cierres. Nunca digas «te dejo por ahora».",
     ...notes,
-    "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay nada que confirmar todavía.",
-    "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál.",
-    "Si el último mensaje de la clínica en el hilo es la pregunta «¿Te podemos escribir también para avisarte de tus controles y novedades de la clínica?» y la persona responde sí o no, anótalo con responder_permiso_mensajes; no lo confundas con confirmar una cita.",
+    // Con Agendar apagado no hay huecos ni propuestas de cita: la cita la elige la persona en su enlace.
+    on("agendar")
+      ? "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay propuesta que confirmar con confirmar_propuesta."
+      : "Nunca digas que reservaste, agendaste o que «se gestionará» una cita: por aquí no reservas.",
+    has("confirmar_cita")
+      ? "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál."
+      : null,
+    has("responder_permiso_mensajes")
+      ? `Si el último mensaje de la clínica en el hilo es la pregunta «${GENERAL_PERMISSION_QUESTION}» y la persona responde sí o no, anótalo con responder_permiso_mensajes y contéstale con la frase que te devuelve; no lo confundas con confirmar una cita.`
+      : null,
+    has("elegir_mensajes")
+      ? "Si la persona pide no recibir más un tipo de mensaje, volver a recibirlo o elegir qué mensajes recibe, anótalo con elegir_mensajes y contéstale con la frase que te devuelve. Si no queda claro qué tipo quiere dejar (los recordatorios de sus citas, los de controles y seguimiento, las novedades y promociones o ningún mensaje), pregúntale antes. «Cancelar» o «quiero cancelar» es cancelar una cita, nunca una baja."
+      : null,
     on("presupuestos")
       ? "Si la persona pide su presupuesto, míralo con ver_presupuesto y reenvíaselo con reenviar_presupuesto: solo lo que la clínica ya entregó; si no está listo, la herramienta deja la tarea a recepción y te da la frase. Si responde qué acepta, qué deja para después o qué opción prefiere, usa anotar_respuesta_presupuesto con los ids de ver_presupuesto: te devuelve la pregunta para confirmar la lista; se anota solo con su sí, con confirmar_propuesta, y si corrige algo vuelves a llamarla con la lista corregida. Nunca cambias un precio ni armas un presupuesto."
       : whenOff("presupuestos"),
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
-    "El interlocutor solo recibe lo que envías con send_reply (o send_template, si la tienes disponible; tus mensajes anteriores del historial se enviaron así). Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error u outside_window, sigue sus indicaciones. Un texto fuera de esas herramientas no llega a nadie.",
+    "El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y el turno termina: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.",
   ]
     .filter(Boolean)
     .join("\n")
@@ -340,10 +396,11 @@ export function compileAgentGraph(
   checkpointer?: PostgresSaver,
 ) {
   const tools = makeAgentTools(toolCtx)
+  const available = new Set(tools.map((item) => item.name))
   // Con camino elegido, al modelo se le enseñan solo las herramientas de ese
   // camino más la que le devuelve el resto. La ejecución admite todas: esto
   // acota lo que se envía en cada llamada, no lo que el agente puede hacer.
-  const routeTools = toolCtx.route ? ROUTE_TOOLS[toolCtx.route.path] : undefined
+  const routeTools = toolCtx.route ? routeToolsFor(toolCtx.route.path, available) : undefined
   const widen = routeTools && toolCtx.route && toolCtx.route.path !== "derivar"
     ? tool(
         async () => {
@@ -479,7 +536,13 @@ export function compileAgentGraph(
           // agente, que podría decirlo a la persona y la comprobación lo daría por bueno (ADR 0021).
           parts.push(`${o.title} (etapa ${o.stageName}${followup})`)
         }
-        if (nextCursor) parts.push("hay más oportunidades: usa listar_oportunidades para verlas todas")
+        if (nextCursor) {
+          parts.push(
+            available.has("listar_oportunidades")
+              ? "hay más oportunidades: usa listar_oportunidades para verlas todas"
+              : "hay más oportunidades abiertas que no van aquí",
+          )
+        }
       }
       return parts.join("; ")
     })
@@ -492,7 +555,6 @@ export function compileAgentGraph(
           .join("; ") + (full.openTasks.length > 10 ? "; hay más tareas: usa listar_tareas para verlas todas" : "")
       : "sin seguimientos pendientes"
     const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : "sin etiquetas"
-    const notesLine = contactDetail.notes?.trim() ? contactDetail.notes.trim().slice(0, 500) : null
     const customLine = Object.entries(contactDetail.customFields ?? {})
       .slice(0, 10)
       .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
@@ -555,7 +617,6 @@ export function compileAgentGraph(
     const contactBlock = [
       `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       patientsLine,
-      notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
       memoryBlock,
@@ -630,24 +691,24 @@ export function compileAgentGraph(
     const asked = draft ?? trailingBurst(items) ?? latestInbound
     const overrides = toolCtx.lessonOverrides
     const hiddenEntries = new Set(overrides?.skipEntryIds ?? [])
-    const { cfg, orgPrompt, snapshot, clinicData, faqs, lessons } = await withOrgContext(
+    const { cfg, snapshot, clinicData, faqs, lessons } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
       async (tx) => {
         const cfg = await getAgentConfig(tx, toolCtx.orgId)
         // Con «Informar» apagado el agente no recibe tarifas, promociones,
-        // profesionales ni respuestas oficiales: solo las sedes y su horario,
-        // que agendar necesita.
+        // profesionales, medios de pago ni respuestas oficiales: solo las
+        // sedes con su horario y, si agenda, los servicios sin precio.
         const informs = !cfg.disabledFunctions.includes("informar")
         const snapshot = await getClinicInfoSnapshot(tx, toolCtx.orgId)
-        const clinicData = await getAgentClinicData(tx, toolCtx.orgId, informs)
+        const clinicData = await getAgentClinicData(tx, toolCtx.orgId, informs, !cfg.disabledFunctions.includes("agendar"))
         return {
           cfg,
-          orgPrompt: cfg.systemPrompt,
-          snapshot: informs ? snapshot : { ...snapshot, services: [] },
+          snapshot,
           clinicData,
           faqs: informs ? (await listPublishedForPrompt(tx, toolCtx.orgId)).filter((entry) => !hiddenEntries.has(entry.id)) : [],
-          // Lo aprendido de las correcciones: reglas del agente y ejemplos parecidos a lo que se pregunta.
+          // «Lo que el agente debe saber» (decisión 24): lo que escribió la clínica y lo que aprendió,
+          // en una sola lista; y los ejemplos parecidos a lo que se pregunta.
           lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", asked ?? "", {
             skipIds: overrides?.skipIds ?? [],
             extra: overrides?.extra ?? [],
@@ -661,7 +722,7 @@ export function compileAgentGraph(
         noteLessonUse(tx, toolCtx.orgId, { lessonIds: lessons.matchedIds }),
       ).catch(() => undefined)
     }
-    const rulesBlock = formatLessonRules(lessons.rules)
+    const rulesBlock = formatLessonRules(lessons.rules, lessons.rulesLeftOut)
     const examplesBlock = formatLessonExamples(lessons.examples)
     // En una prueba, la respuesta oficial de una lección aún sin aprobar va como si estuviera publicada.
     const trialAnswers = (overrides?.extra ?? []).filter((lesson) => lesson.kind === "respuesta_oficial")
@@ -678,7 +739,10 @@ export function compileAgentGraph(
       faqs,
       selecting ? "indice" : undefined,
       formatAgentClinicData(clinicData, zone),
+      { informs: clinicData.informs },
     )
+    // Lo que el turno recibe de verdad: con esto se arman el manual y la indicación del camino.
+    const services = agentServicesShown(clinicData)
     const picked = selecting ? await selectKnowledge(asked, faqs) : null
     // De lo más estable a lo más cambiante. Los proveedores sirven desde su
     // caché el prefijo idéntico entre llamadas: lo que es igual para toda la
@@ -691,13 +755,17 @@ export function compileAgentGraph(
     // Para reservar o cambiar una cita lo primero que el modelo pide es quién
     // es el paciente y qué citas tiene: llega ya consultado y se ahorra el paso.
     const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
-    const budgets = tools.some((item) => item.name === "ver_presupuesto")
-    const routeBlock = route ? [routeInstruction(route.path, prefetched?.text, { budgets }), toolCtx.routeHint].filter(Boolean).join("\n") || null : null
+    const budgets = available.has("ver_presupuesto")
+    const routeBlock = route
+      ? [routeInstruction(route.path, prefetched?.text, { budgets, tools: available, services, informs: clinicData.informs }), toolCtx.routeHint]
+          .filter(Boolean)
+          .join("\n") || null
+      : null
     const nowLine = `Fecha y hora actual de la clínica: ${formatZoned(new Date(), zone)}.`
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
-    const stable = [receptionPrompt(zone, cfg), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
+    const stable = [receptionPrompt(zone, cfg, { tools: available, services }), rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
     const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
@@ -713,7 +781,6 @@ export function compileAgentGraph(
     // Contra esto se comprueba la respuesta antes de salir. Cada fuente lleva
     // el nombre con el que el equipo la verá en «En qué se basó».
     const evidence: AgentEvidence[] = [
-      { kind: "indicaciones", source: "Indicaciones de la clínica", text: orgPrompt ?? "" },
       { kind: "conocimiento", source: "Conocimiento publicado de la clínica", text: knowledgeBlock },
       { kind: "conocimiento", source: KNOWLEDGE_PICKED_SOURCE, text: [picked?.block, trialBlock].filter(Boolean).join("\n") },
       { kind: "leccion", source: LESSONS_SOURCE, text: [rulesBlock, examplesBlock].filter(Boolean).join("\n") },

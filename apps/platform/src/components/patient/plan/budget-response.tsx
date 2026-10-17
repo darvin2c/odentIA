@@ -6,7 +6,7 @@
  * no se reescribe después. Sirve a quien tenga `budgets.decide`: el odontólogo
  * de lo que indicó, recepción y caja (decisión 4).
  */
-import { budgetStateText, isMinor, sumAcceptedCents } from "@odentia/clinical"
+import { budgetStateText, sumAcceptedCents } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -229,10 +229,10 @@ export function BudgetResponse({
         list.push({ id: row.contactId, name: row.contact.displayName, kind: "representante" })
       }
     }
-    const birthDate = patient?.patient.birthDate?.slice(0, 10)
     return {
       deciders: list,
-      minor: birthDate ? isMinor(birthDate, new Date().toISOString().slice(0, 10)) : false,
+      // Lo decide el servidor, con el día de la clínica.
+      minor: patient?.isMinor ?? false,
     }
   }, [patient, responsibilities])
 

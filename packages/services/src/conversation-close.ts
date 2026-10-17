@@ -5,7 +5,6 @@ import { automationJob } from "@odentia/db/schema/automation"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
-import { getBranchHours } from "./agent-clinic-info.js"
 import { claimHandoff } from "./agent-operations.js"
 import { type AgentConfig, getAgentConfig } from "./agentConfig.js"
 import {
@@ -20,13 +19,9 @@ import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgLocale, formatZoned } from "./locale.js"
-import {
-  isOpportune,
-  lastOpportuneAtOrBefore,
-  nextOpportuneFrom,
-  type MinuteRange,
-  type OpportuneSchedule,
-} from "./opportune-hours.js"
+import { windowOpen } from "./message-window.js"
+import { lastOpportuneAtOrBefore, nextOpportuneFrom, type OpportuneSchedule } from "./opportune-hours.js"
+import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import { updateTask } from "./tasks.js"
 
@@ -46,8 +41,6 @@ export const NUDGE_AFTER_HOURS = 3
 /** Límites de `close_after_hours`: la ventana de WhatsApp es de 24 horas. */
 export const CLOSE_AFTER_HOURS_MIN = 6
 export const CLOSE_AFTER_HOURS_MAX = 23
-/** Margen para escribir sin mensaje aprobado: WhatsApp corta a las 24 horas del último entrante. */
-export const WRITE_WINDOW_HOURS = 23
 /** Tras insistir, el agente espera al menos esto antes de despedirse. */
 const AFTER_NUDGE_MS = 60 * 60_000
 const HOUR_MS = 60 * 60_000
@@ -97,10 +90,19 @@ function withName(name: string | null, sentence: string): string {
 
 /**
  * La despedida al cerrar, fija y en la voz de la clínica: dice que estamos
- * atentos si quiere contactarnos (nunca «te dejo por ahora»).
+ * atentos si quiere contactarnos (nunca «te dejo por ahora»). Si había una
+ * cita propuesta sin confirmar (tablero 2c), dice que ese horario quedó libre:
+ * así nadie llega a una cita que nunca se reservó.
  */
-export function farewellText(voice: ClinicVoice, name: string | null): string {
+export function farewellText(voice: ClinicVoice, name: string | null, proposedWhen: string | null = null): string {
   const usted = voice.treatment === "usted"
+  if (proposedWhen) {
+    const released = `Como no alcanzamos a confirmar, dejé libre el ${proposedWhen}.`
+    const next = usted
+      ? "Cuando desee una cita, escríbanos y le busco un horario: estamos atentos."
+      : "Cuando quieras una cita, escríbenos y te busco un horario: estamos atentos."
+    return `${withName(name, released)} ${next}`
+  }
   const warm = voice.tone === "cercano"
   const base = usted
     ? warm
@@ -150,9 +152,9 @@ function proposalWhen(startsAt: unknown, zone: { timezone: string; locale: strin
 
 /**
  * ¿Se le puede escribir ahora sin mensaje aprobado? En WhatsApp, Messenger e
- * Instagram solo dentro de las 23 horas desde su último entrante (margen
- * sobre las 24 del proveedor); en los demás canales, siempre que la conexión
- * esté activa.
+ * Instagram solo dentro de la ventana desde su último entrante (`windowOpen`,
+ * la misma regla y el mismo margen que todo envío, ADR 0042); en los demás
+ * canales, siempre que la conexión esté activa.
  */
 export function canWriteNow(
   thread: { provider: string; connectionStatus: string; lastInboundAt: Date | null },
@@ -160,7 +162,14 @@ export function canWriteNow(
 ): boolean {
   if (thread.connectionStatus !== "active") return false
   if (!WINDOWED_PROVIDERS.has(thread.provider)) return true
-  return !!thread.lastInboundAt && now.getTime() - thread.lastInboundAt.getTime() < WRITE_WINDOW_HOURS * HOUR_MS
+  return windowOpen(thread.lastInboundAt, now)
+}
+
+/** La cita propuesta que espera el sí de la persona en el hilo, con su día y hora como se le dicen. */
+async function proposedAppointmentWhen(tx: Db, orgId: string, id: string): Promise<string | null> {
+  const proposed = await pendingProposalOf(tx, id)
+  if (proposed?.action !== "reservar_cita") return null
+  return proposalWhen(proposed.payload["startsAt"], await findOrgLocale(tx, orgId))
 }
 
 /* ------------------------------ Cerrar ------------------------------ */
@@ -313,7 +322,7 @@ async function countPendingProposalsOf(tx: Db, orgId: string, id: string): Promi
 }
 
 export interface ResolvePreview {
-  /** Al resolver sale la despedida: falso si ya pasaron más de 23 horas del último entrante o el canal no deja escribir. */
+  /** Al resolver sale la despedida: falso si se cerró la ventana del último entrante o el canal no deja escribir. */
   farewell: boolean
   farewellText: string | null
   /** Casos derivados abiertos que se dan por resueltos. */
@@ -329,7 +338,9 @@ export async function getResolvePreview(tx: Db, orgId: string, id: string, now =
   const farewell = thread.status === "open" && canWriteNow(thread, now)
   return {
     farewell,
-    farewellText: farewell ? farewellText(clinicVoiceOf(cfg), greetingName(thread.contactName)) : null,
+    farewellText: farewell
+      ? farewellText(clinicVoiceOf(cfg), greetingName(thread.contactName), await proposedAppointmentWhen(tx, orgId, id))
+      : null,
     handoffs: await countOpenHandoffsOf(tx, orgId, id),
     pendingContact: await countPendingProposalsOf(tx, orgId, id),
   }
@@ -505,34 +516,11 @@ export interface ConversationCareSummary {
   closed: number
 }
 
-/** El horario oportuno de la clínica, leído una vez por ciclo. */
-export async function opportuneScheduleOf(
-  tx: Db,
-  orgId: string,
-  cfg: Pick<AgentConfig, "activeFromMin" | "activeUntilMin">,
-  now: Date,
-): Promise<OpportuneSchedule> {
-  const zone = await findOrgLocale(tx, orgId)
-  const branches = await getBranchHours(tx, orgId, now)
-  const week: MinuteRange[][] = Array.from({ length: 7 }, () => [])
-  for (const branch of branches) {
-    for (const day of branch.week) week[day.weekday]?.push(...day.ranges)
-  }
-  return {
-    timeZone: zone.timezone,
-    week,
-    agent:
-      cfg.activeFromMin !== null && cfg.activeUntilMin !== null
-        ? { fromMin: cfg.activeFromMin, untilMin: cfg.activeUntilMin }
-        : null,
-  }
-}
-
 /**
  * Cuándo cerrar por silencio: a `closeAfterHours` desde que la persona calló
  * (su último entrante, o el inicio de la atención si fue después) o, si esa
- * hora no es oportuna, en la última oportuna anterior; nunca antes del
- * mínimo ni antes de una hora después de insistir.
+ * hora cae fuera del «Horario para escribir», en el último momento permitido
+ * antes; nunca antes del mínimo ni antes de una hora después de insistir.
  */
 export function silenceCloseAt(input: {
   silenceFrom: Date
@@ -623,7 +611,9 @@ export async function tickConversationCare(
       ),
     )
   if (rows.length === 0) return summary
-  const schedule = await opportuneScheduleOf(tx, orgId, cfg, now)
+  // Insistir y despedirse es escribir por cuenta propia: el «Horario para
+  // escribir» de la clínica (ADR 0042), no el horario de atención.
+  const schedule = await writingScheduleOf(tx, orgId)
   const zone = await findOrgLocale(tx, orgId)
   const voice = clinicVoiceOf(cfg)
   for (const row of rows) {
@@ -649,11 +639,17 @@ export async function tickConversationCare(
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
     const writable = canWriteNow(row, now)
     if (now.getTime() >= closeAt.getTime()) {
-      if (writable) await sendFixed(inner, orgId, row.id, format(farewellText(voice, greetingName(row.contactName)), row.channel), { senderKind: "agent" })
+      if (writable) {
+        // Antes de cerrar, porque al cerrar vence la propuesta.
+        const proposedWhen = await proposedAppointmentWhen(inner, orgId, row.id)
+        await sendFixed(inner, orgId, row.id, format(farewellText(voice, greetingName(row.contactName), proposedWhen), row.channel), {
+          senderKind: "agent",
+        })
+      }
       await closeConversationWith(inner, orgId, row.id, { reason: "sin_respuesta", byUserId: null, now })
       return "closed"
     }
-    if (row.nudgedAt || !writable || !isOpportune(now, schedule)) return null
+    if (row.nudgedAt || !writable || !isWritingTime(now, schedule)) return null
     const last = await lastMessageOf(inner, row.id)
     if (!last || last.senderKind !== "agent" || last.automatic) return null
     if (now.getTime() - last.createdAt.getTime() < NUDGE_AFTER_HOURS * HOUR_MS) return null

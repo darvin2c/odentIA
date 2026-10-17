@@ -3,7 +3,7 @@ import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
-import { patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { contact, crmTask, message } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
@@ -24,6 +24,7 @@ import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { updateTask } from "./tasks.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * Panel lateral del agente: lo que recepción ve y atiende desde cualquier
@@ -194,8 +195,7 @@ it("el resumen del agente excluye los presupuestos en borrador", async () => {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `agente-${orgId.slice(0, 8)}`)
   const [who] = await ownerDb.insert(contact).values({ organizationId: orgId, displayName: "Contacto agente" }).returning({ id: contact.id })
-  const [ficha] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Paciente agente", patientNumber: 1 }).returning({ id: patient.id })
-  await ownerDb.insert(patientContact).values({ organizationId: orgId, patientId: ficha!.id, contactId: who!.id, relationship: "self" })
+  const [ficha] = await insertTestPatients(ownerDb, { organizationId: orgId, personId: who!.id, displayName: "Paciente agente", patientNumber: 1 })
   const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: ficha!.id, title: "Plan general" }).returning({ id: treatmentPlan.id })
   await ownerDb.insert(treatmentBudget).values([
     { organizationId: orgId, patientId: ficha!.id, planId: plan!.id, budgetNumber: 1, title: "Propuesta presentada", currency: "PEN", status: "presentado" },
@@ -203,4 +203,24 @@ it("el resumen del agente excluye los presupuestos en borrador", async () => {
   ])
   const summary = await withOrgContext(appDb, orgId, tx => getAgentPatientSummary(tx, orgId, who!.id, ficha!.id))
   expect(summary.budgets.map(budget => budget.status)).toEqual(["presentado"])
+})
+
+it("los casos del agente salen por urgencia y antigüedad antes de cortar, y su tarea es de Recepción", async () => {
+  const ids: string[] = []
+  for (const [sender, priority] of [["primero-ahora", "alta"], ["segundo-sin-apuro", "baja"], ["tercero-hoy", "media"]] as const) {
+    const conv = await openConversation(sender)
+    const handoff = await run((tx) => createHandoff(tx, ORG, null, {
+      conversationId: conv.conversationId, reason: sender, summary: sender, priority, createdBy: "agent",
+    }))
+    ids.push(handoff.id)
+    const [task] = await run((tx) => tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId as string)))
+    // Sin área, nadie de recepción la vería en «Mías y de mi área».
+    expect(task?.area).toBe("recepcion")
+  }
+  const ordered = (await run((tx) => listHandoffs(tx, ORG, { open: true, order: "urgencia", limit: 100 }))).map((h) => h.id).filter((id) => ids.includes(id))
+  // «Ahora», después «Hoy» aunque sea el más nuevo, y al final «Sin apuro».
+  expect(ordered).toEqual([ids[0], ids[2], ids[1]])
+  // Por defecto, del más nuevo al más viejo (la lista de siempre).
+  const recent = (await run((tx) => listHandoffs(tx, ORG, { open: true, limit: 100 }))).map((h) => h.id).filter((id) => ids.includes(id))
+  expect(recent).toEqual([ids[2], ids[1], ids[0]])
 })

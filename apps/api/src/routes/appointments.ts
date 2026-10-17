@@ -1,5 +1,6 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  appointmentReminderReach,
   createAppointment,
   operationBodySchema,
   createChair,
@@ -118,6 +119,8 @@ const availabilityQuery = z.object({
   to: z.iso.datetime({ offset: true }),
   // Al reprogramar: el hueco de esa cita cuenta como libre.
   ignoreAppointmentId: z.uuid().optional(),
+  // «Nueva cita» con servicio: solo quien lo atiende (ADR 0039).
+  serviceId: z.uuid().optional(),
 })
 
 const searchQuery = z.object({ q: z.string().trim().min(2).max(200) })
@@ -161,7 +164,7 @@ export function createAgendaRoute(deps: CrmDeps) {
   app.post("/chairs", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar sillones"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar unidades dentales"), 403)
     }
     const parsed = chairInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -170,11 +173,11 @@ export function createAgendaRoute(deps: CrmDeps) {
     )
   })
 
-  // Los sillones de la sede para administrarlos: también los desactivados.
+  // Las unidades dentales de la sede para administrarlas: también las desactivadas.
   app.get("/chairs", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.read")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la configuración de sillones"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la configuración de unidades dentales"), 403)
     }
     const branchId = c.req.query("branchId")
     if (!branchId || !z.uuid().safeParse(branchId).success) {
@@ -185,15 +188,15 @@ export function createAgendaRoute(deps: CrmDeps) {
     )
   })
 
-  // Renombrar un sillón, desactivarlo o reactivarlo.
+  // Renombrar una unidad dental, desactivarla o reactivarla.
   app.patch("/chairs/:id", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar sillones"), 403)
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar unidades dentales"), 403)
     }
     const id = c.req.param("id")
     if (!z.uuid().safeParse(id).success) {
-      return c.json(errorBody(c, "NOT_FOUND", "Sillón no encontrado"), 404)
+      return c.json(errorBody(c, "NOT_FOUND", "Unidad dental no encontrada"), 404)
     }
     const parsed = chairPatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -346,7 +349,11 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createAppointment(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const created = await createAppointment(tx, orgId, userId, parsed.data)
+        // Si el recordatorio le llegará: «Carmen no recibirá el recordatorio: aún no tiene WhatsApp».
+        return { ...created, reminderReach: await appointmentReminderReach(tx, orgId, created.patientId) }
+      }),
     )
   })
 

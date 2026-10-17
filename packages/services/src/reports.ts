@@ -12,6 +12,8 @@
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { type AdminRecommendation, getAdminRecommendations } from "./agent-admin.js"
+import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { validation } from "./errors.js"
 import { getFinanceResultBetween, getFinanceTotalsBetween, requireBranch } from "./finance.js"
 import { getOrgLocale } from "./locale.js"
@@ -235,25 +237,42 @@ export interface BudgetTotals {
 }
 
 /**
- * Presupuestos presentados en el tramo, según su respuesta a hoy. Uno aceptado
- * en parte cuenta por lo aceptado; las revisiones sustituidas no cuentan.
+ * Las líneas que cuentan de cada presupuesto presentado, con su grupo. Una sola
+ * regla con el resto de la aplicación: el presupuesto vale lo de una opción (la
+ * elegida o, mientras decide, la recomendada: `budgetValueOptionSql`), lo que se
+ * cobra por sesión cuenta todas sus visitas y «espera respuesta» es
+ * `budgetAwaitsAnswerSql`. Uno aceptado en parte cuenta por lo aceptado, y lo
+ * que dejó para después, como en espera. Las revisiones sustituidas no cuentan.
  */
+function budgetLinesSql(orgId: string, where: SQL): SQL {
+  const budget = { id: sql`b.id`, status: sql`b.status`, organizationId: sql`b.organization_id` }
+  return sql`with valued as (
+      select b.id, b.patient_id, b.presented_at, b.title, b.currency, b.status,
+        ${budgetAwaitsAnswerSql(budget)} as awaits,
+        ${budgetValueOptionSql(budget)} as option_id
+      from treatment_budget b
+      where b.organization_id=${orgId} and b.status in ('aceptado','parcial','presentado','pospuesto','rechazado')
+        and ${where}
+    ), budget_line as (
+      select v.id, v.patient_id, v.presented_at, v.title, v.currency,
+        case
+          when v.status in ('aceptado','parcial') and i.decision = 'aceptado' then 'accepted'
+          when v.awaits and (v.status <> 'parcial' or i.decision = 'pospuesto') then 'waiting'
+          when v.status = 'rechazado' then 'rejected'
+        end as grp,
+        i.price_cents::bigint * ${budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })} as cents,
+        (i.id is not null and i.price_cents is null) as missing_price
+      from valued v
+      left join treatment_budget_item i on i.organization_id=${orgId} and i.budget_id=v.id and i.option_id=v.option_id
+    )`
+}
+
+/** Presupuestos presentados en el tramo, según su respuesta a hoy (`budgetLinesSql`). */
 async function budgetTotals(tx: Db, orgId: string, span: ReportSpan): Promise<BudgetTotals[]> {
   const rows = await tx.execute<{ currency: string; grp: BudgetGroup; count: number; cents: string }>(sql`
-    with line as (
-      select b.id, b.currency,
-        case when b.status in ('aceptado','parcial') then 'accepted'
-          when b.status in ('presentado','pospuesto') then 'waiting' else 'rejected' end as grp,
-        case when b.status in ('aceptado','parcial') and i.decision <> 'aceptado' then 0
-          else coalesce(i.price_cents, 0)::bigint
-            * (case when i.billing_mode='session' then greatest(coalesce(i.sessions_planned, 1), 1) else 1 end)
-        end as cents
-      from treatment_budget b
-      left join treatment_budget_item i on i.budget_id=b.id and i.organization_id=${orgId}
-      where b.organization_id=${orgId} and b.presented_at >= ${at(span.start)} and b.presented_at < ${at(span.end)}
-        and b.status in ('aceptado','parcial','presentado','pospuesto','rechazado')
-    ) select currency, grp, count(distinct id)::int as count, coalesce(sum(cents), 0)::text as cents
-    from line group by currency, grp order by currency`)
+    ${budgetLinesSql(orgId, sql`b.presented_at >= ${at(span.start)} and b.presented_at < ${at(span.end)}`)}
+    select currency, grp, count(distinct id)::int as count, coalesce(sum(cents), 0)::text as cents
+    from budget_line where grp is not null group by currency, grp order by currency`)
   const byCurrency = new Map<string, BudgetTotals>()
   for (const row of rows) {
     const entry = byCurrency.get(row.currency) ?? {
@@ -606,12 +625,12 @@ export async function getReportList(
           : sql`a.status in ('programada','confirmada') and a.ends_at < ${at(now)}`
     rows = [
       ...(await tx.execute<Row>(sql`
-        select a.id, a.starts_at as at, a.patient_id as "patientId", p.display_name as "personName",
+        select a.id, a.starts_at as at, a.patient_id as "patientId", pp.display_name as "personName",
           a.service_name as title, u.name as "professionalName", b.name as "branchName",
           ${nextAppointment(sql`a.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total
         from appointment a
-        join patient p on p.id=a.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=a.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=a.branch_id and b.organization_id=${orgId}
         join "user" u on u.id=a.dentist_user_id
         where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
@@ -621,12 +640,12 @@ export async function getReportList(
   } else if (query.list === "controls_pending") {
     rows = [
       ...(await tx.execute<Row>(sql`
-        select f.id, f.due_at as at, f.patient_id as "patientId", p.display_name as "personName",
+        select f.id, f.due_at as at, f.patient_id as "patientId", pp.display_name as "personName",
           f.title, null::text as "professionalName", null::text as "branchName",
           ${nextAppointment(sql`f.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total
         from clinical_follow_up f
-        join patient p on p.id=f.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=f.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         where f.organization_id=${orgId} and f.due_at >= ${start} and f.due_at < ${end}
           and f.status in ('pendiente','programado')
         order by f.due_at, f.id limit ${REPORT_LIST_LIMIT}`)),
@@ -634,18 +653,19 @@ export async function getReportList(
   } else if (query.list === "budgets_waiting") {
     rows = [
       ...(await tx.execute<Row>(sql`
-        select b.id, b.presented_at as at, b.patient_id as "patientId", p.display_name as "personName",
-          b.title, null::text as "professionalName", null::text as "branchName",
-          ${nextAppointment(sql`b.patient_id`)} as "hasNextAppointment",
-          (select coalesce(sum(coalesce(i.price_cents, 0)::bigint
-              * (case when i.billing_mode='session' then greatest(coalesce(i.sessions_planned, 1), 1) else 1 end)), 0)
-            from treatment_budget_item i where i.budget_id=b.id and i.organization_id=${orgId})::text as cents,
-          b.currency::text as currency, count(*) over()::int as total
-        from treatment_budget b
-        join patient p on p.id=b.patient_id and p.organization_id=${orgId}
-        where b.organization_id=${orgId} and b.presented_at >= ${start} and b.presented_at < ${end}
-          and b.status in ('presentado','pospuesto')
-        order by b.presented_at, b.id limit ${REPORT_LIST_LIMIT}`)),
+        ${budgetLinesSql(orgId, sql`b.presented_at >= ${start} and b.presented_at < ${end}`)}
+        , waiting as (
+          select id, patient_id, presented_at, title, currency,
+            case when bool_or(missing_price) then null else coalesce(sum(cents), 0) end as cents
+          from budget_line where grp = 'waiting' group by id, patient_id, presented_at, title, currency
+        )
+        select w.id, w.presented_at as at, w.patient_id as "patientId", pp.display_name as "personName",
+          w.title, null::text as "professionalName", null::text as "branchName",
+          ${nextAppointment(sql`w.patient_id`)} as "hasNextAppointment",
+          w.cents::text as cents, w.currency::text as currency, count(*) over()::int as total
+        from waiting w
+        join patient p on p.id=w.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+        order by w.presented_at, w.id limit ${REPORT_LIST_LIMIT}`)),
     ]
   } else {
     rows = [
@@ -654,12 +674,12 @@ export async function getReportList(
           select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, dentist_user_id
           from appointment where organization_id=${orgId} and status='atendida'
           order by patient_id, starts_at, id
-        ) select v.id, v.starts_at as at, v.patient_id as "patientId", p.display_name as "personName",
+        ) select v.id, v.starts_at as at, v.patient_id as "patientId", pp.display_name as "personName",
           v.service_name as title, u.name as "professionalName", b.name as "branchName",
           ${nextAppointment(sql`v.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total
         from first_visit v
-        join patient p on p.id=v.patient_id and p.organization_id=${orgId}
+        join patient p on p.id=v.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=v.branch_id and b.organization_id=${orgId}
         join "user" u on u.id=v.dentist_user_id
         where v.starts_at >= ${start} and v.starts_at < ${end}

@@ -1,5 +1,4 @@
 import {
-  describeProviderProblem,
   isProviderConfigError,
   meterAiUse,
   type PlatformDecisions,
@@ -7,10 +6,11 @@ import {
   simulateAgentSandbox,
   simulateAgentTurn,
 } from "@odentia/agent"
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertAgentTestBudget,
   confirmProposalByContact,
+  confirmProposalByPhone,
   createHandoff,
   operationBodySchema,
   createProposal,
@@ -22,6 +22,7 @@ import {
   listAgentDecisions,
   listAgentRuns,
   listAnswerTraces,
+  listAwaitingAnswer,
   listHandoffs,
   noteSandboxTurn,
   claimHandoff,
@@ -34,12 +35,15 @@ import {
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
+import { modelProblemResponse } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 export interface AgentOpsDeps extends CrmDeps {
   /** Proveedor de la plataforma; la configuración de la organización prevalece. */
   llm: PlatformLlm
+  /** Rol owner: el caso «Modelo sin responder» en Soporte de odentIA. */
+  ownerDb?: Db
   /** Credenciales del modelo de decisión: «Probar» elige el camino igual que una conversación real. */
   decisions?: PlatformDecisions
   embedder?: SearchEmbedder
@@ -215,6 +219,34 @@ const sandboxInput = z.object({
     )
   })
 
+  /**
+   * Agente › «Esperan su sí»: las citas que el agente propuso y esperan la
+   * respuesta de la persona. Lo ven los mismos roles que antes veían Pendientes.
+   */
+  app.get("/awaiting", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return forbidden(c, "agent.decide")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listAwaitingAnswer(tx, orgId, { limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined }),
+      ),
+    )
+  })
+
+  /** «Confirmó por teléfono»: el mismo permiso que registrar una confirmación, en el dominio del acto. */
+  app.post("/proposals/:id/phone-confirm", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.decide")) return forbidden(c, "agent.decide")
+    if (!canAccess(memberRole, "conversations.write")) return forbidden(c, "conversations.write")
+    const blocked = await actionGate(c, memberRole, orgId, c.req.param("id"))
+    if (blocked) return blocked
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        confirmProposalByPhone(tx, orgId, userId, c.req.param("id"), { secretsKey: deps.secretsKey }),
+      ),
+    )
+  })
+
   app.get("/handoffs", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return forbidden(c, "agent.decide")
@@ -224,6 +256,7 @@ const sandboxInput = z.object({
           conversationId: c.req.query("conversationId"),
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
           open: c.req.query("open") === "1" || c.req.query("open") === "true",
+          ...(c.req.query("order") === "urgencia" ? { order: "urgencia" as const } : {}),
         }),
       ),
     )
@@ -347,8 +380,8 @@ const sandboxInput = z.object({
 
   /**
    * «Probar»: un turno de una conversación de prueba, sin hilo ni persona
-   * real. No envía ni escribe; cuenta que la clínica probó a su agente y lo
-   * que gastó, dentro del tope de pruebas (ADR 0031).
+   * real. No envía ni escribe; cuenta que la clínica probó a su agente (si
+   * el modelo respondió) y lo que gastó, dentro del tope de pruebas (ADR 0031).
    */
   app.post("/sandbox", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -365,14 +398,12 @@ const sandboxInput = z.object({
             { orgId, ...parsed.data },
           ),
         )
-        await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
+        // «Lo probaste» cuenta solo las pruebas que el modelo respondió.
+        if (result.modelAnswered) await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
         return result
       })
     } catch (error) {
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "agente")
       throw error
     }
   })
@@ -402,10 +433,7 @@ const sandboxInput = z.object({
       // Proveedor inutilizable (configuración, credencial, cuota): es un
       // estado de la organización, no un error del servidor, y nunca se
       // reenvía el cuerpo crudo del proveedor.
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "agente")
       throw error
     }
   })

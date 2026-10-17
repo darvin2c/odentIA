@@ -1,6 +1,6 @@
 # 0001 · Persona única: el contacto es la persona y el paciente su historia clínica
 
-Fecha: 2026-10-07 · **Estado:** aceptada
+Fecha: 2026-10-07 · **Estado:** aceptada · La identidad repetida en las dos tablas la sustituye [0044](0044-la-identidad-vive-en-la-persona.md): vive solo en la persona
 
 ## Problema
 
@@ -9,7 +9,7 @@ Una misma persona existía dos veces sin garantía de coherencia: como `patient`
 ## Decisión y motivo
 
 - `contact` es **la persona**; `patient` es **su historia clínica**. Todo paciente es exactamente una persona: su vínculo `self` en `patient_contact`. No toda persona es paciente.
-- La identidad (nombre, documento, nacimiento, sexo, teléfono, correo) es una sola. Se conserva físicamente en ambas tablas y **la base garantiza que sean iguales**: triggers de sincronización en los dos sentidos y conciliación al crear el vínculo (manda la ficha; lo que solo el contacto conocía se completa; un teléfono o correo distinto queda anotado en el contacto).
+- La identidad (nombre, documento, nacimiento, sexo, teléfono, correo) es una sola. *(Sustituido por 0044: vive solo en la persona y la ficha apunta a ella con `person_id`.)* Se conservaba físicamente en ambas tablas y la base garantizaba que fueran iguales: triggers de sincronización en los dos sentidos y conciliación al crear el vínculo (manda la ficha; lo que solo el contacto conocía se completa; un teléfono o correo distinto queda anotado en el contacto).
 - Si al confirmar la transacción un paciente no tiene persona, la base adopta la que ya tiene su mismo documento o la crea desde la filiación. El teléfono nunca identifica.
 - Una persona creada solo para la ficha es **provisional** mientras nada más la referencie; identificar al paciente con un contacto real la sustituye. Con actividad propia, no se fusiona en silencio.
 - La propia persona no se desvincula ni cambia de relación. El agente no modifica la identidad de quien ya es paciente.

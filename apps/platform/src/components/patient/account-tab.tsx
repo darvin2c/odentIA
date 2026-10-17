@@ -1,5 +1,6 @@
 /**
- * Cuenta del paciente: tres cifras (por cobrar, pagado, a favor), lo pendiente
+ * Cuenta del paciente: tres cifras (debe, a favor y saldo, que descuenta lo
+ * que tiene a favor: decisión 22), lo pendiente
  * por concepto y los cobros con su ticket. Sin datos clínicos. Los
  * presupuestos están en la pestaña Plan, donde caja también anota la respuesta
  * (ADR 0034).
@@ -39,6 +40,7 @@ import { usePermission } from "../../lib/crm"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
+  collectApi,
   createManualChargeApi,
   fetchPatientAccount3,
   fetchPaymentMethods,
@@ -98,7 +100,9 @@ export function AccountTab({
   const profile = useOrgFinanceProfile()
 
   const [pickedBranch, setPickedBranch] = useState("")
-  const [askBranch, setAskBranch] = useState<"cobrar" | "devolver" | "agregar" | null>(null)
+  const [askBranch, setAskBranch] = useState<"cobrar" | "devolver" | "agregar" | "aplicar" | null>(null)
+  /** Lo que quedó tras aplicar lo que tenía a favor: «Listo» o lo que falta. */
+  const [applied, setApplied] = useState<{ appliedCents: number; remainingCents: number } | null>(null)
   const [cobrarOpen, setCobrarOpen] = useState(false)
   const [collect, setCollect] = useState<CollectResultBody | null>(null)
   const [viewTicket, setViewTicket] = useState<AccountCobro | null>(null)
@@ -178,6 +182,18 @@ export function AccountTab({
     onError: (err) => setError(financeErrorMessage(err)),
   })
 
+  // «Aplicar lo que tiene a favor»: el mismo cobro de caja, sin dinero nuevo.
+  // Queda como un ticket con el saldo a favor usado (el movimiento registrado).
+  const applyMutation = useMutation({
+    mutationFn: () => collectApi(patientId, { branchId: activeBranch, requestId: crypto.randomUUID() }),
+    onSuccess: (result) => {
+      setApplied({ appliedCents: result.data.creditAppliedCents, remainingCents: result.data.remainingCents })
+      setError(null)
+      invalidate()
+    },
+    onError: (err) => setError(financeErrorMessage(err)),
+  })
+
   const addMutation = useMutation({
     mutationFn: (input: { description: string; amountCents: number }) =>
       createManualChargeApi(patientId, { branchId: activeBranch, ...input }),
@@ -247,10 +263,11 @@ export function AccountTab({
   const orgRow = data.byCurrency.find((row) => row.currency === orgUnit)
   const orgFavor = orgRow?.aFavor ?? 0
   const orgOwed = orgRow?.porCobrar ?? 0
+  const orgBalance = orgRow?.saldo ?? 0
   const balances =
     data.byCurrency.length > 0
       ? data.byCurrency
-      : [{ currency: orgUnit, porCobrar: 0, pagado: 0, aFavor: 0 }]
+      : [{ currency: orgUnit, porCobrar: 0, pagado: 0, aFavor: 0, saldo: 0 }]
   const person = patient.data?.data.patient
   const patientName = person?.displayName ?? ""
   const patientDocument = person?.docNumber ? documentText(person.docType, person.docNumber) : null
@@ -260,13 +277,14 @@ export function AccountTab({
   const refundCents = parseMoneyOrNull(refundAmount, orgUnit, locale)
 
   /** Ejecuta la acción si ya hay sede; si no, la pide una sola vez. */
-  const withBranch = (action: "cobrar" | "devolver" | "agregar") => {
+  const withBranch = (action: "cobrar" | "devolver" | "agregar" | "aplicar") => {
     setError(null)
     if (!activeBranch) {
       setAskBranch(action)
       return
     }
     setAskBranch(null)
+    if (action === "aplicar") applyMutation.mutate()
     if (action === "cobrar") setCobrarOpen(true)
     if (action === "agregar") setAdding({ description: "", amountText: "" })
     if (action === "devolver") {
@@ -277,11 +295,18 @@ export function AccountTab({
     }
   }
 
-  const collectButton = (className?: string) => (
-    <Button className={className} onClick={() => withBranch("cobrar")}>
-      {orgOwed > 0 ? `Cobrar ${money(orgOwed)}` : "Cobrar un adelanto"}
-    </Button>
-  )
+  // Lo que tiene a favor cubre lo que debe: la acción es aplicarlo, no cobrar.
+  const coveredByCredit = orgOwed > 0 && orgBalance === 0
+  const collectButton = (className?: string) =>
+    coveredByCredit ? (
+      <Button className={className} disabled={applyMutation.isPending} onClick={() => withBranch("aplicar")}>
+        {applyMutation.isPending ? "Aplicando…" : "Aplicar lo que tiene a favor"}
+      </Button>
+    ) : (
+      <Button className={className} onClick={() => withBranch("cobrar")}>
+        {orgBalance > 0 ? `Cobrar ${money(orgBalance)}` : "Cobrar un adelanto"}
+      </Button>
+    )
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
@@ -295,9 +320,9 @@ export function AccountTab({
               <dl className="grid grid-cols-3 gap-3">
                 {(
                   [
-                    ["Por cobrar", balance.porCobrar],
-                    ["Pagado", balance.pagado],
+                    ["Debe", balance.porCobrar],
                     ["A favor", balance.aFavor],
+                    ["Saldo", balance.saldo],
                   ] as const
                 ).map(([label, cents]) => (
                   <div key={label} className="min-w-0">
@@ -331,6 +356,7 @@ export function AccountTab({
                 sede.choose(id)
                 const action = askBranch
                 setAskBranch(null)
+                if (action === "aplicar") applyMutation.mutate()
                 if (action === "cobrar") setCobrarOpen(true)
                 if (action === "agregar") setAdding({ description: "", amountText: "" })
                 if (action === "devolver") {
@@ -350,8 +376,24 @@ export function AccountTab({
             <FieldDescription>El cobro entra a la caja de esa sede.</FieldDescription>
           </Field>
         ) : null}
+        {applied ? (
+          <p role="status" className="mt-3 text-sm">
+            {applied.remainingCents > 0
+              ? `Se aplicaron ${money(applied.appliedCents)} de lo que tenía a favor. Falta: ${money(applied.remainingCents)}.`
+              : `Se aplicaron ${money(applied.appliedCents)} de lo que tenía a favor. Ya no debe nada.`}
+          </p>
+        ) : null}
         {canWrite ? (
           <div className="mt-4 flex flex-wrap items-center gap-2">
+            {orgOwed > 0 && orgFavor > 0 && !coveredByCredit ? (
+              <Button
+                variant="outline"
+                disabled={applyMutation.isPending}
+                onClick={() => withBranch("aplicar")}
+              >
+                {applyMutation.isPending ? "Aplicando…" : "Aplicar lo que tiene a favor"}
+              </Button>
+            ) : null}
             {collectButton("hidden sm:inline-flex")}
             {orgFavor > 0 ? (
               <Button variant="outline" onClick={() => withBranch("devolver")}>
@@ -514,6 +556,7 @@ export function AccountTab({
             key={collect.ticket.id}
             ticket={collect.ticket}
             remainingCents={collect.remainingCents}
+            receipt={collect.receipt ?? null}
             patientName={patientName}
             branchName={branchName}
             locale={locale}

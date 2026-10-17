@@ -255,9 +255,10 @@ function AddressStep({
         </div>
       ) : null}
       <div className="flex flex-col gap-1 rounded-xl border px-3.5 py-3 text-sm">
-        <strong className="font-semibold">Después marca dos avisos</strong>
+        <strong className="font-semibold">Después marca tres avisos</strong>
         <span className="text-muted-foreground">«messages», para recibir lo que escriben.</span>
         <span className="text-muted-foreground">«message_template_status_update», para saber cuándo WhatsApp aprueba un mensaje.</span>
+        <span className="text-muted-foreground">«template_category_update», para saber si WhatsApp cuenta un aviso como promoción.</span>
       </div>
       <Note tone="waiting" icon live title="Esperando a Meta.">
         <span>Esta pantalla lo detecta sola cuando verifique la dirección. Puedes cerrarla y volver: seguirá en este paso.</span>

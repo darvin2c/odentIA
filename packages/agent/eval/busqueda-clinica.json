@@ -11,7 +11,7 @@
     { "nombre": "Endodoncia multirradicular (molar)", "especialidad": "endodoncia", "precio": 70000, "dice": "desde" },
     { "nombre": "Exodoncia simple", "especialidad": "cirugia", "precio": 12000, "dice": "exacto" },
     { "nombre": "Extracción de tercer molar (muela del juicio)", "especialidad": "cirugia", "precio": 35000, "dice": "desde" },
-    { "nombre": "Implante dental de titanio", "especialidad": "implantes", "precio": 300000, "dice": "evaluacion" },
+    { "nombre": "Implante dental de titanio", "especialidad": "implantologia", "precio": 300000, "dice": "evaluacion" },
     { "nombre": "Corona cerámica", "especialidad": "protesis", "precio": 90000, "dice": "evaluacion" },
     { "nombre": "Prótesis removible", "especialidad": "protesis", "precio": 120000, "dice": "evaluacion" },
     { "nombre": "Placa total (dentadura completa)", "especialidad": "protesis", "precio": 150000, "dice": "evaluacion" },
@@ -22,7 +22,7 @@
     { "nombre": "Carillas de resina", "especialidad": "estetica", "precio": 40000, "dice": "desde" },
     { "nombre": "Radiografía panorámica", "especialidad": "diagnostico", "precio": 7000, "dice": "exacto" },
     { "nombre": "Tratamiento de encías (curetaje)", "especialidad": "periodoncia", "precio": 25000, "dice": "desde" },
-    { "nombre": "Férula para bruxismo", "especialidad": "rehabilitacion", "precio": 45000, "dice": "exacto" },
+    { "nombre": "Férula para bruxismo", "especialidad": "disfuncion", "precio": 45000, "dice": "exacto" },
     { "nombre": "Consulta de urgencia por dolor", "especialidad": "general", "precio": 8000, "dice": "exacto" },
     { "nombre": "Pulpotomía en niños", "especialidad": "odontopediatria", "precio": 20000, "dice": "exacto" }
   ],

@@ -2,7 +2,7 @@
 // de la API. Norma: Ley 29571 (Código de Protección y Defensa del Consumidor) y su reglamento del Libro de
 // Reclamaciones (D.S. 011-2011-PCM, modificado por D.S. 006-2014-PCM y D.S. 101-2022-PCM).
 //
-// Es la única página de la web que llama a la API (excepción a ADR 0038): la hoja se guarda en el servidor
+// Es la única página de la web que llama a la API (excepción a ADR 0046): la hoja se guarda en el servidor
 // y su copia llega al correo del consumidor.
 
 /**

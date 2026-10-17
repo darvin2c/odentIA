@@ -132,15 +132,14 @@ export interface PortalDocument {
 export interface PortalAccount {
   /** Formato regional de la clínica; `null` si aún no lo configuró. */
   locale: string | null
+  /** Los mismos montos que Caja: debe, pagado, a favor y saldo (lo que debe menos lo que tiene a favor). */
   byCurrency: Array<{
     currency: string
     agreedCents: number
-    chargedCents: number
-    paidCents: number
-    appliedCents: number
-    refundedCents: number
-    outstandingCents: number
-    availableCreditCents: number
+    porCobrar: number
+    pagado: number
+    aFavor: number
+    saldo: number
   }>
   charges: Array<{
     id: string

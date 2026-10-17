@@ -1,4 +1,4 @@
-import { CONTACT_RELATIONSHIP_LABELS } from "@odentia/clinical"
+import { CONTACT_RELATIONSHIP_LABELS, type Kinship, KINSHIP_LABELS } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, Checkbox, Field, FieldLabel, Input } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -55,15 +55,27 @@ function useRefresh(person: PersonPage) {
 /** Relación y si recibe los avisos: lo mismo al vincular y al cambiar la relación. */
 function RelationFields({
   relationship,
+  kinship,
   detail,
   preferred,
+  emergency,
   onChange,
   preferredLabel,
 }: {
   relationship: Relationship
+  /** Parentesco con HL7 v3 RoleCode; vacío si no se sabe. */
+  kinship: string
   detail: string
   preferred: boolean
-  onChange: (next: { relationship?: Relationship; detail?: string; preferred?: boolean }) => void
+  /** Contacto de emergencia (decisión 25); sin él, la casilla no se muestra (a su cargo). */
+  emergency?: boolean
+  onChange: (next: {
+    relationship?: Relationship
+    kinship?: string
+    detail?: string
+    preferred?: boolean
+    emergency?: boolean
+  }) => void
   preferredLabel: string
 }) {
   return (
@@ -83,7 +95,22 @@ function RelationFields({
         </ChoiceSelect>
       </Field>
       <Field>
-        <FieldLabel htmlFor="link-detail">Detalle (opcional, p. ej. madre)</FieldLabel>
+        <FieldLabel htmlFor="link-kinship">Parentesco (opcional)</FieldLabel>
+        <ChoiceSelect
+          id="link-kinship"
+          value={kinship}
+          onChange={(event) => onChange({ kinship: event.target.value })}
+        >
+          <option value="">Sin indicar</option>
+          {Object.entries(KINSHIP_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </ChoiceSelect>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="link-detail">Detalle (opcional)</FieldLabel>
         <Input
           id="link-detail"
           value={detail}
@@ -98,6 +125,15 @@ function RelationFields({
         />
         {preferredLabel}
       </label>
+      {emergency !== undefined ? (
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={emergency}
+            onCheckedChange={(checked) => onChange({ emergency: checked === true })}
+          />
+          Contacto de emergencia
+        </label>
+      ) : null}
     </>
   )
 }
@@ -126,7 +162,9 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
   const [newPhone, setNewPhone] = useState<string | null>(null)
   const [relationship, setRelationship] = useState<Relationship>("family")
   const [relationDetail, setRelationDetail] = useState("")
+  const [kinship, setKinship] = useState("")
   const [preferred, setPreferred] = useState(false)
+  const [emergency, setEmergency] = useState(false)
   const [editing, setEditing] = useState<PatientContactLink | null>(null)
   const [unlinking, setUnlinking] = useState<{
     patientId: string
@@ -142,7 +180,9 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
     setNewPhone(null)
     setRelationship(linking === "charge" ? "guardian" : "family")
     setRelationDetail("")
+    setKinship("")
     setPreferred(false)
+    setEmergency(false)
   }
 
   const link = useMutation({
@@ -170,7 +210,10 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         body: JSON.stringify({
           relationship,
           ...(relationDetail.trim() ? { relationshipDetail: relationDetail.trim() } : {}),
+          kinship: kinship || null,
           isPreferred: preferred,
+          // Quien habla por ella puede ser además su contacto de emergencia, en el mismo paso.
+          ...(linking === "talker" ? { isEmergency: emergency } : {}),
         }),
       })
       return targetPatient
@@ -188,7 +231,9 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         body: JSON.stringify({
           relationship,
           ...(relationDetail.trim() ? { relationshipDetail: relationDetail.trim() } : {}),
+          kinship: kinship || null,
           isPreferred: preferred,
+          isEmergency: emergency,
         }),
       }),
     onSuccess: () => {
@@ -256,10 +301,13 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                     <span className="flex flex-wrap items-center gap-2">
                       <PersonLink contactId={row.contactId}>{row.displayName}</PersonLink>
                       {row.isPreferred ? <Badge>Recibe los avisos</Badge> : null}
+                      {row.isEmergency ? <Badge variant="outline">Contacto de emergencia ✓</Badge> : null}
                       {!row.isActive ? <Badge variant="outline">Archivada</Badge> : null}
                     </span>
                     <span className="text-sm text-muted-foreground">
-                      {row.relationshipDetail || CONTACT_RELATIONSHIP_LABELS[row.relationship]}
+                      {(row.kinship && KINSHIP_LABELS[row.kinship as Kinship]) ||
+                        row.relationshipDetail ||
+                        CONTACT_RELATIONSHIP_LABELS[row.relationship]}
                     </span>
                   </span>
                   {canWrite ? (
@@ -275,7 +323,9 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                               row.relationship === "self" ? "family" : row.relationship,
                             )
                             setRelationDetail(row.relationshipDetail ?? "")
+                            setKinship(row.kinship ?? "")
                             setPreferred(row.isPreferred)
+                            setEmergency(row.isEmergency)
                             setEditing(row)
                           },
                         },
@@ -355,7 +405,8 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                     {row.archived ? <Badge variant="outline">Archivada</Badge> : null}
                   </span>
                   <span className="text-sm text-muted-foreground">
-                    {row.relationshipDetail ||
+                    {(row.kinship && KINSHIP_LABELS[row.kinship as Kinship]) ||
+                      row.relationshipDetail ||
                       RELATIONSHIP_WORDS[row.relationship] ||
                       row.relationship}
                   </span>
@@ -516,8 +567,10 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
           )}
           <RelationFields
             relationship={relationship}
+            kinship={kinship}
             detail={relationDetail}
             preferred={preferred}
+            emergency={linking === "talker" ? emergency : undefined}
             preferredLabel={
               linking === "talker"
                 ? "Recibe los avisos de la paciente"
@@ -526,7 +579,9 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
             onChange={(next) => {
               if (next.relationship) setRelationship(next.relationship)
               if (next.detail !== undefined) setRelationDetail(next.detail)
+              if (next.kinship !== undefined) setKinship(next.kinship)
               if (next.preferred !== undefined) setPreferred(next.preferred)
+              if (next.emergency !== undefined) setEmergency(next.emergency)
             }}
           />
         </div>
@@ -548,13 +603,17 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
       >
         <RelationFields
           relationship={relationship}
+          kinship={kinship}
           detail={relationDetail}
           preferred={preferred}
+          emergency={emergency}
           preferredLabel="Recibe los avisos de la paciente"
           onChange={(next) => {
             if (next.relationship) setRelationship(next.relationship)
             if (next.detail !== undefined) setRelationDetail(next.detail)
+            if (next.kinship !== undefined) setKinship(next.kinship)
             if (next.preferred !== undefined) setPreferred(next.preferred)
+            if (next.emergency !== undefined) setEmergency(next.emergency)
           }}
         />
       </FormDrawer>

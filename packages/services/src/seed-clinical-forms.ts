@@ -23,7 +23,6 @@ import {
   publishFormTemplate,
   setConsentTemplateServices,
   setProfessionalSpecialties,
-  setServiceSpecialties,
   signConsentDocument,
   updateFormResponseDraft,
   updateSpecialty,
@@ -52,28 +51,15 @@ export async function seedClinicalForms(
     name: "Endodoncia",
     description: "Tratamiento de conducto y patología pulpar.",
   })
+  // La «Cirugía» de la biblioteca, renombrada por la clínica (una sola lista, ADR 0039).
   const cirugia = await upsertSpecialty(tx, orgId, ownerUserId, {
-    key: "cirugia-oral",
+    key: "cirugia",
     name: "Cirugía oral",
     description: "Exodoncias y cirugía bucal.",
   })
 
-  await setProfessionalSpecialties(tx, orgId, ownerUserId, ownerUserId, [
-    endodoncia.id,
-    cirugia.id,
-  ])
-
-  // Vincula la primera prestación del tarifario a endodoncia (si existe).
-  const firstService = await tx
-    .select({ id: serviceCatalog.id })
-    .from(serviceCatalog)
-    .where(eq(serviceCatalog.organizationId, orgId))
-    .limit(1)
-  if (firstService[0]) {
-    await setServiceSpecialties(tx, orgId, ownerUserId, firstService[0].id, [
-      endodoncia.id,
-    ])
-  }
+  // Quien crea la clínica atiende la cirugía; la endodoncia la adscribe seed-dev.
+  await setProfessionalSpecialties(tx, orgId, ownerUserId, ownerUserId, [cirugia.id])
 
   const evaluacionSchema: FormSchemaDef = {
     sections: [

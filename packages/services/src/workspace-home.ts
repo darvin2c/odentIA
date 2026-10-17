@@ -94,15 +94,27 @@ export interface WaitingUnsentBudget {
 }
 
 /**
- * El documento que la persona escribió en «Su enlace» ya es de otra ficha: no
- * se guardó y recepción revisa si son la misma persona (nunca se unen solas).
+ * Un documento escrito desde fuera ya es de otra persona y recepción revisa
+ * (nunca se unen solas):
+ * - `enlace`: el que escribió en «Su enlace» es de otra ficha; no se guardó.
+ * - `registro`: alguien se registró en línea con el documento de una persona
+ *   que ya estaba; no se guardó nada en ella ni se completó el registro.
+ * - `representante`: el registro de un menor nombró como representante a una
+ *   persona que ya estaba; el vínculo espera su «Confirmar».
  */
 export interface WaitingPossibleDuplicate {
   /** La tarea que lo recuerda. */
   id: string
-  patientId: string
+  source: "enlace" | "registro" | "representante"
+  /** La ficha que se revisa; en `registro`, la de quien tenía el documento si ya es paciente. */
+  patientId: string | null
+  /** `registro`: quien tenía el documento; `representante`: el representante nombrado. */
+  personId: string | null
+  /** El paciente (`enlace`, `representante`) o quien tenía el documento (`registro`). */
   patientName: string
-  /** De quién es el documento, en palabras. */
+  /** `representante`: su nombre. */
+  personName: string | null
+  /** Qué pasó y lo que escribió, en palabras. */
   detail: string
   createdAt: string
 }
@@ -122,8 +134,14 @@ export interface WaitingPortalReentry {
   createdAt: string
 }
 
-/** Una cita que sigue sin confirmar después del primer recordatorio del agente: hay que llamar. */
+/**
+ * Una cita que hay que confirmar llamando: sigue sin confirmar después del
+ * primer recordatorio del agente (`sin_confirmar`), o es de mañana y quien
+ * recibe sus mensajes no recibe recordatorios (`sin_recordatorios`, ADR 0040):
+ * «Lucía no recibe recordatorios: llámala para confirmar su cita de mañana 10:00».
+ */
 export interface WaitingUnconfirmed {
+  why: "sin_confirmar" | "sin_recordatorios"
   id: string
   patientId: string
   patientName: string
@@ -170,9 +188,22 @@ export interface WaitingConsentToPublish {
   requestedAt: string
 }
 
+/**
+ * Un aviso de servicio que WhatsApp pasó a promoción (ADR 0040): solo sale a
+ * quien aceptó novedades. Para quien administra los mensajes, con «Cambiar el
+ * texto». Sale del estado de la plantilla y se va sola cuando el texto nuevo se
+ * aprueba como servicio.
+ */
+export interface WaitingPromotion {
+  /** El mensaje (clave del catálogo o id del propio). */
+  messageId: string
+  title: string
+}
+
 export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
   | ({ kind: "consentToPublish" } & WaitingConsentToPublish)
+  | ({ kind: "promotion" } & WaitingPromotion)
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
@@ -191,6 +222,8 @@ export type WaitingRow =
 export interface WaitingParts {
   /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
   cases: WaitingCase[]
+  /** Todos los casos abiertos, también los que no llegaron en `cases` (el «y N más» los cuenta). */
+  casesTotal?: number
   /** Atenciones de días anteriores sin cerrar que lleva quien mira, de la más antigua a la más reciente. */
   staleEncounters?: WaitingStaleEncounter[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
@@ -214,6 +247,8 @@ export interface WaitingParts {
   unreached?: WaitingUnreached | null
   /** Consentimientos pedidos por una atención y sin publicar (solo para quien configura). */
   consentsToPublish?: WaitingConsentToPublish[]
+  /** Avisos que WhatsApp cuenta como promoción (solo para quien administra los mensajes). */
+  promotions?: WaitingPromotion[]
 }
 
 export function composeWaiting(parts: WaitingParts): WaitingRow[] {
@@ -256,7 +291,7 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   const others = parts.cases.filter((item) => item.priority !== "alta").sort((a, b) => rank(a.priority) - rank(b.priority))
   const othersShown = others.slice(0, WAITING_LIMITS.otherCases)
   for (const item of othersShown) rows.push({ kind: "case", ...item })
-  const casesLeft = urgent.length - urgentShown.length + others.length - othersShown.length
+  const casesLeft = Math.max(parts.casesTotal ?? parts.cases.length, parts.cases.length) - urgentShown.length - othersShown.length
   if (casesLeft > 0) rows.push({ kind: "more", of: "cases", count: casesLeft })
 
   if (parts.stillOpen && parts.stillOpen.total > 0) rows.push({ kind: "stillOpen", ...parts.stillOpen })
@@ -268,6 +303,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   // Lo que una atención no pudo hacer porque falta publicar su consentimiento.
   for (const item of (parts.consentsToPublish ?? []).slice(0, WAITING_LIMITS.otherCases))
     rows.push({ kind: "consentToPublish", ...item })
+
+  // Un aviso que WhatsApp pasó a promoción: hay que cambiarle el texto (ADR 0040).
+  for (const item of (parts.promotions ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "promotion", ...item })
 
   for (const item of parts.advice) rows.push({ kind: "advice", ...item })
   if (parts.budgets && parts.budgets.total > 0) rows.push({ kind: "budgets", ...parts.budgets })

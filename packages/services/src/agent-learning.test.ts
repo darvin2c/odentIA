@@ -16,6 +16,7 @@ import {
   formatLessonRules,
   getLearningOverview,
   getLesson,
+  LESSON_RULE_LIMIT,
   lessonImpact,
   lessonsForTurn,
   listReviewItems,
@@ -33,7 +34,7 @@ import { type IngestDeps, ingestInbound, sendOutbound } from "./conversations.js
 import { createKnowledgeEntry, getKnowledgeEntry, listActiveKnowledge, setKnowledgeStatus, updateKnowledgeEntry } from "./knowledge.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Aprender: lo que entra a revisión, la corrección, la lección que se aprueba y cómo se retira. */
 setupTestDb()
@@ -326,5 +327,37 @@ describe("guardar una prueba como caso", () => {
     expect(mine.filter((item) => item.question === question)).toEqual([expect.objectContaining({ expected: "Sí, los sábados de 9:00 a 13:00." })])
     expect((await run((tx) => listTestCases(tx, ORG))).some((item) => item.id === first.id)).toBe(false)
     await expect(run((tx) => saveTestCase(tx, OTHER, OWNER, { question: "  ", expected: "x" }), OTHER)).rejects.toThrow("La pregunta es obligatorio")
+  })
+})
+
+describe("las reglas aprendidas llegan todas (decisión 17 de la fase 4)", () => {
+  it("van todas hasta el tope; pasado el tope van las más recientes y se dice cuántas quedaron fuera", async () => {
+    const org = "org_reglas"
+    await insertOrg(ownerDb, org, "org-reglas")
+    const rule = (index: number) => ({
+      organizationId: org,
+      kind: "regla" as const,
+      scope: "recepcion",
+      title: `Regla ${index}`,
+      body: `Regla número ${index}.`,
+      status: "activa" as const,
+      proposedBy: "agent",
+      // La 0 es la más reciente.
+      approvedAt: new Date(Date.now() - index * 60_000),
+    })
+    // Antes eran 20: con 25 llegan todas.
+    await ownerDb.insert(agentLesson).values(Array.from({ length: 25 }, (_, i) => rule(i)))
+    const some = await withOrgContext(appDb, org, (tx) => lessonsForTurn(tx, org, "recepcion", "Hola"))
+    expect(some.rules).toHaveLength(25)
+    expect(some.rulesLeftOut).toBe(0)
+    expect(formatLessonRules(some.rules, some.rulesLeftOut)).not.toContain("no caben")
+    await ownerDb.insert(agentLesson).values(Array.from({ length: LESSON_RULE_LIMIT - 25 + 2 }, (_, i) => rule(25 + i)))
+    const over = await withOrgContext(appDb, org, (tx) => lessonsForTurn(tx, org, "recepcion", "Hola"))
+    expect(over.rules).toHaveLength(LESSON_RULE_LIMIT)
+    expect(over.rules[0]?.title).toBe("Regla 0")
+    expect(over.rulesLeftOut).toBe(2)
+    expect(formatLessonRules(over.rules, over.rulesLeftOut)).toContain("La clínica tiene 2 reglas más antiguas que no caben aquí")
+    // «Aprender» sabe el tope para decirlo.
+    expect((await withOrgContext(appDb, org, (tx) => getLearningOverview(tx, org))).ruleLimit).toBe(LESSON_RULE_LIMIT)
   })
 })

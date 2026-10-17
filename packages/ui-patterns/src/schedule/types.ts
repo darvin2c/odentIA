@@ -19,7 +19,7 @@ export type ScheduleState = ScheduleStatus | ScheduleStage
 
 export interface ScheduleEntry {
   id: string
-  /** Recurso dueño de la cita (profesional, sillón): la columna donde se pinta. */
+  /** Recurso dueño de la cita (profesional, unidad dental): la columna donde se pinta. */
   columnId: string
   /** Instant exacto, ISO 8601 con zona («2026-09-21T13:00:00.000Z»). */
   start: string
@@ -49,7 +49,7 @@ export type ScheduleTone = 0 | 1 | 2 | 3 | 4
 export interface ScheduleColumn {
   id: string
   label: string
-  /** Segunda línea: especialidad, sede, número de sillón. */
+  /** Segunda línea: especialidad, sede, número de unidad dental. */
   detail?: string
   /** Aviso del recurso para la fecha consultada, incluso con citas ocultas. */
   warning?: string

@@ -11,7 +11,7 @@ import { PhoneInput, type PhoneInputProps } from "./phone-input.js"
  *
  * El texto que se ve lo formatea `@maskito/phone` con los metadatos de
  * `libphonenumber-js` (el mismo origen que valida el número); el valor que
- * emite es E.164, el formato que guardan `contact.phone` y `patient.phone`.
+ * emite es E.164, el formato que guarda `contact.phone`, el teléfono de la persona.
  * La lectura bajo cada campo muestra ese valor: es el contrato del componente.
  *
  * **El prefijo internacional lo lleva el selector de país**, no el teclado: el

@@ -7,6 +7,7 @@ import {
   type TemplateStatus,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
+import { formatMoney } from "@odentia/clinical"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationRule } from "@odentia/db/schema/automation"
 import {
@@ -18,7 +19,7 @@ import {
   conversation,
   message,
 } from "@odentia/db/schema/crm"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm"
 import { adminLineOf, beforePhrase, hourPhrase, type LineTiming, lineOfJobKind } from "./admin-lines.js"
 import { lineDays, lineTiming } from "./automation.js"
@@ -51,6 +52,7 @@ import { clinicName, findClinicName, firstName } from "./automation-routing.js"
 import {
   connectionWithAdapter,
   findTemplateByName,
+  isPromotionFor,
   listChannelTemplates,
   requestConnectionTemplate,
   retireTemplates,
@@ -61,6 +63,9 @@ import {
 import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
+import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
+import { nextOpportuneFrom } from "./opportune-hours.js"
+import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
 import { personalLinkButtonUrl } from "./public-links.js"
 
 /**
@@ -261,7 +266,12 @@ function pendingText(def: MessageDef): MessageText | null {
  * dirección, que es la de la clínica con el token al final: sin dirección
  * pública configurada no se puede pedir.
  */
-function orderOf(def: MessageDef, text: MessageText, linkUrl: { url: string; example: string } | null): TemplateOrder {
+function orderOf(
+  def: MessageDef,
+  text: MessageText,
+  linkUrl: { url: string; example: string } | null,
+  examples: Record<MessageVariable, string>,
+): TemplateOrder {
   const { body, variables } = positionalBody(text.body)
   if (def.link && !linkUrl) {
     throw new ServiceError("NO_PUBLIC_URL", 409, "Falta la dirección pública de la clínica para el botón de su enlace")
@@ -270,7 +280,8 @@ function orderOf(def: MessageDef, text: MessageText, linkUrl: { url: string; exa
     name: text.templateName,
     category: def.category,
     body,
-    examples: variables.map((name) => MESSAGE_VARIABLES[name].example),
+    // Los ejemplos son los de la clínica: su nombre y su moneda (`exampleValues`).
+    examples: variables.map((name) => examples[name]),
     buttons: def.buttons.map((button) => button.title),
     ...(def.link && linkUrl ? { link: { title: def.link.title, ...linkUrl } } : {}),
     messageKey: def.catalog?.key ?? null,
@@ -581,6 +592,15 @@ async function exampleValues(tx: Db, orgId: string): Promise<Record<MessageVaria
     values.clinica = cleanVariable(clinic)
     values.lugar = cleanVariable(placePhrase(clinic, site?.name ?? "Centro"))
   }
+  // El importe del ejemplo va en la moneda de la clínica, nunca en la de un país supuesto.
+  const [profile] = await tx
+    .select({ currency: orgProfile.currency, locale: orgProfile.locale })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  if (profile?.currency) {
+    values.resumen_presupuesto = cleanVariable(`3 tratamientos por ${formatMoney(54000, profile.currency, profile.locale || "es")}`)
+  }
   return values
 }
 
@@ -687,6 +707,7 @@ export async function requestMissingTemplates(
       )
   const outcome: RequestOutcome = { requested: 0, failed: [] }
   const linkUrl = await personalLinkButtonUrl(tx, orgId)
+  const examples = await exampleValues(tx, orgId)
   for (const def of defs) {
     const texts = [currentText(def), pendingText(def)].filter((text): text is MessageText => !!text)
     for (const text of texts) {
@@ -702,7 +723,7 @@ export async function requestMissingTemplates(
             inner,
             orgId,
             connectionId,
-            orderOf(def, text, def.link ? linkUrl : null),
+            orderOf(def, text, def.link ? linkUrl : null, examples),
             secretsKey,
             deps,
           ),
@@ -841,6 +862,16 @@ export interface ClinicMessageItem {
   variables: { key: string; label: string; example: string; required: boolean }[]
   /** Tipo de mensaje según WhatsApp, en palabras. */
   category: string
+  /**
+   * WhatsApp lo cuenta como promoción aunque se pidió como aviso: solo sale a
+   * quien aceptó novedades (ADR 0040). La lista lo marca «Meta lo considera promoción».
+   */
+  promotion: boolean
+  /**
+   * Ya estaba en la cuenta y odentIA no sabe enviarla (con encabezado o con
+   * datos por nombre): la lista lo dice y no se ofrece. Nulo en los demás.
+   */
+  unsendable: string | null
   /** Qué pasa mientras no está aprobado; nulo si no hay nada que esperar. */
   meanwhile: string | null
   editable: boolean
@@ -1003,6 +1034,8 @@ function itemOf(
       required: item.required,
     })),
     category: CATEGORY_LABELS[category] ?? category,
+    promotion: current.status === "aprobada" && isPromotionFor({ category }, def.category),
+    unsendable: null,
     meanwhile: meanwhileOf(def, current, pending, context.waiting.get(def.id) ?? 0),
     editable: true,
     deletable: def.origin === "clinica",
@@ -1012,6 +1045,13 @@ function itemOf(
       (def.row.currentVersion !== 0 || def.row.pendingVersion !== null),
   }
 }
+
+/**
+ * Lo que dice la lista de una plantilla de la cuenta con encabezado o con datos
+ * por nombre: se ve, pero no se ofrece (ADR 0040). Programar el encabezado no
+ * vale la pena mientras ningún mensaje de odentIA lo use.
+ */
+export const UNSENDABLE_WORDS = "Ya estaba en tu cuenta · no se puede enviar desde odentIA"
 
 /** Plantillas que ya estaban en la cuenta: ni de odentIA ni creadas desde aquí. Las retiradas no se listan. */
 function accountTemplates(templates: TemplateItem[], known: Set<string>): TemplateItem[] {
@@ -1044,7 +1084,13 @@ function accountItem(template: TemplateItem): ClinicMessageItem {
     buttons: template.buttons.map((title) => ({ title, does: "La respuesta llega a la Bandeja." })),
     variables: [],
     category: CATEGORY_LABELS[template.category] ?? template.category,
-    meanwhile: status === "aprobada" ? null : "Mientras tanto no se ofrece en la Bandeja.",
+    promotion: false,
+    unsendable: template.unsupported ? UNSENDABLE_WORDS : null,
+    meanwhile: template.unsupported
+      ? null
+      : status === "aprobada"
+        ? null
+        : "Mientras tanto no se ofrece en la Bandeja.",
     // Se creó en la página de Meta: ahí se cambia y ahí se elimina.
     editable: false,
     deletable: false,
@@ -1264,7 +1310,7 @@ export async function saveMessageText(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null),
+    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
     deps.secretsKey,
     deps,
   )
@@ -1316,7 +1362,7 @@ export async function revertMessageText(
       tx,
       orgId,
       connectionId,
-      orderOf(def, original, def.link ? await personalLinkButtonUrl(tx, orgId) : null),
+      orderOf(def, original, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
       deps.secretsKey,
       deps,
     )
@@ -1408,7 +1454,7 @@ export async function createClinicMessage(
     tx,
     orgId,
     connectionId,
-    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null),
+    orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
     deps.secretsKey,
     deps,
   )
@@ -1502,6 +1548,8 @@ export interface ApprovedMessages {
 interface Sendable extends ApprovedMessageOption {
   name: string
   language: string
+  /** La categoría con la que se pidió: la regla de envío la compara con la de WhatsApp. */
+  category: TemplateCategory
   /** Datos ya resueltos; nulo si los escribe quien envía. */
   params: string[] | null
   variables: number
@@ -1549,6 +1597,7 @@ async function sendables(
       lastInboundAt: conversation.lastInboundAt,
       connectionId: channelConnection.id,
       provider: channelConnection.provider,
+      contactId: conversation.contactId,
       givenNames: contact.givenNames,
       displayName: contact.displayName,
     })
@@ -1599,6 +1648,8 @@ async function sendables(
     clinica: cleanVariable(await clinicName(tx, orgId)),
   }
   const wrote = row.lastInboundAt !== null
+  // La categoría manda (ADR 0040): lo que WhatsApp cuenta como promoción solo a quien aceptó novedades.
+  const promotions = await acceptsPromotions(tx, orgId, row.contactId)
   const options: Sendable[] = []
   for (const def of defs) {
     // Los que envía el agente piden los datos de una cita, un presupuesto o una oportunidad: no se envían a mano.
@@ -1607,7 +1658,9 @@ async function sendables(
     // «Retomar» continúa una consulta: solo donde la persona ya escribió.
     if (def.origin === "bandeja" && !wrote) continue
     const text = currentText(def)
-    if (templates.get(text.templateName)?.status !== "aprobada") continue
+    const template = templates.get(text.templateName)
+    if (template?.status !== "aprobada") continue
+    if (isPromotionFor(template, def.category) && !promotions) continue
     const { body, variables } = positionalBody(text.body)
     options.push({
       id: def.id,
@@ -1617,6 +1670,7 @@ async function sendables(
       fields: [],
       name: text.templateName,
       language: AUTOMATION_MESSAGE_LANGUAGE,
+      category: def.category,
       params: variables.map((name) => (name === "persona" ? values.persona : values.clinica)),
       variables: variables.length,
       body,
@@ -1624,10 +1678,13 @@ async function sendables(
     })
   }
   for (const template of accountTemplates(all, known)) {
-    if (template.status !== "aprobada") continue
+    // Con encabezado o con datos por nombre odentIA no la sabe enviar: no se ofrece.
+    if (template.status !== "aprobada" || template.unsupported) continue
     options.push({
       id: template.id,
       title: template.name,
+      // Ya estaba en la cuenta: vale la categoría que le dio WhatsApp.
+      category: template.category === "marketing" || template.category === "authentication" ? template.category : "utility",
       previewParts: positionalPreview(template.body),
       buttons: template.buttons,
       fields: Array.from({ length: template.variables }, (_, index) => ({
@@ -1757,6 +1814,7 @@ export async function sendApprovedMessage(
     name: option.name,
     language: option.language,
     params,
+    category: option.category,
     // Un botón de respuesta sigue la conversación: no lo resuelve el sistema.
     ...(option.reply.length
       ? {
@@ -1771,4 +1829,114 @@ export async function sendApprovedMessage(
       (_, position: string) => params[Number(position) - 1] ?? "",
     ),
   })
+}
+
+// ------------------------------------------- «Retomar» lo envía el sistema ---
+
+export type ResumeOutcome =
+  | { sent: true; messageId: string }
+  /** `waiting`: lo que dice «Te espera» del caso, con qué hacer. */
+  | { sent: false; waiting: string }
+
+/**
+ * El agente tiene que escribir fuera de las 24 horas (un caso que el equipo
+ * devolvió tarde): el sistema envía «Retomar la conversación» con el nombre de
+ * la persona y el de la clínica, y el turno termina (ADR 0040). El agente
+ * nunca elige una plantilla. Pasa por la misma regla de la Bandeja
+ * (`sendables`): donde la persona ya escribió, aprobada, sin otro mensaje
+ * aprobado sin responder y con su categoría. Si no se puede, no se envía nada
+ * y devuelve lo que dice «Te espera».
+ */
+export async function resumeConversationBySystem(
+  tx: Db,
+  orgId: string,
+  secretsKey: Buffer,
+  conversationId: string,
+  now: Date = new Date(),
+): Promise<ResumeOutcome> {
+  await tx
+    .select({ id: conversation.id })
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .for("update")
+  const [person] = await tx
+    .select({ contactId: contact.id, givenNames: contact.givenNames, displayName: contact.displayName })
+    .from(conversation)
+    .innerJoin(contact, eq(conversation.contactId, contact.id))
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!person) throw notFound("Conversación")
+  const name = firstName(person)
+  // «No quiero ningún mensaje de la clínica» también frena retomar.
+  if (!(await mayWriteFirst(tx, orgId, person.contactId, "avisos"))) {
+    return { sent: false, waiting: `${name} pidió no recibir ningún mensaje de la clínica: llámala si hace falta.` }
+  }
+  // Lo inicia el agente: sale dentro del «Horario para escribir» (ADR 0042).
+  const schedule = await writingScheduleOf(tx, orgId)
+  if (!isWritingTime(now, schedule)) {
+    const opens = nextOpportuneFrom(now, schedule)
+    const locale = (await findOrgLocale(tx, orgId)).locale
+    const when = opens
+      ? `${new Intl.DateTimeFormat(locale, { timeZone: schedule.timeZone, weekday: "long" }).format(opens)} a las ${new Intl.DateTimeFormat(locale, { timeZone: schedule.timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(opens)}`
+      : null
+    return {
+      sent: false,
+      waiting: `Es fuera del horario para escribir${when ? `: el agente puede escribirle a ${name} desde el ${when}` : ""}. Llámala si es urgente.`,
+    }
+  }
+  const { options, why } = await sendables(tx, orgId, conversationId, now)
+  const option = options.find((item) => item.id === RESUME_MESSAGE_KEY)
+  if (!option) {
+    const { defs } = await loadMessages(tx, orgId)
+    const resume = defs.find((def) => def.id === RESUME_MESSAGE_KEY)
+    const [connection] = await tx
+      .select({ id: conversation.channelConnectionId })
+      .from(conversation)
+      .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    const template =
+      resume && connection ? await findTemplateByName(tx, orgId, connection.id, currentText(resume).templateName) : null
+    const approved = template?.status === "aprobada"
+    return {
+      sent: false,
+      waiting: approved
+        ? (why ?? `WhatsApp no deja escribirle a ${name} ahora. Llámala si es urgente.`)
+        : `WhatsApp no deja escribirle a ${name} hasta que Meta apruebe "Retomar la conversación". Llámala o espera la aprobación.`,
+    }
+  }
+  const params = option.params ?? []
+  const sent = await sendTemplateOutbound(tx, orgId, secretsKey, {
+    conversationId,
+    senderKind: "agent",
+    name: option.name,
+    language: option.language,
+    params,
+    category: option.category,
+    ...(option.reply.length
+      ? { buttons: option.reply.map((button) => ({ id: replyId(button.action, randomUUID()), title: button.title })) }
+      : {}),
+    preview: option.body.replace(/\{\{(\d+)\}\}/g, (_, position: string) => params[Number(position) - 1] ?? ""),
+  })
+  return { sent: true, messageId: sent.id }
+}
+
+// --------------------------------------- «Meta lo considera promoción» ---
+
+/**
+ * Los mensajes de servicio que WhatsApp pasó a promoción en la conexión por la
+ * que sale lo automático (ADR 0040): solo salen a quien aceptó novedades. Es
+ * la fila de «Te espera» de quien administra los mensajes; sale del estado y
+ * se va sola cuando el texto vigente vuelve a ser de servicio.
+ */
+export async function listRecategorizedMessages(tx: Db, orgId: string): Promise<Array<{ messageId: string; title: string }>> {
+  const [primary] = await activeWhatsApps(tx, orgId)
+  if (!primary) return []
+  const { defs } = await loadMessages(tx, orgId)
+  const templates = await templatesOf(tx, orgId, primary)
+  return defs
+    .filter((def) => {
+      const template = templates.get(currentText(def).templateName)
+      return template?.status === "aprobada" && isPromotionFor(template, def.category)
+    })
+    .map((def) => ({ messageId: def.id, title: def.title }))
 }

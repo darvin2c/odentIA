@@ -1,4 +1,5 @@
-import { describeProviderProblem, extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { extractDictation, isProviderConfigError, meterAiUse, type ModelChecker, type PlatformLlm } from "@odentia/agent"
+import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
@@ -7,6 +8,8 @@ import {
   AGENT_ROLES,
   getAgentConfig,
   getAgentOverview,
+  getWritingHours,
+  setWritingHours,
   operationFillsOf,
   previewDictationSuggestions,
   upsertAgentConfig,
@@ -16,6 +19,7 @@ import {
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
+import { checkOrgModel, modelProblemResponse, orgModelCheck } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -25,7 +29,6 @@ const putInput = z.object({
   llm: z.enum(AGENT_LLM_IDS).optional(),
   dailyRunLimit: z.number().int().min(1).max(100_000).optional(),
   decisionProvider: z.enum(["none", "baseline", "jev", "openai_decisions"]).optional(),
-  systemPrompt: z.string().max(8000).optional(),
   handoffKeywords: z.array(z.string().max(60)).max(30).optional(),
   maxTurns: z.number().int().min(1).max(50).optional(),
   replyCheckEnabled: z.boolean().optional(),
@@ -45,8 +48,19 @@ const putInput = z.object({
   closeAfterHours: z.number().int().min(6).max(23).optional(),
 })
 
+/** Por día (0 = domingo), sus tramos en minutos locales; la forma y los cruces los valida el servicio. */
+const writingHoursInput = z.object({
+  week: z
+    .array(z.array(z.tuple([z.number().int().min(0).max(1440), z.number().int().min(0).max(1440)])).max(4))
+    .length(7),
+})
+
 export interface AgentRouteDeps extends CrmDeps {
   llm: PlatformLlm
+  /** Rol owner: el caso «Modelo sin responder» en Soporte de odentIA. */
+  ownerDb?: Db
+  /** Sustituye la comprobación «El modelo responde» (pruebas). */
+  modelChecker?: ModelChecker
 }
 
 export function createAgentRoute(deps: AgentRouteDeps) {
@@ -65,9 +79,47 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
     const parsed = putInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    // Encender exige un modelo que responda, aunque se llame sin el botón.
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => upsertAgentConfig(tx, orgId, parsed.data, { actorUserId: userId })),
+      withOrgContext(deps.db, orgId, (tx) =>
+        upsertAgentConfig(tx, orgId, parsed.data, { actorUserId: userId, modelCheck: orgModelCheck(deps, orgId) }),
+      ),
     )
+  })
+
+  /**
+   * «El modelo responde»: una llamada mínima al modelo elegido (y al otro si
+   * no responde), guardada 10 minutos. `fresh=1` vuelve a comprobar. Nunca
+   * entrega el motivo técnico: ese va a Soporte de odentIA.
+   */
+  /**
+   * «Horario para escribir» (decisión 18 v3): cuándo odentIA escribe por su
+   * cuenta. Lo ve quien supervisa el agente y lo cambia quien lo administra.
+   */
+  app.get("/writing-hours", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => ({ week: await getWritingHours(tx, orgId) })))
+  })
+
+  app.put("/writing-hours", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
+    const parsed = writingHoursInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({ week: await setWritingHours(tx, orgId, userId, parsed.data.week) })),
+    )
+  })
+
+  app.get("/model", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    const fresh = c.req.query("fresh") === "1"
+    return runService(c, 200, async () => {
+      const { llm } = await withOrgContext(deps.db, orgId, (tx) => getAgentConfig(tx, orgId))
+      return checkOrgModel(deps, orgId, llm, { fresh })
+    })
   })
 
   /**
@@ -92,7 +144,9 @@ export function createAgentRoute(deps: AgentRouteDeps) {
   app.get("/overview", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAgentOverview(tx, orgId)))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getAgentOverview(tx, orgId, { modelCheck: orgModelCheck(deps, orgId) })),
+    )
   })
 
   /**
@@ -120,10 +174,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
         }
       })
     } catch (error) {
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El asistente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
       throw error
     }
   })

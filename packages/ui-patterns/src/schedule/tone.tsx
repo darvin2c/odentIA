@@ -33,10 +33,16 @@ export function scheduleToneClass(tone: ScheduleTone = 0): string {
 
 const TITLE = /^(dra?|lic|sra?|srta)\.?$/i
 
-/** «Dra. Ana Torres» → «AT»; «Sillón 1» → «S1». */
+/**
+ * «Dra. Ana Torres» → «AT»; «Unidad dental 1» → «U1»: si el nombre acaba en
+ * número, la inicial va con ese número para distinguir la unidad dental 1 de la 2.
+ */
 export function initialsOf(label: string): string {
   const words = label.trim().split(/\s+/).filter(Boolean)
   const named = words.filter((word) => !TITLE.test(word))
+  const last = named.at(-1)
+  if (named.length > 1 && last !== undefined && /^\d+$/.test(last))
+    return `${named[0]!.charAt(0)}${last}`.toLocaleUpperCase("es")
   return (named.length > 0 ? named : words)
     .slice(0, 2)
     .map((word) => word.charAt(0))

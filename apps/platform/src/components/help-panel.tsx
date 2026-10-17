@@ -3,7 +3,7 @@ import { DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { ArrowRight, CircleHelp } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
 import { mutationErrorMessage } from "../lib/query-error"
@@ -58,6 +58,9 @@ interface DirectMessage {
   text: string
   sent: boolean
 }
+
+/** Lo que se dice al enviar: dónde llega la respuesta y que, si no la ve, le escribimos. */
+const SENT = 'Enviado. Te respondemos aquí, en "Tus casos con soporte". Si no lo ves, te avisamos por correo.'
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary underline underline-offset-4 sm:min-h-8"
 const ANSWER = "flex flex-col gap-2 rounded-2xl rounded-bl-md border border-primary/20 bg-primary-soft px-3.5 py-3 text-sm text-primary-soft-foreground"
@@ -153,7 +156,11 @@ function WhatIsSent({
 export function HelpButton() {
   const queryClient = useQueryClient()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const searchStr = useRouterState({ select: (state) => state.location.searchStr })
   const [open, setOpen] = useState(false)
+  // El correo «Soporte de odentIA respondió tu caso» abre aquí: `?ayuda=casos&caso=<id>`.
+  const [linkedCase, setLinkedCase] = useState<string | null>(null)
+  const handledLink = useRef<string | null>(null)
   const [draft, setDraft] = useState("")
   const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [direct, setDirect] = useState<DirectMessage | null>(null)
@@ -205,6 +212,13 @@ export function HelpButton() {
       void queryClient.invalidateQueries({ queryKey: ["support-cases"] })
     },
   })
+  useEffect(() => {
+    const params = new URLSearchParams(searchStr)
+    if (params.get("ayuda") !== "casos" || handledLink.current === searchStr) return
+    handledLink.current = searchStr
+    setLinkedCase(params.get("caso"))
+    setOpen(true)
+  }, [searchStr])
   // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de pantalla, un mensaje a medio escribir diría otra pantalla de la que se adjunta.
   useEffect(() => {
     setDirect(null)
@@ -330,7 +344,7 @@ export function HelpButton() {
                         </div>
                         {exchange.sent === "enviada" ? (
                           <p role="status" className="text-sm font-semibold">
-                            Se abrió tu caso con soporte. Cuando respondan, lo verás en «Tus casos con soporte», aquí mismo.
+                            {SENT}
                           </p>
                         ) : exchange.sent === "no" ? null : (
                           <WhatIsSent
@@ -377,7 +391,7 @@ export function HelpButton() {
               </ol>
             )}
 
-            <SupportCasesSection />
+            <SupportCasesSection initialCaseId={linkedCase} />
             {(screen.data?.suggestions ?? []).length > 0 ? (
               <section aria-label="En esta pantalla suelen preguntar" className="flex flex-col gap-1.5 border-t pt-3">
                 <h3 className="text-[13px] font-bold text-muted-foreground">En esta pantalla suelen preguntar</h3>
@@ -441,7 +455,7 @@ export function HelpButton() {
 
               {direct?.sent ? (
                 <p role="status" className="text-sm font-semibold">
-                  Se abrió tu caso con soporte. Cuando respondan, lo verás en «Tus casos con soporte», aquí mismo.
+                  {SENT}
                 </p>
               ) : direct ? (
                 <section aria-label={DIRECT[direct.kind].title} className="flex flex-col gap-2">

@@ -12,7 +12,7 @@ import {
 } from "../../components/integrations/integration-list"
 import { MailPanel } from "../../components/integrations/mail-panel"
 import { SettingsNoAccess } from "../../components/settings/no-access"
-import type { AgentOverview } from "../../lib/agent"
+import type { AgentModelStatus } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { type AgentConfig, type ConnectionItem, usePermission } from "../../lib/crm"
 import {
@@ -113,11 +113,13 @@ function IntegrationsPage() {
     enabled: canRead && canSeeAgent,
     retry: 1,
   })
-  const overviewQuery = useQuery({
-    queryKey: ["agent-overview"],
-    queryFn: () => apiFetch<{ data: AgentOverview }>("/api/agent/overview"),
+  // «Responde» o «No responde»: la misma comprobación que el encendido (10 minutos en el servidor).
+  const modelQuery = useQuery({
+    queryKey: ["agent-model"],
+    queryFn: () => apiFetch<{ data: AgentModelStatus }>("/api/agent/model"),
     enabled: canRead && canSeeAgent,
     retry: 1,
+    staleTime: 60_000,
   })
 
   const connectMail = useMutation({
@@ -138,8 +140,8 @@ function IntegrationsPage() {
   const channels = connections ? channelRows(connections, since) : null
   const webchats = webchatQuery.data ? webchatRows(webchatQuery.data.data, lastInboundOf, since) : null
   const mailboxes = mailQuery.data ? mailRows(mailQuery.data.data, lastInboundOf, since) : null
-  const model =
-    configQuery.data && overviewQuery.data ? modelRow(configQuery.data.data, overviewQuery.data.data.provider, since) : null
+  // Mientras se comprueba, la fila lo dice; la página no espera a la llamada al modelo.
+  const model = configQuery.data ? modelRow(configQuery.data.data, modelQuery.data?.data) : null
 
   const panelChannelRow =
     panel?.kind === "channel"
@@ -173,11 +175,11 @@ function IntegrationsPage() {
     connectionsQuery,
     webchatQuery,
     ...(canSeeMail ? [mailQuery] : []),
-    ...(canSeeAgent ? [configQuery, overviewQuery] : []),
+    ...(canSeeAgent ? [configQuery, modelQuery] : []),
   ]
   const failed = tried.filter(neverLoaded)
-  const loading = tried.some((query) => query.isPending)
-  const modelFailed = neverLoaded(configQuery) || neverLoaded(overviewQuery)
+  const loading = tried.some((query) => query !== modelQuery && query.isPending)
+  const modelFailed = neverLoaded(configQuery) || neverLoaded(modelQuery)
   // «Cambiar» solo se ofrece a quien puede abrir esa pantalla.
   const changeModel: IntegrationAction | null = canChangeModel
     ? { label: "Cambiar", emphasis: "secondary", to: "/settings/integrations/model" }

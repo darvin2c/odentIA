@@ -40,7 +40,7 @@ let place: { branchId: string; chairId: string } | null = null
 async function agendaPlace(): Promise<{ branchId: string; chairId: string }> {
   if (place) return place
   const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: "org_a", branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   place = { branchId: site!.id, chairId: chair!.id }
   return place
 }
@@ -117,7 +117,7 @@ it("cancelar la evaluación la devuelve sola a «Interesado» si no le queda otr
   const contactId = await ownContact(f.patient.id)
   const { branchId, chairId } = await agendaPlace()
   const opp = await f.run((tx) => createOpportunity(tx, "org_a", { contactId, title: "Evaluación", serviceId: f.service.id }))
-  // Horas que no usa otra prueba del mismo sillón.
+  // Horas que no usa otra prueba de la misma unidad dental.
   const at = (days: number) => {
     const date = new Date(Date.now() + days * DAY)
     date.setUTCHours(3, 0, 0, 0)

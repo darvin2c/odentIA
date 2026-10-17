@@ -37,6 +37,10 @@ export function KnowledgeStateBadge({ entry }: { entry: KnowledgeEntry }) {
  */
 export function KnowledgeAnswers({
   entries,
+  total,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
   isPending,
   error,
   onRetry,
@@ -49,6 +53,12 @@ export function KnowledgeAnswers({
   onStartBasics,
 }: {
   entries: KnowledgeEntry[]
+  /** Todas las que hay (con la búsqueda), no solo las cargadas. */
+  total?: number
+  /** Hay más páginas en el servidor. */
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
   isPending: boolean
   error: unknown
   onRetry: () => void
@@ -98,7 +108,7 @@ export function KnowledgeAnswers({
     <section aria-labelledby="respuestas" className="elevated flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
       <div className="flex flex-wrap items-center gap-2.5 px-4 pt-4 pb-3 sm:px-5">
         <h2 id="respuestas" className="min-w-0 flex-1 basis-48 font-heading text-base font-semibold">
-          Respuestas oficiales{entries.length > 0 ? ` · ${entries.length}` : ""}
+          Respuestas oficiales{(total ?? entries.length) > 0 ? ` · ${total ?? entries.length}` : ""}
         </h2>
         {entries.length > 0 ? (
           <>
@@ -222,6 +232,13 @@ export function KnowledgeAnswers({
             onClick={() => setShowAll((value) => !value)}
           >
             {showAll ? "Ver menos" : `Ver las ${visible.length}`}
+          </Button>
+        </div>
+      ) : null}
+      {hasMore && onLoadMore && (showAll || hasCriteria) ? (
+        <div className="border-t px-4 py-2 sm:px-5">
+          <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={loadingMore} onClick={onLoadMore}>
+            {loadingMore ? "Cargando…" : `Cargar más (${entries.length} de ${total ?? entries.length})`}
           </Button>
         </div>
       ) : null}

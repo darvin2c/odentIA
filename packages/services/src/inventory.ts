@@ -37,6 +37,7 @@ import {
 } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
 import { createWorkspaceNotification, settleWorkspaceNotifications } from "./workspace.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /* ---------------- validaciones ---------------- */
 
@@ -147,8 +148,9 @@ async function requireBranch(tx: Db, orgId: string, id: string) {
 /** Paciente del tenant: el consumo clínico siempre queda vinculado y validado. */
 async function requireTenantPatient(tx: Db, orgId: string, id: string) {
   const [row] = await tx
-    .select({ id: patient.id, displayName: patient.displayName })
+    .select({ id: patient.id, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, id)))
     .limit(1)
   if (!row) throw notFound("Paciente")
@@ -1163,7 +1165,7 @@ export async function listMovements(
       actorUserId: stockMovement.actorUserId,
       purchaseOrderId: stockMovement.purchaseOrderId,
       patientId: stockMovement.patientId,
-      patientName: patient.displayName,
+      patientName: patientPerson.displayName,
       productId: stockMovement.productId,
       productSku: product.sku,
       productName: product.name,
@@ -1192,6 +1194,7 @@ export async function listMovements(
       patient,
       and(eq(patient.organizationId, orgId), eq(patient.id, stockMovement.patientId)),
     )
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(...conditions))
     .orderBy(desc(stockMovement.createdAt))
     .limit(limit)

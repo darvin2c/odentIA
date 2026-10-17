@@ -152,7 +152,8 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     wait: () => "Dos días antes",
     actor: "agente",
     agent: {
-      purpose: "recordatorio",
+      // «Controles y seguimiento» (ADR 0040): se apaga aparte de los recordatorios de la cita.
+      purpose: "seguimiento",
       does: "le avisa para agendarlo",
       would: "le avisaría para agendarlo",
       step: "Le avisa",
@@ -177,7 +178,8 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     wait: (n) => `Espera ${days(n, 2)}`,
     actor: "agente",
     agent: {
-      purpose: "seguimiento",
+      // WhatsApp lo cuenta como promoción: solo a quien aceptó novedades (ADR 0040).
+      purpose: "novedades",
       does: "le escribe para retomarlo",
       would: "le escribiría para retomarlo",
       step: "Le escribe",
@@ -202,7 +204,8 @@ export const ADMIN_LINES: readonly AdminLine[] = [
     wait: () => null,
     actor: "agente",
     agent: {
-      purpose: "seguimiento",
+      // WhatsApp lo cuenta como promoción: solo a quien aceptó novedades (ADR 0040).
+      purpose: "novedades",
       does: "le escribe para retomar la conversación y da la tarea por hecha",
       would: "le escribiría para retomar la conversación y daría la tarea por hecha",
       step: "Le escribe",

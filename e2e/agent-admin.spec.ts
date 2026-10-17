@@ -323,7 +323,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await call(page, "PUT", "/api/agent/admin/settings", org.slug, { enabled: true })
   await call(page, "POST", "/api/channels/connections", org.slug, {
     channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA E2E",
-    config: { phoneNumberId: "E2E-PNID", wabaId: "E2E-WABA", accessToken: "e2e", appSecret: "e2e-secret", templates: [{ name: "odentia_recordatorio_cita_v1", language: "es" }] },
+    config: { phoneNumberId: "E2E-PNID", wabaId: "E2E-WABA", accessToken: "e2e", appSecret: "e2e-secret", templates: [{ name: "odentia_recordatorio_cita_v2", language: "es" }] },
   }, 201)
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
     submissionId: crypto.randomUUID(),
@@ -339,7 +339,7 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await expect(approved.getByRole("listitem")).toHaveCount(13)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
   await expect(approved).toContainText("1 aprobado · 12 en revisión")
-  await expect(approved).not.toContainText("odentia_recordatorio_cita_v1")
+  await expect(approved).not.toContainText("odentia_recordatorio_cita_v2")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("canales-mensajes-aprobados", { body: await approved.screenshot(), contentType: "image/png" })
@@ -357,23 +357,25 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await expect(page.getByText("Registro de pacientes guardado", { exact: true })).toBeVisible()
   await expect.poll(config).toMatchObject({ askMessages: false })
 
-  // --- Ficha: lo de su atención es servicio; novedades y promociones pregunta antes cómo lo dijo ---
+  // --- Ficha: los tres interruptores de «Tus mensajes»; cada cambio pregunta antes cómo lo dijo (ADR 0040) ---
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}?tab=filiacion`))
   const consent = page.getByRole("region", { name: "Datos y consentimiento" })
   await expect(consent).toContainText("Mensajes de la clínica")
-  await expect(consent).toContainText("Atención (citas, controles, presupuestos)")
-  await expect(consent).toContainText("Parte del servicio: no pide permiso.")
-  await expect(consent.getByText("No se le ha preguntado.")).toHaveCount(1)
+  await expect(consent).toContainText("Avisos de sus citas y papeles")
+  await expect(consent.getByRole("switch", { name: "Recordatorios de sus citas" })).toBeChecked()
+  await expect(consent.getByRole("switch", { name: "Controles y seguimiento" })).toBeChecked()
+  await expect(consent.getByText("Apagado: aún no lo aceptó")).toHaveCount(1)
   const general = consent.getByRole("switch", { name: "Novedades y promociones" })
+  await expect(general).not.toBeChecked()
   await general.click()
-  await expect(consent).toContainText("¿Cómo lo aceptó?")
+  await expect(consent).toContainText("¿Cómo lo pidió?")
   const contacts = await call<{ contacts: Array<{ contactId: string }> }>(page, "GET", `/api/patients/${patient.id}`, org.slug)
   const permissions = () => call<Array<{ purpose: string; granted: boolean | null; source: string | null }>>(page, "GET", `/api/agent/admin/people/${contacts.contacts[0]!.contactId}/permissions`, org.slug)
   // Hasta confirmarlo no se guarda nada.
   expect((await permissions()).find((row) => row.purpose === "novedades")).toMatchObject({ granted: null })
   await consent.getByRole("radio", { name: "Por teléfono" }).click()
   await consent.getByRole("button", { name: "Guardar", exact: true }).click()
-  await expect(consent).toContainText("Sí · aceptó por teléfono")
+  await expect(consent).toContainText("Encendido · lo dijo por teléfono")
   await expect(general).toBeChecked()
   expect((await permissions()).find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "telefono" })
   await info.attach("ficha-mensajes-de-la-clinica", { body: await consent.screenshot(), contentType: "image/png" })

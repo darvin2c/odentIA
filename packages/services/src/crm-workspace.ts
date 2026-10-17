@@ -24,6 +24,7 @@ import { agentAttendingSql, handoffOpenExistsSql, proposalPendingExistsSql } fro
 import { listOpportunities, type OpportunityListItem } from "./opportunities.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import type { TaskItem } from "./tasks.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /* ------------------------------------------------------------------ */
 /* Superficie operativa del CRM (paso P1): contexto + actividad +      */
@@ -94,7 +95,7 @@ export interface CrmContactWorkspace {
    * `seguimiento` son parte del servicio: solo cuenta si se dio de baja (false);
    * `novedades` es el único que pide su permiso (ADR 0030).
    */
-  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades: boolean | null }
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades: boolean | null; avisos: boolean | null }
 }
 
 /**
@@ -106,7 +107,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
     .select({
       id: appointment.id,
       patientId: appointment.patientId,
-      patientName: patientTable.displayName,
+      patientName: patientPerson.displayName,
       startsAt: appointment.startsAt,
       status: appointment.status,
       branchName: branch.name,
@@ -125,6 +126,7 @@ async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Prom
       ),
     )
     .innerJoin(patientTable, and(eq(patientTable.id, appointment.patientId), eq(patientTable.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .innerJoin(branch, and(eq(branch.id, appointment.branchId), eq(branch.organizationId, orgId)))
     .leftJoin(orgProfile, eq(orgProfile.organizationId, appointment.organizationId))
     .innerJoin(user, eq(user.id, appointment.dentistUserId))
@@ -972,7 +974,13 @@ export async function getContactWorkspace(
     agent,
     activity,
     nextAppointment,
-    messages: { recordatorio: granted("recordatorio"), seguimiento: granted("seguimiento"), novedades: granted("novedades") },
+    messages: {
+      recordatorio: granted("recordatorio"),
+      seguimiento: granted("seguimiento"),
+      novedades: granted("novedades"),
+      // `false`: pidió no recibir ningún mensaje de la clínica (ADR 0040).
+      avisos: granted("avisos"),
+    },
   }
 }
 

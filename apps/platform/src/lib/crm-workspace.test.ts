@@ -10,6 +10,7 @@ describe("«Contexto» dice lo que la persona aceptó y su próxima cita", () =>
       "Novedades y promociones: aún no se le preguntó · pidió no recibir recordatorios",
     )
     expect(messagePermissionsSaid({ recordatorio: null, seguimiento: null, novedades: null })).toBe("Novedades y promociones: aún no se le preguntó")
+    expect(messagePermissionsSaid({ recordatorio: false, seguimiento: false, novedades: false, avisos: false })).toBe("No quiere ningún mensaje de la clínica")
   })
 
   it("la próxima cita va con la hora de la sede y nombra al paciente si no es la propia persona", () => {

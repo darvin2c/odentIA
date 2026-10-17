@@ -7,6 +7,7 @@ import {
   type ScheduleState,
 } from "@odentia/ui-patterns"
 import type { QueryClient } from "@tanstack/react-query"
+import type { PhoneWhatsApp } from "./phone-whatsapp"
 
 /** Una cita afecta disponibilidad y seguimiento, también en superficies no montadas. */
 export async function invalidateAppointmentQueries(client: QueryClient): Promise<void> {
@@ -149,7 +150,14 @@ export function visitLabel(
 
 /** Lo que el cajón de la cita dice además de la cita (`GET /api/appointments/:id/context`). */
 export interface AppointmentContext {
-  person: { contactId: string; name: string; phone: string | null; relationship: string } | null
+  person: {
+    contactId: string
+    name: string
+    phone: string | null
+    relationship: string
+    /** Si su teléfono es su WhatsApp, aún no o no tiene (decisión 23). */
+    whatsapp: PhoneWhatsApp
+  } | null
   origin: { source: string; conversationId: string | null; channel: string | null; at: string }
   confirmation: { askAt: string | null; askedAt: string | null } | null
   /** «Faltan datos para atenderla», del servidor; null para quien no edita los datos. */
@@ -166,12 +174,12 @@ export interface AgendaResources {
   defaultDurationMin: number
 }
 
-/** Un sillón en Configuración (`GET /api/agenda/chairs`): también los desactivados. */
+/** Una unidad dental en Configuración (`GET /api/agenda/chairs`): también las desactivadas. */
 export interface ChairSetting {
   id: string
   name: string
   isActive: boolean
-  /** Citas en pie que aún no terminan en ese sillón: no se mueven solas al desactivarlo. */
+  /** Citas en pie que aún no terminan en esa unidad dental: no se mueven solas al desactivarla. */
   upcomingAppointments: number
 }
 
@@ -222,6 +230,8 @@ export interface AgendaAvailability {
   /** Tramos en que cada profesional puede recibir una cita: su horario menos lo ocupado. */
   free: { dentistUserId: string; startsAt: string; endsAt: string }[]
   blocks: ScheduleBlock[]
+  /** Con servicio: si alguien lo atiende en la sede, solo esas personas (ADR 0039). */
+  attending?: { specialtyName: string; dentistUserIds: string[] } | null
 }
 
 /** Persona encontrada al buscar una cita, con sus próximas citas en pie. */

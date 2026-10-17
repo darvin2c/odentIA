@@ -16,7 +16,7 @@ import { contact, conversation, orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
 
 /**
- * Estados de la cita. Los ocupantes bloquean profesional y sillón en la
+ * Estados de la cita. Los ocupantes bloquean profesional y unidad dental en la
  * constraint de exclusión; `cancelada` y `no_asistio` liberan el recurso.
  */
 export const APPOINTMENT_STATUSES = [
@@ -31,7 +31,7 @@ export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number]
 /** Estados que ocupan el recurso (constraint de exclusión parcial en DB). */
 export const OCCUPYING_STATUSES: readonly AppointmentStatus[] = ["programada", "confirmada"]
 
-/** Sillón/consultorio reservable de una sucursal. Sin tabla sala: si una
+/** Unidad dental/consultorio reservable de una sucursal. Sin tabla sala: si una
  * organización la necesita, colgará de aquí y la cita seguirá sin duplicarla. */
 export const scheduleChair = pgTable(
   "schedule_chair",
@@ -52,7 +52,7 @@ export const scheduleChair = pgTable(
 )
 
 /**
- * Reserva real de agenda: profesional + sillón + rango UTC + sucursal. La
+ * Reserva real de agenda: profesional + unidad dental + rango UTC + sucursal. La
  * hora de interfaz se interpreta con `branch.timezone ?? org timezone`.
  * La exclusión anti-solapamiento (btree_gist + tstzrange) vive en la
  * migración: drizzle no declara EXCLUDE.

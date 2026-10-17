@@ -3,13 +3,13 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { portalSession } from "@odentia/db/schema/portal"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
-import { confirmAppointmentByContact } from "./agent-operations.js"
+import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } from "./agent-operations.js"
 import { createAppointment, getAppointmentContext, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, GENERAL_PERMISSION_QUESTION, GENERAL_PERMISSION_YES, replyId } from "./automation-messages.js"
 import {
@@ -38,6 +38,7 @@ import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { getPersonalLinkView } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * Bandeja, Agenda y la confirmación de citas conectadas (fase 2, tablero 3):
@@ -73,14 +74,15 @@ async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessag
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
   ])
-  // Recepción y el Administrador encendidos y sin horario de silencio: el reloj es el real.
+  // Recepción y el Administrador encendidos y con el horario para escribir a toda hora: el reloj es el real.
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: true,
-    advisor: { enabled: options.admin !== false, quietStart: "00:00", quietEnd: "00:00" },
+    advisor: { enabled: options.admin !== false },
+    writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   // Atiende todo el día, toda la semana: mover una cita valida el horario.
   await withOrgContext(appDb, orgId, (tx) =>
     setProfessionalSchedule(tx, orgId, ownerId, {
@@ -110,17 +112,14 @@ async function person(
   c: Clinic,
   name: string,
   options: {
-    consent?: Array<"recordatorio" | "seguimiento">
+    consent?: Array<"recordatorio" | "seguimiento" | "novedades">
     /** Pidió no recibir ese tipo de mensaje (baja). */
-    refused?: Array<"recordatorio" | "seguimiento">
+    refused?: Array<"recordatorio" | "seguimiento" | "avisos">
     openWindow?: boolean
     phone?: string
   } = {},
 ) {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: name, patientNumber: await nextPatientNumber(ownerDb, c.orgId) })
   const [link] = await ownerDb
     .select({ contactId: patientContact.contactId })
     .from(patientContact)
@@ -187,7 +186,8 @@ describe("al cambiar la cita, el agente le avisa", () => {
   it("al reservar desde la Agenda le avisa por la conversación abierta, y eso cuenta como su mensaje del día", async () => {
     const c = await clinic()
     await lineOn(c)
-    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio", "seguimiento"], openWindow: true })
+    // Con el sí de novedades: retomar el presupuesto (más abajo) es promoción para WhatsApp (ADR 0040).
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio", "seguimiento", "novedades"], openWindow: true })
     const booked = await book(c, rosa.patientId, later(3 * DAY))
     expect(booked.notice).toEqual({ queued: true })
     expect((await jobsOf(c)).map((job) => [job.kind, job.status])).toEqual([["aviso_cita_reservada", "pendiente"]])
@@ -345,16 +345,20 @@ describe("al cambiar la cita, el agente le avisa", () => {
     expect((await run(c, (tx) => syncCancelledAppointments(tx, c.orgId, new Date(Date.now() + 2 * HOUR)))).programados).toBe(0)
   })
 
-  it("lo de su cita es parte del servicio: sale sin permiso previo, y si pidió no recibirlo no se le escribe ni queda tarea", async () => {
+  it("el aviso de su cita sale sin permiso previo y aunque no quiera recordatorios; con «ningún mensaje» no sale ni queda tarea", async () => {
     const c = await clinic()
     await lineOn(c)
     // Nunca se le preguntó: el aviso de su reserva sale igual (ADR 0030).
     const rosa = await person(c, "Rosa Quispe", { openWindow: true })
     await book(c, rosa.patientId, later(3 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
-    // Se dio de baja de los recordatorios: la baja se respeta siempre.
-    const ana = await person(c, "Ana Torres", { openWindow: true, refused: ["recordatorio"] })
-    await book(c, ana.patientId, later(4 * DAY))
+    // No quiere recordatorios: el aviso de que su cita quedó reservada le llega igual (ADR 0040).
+    const lucia = await person(c, "Lucía Paredes", { openWindow: true, refused: ["recordatorio"] })
+    await book(c, lucia.patientId, later(4 * DAY))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    // Pidió no recibir ningún mensaje de la clínica: ahí sí se respeta también el aviso.
+    const ana = await person(c, "Ana Torres", { openWindow: true, refused: ["avisos"] })
+    await book(c, ana.patientId, later(5 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido"])
     const theirs = (await jobsOf(c)).find((job) => job.contactId === ana.contactId)
     expect(theirs).toMatchObject({ status: "omitido", cause: "sin_permiso", taskId: null })
@@ -448,6 +452,35 @@ describe("la persona confirma por escrito", () => {
     expect(many.outcome === "varias" ? many.options : []).toHaveLength(2)
     const statuses = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.organizationId, c.orgId))
     expect(statuses.every((item) => item.status === "programada")).toBe(true)
+  })
+})
+
+describe("la persona cambia su cita en la conversación con la regla de la cita propia", () => {
+  it("cancelar deja el motivo «paciente» y no se lleva la cita más allá de lo que permite el enlace", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe", { openWindow: true })
+    const booked = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+    const propose = (action: string, payload: Record<string, unknown>) =>
+      run(c, (tx) =>
+        createProposal(tx, c.orgId, { conversationId: rosa.conversationId!, action, payload, idempotencyKey: `prueba:${randomUUID()}` }),
+      )
+    // Más allá del horizonte de la cita propia (120 días): no se mueve.
+    const far = await propose("reprogramar_cita", {
+      appointmentId: booked.id, expectedVersion: booked.version, startsAt: later(200 * DAY).toISOString(),
+    })
+    const refused = await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, far.id))
+    expect(refused.status).toBe("fallida")
+    expect(refused.error).toMatch(/120 días/)
+    const [same] = await ownerDb.select({ startsAt: appointment.startsAt }).from(appointment).where(eq(appointment.id, booked.id))
+    expect(same?.startsAt.toISOString()).toBe(booked.startsAt)
+    // Cancelarla deja el motivo «paciente», como desde su enlace o el portal.
+    const cancel = await propose("cancelar_cita", { appointmentId: booked.id })
+    expect((await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, cancel.id))).status).toBe("ejecutada")
+    const [trail] = await ownerDb
+      .select({ metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.entityId, booked.id), eq(auditEvent.action, "appointment.status_cancelada")))
+    expect(trail?.metadata).toMatchObject({ cancelReason: "paciente" })
   })
 })
 
@@ -604,7 +637,7 @@ describe("«Contexto» de la conversación", () => {
     const caps = { conversations: true, tasks: true, agent: false }
     const seen = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: { ...caps, appointments: true } }))
     expect(seen.nextAppointment).toMatchObject({ id: next.id, patientName: "Rosa Quispe", branchName: "Centro", dentistName: "Dra. Ana Torres", timeZone: "America/Lima" })
-    expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null, novedades: null })
+    expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null, novedades: null, avisos: null })
     const blind = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: caps }))
     expect(blind.nextAppointment).toBeNull()
   })

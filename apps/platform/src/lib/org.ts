@@ -1,4 +1,10 @@
-import { type ClinicalCountryProfile, clinicalProfileFor } from "@odentia/clinical"
+import {
+  type ClinicalCountryProfile,
+  clinicalProfileFor,
+  DIAGNOSIS_SYSTEM_INFO,
+  type DiagnosisSystemInfo,
+  isDiagnosisSystem,
+} from "@odentia/clinical"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 
@@ -13,10 +19,10 @@ import { apiFetch } from "./api"
 export interface OrgProfile {
   organizationId: string
   legalName: string
-  tradeName: string | null
+  /** El nombre que ven los pacientes (decisión 19): obligatorio. */
+  tradeName: string
   fiscalDocType: string | null
   fiscalDocNumber: string | null
-  billingEmail: string | null
   fiscalAddress: string | null
   countryCode: string
   currency: string
@@ -28,15 +34,19 @@ export interface OrgProfile {
   sheetSize: string
   /** Frase al pie del ticket (recibo interno por defecto). */
   ticketFooter: string
+  /** Lista de diagnósticos de la clínica; null: la que recomienda su país. */
+  diagnosisSystem: string | null
+  /** Logo público de la clínica (se sube en «Datos de la clínica»); null si no tiene. */
+  logo?: string | null
 }
 
 /**
  * Lo que guarda «Datos de la clínica». `null` vacía un dato opcional; lo que no
- * viaja (el correo de facturación, la impresión) queda como estaba.
+ * viaja (la impresión) queda como estaba.
  */
 export interface OrgProfileInput {
   legalName: string
-  tradeName: string | null
+  tradeName: string
   fiscalDocType: string | null
   fiscalDocNumber: string | null
   fiscalAddress: string | null
@@ -91,6 +101,30 @@ export function useOrgProfile() {
 export function useClinicalProfile(): ClinicalCountryProfile {
   const profile = useOrgProfile()
   return clinicalProfileFor(profile.data?.countryCode)
+}
+
+/**
+ * La lista de diagnósticos con la que trabaja la clínica (decisión 26): la
+ * guardada o, sin ella, la que recomienda su país. La misma regla que el servidor.
+ */
+export function effectiveDiagnosisSystem(profile: Pick<OrgProfile, "diagnosisSystem" | "countryCode"> | null | undefined): DiagnosisSystemInfo {
+  const saved = profile?.diagnosisSystem
+  const key = isDiagnosisSystem(saved) ? saved : clinicalProfileFor(profile?.countryCode).diagnosis.recommended
+  return DIAGNOSIS_SYSTEM_INFO[key]
+}
+
+/** La lista de diagnósticos de la clínica, para decirla junto al buscador. */
+export function useDiagnosisSystem(): DiagnosisSystemInfo {
+  return effectiveDiagnosisSystem(useOrgProfile().data)
+}
+
+/** Cambia la lista de la clínica: los diagnósticos nuevos se eligen en ella; nada se reescribe. */
+export async function saveDiagnosisSystem(diagnosisSystem: string): Promise<{ diagnosisSystem: string }> {
+  const { data } = await apiFetch<{ data: { diagnosisSystem: string } }>("/api/org-profile/diagnosis-system", {
+    method: "PUT",
+    body: JSON.stringify({ diagnosisSystem }),
+  })
+  return data
 }
 
 /** Lo que el servidor propone para un país (moneda, formato, zona y papel). */

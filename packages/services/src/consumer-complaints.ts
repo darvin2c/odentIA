@@ -3,7 +3,7 @@
 // (D.S. 011-2011-PCM, modificado por D.S. 006-2014-PCM y D.S. 101-2022-PCM).
 //
 // Es de la plataforma, no de una clínica: la hoja se guarda en tablas globales
-// que solo toca el rol owner (migración 0099). La API pública es la única que
+// que solo toca el rol owner (migraciones 0003 y 0004). La API pública es la única que
 // escribe aquí y lo hace con `ownerDb.transaction`.
 import type { Db } from "@odentia/db"
 import { consumerComplaint, consumerComplaintCounter } from "@odentia/db/schema/consumer-complaints"

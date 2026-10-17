@@ -14,7 +14,7 @@ import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type ChannelAdapter, telegramBotApiAdapter, whatsappCloudApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { encounter, patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { encounter, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { professionalProfile } from "@odentia/db/schema/clinical-forms"
 import { contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -49,6 +49,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { ROUTE_TOOLS, routeInstruction, widenDescription } from "./decision/route.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
 import { type AgentSandbox, type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
+import { insertTestPatients } from "@odentia/services/test-patient"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv(`${"aa".repeat(31)}ab`)
@@ -140,7 +141,7 @@ beforeAll(async () => {
   const service = async (name: string, priceCents: number) => {
     const [row] = await ownerDb
       .insert(serviceCatalog)
-      .values({ organizationId: ORG, name, specialty: "general", scope: "tooth", source: "custom", priceCents, currency: "PEN" })
+      .values({ organizationId: ORG, name, scope: "tooth", source: "custom", priceCents, currency: "PEN" })
       .returning({ id: serviceCatalog.id })
     return row!.id
   }
@@ -209,10 +210,7 @@ const call = async (ctx: AgentToolCtx, name: string, input: Record<string, unkno
 
 /** Paciente cuya propia persona es quien escribe en la conversación. */
 async function patientOf(contactId: string, name: string, relationship: "self" | "family" = "self"): Promise<string> {
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: name, patientNumber: await nextPatientNumber(ownerDb, ORG) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: name, patientNumber: await nextPatientNumber(ownerDb, ORG) })
   await inOrg((tx) => setPatientContact(tx, ORG, clinic.actor, row!.id, { contactId, relationship, isPreferred: relationship === "self" }))
   return row!.id
 }
@@ -314,7 +312,11 @@ it("«Presupuestos» es una función de Recepción con sus tres herramientas, en
   expect(ROUTE_TOOLS.informacion).toEqual(expect.arrayContaining(BUDGET_TOOLS))
   for (const path of ["saludo", "cita", "cambio_cita", "clinico"] as const) expect(widenDescription(path)).toContain("presupuesto")
   expect(routeInstruction("informacion")).toContain("ver_presupuesto")
-  expect(routeInstruction("informacion", null, { budgets: false })).not.toContain("presupuesto")
+  // Con «Presupuestos» apagada no nombra sus herramientas: deja la tarea a recepción, si tiene create_task.
+  const off = routeInstruction("informacion", null, { budgets: false, tools: new Set(["send_reply", "create_task"]) })
+  expect(off).not.toContain("ver_presupuesto")
+  expect(off).toContain("create_task")
+  expect(routeInstruction("informacion", null, { budgets: false, tools: new Set(["send_reply"]) })).not.toContain("presupuesto")
   // «Sí, es correcto» a la pregunta de la lista es un sí; «No, la 36 también», no.
   expect(isAffirmative("Sí, es correcto")).toBe(true)
   expect(isAffirmative("Correcto")).toBe(true)
@@ -516,10 +518,7 @@ it("con dos opciones hay que elegir una; lo incompleto no se propone y corregir 
 it("quien solo está autorizado a recibir información ve el presupuesto, pero la respuesta la da la persona o su representante", async () => {
   const { conversationId } = await byTelegram("tg:autorizado", "evt-autorizado", "Mi papá acepta todo")
   const contactId = await contactOf(conversationId)
-  const [row] = await ownerDb
-    .insert(patient)
-    .values({ organizationId: ORG, displayName: "Jorge Autorizado", patientNumber: await nextPatientNumber(ownerDb, ORG) })
-    .returning({ id: patient.id })
+  const [row] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Jorge Autorizado", patientNumber: await nextPatientNumber(ownerDb, ORG) })
   const patientId = row!.id
   await inOrg((tx) => setPatientContact(tx, ORG, clinic.actor, patientId, { contactId, relationship: "family", isPreferred: false }))
   await inOrg((tx) =>

@@ -462,7 +462,7 @@ function AgendaPage() {
     (kind: GroupMode): ScheduleBlocked[] => {
       const targets = kind === "chairs" ? chairs : team
       return (availability?.blocks ?? []).flatMap((block) => {
-        // Un bloqueo de sillón no cierra al profesional, ni al revés.
+        // Un bloqueo de unidad dental no cierra al profesional, ni al revés.
         const scoped = kind === "chairs" ? block.dentistUserId : block.chairId
         if (scoped) return []
         const own = kind === "chairs" ? block.chairId : block.dentistUserId
@@ -855,7 +855,7 @@ function AgendaPage() {
                   })
                 }
               >
-                {group === "chairs" ? "Ver por profesional" : "Ver por sillón"}
+                {group === "chairs" ? "Ver por profesional" : "Ver por unidad dental"}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -910,13 +910,13 @@ function AgendaPage() {
   const setupState = noChairs ? (
     <EmptyState
       icon={Armchair}
-      title="Esta sede aún no tiene sillones"
+      title="Esta sede aún no tiene unidades dentales"
       description={
         canConfigure
-          ? "Añade al menos uno: cada cita ocupa un sillón."
-          : "Cada cita ocupa un sillón. Pide a quien administra la clínica que añada uno."
+          ? "Añade al menos una: cada cita ocupa una unidad dental."
+          : "Cada cita ocupa una unidad dental. Pide a quien administra la clínica que añada una."
       }
-      actionLabel={canConfigure ? "Añadir sillón" : undefined}
+      actionLabel={canConfigure ? "Añadir unidad dental" : undefined}
       onAction={canConfigure ? () => setChairForm(true) : undefined}
     />
   ) : (
@@ -1138,7 +1138,7 @@ function AgendaPage() {
                     filter,
                     dayColumns,
                     pickWho,
-                    group === "chairs" ? "Sillones: todos" : "Profesionales: todos",
+                    group === "chairs" ? "Unidades dentales: todas" : "Profesionales: todos",
                   )}
             </>
           )
@@ -1165,13 +1165,13 @@ function AgendaPage() {
             setParams({ group: group === "chairs" ? undefined : "chairs", who: undefined })
           }
         >
-          {group === "chairs" ? "Sillones" : "Profesionales"}
+          {group === "chairs" ? "Unidades dentales" : "Profesionales"}
           <span className="font-normal">· cambiar</span>
         </Button>
       ) : null}
       {small ? (
         <ScheduleResourceChips
-          label={group === "chairs" ? "Sillones" : "Profesionales"}
+          label={group === "chairs" ? "Unidades dentales" : "Profesionales"}
           resources={view === "semana" ? team : view === "dia" ? dayColumns : dayTeam}
           formatLabel={(item) => (group === "chairs" ? item.label : shortName(item.label))}
           value={view === "lista" ? filter : view === "semana" ? focus : dayFocus}
@@ -1344,7 +1344,7 @@ function AgendaPage() {
         <ChairForm
           branchId={branchId}
           branchName={resources.branchName}
-          suggestedName={`Sillón ${resources.chairs.length + 1}`}
+          suggestedName={`Unidad dental ${resources.chairs.length + 1}`}
           onClose={() => setChairForm(false)}
           onSaved={async () => {
             setChairForm(false)

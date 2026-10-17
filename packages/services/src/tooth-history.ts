@@ -1,9 +1,9 @@
-import { isValidTooth } from "@odentia/clinical"
+import { DIAGNOSIS_VERIFICATION_LABELS, diagnosisCodeLabel, isDiagnosisVerification, isValidTooth } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
-  cie10Code,
   clinicalFollowUp,
+  diagnosisCatalog,
   encounter,
   encounterDiagnosis,
   encounterProcedure,
@@ -70,12 +70,18 @@ export async function getToothHistory(
       .select({
         row: encounterDiagnosis,
         author: user.name,
-        description: cie10Code.description,
+        description: diagnosisCatalog.title,
         encounterStatus: encounter.status,
       })
       .from(encounterDiagnosis)
       .leftJoin(user, eq(user.id, encounterDiagnosis.createdBy))
-      .leftJoin(cie10Code, eq(cie10Code.code, encounterDiagnosis.cie10Code))
+      .leftJoin(
+        diagnosisCatalog,
+        and(
+          eq(diagnosisCatalog.systemKey, encounterDiagnosis.diagnosisSystem),
+          eq(diagnosisCatalog.code, encounterDiagnosis.diagnosisCode),
+        ),
+      )
       .leftJoin(encounter, eq(encounter.id, encounterDiagnosis.encounterId))
       .where(
         and(
@@ -159,11 +165,18 @@ export async function getToothHistory(
       kind: "diagnostico",
       id: row.id,
       at: row.createdAt,
-      title: description ?? row.cie10Code,
-      code: row.cie10Code,
+      title: description ?? row.diagnosisCode,
+      code: diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode),
       surfaces: row.surfaces,
       status: row.voidedAt ? "anulado" : row.status,
-      detail: [row.diagnosisType, row.note].filter(Boolean).join(" · ") || null,
+      detail:
+        [
+          isDiagnosisVerification(row.diagnosisType) ? DIAGNOSIS_VERIFICATION_LABELS[row.diagnosisType] : null,
+          row.previouslyDiagnosed ? "Ya diagnosticado antes" : null,
+          row.note,
+        ]
+          .filter(Boolean)
+          .join(" · ") || null,
       encounterId: row.encounterId,
       encounterOpen: encounterStatus === "borrador",
       authorName: author,
@@ -176,7 +189,7 @@ export async function getToothHistory(
       id: row.id,
       at: row.createdAt,
       title: row.description,
-      code: row.diagnosisCode,
+      code: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
       surfaces: row.surfaces,
       status: row.voidedAt ? "anulado" : encounterStatus === "borrador" ? "en_curso" : "realizado",
       detail: null,

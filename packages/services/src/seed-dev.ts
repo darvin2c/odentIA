@@ -3,7 +3,7 @@
  *
  * Solo manual (`pnpm db:seed`); NUNCA en CI ni importado por tests
  * (cada test crea sus fixtures mínimas). Idempotente: borra solo las
- * orgs/usuarios semilla y los recrea. Prerrequisito: `seed:cie10` antes
+ * orgs/usuarios semilla y los recrea. Prerrequisito: `seed:diagnoses` antes
  * (los códigos K02.1/K04.0/Z01.2 deben existir; si falta alguno el script
  * falla rápido nombrándolo, sin skips silenciosos).
  *
@@ -14,7 +14,7 @@ import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
@@ -72,11 +72,11 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { createHandoff } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
-import { createScheduleBlock } from "./availability.js"
+import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
 import {
   addBudgetItems,
   adjustBudgetLines,
@@ -116,14 +116,15 @@ import { setCommissionRate } from "./finance.js"
 import { closeOpportunity, createOpportunity, listOpportunities, moveOpportunity, setOpportunityTask } from "./opportunities.js"
 import {
   createPatientRegistrationLink,
+  leaveRegistrationHold,
   registerPatient,
   savePatientRegistrationConfig,
 } from "./patient-registration.js"
-import { createPatient, patientPersonId, updatePatient } from "./patients.js"
+import { createPatient, patientPersonId, RegistrationHeld, updatePatient } from "./patients.js"
 import { collectCharge, createCharge, refundCredit } from "./payments.js"
 import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { setConsent } from "./automation.js"
+import { setConsent, setMessageChoice } from "./automation.js"
 import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
@@ -138,7 +139,12 @@ import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { issuePersonalLink } from "./booking-links.js"
-import { createClinicalOrder, markConsentSentByLink, signConsentDocument } from "./clinical-forms.js"
+import {
+  createClinicalOrder,
+  markConsentSentByLink,
+  setProfessionalSpecialties,
+  signConsentDocument,
+} from "./clinical-forms.js"
 import { seedClinicalForms } from "./seed-clinical-forms.js"
 import { seedCrmActivity } from "./seed-crm-activity.js"
 import { seedFinance } from "./seed-finance.js"
@@ -155,7 +161,8 @@ import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { submitConsumerComplaint } from "./consumer-complaints.js"
 import { seedSaasBillingDemo } from "./seed-saas-billing.js"
-import { createService, updateService } from "./service-catalog.js"
+import { createService, quickAddServices, updateService } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { createStorage } from "./storage.js"
 import { completeTask, createTask, settleTask } from "./tasks.js"
 
@@ -324,7 +331,9 @@ const SEED_ORGS = [ORG_A, ORG_B]
 const ANA_ID = "seed-user-ana"
 const LUIS_ID = "seed-user-luis"
 const CORA_ID = "seed-user-cora"
-const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID]
+/** La endodoncista de Dental Smile (fase 4, tablero 2): atiende martes y jueves por la tarde. */
+const ROJAS_ID = "seed-user-rojas"
+const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID]
 const PASSWORD = "Demo1234"
 // Teléfono compartido del hogar Rosa/Jorge. No puede modelarse con dos filas
 // de contact_identity: el unique (organization_id, channel, external_user_id)
@@ -350,6 +359,7 @@ async function wipeSeed(): Promise<void> {
     "support_access_grant",
     "support_attachment",
     "support_message",
+    "support_notice",
     "support_case",
     "saas_notice",
     "saas_negotiation",
@@ -384,8 +394,6 @@ async function wipeSeed(): Promise<void> {
     "agent_person_fact",
     "agent_case_memory",
     "appointment_booking_link",
-    // Lo enviado a odentIA desde la Ayuda de desarrollo.
-    "help_request",
     "agent_run_ledger",
     "agent_proposal",
     "agent_handoff",
@@ -404,8 +412,6 @@ async function wipeSeed(): Promise<void> {
     "clinical_form_template",
     "consent_template",
     "professional_specialty",
-    "service_specialty",
-    "org_specialty",
     "commission_settlement_line",
     "commission_settlement",
     "commission_rule",
@@ -523,6 +529,8 @@ async function wipeSeed(): Promise<void> {
   await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B})`)
   await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
+  // Los servicios apuntan a su especialidad: la lista de la clínica va después.
+  await db.execute(sql`delete from org_specialty where organization_id in (${ORG_A}, ${ORG_B})`)
   // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
   // sin cascada: sin borrarlo primero, la baja del usuario semilla falla por FK.
   // Se borra por organización **y** por actor: una corrida de e2e deja registros
@@ -706,10 +714,18 @@ await db.insert(user).values([
     email: "cora@odentia.dev",
     emailVerified: true,
   },
+  {
+    id: ROJAS_ID,
+    name: "Dra. Elena Rojas",
+    firstName: "Elena",
+    lastName: "Rojas",
+    email: "rojas@odentia.dev",
+    emailVerified: true,
+  },
 ])
 const passwordHash = await hashPassword(PASSWORD)
 await db.insert(account).values(
-  [ANA_ID, LUIS_ID, CORA_ID].map((userId) => ({
+  [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID].map((userId) => ({
     id: randomUUID(),
     accountId: userId,
     providerId: "credential",
@@ -723,6 +739,13 @@ await db.insert(member).values([
     id: randomUUID(),
     organizationId: ORG_A,
     userId: LUIS_ID,
+    role: "dentist",
+    createdAt: new Date(),
+  },
+  {
+    id: randomUUID(),
+    organizationId: ORG_A,
+    userId: ROJAS_ID,
     role: "dentist",
     createdAt: new Date(),
   },
@@ -752,11 +775,19 @@ await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
   specialtyRegistration: "RNE 1024",
 })
 await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_DENTIST, registrationNumber: "23456" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, ROJAS_ID, {
+  ...PERU_DENTIST,
+  signatureName: "Elena Rojas",
+  registrationNumber: "45678",
+  specialtyRegistration: "RNE 2048",
+})
 await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { ...PERU_DENTIST, registrationNumber: "34567" })
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,
     legalName: "Dental Smile S.A.C.",
+    // El nombre que ven los pacientes en todo (decisión 19); la razón social, solo en el comprobante.
+    tradeName: "Dental Smile",
     fiscalDocNumber: "20601234567",
     // Explicito: país, moneda, idioma y zona son el contrato de la agenda y del
     // formato de los teléfonos (IANA canónico y ISO-3166-1).
@@ -764,15 +795,20 @@ await db.insert(orgProfile).values([
     currency: "PEN",
     locale: "es-PE",
     timezone: "America/Lima",
+    // La lista de diagnósticos que recomienda Perú (decisión 26).
+    diagnosisSystem: "ICD-10",
   },
   {
     organizationId: ORG_B,
     legalName: "Clínica Norte S.A.C.",
+    tradeName: "Clínica Norte",
     fiscalDocNumber: "20550987654",
     countryCode: "PE",
     currency: "PEN",
     locale: "es-PE",
     timezone: "America/Lima",
+    // La lista de diagnósticos que recomienda Perú (decisión 26).
+    diagnosisSystem: "ICD-10",
   },
 ])
 await db.transaction(async (tx) => {
@@ -784,7 +820,7 @@ const [miraflores] = await db
   .values([
     // Miraflores hereda la zona de la organización (`timezone` en null).
     { organizationId: ORG_A, name: "Sede Miraflores", department: "Lima", province: "Lima", district: "Miraflores" },
-    // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin sillones
+    // Surco ejercita el camino contrario: teléfono y zona propios. Queda sin unidades dentales
     // ni horarios: es la sede limpia para probar la configuración desde cero.
     {
       organizationId: ORG_A,
@@ -926,16 +962,17 @@ const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
 }
 for (let i = 0; i < CONTACTS_A.length; i++) {
   const c = CONTACTS_A[i]!
-  const notes =
-    c.name === "Jorge Mamani"
-      ? `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)`
-      : undefined
-  const created = await createContact(
-    db,
-    ORG_A,
-    { displayName: c.name, phone: c.phone, notes },
-    { userId: ANA_ID },
-  )
+  const created = await createContact(db, ORG_A, { displayName: c.name, phone: c.phone }, { userId: ANA_ID })
+  // Las notas de la persona son `crm_note`, con autor (fase 4, «un dato, un lugar»).
+  if (c.name === "Jorge Mamani") {
+    await createContactNote(
+      db,
+      ORG_A,
+      created.id,
+      { body: `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)` },
+      { userId: ANA_ID },
+    )
+  }
   if (c.name === "Rosa Quispe") {
     await updateContact(db, ORG_A, created.id, { preferredChannel: "whatsapp" }, { userId: ANA_ID })
   }
@@ -1267,7 +1304,6 @@ await settleTask(db, ORG_A, settledDemo.id, "Rosa Quispe confirmó su cita")
 await upsertAgentConfig(db, ORG_A, {
   enabled: true,
   llm: "chatgpt_6",
-  systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
   // La voz de la clínica y una indicación por función: lo que se ve en Agente › Recepción.
@@ -1348,8 +1384,9 @@ for (const p of PATIENTS_A) {
     // Filiación completa de la paciente de demostración.
     ...(rosa
       ? {
-          maritalStatus: "casado",
-          educationLevel: "superior_universitaria_completa",
+          // HL7 MaritalStatus y CINE 2011 (decisión 28): casada, universitaria.
+          maritalStatus: "M",
+          educationLevel: "6",
           occupation: "Docente",
           birthCountry: "PE",
           birthPlace: "Cusco",
@@ -1361,7 +1398,7 @@ for (const p of PATIENTS_A) {
           addressRegion: "PE-LMA",
           addressReference: "Frente al parque Kennedy",
           emergencyContactName: "Carlos Paredes",
-          emergencyContactRelationship: "conyuge",
+          emergencyContactRelationship: "SPS",
           emergencyContactPhone: "+51912345678",
           // EPS: régimen con nombre propio en Perú, de tipo general «Privado».
           insuranceType: "PRIVADO",
@@ -1395,7 +1432,7 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
       verification: "confirmada",
     },
   ],
-  familyHistory: [{ relationship: "madre", condition: "Hipertensión arterial" }],
+  familyHistory: [{ relationship: "MTH", condition: "Hipertensión arterial" }],
   asaClass: "II",
   conditions: [
     { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
@@ -1568,11 +1605,28 @@ const seedOffers: Array<{
     leavesFinding: { condition: "missing_tooth" },
   },
 ]
+// Cada clínica nace con las especialidades de la biblioteca (ADR 0039): el
+// servicio apunta a la suya por id.
+const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_SPECIALTIES)
+const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_SPECIALTIES)
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
-for (const offer of seedOffers) {
-  catalogA.push(await createService(db, ORG_A, ANA_ID, offer))
-  await createService(db, ORG_B, CORA_ID, offer)
+for (const { specialty, ...offer } of seedOffers) {
+  catalogA.push(await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }))
+  await createService(db, ORG_B, CORA_ID, { ...offer, specialtyId: specialtiesB.get(specialty) })
 }
+// Implantología sin nadie que la atienda (decisión 2 de la fase 4): la agenda
+// ofrece el implante a cualquiera y Especialidades lo avisa con «Elegir quién atiende».
+catalogA.push(
+  await createService(db, ORG_A, ANA_ID, {
+    code: "IMPLANTE",
+    name: "Implante dental de titanio",
+    specialtyId: specialtiesA.get("implantologia"),
+    scope: "tooth",
+    priceCents: 250000,
+    durationMin: 90,
+    priceDisclosure: "evaluacion",
+  }),
+)
 const serviceIdA = (code: string): string => {
   const found = catalogA.find((s) => s.code === code)
   if (!found) throw new Error(`Servicio ${code} ausente del catálogo semilla`)
@@ -1644,6 +1698,30 @@ for (const tpl of consultaTemplates) {
   }
   catalogA.push(await createService(db, ORG_A, ANA_ID, offer))
   await createService(db, ORG_B, CORA_ID, offer)
+}
+// Un tarifario de clínica mediana en Dental Smile (fase 4, tablero 1): más de
+// 100 servicios activos, muchos más de los 40 que caben en el prompt, para ver
+// el índice por especialidad, la búsqueda y el cambio en bloque de «Cómo dice
+// el precio». Las tres formas, por tercios; precios y duraciones deterministas.
+const libraryForSeed = await db
+  .select({ id: treatmentTemplate.id })
+  .from(treatmentTemplate)
+  .where(eq(treatmentTemplate.isActive, true))
+  .orderBy(asc(treatmentTemplate.key))
+  .limit(140)
+const ownedTemplates = new Set(catalogA.map((service) => service.templateId).filter(Boolean))
+const extraTemplates = libraryForSeed.filter((row) => !ownedTemplates.has(row.id)).slice(0, 96)
+if (extraTemplates.length < 90) throw new Error("La biblioteca tiene pocas prestaciones: ejecuta seed:procedures")
+for (const [index, priceDisclosure] of (["exacto", "desde", "evaluacion"] as const).entries()) {
+  const items = extraTemplates
+    .filter((_, position) => position % 3 === index)
+    .map((row, position) => ({
+      kind: "template" as const,
+      templateId: row.id,
+      priceCents: (6 + ((position * 7 + index * 5) % 60)) * 1000,
+      durationMin: 30 + (position % 4) * 15,
+    }))
+  catalogA.push(...(await quickAddServices(db, ORG_A, ANA_ID, items, { priceDisclosure })).created)
 }
 // Evaluación inicial (borrador) antes del plan: la indicación nace aquí y la
 // ejecución continúa en la misma atención (un solo borrador por paciente).
@@ -1792,23 +1870,23 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
   encounterId: draft.id,
 })
-// Diagnósticos CIE-10 de la atención (ADR 0003): con tipo y sitio dental.
+// Diagnósticos de la atención (ADR 0003 y 0041): en la lista de la clínica (CIE-10), con tipo y sitio dental.
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  cie10Code: "K02.1",
-  diagnosisType: "definitivo",
+  diagnosisCode: "K02.1",
+  diagnosisType: "confirmed",
   toothNumber: 36,
   surfaces: ["occlusal"],
   note: "Dolor a la percusión; caries en dentina.",
 })
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  cie10Code: "K04.0",
-  diagnosisType: "presuntivo",
+  diagnosisCode: "K04.0",
+  diagnosisType: "provisional",
   toothNumber: 46,
 })
 // Un diagnóstico mal registrado se anula con motivo; queda en la traza.
 const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  cie10Code: "K02.1",
-  diagnosisType: "presuntivo",
+  diagnosisCode: "K02.1",
+  diagnosisType: "provisional",
   toothNumber: 37,
 })
 await voidEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, dxErrado.id, {
@@ -2143,8 +2221,8 @@ const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, {
   reason: "Control de rutina",
 })
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, elenaPatientId, elenaEval.id, {
-  cie10Code: "Z01.2",
-  diagnosisType: "definitivo",
+  diagnosisCode: "Z01.2",
+  diagnosisType: "confirmed",
 })
 const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
   title: "Plan profilaxis",
@@ -2197,7 +2275,7 @@ for (const tooth of [16, 26, 36]) {
     condition: "caries",
     surfaces: ["occlusal"],
     details: { variant: "dentin" },
-    diagnosis: { cie10Code: "K02.1", diagnosisType: "definitivo" },
+    diagnosis: { diagnosisCode: "K02.1", diagnosisType: "confirmed" },
     treatment: { serviceId: resinaCpmsA.id },
   })
   luciaResinas[tooth] = panel.planItems[0]!.id
@@ -2250,6 +2328,110 @@ const carmen = await createContact(db, ORG_A, { displayName: "Carmen Huamán", p
 // hija Sofía (menor), que sí lo es: su página dice «Responsable de Sofía Salas»
 // y la de ella, «Habla por ella: Martín Salas».
 await createContactNote(db, ORG_A, carmen.id, { body: "Llamó para preguntar por blanqueamiento; prefiere la tarde." }, { userId: ANA_ID })
+
+// --- Lo repetido: personas, citas y dinero (fase 4, paso 7b-2) ---
+// Carmen Huamán tiene su teléfono en «Teléfono», pero nadie lo marcó como su
+// WhatsApp (decisión 23, caso 2): su página dice «Aún no es su WhatsApp» con
+// «Usarlo como su WhatsApp». Rosa Quispe debe S/ 50 y tiene S/ 30 a favor del
+// adelanto que se le devolvió en parte (decisión 22): «Saldo: S/ 20» y, en
+// Caja, «Aplicar lo que tiene a favor» deja ver lo que falta. El presupuesto
+// «Restauración definitiva pieza 46» tiene dos opciones: Reportes cuenta la
+// recomendada, nunca la suma (G1).
+// Una madre registra a sus dos hijos con su mismo DNI: es la misma persona,
+// representante legal de los dos (G2).
+const hijoVargas = (displayName: string, givenNames: string, birthDate: string, docNumber: string) =>
+  db.transaction((tx) =>
+    registerPatient(
+      tx,
+      ORG_A,
+      { kind: "internal", userId: ANA_ID },
+      {
+        submissionId: randomUUID(),
+        answers: {
+          demographics: { displayName, givenNames, paternalSurname: "Vargas", birthDate, docType: "DNI", docNumber },
+          respondent: "representative",
+          representative: {
+            displayName: "Gabriela Vargas Soto",
+            relationship: "guardian",
+            relationshipDetail: "Madre",
+            phone: "+51987650500",
+            docType: "DNI",
+            docNumber: "45123987",
+          },
+          privacyAccepted: false,
+        },
+      },
+    ),
+  )
+await hijoVargas("Thiago Vargas", "Thiago", "2015-03-10", "78123401")
+await hijoVargas("Valeria Vargas", "Valeria", "2019-08-22", "78123402")
+// Una ortodoncia que se cobra por sesión (12 controles de S/ 100), aceptada, con
+// un adelanto de S/ 500 y una devolución de S/ 100: el portal dice los mismos
+// montos que Caja (tratamiento aceptado S/ 1 200, pagado S/ 400). Su número no
+// tiene WhatsApp: un mensaje rebotó (decisión 23, caso 1).
+const marco = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Marco Torres",
+  givenNames: "Marco",
+  paternalSurname: "Torres",
+  birthDate: "1994-02-11",
+  phone: "+51987650600",
+  registeredBranchId: miraflores.id,
+})
+const marcoEval = await createEncounter(db, ORG_A, ANA_ID, marco.id, {
+  reason: "Evaluación de ortodoncia",
+  branchId: miraflores.id,
+})
+const marcoPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, marco.id, {
+  title: "Ortodoncia",
+  originEncounterId: marcoEval.id,
+})
+const marcoCtrl = await addPlanItem(db, ORG_A, ANA_ID, marco.id, {
+  serviceId: serviceIdA("ORTODONCIA_CTRL"),
+  planId: marcoPlan.id,
+  sourceEncounterId: marcoEval.id,
+  detail: "Controles de ortodoncia",
+})
+const marcoBudget = await createBudget(db, ORG_A, ANA_ID, marco.id, {
+  planId: marcoPlan.id,
+  itemIds: [marcoCtrl.id],
+  title: "Ortodoncia por sesiones",
+})
+await db.transaction((tx) =>
+  adjustBudgetLines(tx, ORG_A, ANA_ID, marco.id, marcoBudget.id, {
+    lines: [{ planItemId: marcoCtrl.id, sessionsPlanned: 12 }],
+  }),
+)
+await deliverBudget(db, ORG_A, ANA_ID, marco.id, marcoBudget.id)
+await decideBudget(db, ORG_A, ANA_ID, marco.id, marcoBudget.id, {
+  decisions: [{ planItemId: marcoCtrl.id, decision: "aceptado" }],
+})
+await db.transaction(async (tx) => {
+  const methods = await listPaymentMethods(tx, ORG_A)
+  const cash = methods.find((method) => method.typeCode === "10")
+  if (!cash) throw new Error("Falta el efectivo en los medios de pago de la clínica demo")
+  await collectCharge(tx, ORG_A, ANA_ID, marco.id, {
+    branchId: miraflores.id,
+    advanceCents: 50000,
+    requestId: "50206010-0000-4000-8000-000000000106",
+    payments: [{ paymentMethodId: cash.id, amountCents: 50000 }],
+  })
+  await refundCredit(tx, ORG_A, ANA_ID, marco.id, {
+    branchId: miraflores.id, amountCents: 10000, paymentMethodId: cash.id,
+    reason: "Devolución de parte del adelanto: empieza el mes que viene.",
+  })
+})
+const marcoPerson = await patientPersonId(db, ORG_A, marco.id)
+if (marcoPerson) {
+  await db.insert(contactIdentity).values({
+    organizationId: ORG_A,
+    contactId: marcoPerson,
+    channel: "whatsapp",
+    externalUserId: "wa:51987650600",
+    isPrimary: true,
+    noWhatsappAt: hoursAgo(20),
+  })
+}
+
 // --- Org B mínima (aislamiento visual) ---
 const sofia = await createContact(db, ORG_B, {
   displayName: "Sofía Ramos",
@@ -2444,6 +2626,7 @@ const pedro = await db.transaction((tx) =>
           contactId: rosaContactId,
           relationship: "guardian",
           relationshipDetail: "Madre",
+          kinship: "MTH",
           isPreferred: true,
         },
       ],
@@ -2486,7 +2669,7 @@ await db.transaction((tx) =>
         privacyAccepted: false,
       },
       contacts: [
-        { contactId: martin.id, relationship: "guardian", relationshipDetail: "Padre", isPreferred: true },
+        { contactId: martin.id, relationship: "guardian", relationshipDetail: "Padre", kinship: "FTH", isPreferred: true },
       ],
     },
   ),
@@ -2563,6 +2746,74 @@ await db.transaction((tx) =>
     },
   ),
 )
+// «Te espera» de recepción con lo que deja el registro en línea cuando el
+// documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
+// de «Madre» espera «Confirmar» o «No es ella», tarea `confirmar_representante`)
+// y alguien se registra con el DNI de Valeria (no se completa y queda para
+// revisar o «Descartar», tarea `registro_con_documento`).
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "public", entryPoint: "qr" },
+    {
+      submissionId: randomUUID(),
+      formVersion: registrationConfig.version,
+      answers: {
+        demographics: {
+          displayName: "Thiago Quispe · QR demo",
+          givenNames: "Thiago",
+          paternalSurname: "Quispe",
+          birthDate: "2019-03-02",
+          phone: SHARED_PHONE,
+          docType: "DNI",
+          docNumber: "78901299",
+        },
+        respondent: "representative",
+        representative: {
+          displayName: "Valeria Quispe · QR demo",
+          relationship: "guardian",
+          relationshipDetail: "Madre",
+          phone: SHARED_PHONE,
+          docType: "DNI",
+          docNumber: "45678920",
+        },
+        health: {
+          allergies: { state: "unanswered", items: [] },
+          conditions: { state: "unanswered", items: [] },
+          medications: { state: "unanswered", items: [] },
+        },
+        privacyAccepted: true,
+      },
+    },
+  ),
+)
+await db
+  .transaction((tx) =>
+    registerPatient(
+      tx,
+      ORG_A,
+      { kind: "public", entryPoint: "qr" },
+      {
+        submissionId: randomUUID(),
+        formVersion: registrationConfig.version,
+        answers: {
+          demographics: { displayName: "Alguien Distinto", birthDate: "1990-01-01", phone: "+51987000999", docType: "DNI", docNumber: "45678920" },
+          respondent: "patient",
+          health: {
+            allergies: { state: "unanswered", items: [] },
+            conditions: { state: "unanswered", items: [] },
+            medications: { state: "unanswered", items: [] },
+          },
+          privacyAccepted: true,
+        },
+      },
+    ),
+  )
+  .catch(async (error: unknown) => {
+    if (!(error instanceof RegistrationHeld)) throw error
+    await db.transaction((tx) => leaveRegistrationHold(tx, ORG_A, error.hold))
+  })
 await db.transaction((tx) =>
   updateContact(
     tx,
@@ -2584,14 +2835,14 @@ await db.transaction((tx) =>
   }),
 )
 
-// --- Agenda: sillones y citas reales (la constraint impide sembrar solapes;
+// --- Agenda: unidades dentales y citas reales (la constraint impide sembrar solapes;
 // los avisos de la UI cubren datos históricos o importaciones, no este seed) ---
 const surco = await db.query.branch.findFirst({
   where: and(eq(branch.organizationId, ORG_A), eq(branch.name, "Sede Surco")),
 })
 if (!surco) throw new Error("Falta la Sede Surco")
 const chairsMiraflores = await Promise.all(
-  ["Sillón 1", "Sillón 2", "Sillón 3"].map((name) =>
+  ["Unidad dental 1", "Unidad dental 2", "Unidad dental 3"].map((name) =>
     createChair(db, ORG_A, { branchId: miraflores.id, name }),
   ),
 )
@@ -2603,12 +2854,19 @@ const domainSeed = {
   contactId: rosaContactId,
   conversationId: convRosa.id,
 }
-// Solo Miraflores lleva agenda: Surco se deja limpia (sin sillones, horarios ni ausencias)
+// Solo Miraflores lleva agenda: Surco se deja limpia (sin unidades dentales, horarios ni ausencias)
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
 await db.transaction((tx) => seedAvailability(tx, domainSeed))
+// La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
+// (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
+await setProfessionalSchedule(db, ORG_A, ANA_ID, {
+  branchId: miraflores.id,
+  dentistUserId: ROJAS_ID,
+  rules: [2, 4].map((weekday) => ({ weekday, startMin: 14 * 60, endMin: 18 * 60 })),
+})
 const chairA = (index: number): string => {
   const chair = chairsMiraflores[index]
-  if (!chair) throw new Error("Faltan sillones semilla")
+  if (!chair) throw new Error("Faltan unidades dentales semilla")
   return chair.id
 }
 /** Hora local de Lima (UTC-5 fijo en la semilla) → instante ISO. */
@@ -2618,8 +2876,8 @@ const lima = (dayOffset: number, hhmm: string): string => {
   return `${base.toISOString().slice(0, 10)}T${hhmm}:00-05:00`
 }
 // Ausencias claras en Miraflores, lejos de las citas sembradas (ayer, hoy y mañana):
-// un permiso y unas vacaciones de dos profesionales, un feriado de toda la sede y un
-// sillón en mantenimiento.
+// un permiso y unas vacaciones de dos profesionales, un feriado de toda la sede y una
+// unidad dental en mantenimiento.
 const limaDay = (dayOffset: number): string => lima(dayOffset, "00:00")
 for (const block of [
   { dentistUserId: ANA_ID, kind: "ausencia", reason: "Permiso", startsAt: lima(4, "15:00"), endsAt: lima(4, "18:00") },
@@ -2815,6 +3073,33 @@ for (const seed of [
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
+// «Tus mensajes» (ADR 0040): Carmen pidió por teléfono no recibir recordatorios
+// (en su página se ve apagado y, con «Recordar la cita» prendida, «Te espera»
+// pide llamarla el día antes de su cita); Diego no quiere ningún mensaje.
+await db.transaction(async (tx) => {
+  await setMessageChoice(tx, ORG_A, ANA_ID, contactIdByName.get("Carmen Rojas")!, {
+    choice: "recordatorio",
+    receive: false,
+    source: "telefono",
+  })
+  await setMessageChoice(tx, ORG_A, ANA_ID, contactIdByName.get("Diego Salazar")!, {
+    choice: "ninguno",
+    receive: false,
+    source: "presencial",
+  })
+})
+// Quién atiende qué (ADR 0039): la Dra. Rojas, Endodoncia; Ana, Cirugía oral
+// (la de la biblioteca, renombrada) y lo general; Luis, lo general.
+// Implantología queda sin nadie: la agenda ofrece a cualquiera y
+// Especialidades lo avisa.
+await db.transaction(async (tx) => {
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, ROJAS_ID, [specialtiesA.get("endodoncia")!])
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, ANA_ID, [
+    specialtiesA.get("cirugia")!,
+    specialtiesA.get("general")!,
+  ])
+  await setProfessionalSpecialties(tx, ORG_A, ANA_ID, LUIS_ID, [specialtiesA.get("general")!])
+})
 // Firmado en papel (fase 3, paso 2B): la anestesia local de la exodoncia, con
 // la foto de la hoja firmada; el pendiente se cierra con método «papel».
 {

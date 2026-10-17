@@ -218,22 +218,22 @@ test("bandeja: lo que cerró el agente se dice en la fila y en la franja del hil
   await info.attach("cerrada-por-el-agente", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })
 
-test("agente: «Pendientes» reemplaza a «Aprobaciones» y la dirección vieja lleva ahí", async ({ owner, fixtureDb }) => {
+test("agente: «Esperan su sí» reemplaza a «Aprobaciones» y la dirección vieja lleva ahí", async ({ owner, fixtureDb }) => {
   const { page, org } = owner
   await page.setViewportSize({ width: 1440, height: 900 })
   // La dirección vieja redirige conservando la búsqueda.
   await gotoHydrated(page, tenant(org.slug, "/agent/approvals?status=ejecutada"))
   await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/pendientes?status=ejecutada"))
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
-  await expect(tabs.getByRole("link", { name: /^Pendientes/ })).toHaveAttribute("aria-current", "page")
+  await expect(tabs.getByRole("link", { name: /^Esperan su sí/ })).toHaveAttribute("aria-current", "page")
   await expect(tabs.getByRole("link", { name: /Aprobaciones/ })).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "Casos del agente" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
 
   // Recepción decide por el agente sin supervisarlo: entra igual que antes.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Casos del agente" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
   await page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/pendientes"))
 })
@@ -256,7 +256,7 @@ test("agente: Límites guarda cuántas horas espera antes de cerrar por silencio
   const form = surface(page, { name: "Cerrar si el paciente no responde", exact: true })
   const hours = form.getByLabel("Cerrar la conversación si el paciente no responde")
   await expect(hours).toHaveValue("22")
-  await expect(form).toContainText("Entre 6 y 23 horas. Antes de cerrar, el agente se despide en horario de atención.")
+  await expect(form).toContainText("Entre 6 y 23 horas. Antes de cerrar, el agente se despide dentro del horario para escribir.")
   const save = form.getByRole("button", { name: "Guardar" })
   for (const wrong of ["5", "24"]) {
     await hours.fill(wrong)

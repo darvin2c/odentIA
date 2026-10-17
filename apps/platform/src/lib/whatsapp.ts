@@ -58,6 +58,10 @@ export interface ClinicMessage {
   variables: MessageData[]
   /** Tipo de mensaje según WhatsApp, ya en palabras. */
   category: string
+  /** WhatsApp lo cuenta como promoción aunque se pidió como aviso: solo sale a quien aceptó novedades (ADR 0040). */
+  promotion: boolean
+  /** Ya estaba en la cuenta y odentIA no sabe enviarla: la frase del servidor. Nulo en los demás. */
+  unsendable: string | null
   /** Qué pasa mientras no está aprobado: frase completa del servidor. */
   meanwhile: string | null
   editable: boolean
@@ -405,9 +409,14 @@ export interface MessageRowModel {
 
 const stopped = (status: MessageStatus) => status === "rechazada" || status === "deshabilitada"
 
+/** La marca de un aviso que WhatsApp pasó a promoción (ADR 0040). */
+export const PROMOTION_MARK = "Meta lo considera promoción"
+
 export function messageRow(item: ClinicMessage, since: Since): MessageRowModel {
   let note: MessageRowModel["note"] = null
-  if (stopped(item.current.status)) note = { text: "Ver el motivo y qué hacer", tone: "danger" }
+  if (item.unsendable) note = { text: item.unsendable, tone: "muted" }
+  else if (item.promotion) note = { text: PROMOTION_MARK, tone: "waiting" }
+  else if (stopped(item.current.status)) note = { text: "Ver el motivo y qué hacer", tone: "danger" }
   else if (item.meanwhile) {
     note = {
       text: item.meanwhile,
@@ -468,7 +477,11 @@ export function statusDetail(item: ClinicMessage, since: Since): string {
   // El tipo importa en lo que WhatsApp tiene en su poder y puede salir: de eso depende lo que cobra.
   const counted = state.status === "aprobada" || state.status === "en_revision" || state.status === "pausada"
   const category = counted ? `WhatsApp lo cuenta como mensaje de ${item.category.toLowerCase()}.` : ""
-  return [sentence, category].filter(Boolean).join(" ")
+  // La categoría manda (ADR 0040): un aviso que pasó a promoción solo sale a quien aceptó novedades.
+  const promotion = item.promotion
+    ? "Solo se enviará a quien aceptó novedades: cambia el texto para que sea solo el aviso."
+    : ""
+  return [sentence, category, promotion].filter(Boolean).join(" ")
 }
 
 /* ---------- Bandeja, pasadas las 24 horas ---------- */

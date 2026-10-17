@@ -83,7 +83,12 @@ async function buildOutbound(
     }
   }
   const buttons = replyButtonsOf(m.replyButtons)
-  return { to, kind: { type: "text", text: resolvePersonalLinkRefs(m.body ?? "", deps.secretsKey), ...(buttons ? { buttons } : {}) } }
+  return {
+    to,
+    // La baja de un correo automático va también en su cabecera (RFC 2369).
+    ...(m.listUnsubscribe ? { listUnsubscribe: m.listUnsubscribe } : {}),
+    kind: { type: "text", text: resolvePersonalLinkRefs(m.body ?? "", deps.secretsKey), ...(buttons ? { buttons } : {}) },
+  }
 }
 
 function replyButtonsOf(value: unknown): { id: string; title: string }[] | null {

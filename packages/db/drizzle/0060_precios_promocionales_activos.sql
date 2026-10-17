@@ -1,1 +1,0 @@
-ALTER TABLE "promotion_service_price" ADD COLUMN "is_active" boolean DEFAULT true NOT NULL;

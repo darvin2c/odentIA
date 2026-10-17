@@ -199,6 +199,8 @@ function PublicRegistrationPage() {
           <form onSubmit={view.onSubmit} className="space-y-6">
             {view.progress}
             {view.body}
+            {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
+            <p className="text-sm text-muted-foreground">Te avisaremos por WhatsApp sobre tus citas.</p>
             <div className="flex flex-col gap-3">
               {view.error ? (
                 <p role="alert" className="text-sm text-destructive">

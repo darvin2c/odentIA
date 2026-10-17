@@ -148,8 +148,13 @@ export function EncounterHandoff({
       steps.push({
         key: `balance-${balance.currency}`,
         owner: "Caja",
-        title: `Cobrar ${orgLocale ? formatMoney(balance.porCobrar, balance.currency, orgLocale) : "…"}`,
-        detail: "Saldo por cobrar en la cuenta del paciente.",
+        // El saldo descuenta lo que tiene a favor (decisión 22).
+        title:
+          balance.saldo > 0
+            ? `Cobrar ${orgLocale ? formatMoney(balance.saldo, balance.currency, orgLocale) : "…"}`
+            : "Aplicar lo que tiene a favor",
+        detail:
+          balance.saldo > 0 ? "Saldo por cobrar en la cuenta del paciente." : "Lo que tiene a favor cubre lo que debe.",
         tone: "warning",
         section: "cuenta",
         action: "Ir a la cuenta",

@@ -168,7 +168,7 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
         !canWrite
           ? "Sin permiso para cambiar tareas: solo lectura."
           : editTask?.settledReason
-            ? `Se cerró sola: ${editTask.settledReason}.`
+            ? `${editTask.status === "cancelled" ? "Descartada" : "Se cerró sola"}: ${editTask.settledReason}.`
             : settled
               ? "Ya está hecha."
               : opportunityId
