@@ -4,6 +4,9 @@ import { type Db, withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
   DICTATION_CHARS,
+  DICTATION_MAX_SUGGESTIONS,
+  DICTATION_OPERATION,
+  DICTATION_SOURCE_CHARS,
   type DiagnosisSystemKey,
   type DictationDraft,
   findingDiagnosisCode,
@@ -24,8 +27,21 @@ import type { AgentRuntime } from "./run.js"
  * que el servicio valida y que solo entran a la historia si el odontólogo los
  * confirma. El esquema de lo que puede llenar sale de la declaración de campos
  * de cada operación de la atención: un campo nuevo ahí aparece aquí solo.
+ *
+ * El esquema es lo que se le pide al modelo y es fijo, porque va en la parte
+ * que el proveedor guarda en caché. Sus topes son los del servicio (lo que
+ * guarda de un tramo y de cada cita) y le sirven de guía: si el modelo se pasa,
+ * la pausa no se rechaza entera, porque `readDictation` lee cada parte por
+ * separado.
  */
-const said = z.string().max(600).optional().describe("El fragmento del dictado, tal cual, del que sale este registro.")
+const said = z.string().max(DICTATION_SOURCE_CHARS).optional().describe("El fragmento del dictado, tal cual, del que sale este registro.")
+/**
+ * Corregir y quitar cambian sugerencias que ya estaban: la guía es de 10 por
+ * pausa. Con 40, ChatGPT 6 llegó a corregir las 40 pendientes en un
+ * odontograma y su salida subió de unos 1 500 a 6 000 tokens (medido el
+ * 2026-10-17). Más que esto en una pausa no se aplica (`readDictation`).
+ */
+const VOICE_EDITS_HINT = 10
 
 const extraction = z.object({
   nota: operationAgentSchema("atencion.nota")
@@ -34,17 +50,17 @@ const extraction = z.object({
     .describe("Los textos de la consulta que se dictaron. Omite los que no se dijeron."),
   diagnosticos: z
     .array(operationAgentSchema("atencion.diagnostico").extend({ dicho: said }))
-    .max(10)
+    .max(DICTATION_MAX_SUGGESTIONS)
     .default([])
     .describe("Un elemento por cada diagnóstico que nombró el odontólogo."),
   indicaciones: z
     .array(operationAgentSchema("plan.indicacion").extend({ dicho: said }))
-    .max(20)
+    .max(DICTATION_MAX_SUGGESTIONS)
     .default([])
     .describe("Un elemento por cada tratamiento que indicó para el plan."),
   controles: z
     .array(operationAgentSchema("control.crear").extend({ dicho: said }))
-    .max(5)
+    .max(DICTATION_MAX_SUGGESTIONS)
     .default([])
     .describe("Un elemento por cada control que pidió."),
   // Los campos de una corrección son los de la operación de esa sugerencia: el servicio los valida, aquí no se declaran.
@@ -56,16 +72,15 @@ const extraction = z.object({
         dicho: said,
       }),
     )
-    .max(10)
+    .max(VOICE_EDITS_HINT)
     .default([])
     .describe("Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna."),
   quitar: z
     .array(z.object({ sugerencia: z.number().int().min(1).describe("El número de la sugerencia pendiente que pidió quitar."), dicho: said }))
-    .max(10)
+    .max(VOICE_EDITS_HINT)
     .default([])
     .describe("Sugerencias pendientes que pidió quitar. Vacío si no pidió quitar ninguna."),
 })
-type Extraction = z.infer<typeof extraction>
 
 const TOOL_NAME = "registrar_dictado"
 
@@ -159,20 +174,97 @@ export function groundSource(said: string | undefined, transcript: string): stri
     .join(" ")
 }
 
-function toDrafts(result: Extraction, transcript: string): DictationDraft[] {
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+const blank = (value: unknown) => value === undefined || value === null || (typeof value === "string" && !value.trim())
+
+/** Cada bloque de registros de la respuesta, en el orden en que se guardan. */
+const DRAFT_PARTS = [
+  { key: "diagnosticos", kind: "diagnostico" },
+  { key: "indicaciones", kind: "plan" },
+  { key: "controles", kind: "control" },
+] as const
+
+/**
+ * Lee la respuesta del modelo parte por parte, para que lo que no cabe en el
+ * esquema no bote la pausa entera:
+ * - «lo que dijiste» se acepta aunque sea largo si de verdad se dijo
+ *   (`groundSource`); el servicio guarda sus primeros caracteres;
+ * - un registro con un dato que no encaja en su operación llega igual, solo
+ *   con los campos de esa operación, y el servicio lo deja por revisar;
+ * - lo que no se puede usar se cuenta en `omitted` para avisar al odontólogo:
+ *   un registro sin ningún dato, una corrección o un «quita» con un número que
+ *   no está entre las pendientes (no se adivina a cuál se refería) y lo que
+ *   pasa de lo que el servicio guarda de un tramo.
+ * Corregir y quitar cambian lo que ya estaba, así que se les cree menos: un
+ * «quita» sin lo que el odontólogo dijo para pedirlo no se aplica, y si en una
+ * pausa llegan más correcciones o «quita» que los que pide el esquema, no se
+ * aplica ninguno. Medido el 2026-10-17: las cuatro veces que llegaron más de
+ * 10 «quita» (20, 20, 30 y 40; los 40, en una pausa de charla y sin cita)
+ * eran sugerencias que nadie pidió quitar. Lo que no se aplica se queda
+ * pendiente, a la vista, y se cuenta.
+ * Solo una respuesta que no es un objeto no se puede leer: `null`.
+ */
+export function readDictation(args: unknown, transcript: string, pendingCount: number): Omit<DictationExtraction, "model"> | null {
+  if (!isRecord(args)) return null
+  let omitted = 0
+  const items = (value: unknown): unknown[] => {
+    if (blank(value)) return []
+    if (Array.isArray(value)) return value
+    omitted += 1
+    return []
+  }
+  const quote = (item: Record<string, unknown>) => groundSource(typeof item["dicho"] === "string" ? item["dicho"] : undefined, transcript)
+  /** Solo los campos de su operación: la cita y lo que el modelo agregue de más no llegan al servicio. */
+  const fields = (kind: DictationDraft["kind"], item: Record<string, unknown>): Record<string, unknown> => {
+    const schema = operationAgentSchema(DICTATION_OPERATION[kind])
+    const parsed = schema.safeParse(item)
+    if (parsed.success) return parsed.data as Record<string, unknown>
+    return Object.fromEntries(Object.entries(item).filter(([key, value]) => key in schema.shape && !blank(value)))
+  }
+  // El modelo a veces escribe el número entre comillas («"3"»): es el mismo número.
+  const pendingIndex = (value: unknown): number | null => {
+    const number = typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : value
+    return typeof number === "number" && Number.isInteger(number) && number >= 1 && number <= pendingCount ? number - 1 : null
+  }
+
   const drafts: DictationDraft[] = []
-  const split = <T extends { dicho?: string | undefined }>(item: T) => {
-    const { dicho, ...payload } = item
-    return { payload: payload as Record<string, unknown>, sourceText: groundSource(dicho, transcript) }
+  const nota = args["nota"]
+  if (isRecord(nota)) {
+    const payload = fields("nota", nota)
+    if (Object.values(payload).some((value) => typeof value === "string" && value.trim())) drafts.push({ kind: "nota", payload, sourceText: quote(nota) })
+    else if (Object.values(payload).some((value) => !blank(value))) omitted += 1
+  } else if (!blank(nota)) omitted += 1
+  for (const part of DRAFT_PARTS) {
+    for (const item of items(args[part.key])) {
+      const payload = isRecord(item) ? fields(part.kind, item) : {}
+      if (!isRecord(item) || Object.keys(payload).length === 0) omitted += 1
+      else drafts.push({ kind: part.kind, payload, sourceText: quote(item) })
+    }
   }
-  if (result.nota) {
-    const { payload, sourceText } = split(result.nota)
-    if (Object.values(payload).some((value) => typeof value === "string" && value.trim())) drafts.push({ kind: "nota", payload, sourceText })
+
+  const corrections: DictationExtraction["corrections"] = []
+  for (const item of items(args["correcciones"])) {
+    const index = isRecord(item) ? pendingIndex(item["sugerencia"]) : null
+    if (!isRecord(item) || index === null || !isRecord(item["cambios"])) omitted += 1
+    else corrections.push({ index, changes: item["cambios"], sourceText: quote(item) })
   }
-  for (const item of result.diagnosticos) drafts.push({ kind: "diagnostico", ...split(item) })
-  for (const item of result.indicaciones) drafts.push({ kind: "plan", ...split(item) })
-  for (const item of result.controles) drafts.push({ kind: "control", ...split(item) })
-  return drafts
+  const removals: DictationExtraction["removals"] = []
+  for (const item of items(args["quitar"])) {
+    const index = isRecord(item) ? pendingIndex(item["sugerencia"]) : null
+    const sourceText = isRecord(item) ? quote(item) : ""
+    // Quitar es lo único que descarta: sin lo que dijo para pedirlo, la sugerencia se queda.
+    if (index === null || !sourceText) omitted += 1
+    else removals.push({ index, sourceText })
+  }
+
+  const voice = <T>(list: T[]) => {
+    if (list.length <= VOICE_EDITS_HINT) return list
+    omitted += list.length
+    return []
+  }
+  const kept = drafts.slice(0, DICTATION_MAX_SUGGESTIONS)
+  omitted += drafts.length - kept.length
+  return { drafts: kept, corrections: voice(corrections), removals: voice(removals), omitted }
 }
 
 /* ---------- Modo de demostración: sin proveedor real ---------- */
@@ -273,6 +365,8 @@ export interface DictationExtraction {
   corrections: Array<{ index: number; changes: Record<string, unknown>; sourceText: string }>
   /** Sugerencias pendientes que pidió quitar, por su posición en `pending`. */
   removals: Array<{ index: number; sourceText: string }>
+  /** Partes de la respuesta que no se pudieron usar (`readDictation`): se le avisa al odontólogo. */
+  omitted: number
   model: string
 }
 
@@ -310,7 +404,7 @@ export function demoSegment(
       if (index >= 0) removals.push({ index, sourceText: sentence })
     }
   }
-  return { drafts, corrections, removals }
+  return { drafts, corrections, removals, omitted: 0 }
 }
 
 /**
@@ -372,17 +466,10 @@ export async function extractDictation(
   )
   reportReplyUse(spec.provider, spec.modelName, reply)
   const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === TOOL_NAME) : undefined
-  const parsed = call ? extraction.safeParse(call.args) : null
-  if (!parsed?.success) {
+  const read = call ? readDictation(call.args, transcript, pending.length) : null
+  if (!read) {
     // El proveedor respondió, pero no con algo que se pueda ordenar: no se inventa nada.
     throw new ServiceError("DICTATION_UNREADABLE", 502, "El asistente no pudo ordenar ese dictado. Vuelve a intentarlo o regístralo a mano.")
   }
-  // Un número que no corresponde a ninguna pendiente se ignora: no se adivina a cuál se refería.
-  const known = <T extends { sugerencia: number }>(item: T) => item.sugerencia <= pending.length
-  return {
-    drafts: toDrafts(parsed.data, transcript),
-    corrections: parsed.data.correcciones.filter(known).map((item) => ({ index: item.sugerencia - 1, changes: item.cambios, sourceText: groundSource(item.dicho, transcript) })),
-    removals: parsed.data.quitar.filter(known).map((item) => ({ index: item.sugerencia - 1, sourceText: groundSource(item.dicho, transcript) })),
-    model: spec.modelName,
-  }
+  return { ...read, model: spec.modelName }
 }

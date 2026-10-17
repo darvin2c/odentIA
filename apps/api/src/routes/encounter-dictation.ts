@@ -89,7 +89,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
           return listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
         })
-        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], repeated: true, model: null }
+        if (!before) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertAgentsNotPaused(tx, orgId))
         const extracted = await meterAiUse(deps.db, orgId, "dictado", () =>
@@ -114,7 +114,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         )
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
         const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
-        return { ...saved, sources, model: extracted.model }
+        // Lo que el asistente no pudo usar de este tramo, para avisarle al odontólogo en vez de perderlo en silencio.
+        return { ...saved, sources, omitted: extracted.omitted, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
