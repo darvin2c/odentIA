@@ -5,6 +5,7 @@
  */
 export * from "./anatomy.js"
 export * from "./catalog.js"
+export * from "./catalogs.js"
 export * from "./findings.js"
 export * from "./treated-findings.js"
 export * from "./signed-odontogram.js"

@@ -14,8 +14,6 @@
  *   entrega. Encolado nunca se presenta como entregado.
  */
 import type { Db } from "@odentia/db"
-import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
-import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
@@ -33,6 +31,7 @@ import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { MUTED, safe, when, Writer, type Zone } from "./pdf-writer.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
+import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
 import { sendPersonalLink } from "./su-enlace.js"
 
 export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent"] as const
@@ -43,88 +42,16 @@ function assertHealthType(value: string): HealthDocumentType {
   throw validation("Documento inválido: receta, orden o consentimiento")
 }
 
-export interface HealthDocumentRecipient {
-  contactId: string
-  displayName: string
-  relation: "paciente" | "representante_legal"
-  email: string | null
-  phone: string | null
-  isDefault: boolean
-}
-
-function ageOn(birthDate: string, on: Date): number {
-  const [y, m, d] = birthDate.split("-").map(Number) as [number, number, number]
-  let age = on.getUTCFullYear() - y
-  const month = on.getUTCMonth() + 1
-  if (month < m || (month === m && on.getUTCDate() < d)) age -= 1
-  return age
-}
+export type HealthDocumentRecipient = DecisionRecipient
 
 /**
- * Quién puede recibir un papel de salud: la propia persona si es mayor de edad
- * y su representante legal vigente. Un menor no lo recibe en su propio chat.
+ * Quién puede recibir un papel de salud: la regla única de a quién se le
+ * manda algo (`listDecisionRecipients`): la propia persona si es mayor de
+ * edad y su representante legal vigente. Un menor no lo recibe en su propio
+ * chat, y al cumplir 18 deja de recibirlo quien lo representó de niño.
  */
-export async function listHealthDocumentRecipients(
-  tx: Db,
-  orgId: string,
-  patientId: string,
-): Promise<HealthDocumentRecipient[]> {
-  const subject = await requirePatient(tx, orgId, patientId)
-  const minor = subject.birthDate ? ageOn(subject.birthDate, new Date()) < 18 : false
-  const today = new Date().toISOString().slice(0, 10)
-  const out: HealthDocumentRecipient[] = []
-  if (!minor) {
-    const [self] = await tx
-      .select({ contact })
-      .from(patientContact)
-      .innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
-      .where(
-        and(
-          eq(patientContact.organizationId, orgId),
-          eq(patientContact.patientId, patientId),
-          eq(patientContact.relationship, "self"),
-          eq(contact.isActive, true),
-        ),
-      )
-      .limit(1)
-    if (self)
-      out.push({
-        contactId: self.contact.id,
-        displayName: self.contact.displayName,
-        relation: "paciente",
-        email: self.contact.email,
-        phone: self.contact.phone,
-        isDefault: false,
-      })
-  }
-  const representatives = await tx
-    .select({ contact })
-    .from(patientResponsibility)
-    .innerJoin(contact, and(eq(contact.id, patientResponsibility.contactId), eq(contact.organizationId, orgId)))
-    .where(
-      and(
-        eq(patientResponsibility.organizationId, orgId),
-        eq(patientResponsibility.patientId, patientId),
-        eq(patientResponsibility.kind, "representante_legal"),
-        isNull(patientResponsibility.revokedAt),
-        sql`${patientResponsibility.startsAt} <= ${today}`,
-        sql`(${patientResponsibility.endsAt} IS NULL OR ${patientResponsibility.endsAt} >= ${today})`,
-        eq(contact.isActive, true),
-      ),
-    )
-  for (const row of representatives) {
-    if (out.some((r) => r.contactId === row.contact.id)) continue
-    out.push({
-      contactId: row.contact.id,
-      displayName: row.contact.displayName,
-      relation: "representante_legal",
-      email: row.contact.email,
-      phone: row.contact.phone,
-      isDefault: false,
-    })
-  }
-  if (out[0]) out[0].isDefault = true
-  return out
+export function listHealthDocumentRecipients(tx: Db, orgId: string, patientId: string): Promise<HealthDocumentRecipient[]> {
+  return listDecisionRecipients(tx, orgId, patientId)
 }
 
 /** WhatsApp primero; sin WhatsApp, el correo. Ningún otro canal lleva papeles de salud. */

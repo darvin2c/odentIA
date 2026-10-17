@@ -13,6 +13,7 @@ import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, gt, ilike, inArray, ne, or, sql } from "drizzle-orm"
+import { decodeCursor, encodeCursor } from "./cursors.js"
 import { branchNotFound, notFound, validation } from "./errors.js"
 import { getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
@@ -371,9 +372,37 @@ export interface ListKnowledgeInput {
   branchId?: string
   q?: string
   limit?: number
+  /** Desde dónde seguir (`nextCursor` de la página anterior). */
+  cursor?: string
 }
 
-export async function listKnowledgeEntries(tx: Db, orgId: string, input: ListKnowledgeInput = {}): Promise<KnowledgeEntryListItem[]> {
+export interface KnowledgePage {
+  items: KnowledgeEntryListItem[]
+  /** Nulo si no hay más. */
+  nextCursor: string | null
+  /** Todas las que cumplen el filtro, no solo las de esta página. */
+  total: number
+}
+
+/**
+ * La pantalla de Conocimiento, por páginas (topes de la fase 4, B6): la
+ * respuesta 101 también se abre, se corrige y se retira. La búsqueda se hace
+ * en el servidor; el orden es la última edición.
+ */
+export async function listKnowledgePage(tx: Db, orgId: string, input: ListKnowledgeInput = {}): Promise<KnowledgePage> {
+  const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), MAX_LIMIT)
+  const rows = await listKnowledgeEntries(tx, orgId, { ...input, limit: limit + 1 }, true)
+  const items = rows.slice(0, limit)
+  const last = items.at(-1)
+  const [counted] = await tx.select({ total: count() }).from(agentKnowledgeEntry).where(and(...knowledgeConditions(orgId, input)))
+  return {
+    items: items.map(({ cursorTs: _ts, ...item }) => item),
+    nextCursor: rows.length > limit && last ? encodeCursor(last.cursorTs, last.id) : null,
+    total: Number(counted?.total ?? 0),
+  }
+}
+
+function knowledgeConditions(orgId: string, input: ListKnowledgeInput) {
   const conditions = [eq(agentKnowledgeEntry.organizationId, orgId)]
   if (input.kind) {
     assertKind(input.kind)
@@ -389,13 +418,35 @@ export async function listKnowledgeEntries(tx: Db, orgId: string, input: ListKno
     const like = `%${q}%`
     conditions.push(or(ilike(agentKnowledgeEntry.title, like), ilike(agentKnowledgeEntry.body, like))!)
   }
-  const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), MAX_LIMIT)
+  return conditions
+}
+
+export async function listKnowledgeEntries(tx: Db, orgId: string, input?: ListKnowledgeInput): Promise<KnowledgeEntryListItem[]>
+export async function listKnowledgeEntries(
+  tx: Db,
+  orgId: string,
+  input: ListKnowledgeInput,
+  withCursor: true,
+): Promise<Array<KnowledgeEntryListItem & { cursorTs: string }>>
+export async function listKnowledgeEntries(
+  tx: Db,
+  orgId: string,
+  input: ListKnowledgeInput = {},
+  withCursor = false,
+): Promise<Array<KnowledgeEntryListItem & { cursorTs?: string }>> {
+  const conditions = knowledgeConditions(orgId, input)
+  if (input.cursor) {
+    const cursor = decodeCursor(input.cursor)
+    if (!cursor || !/^[0-9a-f-]{36}$/i.test(cursor.id)) throw validation("Cursor inválido")
+    conditions.push(sql`(${agentKnowledgeEntry.updatedAt}, ${agentKnowledgeEntry.id}) < (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`)
+  }
+  const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), MAX_LIMIT + 1)
   const rows = await tx
-    .select({ entry: agentKnowledgeEntry, branchName: branch.name })
+    .select({ entry: agentKnowledgeEntry, branchName: branch.name, cursorTs: sql<string>`${agentKnowledgeEntry.updatedAt}::text` })
     .from(agentKnowledgeEntry)
     .leftJoin(branch, eq(branch.id, agentKnowledgeEntry.branchId))
     .where(and(...conditions))
-    .orderBy(desc(agentKnowledgeEntry.updatedAt), asc(agentKnowledgeEntry.id))
+    .orderBy(desc(agentKnowledgeEntry.updatedAt), desc(agentKnowledgeEntry.id))
     .limit(limit)
   const today = await orgToday(tx, orgId)
   // Lo que «Aprender» sabe de cada respuesta: la lección propuesta que la
@@ -423,10 +474,11 @@ export async function listKnowledgeEntries(tx: Db, orgId: string, input: ListKno
       if (!pending.has(lesson.entryId)) pending.set(lesson.entryId, lesson.id)
     } else learned.set(lesson.entryId, (learned.get(lesson.entryId) ?? 0) + lesson.uses)
   }
-  return rows.map(({ entry, branchName }) => ({
+  return rows.map(({ entry, branchName, cursorTs }) => ({
     ...toItem(entry, today, branchName),
     pendingLessonId: pending.get(entry.id) ?? null,
     learned: learned.has(entry.id) ? { uses: learned.get(entry.id) ?? 0 } : null,
+    ...(withCursor ? { cursorTs } : {}),
   }))
 }
 

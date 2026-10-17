@@ -64,6 +64,8 @@ import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
+import { nextOpportuneFrom } from "./opportune-hours.js"
+import { isWritingTime, writingScheduleOf } from "./writing-hours.js"
 import { personalLinkButtonUrl } from "./public-links.js"
 
 /**
@@ -1868,6 +1870,19 @@ export async function resumeConversationBySystem(
   // «No quiero ningún mensaje de la clínica» también frena retomar.
   if (!(await mayWriteFirst(tx, orgId, person.contactId, "avisos"))) {
     return { sent: false, waiting: `${name} pidió no recibir ningún mensaje de la clínica: llámala si hace falta.` }
+  }
+  // Lo inicia el agente: sale dentro del «Horario para escribir» (ADR 0042).
+  const schedule = await writingScheduleOf(tx, orgId)
+  if (!isWritingTime(now, schedule)) {
+    const opens = nextOpportuneFrom(now, schedule)
+    const locale = (await findOrgLocale(tx, orgId)).locale
+    const when = opens
+      ? `${new Intl.DateTimeFormat(locale, { timeZone: schedule.timeZone, weekday: "long" }).format(opens)} a las ${new Intl.DateTimeFormat(locale, { timeZone: schedule.timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(opens)}`
+      : null
+    return {
+      sent: false,
+      waiting: `Es fuera del horario para escribir${when ? `: el agente puede escribirle a ${name} desde el ${when}` : ""}. Llámala si es urgente.`,
+    }
   }
   const { options, why } = await sendables(tx, orgId, conversationId, now)
   const option = options.find((item) => item.id === RESUME_MESSAGE_KEY)

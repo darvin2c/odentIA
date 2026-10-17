@@ -28,6 +28,7 @@ import { channelConnection, contact, conversation } from "@odentia/db/schema/crm
 import { and, asc, desc, eq, gt, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { validateAvailability } from "./availability.js"
+import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
 import {
   appointmentConfirmationPlan,
   cancelPendingForAppointment,
@@ -380,7 +381,14 @@ export interface AppointmentContext {
    * A quién se le escribe por esta cita: la persona del paciente o quien
    * habla por él (la misma que recibe los recordatorios).
    */
-  person: { contactId: string; name: string; phone: string | null; relationship: string } | null
+  person: {
+    contactId: string
+    name: string
+    phone: string | null
+    relationship: string
+    /** Si su teléfono es su WhatsApp, aún no o no tiene (decisión 23). */
+    whatsapp: PhoneWhatsApp
+  } | null
   /** De dónde salió: `source` y, si nació en una conversación, cuál, su canal y cuándo. */
   origin: {
     source: string
@@ -420,7 +428,14 @@ export async function getAppointmentContext(tx: Db, orgId: string, id: string): 
     : []
   return {
     person: person
-      ? { contactId: person.id, name: person.name, phone: person.phone, relationship: person.relationship }
+      ? {
+          contactId: person.id,
+          name: person.name,
+          phone: person.phone,
+          relationship: person.relationship,
+          // Si su teléfono es su WhatsApp: el cajón avisa «Aún no es su WhatsApp» (decisión 23).
+          whatsapp: await phoneWhatsAppState(tx, orgId, person.id),
+        }
       : null,
     origin: {
       source: current.source,
@@ -429,6 +444,31 @@ export async function getAppointmentContext(tx: Db, orgId: string, id: string): 
       at: current.createdAt.toISOString(),
     },
     confirmation: await appointmentConfirmationPlan(tx, orgId, id),
+  }
+}
+
+/**
+ * Si el recordatorio de la cita le llegará a quien lo recibe (la misma persona
+ * de `getAppointmentContext`): al reservar, recepción ve «Carmen no recibirá
+ * el recordatorio: aún no tiene WhatsApp» (decisión 23, caso 2).
+ */
+export async function appointmentReminderReach(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<{ name: string; whatsapp: PhoneWhatsApp; hasEmail: boolean } | null> {
+  const contactId = await preferredContact(tx, orgId, patientId)
+  if (!contactId) return null
+  const [person] = await tx
+    .select({ name: contact.displayName, givenNames: contact.givenNames, email: contact.email })
+    .from(contact)
+    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+    .limit(1)
+  if (!person) return null
+  return {
+    name: person.givenNames?.trim().split(/\s+/)[0] || person.name,
+    whatsapp: await phoneWhatsAppState(tx, orgId, contactId),
+    hasEmail: !!person.email?.trim(),
   }
 }
 
@@ -1047,21 +1087,48 @@ export async function updateAppointment(
     updatedAt: new Date(),
   }
   if (input.reason !== undefined) set.reason = input.reason?.trim() || null
+  let endsAt = current.endsAt
   if (input.serviceId !== undefined) {
     const service = input.serviceId ? await requireService(tx, orgId, input.serviceId) : null
     set.serviceId = service?.id ?? null
     set.serviceName = service?.name ?? null
+    // Otro servicio, otra duración: la cita dura lo del servicio nuevo, como al reservarla.
+    if (service && service.id !== current.serviceId && service.durationMin) {
+      endsAt = new Date(current.startsAt.getTime() + service.durationMin * 60_000)
+      set.endsAt = endsAt
+      set.durationMin = service.durationMin
+    }
   }
-  if (input.dentistUserId !== undefined && input.dentistUserId !== current.dentistUserId) {
-    await requireDentist(tx, orgId, input.dentistUserId)
-    set.dentistUserId = input.dentistUserId
-  }
-  if (input.chairId !== undefined && input.chairId !== current.chairId) {
-    const chair = await requireChair(tx, orgId, input.chairId)
+  const dentistUserId = input.dentistUserId ?? current.dentistUserId
+  if (dentistUserId !== current.dentistUserId) set.dentistUserId = dentistUserId
+  const chairId = input.chairId ?? current.chairId
+  if (chairId !== current.chairId) {
+    const chair = await requireChair(tx, orgId, chairId)
     if (chair.branchId !== current.branchId) {
       throw validation("La unidad dental no pertenece a la sede de la cita")
     }
-    set.chairId = input.chairId
+    set.chairId = chairId
+  }
+  // «Editar» revisa la agenda igual que «Mover» (`moveAppointment`): quien
+  // atiende debe tener horario, y ni un bloqueo ni otra cita pueden pisarla.
+  const active = current.status === "programada" || current.status === "confirmada"
+  const changesPlace =
+    dentistUserId !== current.dentistUserId || chairId !== current.chairId || endsAt.getTime() !== current.endsAt.getTime()
+  if (changesPlace) {
+    if (!active) {
+      throw conflict("APPOINTMENT_STATUS", "Esta cita ya no se puede cambiar: solo se cambian las programadas o confirmadas")
+    }
+    if (await linkedEncounter(tx, orgId, current.id)) {
+      throw conflict("APPOINTMENT_IN_ATTENTION", "La cita tiene una atención en curso: termínala o anúlala antes de cambiarla")
+    }
+    await validateAvailability(tx, orgId, {
+      branchId: current.branchId,
+      dentistUserId,
+      chairId,
+      startsAt: current.startsAt,
+      endsAt,
+      ignoreAppointmentId: id,
+    })
   }
   try {
     const [updated] = await tx

@@ -192,7 +192,6 @@ export const saasSubscription = pgTable(
     sellerWindowDays: integer("seller_window_days"),
     sellerStartedAt: timestamp("seller_started_at", { withTimezone: true }),
     sellerEndedAt: timestamp("seller_ended_at", { withTimezone: true }),
-    billingEmail: text("billing_email"),
     /** Descuento negociado sobre el precio base de cada acción (ADR 0031); la cuota no tiene descuento. */
     discountBps: integer("discount_bps").notNull().default(0),
     /** Prueba negociada para esta clínica; null = la del plan. */

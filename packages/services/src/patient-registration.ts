@@ -35,6 +35,7 @@ import { createContactNote } from "./crm-workspace.js"
 import { createPatient, patientOrganizationToday, patientPersonId, requirePatient, type PatientRow } from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
 import { applyMessagePermissions } from "./data-consents.js"
+import { createPerson, findPersonByDocument } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
 
@@ -200,7 +201,25 @@ export async function getPatientMissingData(
       ),
     )
     .limit(1)
-  return missingPersonData(config, row as unknown as Record<string, unknown>, { representativeContact: !!spokesperson })
+  // El contacto de emergencia es una persona vinculada con la marca (decisión 25).
+  const [emergency] = await tx
+    .select({ name: contact.displayName, phone: contact.phone })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+        eq(patientContact.isEmergency, true),
+        eq(contact.isActive, true),
+      ),
+    )
+    .limit(1)
+  return missingPersonData(
+    config,
+    { ...row, emergencyContactName: emergency?.name ?? null, emergencyContactPhone: emergency?.phone ?? null },
+    { representativeContact: !!spokesperson },
+  )
 }
 
 export interface SaveRegistrationConfigInput {
@@ -928,32 +947,44 @@ export async function attachLegalRepresentative(
   let representativeId = input.existingContactId ?? null
   if (!representativeId) {
     const rep = input.representative
-    const [person] = await tx
-      .insert(contact)
+    // Una sola forma de crear personas (`createPerson`): quien ya tiene ese
+    // documento en la clínica es la misma persona (la madre que registra a su
+    // segundo hijo) y se la reutiliza tal como está, sin tocar sus datos.
+    const docCountry = rep.docNumber
+      ? documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry)
+      : null
+    representativeId =
+      (await findPersonByDocument(tx, orgId, { docType: rep.docType ?? null, docNumber: rep.docNumber || null, docCountry })) ??
+      (
+        await createPerson(
+          tx,
+          orgId,
+          { userId: actorUserId },
+          {
+            displayName: rep.displayName,
+            phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
+            email: rep.email || null,
+            docType: rep.docType ?? null,
+            docNumber: rep.docNumber || null,
+            docCountry,
+          },
+        )
+      ).id
+    await tx
+      .insert(patientContact)
       .values({
         organizationId: orgId,
-        displayName: rep.displayName,
-        phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
-        email: rep.email || null,
-        docType: rep.docType ?? null,
-        docNumber: rep.docNumber || null,
-        // El documento con su país emisor, como el de la persona.
-        docCountry: rep.docNumber
-          ? documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry)
-          : null,
+        patientId,
+        contactId: representativeId,
+        relationship: "guardian",
+        relationshipDetail: rep.relationshipDetail || null,
+        isPreferred: false,
+        createdBy: actorUserId,
       })
-      .returning({ id: contact.id })
-    if (!person) throw new Error("No se pudo crear al representante")
-    representativeId = person.id
-    await tx.insert(patientContact).values({
-      organizationId: orgId,
-      patientId,
-      contactId: person.id,
-      relationship: "guardian",
-      relationshipDetail: rep.relationshipDetail || null,
-      isPreferred: false,
-      createdBy: actorUserId,
-    })
+      // Ya vinculada (como familiar, por ejemplo): conserva su vínculo y recibe el rol.
+      .onConflictDoNothing({
+        target: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
+      })
   }
   await grantResponsibility(tx, orgId, actorUserId, patientId, {
     contactId: representativeId,

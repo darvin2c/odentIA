@@ -18,6 +18,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { personSearchCondition } from "./person-search.js"
 import { findOrgCountry } from "./locale.js"
 import { identityPatchOf, setPersonArchived, updatePersonIdentity } from "./people.js"
 
@@ -48,7 +49,6 @@ export interface ContactListItem {
   preferredChannel: string | null
   isActive: boolean
   tags: string[]
-  assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
   /** Oportunidades abiertas del contacto (agregado SQL completo, no muestra truncada). */
@@ -61,7 +61,6 @@ export interface ContactDetail extends ContactListItem {
   docNumber: string | null
   birthDate: string | null
   sex: string | null
-  notes: string | null
   customFields: Record<string, unknown>
   createdAt: string
   updatedAt: string
@@ -83,7 +82,6 @@ function toListItem(
     preferredChannel: row.preferredChannel,
     isActive: row.isActive,
     tags: row.tags,
-    assignedUserId: row.assignedUserId,
     lastInteractionAt: iso(row.lastInteractionAt),
     channels,
     openOpportunityCount,
@@ -150,21 +148,11 @@ export async function listContacts(
   const sort = normalizeContactSort(input.sort)
   const fingerprint = listingFingerprint({ q, isActive: active, sort })
   const conditions = [eq(contact.organizationId, orgId)]
-  if (q) {
-    const like = `%${q}%`
-    // «987 654» encuentra «+51987654100»: el teléfono se compara por sus dígitos.
-    const digits = /^[\d\s\-()+.]+$/.test(q) ? q.replace(/\D/g, "") : ""
+  // El mismo buscador que la lista de personas: «987 654» encuentra «+51987654100».
+  if (q)
     conditions.push(
-      or(
-        ilike(contact.displayName, like),
-        ilike(contact.phone, like),
-        ilike(contact.email, like),
-        ...(digits.length >= 4
-          ? [sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`]
-          : []),
-      )!,
+      personSearchCondition(q, { displayName: contact.displayName, email: contact.email, phone: contact.phone }),
     )
-  }
   if (active !== "all") conditions.push(eq(contact.isActive, active))
   if (input.cursor) {
     const decoded = decodeListingCursor(input.cursor)
@@ -370,7 +358,6 @@ export async function getContact(tx: Db, orgId: string, id: string): Promise<Con
       docNumber: row.docNumber,
       birthDate: row.birthDate,
       sex: row.sex,
-      notes: row.notes,
       customFields,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -496,10 +483,11 @@ export async function createContact(
     maternalSurname?: string | null
     phone?: string | null
     email?: string | null
+    docType?: string | null
+    docNumber?: string | null
+    docCountry?: string | null
     isActive?: boolean
-    notes?: string
     tags?: string[]
-    assignedUserId?: string | null
   },
   actor?: { userId: string | null },
 ): Promise<ContactDetail> {
@@ -515,10 +503,11 @@ export async function createContact(
       maternalSurname: input.maternalSurname ?? null,
       phone: (await cleanContactPhone(tx, orgId, input.phone)) ?? null,
       email: cleanContactEmail(input.email) ?? null,
+      docType: input.docType ?? null,
+      docNumber: input.docNumber ?? null,
+      docCountry: input.docCountry ?? null,
       isActive: input.isActive ?? true,
-      notes: input.notes ?? null,
       tags: normalizeContactTags(input.tags ?? []),
-      assignedUserId: input.assignedUserId ?? null,
     })
     .returning()
   if (!created) throw new Error("No se pudo crear el contacto")
@@ -526,10 +515,9 @@ export async function createContact(
   const createdFields = ["displayName"]
   if (input.phone !== undefined) createdFields.push("phone")
   if (input.email !== undefined) createdFields.push("email")
+  if (input.docNumber) createdFields.push("docNumber")
   if (input.isActive !== undefined) createdFields.push("isActive")
-  if (input.notes !== undefined) createdFields.push("notes")
   if (input.tags !== undefined) createdFields.push("tags")
-  if (input.assignedUserId !== undefined) createdFields.push("assignedUserId")
   await auditContact(tx, orgId, actor, "contact.created", created.id, { fields: createdFields })
   await notifyCrm(tx, orgId, "contact.updated")
   const full = await getContact(tx, orgId, created.id)
@@ -610,9 +598,7 @@ export async function updateContact(
     sex?: string | null
     /** Archivar/recuperar: archiva o recupera a la persona entera (`setPersonArchived`). */
     isActive?: boolean
-    notes?: string | null
     tags?: string[]
-    assignedUserId?: string | null
     customFields?: Record<string, unknown>
   },
   actor?: { userId: string | null; origin?: "agent" },
@@ -651,17 +637,9 @@ export async function updateContact(
     patch.preferredChannel = preferred
     changed.push("preferredChannel")
   }
-  if (fields.notes !== undefined) {
-    patch.notes = fields.notes
-    changed.push("notes")
-  }
   if (fields.tags !== undefined) {
     patch.tags = normalizeContactTags(fields.tags)
     changed.push("tags")
-  }
-  if (fields.assignedUserId !== undefined) {
-    patch.assignedUserId = fields.assignedUserId
-    changed.push("assignedUserId")
   }
   if (fields.customFields !== undefined) {
     patch.customFields = await sanitizeCustomFields(tx, orgId, fields.customFields)
@@ -921,6 +899,11 @@ export async function claimWhatsAppNumber(
   const before = await findChannelIdentity(tx, orgId, "whatsapp", `wa:${digits}`)
   try {
     const identity = await addContactIdentity(tx, orgId, actorUserId, contactId, { channel: "whatsapp", externalUserId: digits })
+    // Lo decide una persona del equipo: si antes WhatsApp lo rechazó, se vuelve a intentar.
+    await tx
+      .update(contactIdentity)
+      .set({ noWhatsappAt: null })
+      .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, identity.id)))
     return { identityId: identity.id, created: !before }
   } catch (error) {
     if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") {
@@ -932,6 +915,160 @@ export async function claimWhatsAppNumber(
     }
     throw error
   }
+}
+
+/**
+ * Su teléfono y su WhatsApp (decisión 23): si el número de «Teléfono» es ya su
+ * WhatsApp, si aún no lo es (nadie lo marcó: ADR 0027) o si WhatsApp lo
+ * rechazó porque no tiene WhatsApp. `canUse`: la clínica tiene WhatsApp
+ * conectado, así que «Usarlo como su WhatsApp» sirve.
+ */
+export type PhoneWhatsAppState = "sin_telefono" | "es_su_whatsapp" | "aun_no" | "no_tiene"
+
+export interface PhoneWhatsApp {
+  state: PhoneWhatsAppState
+  phone: string | null
+  canUse: boolean
+}
+
+export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: string): Promise<PhoneWhatsApp> {
+  const [person] = await tx
+    .select({ phone: contact.phone })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+    .limit(1)
+  const [connected] = await tx
+    .select({ id: channelConnection.id })
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "whatsapp"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .limit(1)
+  const phone = person?.phone ?? null
+  const digits = phone?.replace(/\D/g, "") ?? ""
+  if (!digits) return { state: "sin_telefono", phone, canUse: !!connected }
+  const [identity] = await tx
+    .select({ noWhatsappAt: contactIdentity.noWhatsappAt })
+    .from(contactIdentity)
+    .where(
+      and(
+        eq(contactIdentity.organizationId, orgId),
+        eq(contactIdentity.contactId, contactId),
+        eq(contactIdentity.channel, "whatsapp"),
+        // Las identidades de WhatsApp se guardan como `wa:<dígitos>` (`normalizeChannelIdentity`).
+        eq(contactIdentity.externalUserId, `wa:${digits}`),
+      ),
+    )
+    .limit(1)
+  const state: PhoneWhatsAppState = !identity ? "aun_no" : identity.noWhatsappAt ? "no_tiene" : "es_su_whatsapp"
+  return { state, phone, canUse: !!connected }
+}
+
+/**
+ * «Usarlo como su WhatsApp»: el teléfono de su ficha pasa a ser su WhatsApp
+ * por decisión de alguien del equipo (ADR 0027), con la misma operación que
+ * «Escribirle» (`claimWhatsAppNumber`). Nunca por coincidencia de un mensaje.
+ */
+export async function usePhoneAsWhatsApp(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  contactId: string,
+): Promise<PhoneWhatsApp> {
+  const [person] = await tx
+    .select({ phone: contact.phone })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+    .limit(1)
+  if (!person) throw notFound("Persona")
+  if (!person.phone?.replace(/\D/g, "")) throw validation("Escribe primero su teléfono en sus datos")
+  await claimWhatsAppNumber(tx, orgId, actorUserId, contactId, person.phone)
+  return phoneWhatsAppState(tx, orgId, contactId)
+}
+
+/**
+ * Un mensaje llega de un número que es el «Teléfono» de una ficha (decisión
+ * 23, caso 3). Nunca se une por coincidencia (regla raíz, ADR 0027): la
+ * conversación pregunta «Este número es el teléfono de Carmen Ruiz. ¿Es
+ * ella?» y solo alguien del equipo confirma. Se sugiere cuando quien escribe
+ * es una persona provisional (aún sin ficha) y el número es el teléfono de
+ * una sola persona activa; si es de varias, no se sugiere ninguna.
+ */
+export interface PhoneMatchSuggestion {
+  identityId: string
+  fromContactId: string
+  personId: string
+  personName: string
+}
+
+export async function phoneMatchOf(tx: Db, orgId: string, conversationId: string): Promise<PhoneMatchSuggestion | null> {
+  const [thread] = await tx
+    .select({ identityId: contactIdentity.id, digits: contactIdentity.externalUserId, fromContactId: contactIdentity.contactId })
+    .from(conversation)
+    .innerJoin(
+      contactIdentity,
+      and(eq(contactIdentity.organizationId, conversation.organizationId), eq(contactIdentity.id, conversation.contactIdentityId)),
+    )
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, conversationId), eq(contactIdentity.channel, "whatsapp")))
+    .limit(1)
+  const digits = thread?.digits.replace(/\D/g, "") ?? ""
+  if (!thread || digits.length < 7) return null
+  // Quien escribe ya tiene su ficha: no es una persona provisional.
+  const [own] = await tx
+    .select({ id: patientContact.id })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, thread.fromContactId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .limit(1)
+  if (own) return null
+  const matches = await tx
+    .select({ id: contact.id, name: contact.displayName })
+    .from(contact)
+    .where(
+      and(
+        eq(contact.organizationId, orgId),
+        eq(contact.isActive, true),
+        sql`${contact.id} <> ${thread.fromContactId}`,
+        sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') = ${digits}`,
+      ),
+    )
+    .limit(2)
+  if (matches.length !== 1 || !matches[0]) return null
+  return { identityId: thread.identityId, fromContactId: thread.fromContactId, personId: matches[0].id, personName: matches[0].name }
+}
+
+/**
+ * «Sí, es Carmen»: alguien del equipo confirma que quien escribe es esa
+ * persona. Se une con la operación que ya existe para eso, «Reasignar canal»
+ * (`moveContactIdentity`): el número queda como su WhatsApp y la conversación
+ * pasa a su página. La persona provisional queda como estaba.
+ */
+export async function confirmPhoneMatch(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  conversationId: string,
+  personId: string,
+): Promise<{ conversationId: string; contactId: string }> {
+  const suggestion = await phoneMatchOf(tx, orgId, conversationId)
+  if (!suggestion || suggestion.personId !== personId) {
+    throw new ServiceError("PHONE_MATCH_GONE", 409, "Ese número ya no coincide con el teléfono de esa persona: revisa la conversación")
+  }
+  await moveContactIdentity(tx, orgId, actorUserId, suggestion.identityId, {
+    fromContactId: suggestion.fromContactId,
+    toContactId: personId,
+    reason: `Recepción confirmó que el número es el teléfono de ${suggestion.personName}`,
+  })
+  return { conversationId, contactId: personId }
 }
 
 /**

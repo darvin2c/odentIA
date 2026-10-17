@@ -159,7 +159,6 @@ export const patient = pgTable(
     addressReference: text("address_reference"),
     insurerName: text("insurer_name"),
     affiliationNumber: text("affiliation_number"),
-    emergencyContactRelationship: text("emergency_contact_relationship"),
     /** Clasificación del estado físico de la ASA (I–VI). */
     asaClass: text("asa_class"),
     maritalStatus: text("marital_status"),
@@ -179,8 +178,6 @@ export const patient = pgTable(
     addressCountry: char("address_country", { length: 2 }),
     /** «Procedencia»: dato censal que solo se pide en clínicas de Perú. */
     origin: text("origin"),
-    emergencyContactName: text("emergency_contact_name"),
-    emergencyContactPhone: text("emergency_contact_phone"),
     /** Tipo general del seguro (`INSURANCE_TYPES`), igual en todos los países. */
     insuranceType: text("insurance_type"),
     /** Régimen con nombre propio del país (SIS, EsSalud, EPS en Perú), si lo tiene. */
@@ -251,6 +248,12 @@ export const patientContact = pgTable(
     /** Parentesco con HL7 v3 RoleCode (`KINSHIP`), si se conoce. */
     kinship: text("kinship"),
     isPreferred: boolean("is_preferred").notNull().default(false),
+    /**
+     * Contacto de emergencia (decisión 25): una marca sobre una persona
+     * vinculada, como `Patient.contact` con `relationship` C de HL7 v2-0131.
+     * Nunca la propia persona.
+     */
+    isEmergency: boolean("is_emergency").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
@@ -282,6 +285,7 @@ export const patientContact = pgTable(
       sql`${table.relationship} IN ('self','guardian','family','other')`,
     ),
     check("patient_contact_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
+    check("patient_contact_emergency_check", sql`NOT (${table.isEmergency} AND ${table.relationship} = 'self')`),
     check(
       "patient_contact_kinship_check",
       sql`${table.kinship} IS NULL OR ${table.kinship} IN ('MTH','FTH','CHILD','SPS','DOMPART','SIB','MGRPRN','PGRPRN','GRNDCHILD','AUNT','UNCLE','COUSN','FAMMEMB','FRND','NBOR')`,
@@ -512,11 +516,8 @@ export const clinicalNote = pgTable(
       .notNull()
       .references(() => user.id),
     note: text("note").notNull(),
-    diagnosisSystem: text("diagnosis_system"),
-    diagnosisCode: text("diagnosis_code"),
-    /** Certeza del diagnóstico codificado (FHIR verificationStatus): provisional o confirmed. */
-    diagnosisType: text("diagnosis_type"),
-    /** Pieza FDI a la que se refiere el diagnóstico, si aplica. */
+    // El diagnóstico es de la atención (`encounter_diagnosis`), no de una nota: una sola vía.
+    /** Pieza FDI a la que se refiere la nota, si aplica. */
     toothNumber: smallint("tooth_number"),
     encounterId: uuid("encounter_id").references(() => encounter.id),
     kind: text("kind").notNull().default("evolucion"),
@@ -529,11 +530,6 @@ export const clinicalNote = pgTable(
       table.createdAt,
     ),
     check("clinical_note_kind_check", sql`${table.kind} IN ('evolucion','adenda')`),
-    check(
-      "clinical_note_diagnosis_type_check",
-      sql`${table.diagnosisType} IS NULL OR (${table.diagnosisCode} IS NOT NULL AND ${table.diagnosisType} IN ('provisional','confirmed'))`,
-    ),
-    ...diagnosisCodeRef("clinical_note", table),
   ],
 )
 
@@ -1853,15 +1849,14 @@ export const patientPayment = pgTable(
     branchId: uuid("branch_id").references(() => branch.id),
     /** Medio configurado por la clínica; nombre/tipo congelados al cobrar. */
     paymentMethodId: uuid("payment_method_id"),
-    methodName: text("method_name"),
+    /** Nombre del medio congelado al cobrar (el único: antes se guardaba dos veces). */
+    methodName: text("method_name").notNull(),
     /** Tipo UN/CEFACT 4461 congelado, independiente del nombre del medio. */
     methodTypeCode: text("method_type_code"),
     payerContactId: uuid("payer_contact_id").references(() => contact.id),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
     paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
-    /** Nombre conservado en pagos anteriores al catálogo configurable. */
-    method: text("method").notNull(),
     reference: text("reference"),
     notes: text("notes"),
     createdBy: text("created_by").references(() => user.id),

@@ -310,10 +310,10 @@ export const contact = pgTable("contact", {
   birthDate: date("birth_date"),
   sex: text("sex"),
   isActive: boolean("is_active").notNull().default(true),
-  notes: text("notes"),
+  // Las notas de la persona son `crm_note` (con autor y fecha); el responsable,
+  // el de su conversación u oportunidad (fase 4, «un dato, un lugar»).
   tags: text("tags").array().notNull().default(sql`'{}'`),
   customFields: jsonb("custom_fields").notNull().default(sql`'{}'::jsonb`),
-  assignedUserId: text("assigned_user_id").references(() => user.id),
   lastInteractionAt: timestamp("last_interaction_at", { withTimezone: true }),
   ...timestamps,
 }, table => [
@@ -343,6 +343,12 @@ export const contactIdentity = pgTable(
     externalUserId: text("external_user_id").notNull(),
     displayName: text("display_name"),
     isPrimary: boolean("is_primary").notNull().default(false),
+    /**
+     * WhatsApp rechazó un mensaje porque el número no tiene WhatsApp (decisión
+     * 23, caso 1): la ficha lo dice y no se le escribe por aquí. Vuelve a vacío
+     * si la persona escribe desde ese número o el equipo lo vuelve a marcar.
+     */
+    noWhatsappAt: timestamp("no_whatsapp_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -552,10 +558,14 @@ export const customFieldDef = pgTable(
  */
 export interface AgentAdvisorSettings {
   enabled?: boolean
-  /** Horario en que no escribe por su cuenta, con la hora de cada sede («HH:MM»). */
-  quietStart?: string
-  quietEnd?: string
 }
+
+/**
+ * «Horario para escribir» (decisión 18 v3, ADR 0042): por día de la semana
+ * (0 = domingo), los tramos en minutos locales en que odentIA escribe por su
+ * cuenta; vacío = ese día no. Se lee con la hora de cada sede.
+ */
+export type AgentWritingHours = Array<Array<[number, number]>>
 
 export const agentConfig = pgTable(
   "agent_config",
@@ -579,14 +589,15 @@ export const agentConfig = pgTable(
      * conocimiento y opina en sombra.
      */
     decisionRoutingEnabled: boolean("decision_routing_enabled").notNull().default(true),
-    /**
-     * Administrador: si está encendido y en qué horario no escribe por su
-     * cuenta. Vacío = apagado, todo por defecto.
-     */
+    /** Administrador: si está encendido. Vacío = apagado. */
     advisor: jsonb("advisor").$type<AgentAdvisorSettings>().notNull().default(sql`'{}'::jsonb`),
+    /** «Horario para escribir»: vale para todo lo que odentIA envía por su cuenta. */
+    writingHours: jsonb("writing_hours")
+      .$type<AgentWritingHours>()
+      .notNull()
+      .default(sql`'[[],[[480,1200]],[[480,1200]],[[480,1200]],[[480,1200]],[[480,1200]],[[480,840]]]'::jsonb`),
     /** Asistente clínico: dictado en la atención. Apagado hasta que la clínica lo encienda. */
     clinicalAssistantEnabled: boolean("clinical_assistant_enabled").notNull().default(false),
-    systemPrompt: text("system_prompt").notNull().default(""),
     handoffKeywords: text("handoff_keywords").array().notNull().default(sql`'{}'`),
     maxTurns: integer("max_turns").notNull().default(10),
     /** Comprueba precios, fechas y horas de cada respuesta contra lo consultado antes de enviarla. */
@@ -629,6 +640,10 @@ export const agentConfig = pgTable(
     check("agent_config_llm_check", sql`${table.llm} in ('chatgpt_6','claude_5_5')`),
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
     check("agent_config_close_after_hours_check", sql`${table.closeAfterHours} between 6 and 23`),
+    check(
+      "agent_config_writing_hours_check",
+      sql`jsonb_typeof(${table.writingHours}) = 'array' and jsonb_array_length(${table.writingHours}) = 7`,
+    ),
     check(
       "agent_config_decision_provider_check",
       sql`${table.decisionProvider} in ('none','baseline','jev','openai_decisions')`,

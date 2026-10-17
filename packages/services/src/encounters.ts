@@ -789,7 +789,7 @@ export async function getEncounterDetail(
     tx
       .select()
       .from(clinicalNote)
-      .where(and(childOf, eq(clinicalNote.kind, "evolucion"), isNull(clinicalNote.diagnosisCode)))
+      .where(and(childOf, eq(clinicalNote.kind, "evolucion")))
       .orderBy(asc(clinicalNote.createdAt), asc(clinicalNote.id)),
     tx
       .select()

@@ -145,7 +145,6 @@ interface Profile {
   tradeName: string | null
   fiscalDocNumber: string | null
   fiscalAddress: string | null
-  billingEmail: string | null
   countryCode: string
   currency: string
   timezone: string
@@ -155,27 +154,30 @@ interface Profile {
   ticketFooter: string
 }
 
-it("datos de la clínica: vaciar un dato lo guarda vacío y lo que la pantalla ya no envía se conserva", async () => {
+it("datos de la clínica: vaciar un dato lo guarda vacío, lo que no se envía se conserva y el nombre comercial es el de la cuenta", async () => {
   const region = { countryCode: "PE", currency: "PEN", timezone: "America/Lima", locale: "es-PE" }
   const created = await request("owner", "PUT", "/org-profile", {
     legalName: "Clínica Ajustes S.A.C.",
     tradeName: "Ajustes",
     fiscalDocNumber: "20123456789",
     fiscalAddress: "Av. Central 123",
-    billingEmail: "cobros@example.test",
     ...region,
   })
   expect(created.status).toBe(200)
+  // Un solo nombre visible (decisión 19): el nombre comercial es también el de la cuenta.
+  const [account] = await ownerDb.execute<{ name: string }>(sql`select name from organization where id = ${ORG}`)
+  expect(account?.name).toBe("Ajustes")
   // Al crear la clínica viene prendida «Recordar la cita», a nombre de quien la crea, y nada más (ADR 0026).
   const lines = await ownerDb.execute<{ kind: string; enabled: boolean; enabled_by: string | null }>(
     sql`select kind, enabled, enabled_by from automation_rule where organization_id = ${ORG}`,
   )
   expect([...lines].map((row) => [row.kind, row.enabled, row.enabled_by])).toEqual([["recordatorio_cita", true, "u-set-owner"]])
 
-  // La pantalla ya no muestra el correo de facturación: no lo envía y no se borra.
+  // El nombre comercial es obligatorio: vacío no se acepta; si no se envía, queda como estaba.
+  const blank = await request("owner", "PUT", "/org-profile", { legalName: "Clínica Ajustes S.A.C.", tradeName: "  ", ...region })
+  expect(blank.status).toBe(400)
   const saved = await request("owner", "PUT", "/org-profile", {
     legalName: "Clínica Ajustes S.A.C.",
-    tradeName: null,
     fiscalDocType: null,
     fiscalDocNumber: null,
     fiscalAddress: "Av. Central 456",
@@ -183,10 +185,9 @@ it("datos de la clínica: vaciar un dato lo guarda vacío y lo que la pantalla y
   })
   expect(saved.status).toBe(200)
   expect(await data<Profile>(saved)).toMatchObject({
-    tradeName: null,
+    tradeName: "Ajustes",
     fiscalDocNumber: null,
     fiscalAddress: "Av. Central 456",
-    billingEmail: "cobros@example.test",
     // Tampoco envía la impresión: queda como estaba.
     receiptWidth: "80",
     ticketFooter: "Recibo interno. No es un documento fiscal.",

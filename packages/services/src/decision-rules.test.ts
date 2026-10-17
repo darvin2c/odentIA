@@ -17,6 +17,7 @@ import {
   signConsentByLink,
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { listHealthDocumentRecipients } from "./health-documents.js"
 import { patientPersonId } from "./patients.js"
 import { contactDecides, requireDecisionContact } from "./responsibilities.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
@@ -54,9 +55,39 @@ it("un menor no decide por sí mismo, ni su presupuesto se le envía a él", asy
     .set({ revokedAt: new Date(), revokeReason: "Cumplió 18" })
     .where(eq(patientResponsibility.patientId, f.patient.id))
   await ownerDb.insert(patientResponsibility).values({
-    organizationId: ORG, patientId: f.patient.id, contactId: madre!.id, kind: "representante_legal", startsAt: new Date().toISOString().slice(0, 10),
+    // Hoy en la clínica (Lima), no en UTC: la edad y lo vigente se cuentan con su día.
+    organizationId: ORG, patientId: f.patient.id, contactId: madre!.id, kind: "representante_legal",
+    startsAt: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date()),
   })
   expect(await f.run((tx) => contactDecides(tx, ORG, f.patient.id, madre!.id))).toBe(true)
+})
+
+it("la receta de quien ya cumplió 18 no le llega a quien lo representó de niño, ni se le puede elegir a mano", async () => {
+  const f = await clinicalFixture()
+  const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
+  // Mateo cumplió 18 este 1 de enero; su madre lo representa desde 2020.
+  await ownerDb.update(patient).set({ birthDate: `${new Date().getUTCFullYear() - 18}-01-01` }).where(eq(patient.id, f.patient.id))
+  const [madre] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Rosa Madre de Mateo" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: madre!.id, relationship: "guardian" })
+  await ownerDb.insert(patientResponsibility).values({
+    organizationId: ORG, patientId: f.patient.id, contactId: madre!.id, kind: "representante_legal", startsAt: "2020-01-01",
+  })
+  // La receta: solo a él. El presupuesto: a él, y elegir a su madre a mano se rechaza.
+  const recipients = await f.run((tx) => listHealthDocumentRecipients(tx, ORG, f.patient.id))
+  expect(recipients.map((row) => row.contactId)).toEqual([personId])
+  expect((await f.run((tx) => serviceRecipient(tx, ORG, f.patient.id))).contactId).toBe(personId)
+  await expect(f.run((tx) => serviceRecipient(tx, ORG, f.patient.id, madre!.id))).rejects.toMatchObject({
+    code: "DOCUMENT_RECIPIENT_NOT_AUTHORIZED",
+  })
+  // Un autorizado de información tampoco recibe sus papeles.
+  const [tia] = await ownerDb.insert(contact).values({ organizationId: ORG, displayName: "Tía autorizada" }).returning({ id: contact.id })
+  await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family" })
+  await ownerDb.insert(patientResponsibility).values({
+    organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, kind: "autorizado_informacion", startsAt: "2024-01-01",
+  })
+  await expect(f.run((tx) => serviceRecipient(tx, ORG, f.patient.id, tia!.id))).rejects.toMatchObject({
+    code: "DOCUMENT_RECIPIENT_NOT_AUTHORIZED",
+  })
 })
 
 it("sin fecha de nacimiento la propia persona no firma por enlace: lo firma en la clínica", async () => {

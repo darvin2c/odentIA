@@ -22,11 +22,20 @@ import {
   cleanContactPhone,
   createContact,
   notifyContactChange,
+  type PhoneWhatsApp,
+  phoneWhatsAppState,
   requireContact,
 } from "./contacts.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
-import { assertDocumentFree, patientOrganizationToday, patientPersonId, updatePatient } from "./patients.js"
+import { personSearchCondition } from "./person-search.js"
+import {
+  assertDocumentFree,
+  birthDateIsMinor,
+  patientOrganizationToday,
+  patientPersonId,
+  updatePatient,
+} from "./patients.js"
 
 /** Permisos de quien mira: el servicio no entrega lo que su rol no lee. */
 export type PersonCan = (permission: string) => boolean
@@ -74,8 +83,12 @@ export interface PersonPage {
   docNumber: string | null
   docCountry: string | null
   birthDate: string | null
+  /** Menor de edad hoy, con el día de la clínica (lo decide el servidor). */
+  isMinor: boolean
   sex: string | null
   phone: string | null
+  /** Si su teléfono es ya su WhatsApp, aún no o no tiene (decisión 23). */
+  phoneWhatsApp: PhoneWhatsApp
   email: string | null
   /** Archivada entera: la persona o su ficha (lo que quedó de antes de unir los dos indicadores). */
   archived: boolean
@@ -278,8 +291,10 @@ export async function getPersonPage(
     docNumber: row.docNumber,
     docCountry: row.docCountry,
     birthDate: row.birthDate,
+    isMinor: await birthDateIsMinor(tx, orgId, row.birthDate),
     sex: row.sex,
     phone: row.phone,
+    phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id),
     email: row.email,
     archived,
     createdAt: row.createdAt.toISOString(),
@@ -379,16 +394,14 @@ function viewCondition(view: PeopleView) {
   }
 }
 
-/** Nombre, teléfono (por sus dígitos), documento o correo; buscar nunca identifica. */
+/** Nombre, teléfono (por sus dígitos), documento o correo; buscar nunca identifica (`personSearchCondition`). */
 function searchCondition(q: string) {
-  if (!q) return sql`true`
-  const like = `%${q}%`
-  const digits = /^[\d\s\-()+.]+$/.test(q) ? q.replace(/\D/g, "") : ""
-  const phone =
-    digits.length >= 4
-      ? sql` or regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`
-      : sql``
-  return sql`(c.display_name ilike ${like} or c.doc_number ilike ${like} or c.email ilike ${like} or c.phone ilike ${like}${phone})`
+  return personSearchCondition(q, {
+    displayName: sql`c.display_name`,
+    docNumber: sql`c.doc_number`,
+    email: sql`c.email`,
+    phone: sql`c.phone`,
+  })
 }
 
 function encodePeopleCursor(name: string, id: string, fingerprint: string): string {
@@ -701,11 +714,43 @@ export interface CreatePersonInput {
   displayName?: string | null
   phone?: string | null
   email?: string | null
+  /** Su documento, si se conoce (el representante del registro lo trae). */
+  docType?: string | null
+  docNumber?: string | null
+  docCountry?: string | null
+}
+
+/**
+ * La persona que ya tiene ese documento en la clínica, o null. Quien registra
+ * a alguien por segunda vez (la madre del segundo hijo) es la misma persona:
+ * se la reutiliza, nunca se crea otra ficha con su documento.
+ */
+export async function findPersonByDocument(
+  tx: Db,
+  orgId: string,
+  doc: { docType?: string | null; docNumber?: string | null; docCountry?: string | null },
+): Promise<string | null> {
+  if (!doc.docNumber) return null
+  const [row] = await tx
+    .select({ id: contact.id })
+    .from(contact)
+    .where(
+      and(
+        eq(contact.organizationId, orgId),
+        eq(contact.docNumber, doc.docNumber),
+        doc.docType ? eq(contact.docType, doc.docType) : sql`${contact.docType} is null`,
+        doc.docCountry ? eq(contact.docCountry, doc.docCountry) : sql`${contact.docCountry} is null`,
+      ),
+    )
+    .limit(1)
+  return row?.id ?? null
 }
 
 /**
  * «Nueva persona»: nombre separado y cómo ubicarla, con las reglas de la
- * ficha. Registrarla como paciente es otro paso, en su página.
+ * ficha. Registrarla como paciente es otro paso, en su página. Es la única
+ * forma de crear una persona: la usan «Nueva persona», la Bandeja y el
+ * representante del registro.
  */
 export async function createPerson(
   tx: Db,
@@ -729,25 +774,46 @@ export async function createPerson(
       maternalSurname,
       phone: clean(input.phone),
       email: clean(input.email),
+      docType: clean(input.docType),
+      docNumber: clean(input.docNumber),
+      docCountry: clean(input.docCountry),
     },
     await patientOrganizationToday(tx, orgId),
     countryCode,
   )
   const first = Object.values(errors)[0]
   if (first) throw validation(first)
-  const created = await createContact(
-    tx,
-    orgId,
-    {
-      displayName,
-      givenNames,
-      paternalSurname,
-      maternalSurname,
-      phone: clean(input.phone),
-      email: clean(input.email),
-    },
-    actor,
-  )
+  const docNumber = clean(input.docNumber)
+  const doc = docNumber
+    ? {
+        docType: clean(input.docType),
+        docNumber,
+        // El documento con su país emisor, como el de la ficha.
+        docCountry: documentIssuerCountry(clinicalProfileFor(countryCode), clean(input.docType), clean(input.docCountry)),
+      }
+    : null
+  if (doc) await assertDocumentFree(tx, orgId, doc)
+  let created: { id: string }
+  try {
+    created = await createContact(
+      tx,
+      orgId,
+      {
+        displayName,
+        givenNames,
+        paternalSurname,
+        maternalSurname,
+        phone: clean(input.phone),
+        email: clean(input.email),
+        ...(doc ?? {}),
+      },
+      actor,
+    )
+  } catch (error) {
+    if (isUniqueViolation(error))
+      throw new ServiceError("DUPLICATE_DOCUMENT", 409, "Ese documento ya es de otra persona")
+    throw error
+  }
   return { id: created.id }
 }
 
@@ -845,10 +911,8 @@ export interface PersonNote {
   id: string
   body: string
   at: string
-  /** Quién la escribió; null en lo anotado antes sin autor. */
+  /** Quién la escribió; null si la dejó el sistema (al unir persona y ficha). */
   authorName: string | null
-  /** Lo que quedó en el campo libre de antes (sin autor ni fecha propia). */
-  legacy: boolean
 }
 
 /**
@@ -861,7 +925,7 @@ export async function listPersonNotes(
   orgId: string,
   contactId: string,
 ): Promise<PersonNote[]> {
-  const row = await requireContact(tx, orgId, contactId)
+  await requireContact(tx, orgId, contactId)
   const notes = await tx
     .select({ id: crmNote.id, body: crmNote.body, at: crmNote.createdAt, authorName: user.name })
     .from(crmNote)
@@ -874,15 +938,6 @@ export async function listPersonNotes(
     body: note.body,
     at: note.at.toISOString(),
     authorName: note.authorName ?? null,
-    legacy: false,
   }))
-  if (row.notes?.trim())
-    list.push({
-      id: `legacy:${row.id}`,
-      body: row.notes.trim(),
-      at: row.createdAt.toISOString(),
-      authorName: null,
-      legacy: true,
-    })
   return list
 }

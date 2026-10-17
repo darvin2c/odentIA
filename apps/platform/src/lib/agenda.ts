@@ -7,6 +7,7 @@ import {
   type ScheduleState,
 } from "@odentia/ui-patterns"
 import type { QueryClient } from "@tanstack/react-query"
+import type { PhoneWhatsApp } from "./people"
 
 /** Una cita afecta disponibilidad y seguimiento, también en superficies no montadas. */
 export async function invalidateAppointmentQueries(client: QueryClient): Promise<void> {
@@ -149,7 +150,14 @@ export function visitLabel(
 
 /** Lo que el cajón de la cita dice además de la cita (`GET /api/appointments/:id/context`). */
 export interface AppointmentContext {
-  person: { contactId: string; name: string; phone: string | null; relationship: string } | null
+  person: {
+    contactId: string
+    name: string
+    phone: string | null
+    relationship: string
+    /** Si su teléfono es su WhatsApp, aún no o no tiene (decisión 23). */
+    whatsapp: PhoneWhatsApp
+  } | null
   origin: { source: string; conversationId: string | null; channel: string | null; at: string }
   confirmation: { askAt: string | null; askedAt: string | null } | null
   /** «Faltan datos para atenderla», del servidor; null para quien no edita los datos. */

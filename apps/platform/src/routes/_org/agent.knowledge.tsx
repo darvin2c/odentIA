@@ -12,8 +12,8 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { DatePickerButton, ErrorState, FormDrawer, PageHeader, PageShell } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { DatePickerButton, ErrorState, FormDrawer, PageHeader, PageShell, useListSearch } from "@odentia/ui-patterns"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { KnowledgeAnswers } from "../../components/agent/knowledge-answers"
@@ -92,9 +92,19 @@ function AgentKnowledgePage() {
   const formOpen = creating || editing !== null || answering !== null
   const formDirty = formOpen && !sameDraft(form, baseline)
 
-  const entriesQuery = useQuery({
-    queryKey: ["agent-knowledge"],
-    queryFn: () => apiFetch<{ data: KnowledgeEntry[] }>("/api/agent/knowledge?limit=100"),
+  // Por páginas (topes de la fase 4): la respuesta 101 también se abre. La
+  // búsqueda va al servidor; la sede y el estado se filtran sobre lo cargado.
+  const search = useListSearch().get("q")?.trim() ?? ""
+  const entriesQuery = useInfiniteQuery({
+    queryKey: ["agent-knowledge", search],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: "100" })
+      if (search) params.set("q", search)
+      if (pageParam) params.set("cursor", pageParam)
+      return apiFetch<{ data: KnowledgeEntry[]; nextCursor: string | null; total: number }>(`/api/agent/knowledge?${params}`)
+    },
+    initialPageParam: "",
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
     enabled: canRead,
     retry: false,
   })
@@ -206,7 +216,8 @@ function AgentKnowledgePage() {
     },
   })
 
-  const entries = entriesQuery.data?.data ?? []
+  const entries = entriesQuery.data?.pages.flatMap((page) => page.data) ?? []
+  const entriesTotal = entriesQuery.data?.pages[0]?.total ?? entries.length
   const basics = basicsQuery.data?.data ?? null
   const gaps = gapsQuery.data?.data ?? []
   const branches = (branchesQuery.data?.data ?? []).filter((branch) => branch.isActive !== false)
@@ -331,6 +342,10 @@ function AgentKnowledgePage() {
 
       <KnowledgeAnswers
         entries={entries}
+        total={entriesTotal}
+        hasMore={entriesQuery.hasNextPage}
+        loadingMore={entriesQuery.isFetchingNextPage}
+        onLoadMore={() => void entriesQuery.fetchNextPage()}
         isPending={entriesQuery.isPending}
         error={entriesQuery.isError ? entriesQuery.error : null}
         onRetry={() => void entriesQuery.refetch()}

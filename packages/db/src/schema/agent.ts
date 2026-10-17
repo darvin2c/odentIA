@@ -575,6 +575,10 @@ export type CorrectionFailure = (typeof CORRECTION_FAILURES)[number]
 export const LESSON_STATUSES = ["propuesta", "activa", "retirada", "descartada"] as const
 export type LessonStatus = (typeof LESSON_STATUSES)[number]
 
+/** De dónde sale una regla de «Lo que el agente debe saber»: la escribió la clínica o se aprendió. */
+export const LESSON_SOURCES = ["aprendida", "escrita"] as const
+export type LessonSource = (typeof LESSON_SOURCES)[number]
+
 /**
  * Lección: lo que el agente aprende de una corrección. Nace `propuesta` y no
  * cambia nada hasta que una persona la aprueba; `activa` se usa; `retirada`
@@ -608,6 +612,12 @@ export const agentLesson = pgTable(
     previousBody: text("previous_body"),
     uses: integer("uses").notNull().default(0),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /**
+     * Lo que el agente debe saber (decisión 24): `escrita` la escribió la
+     * clínica (una regla activa desde que se guarda); `aprendida` salió de una
+     * corrección y la aprobó alguien.
+     */
+    source: text("source").$type<LessonSource>().notNull().default("aprendida"),
     proposedBy: text("proposed_by").notNull(),
     approvedBy: text("approved_by"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
@@ -620,6 +630,8 @@ export const agentLesson = pgTable(
     index("agent_lesson_org_idx").on(table.organizationId, table.status, table.createdAt),
     check("agent_lesson_kind_check", sql`${table.kind} in ('respuesta_oficial','regla','ejemplo')`),
     check("agent_lesson_status_check", sql`${table.status} in ('propuesta','activa','retirada','descartada')`),
+    check("agent_lesson_source_check", sql`${table.source} in ('aprendida','escrita')`),
+    check("agent_lesson_written_rule_check", sql`${table.source} = 'aprendida' or ${table.kind} = 'regla'`),
     check(
       "agent_lesson_failure_check",
       sql`${table.failure} is null or ${table.failure} in ('dato_equivocado','falto_dato','tono','no_debio_responder','otra_cosa')`,

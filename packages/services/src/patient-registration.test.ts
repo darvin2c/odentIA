@@ -262,6 +262,42 @@ it("menor público sin responsable falla 400 sin escrituras", async () => {
   expect(dupes).toEqual([])
 })
 
+it("la madre registra a su segundo hijo con su mismo documento: es la misma persona, sin error", async () => {
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  const child = (displayName: string, phone: string): RegistrationAnswers => ({
+    demographics: { displayName, birthDate: MINOR_BIRTH, phone },
+    respondent: "representative",
+    representative: {
+      displayName: "Rosa Segundo Hijo",
+      relationship: "guardian",
+      relationshipDetail: "Madre",
+      phone: "+51977000177",
+      docType: "DNI",
+      docNumber: "41529977",
+    },
+    health: emptyClinical(),
+    privacyAccepted: true,
+  })
+  const register = (answers: RegistrationAnswers) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(tx, "org_a", { kind: "public", entryPoint: "qr" }, { submissionId: randomUUID(), formVersion: version, answers }),
+    )
+  const first = await register(child("Mateo Segundo Hijo", "+51977000178"))
+  const second = await register(child("Sofía Segundo Hijo", "+51977000179"))
+  const representativeOf = async (patientId: string) =>
+    (await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", patientId))).find(
+      (row) => row.kind === "representante_legal",
+    )?.contactId
+  const mother = await representativeOf(first.id)
+  expect(mother).toBeTruthy()
+  expect(await representativeOf(second.id)).toBe(mother)
+  const [{ count }] = await ownerDb.execute<{ count: number }>(
+    sql`select count(*)::int as count from contact where organization_id = 'org_a' and doc_number = '41529977'`,
+  )
+  expect(count).toBe(1)
+})
+
 it("menor con enlace contextual queda como guardian sin modificar el contacto", async () => {
   await publish("org_a")
   const linkVersion = await publishedVersion("org_a")

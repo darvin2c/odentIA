@@ -1740,13 +1740,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const commercialContext = tool(
-    async ({ notesCursor }: { notesCursor?: string }) => ctx.sandbox ? { name: SANDBOX_PERSON, tags: [], contactNotes: null, customFields: {}, operationalNotes: [], nextNotesCursor: null } : inOrg(async tx => {
+    async ({ notesCursor }: { notesCursor?: string }) => ctx.sandbox ? { name: SANDBOX_PERSON, tags: [], customFields: {}, operationalNotes: [], nextNotesCursor: null } : inOrg(async tx => {
       const full = await getContact(tx, ctx.orgId, ctx.contactId)
       const notes = await listContactNotes(tx, ctx.orgId, ctx.contactId, { cursor: notesCursor })
       return {
         name: full.contact.displayName,
         tags: full.contact.tags,
-        contactNotes: full.contact.notes,
         customFields: full.contact.customFields,
         operationalNotes: notes.items,
         nextNotesCursor: notes.nextCursor,

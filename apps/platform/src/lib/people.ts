@@ -54,8 +54,12 @@ export interface PersonPage {
   docNumber: string | null
   docCountry: string | null
   birthDate: string | null
+  /** Menor de edad hoy, con el día de la clínica: lo decide el servidor. */
+  isMinor: boolean
   sex: string | null
   phone: string | null
+  /** Si su teléfono es ya su WhatsApp, aún no o no tiene (decisión 23). */
+  phoneWhatsApp: PhoneWhatsApp
   email: string | null
   archived: boolean
   createdAt: string
@@ -69,6 +73,14 @@ export interface PersonPage {
   responsibleFor: PersonResponsibleFor[]
   spokenForBy: PersonSpokenForBy[]
   channels: string[]
+}
+
+/** Su teléfono y su WhatsApp (decisión 23), como lo dice el servidor. */
+export interface PhoneWhatsApp {
+  state: "sin_telefono" | "es_su_whatsapp" | "aun_no" | "no_tiene"
+  phone: string | null
+  /** La clínica tiene WhatsApp conectado: «Usarlo como su WhatsApp» sirve. */
+  canUse: boolean
 }
 
 export interface PersonListItem {
@@ -117,8 +129,8 @@ export interface PersonNote {
   id: string
   body: string
   at: string
+  /** null si la dejó el sistema (al unir persona y ficha). */
   authorName: string | null
-  legacy: boolean
 }
 
 export function personQueryKey(personId: string) {

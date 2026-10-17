@@ -326,3 +326,26 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
     ).toBe(200)
   })
 })
+
+describe("la Bandeja crea y busca a la persona con lo mismo que «Nueva persona»", () => {
+  it("crea con `createPerson` (nombres y apellidos separados) y la encuentra por su teléfono escrito con espacios", async () => {
+    // Lo que envía «Nueva conversación» de la Bandeja.
+    const created = await send("reception", "POST", "/people", {
+      givenNames: "Carmen",
+      paternalSurname: "Ruiz",
+      maternalSurname: null,
+      phone: "+51987650777",
+    })
+    expect(created.status).toBe(201)
+    const { data } = (await created.json()) as { data: { id: string } }
+    const [row] = await ownerDb.execute<{ given_names: string; paternal_surname: string; display_name: string }>(
+      sql`select given_names, paternal_surname, display_name from contact where id = ${data.id}`,
+    )
+    expect(row).toMatchObject({ given_names: "Carmen", paternal_surname: "Ruiz", display_name: "Carmen Ruiz" })
+    // El mismo buscador que la lista de personas: compara los dígitos del teléfono.
+    const found = (await (await get("reception", `/people?ver=todos&q=${encodeURIComponent("987 650 777")}`)).json()) as {
+      data: { id: string }[]
+    }
+    expect(found.data.map((item) => item.id)).toContain(data.id)
+  })
+})

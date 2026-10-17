@@ -236,7 +236,8 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     grantResponsibility(tx, "org_a", ACTOR, child.id, {
       contactId: mother.id,
       kind: "representante_legal",
-      startsAt: new Date().toISOString().slice(0, 10),
+      // Hoy en la clínica (Lima): lo vigente se cuenta con su día, no con UTC.
+      startsAt: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date()),
       endsAt: null,
       evidenceDocumentId: null,
     }),

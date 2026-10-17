@@ -22,7 +22,6 @@ interface Config {
   activeUntilMin: number | null
   handoffKeywords: string[]
   dailyRunLimit: number
-  systemPrompt: string
 }
 
 /** El control cabe entero en la ventana: no queda tapado ni fuera de la pantalla. */
@@ -180,24 +179,26 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knows.getByRole("link", { name: /^Lo que aprendió de tus correcciones/ })).toContainText("Ninguna lección todavía")
   await expect(knows).toContainText("Lo que recuerda de cada persona")
 
-  // Indicaciones solo para Recepción, una por una: editar una no pierde las demás.
-  await expect(behaves).toContainText("Todavía no le diste ninguna.")
+  // «Lo que el agente debe saber» (decisión 24): una sola lista, cada línea con su origen; editar una no pierde las demás.
+  const knowsMust = page.getByRole("region", { name: "Lo que el agente debe saber" })
+  await expect(knowsMust).toContainText("Todavía no hay nada aquí.")
   for (const text of ["No ofrezcas descuentos.", "Despídete recordando la dirección."]) {
-    await behaves.getByRole("button", { name: "Agregar indicación" }).click()
-    const addForm = sideSurface(page, { name: "Agregar indicación", exact: true })
-    await addForm.getByLabel("Indicación", { exact: true }).fill(text)
+    await knowsMust.getByRole("button", { name: "Agregar" }).first().click()
+    const addForm = sideSurface(page, { name: "Agregar a lo que debe saber", exact: true })
+    await addForm.getByLabel("Qué debe saber", { exact: true }).fill(text)
     await addForm.getByRole("button", { name: "Guardar" }).click()
     await expect(addForm).toBeHidden()
-    await expect(behaves).toContainText(`«${text}»`)
+    await expect(knowsMust.getByRole("listitem").filter({ hasText: text })).toContainText("Escrita por la clínica")
   }
-  await behaves.getByRole("button", { name: "Editar la indicación 1" }).click()
-  const editForm = sideSurface(page, { name: "Editar indicación", exact: true })
-  await expect(editForm.getByLabel("Indicación", { exact: true })).toHaveValue("No ofrezcas descuentos.")
-  await editForm.getByLabel("Indicación", { exact: true }).fill("No ofrezcas descuentos ni promociones.")
+  await knowsMust.getByRole("button", { name: "Editar: No ofrezcas descuentos." }).click()
+  const editForm = sideSurface(page, { name: "Editar", exact: true })
+  await expect(editForm.getByLabel("Qué debe saber", { exact: true })).toHaveValue("No ofrezcas descuentos.")
+  await editForm.getByLabel("Qué debe saber", { exact: true }).fill("No ofrezcas descuentos ni promociones.")
   await editForm.getByRole("button", { name: "Guardar" }).click()
   await expect(editForm).toBeHidden()
-  await expect(behaves).toContainText("«No ofrezcas descuentos ni promociones.»")
-  expect((await config()).systemPrompt).toBe("No ofrezcas descuentos ni promociones.\nDespídete recordando la dirección.")
+  await expect(knowsMust).toContainText("No ofrezcas descuentos ni promociones.")
+  await expect(knowsMust).toContainText("Despídete recordando la dirección.")
+  await expect(knowsMust.getByRole("button", { name: /^Escritas por la clínica · 2/ })).toBeVisible()
 
   // La base: lo fijo no se edita; la voz sí, con su muestra.
   await behaves.getByRole("button", { name: "Editar la base" }).click()
@@ -295,7 +296,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(knows.getByRole("link", { name: /^Qué sabe/ })).toContainText("lo que recuerda de cada persona")
   await expect(knows.getByRole("link", { name: /^Respuestas oficiales/ })).toBeHidden()
   const behaveRow = behaves.getByRole("button", { name: /^Cómo se comporta/ })
-  await expect(behaveRow).toContainText("Sofi · de usted · tono cercano · pocos emojis · 2 indicaciones")
+  await expect(behaveRow).toContainText("Sofi · de usted · tono cercano · pocos emojis")
   await expect(behaveRow).toHaveAttribute("aria-expanded", "false")
   await expect(behaves.getByRole("button", { name: "Editar la base" })).toBeHidden()
   await behaveRow.click()

@@ -17,7 +17,12 @@ import {
 } from "@odentia/db/schema/portal"
 import { portalPasskey } from "@odentia/db/schema/portal-access"
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, max } from "drizzle-orm"
-import { moveAppointment, setAppointmentStatus } from "./appointments.js"
+import {
+  assertOwnAppointmentChangeable,
+  cancelOwnAppointment,
+  confirmOwnAppointment,
+  moveOwnAppointment,
+} from "./own-appointment.js"
 import { type BookingLinkSlot, listWeekSlots } from "./booking-links.js"
 import { decideBudget, getBudgetDetail, listBudgets, type BudgetWithTotals } from "./budgets.js"
 import { getPatientDocument, listPatientDocuments } from "./clinical.js"
@@ -71,7 +76,6 @@ export function assertShareRights(scope: PortalScope, rights: PortalShareRights)
  */
 
 const LINK_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
-const RESCHEDULE_HORIZON_DAYS = 120
 
 function rawToken(): string {
   return randomBytes(32).toString("base64url")
@@ -1071,13 +1075,9 @@ export async function confirmPortalAppointment(
 ): Promise<PortalAppointmentView> {
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
-  if (current.status !== "programada") {
-    throw conflict("APPOINTMENT_STATUS", "Solo puedes confirmar una cita programada")
-  }
-  if (current.startsAt.getTime() <= Date.now()) {
-    throw conflict("APPOINTMENT_STATUS", "Esta cita ya pasó; pide una nueva en recepción")
-  }
-  const updated = await setAppointmentStatus(tx, ctx.orgId, portalActor(ctx.session), current.id, "confirmada", { via: "portal" })
+  // La misma regla que el enlace y el agente: si ya estaba confirmada, queda como está.
+  const { item: updated, already } = await confirmOwnAppointment(tx, ctx.orgId, portalActor(ctx.session), current, "portal")
+  if (already) return portalAppointmentView(tx, ctx.orgId, updated.id)
   await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_confirmed", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
@@ -1114,38 +1114,12 @@ export async function reschedulePortalAppointment(
 ): Promise<PortalAppointmentView> {
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
-  if (current.status !== "programada" && current.status !== "confirmada") {
-    throw conflict("APPOINTMENT_STATUS", "Esta cita ya no puede reprogramarse")
-  }
-  // Una cita que ya empezó o pasó no se mueve desde el portal.
-  if (current.startsAt.getTime() <= Date.now()) {
-    throw conflict("APPOINTMENT_STATUS", "Esta cita ya pasó: escríbenos para ver otra fecha")
-  }
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
     throw validation("La versión de la cita es inválida; recarga e intenta de nuevo")
   }
-  const startsAt = new Date(input.startsAt)
-  if (!/^\d{4}-\d{2}-\d{2}T/.test(input.startsAt) || !Number.isFinite(startsAt.getTime())) {
-    throw validation("Fecha ISO inválida")
-  }
-  if (startsAt.getTime() <= Date.now()) throw validation("Elige una fecha futura")
-  if (startsAt.getTime() > Date.now() + RESCHEDULE_HORIZON_DAYS * 24 * 3600_000) {
-    throw validation(`Solo puedes reprogramar dentro de ${RESCHEDULE_HORIZON_DAYS} días`)
-  }
-  // La movió la propia persona: no se le avisa lo que acaba de hacer (ADR 0027).
-  const moved = await moveAppointment(
-    tx,
-    ctx.orgId,
-    portalActor(ctx.session),
-    current.id,
-    {
-      expectedVersion: input.expectedVersion,
-      startsAt: startsAt.toISOString(),
-      dentistUserId: input.dentistUserId,
-      ...(input.chairId ? { chairId: input.chairId } : {}),
-    },
-    { notice: false },
-  )
+  // La misma regla que el enlace y el agente: en pie, hora futura y dentro del horizonte.
+  const moved = await moveOwnAppointment(tx, ctx.orgId, portalActor(ctx.session), current, input)
+  const startsAt = new Date(moved.startsAt)
   await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_rescheduled", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
@@ -1169,15 +1143,7 @@ export async function cancelPortalAppointment(
 ): Promise<PortalAppointmentView> {
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
-  if ((current.status !== "programada" && current.status !== "confirmada") || current.startsAt.getTime() <= Date.now()) {
-    throw conflict("APPOINTMENT_STATUS", "Esta cita ya no puede cancelarse desde aquí")
-  }
-  // La canceló la propia persona: no se le avisa lo que acaba de hacer (ADR 0027).
-  await setAppointmentStatus(tx, ctx.orgId, portalActor(ctx.session), current.id, "cancelada", {
-    cancelReason: "paciente",
-    cancelNote: "La canceló la persona desde el portal",
-    notice: false,
-  })
+  await cancelOwnAppointment(tx, ctx.orgId, portalActor(ctx.session), current, "La canceló la persona desde el portal")
   await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_cancelled", "appointment", current.id, {
     sessionId: ctx.session.id,
     contactId: ctx.session.contactId,
@@ -1210,9 +1176,7 @@ export async function getPortalRescheduleSlots(
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
-  if (current.status !== "programada" && current.status !== "confirmada") {
-    throw conflict("APPOINTMENT_STATUS", "Esta cita ya no puede reprogramarse")
-  }
+  assertOwnAppointmentChangeable(current)
   if (typeof input.from !== "string" || typeof input.to !== "string") {
     throw validation("Rango de fechas inválido")
   }
@@ -1522,15 +1486,19 @@ export async function getPortalDocumentUrl(
 export interface PortalAccountView {
   /** Formato regional de la clínica; `null` si aún no lo configuró. */
   locale: string | null
+  /** Los mismos montos que Caja (`accountBalances`), más lo aceptado de sus presupuestos. */
   byCurrency: Array<{
     currency: string
+    /** Lo aceptado: todas las visitas de lo que se cobra por sesión. */
     agreedCents: number
-    chargedCents: number
-    paidCents: number
-    appliedCents: number
-    refundedCents: number
-    outstandingCents: number
-    availableCreditCents: number
+    /** Debe. */
+    porCobrar: number
+    /** Pagado neto: lo cobrado menos lo devuelto. */
+    pagado: number
+    /** A favor. */
+    aFavor: number
+    /** Saldo: lo que debe menos lo que tiene a favor. */
+    saldo: number
   }>
   charges: Array<{
     id: string
@@ -1578,7 +1546,7 @@ export async function getPortalAccount(tx: Db, ctx: PortalContext): Promise<Port
         id: payment.id,
         amountCents: payment.amountCents,
         currency: payment.currency,
-        method: payment.method,
+        method: payment.methodName,
         reference: payment.reference,
         paidAt: payment.paidAt,
         voidedAt: payment.voidedAt,

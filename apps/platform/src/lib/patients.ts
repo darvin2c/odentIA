@@ -38,7 +38,6 @@ export interface Patient {
   addressReference?: string | null
   insurerName?: string | null
   affiliationNumber?: string | null
-  emergencyContactRelationship?: string | null
   asaClass?: string | null
   birthDate?: string | null
   sex?: string | null
@@ -50,8 +49,6 @@ export interface Patient {
   occupation?: string | null
   address?: string | null
   origin?: string | null
-  emergencyContactName?: string | null
-  emergencyContactPhone?: string | null
   /** Tipo general del seguro y, si lo tiene, su régimen con nombre propio del país. */
   insuranceType?: string | null
   insuranceScheme?: string | null
@@ -190,7 +187,7 @@ export interface PatientHealth {
   } | null
 }
 
-export const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
+export { ALLERGY_SEVERITIES } from "@odentia/clinical"
 
 /** Tipo de alérgeno; mismo catálogo que valida el servidor. */
 export const ALLERGY_CATEGORY_LABELS: Record<string, string> = {
@@ -580,6 +577,8 @@ export interface TimelineItem {
   planId?: string | null
   /** Decisión vigente del tratamiento. */
   decision?: string | null
+  /** El estado con el nombre único de la aplicación (el de un presupuesto lo escribe el servidor). */
+  statusText?: string | null
   /** Vencimiento de un control, para leerlo aquí mismo. */
   dueAt?: string | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
@@ -744,6 +743,8 @@ export interface PatientContactLink {
   /** Parentesco con HL7 v3 RoleCode, si se conoce. */
   kinship?: string | null
   isPreferred: boolean
+  /** Contacto de emergencia: una marca sobre la persona vinculada (decisión 25). */
+  isEmergency: boolean
 }
 
 export interface PatientRegistrationInfo {
@@ -770,6 +771,8 @@ export interface PatientFull {
    * fase 3); null para quien no edita los datos (odontólogo, caja).
    */
   missingData: MissingPersonDatum[] | null
+  /** Menor de edad hoy, con el día de la clínica: lo decide el servidor, no el navegador. */
+  isMinor: boolean
 }
 
 /** Etiqueta de historia clínica: HC-000123 (padding 6). */

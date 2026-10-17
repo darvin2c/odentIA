@@ -70,32 +70,35 @@ export interface WeeklySchedule {
   save: () => void
 }
 
+/** Un turno guardado: día de la semana (0 = domingo) y minutos desde la medianoche. */
+export interface WeeklyRule {
+  weekday: number
+  startMin: number
+  endMin: number
+}
+
 /**
- * El horario semanal de un profesional en una sede: sus turnos, como borrador
- * hasta guardar. Es el mismo en la agenda y en Configuración.
+ * Una semana de turnos como borrador hasta guardar: la que se edita con
+ * `WeeklyScheduleFields`. La usan el horario de cada profesional y el
+ * «Horario para escribir» del agente (decisión 18 v3): el mismo editor.
  */
-export function useWeeklySchedule(input: {
-  branchId: string | undefined
-  dentistUserId: string
+export function useWeeklyTurns(input: {
+  /** Qué semana es: al cambiar, se vuelve a cargar lo guardado. */
+  key: string
+  /** Lo guardado; indefinido mientras llega. */
+  rules: WeeklyRule[] | undefined
+  failed: boolean
+  retry: () => void
+  save: (rules: WeeklyRule[]) => Promise<unknown>
+  savedMessage: string
   onSaved?: () => void | Promise<void>
 }): WeeklySchedule {
-  const { branchId, dentistUserId, onSaved } = input
-  const queryClient = useQueryClient()
-  const query = useQuery({
-    queryKey: ["professional-schedule", branchId, dentistUserId],
-    enabled: Boolean(branchId && dentistUserId),
-    queryFn: () =>
-      apiFetch<{ data: ProfessionalSchedule }>(
-        `/api/agenda/schedules?branchId=${branchId}&dentistUserId=${dentistUserId}`,
-      ),
-  })
+  const { key, rules, failed, retry, save: persist, savedMessage, onSaved } = input
   const [turns, setTurns] = React.useState<TurnDraft[]>([])
   const [baseline, setBaseline] = React.useState<TurnDraft[]>([])
   const [loadedFor, setLoadedFor] = React.useState("")
   const [error, setError] = React.useState("")
-  const key = `${branchId}:${dentistUserId}`
   React.useEffect(() => {
-    const rules = query.data?.data.rules
     if (!rules || loadedFor === key) return
     const loaded = rules.map((rule) => ({
       key: turnSeq++,
@@ -107,29 +110,22 @@ export function useWeeklySchedule(input: {
     setBaseline(loaded)
     setLoadedFor(key)
     setError("")
-  }, [query.data, loadedFor, key])
+  }, [rules, loadedFor, key])
 
   const save = useMutation({
     mutationFn: (submitted: TurnDraft[]) => {
-      const rules = submitted.map((turn) => {
+      const next = submitted.map((turn) => {
         const startMin = toMinutes(turn.from)
         const endMin = toMinutes(turn.to)
         if (endMin <= startMin) throw new Error("Cada turno debe terminar después de empezar.")
         return { weekday: turn.weekday, startMin, endMin }
       })
-      return apiFetch("/api/agenda/schedules", {
-        method: "PUT",
-        body: JSON.stringify({ branchId, dentistUserId, rules }),
-      })
+      return persist(next)
     },
     onSuccess: async (_result, submitted) => {
       setBaseline(submitted)
       setError("")
-      toast.success("Horario guardado")
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["professional-schedule"] }),
-        queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
-      ])
+      toast.success(savedMessage)
       await onSaved?.()
     },
     onError: (cause) => setError(errorMessage(cause)),
@@ -139,8 +135,8 @@ export function useWeeklySchedule(input: {
   return {
     turns: ready ? turns : [],
     ready,
-    failed: !ready && query.isError,
-    retry: () => void query.refetch(),
+    failed: !ready && failed,
+    retry,
     dirty: ready && !sameTurns(turns, baseline),
     saving: save.isPending,
     error,
@@ -166,15 +162,61 @@ export function useWeeklySchedule(input: {
   }
 }
 
+/**
+ * El horario semanal de un profesional en una sede: sus turnos, como borrador
+ * hasta guardar. Es el mismo en la agenda y en Configuración.
+ */
+export function useWeeklySchedule(input: {
+  branchId: string | undefined
+  dentistUserId: string
+  onSaved?: () => void | Promise<void>
+}): WeeklySchedule {
+  const { branchId, dentistUserId, onSaved } = input
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: ["professional-schedule", branchId, dentistUserId],
+    enabled: Boolean(branchId && dentistUserId),
+    queryFn: () =>
+      apiFetch<{ data: ProfessionalSchedule }>(
+        `/api/agenda/schedules?branchId=${branchId}&dentistUserId=${dentistUserId}`,
+      ),
+  })
+  return useWeeklyTurns({
+    key: `${branchId}:${dentistUserId}`,
+    rules: query.data?.data.rules,
+    failed: query.isError,
+    retry: () => void query.refetch(),
+    save: (rules) =>
+      apiFetch("/api/agenda/schedules", {
+        method: "PUT",
+        body: JSON.stringify({ branchId, dentistUserId, rules }),
+      }),
+    savedMessage: "Horario guardado",
+    onSaved: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["professional-schedule"] }),
+        queryClient.invalidateQueries({ queryKey: ["agenda-availability"] }),
+      ])
+      await onSaved?.()
+    },
+  })
+}
+
 /** Los días de la semana con sus turnos. En el panel van uno bajo otro; en la página, en fila. */
 export function WeeklyScheduleFields({
   schedule,
   canEdit,
   stacked = false,
+  emptyLabel = "No atiende",
+  unit = "turno",
 }: {
   schedule: WeeklySchedule
   canEdit: boolean
   stacked?: boolean
+  /** Lo que dice un día sin turnos: «No atiende», «No escribimos». */
+  emptyLabel?: string
+  /** Cómo se llama cada tramo: «turno» en la agenda, «tramo» al escribir. */
+  unit?: string
 }) {
   if (schedule.failed) {
     return (
@@ -215,7 +257,7 @@ export function WeeklyScheduleFields({
             >
               {turns.length === 0 ? (
                 <span className="flex h-10 items-center text-sm text-muted-foreground">
-                  No atiende
+                  {emptyLabel}
                 </span>
               ) : null}
               {turns.map((turn) => (
@@ -240,7 +282,7 @@ export function WeeklyScheduleFields({
                       variant="ghost"
                       size="icon"
                       className="size-8 text-muted-foreground"
-                      aria-label={`Quitar el turno de ${turn.from} a ${turn.to} del ${day.long}`}
+                      aria-label={`Quitar el ${unit} de ${turn.from} a ${turn.to} del ${day.long}`}
                       onClick={() => schedule.remove(turn.key)}
                     >
                       <X aria-hidden />
@@ -254,11 +296,11 @@ export function WeeklyScheduleFields({
                 variant="ghost"
                 size="sm"
                 className="mt-0.5 shrink-0 gap-1 px-2 text-primary"
-                aria-label={`Añadir turno el ${day.long}`}
+                aria-label={`Añadir ${unit} el ${day.long}`}
                 onClick={() => schedule.add(day.weekday)}
               >
                 <Plus aria-hidden />
-                Turno
+                {unit.charAt(0).toUpperCase() + unit.slice(1)}
               </Button>
             ) : null}
           </div>

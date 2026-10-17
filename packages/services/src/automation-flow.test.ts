@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { channelAdapters } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
+import { professionalSchedule } from "@odentia/db/schema/availability"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationLinkToken, automationRule } from "@odentia/db/schema/automation"
 import { clinicalFollowUp, patient, patientContact, patientResponsibility, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
@@ -15,7 +16,7 @@ import { applyAdminDraft, deleteAdminLine, discardAdminDraft, saveAdminDraft, se
 import { adminLineOf } from "./admin-lines.js"
 import { type AdminDecider, interpretAdminRequest, keywordAdminDecider, readNumbers } from "./admin-request.js"
 import { getAdminLine, getAdminPage, getAdminRecommendation, listAdminLinePeople, runAdminLineOnce } from "./agent-admin.js"
-import { confirmAppointmentByContact } from "./agent-operations.js"
+import { confirmAppointmentByContact, confirmProposalByPhone, countAwaitingAnswer, createHandoff, createProposal, listAwaitingAnswer } from "./agent-operations.js"
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, replyId } from "./automation-messages.js"
 import {
   applyTemplateUpdates,
@@ -51,6 +52,7 @@ import { nextPatientNumber } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { setWritingHours } from "./writing-hours.js"
 
 /**
  * Automatizaciones de punta a punta contra la base: qué se programa al prender,
@@ -65,7 +67,7 @@ configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odenti
 const KEY = secretsKeyFromEnv("ab".repeat(32))
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
-// 15:00Z son las 10:00 en Lima: fuera del horario de silencio.
+// 15:00Z son las 10:00 en Lima de un martes: dentro del «Horario para escribir».
 const NOW = new Date("2026-10-06T15:00:00.000Z")
 const all = () => true
 
@@ -94,12 +96,13 @@ async function clinic(
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
   ])
-  // Recepción (quien escribe) y el Administrador, encendidos. Sin horario de
-  // silencio cuando el caso usa el reloj real.
+  // Recepción (quien escribe) y el Administrador, encendidos. Con el horario
+  // para escribir a toda hora cuando el caso usa el reloj real.
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: options.reception !== false,
-    advisor: { enabled: true, ...(options.anyHour ? { quietStart: "00:00", quietEnd: "00:00" } : {}) },
+    advisor: { enabled: true },
+    ...(options.anyHour ? { writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]) } : {}),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
   const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
@@ -567,7 +570,7 @@ describe("como mucho un mensaje al día por persona", () => {
     expect(jobs.find((job) => job.kind === "recordatorio_cita")?.status).toBe("enviado")
     const followUp = jobs.find((job) => job.kind === "seguimiento_presupuesto")!
     expect(followUp.status).toBe("pendiente")
-    // Mañana a las 8:00 de Lima, cuando termina el horario de silencio.
+    // Mañana a las 8:00 de Lima, cuando empieza el horario para escribir.
     expect(followUp.scheduledFor.toISOString()).toBe("2026-10-07T13:00:00.000Z")
   })
 })
@@ -1601,7 +1604,140 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     const oppId = await opportunityFor(c, p.contactId, new Date(Date.now() - 2 * HOUR))
     const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "seguimiento_comercial"))
     expect(advice).toMatchObject({ total: 1, actor: "agente", once: { label: "Escribirles esta vez" } })
-    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_comercial", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true })
+    expect(await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_comercial", { secretsKey: KEY }))).toEqual({ created: 1, total: 1, writes: true, all: 1 })
     expect(await jobsOf(c)).toMatchObject([{ kind: "seguimiento_comercial", status: "pendiente", opportunityId: oppId, payload: { once: true } }])
+  })
+})
+
+describe("una puerta para escribirle a alguien (ADR 0042)", () => {
+  it("«Probar línea» cuenta a cada persona con la misma regla que el envío real", async () => {
+    const c = await clinic({ approved: ["seguimiento_no_asistencia"], anyHour: true })
+    const line = adminLineOf("seguimiento_no_asistencia")!
+    // Nunca dijo nada de los mensajes de seguimiento: es parte del servicio y le llega.
+    const silent = await person(c, "Nunca dijo nada")
+    // Pidió no recibirlos: no le llega ni en la prueba ni de verdad.
+    const refused = await person(c, "Pidió que no", { refused: ["seguimiento"] })
+    const now = new Date()
+    for (const p of [silent, refused]) await appointmentFor(c, p.patientId, new Date(now.getTime() - 2 * DAY), "no_asistio", 10)
+    const test = await run(c, (tx) => testAdminLine(tx, c.orgId, line, { agentPart: true, teamPart: false, days: null }))
+    expect(test!.rows.map((row) => [row.route, row.total])).toEqual([
+      ["plantilla", 1],
+      ["no_pudo", 1],
+    ])
+    // El envío real dice lo mismo, persona por persona.
+    await run(c, (tx) => runAdminLineOnce(tx, c.orgId, c.ownerId, all, "seguimiento_no_asistencia", { secretsKey: KEY }))
+    const sent = await run(c, (tx) => deliverDueJobs(tx, c.orgId, new Date(), { secretsKey: KEY }))
+    expect(sent.map((result) => result.outcome).sort()).toEqual(["enviado", "omitido"])
+    const jobs = await jobsOf(c)
+    expect(jobs.find((job) => job.patientId === silent.patientId)).toMatchObject({ status: "enviado", via: "plantilla" })
+    expect(jobs.find((job) => job.patientId === refused.patientId)).toMatchObject({ status: "omitido", cause: "sin_permiso" })
+  })
+
+  it("quien escribió hace poco tiene la ventana abierta aunque su conversación esté cerrada", async () => {
+    const c = await clinic({ anyHour: true })
+    const line = adminLineOf("seguimiento_no_asistencia")!
+    const p = await person(c, "Escribió y se cerró", { openWindow: true })
+    await ownerDb.update(conversation).set({ status: "closed", closedAt: new Date(), closeReason: "resuelta" }).where(eq(conversation.id, p.conversationId!))
+    await appointmentFor(c, p.patientId, new Date(Date.now() - 2 * DAY), "no_asistio", 10)
+    const test = await run(c, (tx) => testAdminLine(tx, c.orgId, line, { agentPart: true, teamPart: false, days: null }))
+    expect(test!.rows.map((row) => [row.route, row.total])).toEqual([["respuesta", 1]])
+  })
+})
+
+describe("el horario para escribir", () => {
+  // Domingo 11 de octubre, 8:00 en Lima: el domingo no se escribe (el horario que viene).
+  const SUNDAY = new Date("2026-10-11T13:00:00.000Z")
+
+  it("un recordatorio que toca el domingo sale el lunes a las 8:00 si aún falta una hora para la cita; si no, no sale", async () => {
+    const c = await clinic()
+    await ruleOn(c, "recordatorio_cita", new Date(SUNDAY.getTime() - DAY), { hoursBefore: [24] })
+    const early = await person(c, "Cita a las 9")
+    const tooEarly = await person(c, "Cita a las 8 y media")
+    const nine = await appointmentFor(c, early.patientId, new Date("2026-10-12T14:00:00.000Z"))
+    await appointmentFor(c, tooEarly.patientId, new Date("2026-10-12T13:30:00.000Z"))
+    expect(await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, SUNDAY))).toMatchObject({ programados: 1 })
+    expect((await jobsOf(c)).map((job) => [job.appointmentId, job.scheduledFor.toISOString()])).toEqual([[nine, "2026-10-12T13:00:00.000Z"]])
+  })
+
+  it("lo que vence fuera del horario espera; los avisos de lo que pasó salen al momento", async () => {
+    const c = await clinic({ approved: ["seguimiento_no_asistencia", "aviso_cita_cancelada"] })
+    const p = await person(c, "Faltó el viernes")
+    await appointmentFor(c, p.patientId, new Date(SUNDAY.getTime() - 2 * DAY), "no_asistio", 10)
+    await ruleOn(c, "seguimiento_no_asistencia", new Date(SUNDAY.getTime() - 3 * DAY))
+    await run(c, (tx) => syncVisitFollowUps(tx, c.orgId, SUNDAY))
+    // Al programarlo ya se corre al primer momento permitido.
+    const [job] = await jobsOf(c)
+    expect(job!.scheduledFor.toISOString()).toBe("2026-10-12T13:00:00.000Z")
+    // Si vence igual en domingo (el horario cambió después), el envío lo pospone.
+    await ownerDb.update(automationJob).set({ scheduledFor: SUNDAY }).where(eq(automationJob.id, job!.id))
+    expect(await deliver(c, SUNDAY)).toMatchObject([{ outcome: "pospuesto", detail: "Fuera del horario para escribir" }])
+    expect((await jobsOf(c))[0]!.scheduledFor.toISOString()).toBe("2026-10-12T13:00:00.000Z")
+    // Con el domingo abierto para escribir, sale.
+    await run(c, (tx) => setWritingHours(tx, c.orgId, c.ownerId, Array.from({ length: 7 }, (): Array<[number, number]> => [[480, 1200]])))
+    await ownerDb.update(automationJob).set({ scheduledFor: SUNDAY }).where(eq(automationJob.id, job!.id))
+    expect((await deliver(c, SUNDAY)).map((result) => result.outcome)).toEqual(["enviado"])
+  })
+})
+
+describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () => {
+  /** Una cita propuesta por el agente en la conversación de la persona, con el profesional que atiende ese día. */
+  async function proposed(c: Clinic, startsAt: string) {
+    // El profesional atiende todos los días de 8:00 a 20:00 en la sede.
+    await ownerDb.insert(professionalSchedule).values(
+      Array.from({ length: 7 }, (_, weekday) => ({ organizationId: c.orgId, branchId: c.branchId, dentistUserId: c.dentistId, weekday, startMin: 480, endMin: 1200 })),
+    ).onConflictDoNothing()
+    const p = await person(c, "Pedro Ruiz", { openWindow: true })
+    const proposal = await run(c, (tx) =>
+      createProposal(tx, c.orgId, {
+        conversationId: p.conversationId!, action: "reservar_cita",
+        payload: { patientId: p.patientId, branchId: c.branchId, dentistUserId: c.dentistId, chairId: c.chairId, startsAt, durationMin: 30 },
+        idempotencyKey: `prueba:${randomUUID()}`,
+      }),
+    )
+    return { p, proposal }
+  }
+
+  it("muestra solo las citas propuestas abiertas, con lo que se le propuso, y cuenta solo esas", async () => {
+    const c = await clinic({ anyHour: true })
+    const startsAt = new Date(Date.now() + 3 * DAY)
+    startsAt.setUTCHours(21, 30, 0, 0) // 16:30 en Lima
+    const { p, proposal } = await proposed(c, startsAt.toISOString())
+    const list = await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))
+    expect(list.total).toBe(1)
+    expect(list.items).toMatchObject([{ id: proposal.id, conversationId: p.conversationId, contactName: "Pedro Ruiz", action: "reservar_cita", taken: false }])
+    expect(list.items[0]!.text).toMatch(/^Le propuse el \S+ \d+ a las 16:30 con Dra\. Ana Torres$/)
+    expect(await run(c, (tx) => countAwaitingAnswer(tx, c.orgId))).toBe(1)
+    // Un caso derivado no está aquí ni en el número.
+    await run(c, (tx) => createHandoff(tx, c.orgId, null, { conversationId: p.conversationId!, reason: "Dolor", summary: "Dolor", createdBy: "agent" }))
+    expect(await run(c, (tx) => countAwaitingAnswer(tx, c.orgId))).toBe(1)
+  })
+
+  it("«Confirmó por teléfono» reserva con la misma regla que el agente; si el horario se ocupó, lo dice y no hace nada", async () => {
+    const c = await clinic({ anyHour: true })
+    const startsAt = new Date(Date.now() + 3 * DAY)
+    startsAt.setUTCHours(15, 0, 0, 0) // 10:00 en Lima
+    const { p, proposal } = await proposed(c, startsAt.toISOString())
+    const done = await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, proposal.id))
+    expect(done.status).toBe("ejecutada")
+    const booked = await ownerDb.select().from(appointment).where(eq(appointment.patientId, p.patientId))
+    expect(booked).toMatchObject([{ startsAt, chairId: c.chairId, dentistUserId: c.dentistId, status: "programada" }])
+    expect(await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).toEqual({ items: [], total: 0 })
+    // Otra persona: le proponen el mismo horario, que ya no está libre.
+    const other = await person(c, "Ana Gómez", { openWindow: true })
+    const late = await run(c, (tx) =>
+      createProposal(tx, c.orgId, {
+        conversationId: other.conversationId!, action: "reservar_cita",
+        payload: { patientId: other.patientId, branchId: c.branchId, dentistUserId: c.dentistId, chairId: c.chairId, startsAt: startsAt.toISOString(), durationMin: 30 },
+        idempotencyKey: `prueba:${randomUUID()}`,
+      }),
+    )
+    expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items).toMatchObject([{ id: late.id, taken: true }])
+    await expect(run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, late.id))).rejects.toMatchObject({
+      code: "SLOT_TAKEN",
+      message: "Ese horario ya no está libre: elige otro en la Agenda",
+    })
+    // La propuesta sigue esperando; nada quedó a medias.
+    expect((await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).items.map((item) => item.id)).toEqual([late.id])
+    expect(await ownerDb.select().from(appointment).where(eq(appointment.patientId, other.patientId))).toHaveLength(0)
   })
 })

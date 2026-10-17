@@ -16,6 +16,8 @@ import {
   type HealthMedicationDeclaration,
   type RegistrationAnswers,
   type RegistrationConfig,
+  ALLERGY_SEVERITIES,
+  CONDITION_STATUSES,
 } from "@odentia/clinical"
 import {
   Badge,
@@ -65,8 +67,9 @@ export const BLOOD_GROUP_LABELS: Record<BloodGroup, string> = {
   unknown: "No lo sé",
 }
 
-export const ALLERGY_SEVERITY_OPTIONS = ["leve", "moderada", "severa", "desconocida"] as const
-export const CONDITION_STATUS_OPTIONS = ["activa", "resuelta", "inactiva"] as const
+// Las listas de `@odentia/clinical`, las mismas que valida el servidor.
+export const ALLERGY_SEVERITY_OPTIONS = ALLERGY_SEVERITIES
+export const CONDITION_STATUS_OPTIONS = CONDITION_STATUSES
 
 let rowSeq = 0
 function nextRowKey(prefix: string): string {

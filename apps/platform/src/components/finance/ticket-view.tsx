@@ -219,7 +219,7 @@ export function TicketView({
     staleTime: 30_000,
   })
   const owed = account.data
-    ? (account.data.data.byCurrency.find((row) => row.currency === currency)?.porCobrar ?? 0)
+    ? (account.data.data.byCurrency.find((row) => row.currency === currency)?.saldo ?? 0)
     : null
 
   const voidMutation = useMutation({

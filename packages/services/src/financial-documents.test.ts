@@ -196,7 +196,6 @@ async function seedRecipients(orgId: string) {
       currency: "PEN",
       paidAt: new Date("2026-10-11T12:00:00-05:00"),
       methodName: "Efectivo",
-      method: "efectivo",
     })
     .returning()
   await ownerDb.insert(patientPaymentApplication).values({

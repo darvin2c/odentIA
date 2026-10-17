@@ -545,6 +545,7 @@ export interface SlotsQuery {
   to: string
   durationMin?: number
   timeZone?: string
+  /** Cada cuántos minutos empieza un hueco; sin indicar, `bookingStepMin` de la duración. */
   stepMin?: number
   /** Descarta los huecos que empiezan antes de este instante (lo ya pasado no se ofrece). */
   notBefore?: string
@@ -581,6 +582,16 @@ export interface AvailableSlotsResult {
 }
 
 /**
+ * Cada cuántos minutos se ofrece una hora a quien reserva: una por cada cita
+ * que cabe (redondeada a 5 minutos, entre 15 y 60), no cada cuarto de hora.
+ * Menos opciones y las mismas posibilidades reales. Es una sola regla para el
+ * enlace, el portal y el agente: la persona ve las mismas horas por cualquier vía.
+ */
+export function bookingStepMin(durationMin: number): number {
+  return Math.min(60, Math.max(15, Math.round(durationMin / 5) * 5))
+}
+
+/**
  * Huecos reservables en la zona IANA de la sede (o la pedida si es
  * válida). Solo profesionales con horario explícito; descuenta citas
  * ocupantes, bloqueos y ausencias. Con servicio, solo quien lo atiende
@@ -602,10 +613,6 @@ export async function listAvailableSlots(
   if (to <= from) throw validation("El rango de huecos es inválido")
   if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * 86_400_000) {
     throw validation(`El rango máximo es de ${MAX_RANGE_DAYS} días`)
-  }
-  const step = input.stepMin ?? 15
-  if (!Number.isInteger(step) || step < 5 || step > 120) {
-    throw validation("El paso debe estar entre 5 y 120 minutos")
   }
   let duration = input.durationMin
   if (input.serviceId) {
@@ -629,6 +636,10 @@ export async function listAvailableSlots(
     throw validation("La duración debe estar entre 1 y 480 minutos")
   }
   const slotMin: number = duration
+  const step = input.stepMin ?? bookingStepMin(slotMin)
+  if (!Number.isInteger(step) || step < 5 || step > 120) {
+    throw validation("El paso debe estar entre 5 y 120 minutos")
+  }
   const perDay = input.perDentistPerDay
   if (perDay !== undefined && (!Number.isInteger(perDay) || perDay < 1 || perDay > 50)) {
     throw validation("perDentistPerDay debe estar entre 1 y 50")
@@ -964,6 +975,8 @@ export async function getAgendaAvailability(
       from: now.toISOString(),
       to: new Date(now.getTime() + NEXT_FREE_DAYS * 86_400_000).toISOString(),
       notBefore: now.toISOString(),
+      // Recepción ve el primer cuarto de hora libre, no la hora que se ofrece a la persona.
+      stepMin: 15,
       firstPerDentist: true,
       ...(input.serviceId ? { serviceId: input.serviceId } : {}),
     }),

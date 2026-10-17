@@ -311,9 +311,12 @@ export function refundApi(
 
 export interface AccountCurrency {
   currency: string
+  /** Debe. */
   porCobrar: number
   pagado: number
   aFavor: number
+  /** Lo que debe menos lo que tiene a favor (decisión 22); nunca baja de cero. */
+  saldo: number
 }
 
 export interface AccountPendingItem {

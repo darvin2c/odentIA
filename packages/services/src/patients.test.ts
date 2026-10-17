@@ -852,7 +852,12 @@ it("persona única: una identidad, protegida del agente y sustituible por el con
   ).rejects.toMatchObject({ status: 404 })
   const nuevo = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", whatsapp.id))
   expect(nuevo.contact).toMatchObject({ docType: "DNI", docNumber: "45550001" })
-  expect(nuevo.contact.notes).toContain("Teléfono anterior del contacto: +51911222333")
+  // Lo que no conserva queda como nota de la persona (`crm_note`), sin autor.
+  const [kept] = await ownerDb.execute<{ body: string; author_user_id: string | null }>(
+    sql`select body, author_user_id from crm_note where contact_id = ${whatsapp.id}`,
+  )
+  expect(kept).toMatchObject({ author_user_id: null })
+  expect(kept?.body).toContain("Teléfono anterior del contacto: +51911222333")
 
   // Con actividad propia ya no es provisional: no se fusiona en silencio.
   const tercero = await withOrgContext(appDb, "org_a", (tx) =>

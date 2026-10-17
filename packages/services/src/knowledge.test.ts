@@ -25,6 +25,7 @@ import {
   listActiveKnowledge,
   listKnowledgeEntries,
   listKnowledgeGaps,
+  listKnowledgePage,
   listKnowledgeRevisions,
   recordKnowledgeGap,
   scoreKnowledgeMatch,
@@ -35,7 +36,7 @@ import {
 import { createPaymentMethod, updatePaymentMethod } from "./payment-methods.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Conocimiento del agente: vigencia, búsqueda, lo básico de una clínica y lo que no supo responder. */
 setupTestDb()
@@ -386,4 +387,29 @@ it("lo que no supo responder se agrupa, muestra lo que respondió el equipo y se
   await expect(run((tx) => tx.delete(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, other!)))).rejects.toThrow()
   await expect(withOrgContext(appDb, OTHER, (tx) => getKnowledgeEntry(tx, OTHER, answered.id))).rejects.toMatchObject({ code: "NOT_FOUND" })
   expect((await run((tx) => tx.select({ id: agentKnowledgeEntry.id }).from(agentKnowledgeEntry).where(eq(agentKnowledgeEntry.id, answered.id)))).length).toBe(1)
+})
+
+it("Conocimiento pagina: la respuesta 101 también se abre, y la búsqueda va al servidor", async () => {
+  const orgId = `pagina-${Date.now()}`
+  await insertOrg(ownerDb, orgId, orgId)
+  await ownerDb.insert(agentKnowledgeEntry).values(
+    Array.from({ length: 105 }, (_, index) => ({
+      organizationId: orgId, kind: "faq", title: `Pregunta ${index}`, body: index === 3 ? "Hay estacionamiento." : "Respuesta.",
+      status: "publicada", createdBy: OWNER, updatedAt: new Date(Date.now() - index * 60_000),
+    })),
+  )
+  const page = (input: Parameters<typeof listKnowledgePage>[2]) => withOrgContext(appDb, orgId, (tx) => listKnowledgePage(tx, orgId, input))
+  const first = await page({ limit: 100 })
+  expect(first.items).toHaveLength(100)
+  expect(first.total).toBe(105)
+  expect(first.nextCursor).not.toBeNull()
+  const second = await page({ limit: 100, cursor: first.nextCursor! })
+  expect(second.items.map((entry) => entry.title)).toEqual(["Pregunta 100", "Pregunta 101", "Pregunta 102", "Pregunta 103", "Pregunta 104"])
+  expect(second.nextCursor).toBeNull()
+  // Ninguna se repite ni se pierde entre páginas.
+  expect(new Set([...first.items, ...second.items].map((entry) => entry.id)).size).toBe(105)
+  const found = await page({ q: "estacionamiento" })
+  expect(found).toMatchObject({ total: 1, nextCursor: null })
+  expect(found.items.map((entry) => entry.title)).toEqual(["Pregunta 3"])
+  await expect(page({ cursor: "roto" })).rejects.toMatchObject({ code: "VALIDATION" })
 })

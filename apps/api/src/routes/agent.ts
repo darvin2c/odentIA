@@ -8,6 +8,8 @@ import {
   AGENT_ROLES,
   getAgentConfig,
   getAgentOverview,
+  getWritingHours,
+  setWritingHours,
   operationFillsOf,
   previewDictationSuggestions,
   upsertAgentConfig,
@@ -27,7 +29,6 @@ const putInput = z.object({
   llm: z.enum(AGENT_LLM_IDS).optional(),
   dailyRunLimit: z.number().int().min(1).max(100_000).optional(),
   decisionProvider: z.enum(["none", "baseline", "jev", "openai_decisions"]).optional(),
-  systemPrompt: z.string().max(8000).optional(),
   handoffKeywords: z.array(z.string().max(60)).max(30).optional(),
   maxTurns: z.number().int().min(1).max(50).optional(),
   replyCheckEnabled: z.boolean().optional(),
@@ -45,6 +46,13 @@ const putInput = z.object({
   channels: z.array(z.string().max(40)).max(20).nullable().optional(),
   /** Horas de silencio tras las que el agente se despide y cierra (ADR 0024). */
   closeAfterHours: z.number().int().min(6).max(23).optional(),
+})
+
+/** Por día (0 = domingo), sus tramos en minutos locales; la forma y los cruces los valida el servicio. */
+const writingHoursInput = z.object({
+  week: z
+    .array(z.array(z.tuple([z.number().int().min(0).max(1440), z.number().int().min(0).max(1440)])).max(4))
+    .length(7),
 })
 
 export interface AgentRouteDeps extends CrmDeps {
@@ -84,6 +92,26 @@ export function createAgentRoute(deps: AgentRouteDeps) {
    * no responde), guardada 10 minutos. `fresh=1` vuelve a comprobar. Nunca
    * entrega el motivo técnico: ese va a Soporte de odentIA.
    */
+  /**
+   * «Horario para escribir» (decisión 18 v3): cuándo odentIA escribe por su
+   * cuenta. Lo ve quien supervisa el agente y lo cambia quien lo administra.
+   */
+  app.get("/writing-hours", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => ({ week: await getWritingHours(tx, orgId) })))
+  })
+
+  app.put("/writing-hours", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Esto lo cambia quien administra el agente"), 403)
+    const parsed = writingHoursInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({ week: await setWritingHours(tx, orgId, userId, parsed.data.week) })),
+    )
+  })
+
   app.get("/model", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)

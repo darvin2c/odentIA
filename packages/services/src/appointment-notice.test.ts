@@ -73,11 +73,12 @@ async function clinic(options: { whatsapp?: boolean; approved?: AutomationMessag
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
   ])
-  // Recepción y el Administrador encendidos y sin horario de silencio: el reloj es el real.
+  // Recepción y el Administrador encendidos y con el horario para escribir a toda hora: el reloj es el real.
   await ownerDb.insert(agentConfig).values({
     organizationId: orgId,
     enabled: true,
-    advisor: { enabled: options.admin !== false, quietStart: "00:00", quietEnd: "00:00" },
+    advisor: { enabled: options.admin !== false },
+    writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
   })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
   const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })

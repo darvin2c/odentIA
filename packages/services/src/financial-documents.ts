@@ -35,7 +35,8 @@ import { NOTICE_PURPOSE } from "./automation-messages.js"
 import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
 import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { mayWriteFirst } from "./message-permission.js"
+import { mayWriteFirst, permitsMessage } from "./message-permission.js"
+import { windowOpen } from "./message-window.js"
 import { budgetStateText } from "@odentia/clinical"
 import { deliverBudget, requireOwnBudget } from "./budgets.js"
 import {
@@ -46,11 +47,10 @@ import {
 } from "./financial-document-pdf.js"
 import type { Storage } from "./storage.js"
 import { requirePatient } from "./patients.js"
+import { listDecisionRecipients } from "./responsibilities.js"
 
 export const FINANCIAL_DOCUMENT_TYPES = ["ticket", "budget"] as const
 export type FinancialDocumentType = (typeof FINANCIAL_DOCUMENT_TYPES)[number]
-/** Ventana de sesión para texto/media (igual que conversaciones: 24 h). */
-const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /** Prefijos de hilo de las respuestas de correo (contrato de los slices Email). */
 const EMAIL_THREAD_PREFIXES = ["gmail-thread:", "m365-conv:"]
@@ -77,13 +77,24 @@ export interface DocumentRecipient {
   isDefault: boolean
 }
 
-/** Personas autorizadas a recibir el documento económico del paciente. */
+/**
+ * Personas autorizadas a recibir el documento económico del paciente. Un
+ * presupuesto es una decisión sobre su salud: va solo a quien decide
+ * (`listDecisionRecipients`, la regla única de a quién se le manda). El
+ * comprobante puede ir además al responsable económico.
+ */
 export async function listDocumentRecipients(
   tx: Db,
   orgId: string,
   patientId: string,
   preferContactId?: string | null,
+  documentType: FinancialDocumentType = "ticket",
 ): Promise<DocumentRecipient[]> {
+  if (documentType === "budget") {
+    const decides = await listDecisionRecipients(tx, orgId, patientId)
+    const preferred = decides.find((r) => r.contactId === preferContactId)
+    return decides.map((r) => ({ ...r, isDefault: preferred ? r === preferred : r.isDefault }))
+  }
   await requirePatient(tx, orgId, patientId)
   const today = new Date().toISOString().slice(0, 10)
   const links = await tx
@@ -149,8 +160,9 @@ async function requireAuthorizedRecipient(
   patientId: string,
   contactId: string | undefined,
   preferContactId?: string | null,
+  documentType: FinancialDocumentType = "ticket",
 ): Promise<DocumentRecipient> {
-  const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId)
+  const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId, documentType)
   if (recipients.length === 0) throw notFound("Destinatario del documento")
   const chosen = contactId
     ? recipients.find((r) => r.contactId === contactId)
@@ -340,7 +352,7 @@ export async function getDocumentSendOptions(
   if (documentType === "budget" && actor.memberRole === "dentist" && actor.actorUserId)
     await requireDentistOwnPlan(tx, orgId, actor.actorUserId, patientId, input.documentId)
   const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, patientId, documentType, input.documentId)
-  const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId)
+  const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId, documentType)
   if (recipients.length === 0) throw notFound("Destinatario del documento")
   const recipient =
     (input.recipientContactId && recipients.find((r) => r.contactId === input.recipientContactId)) ||
@@ -394,20 +406,25 @@ export async function documentChannelsFor(
     .select({ conversation, connection: channelConnection })
     .from(conversation)
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
-    .where(
-      and(
-        eq(conversation.organizationId, orgId),
-        eq(conversation.contactId, recipient.contactId),
-        eq(conversation.status, "open"),
-      ),
-    )
+    // Abiertas o cerradas: escribir reabre (ADR 0024). Cuenta desde cuándo
+    // escribió la persona, con la misma ventana que todo lo demás (ADR 0042).
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.contactId, recipient.contactId)))
     .orderBy(desc(conversation.lastMessageAt))
   const connections = await listMediaConnections(tx, orgId)
   const now = Date.now()
-  const channels: DocumentChannelOption[] = connections.map((conn) => {
-    const thread = threads.find((t) => t.conversation.channelConnectionId === conn.id)
-    const lastInboundAt = thread?.conversation.lastInboundAt?.getTime() ?? null
-    const withinWindow = lastInboundAt !== null && now - lastInboundAt <= SESSION_WINDOW_MS
+  // Es un aviso que manda el equipo: como respuesta sale siempre; si no, solo
+  // lo frena «No quiero ningún mensaje de la clínica» (la misma puerta).
+  const allowed = await mayWriteFirst(tx, orgId, recipient.contactId, "avisos")
+  const refused = (option: DocumentChannelOption): DocumentChannelOption =>
+    allowed || !option.usable ? option : { ...option, usable: false, reason: DOCUMENT_OPTED_OUT }
+  const options: DocumentChannelOption[] = connections.map((conn) => {
+    const own = threads.filter((t) => t.conversation.channelConnectionId === conn.id)
+    const thread = own[0]
+    const lastInboundAt = own.reduce<Date | null>(
+      (latest, t) => (t.conversation.lastInboundAt && (!latest || t.conversation.lastInboundAt > latest) ? t.conversation.lastInboundAt : latest),
+      null,
+    )
+    const withinWindow = windowOpen(lastInboundAt, now)
     if (conn.channel === "email") {
       const hasThread =
         !!thread && EMAIL_THREAD_PREFIXES.some((p) => thread.conversation.externalThreadId.startsWith(p))
@@ -485,12 +502,23 @@ export async function documentChannelsFor(
       isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
     }
   })
+  const channels = options.map((option, index) => {
+    // Dentro de la ventana es una respuesta: sale aunque haya pedido no recibir mensajes.
+    const conn = connections[index]
+    const inWindow = !!conn && threads.some(
+      (t) => t.conversation.channelConnectionId === conn.id && windowOpen(t.conversation.lastInboundAt, now),
+    )
+    return inWindow ? option : refused(option)
+  })
   return {
     channels,
     preferredChannel: recipientRow?.preferredChannel ?? null,
     lastChannel: threads[0]?.connection.channel ?? null,
   }
 }
+
+/** Lo que dice la pantalla de un documento cuando la persona pidió no recibir nada. */
+export const DOCUMENT_OPTED_OUT = "Pidió no recibir ningún mensaje de la clínica: entrégaselo impreso, o envíaselo si te escribe."
 
 // --- Entrega de borrador --------------------------------------------------------
 // Enviar un borrador lo entrega en la misma transacción (equivale a entregar):
@@ -861,6 +889,17 @@ export async function deliverDocumentPdf(
       await resolveConversation(tx, orgId, actorUserId, input.recipient, input.conn, input.exactAddress ?? false)
     ).id
   }
+  // La misma puerta que todo envío (ADR 0042): un aviso que manda el equipo
+  // sale como respuesta a quien acaba de escribir o con su permiso.
+  const [thread] = await tx
+    .select({ lastInboundAt: conversation.lastInboundAt })
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  const via = windowOpen(thread?.lastInboundAt) ? "respuesta" : "otra"
+  if (!(await permitsMessage(tx, orgId, input.recipient.contactId, { purpose: "avisos", initiative: "equipo", via }))) {
+    throw new ServiceError("DOCUMENT_OPTED_OUT", 409, DOCUMENT_OPTED_OUT)
+  }
   const ref = await deps.storage.putAttachment({
     orgId,
     conversationId,
@@ -930,7 +969,7 @@ export async function sendFinancialDocument(
       }
     }
   }
-  const registered = await requireAuthorizedRecipient(tx, orgId, input.patientId, input.recipientContactId, preferContactId)
+  const registered = await requireAuthorizedRecipient(tx, orgId, input.patientId, input.recipientContactId, preferContactId, documentType)
   // Otro correo: lo decide quien envía, de forma explícita, y queda registrado.
   const otherEmail = input.otherEmail?.trim() ? assertEmail(input.otherEmail) : null
   if (otherEmail && !input.confirmOtherEmail)

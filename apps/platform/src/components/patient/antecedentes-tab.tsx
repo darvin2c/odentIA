@@ -1,4 +1,4 @@
-import { FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
+import { ALLERGY_SEVERITIES, CONDITION_STATUSES, FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -124,8 +124,8 @@ function isValidDateStr(value: string): boolean {
     date.getUTCDate() === d
   )
 }
-const SEVERITY_OPTIONS = ["leve", "moderada", "severa", "desconocida"]
-const STATUS_OPTIONS = ["activa", "resuelta", "inactiva"]
+const SEVERITY_OPTIONS: readonly string[] = ALLERGY_SEVERITIES
+const STATUS_OPTIONS: readonly string[] = CONDITION_STATUSES
 
 const LEGACY_TOP_KEYS = [
   "motivoConsulta",

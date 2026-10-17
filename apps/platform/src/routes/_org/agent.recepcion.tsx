@@ -17,10 +17,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import { ArrowRight, ChevronDown, ChevronRight, Lock, Plus } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
+import { AgentGuidance } from "../../components/agent/agent-guidance"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import {
   FunctionNoteDrawer,
-  InstructionDrawer,
   LimitsDrawer,
   type LimitsSection,
 } from "../../components/agent/reception-drawers"
@@ -34,7 +34,6 @@ import {
   type AgentRoles,
   type LearningOverview,
   minutesToClock,
-  splitInstructions,
   voicePreview,
 } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
@@ -248,7 +247,6 @@ function ReceptionPage() {
   const agentPanel = useAgentPanel()
   const [noteFor, setNoteFor] = useState<AgentFunction | null>(null)
   const [limits, setLimits] = useState<LimitsSection | null>(null)
-  const [instruction, setInstruction] = useState<number | "nueva" | null>(null)
   const [baseOpen, setBaseOpen] = useState(false)
   const [turnOnOpen, setTurnOnOpen] = useState(false)
   const [turnOffOpen, setTurnOffOpen] = useState(false)
@@ -359,7 +357,6 @@ function ReceptionPage() {
     `tono ${TONE_LABEL[config.tone]}`,
     EMOJIS_LABEL[config.emojis],
   ].join(" · ")
-  const instructions = splitInstructions(config.systemPrompt)
   const lessons = learningQuery.data?.data.learned.filter((lesson) => lesson.agent === "recepcion").length
   const { today, knows } = overview
   const gaps = overview.needsYou.gaps
@@ -610,7 +607,7 @@ function ReceptionPage() {
             title="Cómo se comporta"
             hint="La voz es la de tu clínica. Aquí va solo lo propio de Recepción."
             phone={{
-              summary: `${config.personaName ?? "Sin nombre propio"} · ${TREATMENT_LABEL[config.treatment ?? "tu"]} · tono ${TONE_LABEL[config.tone]} · ${EMOJIS_LABEL[config.emojis]} · ${count(instructions.length, "indicación", "indicaciones")}`,
+              summary: `${config.personaName ?? "Sin nombre propio"} · ${TREATMENT_LABEL[config.treatment ?? "tu"]} · tono ${TONE_LABEL[config.tone]} · ${EMOJIS_LABEL[config.emojis]}`,
               expanded: behaviorOpen,
               onToggle: () => setBehaviorOpen((open) => !open),
             }}
@@ -632,40 +629,10 @@ function ReceptionPage() {
                 «{voicePreview({ personaName: config.personaName, treatment: config.treatment, tone: config.tone, emojis: config.emojis, clinicName: org.name })}»
               </p>
             </div>
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">Indicaciones solo para Recepción</h3>
-              {instructions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Todavía no le diste ninguna. Con la base y lo que sabe ya puede atender.</p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {instructions.map((item, index) => (
-                    <li key={item.line} className="flex items-start gap-3 rounded-xl bg-muted/60 px-4 py-2 text-sm">
-                      <p className="min-w-0 flex-1 py-1.5 break-words">«{item.text}»</p>
-                      {canWrite ? (
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="h-auto min-h-11 shrink-0 p-0 sm:min-h-8"
-                          aria-label={`Editar la indicación ${index + 1}`}
-                          onClick={() => setInstruction(item.line)}
-                        >
-                          Editar
-                        </Button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {canWrite ? (
-                <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:min-h-8" onClick={() => setInstruction("nueva")}>
-                  <Plus aria-hidden />
-                  Agregar indicación
-                </Button>
-              ) : null}
-              <p className="text-sm text-muted-foreground">Orientan al agente. Lo que deba cumplirse siempre va en los límites.</p>
-            </div>
           </Card>
+
+          {/* Decisión 24: lo que escribe la clínica y lo que aprendió, en una sola lista. */}
+          <AgentGuidance canWrite={canWrite} />
 
           {canWrite ? (
             <Link
@@ -710,7 +677,6 @@ function ReceptionPage() {
 
       <FunctionNoteDrawer fn={noteFor} config={config} onClose={() => setNoteFor(null)} />
       <LimitsDrawer section={limits} onClose={() => setLimits(null)} config={config} connectedChannels={overview.readiness.channels} />
-      <InstructionDrawer target={instruction} onClose={() => setInstruction(null)} config={config} />
       <AgentBaseDrawer
         open={baseOpen}
         onClose={() => setBaseOpen(false)}

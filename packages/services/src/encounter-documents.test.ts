@@ -353,7 +353,8 @@ it("los papeles de salud van solo a la persona adulta o a su representante legal
       ],
     }),
   )
-  const today = new Date().toISOString().slice(0, 10)
+  // Hoy en la clínica (Lima): la representación vigente se cuenta con su día, no con UTC.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
   for (const [contactId, kind] of [
     [mother.id, "representante_legal"],
     [payer.id, "responsable_economico"],

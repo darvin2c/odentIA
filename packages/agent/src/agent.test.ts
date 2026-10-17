@@ -48,6 +48,8 @@ import {
   setPatientContact,
   setProfessionalSchedule,
   upsertAgentConfig,
+  addAgentGuidance,
+  removeAgentGuidance,
 } from "@odentia/services"
 import { closeConversationWith } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
@@ -805,14 +807,14 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
     { messages: [], turnCount: 0 },
     { configurable: { thread_id: threadId } },
   )
-  await withOrgContext(appDb, "org_a", (tx) =>
-    upsertAgentConfig(tx, "org_a", { systemPrompt: "PROMPT-TURNO-DOS" }))
+  // Lo que escribe la clínica en «Lo que el agente debe saber» le llega en el turno siguiente.
+  const written = await withOrgContext(appDb, "org_a", (tx) => addAgentGuidance(tx, "org_a", "u_indicaciones", "PROMPT-TURNO-DOS"))
   toolCtx.draftText = "segundo turno"
   await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
     { messages: [], turnCount: 0 },
     { configurable: { thread_id: threadId } },
   )
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { systemPrompt: "" }))
+  await withOrgContext(appDb, "org_a", (tx) => removeAgentGuidance(tx, "org_a", "u_indicaciones", written.id))
   expect(model.seen).toHaveLength(2)
   const first = model.seen[0] ?? []
   const second = model.seen[1] ?? []

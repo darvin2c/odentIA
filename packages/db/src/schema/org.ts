@@ -19,12 +19,17 @@ export const orgProfile = pgTable("org_profile", {
     .primaryKey()
     .references(() => organization.id),
   legalName: text("legal_name").notNull(),
-  tradeName: text("trade_name"),
+  /**
+   * El nombre que ve la persona en todo (decisión 19): WhatsApp, «Su enlace»,
+   * el portal, el registro, el chat web y los PDF. Obligatorio: vacío, la base
+   * pone la razón social (respaldo de datos viejos) y lo copia en
+   * `organization.name`. La razón social va solo en el comprobante y lo legal.
+   */
+  tradeName: text("trade_name").notNull().default(""),
   // Tipo de identificador fiscal tal como lo nombra el país de la clínica
   // (texto libre); null mientras la clínica no lo tenga.
   fiscalDocType: text("fiscal_doc_type"),
   fiscalDocNumber: text("fiscal_doc_number"),
-  billingEmail: text("billing_email"),
   fiscalAddress: text("fiscal_address"),
   // Perfil regional (ISO 3166-1, ISO 4217, IANA, BCP 47): sin valores por
   // defecto, porque el núcleo no asume ningún país; quien crea el perfil los

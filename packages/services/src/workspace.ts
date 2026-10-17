@@ -4,7 +4,7 @@ import { encounter, patient } from "@odentia/db/schema/clinical"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
-import { listHandoffs } from "./agent-operations.js"
+import { countOpenHandoffs, listHandoffs } from "./agent-operations.js"
 import { type AppointmentVisit, appointmentVisit } from "./appointments.js"
 import { checkEncounterClosing } from "./encounters.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
@@ -430,18 +430,24 @@ async function waitingStaleEncounters(tx: Db, orgId: string, userId: string, tim
 /** Atenciones de otro día sin cerrar que llegan a «Te espera» a la vez. */
 const WAITING_STALE_ENCOUNTERS = 5
 
-/** Casos que pasó el agente y siguen sin resolver, para quien puede tomarlos. */
-async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean): Promise<WaitingCase[]> {
-  const rows = await listHandoffs(tx, orgId, { limit: 100, open: true })
-  return rows
-    // Lo que ya tomó otra persona no espera a quien mira; quien dirige lo ve todo.
-    .filter(row => all || row.assigneeUserId === null || row.assigneeUserId === userId)
+/**
+ * Casos que pasó el agente y siguen sin resolver, para quien puede tomarlos:
+ * primero los urgentes y, en cada urgencia, el que más lleva esperando. El
+ * corte va después de ordenar, y `total` cuenta todos: los más viejos nunca
+ * quedan fuera sin decirlo.
+ */
+async function waitingCases(tx: Db, orgId: string, userId: string, all: boolean): Promise<{ items: WaitingCase[]; total: number }> {
+  // Lo que ya tomó otra persona no espera a quien mira; quien dirige lo ve todo.
+  const rows = await listHandoffs(tx, orgId, { limit: 100, open: true, order: "urgencia", ...(all ? {} : { visibleTo: userId }) })
+  const items = rows
     .map(row => ({
       id: row.id, priority: row.priority, reason: row.reason, contactName: row.contactName,
       channel: row.channel, createdAt: row.createdAt, conversationId: row.conversationId,
       unclaimed: row.assigneeUserId === null,
     }))
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  const total = rows.length < 100 ? rows.length : await countOpenHandoffs(tx, orgId, all ? {} : { forUserId: userId })
+  return { items, total }
 }
 
 /**
@@ -689,7 +695,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
   const unreached = options.can && access.agent ? await getAdminUnreached(tx, orgId, options.can) : null
   const waiting = composeWaiting({
-    cases: access.agent ? await waitingCases(tx, orgId, userId, access.allTasks) : [],
+    ...(access.agent ? await waitingCases(tx, orgId, userId, access.allTasks).then(({ items, total }) => ({ cases: items, casesTotal: total })) : { cases: [] }),
     // Ningún borrador queda abandonado: la atención de otro día le sale a quien la lleva.
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.

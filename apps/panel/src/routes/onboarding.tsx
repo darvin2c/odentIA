@@ -74,7 +74,7 @@ const personaSchema = z.object({
 })
 
 const onboardingSchema = personaSchema.extend({
-  orgName: z.string().min(2, "Nombre de la organización"),
+  orgName: z.string().min(2, "Escribe el nombre comercial"),
   slug: z
     .string()
     .regex(slugPattern, "Slug inválido (minúsculas, números y guiones)")
@@ -230,6 +230,8 @@ function OnboardingPage() {
           method: "PUT",
           body: JSON.stringify({
             legalName: value.legalName,
+            // El nombre que se escribió es el nombre comercial: el que verán sus pacientes (decisión 19).
+            ...(!skipOrg && value.orgName.trim() ? { tradeName: value.orgName.trim() } : {}),
             fiscalDocNumber: value.fiscalDocNumber || undefined,
             countryCode: value.countryCode,
             currency: value.currency,
@@ -431,7 +433,7 @@ function OnboardingPage() {
               <form.Field name="orgName" validators={stepValidator("orgName")}>
                 {(field) => (
                   <Field>
-                    <FieldLabel htmlFor="orgName">Nombre de la organización</FieldLabel>
+                    <FieldLabel htmlFor="orgName">Nombre comercial</FieldLabel>
                     <Input
                       id="orgName"
                       aria-invalid={field.state.meta.errors.length > 0 || undefined}

@@ -182,7 +182,7 @@ it("traza la propuesta versionada, el representante, las sesiones y la evidencia
   )
   const doc = await f.run((tx) =>
     registerPatientDocument(tx, ...f.args, {
-      category: "receta",
+      category: "informe",
       label: "Receta clínica",
       storageKey: "test/rx",
       contentType: "application/pdf",

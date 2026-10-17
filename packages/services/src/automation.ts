@@ -42,7 +42,6 @@ import {
   automationMessageOf,
   CHOOSE_MESSAGES_LINK,
   isStopWord,
-  MESSAGE_KIND_WORDS,
   optInReply,
   optOutReply,
   SWITCHABLE_PURPOSES,
@@ -55,6 +54,7 @@ import {
   withLinkLine,
 } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { permissionRefusal, writingTimeFor } from "./message-gate.js"
 import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { answerBudgetButton } from "./budget-send.js"
@@ -78,6 +78,7 @@ import { personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
+import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
 
 /**
@@ -377,19 +378,15 @@ export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Dat
 
 /**
  * Lo que el Administrador necesita saber antes de hacer algo por su cuenta:
- * si él y Recepción están encendidos y su horario de silencio.
+ * si él y Recepción están encendidos. A qué hora escribe lo dice el «Horario
+ * para escribir» (`writing-hours.ts`), el mismo para todo lo que sale solo.
  */
 export interface AdminRuntime {
   adminOn: boolean
   receptionOn: boolean
   /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0031). */
   agentsPaused: boolean
-  quietStart: string
-  quietEnd: string
 }
-
-export const DEFAULT_QUIET_START = "21:00"
-export const DEFAULT_QUIET_END = "08:00"
 
 export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime> {
   const [row] = await tx
@@ -402,8 +399,6 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
     adminOn: row?.advisor?.enabled === true,
     receptionOn: row?.enabled === true,
     agentsPaused: gate.trialExhausted,
-    quietStart: row?.advisor?.quietStart ?? DEFAULT_QUIET_START,
-    quietEnd: row?.advisor?.quietEnd ?? DEFAULT_QUIET_END,
   }
 }
 
@@ -923,38 +918,18 @@ export async function timezoneOf(tx: Db, orgId: string, branchId?: string | null
   return profile?.timezone ?? NEUTRAL_TIMEZONE
 }
 
-/** true si `now` cae en la ventana de silencio (regla de horarios por sede). */
-export function inQuietHours(now: Date, timeZone: string, start?: string, end?: string): boolean {
-  const s = start ?? "21:00"
-  const e = end ?? "08:00"
-  // Lectura técnica de la hora (HH:mm) para comparar, no un texto para personas.
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(now)
-  const [h, m] = parts.split(":").map(Number)
-  const cur = (h ?? 0) * 60 + (m ?? 0)
-  const toMin = (v: string) => {
-    const [hh, mm] = v.split(":").map(Number)
-    return (hh ?? 0) * 60 + (mm ?? 0)
-  }
-  const from = toMin(s)
-  const to = toMin(e)
-  if (from === to) return false
-  if (from < to) return cur >= from && cur < to
-  return cur >= from || cur < to
-}
+/** Lo que queda anotado cuando un recordatorio ya no tiene momento para salir dentro del horario. */
+const OUTSIDE_WRITING_HOURS_LATE = "Fuera del horario para escribir y ya sin una hora de margen antes de la cita"
 
-/** Pospone al primer instante fuera de la ventana de silencio (pasos de 15 min, máx. 24 h). */
-function afterQuietEnd(now: Date, timeZone: string, start?: string, end?: string): Date {
-  let candidate = new Date(now.getTime() + 15 * 60_000)
-  for (let i = 0; i < 96; i++) {
-    if (!inQuietHours(candidate, timeZone, start, end)) return candidate
-    candidate = new Date(candidate.getTime() + 15 * 60_000)
-  }
-  return candidate
+/** Cuándo empieza la cita de un trabajo, para no recordarla con menos de una hora de margen. */
+async function appointmentStartOf(tx: Db, orgId: string, appointmentId: string | null): Promise<Date | null> {
+  if (!appointmentId) return null
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  return row?.startsAt ?? null
 }
 
 // ------------------------------------------------------- sincronización ---
@@ -1043,19 +1018,25 @@ export async function syncAppointmentReminders(
       omitidos++
       continue
     }
+    // El «Horario para escribir» se mide con la hora de la sede de la cita.
+    const timeZone = await timezoneOf(tx, orgId, appt.branchId)
+    const schedule = await writingScheduleOf(tx, orgId, timeZone)
     for (const h of hoursList) {
-      const scheduledFor = new Date(appt.startsAt.getTime() - h * 3_600_000)
-      if (scheduledFor.getTime() < now.getTime() - 30 * 60_000) continue
+      const target = new Date(appt.startsAt.getTime() - h * 3_600_000)
+      if (target.getTime() < now.getTime() - 30 * 60_000) continue
+      // Fuera del horario sale en el último momento permitido antes; si no hay,
+      // en el primero después con una hora de margen antes de la cita.
+      const scheduledFor = sendTimeFor(target, now, schedule, appt.startsAt)
+      if (!scheduledFor) continue
       const job = await enqueueJob(tx, orgId, {
         ruleId: rule.id,
         kind: "recordatorio_cita",
         dedupeKey: `recordatorio_cita:${appt.id}:${h}`,
-        scheduledFor: scheduledFor < now ? now : scheduledFor,
+        scheduledFor,
         contactId,
         appointmentId: appt.id,
         patientId: appt.patientId,
-        // El horario de silencio se mide con la hora de la sede de la cita.
-        payload: { timeZone: await timezoneOf(tx, orgId, appt.branchId) },
+        payload: { timeZone },
       })
       if (job) programados++
     }
@@ -1216,7 +1197,7 @@ export async function syncVisitFollowUps(tx: Db, orgId: string, now: Date): Prom
       ruleId: rule.id,
       kind: "seguimiento_no_asistencia",
       dedupeKey: `seguimiento_no_asistencia:${appt.id}`,
-      scheduledFor: at < now ? now : at,
+      scheduledFor: sendTimeFor(at, now, await writingScheduleOf(tx, orgId, timeZone)) ?? (at < now ? now : at),
       contactId,
       appointmentId: appt.id,
       patientId: appt.patientId,
@@ -1766,15 +1747,6 @@ function emailBody(
   return `${message.subject}\n\n${message.text}${actions}\n\nPuedes responder a este correo.\n\n${clinic}${footer}`
 }
 
-/** Primer instante de mañana (en la zona dada) fuera del horario de silencio. */
-function tomorrowMorning(now: Date, timeZone: string, quietStart?: string, quietEnd?: string): Date {
-  const hourNow = Number(
-    new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(now),
-  )
-  const midnight = new Date(now.getTime() + (24 - hourNow) * 3_600_000)
-  return afterQuietEnd(midnight, timeZone, quietStart, quietEnd)
-}
-
 /** Fin del día siguiente en la zona dada: el plazo de una tarea que deja el Administrador. */
 function endOfTomorrow(now: Date, timeZone: string): Date {
   const hourNow = Number(
@@ -1793,7 +1765,14 @@ function endOfTomorrow(now: Date, timeZone: string): Date {
  * de un caso del agente ni las que dejó una persona. Corre en cada ciclo del
  * worker, aunque el Administrador esté apagado. Devuelve cuántas cerró.
  */
-export async function settleTasks(tx: Db, orgId: string, now: Date): Promise<number> {
+export async function settleTasks(
+  tx: Db,
+  orgId: string,
+  now: Date,
+  opts: { batch?: number; perCycle?: number } = {},
+): Promise<number> {
+  const batch = opts.batch ?? BATCH_LIMIT
+  const perCycle = opts.perCycle ?? SETTLE_PER_CYCLE
   let settled = 0
   const ofClosed = await tx
     .select({ id: crmTask.id, status: opportunity.status })
@@ -1804,29 +1783,65 @@ export async function settleTasks(tx: Db, orgId: string, now: Date): Promise<num
   for (const row of ofClosed) {
     if (await settleTask(tx, orgId, row.id, row.status === "won" ? "la oportunidad se ganó" : "la oportunidad se perdió")) settled++
   }
-  const left = await tx
-    .select({ job: automationJob, taskId: crmTask.id, name: sql<string | null>`coalesce(${patient.displayName}, ${contact.displayName})` })
-    .from(crmTask)
-    .innerJoin(automationJob, and(eq(automationJob.organizationId, crmTask.organizationId), eq(automationJob.taskId, crmTask.id)))
-    .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, crmTask.organizationId)))
-    .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, crmTask.organizationId)))
-    .where(
-      and(
-        eq(crmTask.organizationId, orgId),
-        eq(crmTask.status, "open"),
-        eq(crmTask.createdBy, "admin"),
-        sql`${automationJob.kind} <> 'seguimiento_comercial'`,
-      ),
-    )
-    .orderBy(asc(crmTask.createdAt))
-    .limit(BATCH_LIMIT)
-  for (const row of left) {
-    const validity = await stillValid(tx, orgId, row.job, now)
-    if (validity.valid) continue
-    if (await settleTask(tx, orgId, row.taskId, settledWords(validity.reason, row.name))) settled++
+  // Las que dejó el Administrador se revisan avanzando con un cursor: las que
+  // siguen en pie no tapan a las siguientes. Cada ciclo sigue donde quedó el
+  // anterior y, al llegar al final, vuelve a empezar.
+  let cursor = settleCursors.get(orgId) ?? null
+  let checked = 0
+  let wrapped = false
+  while (checked < perCycle) {
+    const size = Math.min(batch, perCycle - checked)
+    const left = await tx
+      .select({
+        job: automationJob,
+        taskId: crmTask.id,
+        // Con sus microsegundos: el cursor no vuelve a tomar la misma tarea.
+        createdAt: sql<string>`${crmTask.createdAt}::text`,
+        name: sql<string | null>`coalesce(${patient.displayName}, ${contact.displayName})`,
+      })
+      .from(crmTask)
+      .innerJoin(automationJob, and(eq(automationJob.organizationId, crmTask.organizationId), eq(automationJob.taskId, crmTask.id)))
+      .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, crmTask.organizationId)))
+      .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, crmTask.organizationId)))
+      .where(
+        and(
+          eq(crmTask.organizationId, orgId),
+          eq(crmTask.status, "open"),
+          eq(crmTask.createdBy, "admin"),
+          sql`${automationJob.kind} <> 'seguimiento_comercial'`,
+          cursor ? sql`(${crmTask.createdAt}, ${crmTask.id}) > (${cursor.createdAt}::timestamptz, ${cursor.id}::uuid)` : undefined,
+        ),
+      )
+      .orderBy(asc(crmTask.createdAt), asc(crmTask.id))
+      .limit(size)
+    for (const row of left) {
+      const validity = await stillValid(tx, orgId, row.job, now)
+      if (!validity.valid && (await settleTask(tx, orgId, row.taskId, settledWords(validity.reason, row.name)))) settled++
+    }
+    checked += left.length
+    const last = left.at(-1)
+    if (!last && cursor && !wrapped) {
+      // El ciclo anterior terminó justo en la última: se vuelve a empezar ahora.
+      cursor = null
+      wrapped = true
+      continue
+    }
+    if (!last || left.length < size) {
+      // Se llegó al final: el próximo ciclo empieza otra vez desde la más vieja.
+      cursor = null
+      break
+    }
+    cursor = { createdAt: last.createdAt, id: last.taskId }
   }
+  if (cursor) settleCursors.set(orgId, cursor)
+  else settleCursors.delete(orgId)
   return settled
 }
+
+/** Tareas del Administrador que se revisan como mucho en un ciclo del worker. */
+const SETTLE_PER_CYCLE = 1000
+/** Dónde quedó la revisión de cada clínica: el ciclo siguiente continúa desde ahí. */
+const settleCursors = new Map<string, { createdAt: string; id: string }>()
 
 /** Por qué se cerró sola, en palabras: «Rosa confirmó su cita», «la cita ya pasó». */
 function settledWords(reason: string | undefined, name: string | null): string {
@@ -2124,28 +2139,32 @@ export async function deliverJob(
     }
     return { jobId: job.id, outcome: status, detail }
   }
-  if (inQuietHours(now, tz, runtime.quietStart, runtime.quietEnd)) {
-    const later = afterQuietEnd(now, tz, runtime.quietStart, runtime.quietEnd)
+  // El tipo es el del mensaje: un aviso de cita es un aviso aunque sea de «Recordar la cita» (ADR 0040).
+  const purpose = purposeOfKind(job.kind)
+  // La hora (ADR 0042): fuera del «Horario para escribir» espera al primer
+  // momento permitido; un recordatorio que ya no llega con una hora de margen
+  // antes de la cita no sale. Los avisos de lo que pasó salen al momento.
+  const timing = await writingTimeFor(tx, orgId, {
+    purpose,
+    now,
+    timeZone: tz,
+    appointmentAt: job.kind === "recordatorio_cita" ? await appointmentStartOf(tx, orgId, job.appointmentId) : null,
+  })
+  if ("never" in timing) {
+    await close(ids(), "cancelado", OUTSIDE_WRITING_HOURS_LATE)
+    return { jobId: job.id, outcome: "cancelado", detail: OUTSIDE_WRITING_HOURS_LATE }
+  }
+  if ("later" in timing) {
     await tx
       .update(automationJob)
-      .set({ scheduledFor: later, updatedAt: now })
+      .set({ scheduledFor: timing.later, updatedAt: now })
       .where(eq(automationJob.id, job.id))
-    return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario de envío" }
+    return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario para escribir" }
   }
   if (!job.contactId) return cannot("Sin persona a quien escribirle", "sin_destino")
   const contactId = job.contactId
-  // El tipo es el del mensaje: un aviso de cita es un aviso aunque sea de «Recordar la cita» (ADR 0040).
-  const purpose = purposeOfKind(job.kind)
   if (!(await mayWriteFirst(tx, orgId, contactId, purpose))) {
-    return cannot(
-      purpose === "novedades"
-        ? "La persona no aceptó novedades y promociones"
-        : purpose === "avisos"
-          ? "La persona pidió no recibir ningún mensaje de la clínica"
-          : `La persona pidió no recibir ${MESSAGE_KIND_WORDS[purpose].title.toLowerCase()}`,
-      "sin_permiso",
-      { status: "omitido" },
-    )
+    return cannot(permissionRefusal(purpose), "sin_permiso", { status: "omitido" })
   }
 
   if (job.kind === "recordatorio_cita") {
@@ -2201,7 +2220,7 @@ export async function deliverJob(
     if (today?.sent || today?.reminder) {
       await tx
         .update(automationJob)
-        .set({ scheduledFor: tomorrowMorning(now, tz, runtime.quietStart, runtime.quietEnd), updatedAt: now })
+        .set({ scheduledFor: nextWritingDay(now, await writingScheduleOf(tx, orgId, tz)), updatedAt: now })
         .where(eq(automationJob.id, job.id))
       return { jobId: job.id, outcome: "pospuesto", detail: "Ya recibió un mensaje hoy" }
     }
@@ -2538,7 +2557,7 @@ export async function rescheduleAppointmentReminders(
   startsAt: Date,
 ): Promise<void> {
   const pending = await tx
-    .select({ id: automationJob.id, dedupeKey: automationJob.dedupeKey })
+    .select({ id: automationJob.id, dedupeKey: automationJob.dedupeKey, payload: automationJob.payload })
     .from(automationJob)
     .where(
       and(
@@ -2552,11 +2571,14 @@ export async function rescheduleAppointmentReminders(
   for (const job of pending) {
     const hours = Number(job.dedupeKey.split(":").at(-1))
     if (!Number.isFinite(hours)) continue
-    const at = new Date(startsAt.getTime() - hours * 3_600_000)
+    const target = new Date(startsAt.getTime() - hours * 3_600_000)
+    // La misma regla que al programarlo: dentro del «Horario para escribir».
+    const schedule = await writingScheduleOf(tx, orgId, jobPayloadOf(job.payload).timeZone)
+    const at = target.getTime() < now.getTime() ? null : sendTimeFor(target, now, schedule, startsAt)
     await tx
       .update(automationJob)
       .set(
-        at.getTime() < now.getTime()
+        at === null
           ? { status: "cancelado", lastError: "La cita se movió y este recordatorio ya no llega a tiempo", updatedAt: now }
           : { scheduledFor: at, updatedAt: now },
       )

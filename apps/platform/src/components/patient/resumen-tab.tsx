@@ -175,12 +175,8 @@ export function PatientPendingCard({
       detail:
         proposal.context.afterSummary || proposal.reason || "Espera la confirmación del paciente.",
       action: (
-        <Link
-          to="/agent/pendientes"
-          search={{ status: undefined, conversationId: proposal.conversationId }}
-          className={buttonVariants({ size: "sm" })}
-        >
-          Revisar
+        <Link to="/inbox" search={{ conversation: proposal.conversationId }} className={buttonVariants({ size: "sm" })}>
+          Ver conversación
         </Link>
       ),
     })
@@ -193,15 +189,19 @@ export function PatientPendingCard({
       action: go("plan", "Ir al plan"),
     })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
+    // El saldo descuenta lo que tiene a favor (decisión 22).
     if (balance.porCobrar > 0)
       pending.push({
         id: `balance-${balance.currency}`,
-        title: `Saldo por cobrar de ${money(balance.porCobrar, balance.currency)}`,
+        title:
+          balance.saldo > 0
+            ? `Saldo por cobrar de ${money(balance.saldo, balance.currency)}`
+            : "Lo que tiene a favor cubre lo que debe",
         detail:
           balance.aFavor > 0
-            ? `Hay un anticipo disponible de ${money(balance.aFavor, balance.currency)}.`
+            ? `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
             : "Cargos emitidos sin pago aplicado.",
-        action: go("cuenta", "Ir a cobros"),
+        action: go("cuenta", balance.saldo > 0 ? "Ir a cobros" : "Aplicar lo que tiene a favor"),
       })
   }
   if (canEditPatient) {

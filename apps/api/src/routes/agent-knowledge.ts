@@ -6,7 +6,7 @@ import {
   getKnowledgeBasics,
   getKnowledgeDataSources,
   getKnowledgeEntry,
-  listKnowledgeEntries,
+  listKnowledgePage,
   listKnowledgeGaps,
   listKnowledgeRevisions,
   setKnowledgeStatus,
@@ -16,7 +16,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { type CrmDeps, runService, validationError } from "./helpers.js"
+import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 const day = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, "Fecha AAAA-MM-DD")
 const catalog = {
@@ -66,10 +66,17 @@ export function createAgentKnowledgeRoute(deps: CrmDeps) {
       branchId: c.req.query("branchId"),
       q: c.req.query("q"),
       limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+      cursor: c.req.query("cursor"),
     }
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => listKnowledgeEntries(tx, orgId, query)),
-    )
+    // Por páginas: `nextCursor` sigue y `total` cuenta todas las que cumplen el filtro.
+    try {
+      const page = await withOrgContext(deps.db, orgId, (tx) => listKnowledgePage(tx, orgId, query))
+      return c.json({ data: page.items, nextCursor: page.nextCursor, total: page.total })
+    } catch (error) {
+      const handled = serviceErrorResponse(c, error)
+      if (handled) return handled
+      throw error
+    }
   })
 
   /** Qué preguntas básicas de una clínica ya puede responder el agente. */

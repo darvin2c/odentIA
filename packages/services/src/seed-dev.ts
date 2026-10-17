@@ -784,6 +784,8 @@ await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,
     legalName: "Dental Smile S.A.C.",
+    // El nombre que ven los pacientes en todo (decisión 19); la razón social, solo en el comprobante.
+    tradeName: "Dental Smile",
     fiscalDocNumber: "20601234567",
     // Explicito: país, moneda, idioma y zona son el contrato de la agenda y del
     // formato de los teléfonos (IANA canónico y ISO-3166-1).
@@ -797,6 +799,7 @@ await db.insert(orgProfile).values([
   {
     organizationId: ORG_B,
     legalName: "Clínica Norte S.A.C.",
+    tradeName: "Clínica Norte",
     fiscalDocNumber: "20550987654",
     countryCode: "PE",
     currency: "PEN",
@@ -957,16 +960,17 @@ const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
 }
 for (let i = 0; i < CONTACTS_A.length; i++) {
   const c = CONTACTS_A[i]!
-  const notes =
-    c.name === "Jorge Mamani"
-      ? `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)`
-      : undefined
-  const created = await createContact(
-    db,
-    ORG_A,
-    { displayName: c.name, phone: c.phone, notes },
-    { userId: ANA_ID },
-  )
+  const created = await createContact(db, ORG_A, { displayName: c.name, phone: c.phone }, { userId: ANA_ID })
+  // Las notas de la persona son `crm_note`, con autor (fase 4, «un dato, un lugar»).
+  if (c.name === "Jorge Mamani") {
+    await createContactNote(
+      db,
+      ORG_A,
+      created.id,
+      { body: `Teléfono familiar compartido: ${SHARED_PHONE} (titular: Rosa Quispe)` },
+      { userId: ANA_ID },
+    )
+  }
   if (c.name === "Rosa Quispe") {
     await updateContact(db, ORG_A, created.id, { preferredChannel: "whatsapp" }, { userId: ANA_ID })
   }
@@ -1298,7 +1302,6 @@ await settleTask(db, ORG_A, settledDemo.id, "Rosa Quispe confirmó su cita")
 await upsertAgentConfig(db, ORG_A, {
   enabled: true,
   llm: "chatgpt_6",
-  systemPrompt: "Eres el asistente de Dental Smile. Responde en español, tono amable.",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
   // La voz de la clínica y una indicación por función: lo que se ve en Agente › Recepción.
@@ -2323,6 +2326,110 @@ const carmen = await createContact(db, ORG_A, { displayName: "Carmen Huamán", p
 // hija Sofía (menor), que sí lo es: su página dice «Responsable de Sofía Salas»
 // y la de ella, «Habla por ella: Martín Salas».
 await createContactNote(db, ORG_A, carmen.id, { body: "Llamó para preguntar por blanqueamiento; prefiere la tarde." }, { userId: ANA_ID })
+
+// --- Lo repetido: personas, citas y dinero (fase 4, paso 7b-2) ---
+// Carmen Huamán tiene su teléfono en «Teléfono», pero nadie lo marcó como su
+// WhatsApp (decisión 23, caso 2): su página dice «Aún no es su WhatsApp» con
+// «Usarlo como su WhatsApp». Rosa Quispe debe S/ 50 y tiene S/ 30 a favor del
+// adelanto que se le devolvió en parte (decisión 22): «Saldo: S/ 20» y, en
+// Caja, «Aplicar lo que tiene a favor» deja ver lo que falta. El presupuesto
+// «Restauración definitiva pieza 46» tiene dos opciones: Reportes cuenta la
+// recomendada, nunca la suma (G1).
+// Una madre registra a sus dos hijos con su mismo DNI: es la misma persona,
+// representante legal de los dos (G2).
+const hijoVargas = (displayName: string, givenNames: string, birthDate: string, docNumber: string) =>
+  db.transaction((tx) =>
+    registerPatient(
+      tx,
+      ORG_A,
+      { kind: "internal", userId: ANA_ID },
+      {
+        submissionId: randomUUID(),
+        answers: {
+          demographics: { displayName, givenNames, paternalSurname: "Vargas", birthDate, docType: "DNI", docNumber },
+          respondent: "representative",
+          representative: {
+            displayName: "Gabriela Vargas Soto",
+            relationship: "guardian",
+            relationshipDetail: "Madre",
+            phone: "+51987650500",
+            docType: "DNI",
+            docNumber: "45123987",
+          },
+          privacyAccepted: false,
+        },
+      },
+    ),
+  )
+await hijoVargas("Thiago Vargas", "Thiago", "2015-03-10", "78123401")
+await hijoVargas("Valeria Vargas", "Valeria", "2019-08-22", "78123402")
+// Una ortodoncia que se cobra por sesión (12 controles de S/ 100), aceptada, con
+// un adelanto de S/ 500 y una devolución de S/ 100: el portal dice los mismos
+// montos que Caja (tratamiento aceptado S/ 1 200, pagado S/ 400). Su número no
+// tiene WhatsApp: un mensaje rebotó (decisión 23, caso 1).
+const marco = await createPatient(db, ORG_A, ANA_ID, {
+  displayName: "Marco Torres",
+  givenNames: "Marco",
+  paternalSurname: "Torres",
+  birthDate: "1994-02-11",
+  phone: "+51987650600",
+  registeredBranchId: miraflores.id,
+})
+const marcoEval = await createEncounter(db, ORG_A, ANA_ID, marco.id, {
+  reason: "Evaluación de ortodoncia",
+  branchId: miraflores.id,
+})
+const marcoPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, marco.id, {
+  title: "Ortodoncia",
+  originEncounterId: marcoEval.id,
+})
+const marcoCtrl = await addPlanItem(db, ORG_A, ANA_ID, marco.id, {
+  serviceId: serviceIdA("ORTODONCIA_CTRL"),
+  planId: marcoPlan.id,
+  sourceEncounterId: marcoEval.id,
+  detail: "Controles de ortodoncia",
+})
+const marcoBudget = await createBudget(db, ORG_A, ANA_ID, marco.id, {
+  planId: marcoPlan.id,
+  itemIds: [marcoCtrl.id],
+  title: "Ortodoncia por sesiones",
+})
+await db.transaction((tx) =>
+  adjustBudgetLines(tx, ORG_A, ANA_ID, marco.id, marcoBudget.id, {
+    lines: [{ planItemId: marcoCtrl.id, sessionsPlanned: 12 }],
+  }),
+)
+await deliverBudget(db, ORG_A, ANA_ID, marco.id, marcoBudget.id)
+await decideBudget(db, ORG_A, ANA_ID, marco.id, marcoBudget.id, {
+  decisions: [{ planItemId: marcoCtrl.id, decision: "aceptado" }],
+})
+await db.transaction(async (tx) => {
+  const methods = await listPaymentMethods(tx, ORG_A)
+  const cash = methods.find((method) => method.typeCode === "10")
+  if (!cash) throw new Error("Falta el efectivo en los medios de pago de la clínica demo")
+  await collectCharge(tx, ORG_A, ANA_ID, marco.id, {
+    branchId: miraflores.id,
+    advanceCents: 50000,
+    requestId: "50206010-0000-4000-8000-000000000106",
+    payments: [{ paymentMethodId: cash.id, amountCents: 50000 }],
+  })
+  await refundCredit(tx, ORG_A, ANA_ID, marco.id, {
+    branchId: miraflores.id, amountCents: 10000, paymentMethodId: cash.id,
+    reason: "Devolución de parte del adelanto: empieza el mes que viene.",
+  })
+})
+const marcoPerson = await patientPersonId(db, ORG_A, marco.id)
+if (marcoPerson) {
+  await db.insert(contactIdentity).values({
+    organizationId: ORG_A,
+    contactId: marcoPerson,
+    channel: "whatsapp",
+    externalUserId: "wa:51987650600",
+    isPrimary: true,
+    noWhatsappAt: hoursAgo(20),
+  })
+}
+
 // --- Org B mínima (aislamiento visual) ---
 const sofia = await createContact(db, ORG_B, {
   displayName: "Sofía Ramos",

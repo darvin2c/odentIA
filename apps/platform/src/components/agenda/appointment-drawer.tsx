@@ -49,6 +49,7 @@ import { useAppointmentArrival } from "./arrival"
 import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
+import { PhoneWhatsAppNote } from "../person/phone-whatsapp"
 import { ServiceSelect } from "../service-select"
 
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
@@ -502,6 +503,9 @@ export function AppointmentDrawer({
                 <DetailField label="Teléfono">
                   {context.person.phone ? internationalText(context.person.phone) : "Sin teléfono"}
                   {context.person.relationship !== "self" ? ` · de ${context.person.name}` : ""}
+                  {context.person.phone ? (
+                    <PhoneWhatsAppNote contactId={context.person.contactId} value={context.person.whatsapp} />
+                  ) : null}
                 </DetailField>
               ) : null}
               {context?.missingData && context.missingData.length > 0 ? (

@@ -1,4 +1,5 @@
 import {
+  SEX_CODES,
   BLOOD_GROUPS,
   DOC_TYPES,
   DOCUMENT_FORMATS,
@@ -117,7 +118,8 @@ const patientListQuery = listQuery.extend({
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .optional(),
-  sex: z.enum(["M", "F"]).optional(),
+  // Los cuatro de ISO/IEC 5218, los mismos que la ficha (antes filtraba solo M y F).
+  sex: z.enum(SEX_CODES).optional(),
   docType: z.enum(DOC_TYPES).optional(),
   sort: z.enum(["name", "-name", "created", "-created", "number", "-number"]).optional(),
 })

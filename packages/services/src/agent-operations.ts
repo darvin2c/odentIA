@@ -27,10 +27,10 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
-import { appointment } from "@odentia/db/schema/agenda"
+import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
-import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
+import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
 import { resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
@@ -1596,7 +1596,8 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       if (isUuid(id)) patientIds.add(id)
     }
     if (isUuid(payload.branchId)) branchIds.add(payload.branchId)
-    if (isUuid(payload.dentistUserId)) userIds.add(payload.dentistUserId)
+    // Los ids de usuario no son UUID (los pone el proveedor de identidad).
+    if (typeof payload.dentistUserId === "string" && payload.dentistUserId) userIds.add(payload.dentistUserId)
     if (row.action === "decidir_presupuesto" && isUuid(payload.budgetId)) budgetIds.add(payload.budgetId)
   }
   const [contacts, convs, opps, appts, patients, branches, users, budgets] = await Promise.all([
@@ -2300,6 +2301,199 @@ export async function confirmProposalByContact(
   return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
 }
 
+/* ------------------------------ «Esperan su sí» ------------------------------ */
+
+/** Las propuestas que esperan el sí de la persona: las citas. */
+export const APPOINTMENT_PROPOSAL_ACTIONS = ["reservar_cita", "reprogramar_cita", "cancelar_cita"] as const
+type AppointmentProposalAction = (typeof APPOINTMENT_PROPOSAL_ACTIONS)[number]
+
+/** Lo que dice recepción cuando el horario propuesto ya no está libre. */
+export const SLOT_TAKEN_WORDS = "Ese horario ya no está libre: elige otro en la Agenda"
+
+export interface AwaitingAnswerItem {
+  id: string
+  conversationId: string
+  contactId: string | null
+  contactName: string | null
+  channel: string | null
+  action: AppointmentProposalAction
+  /** «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas». */
+  text: string
+  createdAt: string
+  /** El horario propuesto se ocupó (o la cita cambió) mientras esperaba. */
+  taken: boolean
+}
+
+export interface AwaitingAnswerList {
+  items: AwaitingAnswerItem[]
+  /** Todas las abiertas, también las que no caben en la lista. */
+  total: number
+}
+
+/** «jueves 22 a las 16:30», en la zona de la clínica. */
+function dayAndHour(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">): string | null {
+  if (typeof value !== "string") return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const day = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, weekday: "long", day: "numeric" })
+    .format(date)
+    .replace(",", "")
+  const hour = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date)
+  return `${day} a las ${hour}`
+}
+
+/**
+ * ¿Sigue libre el horario de una cita propuesta? La misma regla que al
+ * reservar (`validateAvailability`, la que aplica `createAppointment`): solo
+ * lee, no reserva nada.
+ */
+async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<boolean> {
+  if (typeof payload.startsAt !== "string" || typeof payload.dentistUserId !== "string" || typeof payload.chairId !== "string") {
+    return false
+  }
+  const startsAt = new Date(payload.startsAt)
+  if (Number.isNaN(startsAt.getTime())) return false
+  const minutes = typeof payload.durationMin === "number" ? payload.durationMin : 30
+  const endsAt = typeof payload.endsAt === "string" ? new Date(payload.endsAt) : new Date(startsAt.getTime() + minutes * 60_000)
+  let branchId = typeof payload.branchId === "string" ? payload.branchId : null
+  if (!branchId) {
+    const [chair] = await tx
+      .select({ branchId: scheduleChair.branchId })
+      .from(scheduleChair)
+      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.id, payload.chairId)))
+      .limit(1)
+    branchId = chair?.branchId ?? null
+  }
+  if (!branchId) return false
+  try {
+    await validateAvailability(tx, orgId, {
+      branchId,
+      dentistUserId: payload.dentistUserId,
+      chairId: payload.chairId,
+      startsAt,
+      endsAt,
+    })
+    return true
+  } catch (error) {
+    if (error instanceof ServiceError) return false
+    throw error
+  }
+}
+
+/**
+ * Agente › «Esperan su sí» (decisión 21, tablero 2c): solo las citas que el
+ * agente propuso y esperan respuesta de la persona. Para saber, no para hacer:
+ * lo ya hecho se ve en la conversación y en la cita. Cada fila dice lo que se
+ * le propuso y si ese horario se ocupó mientras esperaba.
+ */
+export async function listAwaitingAnswer(
+  tx: Db,
+  orgId: string,
+  input: { limit?: number } = {},
+): Promise<AwaitingAnswerList> {
+  await expireDueProposals(tx, orgId)
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 200)
+  const open = and(
+    eq(agentProposal.organizationId, orgId),
+    inArray(agentProposal.action, [...APPOINTMENT_PROPOSAL_ACTIONS]),
+    proposalPendingSql(sql.raw('"agent_proposal"')),
+  )
+  const [counted] = await tx.select({ total: count() }).from(agentProposal).where(open)
+  // Las más viejas primero: llevan más tiempo esperando.
+  const rows = await tx.select().from(agentProposal).where(open).orderBy(asc(agentProposal.createdAt), asc(agentProposal.id)).limit(limit)
+  const zone = await getOrgLocale(tx, orgId)
+  const enriched = await enrichProposals(tx, orgId, rows)
+  const items: AwaitingAnswerItem[] = []
+  for (const proposal of enriched) {
+    const action = proposal.action as AppointmentProposalAction
+    const when = dayAndHour(proposal.payload.startsAt, zone)
+    const dentist = proposal.context.dentistName
+    let text: string
+    let taken: boolean
+    if (action === "reservar_cita") {
+      text = `Le propuse el ${when ?? "horario que eligió"}${dentist ? ` con ${dentist}` : ""}`
+      taken = !(await proposedSlotFree(tx, orgId, proposal.payload))
+    } else if (action === "reprogramar_cita") {
+      text = `Le propuse mover su cita al ${when ?? "nuevo horario"}`
+      taken = proposal.context.isStale === true
+    } else {
+      text = `Le propuse cancelar su cita${proposal.context.currentSummary ? ` (${proposal.context.currentSummary.replace(/^Cita actual: /, "")})` : ""}`
+      taken = proposal.context.isStale === true
+    }
+    items.push({
+      id: proposal.id,
+      conversationId: proposal.conversationId,
+      contactId: proposal.contactId,
+      contactName: proposal.context.contactName,
+      channel: proposal.context.channel,
+      action,
+      text,
+      createdAt: proposal.createdAt,
+      taken,
+    })
+  }
+  return { items, total: Number(counted?.total ?? 0) }
+}
+
+/** Cuántas citas esperan el sí de la persona: el número junto a la pestaña «Esperan su sí». */
+export async function countAwaitingAnswer(tx: Db, orgId: string): Promise<number> {
+  const [row] = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n from agent_proposal p
+    where p.organization_id = ${orgId}
+      and p.action in (${sql.join(APPOINTMENT_PROPOSAL_ACTIONS.map((action) => sql`${action}`), sql`, `)})
+      and ${proposalPendingSql(sql.raw("p"))}`)
+  return row?.n ?? 0
+}
+
+/**
+ * «Confirmó por teléfono»: la persona dijo que sí por otra vía y recepción lo
+ * anota con un clic. La cita se reserva, se mueve o se cancela con la misma
+ * operación que cuando confirma en el chat (`executeProposal`, la del agente).
+ * Si el horario ya no está libre, no se hace nada y se dice: «Ese horario ya
+ * no está libre: elige otro en la Agenda». Quién lo anotó queda auditado.
+ */
+export async function confirmProposalByPhone(
+  tx: Db,
+  orgId: string,
+  staffUserId: string,
+  id: string,
+  opts: { secretsKey?: Buffer } = {},
+): Promise<ProposalItem> {
+  const current = await requireProposal(tx, orgId, id)
+  const expired = await takeExpiredProposal(tx, orgId, staffUserId, id)
+  if (expired) return expired
+  if (current.status !== "propuesta") {
+    throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
+  }
+  if (!(APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(current.action)) {
+    throw new ServiceError("PROPOSAL_NOT_APPOINTMENT", 409, "Solo una cita propuesta se confirma por teléfono")
+  }
+  if (current.action === "reservar_cita" && !(await proposedSlotFree(tx, orgId, current.payload))) {
+    throw new ServiceError("SLOT_TAKEN", 409, SLOT_TAKEN_WORDS)
+  }
+  const decidedBy = `staff:${staffUserId}`
+  const [row] = await tx
+    .update(agentProposal)
+    .set({ status: "aprobada", decidedBy, decidedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(agentProposal.id, id), eq(agentProposal.organizationId, orgId), eq(agentProposal.status, "propuesta")))
+    .returning()
+  if (!row) throw await pendingConflict(tx, orgId, id)
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: staffUserId,
+    action: "agent.proposal_confirmed",
+    entity: "agent_proposal",
+    entityId: id,
+    metadata: { via: "telefono" },
+  })
+  const executed = await executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
+  // Se ocupó entre la comprobación y la reserva: nada queda hecho y la fila sigue esperando.
+  if (executed.status === "fallida" && current.action === "reservar_cita") {
+    throw new ServiceError("SLOT_TAKEN", 409, SLOT_TAKEN_WORDS)
+  }
+  return executed
+}
+
 /**
  * Oportunidad del interlocutor bloqueada para ejecutar: la herramienta
  * comercial opera sobre el contacto de ctx/conversación y nunca sobre la
@@ -2858,6 +3052,8 @@ export interface AgentPanelSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
+  /** Citas propuestas que esperan el sí de la persona: el número de la pestaña «Esperan su sí». */
+  awaitingAnswer: number
   /**
    * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Es el
    * único contador (el del menú del Agente); ninguna otra parte lo repite.
@@ -2887,6 +3083,7 @@ export async function getAgentPanelSummary(tx: Db, orgId: string, userId: string
   return {
     enabled: cfg?.enabled ?? false,
     awaitingContact: await countAwaitingContact(tx, orgId),
+    awaitingAnswer: await countAwaitingAnswer(tx, orgId),
     openHandoffs: await countOpenHandoffs(tx, orgId, { forUserId: userId }),
     interventionsToday: today.ok + today.handoff,
     failedToday: today.error + today.sinRespuesta,
@@ -3090,6 +3287,8 @@ export async function createHandoff(
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
+    // Sin área, nadie de recepción la vería en «Mías y de mi área» (M5): el caso es de Recepción.
+    area: "recepcion",
     dueAt: new Date(Date.now() + HANDOFF_DUE_HOURS[priority] * 3_600_000).toISOString(),
     createdBy,
     actorUserId,
@@ -3153,20 +3352,38 @@ export async function annotateHandoff(
     .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
 }
 
+/**
+ * Casos que pasó el agente. Por defecto, del más nuevo al más viejo; con
+ * `order: "urgencia"`, primero «Ahora», después «Hoy» y «Sin apuro», y en cada
+ * una el que más lleva esperando: así el corte del tope nunca deja fuera a los
+ * más viejos ni a los urgentes. `visibleTo`: solo los sin tomar y los de esa
+ * persona (la misma regla que `countOpenHandoffs`).
+ */
 export async function listHandoffs(
   tx: Db,
   orgId: string,
-  input: { conversationId?: string; limit?: number; open?: boolean } = {},
+  input: { conversationId?: string; limit?: number; open?: boolean; order?: "reciente" | "urgencia"; visibleTo?: string } = {},
 ): Promise<HandoffItem[]> {
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
   if (input.open) conditions.push(handoffStillOpen())
+  if (input.visibleTo) {
+    conditions.push(or(isNull(agentHandoff.assigneeUserId), eq(agentHandoff.assigneeUserId, input.visibleTo))!)
+  }
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
+  const order =
+    input.order === "urgencia"
+      ? [
+          sql`case ${agentHandoff.priority} when 'alta' then 0 when 'media' then 1 else 2 end`,
+          asc(agentHandoff.createdAt),
+          asc(agentHandoff.id),
+        ]
+      : [desc(agentHandoff.createdAt), asc(agentHandoff.id)]
   const rows = await tx
     .select()
     .from(agentHandoff)
     .where(and(...conditions))
-    .orderBy(desc(agentHandoff.createdAt), asc(agentHandoff.id))
+    .orderBy(...order)
     .limit(limit)
   return enrichHandoffs(tx, rows)
 }

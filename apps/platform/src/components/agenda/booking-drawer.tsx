@@ -24,6 +24,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
+import type { PhoneWhatsApp } from "../../lib/people"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
@@ -65,6 +66,22 @@ export interface BookingSeed {
  * unidad dental la pone la agenda. Quien aún no es paciente se registra aquí mismo
  * con lo mínimo.
  */
+/** A quién le llega el recordatorio de la cita y por dónde (decisión 23). */
+interface ReminderReach {
+  name: string
+  whatsapp: PhoneWhatsApp
+  hasEmail: boolean
+}
+
+/** «Carmen no recibirá el recordatorio: aún no tiene WhatsApp»; nada si le llega por WhatsApp. */
+function reminderWords(reach: ReminderReach | null | undefined): string | null {
+  if (!reach || reach.whatsapp.state === "es_su_whatsapp") return null
+  const why = reach.whatsapp.state === "no_tiene" ? "su número no tiene WhatsApp" : "aún no tiene WhatsApp"
+  return reach.hasEmail
+    ? `${reach.name} recibirá el recordatorio por correo: ${why}.`
+    : `${reach.name} no recibirá el recordatorio: ${why}.`
+}
+
 export function BookingDrawer({
   seed,
   branchId,
@@ -280,7 +297,7 @@ export function BookingDrawer({
         setRegistering(false)
       }
       if (!id) throw new Error("Elige un paciente.")
-      return apiFetch<{ data: AgendaAppointment }>("/api/appointments", {
+      return apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
           branchId,
@@ -307,6 +324,7 @@ export function BookingDrawer({
               ? `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`
               : null,
             whatsappNote.current,
+            reminderWords(result.data.reminderReach),
             consentNote.current,
           ]
             .filter(Boolean)

@@ -38,7 +38,7 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
-import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
+import { patientIsMinor, requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 
@@ -1871,14 +1871,6 @@ function assertSignatureData(raw: unknown, label = "La firma manuscrita"): Recor
   return { image }
 }
 
-/** Edad cumplida en años a una fecha (AAAA-MM-DD). */
-function ageOn(birthDate: string, on: Date): number {
-  const [y, m, d] = birthDate.split("-").map(Number) as [number, number, number]
-  let age = on.getUTCFullYear() - y
-  const month = on.getUTCMonth() + 1
-  if (month < m || (month === m && on.getUTCDate() < d)) age -= 1
-  return age
-}
 
 /**
  * Firma del consentimiento: firma la propia persona (si es mayor de edad) o
@@ -1914,7 +1906,8 @@ export async function signConsentDocument(
     throw validation("La persona firmante debe confirmar que comprendió la información")
   const subject = await requirePatient(tx, orgId, current.patientId)
   const now = new Date()
-  const minor = subject.birthDate ? ageOn(subject.birthDate, now) < 18 : false
+  // La edad con el día de la clínica: la misma regla que decide quién firma.
+  const minor = await patientIsMinor(tx, orgId, current.patientId)
   if (minor && input.signerKind !== "representante")
     throw validation("El paciente es menor de edad: firma su representante legal vigente")
   let verified: { displayName: string; docNumber: string | null; docType: string | null }
@@ -2126,7 +2119,7 @@ export async function signConsentByLink(
   if (input.comprehensionConfirmed !== true) throw validation("Marca que entendiste lo que te explicaron y aceptas")
   const subject = await requirePatient(tx, orgId, current.patientId)
   const now = new Date()
-  const minor = subject.birthDate ? ageOn(subject.birthDate, now) < 18 : false
+  const minor = await patientIsMinor(tx, orgId, current.patientId)
   const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, signerContactId)
   let signerKind: "paciente" | "representante"
   let verified: { displayName: string; docNumber: string | null; docType: string | null }
@@ -2313,8 +2306,8 @@ export async function revokeConsentDocument(
   if (!clean) throw validation("La revocación necesita un motivo")
   if (clean.length > 2000) throw validation("El motivo supera 2000 caracteres")
   if (!input.revokerContactId) throw validation("Indica quién revoca")
-  const subject = await requirePatient(tx, orgId, current.patientId)
-  const minor = subject.birthDate ? ageOn(subject.birthDate, new Date()) < 18 : false
+  await requirePatient(tx, orgId, current.patientId)
+  const minor = await patientIsMinor(tx, orgId, current.patientId)
   const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.revokerContactId)
   if (linked.relationship === "self" && minor)
     throw validation("El paciente es menor de edad: revoca su representante legal vigente")
@@ -2419,7 +2412,7 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
           .from(diagnosisCatalog)
           .where(and(eq(diagnosisCatalog.systemKey, doc.diagnosisSystem), eq(diagnosisCatalog.code, doc.diagnosisCode)))
       : []
-  const minor = person.birthDate ? ageOn(person.birthDate, new Date()) < 18 : false
+  const minor = await patientIsMinor(tx, orgId, doc.patientId)
   return {
     document: doc,
     diagnosisDescription: dx?.description ?? null,

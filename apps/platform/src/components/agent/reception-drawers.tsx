@@ -2,7 +2,7 @@ import { Checkbox, Field, FieldDescription, FieldLabel, Input, Textarea } from "
 import { FormDrawer, TimeSelect } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useState } from "react"
-import { type AgentFunction, clockToMinutes, minutesToClock, withInstruction } from "../../lib/agent"
+import { type AgentFunction, clockToMinutes, minutesToClock } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { CLOSE_AFTER_HOURS_MAX, CLOSE_AFTER_HOURS_MIN, closeAfterHoursIssue } from "../../lib/conversation-state"
@@ -341,93 +341,13 @@ export function LimitsDrawer({
           <span className="text-sm text-muted-foreground">horas</span>
         </div>
         <FieldDescription id="limites-cierre-ayuda">
-          Entre 6 y 23 horas. Antes de cerrar, el agente se despide en horario de atención. Más de 23 no se puede: WhatsApp ya no deja escribirle.
+          Entre 6 y 23 horas. Antes de cerrar, el agente se despide dentro del horario para escribir. Más de 23 no se puede: WhatsApp ya no deja escribirle.
         </FieldDescription>
       </Field>
       ) : null}
       {issue ? (
         <p role="status" className="text-sm text-muted-foreground">
           {issue}
-        </p>
-      ) : null}
-      </div>
-    </FormDrawer>
-  )
-}
-
-/** Lo que cabe en el texto de indicaciones que guarda el servidor. */
-const INSTRUCTIONS_MAX = 8000
-
-/**
- * Una indicación de la clínica para Recepción. El servidor guarda todas como
- * un solo texto: aquí se cambia, se quita o se añade una línea y las demás
- * quedan como estaban.
- */
-export function InstructionDrawer({
-  target,
-  onClose,
-  config,
-}: {
-  /** Línea del texto guardado que se edita, "nueva" para añadir; null = cerrado. */
-  target: number | "nueva" | null
-  onClose: () => void
-  config: AgentConfig
-}) {
-  const line = typeof target === "number" ? target : null
-  const saved = line === null ? "" : (config.systemPrompt.split(/\r?\n/)[line] ?? "").trim()
-  const [text, setText] = useState(saved)
-  const [adding, setAdding] = useState(target === "nueva")
-  useEffect(() => {
-    if (target === null) return
-    setText(saved)
-    setAdding(target === "nueva")
-  }, [target, saved])
-  const save = useSaveConfig(onClose)
-  const next = withInstruction(config.systemPrompt, line, text)
-  const tooLong = next.length > INSTRUCTIONS_MAX
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (target === null || save.isPending || tooLong) return
-    if (adding && !text.trim()) return
-    save.mutate({ systemPrompt: next })
-  }
-
-  return (
-    <FormDrawer
-      open={target !== null}
-      onClose={() => {
-        save.reset()
-        onClose()
-      }}
-      title={adding ? "Agregar indicación" : "Editar indicación"}
-      description="Cómo quieres que atienda Recepción. Los datos concretos (precios, horarios, políticas) van en Conocimiento."
-      onSubmit={submit}
-      isSubmitting={save.isPending}
-      isDirty={text !== saved}
-      error={mutationErrorMessage(save.error)}
-      submitLabel="Guardar"
-      cancelLabel="Cancelar"
-      submitDisabled={tooLong || (adding && !text.trim())}
-    >
-      <div className="flex flex-col gap-5">
-      <Field>
-        <FieldLabel htmlFor="recepcion-indicacion">Indicación</FieldLabel>
-        <Textarea
-          id="recepcion-indicacion"
-          rows={4}
-          maxLength={600}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
-        />
-        <FieldDescription>
-          Una idea por indicación. {adding ? "" : "Déjala vacía para quitarla. "}No puede contradecir lo que fija odentIA: ante un choque, gana la base.
-        </FieldDescription>
-      </Field>
-      {tooLong ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          Las indicaciones de Recepción ya ocupan todo el espacio disponible. Acorta o quita alguna antes de agregar otra.
         </p>
       ) : null}
       </div>

@@ -13,6 +13,7 @@ import {
   selfPatientOf,
   setPersonArchived,
   updatePersonIdentity,
+  usePhoneAsWhatsApp,
 } from "@odentia/services"
 import { type Context, Hono } from "hono"
 import { z } from "zod"
@@ -176,6 +177,20 @@ export function createPeopleRoute(deps: CrmDeps) {
           identityPatchOf(parsed.data),
         )
         return { saved: true }
+      }),
+    )
+  })
+
+  // «Usarlo como su WhatsApp» (decisión 23): el teléfono de su ficha pasa a ser
+  // su WhatsApp por decisión de quien lo pulsa (ADR 0027), como «Escribirle».
+  app.post("/:id/whatsapp", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["conversations.write", "patients.write"]))
+      return forbidden(c, "No tienes permiso para cambiar su WhatsApp")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await assertPersonVisible(tx, orgId, c.req.param("id"), canOf(c))
+        return usePhoneAsWhatsApp(tx, orgId, userId, c.req.param("id"))
       }),
     )
   })

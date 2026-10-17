@@ -4,6 +4,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
+import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
 import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureLibrarySpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -115,11 +116,10 @@ const branchPatch = branchInput.partial()
 
 const orgProfileInput = z.object({
   legalName: z.string().min(1).max(200),
-  // `null` vacía el dato; una clave ausente lo deja como estaba.
-  tradeName: z.string().max(200).nullish(),
+  // El nombre que ve la persona en todo (decisión 19): obligatorio; ausente, queda como estaba.
+  tradeName: z.string().trim().min(1, "Escribe el nombre comercial: así te verán tus pacientes").max(200).optional(),
   fiscalDocType: z.string().max(20).nullish(),
   fiscalDocNumber: z.string().max(20).nullish(),
-  billingEmail: z.string().email().optional(),
   fiscalAddress: z.string().max(300).nullish(),
   countryCode: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
@@ -228,8 +228,8 @@ export function createApp(deps: AppDeps) {
     return c.json({ ok: true })
   })
 
-  // Subdominios reservados: nunca son slugs de tenant (colisionarían con app./api./www.).
-  const RESERVED_SLUGS: Record<string, true> = { api: true, app: true, admin: true, www: true, storage: true }
+  // Subdominios reservados: nunca son slugs de tenant (la lista vive en services).
+  const RESERVED_SLUGS = RESERVED_ORG_SLUGS
   app.use("/api/auth/organization/create", async (c, next) => {
     if (c.req.method !== "POST") return next()
     const body = (await c.req.raw
@@ -409,9 +409,48 @@ export function createApp(deps: AppDeps) {
         .from(orgProfile)
         .where(eq(orgProfile.organizationId, orgId))
         .limit(1)
-      return found ?? null
+      // El logo de la clínica viaja con sus datos: se sube en «Datos de la clínica».
+      return found ? { ...found, logo: await getClinicLogo(tx, orgId) } : null
     })
     return c.json({ data: row })
+  })
+
+  // El logo de la clínica (decisión 19): imagen pública, en el bucket de avatares.
+  guarded.put("/org-profile/logo", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el logo"), 403)
+    }
+    const form = await c.req.formData().catch(() => null)
+    const file = form?.get("file")
+    if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta la imagen del logo"), 400)
+    const ext = CLINIC_LOGO_MIME_EXT[file.type]
+    if (!ext) return c.json(errorBody(c, "VALIDATION", "El logo debe ser PNG, JPG o WebP"), 400)
+    if (file.size > CLINIC_LOGO_MAX_BYTES) return c.json(errorBody(c, "VALIDATION", "El logo no puede superar 2 MB"), 400)
+    // Va a la carpeta de la clínica dentro del bucket público de imágenes.
+    const { url } = await deps.storage.putAvatar({
+      userId: `clinica-${orgId}`,
+      body: Buffer.from(await file.arrayBuffer()),
+      contentType: file.type,
+      ext,
+    })
+    return runService(c, 200, async () => {
+      const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, url))
+      if (saved.previous) await deps.storage.deleteByUrl(saved.previous).catch(() => {})
+      return { logo: saved.logo }
+    })
+  })
+
+  guarded.delete("/org-profile/logo", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar el logo"), 403)
+    }
+    return runService(c, 200, async () => {
+      const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, null))
+      if (saved.previous) await deps.storage.deleteByUrl(saved.previous).catch(() => {})
+      return { logo: null }
+    })
   })
 
   guarded.put("/org-profile", async (c) => {
@@ -691,7 +730,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))
   guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
-  guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb }))
+  guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions }))
   guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions, embedder: deps.embedder }))
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))

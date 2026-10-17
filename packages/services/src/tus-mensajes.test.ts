@@ -31,6 +31,7 @@ import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { getPersonalLinkPaper, getPersonalLinkView, setPersonalLinkMessages } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { setWritingHours } from "./writing-hours.js"
 
 /**
  * WhatsApp y los mensajes que se pueden apagar (ADR 0040): tres tipos que la
@@ -68,7 +69,13 @@ async function clinic(options: { approved?: string[]; email?: boolean } = {}): P
     { id: `m-${ownerId}`, userId: ownerId, organizationId: orgId, role: "owner", createdAt: new Date() },
     { id: `m-${dentistId}`, userId: dentistId, organizationId: orgId, role: "dentist", createdAt: new Date() },
   ])
-  await ownerDb.insert(agentConfig).values({ organizationId: orgId, enabled: true, advisor: { enabled: true } })
+  // Con el horario para escribir a toda hora: estas pruebas usan el reloj real.
+  await ownerDb.insert(agentConfig).values({
+    organizationId: orgId,
+    enabled: true,
+    advisor: { enabled: true },
+    writingHours: Array.from({ length: 7 }, (): Array<[number, number]> => [[0, 1440]]),
+  })
   const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
   const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: site!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
   const templates = (options.approved ?? []).map((name) => ({ name, language: "es" }))
@@ -328,6 +335,17 @@ describe("el agente no elige plantillas: retoma el sistema", () => {
       templateParams: ["Lucía", "Clínica Sonríe"],
       body: "Hola, Lucía. Te escribimos de Clínica Sonríe para continuar con tu consulta. ¿Seguimos por aquí?",
     })
+  })
+
+  it("fuera del «Horario para escribir» el sistema no retoma: dice desde cuándo puede escribirle", async () => {
+    const c = await clinic({ approved: [RESUME_MESSAGE.template] })
+    const p = await person(c, "Lucía Paredes", { wroteHoursAgo: 60 })
+    await run(c, (tx) => setWritingHours(tx, c.orgId, c.ownerId, [[], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 840]]]))
+    // Domingo 11 de octubre a las 10:00 en Lima: el domingo no se escribe.
+    const outcome = await run(c, (tx) => resumeConversationBySystem(tx, c.orgId, KEY, p.conversationId, new Date("2026-10-11T15:00:00Z")))
+    expect(outcome).toMatchObject({ sent: false })
+    expect(outcome.sent === false && outcome.waiting).toMatch(/^Es fuera del horario para escribir: el agente puede escribirle a Lucía desde el lunes a las 08:00/)
+    expect(await lastOut(p.conversationId)).toBeUndefined()
   })
 
   it("sin «Retomar» aprobada no se envía nada y «Te espera» dice qué hacer", async () => {

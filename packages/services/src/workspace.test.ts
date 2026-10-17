@@ -112,9 +112,9 @@ beforeAll(async () => {
   // Cobros: uno vigente en PEN, uno anulado (excluido) y uno en USD.
   const [account] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: "Cuenta pulso", patientNumber: 901 }).returning({ id: patient.id })
   await ownerDb.insert(patientPayment).values([
-    { organizationId: "org_a", patientId: account!.id, amountCents: 20000, currency: "PEN", paidAt: new Date(), method: "yape" },
-    { organizationId: "org_a", patientId: account!.id, amountCents: 99999, currency: "PEN", paidAt: new Date(), method: "efectivo", voidedAt: new Date() },
-    { organizationId: "org_a", patientId: account!.id, amountCents: 10000, currency: "USD", paidAt: new Date(Date.now() - 2 * 86_400_000), method: "tarjeta" },
+    { organizationId: "org_a", patientId: account!.id, amountCents: 20000, currency: "PEN", paidAt: new Date(), methodName: "yape" },
+    { organizationId: "org_a", patientId: account!.id, amountCents: 99999, currency: "PEN", paidAt: new Date(), methodName: "efectivo", voidedAt: new Date() },
+    { organizationId: "org_a", patientId: account!.id, amountCents: 10000, currency: "USD", paidAt: new Date(Date.now() - 2 * 86_400_000), methodName: "tarjeta" },
   ])
 })
 

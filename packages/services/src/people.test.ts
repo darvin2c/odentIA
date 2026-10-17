@@ -364,11 +364,9 @@ describe("una lista y un buscador", () => {
 })
 
 describe("un sitio para las notas", () => {
-  it("las notas dicen quién las escribió y lo anotado antes sin autor queda al final", async () => {
+  it("las notas dicen quién las escribió: una sola lista, la de `crm_note`", async () => {
     const c = await clinic()
-    const person = await c.run((tx) =>
-      createContact(tx, c.orgId, { displayName: "Rosa Quispe", notes: "Prefiere la tarde" }),
-    )
+    const person = await c.run((tx) => createContact(tx, c.orgId, { displayName: "Rosa Quispe" }))
     await c.run((tx) =>
       createContactNote(
         tx,
@@ -380,12 +378,7 @@ describe("un sitio para las notas", () => {
     )
     const notes = await c.run((tx) => listPersonNotes(tx, c.orgId, person.id))
     expect(notes).toEqual([
-      expect.objectContaining({
-        body: "Llamó por el precio",
-        authorName: "Ana Recepción",
-        legacy: false,
-      }),
-      expect.objectContaining({ body: "Prefiere la tarde", authorName: null, legacy: true }),
+      expect.objectContaining({ body: "Llamó por el precio", authorName: "Ana Recepción" }),
     ])
   })
 })

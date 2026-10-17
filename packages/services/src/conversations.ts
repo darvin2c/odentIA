@@ -34,11 +34,10 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
 import { hidePersonalLinkRefs } from "./personal-link-token.js"
+import { windowOpen } from "./message-window.js"
 import { decryptConfig } from "./secrets.js"
 import type { AttachmentRef, Storage } from "./storage.js"
 
-/** Ventana de WhatsApp para texto libre: 24h desde el último inbound. */
-export const WA_FREE_TEXT_WINDOW_MS = 24 * 60 * 60 * 1000
 
 /** Acepta las marcas UTC emitidas por nuestros cursores sin perder microsegundos. */
 function conversationCursor(value: string): { ts: string; id: string } {
@@ -202,6 +201,13 @@ export async function ingestInbound(
     // El archivado no bloquea la recepción entrante ni crea un contacto
     // nuevo: se reutiliza el contacto archivado (el badge lo muestra).
     contactId = identity.contactId
+    // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
+    if (identity.noWhatsappAt) {
+      await tx
+        .update(contactIdentity)
+        .set({ noWhatsappAt: null })
+        .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, identity.id)))
+    }
   } else {
     const [created] = await tx
       .insert(contact)
@@ -454,6 +460,21 @@ export async function ingestInbound(
  * sent/delivered/read en sent_at si sigue nulo; un fallo guarda el motivo que
  * entrega el adaptador (de ahí lo lee `reconcileDeliveries`).
  */
+/**
+ * WhatsApp no pudo entregar un mensaje porque el número no tiene WhatsApp
+ * (decisión 23, caso 1): su identidad queda marcada. La ficha lo dice y no se
+ * le vuelve a escribir por ahí hasta que escriba desde ese número o el equipo
+ * lo vuelva a marcar como su WhatsApp.
+ */
+async function markNotOnWhatsApp(tx: Db, orgId: string, conversationId: string): Promise<void> {
+  await tx.execute(sql`
+    update contact_identity ci set no_whatsapp_at = now()
+    from conversation cv
+    where cv.organization_id = ${orgId} and cv.id = ${conversationId}
+      and ci.organization_id = cv.organization_id and ci.id = cv.contact_identity_id
+      and ci.channel = 'whatsapp' and ci.no_whatsapp_at is null`)
+}
+
 export async function applyStatus(
   tx: Db,
   orgId: string,
@@ -474,6 +495,7 @@ export async function applyStatus(
           .set({ status: s.status, ...(s.error ? { error: s.error.slice(0, 500) } : {}) })
           .where(and(eq(message.organizationId, orgId), eq(message.externalId, s.externalMessageId)))
           .returning({ id: message.id, conversationId: message.conversationId })
+    if (updated && s.notOnWhatsApp) await markNotOnWhatsApp(tx, orgId, updated.conversationId)
     if (updated) {
       applied += 1
       await notify(tx, {
@@ -598,8 +620,7 @@ function assertWindowAllows(
 ): void {
   // Los media salientes también son mensajes de sesión sujetos a la ventana.
   if (content.type === "template") return
-  const last = row.conversation.lastInboundAt
-  if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
+  if (!windowOpen(row.conversation.lastInboundAt)) {
     throw new ServiceError(
       "WINDOW_CLOSED",
       409,
@@ -612,8 +633,7 @@ function assertWindowAllows(
 function assertMetaWindowAllows(row: {
   conversation: typeof conversation.$inferSelect
 }): void {
-  const last = row.conversation.lastInboundAt
-  if (!last || Date.now() - last.getTime() > WA_FREE_TEXT_WINDOW_MS) {
+  if (!windowOpen(row.conversation.lastInboundAt)) {
     throw new ServiceError(
       "WINDOW_CLOSED",
       409,
@@ -1221,9 +1241,7 @@ export async function getConversationDetail(
     whatsappWindow:
       row.connection.provider === "whatsapp_cloud_api"
         ? {
-            open:
-              !!row.conversation.lastInboundAt &&
-              Date.now() - row.conversation.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS,
+            open: windowOpen(row.conversation.lastInboundAt),
             lastInboundAt: row.conversation.lastInboundAt?.toISOString() ?? null,
           }
         : null,
@@ -1632,7 +1650,7 @@ export async function writeToPerson(
   const typedPhone = input.phone?.trim() || null
   if (!typedPhone) {
     const live = threads.find(
-      (row) => row.lastInboundAt && now - row.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS,
+      (row) => windowOpen(row.lastInboundAt, now),
     )
     if (live) return { conversationId: live.id, created: false, channel: live.channel, identityCreated: false }
   }

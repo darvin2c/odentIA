@@ -3,9 +3,11 @@ import {
   demographicsSchema,
   IDENTITY_DOC_TYPES,
   isMinor,
+  KINSHIP,
   normalizePersonData,
   normalizePhone,
   registrationContactInputSchema,
+  SEX_CODES,
   validateDemographics,
   type RegistrationContactInput,
 } from "@odentia/clinical"
@@ -26,7 +28,8 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
 import { endPairAccess } from "./pair-access.js"
-import { setPersonArchived } from "./people.js"
+import { createPerson, setPersonArchived } from "./people.js"
+import { personSearchCondition } from "./person-search.js"
 import { decodeCursor } from "./cursors.js"
 import {
   branchNotFound,
@@ -38,7 +41,6 @@ import {
 import { findOrgCountry, NEUTRAL_TIMEZONE } from "./locale.js"
 
 const PAGE_DEFAULT = 30
-const PATIENT_SEXES = ["M", "F"] as const
 
 /** Upsert atómico del correlativo de historia clínica por organización. */
 export async function nextPatientNumber(tx: Db, orgId: string): Promise<number> {
@@ -158,7 +160,12 @@ export async function createPatient(
   const countryCode = await findOrgCountry(tx, orgId)
   const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId), countryCode)
   if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
-  const clean = normalizeDemographics(demographicsSchema.parse(demographics), countryCode)
+  const {
+    emergencyContactName,
+    emergencyContactPhone,
+    emergencyContactRelationship,
+    ...clean
+  } = normalizeDemographics(demographicsSchema.parse(demographics), countryCode)
   if (registeredBranchId) await assertTenantBranch(tx, orgId, registeredBranchId)
   const links = contacts.map(c => registrationContactInputSchema.parse(c)).sort((a, b) => a.contactId.localeCompare(b.contactId))
   if (new Set(links.map(c => c.contactId)).size !== links.length) throw validation("No repitas un contacto")
@@ -180,8 +187,22 @@ export async function createPatient(
     }).returning()
     if (!row) throw new Error("No se pudo crear el paciente")
     if (links.length) await tx.insert(patientContact).values(links.map(link => ({ ...link, organizationId: orgId, patientId: row.id, createdBy: actorUserId })))
+    // El contacto de emergencia declarado es una persona vinculada con la marca (decisión 25).
+    await declareEmergencyContact(tx, orgId, actorUserId, row.id, {
+      name: emergencyContactName,
+      phone: emergencyContactPhone,
+      kinship: emergencyContactRelationship,
+    })
     await tx.insert(patientRegistration).values({
-      ...(provenance ?? { entryPoint: "platform", respondent: "staff", answers: { demographics: clean, respondent: "staff", privacyAccepted: false } }),
+      ...(provenance ?? {
+        entryPoint: "platform",
+        respondent: "staff",
+        answers: {
+          demographics: { ...clean, emergencyContactName, emergencyContactPhone, emergencyContactRelationship },
+          respondent: "staff",
+          privacyAccepted: false,
+        },
+      }),
       organizationId: orgId, patientId: row.id, actorUserId,
     })
     await tx.insert(auditEvent).values({
@@ -197,6 +218,62 @@ export async function createPatient(
       throw duplicateDocument(clean.docType)
     throw e
   }
+}
+
+/** Los parentescos de HL7 RoleCode que no son familia: el vínculo queda como «otro». */
+const NOT_FAMILY_KINSHIP = new Set(["FRND", "NBOR"])
+
+/**
+ * Lo que alguien declara como contacto de emergencia (el registro, «Tus
+ * datos») se vuelve una persona vinculada con la marca «Contacto de
+ * emergencia» (decisión 25): se crea con la operación de personas
+ * (`createPerson`) y se vincula a la ficha. Nunca se busca por su teléfono
+ * para unirla con otra persona (ADR 0027). Si la persona marcada ya es la que
+ * se declara (mismo nombre), queda como está; si es otra, la marca pasa a la
+ * nueva y la anterior sigue vinculada.
+ */
+export async function declareEmergencyContact(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  patientId: string,
+  input: { name?: string | null; phone?: string | null; kinship?: string | null },
+): Promise<string | null> {
+  const name = input.name?.trim().replace(/\s+/g, " ") || null
+  const phone = input.phone?.trim() || null
+  if (!name && !phone) return null
+  const kinship = input.kinship && (KINSHIP as readonly string[]).includes(input.kinship) ? input.kinship : null
+  const marked = await tx
+    .select({ contactId: contact.id, displayName: contact.displayName })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isEmergency, true)))
+  const same = name ? marked.find((row) => row.displayName.trim().toLowerCase() === name.toLowerCase()) : undefined
+  if (same) return same.contactId
+  const created = await createPerson(tx, orgId, { userId: actorUserId }, { displayName: name ?? phone, phone })
+  await tx
+    .update(patientContact)
+    .set({ isEmergency: false, updatedAt: new Date() })
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.isEmergency, true)))
+  await tx.insert(patientContact).values({
+    organizationId: orgId,
+    patientId,
+    contactId: created.id,
+    relationship: kinship && !NOT_FAMILY_KINSHIP.has(kinship) ? "family" : "other",
+    kinship,
+    isPreferred: false,
+    isEmergency: true,
+    createdBy: actorUserId,
+  })
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "patient.contact_set",
+    entity: "patient",
+    entityId: patientId,
+    metadata: { contactId: created.id, relationship: kinship ? "family" : "other", isEmergency: true },
+  })
+  return created.id
 }
 
 /** Ese documento ya es de otra persona: nunca se unen solas. */
@@ -350,7 +427,7 @@ export async function listPatients(
   if (
     input.sex != null &&
     input.sex !== "" &&
-    !(PATIENT_SEXES as readonly string[]).includes(input.sex)
+    !(SEX_CODES as readonly string[]).includes(input.sex)
   ) {
     throw validation("Sexo inválido")
   }
@@ -370,17 +447,16 @@ export async function listPatients(
     sort,
   })
   const conditions = [eq(patient.organizationId, orgId)]
-  if (q) {
-    const like = `%${q}%`
+  // El mismo buscador que la lista de personas: el teléfono, por sus dígitos.
+  if (q)
     conditions.push(
-      or(
-        ilike(patient.displayName, like),
-        ilike(patient.docNumber, like),
-        ilike(patient.phone, like),
-        ilike(patient.email, like),
-      )!,
+      personSearchCondition(q, {
+        displayName: patient.displayName,
+        docNumber: patient.docNumber,
+        email: patient.email,
+        phone: patient.phone,
+      }),
     )
-  }
   if (input.isActive !== undefined) conditions.push(eq(patient.isActive, input.isActive))
   if (input.sex) conditions.push(eq(patient.sex, input.sex))
   if (input.docType) conditions.push(eq(patient.docType, input.docType))
@@ -465,11 +541,22 @@ export async function listPatients(
 
 export interface PatientFull {
   patient: PatientRow
-  contacts: { contactId: string; displayName: string; phone: string | null; email: string | null; isActive: boolean; relationship: RegistrationContactInput["relationship"]; relationshipDetail: string | null; kinship: string | null; isPreferred: boolean }[]
+  contacts: { contactId: string; displayName: string; phone: string | null; email: string | null; isActive: boolean; relationship: RegistrationContactInput["relationship"]; relationshipDetail: string | null; kinship: string | null; isPreferred: boolean; isEmergency: boolean }[]
   registration: (Pick<typeof patientRegistration.$inferSelect, "entryPoint" | "respondent" | "createdAt" | "contextContactId" | "conversationId" | "formVersion" | "answers" | "privacyNotice"> & { actor: { id: string; name: string } | null }) | null
   activeAllergies: (typeof patientAllergy.$inferSelect)[]
   activeConditions: (typeof patientCondition.$inferSelect)[]
   currentMedications: (typeof patientMedication.$inferSelect)[]
+  /**
+   * Es menor de edad hoy, con el día de la clínica: la pantalla no calcula la
+   * edad por su cuenta para decidir quién firma o quién decide.
+   */
+  isMinor: boolean
+}
+
+/** Menor de edad hoy, con el día de la clínica (la misma cuenta que `patientAge`). */
+export async function birthDateIsMinor(tx: Db, orgId: string, birthDate: string | null): Promise<boolean> {
+  if (!birthDate) return false
+  return isMinor(String(birthDate).slice(0, 10), await patientOrganizationToday(tx, orgId))
 }
 
 export async function getPatient(tx: Db, orgId: string, id: string): Promise<PatientFull> {
@@ -477,6 +564,7 @@ export async function getPatient(tx: Db, orgId: string, id: string): Promise<Pat
   const contacts = await tx.select({
     contactId: contact.id, displayName: contact.displayName, phone: contact.phone, email: contact.email, isActive: contact.isActive,
     relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, kinship: patientContact.kinship, isPreferred: patientContact.isPreferred,
+    isEmergency: patientContact.isEmergency,
   }).from(patientContact).innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, id)))
     .orderBy(desc(patientContact.isPreferred), asc(contact.displayName), asc(contact.id))
@@ -526,6 +614,7 @@ export async function getPatient(tx: Db, orgId: string, id: string): Promise<Pat
     activeAllergies,
     activeConditions,
     currentMedications,
+    isMinor: await birthDateIsMinor(tx, orgId, row.birthDate),
   }
 }
 
@@ -534,6 +623,7 @@ export async function listPatientsByContact(tx: Db, orgId: string, contactId: st
   return tx.select({
     id: patient.id, patientNumber: patient.patientNumber, displayName: patient.displayName, isActive: patient.isActive,
     relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, kinship: patientContact.kinship, isPreferred: patientContact.isPreferred,
+    isEmergency: patientContact.isEmergency,
   }).from(patientContact).innerJoin(patient, and(eq(patient.id, patientContact.patientId), eq(patient.organizationId, orgId)))
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, contactId)))
     .orderBy(asc(patient.displayName), asc(patient.id))
@@ -561,6 +651,8 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     // `patient_contact_person_adopt`): aquí solo se valida y se deja traza.
     await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.person_replaced", entity: "patient", entityId: patientId, metadata: { fromContactId: currentPerson, toContactId: link.contactId } })
   }
+  if (link.isEmergency && link.relationship === "self")
+    throw validation("La propia persona no es su contacto de emergencia: marca a alguien vinculado")
   const [before] = await tx.select({ relationship: patientContact.relationship }).from(patientContact)
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, link.contactId)))
   try {
@@ -568,9 +660,14 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     await tx.insert(patientContact).values({ ...link, organizationId: orgId, patientId, createdBy: actorUserId })
       .onConflictDoUpdate({
         target: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
-        set: { relationship: link.relationship, relationshipDetail: link.relationshipDetail ?? null, kinship: link.kinship ?? null, isPreferred: link.isPreferred, updatedAt: new Date() },
+        set: {
+          relationship: link.relationship, relationshipDetail: link.relationshipDetail ?? null, kinship: link.kinship ?? null, isPreferred: link.isPreferred,
+          // Sin indicar, la marca de contacto de emergencia queda como estaba.
+          ...(link.isEmergency === undefined ? {} : { isEmergency: link.isEmergency }),
+          updatedAt: new Date(),
+        },
       })
-    await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_set", entity: "patient", entityId: patientId, metadata: { contactId: link.contactId, relationship: link.relationship, isPreferred: link.isPreferred } })
+    await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_set", entity: "patient", entityId: patientId, metadata: { contactId: link.contactId, relationship: link.relationship, isPreferred: link.isPreferred, ...(link.isEmergency === undefined ? {} : { isEmergency: link.isEmergency }) } })
   } catch (error) {
     if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("patient_contact_self_")) throw conflict("ALREADY_PATIENT", "El contacto o paciente ya tiene una relación propia")
     if (isUniqueViolation(error) && uniqueConstraintOf(error).includes("contact_org_doc_uidx")) throw conflict("DUPLICATE_DOCUMENT", "Ya existe otra persona con el documento del paciente")
@@ -679,7 +776,6 @@ const PATCH_FIELDS = [
   "addressPostalCode",
   "addressCountry",
   "addressReference",
-  "emergencyContactRelationship",
   "insurerName",
   "affiliationNumber",
   "docType",
@@ -693,8 +789,6 @@ const PATCH_FIELDS = [
   "occupation",
   "address",
   "origin",
-  "emergencyContactName",
-  "emergencyContactPhone",
   "insuranceType",
   "insuranceScheme",
   "referralSource",
@@ -793,6 +887,14 @@ export async function updatePatient(
       entityId: id,
       metadata: { fields: touched },
     })
+    // El contacto de emergencia no es un dato de la ficha: es una persona vinculada (decisión 25).
+    if (patch.emergencyContactName !== undefined || patch.emergencyContactPhone !== undefined) {
+      await declareEmergencyContact(tx, orgId, actorUserId, id, {
+        name: (merged.emergencyContactName as string | null | undefined) ?? null,
+        phone: (merged.emergencyContactPhone as string | null | undefined) ?? null,
+        kinship: (merged.emergencyContactRelationship as string | null | undefined) ?? null,
+      })
+    }
     return updated
   } catch (e) {
     if (!isUniqueViolation(e)) throw e

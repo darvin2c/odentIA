@@ -590,7 +590,8 @@ it("cuenta: concepto manual, cobro parcial, anulación, devolución y límites",
 it("responsables: vigencia, duplicado y revocación con motivo", async () => {
   const { patientId } = await setupAcceptedItem()
   const contactId = await linkContact(patientId)
-  const startsAt = new Date().toISOString().slice(0, 10)
+  // Hoy en la clínica (Lima): lo vigente se cuenta con su día, no con UTC.
+  const startsAt = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
 
   const granted = await post(app, `/patients/${patientId}/responsibilities`, {
     contactId,
@@ -1089,7 +1090,7 @@ it("consentimiento estructurado: firma con profesional, PDF con huella, menor y 
   await post(app, `/patients/${childId}/responsibilities`, {
     contactId: guardianId,
     kind: "representante_legal",
-    startsAt: new Date().toISOString().slice(0, 10),
+    startsAt: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date()),
   })
   const create = async () => {
     const res = await post(app, "/clinical-forms/consents", {

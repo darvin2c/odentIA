@@ -190,7 +190,8 @@ export function PersonHeader({
     enabled: canRead && Boolean(patient),
   })
   const age = ageFrom(person.birthDate)
-  const isMinor = age !== "" && Number(age) < 18
+  // Menor de edad según el servidor (el día de la clínica), no la hora de este equipo.
+  const isMinor = person.isMinor
   const representatives = (responsibilities.data?.data ?? []).filter(
     (row) => row.isCurrent && row.kind === "representante_legal",
   )

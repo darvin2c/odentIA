@@ -360,7 +360,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   ).id
   await inOrg(async (tx) => {
     await upsertAgentConfig(tx, ORG, { enabled: true, ...(decider ? { decisionProvider: "jev" as const, decisionRoutingEnabled: true } : {}) })
-    await updateAdminSettings(tx, ORG, owner, { enabled: true, quietStart: "21:00", quietEnd: "08:00" })
+    await updateAdminSettings(tx, ORG, owner, { enabled: true })
     for (const [title, body] of [
       ["Horario de atención", "Atendemos de lunes a sábado, de 9:00 a 18:00."],
       ["Pago en partes", "Los tratamientos largos se pueden pagar en partes, con una inicial. Los medios de pago son los que acepta caja."],

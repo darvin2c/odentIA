@@ -13,7 +13,6 @@ export interface AgentConfig {
   dailyRunLimit: number
   /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
   decisionProvider: DecisionProvider
-  systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number
   /** Comprueba precios, fechas y horas de cada respuesta contra lo consultado antes de enviarla. */
@@ -79,7 +78,6 @@ const DEFAULTS = {
   llm: DEFAULT_AGENT_LLM,
   dailyRunLimit: 500,
   decisionProvider: "none" as DecisionProvider,
-  systemPrompt: "",
   handoffKeywords: [] as string[],
   maxTurns: 10,
   replyCheckEnabled: true,
@@ -107,7 +105,6 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
     decisionProvider: (DECISION_PROVIDERS as readonly string[]).includes(row.decisionProvider)
       ? (row.decisionProvider as DecisionProvider)
       : "none",
-    systemPrompt: row.systemPrompt,
     handoffKeywords: row.handoffKeywords,
     maxTurns: row.maxTurns,
     replyCheckEnabled: row.replyCheckEnabled,
@@ -142,7 +139,6 @@ export interface UpsertAgentConfigInput {
   llm?: AgentLlm
   dailyRunLimit?: number
   decisionProvider?: DecisionProvider
-  systemPrompt?: string
   handoffKeywords?: string[]
   maxTurns?: number
   replyCheckEnabled?: boolean

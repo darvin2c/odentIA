@@ -736,6 +736,20 @@
       "when": 1792113996295,
       "tag": "0104_modelo_que_responde",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1792113996296,
+      "tag": "0105_una_puerta_y_una_lista",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792113996297,
+      "tag": "0106_un_dato_un_lugar",
+      "breakpoints": true
     }
   ]
 }

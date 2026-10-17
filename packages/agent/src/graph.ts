@@ -150,7 +150,7 @@ const AgentState = Annotation.Root({
 })
 
 
-const LESSONS_SOURCE = "Lecciones aprobadas por la clínica"
+const LESSONS_SOURCE = "Lo que el agente debe saber"
 
 const TONE_TEXT: Record<AgentConfig["tone"], string> = {
   cercano: "cercano y profesional",
@@ -555,7 +555,6 @@ export function compileAgentGraph(
           .join("; ") + (full.openTasks.length > 10 ? "; hay más tareas: usa listar_tareas para verlas todas" : "")
       : "sin seguimientos pendientes"
     const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : "sin etiquetas"
-    const notesLine = contactDetail.notes?.trim() ? contactDetail.notes.trim().slice(0, 500) : null
     const customLine = Object.entries(contactDetail.customFields ?? {})
       .slice(0, 10)
       .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
@@ -618,7 +617,6 @@ export function compileAgentGraph(
     const contactBlock = [
       `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       patientsLine,
-      notesLine ? `Notas del contacto (internas): ${notesLine}${(contactDetail.notes?.trim().length ?? 0) > 500 ? "… (texto completo en leer_contexto_comercial)" : ""}.` : null,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
       memoryBlock,
@@ -693,7 +691,7 @@ export function compileAgentGraph(
     const asked = draft ?? trailingBurst(items) ?? latestInbound
     const overrides = toolCtx.lessonOverrides
     const hiddenEntries = new Set(overrides?.skipEntryIds ?? [])
-    const { cfg, orgPrompt, snapshot, clinicData, faqs, lessons } = await withOrgContext(
+    const { cfg, snapshot, clinicData, faqs, lessons } = await withOrgContext(
       toolCtx.db,
       toolCtx.orgId,
       async (tx) => {
@@ -706,11 +704,11 @@ export function compileAgentGraph(
         const clinicData = await getAgentClinicData(tx, toolCtx.orgId, informs, !cfg.disabledFunctions.includes("agendar"))
         return {
           cfg,
-          orgPrompt: cfg.systemPrompt,
           snapshot,
           clinicData,
           faqs: informs ? (await listPublishedForPrompt(tx, toolCtx.orgId)).filter((entry) => !hiddenEntries.has(entry.id)) : [],
-          // Lo aprendido de las correcciones: reglas del agente y ejemplos parecidos a lo que se pregunta.
+          // «Lo que el agente debe saber» (decisión 24): lo que escribió la clínica y lo que aprendió,
+          // en una sola lista; y los ejemplos parecidos a lo que se pregunta.
           lessons: await lessonsForTurn(tx, toolCtx.orgId, "recepcion", asked ?? "", {
             skipIds: overrides?.skipIds ?? [],
             extra: overrides?.extra ?? [],
@@ -767,7 +765,7 @@ export function compileAgentGraph(
     // Las reglas son de la organización (estables); los ejemplos dependen del mensaje y van con lo del turno.
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
-    const stable = [receptionPrompt(zone, cfg, { tools: available, services }), orgPrompt, rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
+    const stable = [receptionPrompt(zone, cfg, { tools: available, services }), rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
     const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
       .filter(Boolean)
       .join("\n\n")
@@ -783,7 +781,6 @@ export function compileAgentGraph(
     // Contra esto se comprueba la respuesta antes de salir. Cada fuente lleva
     // el nombre con el que el equipo la verá en «En qué se basó».
     const evidence: AgentEvidence[] = [
-      { kind: "indicaciones", source: "Indicaciones de la clínica", text: orgPrompt ?? "" },
       { kind: "conocimiento", source: "Conocimiento publicado de la clínica", text: knowledgeBlock },
       { kind: "conocimiento", source: KNOWLEDGE_PICKED_SOURCE, text: [picked?.block, trialBlock].filter(Boolean).join("\n") },
       { kind: "leccion", source: LESSONS_SOURCE, text: [rulesBlock, examplesBlock].filter(Boolean).join("\n") },

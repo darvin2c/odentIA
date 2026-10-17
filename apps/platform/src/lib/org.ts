@@ -19,10 +19,10 @@ import { apiFetch } from "./api"
 export interface OrgProfile {
   organizationId: string
   legalName: string
-  tradeName: string | null
+  /** El nombre que ven los pacientes (decisión 19): obligatorio. */
+  tradeName: string
   fiscalDocType: string | null
   fiscalDocNumber: string | null
-  billingEmail: string | null
   fiscalAddress: string | null
   countryCode: string
   currency: string
@@ -36,15 +36,17 @@ export interface OrgProfile {
   ticketFooter: string
   /** Lista de diagnósticos de la clínica; null: la que recomienda su país. */
   diagnosisSystem: string | null
+  /** Logo público de la clínica (se sube en «Datos de la clínica»); null si no tiene. */
+  logo?: string | null
 }
 
 /**
  * Lo que guarda «Datos de la clínica». `null` vacía un dato opcional; lo que no
- * viaja (el correo de facturación, la impresión) queda como estaba.
+ * viaja (la impresión) queda como estaba.
  */
 export interface OrgProfileInput {
   legalName: string
-  tradeName: string | null
+  tradeName: string
   fiscalDocType: string | null
   fiscalDocNumber: string | null
   fiscalAddress: string | null

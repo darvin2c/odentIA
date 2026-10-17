@@ -66,14 +66,8 @@ interface FullOrganization {
 type Membership = FullOrganization["members"][number]
 type Invitation = FullOrganization["invitations"][number]
 
-const ASSIGNABLE_SCHEMA_ROLES: [OrgRole, ...OrgRole[]] = [
-  "owner",
-  "admin",
-  "reception",
-  "dentist",
-  "cashier",
-  "member",
-]
+// Los roles de `@odentia/auth`, no una copia.
+const ASSIGNABLE_SCHEMA_ROLES = ORG_ROLES
 
 const inviteSchema = z.object({
   email: z.string().trim().email("Escribe un correo válido"),

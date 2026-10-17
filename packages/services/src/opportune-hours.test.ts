@@ -10,9 +10,9 @@ import {
 } from "./opportune-hours.js"
 
 /**
- * Horario oportuno (ADR 0024): el de atención de la clínica ese día, de 8:00 a
- * 21:00 si ese día no atiende nadie, y acotado por el horario del agente. Lima
- * es UTC−5 todo el año; el 12 de octubre de 2026 es lunes.
+ * Horas de un horario semanal (el «Horario para escribir», ADR 0042, y el del
+ * agente): un día sin tramos no tiene momento permitido. Lima es UTC−5 todo el
+ * año; el 12 de octubre de 2026 es lunes.
  */
 const LIMA = "America/Lima"
 const at = (iso: string) => new Date(iso)
@@ -44,12 +44,12 @@ describe("horario oportuno", () => {
     expect(lastOpportuneAtOrBefore(lunch, clinic)?.toISOString()).toBe("2026-10-12T17:59:00.000Z") // 12:59
   })
 
-  it("un domingo sin horario de la clínica vale de 8:00 a 21:00", () => {
-    expect(opportuneRangesOn(clinic, 0)).toEqual([[480, 1260]])
+  it("un domingo sin tramos no tiene momento: lo siguiente es el lunes y lo anterior, el sábado", () => {
+    expect(opportuneRangesOn(clinic, 0)).toEqual([])
     const sundayEarly = at("2026-10-11T11:30:00Z") // domingo 6:30
-    expect(nextOpportuneFrom(sundayEarly, clinic)?.toISOString()).toBe("2026-10-11T13:00:00.000Z") // 8:00
-    expect(isOpportune(at("2026-10-12T01:30:00Z"), clinic)).toBe(true) // domingo 20:30
-    expect(isOpportune(at("2026-10-12T02:00:00Z"), clinic)).toBe(false) // domingo 21:00
+    expect(isOpportune(at("2026-10-11T17:00:00Z"), clinic)).toBe(false) // domingo 12:00
+    expect(nextOpportuneFrom(sundayEarly, clinic)?.toISOString()).toBe("2026-10-12T14:00:00.000Z") // lunes 9:00
+    expect(lastOpportuneAtOrBefore(sundayEarly, clinic)?.toISOString()).toBe("2026-10-10T23:59:00.000Z") // sábado 18:59
   })
 
   it("el horario del agente recorta el de la clínica, también si cruza la medianoche", () => {
@@ -57,10 +57,10 @@ describe("horario oportuno", () => {
     expect(opportuneRangesOn(withAgent, 1)).toEqual([[600, 780], [900, 1080]])
     expect(isOpportune(at("2026-10-12T14:30:00Z"), withAgent)).toBe(false) // lunes 9:30: la clínica sí, el agente no
     expect(nextOpportuneFrom(at("2026-10-12T14:30:00Z"), withAgent)?.toISOString()).toBe("2026-10-12T15:00:00.000Z")
-    const night = { ...clinic, agent: { fromMin: 1200, untilMin: 120 } }
-    // Domingo por defecto 8–21 y el agente de 20:00 a 2:00: solo de 20:00 a 21:00.
-    expect(opportuneRangesOn(night, 0)).toEqual([[1200, 1260]])
-    expect(opportuneRangesOn(night, 1)).toEqual([])
+    const night = { ...clinic, agent: { fromMin: 1080, untilMin: 120 } }
+    // Lunes de 15:00 a 19:00 y el agente de 18:00 a 2:00: solo de 18:00 a 19:00; el domingo, nada.
+    expect(opportuneRangesOn(night, 1)).toEqual([[1080, 1140]])
+    expect(opportuneRangesOn(night, 0)).toEqual([])
   })
 
   it("el agente abre a su hora: fuera de su franja la corrida espera a la apertura", () => {

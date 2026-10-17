@@ -37,8 +37,15 @@ type FieldKind =
   /** Seguro: una lista que guarda el tipo general y, si lo tiene, el régimen del país. */
   | { kind: "insurance" }
 
+/**
+ * Lo que se declara como contacto de emergencia: no es un dato de la ficha,
+ * el servidor lo vuelve una persona vinculada con la marca (decisión 25).
+ * Solo lo pide «Completar» cuando falta; lo demás se cambia en Personas vinculadas.
+ */
+type EmergencyKey = "emergencyContactName" | "emergencyContactRelationship" | "emergencyContactPhone"
+
 interface SectionField {
-  key: keyof Patient & string
+  key: (keyof Patient & string) | EmergencyKey
   label: string
   hint?: string
   type: FieldKind
@@ -108,18 +115,11 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
       },
       contacto: {
         title: "Contacto",
-        description: "Cómo ubicarla, dónde vive y a quién llamar en una emergencia.",
+        description: "Cómo ubicarla y dónde vive. El contacto de emergencia se marca en Personas vinculadas.",
         fields: [
           { key: "phone", label: "Teléfono", type: { kind: "phone" } },
           { key: "email", label: "Correo", type: { kind: "text", max: 200 } },
           ...addressFields,
-          { key: "emergencyContactName", label: "Contacto de emergencia", type: { kind: "text", max: 200 } },
-          {
-            key: "emergencyContactRelationship",
-            label: "Parentesco",
-            type: { kind: "select", options: options(KINSHIP_LABELS) },
-          },
-          { key: "emergencyContactPhone", label: "Teléfono de emergencia", type: { kind: "phone" } },
         ],
       },
       seguro: {
@@ -156,7 +156,13 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
 }
 
 /** Qué campos abre «Completar» por cada dato que falta. */
-const COMPLETE_FIELDS: Record<MissingPersonDatum["key"], Array<keyof Patient & string>> = {
+const EMERGENCY_FIELDS: SectionField[] = [
+  { key: "emergencyContactName", label: "Contacto de emergencia", type: { kind: "text", max: 200 } },
+  { key: "emergencyContactRelationship", label: "Parentesco", type: { kind: "select", options: options(KINSHIP_LABELS) } },
+  { key: "emergencyContactPhone", label: "Teléfono de emergencia", type: { kind: "phone" } },
+]
+
+const COMPLETE_FIELDS: Record<MissingPersonDatum["key"], Array<SectionField["key"]>> = {
   givenNames: ["givenNames"],
   paternalSurname: ["paternalSurname", "maternalSurname"],
   birthDate: ["birthDate"],
@@ -252,7 +258,13 @@ export function FiliacionSectionDrawer({
   const source = (patient ?? person ?? {}) as unknown as Partial<Record<string, unknown>>
   const sections = useSectionFields(source)
   const completing = section === "completar"
-  const all = [...sections.identidad.fields, ...sections.contacto.fields, ...sections.seguro.fields, ...sections.mas.fields]
+  const all = [
+    ...sections.identidad.fields,
+    ...sections.contacto.fields,
+    ...sections.seguro.fields,
+    ...sections.mas.fields,
+    ...EMERGENCY_FIELDS,
+  ]
   const wanted = completing
     ? new Set((missing ?? []).flatMap((datum) => COMPLETE_FIELDS[datum.key]))
     : null

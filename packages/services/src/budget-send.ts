@@ -15,7 +15,7 @@
  * responde y reserva lo que aceptó; dentro de las 24 horas y por correo va
  * además el PDF, con la dirección de su enlace escrita.
  */
-import { budgetOptionLabel, formatMoney, isMinor } from "@odentia/clinical"
+import { budgetOptionLabel, formatMoney } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -39,12 +39,8 @@ import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError } from "./errors.js"
 import { buildBudgetSnapshot, renderBudgetPdf } from "./financial-document-pdf.js"
-import {
-  type DocumentRecipient,
-  deliverDocumentPdf,
-  listDocumentRecipients,
-  type RecipientRelation,
-} from "./financial-documents.js"
+import { type DocumentRecipient, deliverDocumentPdf, type RecipientRelation } from "./financial-documents.js"
+import { listDecisionRecipients } from "./responsibilities.js"
 import { findOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
 
@@ -53,7 +49,10 @@ const SENDABLE = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"] 
 
 /**
  * A quién le llega lo del servicio de un paciente (su presupuesto, «Su
- * enlace»): la propia persona o, si es menor, su representante legal.
+ * enlace»): la regla única de `listDecisionRecipients`. La propia persona si
+ * es mayor de edad o, si es menor, su representante legal vigente. Elegido a
+ * mano, solo alguien de esa lista: nunca un autorizado de información ni el
+ * responsable económico.
  */
 export async function serviceRecipient(
   tx: Db,
@@ -61,29 +60,19 @@ export async function serviceRecipient(
   patientId: string,
   recipientContactId?: string | null,
 ): Promise<DocumentRecipient> {
-  const recipients = await listDocumentRecipients(tx, orgId, patientId)
+  const recipients = await listDecisionRecipients(tx, orgId, patientId)
   if (recipientContactId) {
     const chosen = recipients.find((row) => row.contactId === recipientContactId)
     if (!chosen) {
       throw new ServiceError(
         "DOCUMENT_RECIPIENT_NOT_AUTHORIZED",
         403,
-        "El destinatario no es la persona ni un pagador autorizado del paciente",
+        "El destinatario no es la persona ni su representante legal vigente",
       )
     }
     return chosen
   }
-  const [row] = await tx
-    .select({ birthDate: patient.birthDate })
-    .from(patient)
-    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-    .limit(1)
-  const birth = row?.birthDate ? String(row.birthDate).slice(0, 10) : null
-  const minor = birth ? isMinor(birth, new Date().toISOString().slice(0, 10)) : false
-  const self = recipients.find((r) => r.relation === "paciente") ?? null
-  const representative = recipients.find((r) => r.relation === "representante_legal") ?? null
-  // Un menor no decide: sin representante legal no hay a quién enviárselo.
-  const chosen = minor ? representative : (self ?? representative)
+  const chosen = recipients.find((row) => row.isDefault) ?? null
   if (!chosen) {
     throw new ServiceError(
       "BUDGET_NO_RECIPIENT",

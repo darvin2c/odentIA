@@ -689,7 +689,7 @@ it("controles, recetas y cuenta se aíslan por tenant y no admiten borrado", asy
         values ('c0000000-0000-4000-8000-000000000001', 'org_a', ${paciente}::uuid, 'Cargo RLS', 12000, 'PEN')`,
   )
   await ownerDb.execute(
-    sql`insert into patient_payment (id, organization_id, patient_id, amount_cents, currency, paid_at, method)
+    sql`insert into patient_payment (id, organization_id, patient_id, amount_cents, currency, paid_at, method_name)
         values ('c0000000-0000-4000-8000-000000000002', 'org_a', ${paciente}::uuid, 8000, 'PEN', now(), 'efectivo')`,
   )
   await ownerDb.execute(

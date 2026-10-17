@@ -77,7 +77,8 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
   const tasksView = context.allTasks ? "todas" : "mias"
   switch (row.kind) {
     case "case":
-      return row.conversationId ? null : <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
+      // Los casos del agente viven aquí y en el panel lateral (decisión 21): sin conversación, su tarea en Tareas.
+      return row.conversationId ? null : <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
     case "staleEncounter":
       return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
     case "unconfirmed":
@@ -108,7 +109,8 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
       if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
       if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
-      return <Link to="/agent/pendientes" search={{ conversationId: undefined, status: undefined }} {...props} />
+      // «y N casos más»: cada caso es una tarea de Recepción («Te lo pasó el agente»).
+      return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
     default:
       return null
   }
@@ -127,7 +129,7 @@ function open(row: WaitingRow, handlers: WaitingHandlers) {
  * abriendo el caso o la tarea.
  */
 function quickAction(row: WaitingRow, handlers: WaitingHandlers): { label: string; run: () => void; primary: boolean } | null {
-  // «Tomar» toma la conversación del caso, como en la Bandeja: sin conversación la fila lleva a Pendientes.
+  // «Tomar» toma la conversación del caso, como en la Bandeja: sin conversación la fila lleva a su tarea.
   if (row.kind === "case" && row.unclaimed && row.conversationId && handlers.onTake) {
     const take = handlers.onTake
     return { label: "Tomar", run: () => take(row), primary: true }

@@ -7,6 +7,7 @@ import { ArrowRight, ChevronRight, CircleHelp, Lightbulb, Lock, MessageCircle, M
 import { type ReactNode, useState } from "react"
 import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
+import { WritingHoursCard } from "../../components/agent/writing-hours"
 import { AgentTabs } from "../../components/agent-tabs"
 import { AGENT_MODEL_DOWN, type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
@@ -148,8 +149,8 @@ function AgentSummaryPage() {
         <EmptyState
           icon={Lock}
           title="No tienes acceso a esta sección"
-          description={`Pídelo a quien administra la clínica.${canDecide ? " Tus pendientes siguen en su pestaña." : ""}`}
-          {...(canDecide ? { actionLabel: "Ir a Pendientes", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
+          description={`Pídelo a quien administra la clínica.${canDecide ? " Las citas que esperan su sí siguen en «Esperan su sí»." : ""}`}
+          {...(canDecide ? { actionLabel: "Ir a Esperan su sí", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
         />
       </PageShell>
     )
@@ -344,6 +345,8 @@ function AgentSummaryPage() {
               })}
             </ul>
           </section>
+
+          <WritingHoursCard canWrite={canWrite} />
 
           <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
             <section aria-label="Cómo le fue esta semana" className="elevated flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 sm:gap-3 sm:p-6">

@@ -204,3 +204,23 @@ it("el resumen del agente excluye los presupuestos en borrador", async () => {
   const summary = await withOrgContext(appDb, orgId, tx => getAgentPatientSummary(tx, orgId, who!.id, ficha!.id))
   expect(summary.budgets.map(budget => budget.status)).toEqual(["presentado"])
 })
+
+it("los casos del agente salen por urgencia y antigüedad antes de cortar, y su tarea es de Recepción", async () => {
+  const ids: string[] = []
+  for (const [sender, priority] of [["primero-ahora", "alta"], ["segundo-sin-apuro", "baja"], ["tercero-hoy", "media"]] as const) {
+    const conv = await openConversation(sender)
+    const handoff = await run((tx) => createHandoff(tx, ORG, null, {
+      conversationId: conv.conversationId, reason: sender, summary: sender, priority, createdBy: "agent",
+    }))
+    ids.push(handoff.id)
+    const [task] = await run((tx) => tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId as string)))
+    // Sin área, nadie de recepción la vería en «Mías y de mi área».
+    expect(task?.area).toBe("recepcion")
+  }
+  const ordered = (await run((tx) => listHandoffs(tx, ORG, { open: true, order: "urgencia", limit: 100 }))).map((h) => h.id).filter((id) => ids.includes(id))
+  // «Ahora», después «Hoy» aunque sea el más nuevo, y al final «Sin apuro».
+  expect(ordered).toEqual([ids[0], ids[2], ids[1]])
+  // Por defecto, del más nuevo al más viejo (la lista de siempre).
+  const recent = (await run((tx) => listHandoffs(tx, ORG, { open: true, limit: 100 }))).map((h) => h.id).filter((id) => ids.includes(id))
+  expect(recent).toEqual([ids[2], ids[1], ids[0]])
+})

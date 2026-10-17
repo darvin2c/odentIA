@@ -16,7 +16,8 @@ import { useNavigate } from "@tanstack/react-router"
 import { ChevronRight, Search, UserPlus } from "lucide-react"
 import { useEffect, useId, useState } from "react"
 import { ApiError, apiFetch } from "../lib/api"
-import { type ContactListItem, timeAgo, usePermission } from "../lib/crm"
+import { timeAgo, usePermission } from "../lib/crm"
+import type { PersonListItem } from "../lib/people"
 import { useOrgProfile } from "../lib/org"
 import { useWriteToPerson } from "./write-to-person"
 
@@ -31,7 +32,9 @@ function errorText(error: unknown, fallback: string): string {
 
 /**
  * «Nueva conversación» de la Bandeja: se busca a la persona por nombre o por
- * teléfono y se le escribe; si no existe, se crea con su número. El WhatsApp
+ * teléfono y se le escribe; si no existe, se crea con su número. Busca y crea
+ * con lo mismo que «Nueva persona» (`/api/people`, `createPerson`): nombres y
+ * apellidos separados y el mismo buscador. El WhatsApp
  * sale solo del número, sin escribir «wa:» ni elegir canales. Lo que sigue (los
  * mensajes aprobados para quien nunca escribió) lo ofrece el propio hilo.
  */
@@ -52,11 +55,13 @@ export function NewConversationDialog({
   const [query, setQuery] = useState(initialQuery)
   const [debounced, setDebounced] = useState(initialQuery)
   const [creating, setCreating] = useState(false)
-  const [name, setName] = useState("")
+  const [name, setName] = useState({ givenNames: "", paternalSurname: "", maternalSurname: "" })
   const [phone, setPhone] = useState<string | null>(null)
-  const [needsPhoneFor, setNeedsPhoneFor] = useState<ContactListItem | null>(null)
+  const [needsPhoneFor, setNeedsPhoneFor] = useState<PersonListItem | null>(null)
   const searchId = useId()
   const nameId = useId()
+  const paternalId = useId()
+  const maternalId = useId()
   const phoneId = useId()
   const country = normalizeCountry(profile.data?.countryCode)
 
@@ -66,7 +71,7 @@ export function NewConversationDialog({
     setQuery(initialQuery)
     setDebounced(initialQuery)
     setCreating(false)
-    setName("")
+    setName({ givenNames: "", paternalSurname: "", maternalSurname: "" })
     setPhone(null)
     setNeedsPhoneFor(null)
     write.reset()
@@ -78,10 +83,10 @@ export function NewConversationDialog({
   }, [query])
 
   const results = useQuery({
-    queryKey: ["contacts", "nueva-conversacion", debounced],
+    queryKey: ["people", "nueva-conversacion", debounced],
     enabled: open && debounced.length >= 2,
     queryFn: () =>
-      apiFetch<{ data: ContactListItem[] }>(`/api/contacts?q=${encodeURIComponent(debounced)}&limit=8`),
+      apiFetch<{ data: PersonListItem[] }>(`/api/people?ver=todos&limit=8&q=${encodeURIComponent(debounced)}`),
     placeholderData: keepPreviousData,
   })
   const people = debounced.length >= 2 ? (results.data?.data ?? []) : []
@@ -91,7 +96,7 @@ export function NewConversationDialog({
     void navigate({ to: "/inbox", search: { conversation: conversationId } })
   }
 
-  const choose = (person: ContactListItem, typed?: string) => {
+  const choose = (person: PersonListItem, typed?: string) => {
     write.mutate(
       { contactId: person.id, ...(typed ? { phone: typed } : {}) },
       {
@@ -106,9 +111,15 @@ export function NewConversationDialog({
   const create = useMutation({
     retry: false,
     mutationFn: async () => {
-      const created = await apiFetch<{ data: { id: string } }>("/api/contacts", {
+      // La misma operación que «Nueva persona» (`createPerson`): nombres y apellidos separados.
+      const created = await apiFetch<{ data: { id: string } }>("/api/people", {
         method: "POST",
-        body: JSON.stringify({ displayName: name.trim(), ...(phone ? { phone } : {}) }),
+        body: JSON.stringify({
+          givenNames: name.givenNames.trim() || null,
+          paternalSurname: name.paternalSurname.trim() || null,
+          maternalSurname: name.maternalSurname.trim() || null,
+          ...(phone ? { phone } : {}),
+        }),
       })
       return write.mutateAsync({ contactId: created.data.id })
     },
@@ -119,9 +130,10 @@ export function NewConversationDialog({
     const text = query.trim()
     if (looksLikePhone(text)) {
       setPhone(toE164(text, country))
-      setName("")
+      setName({ givenNames: "", paternalSurname: "", maternalSurname: "" })
     } else {
-      setName(text)
+      // Lo buscado propone los nombres; los apellidos se escriben aparte.
+      setName({ givenNames: text, paternalSurname: "", maternalSurname: "" })
       setPhone(null)
     }
     setCreating(true)
@@ -129,7 +141,8 @@ export function NewConversationDialog({
 
   const busy = write.isPending || create.isPending
   const writeError = write.error && !(write.error instanceof ApiError && write.error.shape.code === "NO_PHONE") ? write.error : null
-  const createLabel = looksLikePhone(query) ? `Crear contacto con ${query.trim()}` : `Crear contacto «${query.trim()}»`
+  const createLabel = looksLikePhone(query) ? `Crear persona con ${query.trim()}` : `Crear persona «${query.trim()}»`
+  const nameReady = Boolean(name.givenNames.trim() && (name.paternalSurname.trim() || name.maternalSurname.trim()))
 
   return (
     <Dialog
@@ -181,12 +194,38 @@ export function NewConversationDialog({
             className="grid gap-3"
             onSubmit={(event) => {
               event.preventDefault()
-              if (name.trim()) create.mutate()
+              if (nameReady) create.mutate()
             }}
           >
             <div className="grid gap-1.5">
-              <FieldLabel htmlFor={nameId}>Nombre</FieldLabel>
-              <Input id={nameId} value={name} maxLength={200} autoFocus onChange={(event) => setName(event.target.value)} />
+              <FieldLabel htmlFor={nameId}>Nombres</FieldLabel>
+              <Input
+                id={nameId}
+                value={name.givenNames}
+                maxLength={100}
+                autoFocus
+                onChange={(event) => setName({ ...name, givenNames: event.target.value })}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <FieldLabel htmlFor={paternalId}>Primer apellido</FieldLabel>
+                <Input
+                  id={paternalId}
+                  value={name.paternalSurname}
+                  maxLength={100}
+                  onChange={(event) => setName({ ...name, paternalSurname: event.target.value })}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <FieldLabel htmlFor={maternalId}>Segundo apellido</FieldLabel>
+                <Input
+                  id={maternalId}
+                  value={name.maternalSurname}
+                  maxLength={100}
+                  onChange={(event) => setName({ ...name, maternalSurname: event.target.value })}
+                />
+              </div>
             </div>
             <div className="grid gap-1.5">
               <FieldLabel htmlFor={phoneId}>Teléfono</FieldLabel>
@@ -195,14 +234,14 @@ export function NewConversationDialog({
             </div>
             {create.error ? (
               <p role="alert" className="text-sm text-destructive">
-                {errorText(create.error, "No se pudo crear el contacto.")}
+                {errorText(create.error, "No se pudo crear a la persona.")}
               </p>
             ) : null}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setCreating(false)}>
                 Volver
               </Button>
-              <SubmitButton type="submit" disabled={!name.trim() || !phone} pending={create.isPending}>
+              <SubmitButton type="submit" disabled={!nameReady || !phone} pending={create.isPending}>
                 Crear y escribirle
               </SubmitButton>
             </DialogFooter>
@@ -252,7 +291,7 @@ export function NewConversationDialog({
                     <Button
                       variant="outline"
                       className="h-auto min-h-11 w-full justify-between gap-2 py-2 text-left"
-                      disabled={busy || !person.isActive}
+                      disabled={busy || person.archived}
                       onClick={() => choose(person)}
                     >
                       <span className="min-w-0">
@@ -260,7 +299,7 @@ export function NewConversationDialog({
                         <span className="block truncate text-xs font-normal text-muted-foreground">
                           {[
                             person.phone ? internationalText(person.phone) : "Sin teléfono",
-                            !person.isActive
+                            person.archived
                               ? "archivada"
                               : person.lastInteractionAt
                                 ? `escribió ${timeAgo(person.lastInteractionAt)}`

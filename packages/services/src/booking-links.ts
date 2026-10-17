@@ -9,7 +9,14 @@ import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal } from "./agent-operations.js"
-import { createAppointment, moveAppointment, setAppointmentStatus } from "./appointments.js"
+import { createAppointment } from "./appointments.js"
+import {
+  assertOwnAppointmentChangeable,
+  cancelOwnAppointment,
+  confirmOwnAppointment,
+  moveOwnAppointment,
+  ownAppointmentChangeable,
+} from "./own-appointment.js"
 import { listAvailableSlots } from "./availability.js"
 import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
@@ -261,10 +268,8 @@ interface ShownAppointment {
   startsAt: Date
 }
 
-/** Una cita se puede cambiar, cancelar o confirmar desde su enlace mientras siga en pie y no haya empezado. */
-function isChangeable(row: { status: string; startsAt: Date }): boolean {
-  return (row.status === "programada" || row.status === "confirmada") && row.startsAt.getTime() > Date.now()
-}
+/** Una cita se puede cambiar, cancelar o confirmar mientras siga en pie y no haya empezado (`own-appointment.ts`). */
+const isChangeable = (row: { status: string; startsAt: Date }): boolean => ownAppointmentChangeable(row)
 
 /**
  * La cita que muestra el enlace: la suya (la que reservó con él o con la que
@@ -543,25 +548,7 @@ export async function listWeekSlots(
   const to = new Date(input.to)
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw validation("Rango de fechas inválido")
   if (to.getTime() - from.getTime() > SLOT_RANGE_DAYS * 86_400_000) throw validation(`El rango máximo es de ${SLOT_RANGE_DAYS} días`)
-  // A quien elige su cita se le ofrece un horario por cada cita que cabe, no
-  // cada cuarto de hora: menos opciones y las mismas posibilidades reales.
-  const [site] = await tx
-    .select({ minutes: branch.appointmentDefaultMinutes })
-    .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId)))
-    .limit(1)
-  if (!site) throw branchNotFound()
-  const service = input.serviceId
-    ? (
-        await tx
-          .select({ minutes: serviceCatalog.durationMin })
-          .from(serviceCatalog)
-          .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, input.serviceId)))
-          .limit(1)
-      )[0]
-    : undefined
-  const duration = input.durationMin ?? service?.minutes ?? site.minutes
-  const stepMin = Math.min(60, Math.max(15, Math.round(duration / 5) * 5))
+  // El paso de las horas lo decide la Agenda (`bookingStepMin`): el mismo que ofrece el agente.
   const notBefore = new Date().toISOString()
   // Día por día: la Agenda recorta cada consulta a un tope de huecos, y con
   // varios profesionales una semana entera dejaría sin horarios los últimos días.
@@ -576,7 +563,6 @@ export async function listWeekSlots(
       from: new Date(start).toISOString(),
       to: new Date(Math.min(start + 86_400_000, to.getTime())).toISOString(),
       notBefore,
-      stepMin,
     })
     timeZone = day.timeZone
     truncated ||= day.truncated
@@ -834,7 +820,7 @@ export async function reserveBookingLink(
 function changeableAppointment(link: ResolvedPersonalLink): ShownAppointment {
   const current = link.appointment
   if (!current) throw linkExpired()
-  if (!isChangeable(current)) throw new ServiceError("BOOKING_NOT_CHANGEABLE", 409, "Esta cita ya no se puede cambiar desde aquí. Escríbenos por el chat.")
+  assertOwnAppointmentChangeable(current)
   return current
 }
 
@@ -852,12 +838,7 @@ export async function changeBookingLinkAppointment(
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
-  await moveAppointment(tx, orgId, `contact:${link.row.contactId}`, current.id, {
-    expectedVersion: current.version,
-    startsAt: input.startsAt,
-    dentistUserId: input.dentistUserId,
-    ...(input.chairId ? { chairId: input.chairId } : {}),
-  }, { notice: false })
+  await moveOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, input)
   // La cita que cambió es la del enlace: sigue a la vista hasta su nueva hora.
   await tx
     .update(appointmentBookingLink)
@@ -891,11 +872,7 @@ export async function cancelBookingLinkAppointment(
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
   const before = await appointmentView(tx, orgId, current.id)
-  await setAppointmentStatus(tx, orgId, `contact:${link.row.contactId}`, current.id, "cancelada", {
-    cancelReason: "paciente",
-    cancelNote: "La canceló la persona desde su enlace",
-    notice: false,
-  })
+  await cancelOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "La canceló la persona desde su enlace")
   await tx
     .update(appointmentBookingLink)
     .set({ appointmentId: current.id })
@@ -922,9 +899,7 @@ export async function cancelBookingLinkAppointment(
 export async function confirmBookingLinkAppointment(tx: Db, orgId: string, token: string): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
-  if (current.status === "programada") {
-    await setAppointmentStatus(tx, orgId, `contact:${link.row.contactId}`, current.id, "confirmada", { via: "enlace" })
-  }
+  await confirmOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "enlace")
   const view = await appointmentView(tx, orgId, current.id)
   if (!view) throw notFound("Cita")
   return view

@@ -1,5 +1,6 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  appointmentReminderReach,
   createAppointment,
   operationBodySchema,
   createChair,
@@ -348,7 +349,11 @@ export function createAppointmentsRoute(deps: CrmDeps) {
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createAppointment(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const created = await createAppointment(tx, orgId, userId, parsed.data)
+        // Si el recordatorio le llegará: «Carmen no recibirá el recordatorio: aún no tiene WhatsApp».
+        return { ...created, reminderReach: await appointmentReminderReach(tx, orgId, created.patientId) }
+      }),
     )
   })
 

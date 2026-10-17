@@ -15,7 +15,15 @@ import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { updateAdminSettings } from "./agent-admin.js"
 import { setLine } from "./automation.js"
-import { createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import {
+  adjustBudgetLines,
+  createBudget,
+  decideBudget,
+  deliverBudget,
+  duplicateBudgetOption,
+  getBudgetDetail,
+  recommendBudgetOption,
+} from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
 import {
@@ -218,6 +226,30 @@ it("presupuestos: tres grupos que suman el total, y lo aceptado en parte cuenta 
   expect(list.rows).toEqual([expect.objectContaining({ patientId: waiting.patient.id, cents: 120000, currency: "PEN" })])
 })
 
+it("presupuestos con opciones: cuenta la recomendada, como el resto de la aplicación, nunca la suma", async () => {
+  const f = await clinicalFixture()
+  const item = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  const withTwo = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, budget.id, budget.options[0]!.id))
+  const optionB = withTwo.options[1]!
+  await f.run((tx) =>
+    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, optionId: optionB.id, priceCents: 300000 }] }),
+  )
+  await f.run((tx) => recommendBudgetOption(tx, ...f.args, budget.id, optionB.id))
+  // La clínica de prueba es compartida: se mide lo que suma este presupuesto.
+  const waitingOf = async () =>
+    (await f.run((tx) => getReportSales(tx, "org_a", { period: "este_mes" }))).budgets[0]?.waiting ?? { count: 0, cents: 0 }
+  const before = await waitingOf()
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  const detail = await f.run((tx) => getBudgetDetail(tx, "org_a", f.patient.id, budget.id))
+  expect(detail.totalCents).toBe(300000)
+
+  const after = await waitingOf()
+  expect({ count: after.count - before.count, cents: after.cents - before.cents }).toEqual({ count: 1, cents: 300000 })
+  const list = await f.run((tx) => getReportList(tx, "org_a", { period: "este_mes", list: "budgets_waiting" }))
+  expect(list.rows.find((row) => row.id === budget.id)).toEqual(expect.objectContaining({ cents: detail.totalCents }))
+})
+
 it("atención: quién respondió primero, por dónde escribieron y qué pasó el agente al equipo", async () => {
   const c = await clinic()
   const [person] = await ownerDb.insert(contact).values({ organizationId: c.orgId, displayName: "Interlocutor" }).returning()
@@ -268,7 +300,7 @@ it("dinero: totales del periodo, del anterior y por mes, en la moneda y la zona 
   const place = await c.site("Centro")
   const [doctor, p1] = [await c.dentist("Marta"), await c.person("Uno", 1)]
   const pay = (paidAt: string, amountCents: number) =>
-    ownerDb.insert(patientPayment).values({ organizationId: c.orgId, patientId: p1, branchId: place.branchId, amountCents, currency: "EUR", paidAt: new Date(paidAt), method: "tarjeta" })
+    ownerDb.insert(patientPayment).values({ organizationId: c.orgId, patientId: p1, branchId: place.branchId, amountCents, currency: "EUR", paidAt: new Date(paidAt), methodName: "tarjeta" })
   await pay("2026-08-10T10:00:00Z", 10000)
   // 31 de agosto a las 22:30 UTC: en Madrid ya es 1 de septiembre.
   await pay("2026-08-31T22:30:00Z", 5000)

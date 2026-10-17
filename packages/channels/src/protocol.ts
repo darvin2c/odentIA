@@ -77,6 +77,11 @@ export interface NormalizedStatus {
    * conoce el caso; si no, `código: lo que dijo el proveedor`.
    */
   error?: string
+  /**
+   * El proveedor no pudo entregarlo porque el número no tiene WhatsApp
+   * (decisión 23, caso 1). Solo lo marca el adaptador que lo sabe.
+   */
+  notOnWhatsApp?: boolean
 }
 
 /** Estado de una plantilla en el proveedor, en palabras del sistema. */

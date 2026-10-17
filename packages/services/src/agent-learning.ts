@@ -463,10 +463,11 @@ export async function getLesson(tx: Db, orgId: string, id: string): Promise<Less
 }
 
 export async function listLessons(tx: Db, orgId: string, status: LessonStatus): Promise<LessonItem[]> {
+  // Lo que escribió la clínica no se aprendió: vive en «Lo que el agente debe saber».
   const rows = await tx
     .select()
     .from(agentLesson)
-    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, status)))
+    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, status), eq(agentLesson.source, "aprendida")))
     .orderBy(desc(agentLesson.updatedAt))
     .limit(200)
   return toLessonItems(tx, orgId, rows)
@@ -689,9 +690,33 @@ async function keepTestCase(tx: Db, orgId: string, actorUserId: string, lesson: 
  * oficial entra al conocimiento (nueva, o cambiando la que ya había); una regla
  * o un ejemplo quedan para su agente. Su pregunta queda como caso de prueba.
  */
-export async function approveLesson(tx: Db, orgId: string, actorUserId: string, id: string): Promise<LessonItem> {
+/**
+ * Aprueba una lección. Una regla que contradice otra (`findRuleConflict`) se
+ * avisa antes en la pantalla; con `replaceId` («Reemplazar») la otra deja de
+ * valer en el mismo paso. «Mantener las dos» aprueba sin `replaceId`.
+ */
+export async function approveLesson(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  opts: { replaceId?: string } = {},
+): Promise<LessonItem> {
   const lesson = await lockLesson(tx, orgId, id)
   if (lesson.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, `La lección ya está ${lesson.status}`)
+  if (opts.replaceId) {
+    if (lesson.kind !== "regla") throw validation("Solo una regla reemplaza a otra")
+    const replaced = await lockLesson(tx, orgId, opts.replaceId)
+    if (replaced.status !== "activa" || replaced.kind !== "regla" || replaced.scope !== lesson.scope) {
+      throw new ServiceError("LESSON_NOT_ACTIVE", 409, "La regla que se iba a reemplazar ya no está activa")
+    }
+    const now = new Date()
+    await tx
+      .update(agentLesson)
+      .set({ status: "retirada", withdrawnBy: actorUserId, withdrawnAt: now, updatedAt: now })
+      .where(eq(agentLesson.id, replaced.id))
+    await audit(tx, orgId, actorUserId, "agent.lesson_replaced", "agent_lesson", replaced.id, { by: id })
+  }
   const applied = lesson.kind === "respuesta_oficial" ? await applyOfficialAnswer(tx, orgId, actorUserId, lesson) : null
   await tx
     .update(agentLesson)
@@ -904,7 +929,13 @@ export async function lessonsForTurn(
     .select(columns)
     .from(agentLesson)
     .where(and(active, eq(agentLesson.kind, "regla")))
-    .orderBy(desc(agentLesson.approvedAt), asc(agentLesson.id))
+    // Una sola lista (decisión 24): primero lo que escribió la clínica, en su orden; después lo aprendido.
+    .orderBy(
+      sql`case ${agentLesson.source} when 'escrita' then 0 else 1 end`,
+      sql`case ${agentLesson.source} when 'escrita' then ${agentLesson.createdAt} end asc`,
+      desc(agentLesson.approvedAt),
+      asc(agentLesson.id),
+    )
   const exampleRows = await tx
     .select(columns)
     .from(agentLesson)
@@ -939,7 +970,7 @@ export async function lessonsForTurn(
 export function formatLessonRules(rules: TurnLessons["rules"], leftOut = 0): string {
   if (rules.length === 0) return ""
   return [
-    "Reglas que tu clínica aprobó al corregirte. Cúmplelas siempre; si chocan con los principios de arriba, ganan los principios:",
+    "Lo que debes saber de tu clínica (lo escribió la clínica o lo aprobó al corregirte). Cúmplelo siempre; si choca con los principios de arriba, ganan los principios:",
     ...rules.map((rule) => `- ${shorten(rule.body, 300)}`),
     leftOut > 0 ? `(La clínica tiene ${leftOut} reglas más antiguas que no caben aquí; si algo no está en estas, no lo supongas.)` : null,
   ]

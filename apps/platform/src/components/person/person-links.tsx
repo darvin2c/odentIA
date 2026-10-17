@@ -58,6 +58,7 @@ function RelationFields({
   kinship,
   detail,
   preferred,
+  emergency,
   onChange,
   preferredLabel,
 }: {
@@ -66,7 +67,15 @@ function RelationFields({
   kinship: string
   detail: string
   preferred: boolean
-  onChange: (next: { relationship?: Relationship; kinship?: string; detail?: string; preferred?: boolean }) => void
+  /** Contacto de emergencia (decisión 25); sin él, la casilla no se muestra (a su cargo). */
+  emergency?: boolean
+  onChange: (next: {
+    relationship?: Relationship
+    kinship?: string
+    detail?: string
+    preferred?: boolean
+    emergency?: boolean
+  }) => void
   preferredLabel: string
 }) {
   return (
@@ -116,6 +125,15 @@ function RelationFields({
         />
         {preferredLabel}
       </label>
+      {emergency !== undefined ? (
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox
+            checked={emergency}
+            onCheckedChange={(checked) => onChange({ emergency: checked === true })}
+          />
+          Contacto de emergencia
+        </label>
+      ) : null}
     </>
   )
 }
@@ -146,6 +164,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
   const [relationDetail, setRelationDetail] = useState("")
   const [kinship, setKinship] = useState("")
   const [preferred, setPreferred] = useState(false)
+  const [emergency, setEmergency] = useState(false)
   const [editing, setEditing] = useState<PatientContactLink | null>(null)
   const [unlinking, setUnlinking] = useState<{
     patientId: string
@@ -163,6 +182,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
     setRelationDetail("")
     setKinship("")
     setPreferred(false)
+    setEmergency(false)
   }
 
   const link = useMutation({
@@ -192,6 +212,8 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
           ...(relationDetail.trim() ? { relationshipDetail: relationDetail.trim() } : {}),
           kinship: kinship || null,
           isPreferred: preferred,
+          // Quien habla por ella puede ser además su contacto de emergencia, en el mismo paso.
+          ...(linking === "talker" ? { isEmergency: emergency } : {}),
         }),
       })
       return targetPatient
@@ -211,6 +233,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
           ...(relationDetail.trim() ? { relationshipDetail: relationDetail.trim() } : {}),
           kinship: kinship || null,
           isPreferred: preferred,
+          isEmergency: emergency,
         }),
       }),
     onSuccess: () => {
@@ -278,6 +301,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                     <span className="flex flex-wrap items-center gap-2">
                       <PersonLink contactId={row.contactId}>{row.displayName}</PersonLink>
                       {row.isPreferred ? <Badge>Recibe los avisos</Badge> : null}
+                      {row.isEmergency ? <Badge variant="outline">Contacto de emergencia ✓</Badge> : null}
                       {!row.isActive ? <Badge variant="outline">Archivada</Badge> : null}
                     </span>
                     <span className="text-sm text-muted-foreground">
@@ -301,6 +325,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                             setRelationDetail(row.relationshipDetail ?? "")
                             setKinship(row.kinship ?? "")
                             setPreferred(row.isPreferred)
+                            setEmergency(row.isEmergency)
                             setEditing(row)
                           },
                         },
@@ -545,6 +570,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
             kinship={kinship}
             detail={relationDetail}
             preferred={preferred}
+            emergency={linking === "talker" ? emergency : undefined}
             preferredLabel={
               linking === "talker"
                 ? "Recibe los avisos de la paciente"
@@ -555,6 +581,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
               if (next.detail !== undefined) setRelationDetail(next.detail)
               if (next.kinship !== undefined) setKinship(next.kinship)
               if (next.preferred !== undefined) setPreferred(next.preferred)
+              if (next.emergency !== undefined) setEmergency(next.emergency)
             }}
           />
         </div>
@@ -579,12 +606,14 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
           kinship={kinship}
           detail={relationDetail}
           preferred={preferred}
+          emergency={emergency}
           preferredLabel="Recibe los avisos de la paciente"
           onChange={(next) => {
             if (next.relationship) setRelationship(next.relationship)
             if (next.detail !== undefined) setRelationDetail(next.detail)
             if (next.kinship !== undefined) setKinship(next.kinship)
             if (next.preferred !== undefined) setPreferred(next.preferred)
+            if (next.emergency !== undefined) setEmergency(next.emergency)
           }}
         />
       </FormDrawer>

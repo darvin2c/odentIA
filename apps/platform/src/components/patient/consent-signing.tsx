@@ -30,7 +30,7 @@ import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { fetchMyProfessionalProfile, registrationLabel } from "../../lib/encounters"
-import { ageFrom, type PatientFull } from "../../lib/patients"
+import type { PatientFull } from "../../lib/patients"
 import { FirmaPad } from "./firma-pad"
 
 export interface SignerChoice {
@@ -55,8 +55,8 @@ export function useSignerChoices(patientId: string) {
   })
   const detail = patientQuery.data?.data
   const own = detail?.contacts.find((link) => link.relationship === "self")
-  const age = Number(ageFrom(detail?.patient.birthDate))
-  const isMinor = detail?.patient.birthDate != null && Number.isFinite(age) && age < 18
+  // Menor de edad según el servidor (el día de la clínica), no la hora de este equipo.
+  const isMinor = detail?.isMinor ?? false
   const representatives = (responsibilitiesQuery.data?.data ?? []).filter(
     (row) => row.isCurrent && row.kind === "representante_legal",
   )

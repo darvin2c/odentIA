@@ -1,7 +1,12 @@
-import { isProviderConfigError, meterAiUse, type PlatformLlm, previewLesson } from "@odentia/agent"
+import { createRuleConflictModel, isProviderConfigError, meterAiUse, type PlatformDecisions, type PlatformLlm, previewLesson } from "@odentia/agent"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  addAgentGuidance,
   approveLesson,
+  editAgentGuidance,
+  findRuleConflict,
+  listAgentGuidance,
+  removeAgentGuidance,
   correctAnswer,
   discardLesson,
   getLearningOverview,
@@ -43,8 +48,13 @@ const caseInput = z.object({ question: z.string().trim().min(1).max(2000), expec
 
 const withdrawInput = z.object({ withdrawCase: z.boolean().optional() })
 
+const guidanceInput = z.object({ body: z.string().trim().min(1).max(2000) })
+const approveInput = z.object({ replaceId: z.string().uuid().optional() })
+
 export interface AgentLearningDeps extends CrmDeps {
   llm: PlatformLlm
+  /** Credenciales del modelo de decisión: con él se detecta si una regla contradice otra. */
+  decisions?: PlatformDecisions
   /** Rol owner: el caso «Modelo sin responder» en Soporte de odentIA. */
   ownerDb?: Db
 }
@@ -130,8 +140,72 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
     )
   })
 
+  /**
+   * «Lo que el agente debe saber» (decisión 24): una sola lista con lo que
+   * escribió la clínica y lo que aprendió. La lee quien supervisa el agente y
+   * la cambia quien lo administra.
+   */
+  app.get("/guidance", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.read")) return forbidden(c)
+    const source = c.req.query("source")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => listAgentGuidance(tx, orgId, source ? { source } : {})))
+  })
+
+  app.post("/guidance", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    const parsed = guidanceInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => addAgentGuidance(tx, orgId, userId, parsed.data.body)))
+  })
+
+  app.patch("/guidance/:id", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    const parsed = guidanceInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => editAgentGuidance(tx, orgId, userId, c.req.param("id"), parsed.data.body)),
+    )
+  })
+
+  app.delete("/guidance/:id", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) => removeAgentGuidance(tx, orgId, userId, c.req.param("id")))
+      return { ok: true }
+    })
+  })
+
+  /**
+   * Antes de aprobar una regla: ¿contradice otra? Con el modelo de decisión de
+   * la clínica si lo configuró; si no, con la comparación simple. Solo lee.
+   */
+  app.get("/lessons/:id/conflict", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    return runService(c, 200, async () => {
+      const model = await createRuleConflictModel(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm, ...(deps.decisions ? { decisions: deps.decisions } : {}) }, orgId).catch(() => null)
+      return withOrgContext(deps.db, orgId, (tx) => findRuleConflict(tx, orgId, c.req.param("id"), model))
+    })
+  })
+
+  // «Reemplazar»: aprobar la regla nueva retira la que contradecía, en el mismo paso.
+  app.post("/lessons/:id/approve", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c)
+    const parsed = approveInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        approveLesson(tx, orgId, userId, c.req.param("id"), parsed.data.replaceId ? { replaceId: parsed.data.replaceId } : {}),
+      ),
+    )
+  })
+
   for (const [path, action] of [
-    ["approve", approveLesson],
     ["discard", discardLesson],
     ["restore", restoreLesson],
   ] as const) {

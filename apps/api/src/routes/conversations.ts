@@ -1,5 +1,7 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  confirmPhoneMatch,
+  phoneMatchOf,
   assignConversation,
   attachmentUrl,
   CONVERSATION_STATUSES,
@@ -106,6 +108,27 @@ export function createConversationsRoute(deps: CrmDeps) {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getInboxConversationDetail(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  // «Este número es el teléfono de Carmen Ruiz. ¿Es ella?» (decisión 23, caso 3):
+  // la sugerencia nunca une sola; «Sí, es Carmen» la confirma una persona del equipo.
+  app.get("/:id/phone-match", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const match = await phoneMatchOf(tx, orgId, c.req.param("id"))
+        return match ? { personId: match.personId, personName: match.personName } : null
+      }),
+    )
+  })
+
+  app.post("/:id/phone-match", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z.object({ personId: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => confirmPhoneMatch(tx, orgId, userId, c.req.param("id"), parsed.data.personId)),
     )
   })
 

@@ -189,7 +189,8 @@ export interface OrganizationDetail {
 }
 /**
  * Subdominios reservados: nunca son slugs de tenant (colisionarían con las
- * apps/infra). El panel y la API la reutilizan en vez de copiarla.
+ * apps/infra). La API la reutiliza; el alta del panel la repite porque el panel
+ * no depende de ningún paquete del dominio (y el servidor vuelve a validarla).
  */
 export const RESERVED_ORG_SLUGS: Record<string, true> = {
   api: true,

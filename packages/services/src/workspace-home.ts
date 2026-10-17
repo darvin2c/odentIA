@@ -210,6 +210,8 @@ export type WaitingRow =
 export interface WaitingParts {
   /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
   cases: WaitingCase[]
+  /** Todos los casos abiertos, también los que no llegaron en `cases` (el «y N más» los cuenta). */
+  casesTotal?: number
   /** Atenciones de días anteriores sin cerrar que lleva quien mira, de la más antigua a la más reciente. */
   staleEncounters?: WaitingStaleEncounter[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
@@ -277,7 +279,7 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   const others = parts.cases.filter((item) => item.priority !== "alta").sort((a, b) => rank(a.priority) - rank(b.priority))
   const othersShown = others.slice(0, WAITING_LIMITS.otherCases)
   for (const item of othersShown) rows.push({ kind: "case", ...item })
-  const casesLeft = urgent.length - urgentShown.length + others.length - othersShown.length
+  const casesLeft = Math.max(parts.casesTotal ?? parts.cases.length, parts.cases.length) - urgentShown.length - othersShown.length
   if (casesLeft > 0) rows.push({ kind: "more", of: "cases", count: casesLeft })
 
   if (parts.stillOpen && parts.stillOpen.total > 0) rows.push({ kind: "stillOpen", ...parts.stillOpen })

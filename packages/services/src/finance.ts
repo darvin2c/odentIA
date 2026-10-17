@@ -630,7 +630,7 @@ export async function reverseCashIncome(
     kind: "devolucion",
     amountCents: payment.amountCents,
     currency: payment.currency,
-    methodName: payment.methodName ?? payment.method,
+    methodName: payment.methodName,
     methodTypeCode: payment.methodTypeCode,
     concept: `Compensación por anulación`,
     allowNegative: true,
@@ -1366,7 +1366,7 @@ async function collectedApplications(
     paymentId: r.payment.id,
     paymentCents: r.payment.amountCents,
     paidAt: r.payment.paidAt,
-    methodLabel: r.payment.methodName ?? r.payment.method,
+    methodLabel: r.payment.methodName,
     cashMethod: methodCashOf(r.payment),
     patientId: r.app.patientId,
     dentistUserId: r.dentistUserId,
@@ -2252,7 +2252,7 @@ async function financeBuckets(
   }
   const methodAdd = (curr: string, payment: typeof payments[number], cents: number): void => {
     const entry = bucket(curr)
-    const key = payment.methodName ?? payment.method
+    const key = payment.methodName
     const slot = entry.byMethod.get(key) ?? { label: key, cash: methodCashOf(payment), cents: 0 }
     slot.cents = addCents(slot.cents, cents)
     entry.byMethod.set(key, slot)

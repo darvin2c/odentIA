@@ -10,6 +10,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertAgentTestBudget,
   confirmProposalByContact,
+  confirmProposalByPhone,
   createHandoff,
   operationBodySchema,
   createProposal,
@@ -21,6 +22,7 @@ import {
   listAgentDecisions,
   listAgentRuns,
   listAnswerTraces,
+  listAwaitingAnswer,
   listHandoffs,
   noteSandboxTurn,
   claimHandoff,
@@ -217,6 +219,34 @@ const sandboxInput = z.object({
     )
   })
 
+  /**
+   * Agente › «Esperan su sí»: las citas que el agente propuso y esperan la
+   * respuesta de la persona. Lo ven los mismos roles que antes veían Pendientes.
+   */
+  app.get("/awaiting", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return forbidden(c, "agent.decide")
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listAwaitingAnswer(tx, orgId, { limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined }),
+      ),
+    )
+  })
+
+  /** «Confirmó por teléfono»: el mismo permiso que registrar una confirmación, en el dominio del acto. */
+  app.post("/proposals/:id/phone-confirm", async (c) => {
+    const { orgId, memberRole, userId } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.decide")) return forbidden(c, "agent.decide")
+    if (!canAccess(memberRole, "conversations.write")) return forbidden(c, "conversations.write")
+    const blocked = await actionGate(c, memberRole, orgId, c.req.param("id"))
+    if (blocked) return blocked
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        confirmProposalByPhone(tx, orgId, userId, c.req.param("id"), { secretsKey: deps.secretsKey }),
+      ),
+    )
+  })
+
   app.get("/handoffs", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return forbidden(c, "agent.decide")
@@ -226,6 +256,7 @@ const sandboxInput = z.object({
           conversationId: c.req.query("conversationId"),
           limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
           open: c.req.query("open") === "1" || c.req.query("open") === "true",
+          ...(c.req.query("order") === "urgencia" ? { order: "urgencia" as const } : {}),
         }),
       ),
     )

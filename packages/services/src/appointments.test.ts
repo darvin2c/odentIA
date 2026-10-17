@@ -23,6 +23,8 @@ import {
   listAvailableSlots,
   setProfessionalSchedule,
 } from "./availability.js"
+import { findFreeGaps } from "./agent-operations.js"
+import { listWeekSlots } from "./booking-links.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -304,6 +306,40 @@ it("editar congela el nuevo servicio y cancelar libera el recurso", async () => 
   expect(reuse.status).toBe("programada")
 })
 
+it("«Editar» revisa la agenda igual que «Mover»: unidad bloqueada, quien no atiende y el servicio que dura más", async () => {
+  // Viernes 2026-10-09, 10:00 en Lima.
+  const created = await run((tx) =>
+    createAppointment(tx, ORG, ACTOR, {
+      patientId,
+      dentistUserId: DENTIST,
+      chairId,
+      startsAt: "2026-10-09T15:00:00Z",
+      endsAt: "2026-10-09T15:30:00Z",
+    }),
+  )
+  await run((tx) =>
+    createScheduleBlock(tx, ORG, ACTOR, {
+      branchId,
+      chairId: chair2Id,
+      startsAt: "2026-10-09T14:00:00Z",
+      endsAt: "2026-10-09T17:00:00Z",
+      kind: "bloqueo",
+      reason: "Mantenimiento de la unidad",
+    }),
+  )
+  // A una unidad dental bloqueada: «Mover» no lo deja, y «Editar» tampoco.
+  await expect(
+    run((tx) => updateAppointment(tx, ORG, ACTOR, created.id, { expectedVersion: created.version, chairId: chair2Id })),
+  ).rejects.toMatchObject({ code: "SCHEDULE_BLOCKED", status: 409 })
+  // A alguien del equipo sin horario en la sede (recepción): no atiende.
+  await expect(
+    run((tx) => updateAppointment(tx, ORG, ACTOR, created.id, { expectedVersion: created.version, dentistUserId: ACTOR })),
+  ).rejects.toMatchObject({ code: "VALIDATION", status: 400 })
+  // Otro servicio, otra duración: la cita pasa a durar lo del servicio.
+  const edited = await run((tx) => updateAppointment(tx, ORG, ACTOR, created.id, { expectedVersion: created.version, serviceId }))
+  expect(new Date(edited.endsAt).getTime() - new Date(edited.startsAt).getTime()).toBe(45 * 60_000)
+})
+
 it("listScheduleResources devuelve miembros, unidades dentales y la zona de la sede", async () => {
   const resources = await run((tx) => listScheduleResources(tx, ORG, {}))
   expect(resources.branchId).toBe(branchId)
@@ -396,6 +432,8 @@ it("los huecos descartan lo ya pasado cuando se indica el corte", async () => {
       from: "2026-10-07T05:00:00Z",
       to: "2026-10-08T05:00:00Z",
       notBefore: "2026-10-07T20:10:00Z",
+      // Cada cuarto de hora (sin indicarlo, el paso sale de la duración: `bookingStepMin`).
+      stepMin: 15,
     }),
   )
   expect(result.slots[0]?.startsAt).toBe("2026-10-07T20:15:00.000Z")
@@ -425,6 +463,14 @@ it("la búsqueda de la agenda devuelve a la persona con sus próximas citas en p
   expect(after[0]?.appointments).toEqual([])
   // Con menos de dos caracteres no se busca.
   expect(await run((tx) => searchAgendaPatients(tx, ORG, { q: "z", now }))).toEqual([])
+})
+
+it("la Agenda busca con el mismo buscador de personas: el teléfono escrito con espacios", async () => {
+  await ownerDb
+    .insert(patient)
+    .values({ organizationId: ORG, displayName: "Ana Teléfono", patientNumber: 9103, phone: "+51987654321" })
+  const found = await run((tx) => searchAgendaPatients(tx, ORG, { q: "987 654 321" }))
+  expect(found.map((item) => item.patientName)).toEqual(["Ana Teléfono"])
 })
 
 it("cancelar deja el motivo y la nota en la auditoría, y rechaza un motivo desconocido", async () => {
@@ -688,4 +734,21 @@ it("una unidad dental se renombra, se desactiva y se reactiva; desactivada sale 
   await expect(
     withOrgContext(appDb, "org_a", (tx) => updateChair(tx, "org_a", ACTOR, extra.id, { name: "Ajeno" })),
   ).rejects.toMatchObject({ status: 404 })
+})
+
+it("el enlace y el agente ofrecen las mismas horas: el mismo paso y quien atiende", async () => {
+  // Martes 2 de marzo de 2027 en Lima, sin citas: lo que cambia es solo cómo se ofrece.
+  const day = { from: "2027-03-02T05:00:00Z", to: "2027-03-03T05:00:00Z" }
+  const link = await run((tx) => listWeekSlots(tx, ORG, { branchId, serviceId, ...day }))
+  const agent = await run((tx) => findFreeGaps(tx, ORG, { branchId, serviceId, ...day }))
+  expect(agent.gaps.length).toBeGreaterThan(0)
+  const key = (slot: { startsAt: string; dentistUserId: string }) => `${slot.dentistUserId}@${slot.startsAt}`
+  const offered = new Set(link.slots.map(key))
+  // Cada hora que dice el agente es una que también ofrece el enlace (paso de 45 minutos, no de 15).
+  for (const gap of agent.gaps) expect(offered.has(key(gap))).toBe(true)
+  // El agente dice las dos primeras de cada profesional: las mismas que abren su día en el enlace.
+  for (const dentist of [DENTIST, DENTIST_2]) {
+    const first = link.slots.filter((slot) => slot.dentistUserId === dentist).slice(0, 2).map(key)
+    expect(agent.gaps.filter((gap) => gap.dentistUserId === dentist).map(key)).toEqual(first)
+  }
 })

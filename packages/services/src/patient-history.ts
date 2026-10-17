@@ -1,4 +1,4 @@
-import { diagnosisCodeLabel, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { budgetStateText, diagnosisCodeLabel, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -667,6 +667,8 @@ export interface TimelineItem {
   planId?: string | null
   /** Decisión vigente del tratamiento (aceptado, pendiente, etc.). */
   decision?: string | null
+  /** El estado dicho con el nombre único de la aplicación (`budgetStateText` para un presupuesto). */
+  statusText?: string | null
   /** Vencimiento de un control, para leerlo sin consultar otra pantalla. */
   dueAt?: Date | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
@@ -882,7 +884,6 @@ export async function getTimeline(
         createdAt: row.createdAt,
         title: "Nota clínica",
         detail: row.note,
-        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: [],
         authorId: row.authorUserId,
         encounterId: null,
@@ -1043,11 +1044,12 @@ export async function getTimeline(
       .where(
         and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds)),
       )) {
-      const [line] = await tx
+      const lines = await tx
         .select({
-          // Un tratamiento cuenta una vez aunque esté en varias opciones.
-          total: sql<number>`count(distinct ${treatmentBudgetItem.planItemId})::int`,
-          currency: sql<string>`min(${treatmentBudgetItem.currency})`,
+          planItemId: treatmentBudgetItem.planItemId,
+          currency: treatmentBudgetItem.currency,
+          decision: treatmentBudgetItem.decision,
+          optionId: treatmentBudgetItem.optionId,
         })
         .from(treatmentBudgetItem)
         .where(
@@ -1056,12 +1058,21 @@ export async function getTimeline(
             eq(treatmentBudgetItem.budgetId, row.id),
           ),
         )
+      const options = await tx
+        .select({ id: treatmentBudgetOption.id, decision: treatmentBudgetOption.decision })
+        .from(treatmentBudgetOption)
+        .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.budgetId, row.id)))
+      // Un tratamiento cuenta una vez aunque esté en varias opciones.
+      const total = new Set(lines.map((line) => line.planItemId)).size
+      const currency = lines.map((line) => line.currency).sort()[0]
       hydrated.set(row.id, {
         ...hydrated.get(row.id)!,
         createdAt: row.createdAt,
         title: `Presupuesto N.º ${row.budgetNumber} · ${row.title}`,
-        detail: `Revisión ${row.revisionNumber} · ${line?.total ?? 0} tratamiento(s) · ${line?.currency ?? row.currency}`,
+        detail: `Revisión ${row.revisionNumber} · ${total} tratamiento(s) · ${currency ?? row.currency}`,
         status: row.status,
+        // Los mismos nombres que Plan (ADR 0034): «Enviado · espera respuesta», «Aceptó 2 de 3»…
+        statusText: budgetStateText({ status: row.status, items: lines, options }),
         authorId: row.createdBy,
         planId: row.planId,
         budgetId: row.id,

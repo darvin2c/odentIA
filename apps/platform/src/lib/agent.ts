@@ -103,6 +103,8 @@ export interface AgentPanelSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
+  /** Citas propuestas que esperan el sí de la persona: el número de «Esperan su sí». */
+  awaitingAnswer: number
   /** Casos que el agente pasó a una persona y siguen sin resolver: lo que espera al equipo. */
   openHandoffs: number
   /** Corridas de hoy que respondieron o derivaron. */
@@ -527,31 +529,43 @@ export interface TestCaseItem {
   createdAt: string
 }
 
-/**
- * Las indicaciones de la clínica se guardan como un solo texto; la página las
- * presenta una por línea. `line` es la posición en el texto guardado, para
- * cambiar una sin tocar las demás.
- */
-export function splitInstructions(text: string): Array<{ line: number; text: string }> {
-  return text
-    .split(/\r?\n/)
-    .map((raw, line) => ({ line, text: raw.trim() }))
-    .filter((item) => item.text.length > 0)
+/** Una línea de «Lo que el agente debe saber» (decisión 24), como la entrega `/api/agent/learning/guidance`. */
+export interface GuidanceItem {
+  id: string
+  body: string
+  source: "escrita" | "aprendida"
+  /** Escrita: quién la escribió. Aprendida: quién la aprobó. */
+  byName: string | null
+  at: string
+  conversationId: string | null
+  contactName: string | null
 }
 
-/**
- * El texto guardado con una indicación cambiada, quitada (texto vacío) o
- * añadida al final (`line` nulo). Las demás líneas quedan como estaban; una
- * indicación ocupa una sola línea, así que sus saltos se vuelven espacios.
- */
-export function withInstruction(text: string, line: number | null, next: string): string {
-  const value = next.replace(/\s*\r?\n\s*/g, " ").trim()
-  const lines = text.split(/\r?\n/)
-  if (line === null) {
-    if (!value) return text
-    return text.trim() ? `${text.replace(/\s+$/, "")}\n${value}` : value
-  }
-  if (value) lines[line] = value
-  else lines.splice(line, 1)
-  return lines.join("\n")
+export interface GuidanceList {
+  items: GuidanceItem[]
+  counts: { all: number; escrita: number; aprendida: number }
 }
+
+export const GUIDANCE_KEY = ["agent-guidance"] as const
+
+/** Una cita que el agente propuso y espera el sí de la persona (`/api/agent/awaiting`). */
+export interface AwaitingAnswerItem {
+  id: string
+  conversationId: string
+  contactId: string | null
+  contactName: string | null
+  channel: string | null
+  action: "reservar_cita" | "reprogramar_cita" | "cancelar_cita"
+  /** «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas». */
+  text: string
+  createdAt: string
+  /** El horario se ocupó (o la cita cambió) mientras esperaba. */
+  taken: boolean
+}
+
+export interface AwaitingAnswerList {
+  items: AwaitingAnswerItem[]
+  total: number
+}
+
+export const AWAITING_ANSWER_KEY = ["agent-awaiting"] as const

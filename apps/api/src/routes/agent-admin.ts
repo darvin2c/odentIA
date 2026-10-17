@@ -31,12 +31,9 @@ import { canAccess, canAccessAny, orgContextOf, type Permission } from "../lib/c
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
-const hour = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
-
+// A qué hora escribe no es un ajuste del Administrador: es el «Horario para escribir» de Agente.
 const settingsInput = z.object({
   enabled: z.boolean().optional(),
-  quietStart: hour.optional(),
-  quietEnd: hour.optional(),
 })
 
 const lineInput = z.object({

@@ -1147,3 +1147,28 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
   const config = (await (await app.request("/agent/config")).json()) as { data: { closeAfterHours: number } }
   expect(config.data.closeAfterHours).toBe(12)
 })
+
+it("«Horario para escribir», «Esperan su sí» y «Lo que el agente debe saber»: los lee quien supervisa y los cambia quien administra", async () => {
+  const json = { "content-type": "application/json" }
+  const owner = buildApp("owner")
+  const reception = buildApp("reception")
+  const member = buildApp("member")
+  // El horario viene: lunes a viernes de 8:00 a 20:00, sábado de 8:00 a 14:00 y domingo sin mensajes.
+  const read = (await (await owner.request("/agent/writing-hours")).json()) as { data: { week: number[][][] } }
+  expect(read.data.week).toEqual([[], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 1200]], [[480, 840]]])
+  const week = Array.from({ length: 7 }, () => [[540, 1140]])
+  expect((await member.request("/agent/writing-hours", { method: "PUT", headers: json, body: JSON.stringify({ week }) })).status).toBe(403)
+  expect((await owner.request("/agent/writing-hours", { method: "PUT", headers: json, body: JSON.stringify({ week: [[[600, 500]], [], [], [], [], [], []] }) })).status).toBe(400)
+  const saved = await owner.request("/agent/writing-hours", { method: "PUT", headers: json, body: JSON.stringify({ week }) })
+  expect(saved.status).toBe(200)
+  expect(((await saved.json()) as { data: { week: unknown } }).data.week).toEqual(week)
+  // Recepción decide por el agente: ve las citas que esperan su sí, como antes veía Pendientes.
+  expect((await reception.request("/agent/awaiting")).status).toBe(200)
+  expect((await member.request("/agent/awaiting")).status).toBe(403)
+  // Lo que debe saber: lo escribe quien administra el agente.
+  expect((await reception.request("/agent/learning/guidance", { method: "POST", headers: json, body: JSON.stringify({ body: "No ofrezcas descuentos." }) })).status).toBe(403)
+  const added = await owner.request("/agent/learning/guidance", { method: "POST", headers: json, body: JSON.stringify({ body: "No ofrezcas descuentos." }) })
+  expect(added.status).toBe(201)
+  const listed = (await (await owner.request("/agent/learning/guidance?source=escrita")).json()) as { data: { items: Array<{ body: string; source: string }> } }
+  expect(listed.data.items).toEqual([expect.objectContaining({ body: "No ofrezcas descuentos.", source: "escrita" })])
+})

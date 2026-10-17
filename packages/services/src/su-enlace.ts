@@ -27,8 +27,9 @@ import {
   replyId,
   withLinkLine,
 } from "./automation-messages.js"
-import { clinicName as findClinicName, firstName, previewMessageRoute, routeMessage } from "./automation-routing.js"
-import { getMessagePermissions, mayWriteFirst, setMessageChoice } from "./automation.js"
+import { clinicName as findClinicName, firstName } from "./automation-routing.js"
+import { openRoute, previewRoute } from "./message-gate.js"
+import { getMessagePermissions, setMessageChoice } from "./automation.js"
 import {
   appointmentView,
   type BookingLinkAppointment,
@@ -834,10 +835,10 @@ export async function previewPersonalLinkSend(tx: Db, orgId: string, patientId: 
   if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) {
     return { ...base, channel: null, via: null, label: null, blocked: NO_ADDRESS }
   }
-  const route = await previewMessageRoute(tx, orgId, recipient.contactId, spec)
-  if ("cause" in route) return { ...base, channel: null, via: null, label: null, blocked: route.detail }
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
-    return { ...base, channel: null, via: null, label: null, blocked: OPTED_OUT }
+  // La puerta para escribirle a alguien (ADR 0042): un aviso que manda el equipo.
+  const route = await previewRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) {
+    return { ...base, channel: null, via: null, label: null, blocked: route.cause === "sin_permiso" ? OPTED_OUT : route.detail }
   }
   return {
     ...base,
@@ -899,10 +900,10 @@ export async function sendPersonalLink(
   }
   const recipient = await serviceRecipient(tx, orgId, input.patientId)
   const { spec, params, text } = await personalLinkMessage(tx, orgId, recipient.displayName)
-  const route = await routeMessage(tx, orgId, recipient.contactId, spec)
-  if ("cause" in route) throw new ServiceError("LINK_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}`)
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
-    throw new ServiceError("LINK_OPTED_OUT", 409, OPTED_OUT)
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) {
+    if (route.cause === "sin_permiso") throw new ServiceError("LINK_OPTED_OUT", 409, OPTED_OUT)
+    throw new ServiceError("LINK_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}`)
   }
   const link = await issuePersonalLink(
     tx,

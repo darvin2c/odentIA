@@ -84,3 +84,8 @@ it("las citas sin confirmar que no caben se resumen en una fila con su cuenta", 
   ])
   expect(shape({ unconfirmed: { items: [], total: 0 } })).toEqual([])
 })
+
+it("los casos que no llegaron en la lista también se cuentan en «y N más»", () => {
+  // Llegaron los dos más urgentes de 130: la fila dice cuántos quedan, no los que llegaron.
+  expect(shape({ cases: [caseOf("u1", "alta"), caseOf("h1", "media")], casesTotal: 130 })).toEqual(["case:u1", "case:h1", "more:cases:128"])
+})

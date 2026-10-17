@@ -1,4 +1,6 @@
 import {
+  ALLERGY_SEVERITIES,
+  PATIENT_DOCUMENT_CATEGORIES,
   activeFindingsAsOf,
   BLOOD_GROUPS,
   type BloodGroup,
@@ -80,7 +82,6 @@ async function requireDraftLink(
   return row
 }
 
-const ALLERGY_SEVERITIES = ["leve", "moderada", "severa", "desconocida"] as const
 /** Parentescos de los antecedentes familiares (HL7 v3 RoleCode, solo familiares). */
 export const FAMILY_RELATIONSHIPS = FAMILY_KINSHIP
 /** Clasificación del estado físico de la American Society of Anesthesiologists. */
@@ -101,16 +102,7 @@ export const ALLERGY_CATEGORIES = [
  */
 export const DIAGNOSIS_TYPES = DIAGNOSIS_VERIFICATION
 const HEALTH_REVIEW_STATES = ["unknown", "none", "recorded"] as const
-const DOCUMENT_CATEGORIES = [
-  "consentimiento",
-  "radiografia",
-  "foto_clinica",
-  "informe",
-  "presupuesto",
-  "receta",
-  "comprobante_pago",
-  "otro",
-] as const
+const DOCUMENT_CATEGORIES = PATIENT_DOCUMENT_CATEGORIES
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -1103,7 +1095,6 @@ export async function addClinicalNote(
   if (input.diagnosisCode || input.diagnosisType?.trim()) {
     throw validation("Registra el diagnóstico en la sección Diagnóstico de la atención")
   }
-  const diagnosisType = null
   const toothNumber = input.toothNumber ?? null
   if (toothNumber !== null && (!Number.isInteger(toothNumber) || !isValidTooth(toothNumber)))
     throw validation("Pieza FDI inválida")
@@ -1114,8 +1105,6 @@ export async function addClinicalNote(
       patientId,
       authorUserId: actorUserId,
       note,
-      diagnosisCode: input.diagnosisCode ?? null,
-      diagnosisType,
       toothNumber,
       encounterId: input.encounterId ?? null,
       kind: "evolucion",

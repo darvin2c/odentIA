@@ -193,7 +193,8 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
   // 'sent' y otros no tienen equivalente local.
   if (!status) return null
   const error = status === "failed" ? sendFailureText(s.errors?.[0]) : null
-  return { externalMessageId: s.id, status, ...(error ? { error } : {}) }
+  const notOnWhatsApp = status === "failed" && s.errors?.[0]?.code === NOT_ON_WHATSAPP_CODE
+  return { externalMessageId: s.id, status, ...(error ? { error } : {}), ...(notOnWhatsApp ? { notOnWhatsApp } : {}) }
 }
 
 /**
@@ -203,7 +204,14 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
  * El error llega en la respuesta del envío o después, en el aviso de estado.
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
  */
+/**
+ * «Message undeliverable»: Meta no pudo entregarlo, sobre todo porque el número
+ * no tiene WhatsApp. La ficha dice «Este número no tiene WhatsApp» (decisión 23).
+ */
+const NOT_ON_WHATSAPP_CODE = 131026
+
 const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
+  [NOT_ON_WHATSAPP_CODE]: "WhatsApp no pudo entregarlo: lo más probable es que este número no tenga WhatsApp.",
   // «Business eligibility payment issue»: la cuenta de WhatsApp Business no
   // tiene una forma de pago válida (o su línea de crédito no está activa).
   131042:

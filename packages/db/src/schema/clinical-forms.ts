@@ -136,7 +136,8 @@ export const clinicalFormTemplate = pgTable(
   ],
 )
 
-export const FORM_RESPONSE_STATUSES = ["borrador", "finalizado"] as const
+/** Igual que su CHECK (`catalog-checks.test.ts`): «descartado» es el borrador que se dejó. */
+export const FORM_RESPONSE_STATUSES = ["borrador", "finalizado", "descartado"] as const
 
 /**
  * Captura de un formulario por paciente/atención. Guarda snapshot de la

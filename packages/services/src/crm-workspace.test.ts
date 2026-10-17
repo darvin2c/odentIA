@@ -167,8 +167,6 @@ it("notas: append-only, no pisan el campo libre del contacto", async () => {
   const notes = items.filter((i) => i.kind === "note")
   expect(notes).toHaveLength(2)
   expect(new Set(notes.map((n) => n.body))).toEqual(new Set(["Primera nota", "Segunda nota"]))
-  const full = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", contactId))
-  expect(full.contact.notes).toBeNull()
 })
 
 it("timeline: keyset por contacto y capacidades, sin fugas entre contactos ni orgs", async () => {

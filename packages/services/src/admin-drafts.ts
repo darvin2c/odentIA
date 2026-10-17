@@ -26,7 +26,11 @@ import {
   TASK_NOTE_CHARS,
 } from "./automation.js"
 import { automationMessageOf, MESSAGE_VARIABLES, renderMessage } from "./automation-messages.js"
+import { chooseVia } from "./automation-routing.js"
+import { isPromotionFor } from "./channel-templates.js"
 import { currentAutomationMessageOf, findMessageTemplate } from "./clinic-messages.js"
+import { mayWriteFirstSql } from "./message-permission.js"
+import { windowOpen } from "./message-window.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 
 /* ---------- Pedírselo con palabras: del pedido al borrador ---------- */
@@ -388,6 +392,10 @@ function population(line: AdminLine, orgId: string, days: number | null): { rows
  * permiso, su WhatsApp, su correo), por dónde le habría llegado. Solo lee: no
  * se envía nada ni se abre ninguna conversación. Null en las líneas que no
  * escriben a la persona o cuyo disparo no se puede reconstruir.
+ *
+ * Usa las mismas reglas que el envío real (ADR 0042): el permiso es
+ * `mayWriteFirstSql` (la que ejecuta `mayWriteFirst`), la ventana es
+ * `windowOpen` y el orden de las vías es `chooseVia`.
  */
 export async function testAdminLine(
   tx: Db,
@@ -399,7 +407,14 @@ export async function testAdminLine(
   const found = population(line, orgId, state.days)
   if (!found) return null
   const purpose = line.agent.purpose
-  const rows = await tx.execute<{ consent: boolean; whatsapp: boolean; recent: boolean; email: boolean; reachable: boolean }>(sql`
+  const rows = await tx.execute<{
+    consent: boolean
+    novedades: boolean
+    whatsapp: boolean
+    lastInboundAt: string | null
+    email: boolean
+    reachable: boolean
+  }>(sql`
     with pop as (${found.rows} limit ${LINE_TEST_LIMIT}),
     who as (
       select coalesce(pop.contact_id, (
@@ -410,14 +425,14 @@ export async function testAdminLine(
       from pop)
     select
       who.cid is not null as reachable,
-      coalesce((select s.status = 'granted' from automation_consent s
-        where s.organization_id = ${orgId} and s.contact_id = who.cid and s.purpose = ${purpose} limit 1), false) as consent,
+      ${mayWriteFirstSql(orgId, sql`who.cid`, purpose)} as consent,
+      ${mayWriteFirstSql(orgId, sql`who.cid`, "novedades")} as novedades,
       exists (select 1 from contact_identity i
         where i.organization_id = ${orgId} and i.contact_id = who.cid and i.channel = 'whatsapp') as whatsapp,
-      exists (select 1 from conversation v
+      -- Abierta o cerrada: escribir la reabre (ADR 0024); cuenta desde cuándo escribió.
+      (select max(v.last_inbound_at)::text from conversation v
         join channel_connection n on n.id = v.channel_connection_id and n.organization_id = v.organization_id and n.channel = 'whatsapp'
-        where v.organization_id = ${orgId} and v.contact_id = who.cid and v.status = 'open'
-          and v.last_inbound_at >= now() - interval '24 hours') as recent,
+        where v.organization_id = ${orgId} and v.contact_id = who.cid) as "lastInboundAt",
       exists (select 1 from contact c
         where c.organization_id = ${orgId} and c.id = who.cid and c.email ~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$') as email
     from who`)
@@ -428,15 +443,29 @@ export async function testAdminLine(
   const whatsapp = connections.find((row) => row.channel === "whatsapp")
   const mailbox = connections.some((row) => row.channel === "email")
   const spec = automationMessageOf(line.key)
-  const approved = !!whatsapp && !!spec && (await findMessageTemplate(tx, orgId, whatsapp.id, spec.key))?.status === "aprobada"
+  const template = whatsapp && spec ? await findMessageTemplate(tx, orgId, whatsapp.id, spec.key) : null
+  const approved = template?.status === "aprobada"
+  // Si WhatsApp lo cuenta como promoción, solo sale con plantilla a quien aceptó novedades (ADR 0040).
+  const promotion = !!template && !!spec && isPromotionFor(template, spec.category)
+  const now = new Date()
   const count: Record<LineTestRoute, number> = { respuesta: 0, plantilla: 0, correo: 0, no_pudo: 0, tarea: 0 }
   for (const row of rows) {
-    if (!state.agentPart) count.tarea++
-    else if (!row.reachable || !row.consent) count.no_pudo++
-    else if (row.whatsapp && whatsapp && row.recent) count.respuesta++
-    else if (row.whatsapp && whatsapp && approved) count.plantilla++
-    else if (row.email && mailbox) count.correo++
-    else count.no_pudo++
+    if (!state.agentPart) {
+      count.tarea++
+      continue
+    }
+    // Lo que el agente envía por su cuenta pide siempre el permiso de ese tipo de mensaje.
+    if (!row.reachable || !row.consent) {
+      count.no_pudo++
+      continue
+    }
+    const route = chooseVia({
+      windowOpen: windowOpen(row.lastInboundAt, now),
+      whatsapp: row.whatsapp && !!whatsapp,
+      templateUsable: approved && (!promotion || row.novedades),
+      email: row.email && mailbox && !!spec,
+    })
+    count[route?.via ?? "no_pudo"]++
   }
   const total = rows.length
   const team = TASK_AREA_LABELS[line.team.area].team
@@ -481,7 +510,7 @@ export async function reviewAdminLine(tx: Db, orgId: string, line: AdminLine, ne
   }
   checks.push({
     ok: true,
-    text: `Respeta el permiso de cada persona y el horario de silencio (de ${runtime.quietStart} a ${runtime.quietEnd}, con la hora de cada sede).`,
+    text: "Respeta el permiso de cada persona y el «Horario para escribir» de Agente, con la hora de cada sede.",
   })
   if (!runtime.receptionOn) checks.push({ ok: false, text: "Recepción está apagada: mientras siga así, esta línea no le escribe a nadie." })
   const spec = automationMessageOf(line.key)

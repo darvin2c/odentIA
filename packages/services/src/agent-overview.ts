@@ -120,7 +120,13 @@ async function agentOutcomes(tx: Db, orgId: string, since: Date): Promise<AgentO
  * no arma las fichas completas de «Aprender».
  */
 async function learnedSince(tx: Db, orgId: string, since: Date): Promise<AgentLearned> {
-  const approved = and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), gte(agentLesson.approvedAt, since))
+  // Lo que escribió la clínica no es algo que aprendió (decisión 24).
+  const approved = and(
+    eq(agentLesson.organizationId, orgId),
+    eq(agentLesson.status, "activa"),
+    eq(agentLesson.source, "aprendida"),
+    gte(agentLesson.approvedAt, since),
+  )
   const kinds = await tx.select({ kind: agentLesson.kind, total: count() }).from(agentLesson).where(approved).groupBy(agentLesson.kind)
   const of = (kind: string) => kinds.find((row) => row.kind === kind)?.total ?? 0
   const [latest] = await tx
