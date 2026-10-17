@@ -2,7 +2,8 @@
 // con los números que pone la clínica. Es un ejemplo, nunca una promesa de resultados.
 import { type ChangeEvent, useState } from "react"
 import { usd } from "../../lib/pricing"
-import { computeValue, DEFAULT_VALUE_INPUT, type ValueInput } from "../../lib/value"
+import { computeValue, DEFAULT_VALUE_INPUT, sizeOf, type ValueInput } from "../../lib/value"
+import SizePicker from "../SizePicker"
 
 export default function ValueCalc() {
   const [i, setI] = useState<ValueInput>(DEFAULT_VALUE_INPUT)
@@ -20,6 +21,7 @@ export default function ValueCalc() {
       <div className="vgrid">
         <div className="vin">
           <span className="tag tag-d">Tu clínica, en un mes</span>
+          <SizePicker current={sizeOf(i)} onPick={setI} />
           <label className="vl">
             <span>Personas que te escriben</span>
             <input

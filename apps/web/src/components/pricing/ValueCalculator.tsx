@@ -2,7 +2,8 @@
 // sin agentes con su cuenta del mes en odentIA. Es un ejemplo, nunca una promesa de resultados.
 import { type ChangeEvent, useEffect, useId, useState } from "react"
 import { CONSULTATION, CONVERSATION, PLAN, RECOVERED, usd } from "../../lib/pricing"
-import { computeValue, DEFAULT_VALUE_INPUT, type ValueInput } from "../../lib/value"
+import { computeValue, DEFAULT_VALUE_INPUT, sizeOf, type ValueInput } from "../../lib/value"
+import SizePicker from "../SizePicker"
 import "./value-calculator.css"
 
 type Key = keyof ValueInput
@@ -85,6 +86,7 @@ export default function ValueCalculator() {
       <div className="vc-grid">
         <div className="vc-in">
           <span className="tag tag-d">Tu clínica, en un mes</span>
+          <SizePicker current={sizeOf(v)} onPick={setV} />
           <label className="vc-l" htmlFor={fieldId("writers")}>
             <span>Personas que te escriben</span>
             {num("writers", 5000)}

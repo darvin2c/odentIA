@@ -29,10 +29,6 @@ const TABS: { id: Tab; label: string; sub: string; href: string }[] = [
     href: "/agentes/administrador",
   },
 ]
-const EMOJI_OPTS: [Emojis, string][] = [
-  ["no", "Sin emojis"],
-  ["pocos", "Pocos emojis"],
-]
 const TONE_OPTS: [Tone, string][] = [
   ["cercano", "Cercano"],
   ["neutro", "Neutro"],
@@ -234,32 +230,34 @@ export default function AgentTabs() {
                   <span className="mono">Miércoles · 23:40 · la clínica está cerrada</span>
                 </span>
               </div>
-              <fieldset className="tones" aria-label="Tono del asistente">
-                {TONE_OPTS.map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className={id === tone ? "tone on" : "tone"}
-                    aria-pressed={id === tone}
-                    onClick={() => setTone(id)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </fieldset>
-              <fieldset className="tones" aria-label="Emojis del asistente">
-                {EMOJI_OPTS.map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className={id === emojis ? "tone on" : "tone"}
-                    aria-pressed={id === emojis}
-                    onClick={() => setEmojis(id)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </fieldset>
+              <div className="voice">
+                <fieldset className="tones" aria-label="Tono del asistente">
+                  {TONE_OPTS.map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={id === tone ? "tone on" : "tone"}
+                      aria-pressed={id === tone}
+                      onClick={() => setTone(id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </fieldset>
+                {/* Emojis: «No usar» (apagado, como viene) o «Pocos» (encendido). */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={emojis === "pocos"}
+                  className={emojis === "pocos" ? "emo on" : "emo"}
+                  onClick={() => setEmojis(emojis === "pocos" ? "no" : "pocos")}
+                >
+                  <span className="emo-track" aria-hidden="true">
+                    <span className="emo-knob"></span>
+                  </span>
+                  Emojis
+                </button>
+              </div>
               <div className="chatmsgs" aria-live="polite">
                 {msgs.map((m) => (
                   <div key={m.id} className={m.cls}>

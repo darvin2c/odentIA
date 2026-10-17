@@ -65,3 +65,34 @@ export function computeValue(i: ValueInput) {
     worthIt: withoutUs > withUs,
   }
 }
+
+export type ClinicSize = "pequena" | "mediana" | "grande"
+
+/** Tamaños de ejemplo para empezar sin escribir números; después se ajustan a mano. */
+export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input: ValueInput }[] = [
+  {
+    id: "pequena",
+    label: "Pequeña",
+    hint: "1 o 2 odontólogos",
+    input: { ...DEFAULT_VALUE_INPUT, writers: 120, overdue: 25, consultations: 120, teamHours: 25 },
+  },
+  { id: "mediana", label: "Mediana", hint: "3 a 6 odontólogos", input: DEFAULT_VALUE_INPUT },
+  {
+    id: "grande",
+    label: "Grande",
+    hint: "7 o más, o varias sedes",
+    input: {
+      ...DEFAULT_VALUE_INPUT,
+      writers: 800,
+      overdue: 160,
+      consultations: 800,
+      teamHours: 160,
+    },
+  },
+]
+
+/** El tamaño cuyos números coinciden con los de la calculadora; si se tocaron, ninguno. */
+export function sizeOf(i: ValueInput): ClinicSize | null {
+  const keys = Object.keys(DEFAULT_VALUE_INPUT) as (keyof ValueInput)[]
+  return CLINIC_SIZES.find((s) => keys.every((k) => s.input[k] === i[k]))?.id ?? null
+}
