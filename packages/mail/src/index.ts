@@ -147,14 +147,6 @@ export function invitationTemplate({
 
 /* ---------- Avisos de soporte: solo avisan, nunca llevan el texto del caso ---------- */
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-}
-
 const SUPPORT_KIND_LABEL = { pregunta: "Pregunta", problema: "Problema", acceso: "Acceso" } as const
 export type SupportCaseKindLabel = keyof typeof SUPPORT_KIND_LABEL
 
