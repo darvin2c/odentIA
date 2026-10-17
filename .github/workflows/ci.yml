@@ -52,7 +52,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [check, docker-build]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Un deploy que reconstruye todos los servicios (admin, panel, platform, web,
+    # api, worker) puede superar los 20 minutos; el CLI espera hasta 40.
+    timeout-minutes: 45
     env:
       OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
       OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
@@ -68,4 +70,4 @@ jobs:
       - name: Conectar con OpenShip
         run: openship context add ci --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN" --use
       - name: Desplegar el commit verificado
-        run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 1200000
+        run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 2400000
