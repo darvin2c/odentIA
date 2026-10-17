@@ -1,6 +1,64 @@
 ---
-// Página legal sin texto todavía (LEGAL.libro en src/lib/pages-data.ts).
-import LegalPage from "../../components/pages/LegalPage.astro"
-import { LEGAL } from "../../lib/pages-data"
+// Libro de Reclamaciones virtual de odentIA (Perú: Ley 29571 y D.S. 011-2011-PCM con sus modificatorias).
+// Es un formulario real: la hoja se guarda en la API y su copia llega al correo del consumidor (excepción a
+// ADR 0038). Va sin indexar mientras falten los datos reales del proveedor (src/lib/complaints.ts).
+import ComplaintForm from "../../components/complaints/ComplaintForm"
+import Base from "../../layouts/Base.astro"
+import { providerPending, RESPONSE_DAYS } from "../../lib/complaints"
+import { breadcrumbJsonLd } from "../../lib/faq"
+
+const path = "/pe/libro-de-reclamaciones"
+const title = "Libro de Reclamaciones"
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  [title, path],
+]
+const jsonLd = breadcrumbJsonLd(Astro.site, trail)
 ---
-<LegalPage page={LEGAL.libro} />
+<Base
+  title={title}
+  description="Libro de Reclamaciones virtual de odentIA (Perú): registra un reclamo o una queja y recibe la copia de tu hoja en tu correo."
+  jsonLd={jsonLd}
+  header="light"
+  noindex={providerPending}
+>
+  <nav class="wrap crumbs" aria-label="Migas de pan">
+    <ol>
+      {trail.map(([name, href], i) => (
+        <li>{i < trail.length - 1 ? <a href={href}>{name}</a> : <span aria-current="page">{name}</span>}</li>
+      ))}
+    </ol>
+  </nav>
+  <div class="wrap libro">
+    <header class="intro">
+      <span class="tag">[ Perú ]</span>
+      <h1 class="h2">Libro de Reclamaciones</h1>
+      <p class="lead">
+        Conforme al Código de Protección y Defensa del Consumidor, puedes registrar aquí un reclamo o una queja
+        sobre odentIA. Te responderemos por correo en un plazo no mayor a quince ({RESPONSE_DAYS}) días hábiles.
+      </p>
+    </header>
+    <ComplaintForm client:load />
+  </div>
+</Base>
+
+<style>
+  /* Migas, entrada y hoja comparten la misma columna. */
+  .crumbs { max-width: 880px; }
+  .crumbs ol { list-style: none; margin: 0; padding: 18px 0 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13.5px; color: var(--soft); }
+  .crumbs li + li::before { content: "/"; margin-right: 6px; color: #cbd5e1; }
+  .crumbs a { color: var(--soft); text-decoration: none; display: inline-block; padding: 6px 0; }
+  .crumbs a:hover { color: var(--teal); }
+  .crumbs span { display: inline-block; padding: 6px 0; color: var(--ink-2); }
+
+  .libro { max-width: 880px; padding-top: 40px; padding-bottom: 112px; display: flex; flex-direction: column; gap: 32px; }
+  .intro { display: flex; flex-direction: column; gap: 16px; }
+  @media (max-width: 720px) { .libro { padding-top: 28px; padding-bottom: 72px; } }
+
+  /* Imprimir deja solo la hoja: sin cabecera, pie, migas ni el texto de entrada. */
+  @media print {
+    :global(.site-head), :global(.foot), :global(.skip), .crumbs, .intro { display: none !important; }
+    :global(body) { background: #fff; }
+    .libro { padding: 0; max-width: none; }
+  }
+</style>

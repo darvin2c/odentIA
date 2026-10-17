@@ -16,6 +16,11 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional().default(""),
   SMTP_PASS: z.string().optional().default(""),
   SMTP_FROM: z.string().min(1),
+  /**
+   * Correo de odentIA que recibe el aviso de cada Hoja de Reclamación (Libro de
+   * Reclamaciones de la web). Opcional: sin él solo sale la copia al consumidor.
+   */
+  COMPLAINTS_EMAIL: z.preprocess((value) => (value === "" ? undefined : value), z.string().email().optional()),
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().min(1).default("auto"),
   S3_ACCESS_KEY: z.string().min(1),

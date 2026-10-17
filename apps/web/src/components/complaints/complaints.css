@@ -1,0 +1,420 @@
+/* Hoja de Reclamación: una hoja blanca con los cuatro bloques del Anexo I, sobre los tokens de web.css. */
+.lr-sheet {
+  --lr-danger: #b42318;
+  --lr-danger-soft: #fef3f2;
+  --lr-field: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 36px;
+  background: var(--paper);
+  border-radius: var(--radius);
+  box-shadow:
+    0 1px 0 rgba(15, 23, 42, 0.04),
+    0 12px 40px -18px rgba(15, 23, 42, 0.18);
+  min-width: 0;
+}
+
+.lr-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px 32px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.lr-title {
+  font-size: clamp(22px, 2.2vw, 28px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+.lr-sub {
+  margin-top: 4px;
+  color: var(--muted);
+}
+.lr-meta,
+.lr-provider,
+.lr-receipt {
+  margin: 0;
+  display: grid;
+  gap: 12px 28px;
+}
+.lr-meta {
+  grid-auto-flow: column;
+}
+.lr-meta dt,
+.lr-provider dt,
+.lr-receipt dt,
+.lr-copy dt {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--soft);
+}
+.lr-meta dd,
+.lr-provider dd,
+.lr-receipt dd,
+.lr-copy dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.lr-provider {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: var(--bg);
+}
+.lr-wide {
+  grid-column: 1 / -1;
+}
+.lr-required {
+  font-size: 14.5px;
+  color: var(--muted);
+}
+
+.lr-block {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.lr-block-t {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 19px;
+  line-height: 1.3;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.lr-n {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 15px;
+}
+.lr-note {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: var(--teal-soft);
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.lr-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 20px;
+}
+.lr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.lr-field > label,
+.lr-choice > legend {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink);
+}
+.lr-choice > legend {
+  margin-bottom: 8px;
+}
+.lr-opt {
+  font-weight: 500;
+  color: var(--soft);
+}
+.lr-field input:not([type="checkbox"]):not([type="radio"]),
+.lr-field select,
+.lr-field textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--lr-field);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+.lr-field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.lr-field input:hover,
+.lr-field select:hover,
+.lr-field textarea:hover {
+  box-shadow: inset 0 0 0 1.5px var(--soft);
+}
+.lr-field input:focus-visible,
+.lr-field select:focus-visible,
+.lr-field textarea:focus-visible {
+  outline: 3px solid var(--sky);
+  outline-offset: 1px;
+  box-shadow: inset 0 0 0 1.5px var(--teal);
+}
+.lr-field input[aria-invalid="true"]:not([type="checkbox"]):not([type="radio"]),
+.lr-field select[aria-invalid="true"],
+.lr-field textarea[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 2px var(--lr-danger) !important;
+}
+.lr-hint,
+.lr-count {
+  font-size: 14px;
+  color: var(--muted);
+}
+.lr-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lr-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--lr-danger);
+}
+.lr-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.lr-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 0;
+  font-weight: 500 !important;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.lr-check input,
+.lr-radio input,
+.lr-kind input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--teal);
+}
+.lr-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.lr-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px var(--lr-field);
+  font-weight: 600;
+  cursor: pointer;
+}
+.lr-radio input {
+  margin: 0;
+}
+.lr-kinds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.lr-kind {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1.5px var(--lr-field);
+  cursor: pointer;
+}
+.lr-radio:has(input:checked),
+.lr-kind:has(input:checked) {
+  background: var(--teal-soft);
+  box-shadow: inset 0 0 0 2px var(--teal);
+}
+.lr-choice[data-invalid="true"] .lr-kind {
+  box-shadow: inset 0 0 0 2px var(--lr-danger);
+}
+.lr-kind-t {
+  font-weight: 800;
+}
+.lr-kind-h {
+  grid-column: 2;
+  font-size: 14.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.lr-notices {
+  margin: 0;
+  padding: 18px 20px 18px 38px;
+  border-radius: 16px;
+  background: #fff8e8;
+  box-shadow: inset 0 0 0 1.5px var(--amber);
+  color: #5c3b00;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  line-height: 1.55;
+  font-size: 15.5px;
+}
+
+.lr-submit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+.lr-submit .btn[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+.lr-send-error {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: var(--lr-danger-soft);
+  color: var(--lr-danger);
+  font-weight: 600;
+  line-height: 1.5;
+  box-shadow: inset 0 0 0 1.5px #fecdca;
+}
+
+/* Confirmación */
+.lr-done-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.lr-done-head h2 {
+  font-size: clamp(24px, 2.6vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+.lr-done-head h2:focus {
+  outline: none;
+}
+.lr-ok {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #dcfae6;
+  color: #067647;
+}
+.lr-receipt {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 18px 20px;
+  border-radius: 16px;
+  background: var(--bg);
+}
+.lr-big {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+.lr-msg {
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.lr-warn {
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: #fff8e8;
+  box-shadow: inset 0 0 0 1.5px var(--amber);
+  color: #5c3b00;
+}
+.lr-copy summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.lr-copy dl {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.lr-copy dd {
+  font-weight: 500;
+  white-space: pre-wrap;
+}
+.lr-small {
+  font-size: 14.5px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.lr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .lr-sheet {
+    padding: 22px 18px;
+    gap: 24px;
+    border-radius: 18px;
+  }
+  .lr-grid,
+  .lr-kinds,
+  .lr-provider,
+  .lr-receipt {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lr-meta {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .lr-submit .btn,
+  .lr-actions .btn {
+    width: 100%;
+  }
+}
+
+/* Impresión: solo la hoja, sin sombras ni botones. */
+@media print {
+  .lr-sheet {
+    box-shadow: none;
+    padding: 0;
+  }
+  .lr-receipt,
+  .lr-provider,
+  .lr-warn {
+    background: none;
+    box-shadow: inset 0 0 0 1px #94a3b8;
+  }
+  .lr-copy summary {
+    list-style: none;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

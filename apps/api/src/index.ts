@@ -52,6 +52,7 @@ const app = createApp({
   webURL: env.WEB_URL,
   adminURL: env.ADMIN_URL,
   mailer,
+  complaintsEmail: env.COMPLAINTS_EMAIL || undefined,
   listenUrl: env.APP_DATABASE_URL,
   llm: platformLlmFromEnv(env),
   decisions: {

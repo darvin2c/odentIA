@@ -1881,52 +1881,11 @@ export const PAGES = {
   },
 } satisfies Record<string, PageData>
 
-/** Páginas legales: aún sin texto. Cada una dice qué cubrirá; el texto lo redacta un abogado. */
+/** Páginas legales que aún no tienen texto propio (la plantilla breve de LegalPage). Las que ya lo tienen
+ * viven en src/lib/legal/. */
 export type LegalPageData = { path: string; title: string; description: string; covers: string }
 
 export const LEGAL = {
-  terminos: {
-    path: "/terminos",
-    title: "Términos del servicio",
-    description: "Términos del servicio de odentIA para clínicas dentales. Texto en preparación.",
-    covers:
-      "El servicio: el plan que vuelve en crédito, la prueba, el cobro por acción, la cancelación y el uso de los agentes.",
-  },
-  privacidad: {
-    path: "/privacidad",
-    title: "Política de privacidad",
-    description: "Política de privacidad de odentIA. Texto en preparación.",
-    covers:
-      "Qué datos guardan la web y la cuenta, para qué, y cómo pedir verlos, corregirlos o borrarlos.",
-  },
-  cookies: {
-    path: "/cookies",
-    title: "Política de cookies",
-    description: "Política de cookies de la web de odentIA. Texto en preparación.",
-    covers: "Qué cookies usa esta web y para qué.",
-  },
-  encargo: {
-    path: "/encargo-de-tratamiento",
-    title: "Encargo de tratamiento de datos",
-    description:
-      "Encargo de tratamiento de datos entre la clínica y odentIA. Texto en preparación.",
-    covers:
-      "La clínica es responsable de los datos de sus pacientes y odentIA los trata por encargo suyo.",
-  },
-  subencargados: {
-    path: "/subencargados",
-    title: "Subencargados",
-    description: "Subencargados del tratamiento de datos en odentIA. Texto en preparación.",
-    covers:
-      "Quién más trata los datos y para qué: los modelos de IA, WhatsApp, el servidor, el almacenamiento y el correo.",
-  },
-  avisoLegal: {
-    path: "/aviso-legal",
-    title: "Aviso legal",
-    description: "Aviso legal de odentIA. Texto en preparación.",
-    covers:
-      "Quién está detrás de odentIA: razón social, número de contribuyente, domicilio y contacto.",
-  },
   libro: {
     path: "/pe/libro-de-reclamaciones",
     title: "Libro de reclamaciones",

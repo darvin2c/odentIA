@@ -21,6 +21,10 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   y los hosts de organizaciones a platform. El dominio raíz queda para marketing:
   la web de `apps/web` (ADR 0038) es HTML estático de `pnpm --filter @odentia/web build`
   (carpeta `dist/`), servido tal cual por el borde con `WEB_URL` como dirección canónica.
+  Se compila con `VITE_BASE_DOMAIN` (y `VITE_BASE_PORT` si aplica) del dominio de producción,
+  porque enlaza a `app.` y envía el Libro de Reclamaciones a `api.`; añadir el origen raíz
+  `https://<dominio>` a `TRUSTED_ORIGINS` para que la API acepte ese envío, y `COMPLAINTS_EMAIL`
+  con el correo de odentIA que recibe el aviso de cada hoja.
 - `pgdata` es persistente. Un redeploy puede reiniciar PostgreSQL; no debe borrar
   ni sustituir su volumen. No ejecutar `down -v` en producción.
 

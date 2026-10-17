@@ -153,6 +153,7 @@ import { seedWorkspace } from "./seed-workspace.js"
 import { seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
+import { submitConsumerComplaint } from "./consumer-complaints.js"
 import { seedSaasBillingDemo } from "./seed-saas-billing.js"
 import { createService, updateService } from "./service-catalog.js"
 import { createStorage } from "./storage.js"
@@ -2922,6 +2923,28 @@ await db.transaction(async (tx) => {
   await seedAdminOrganizations(tx)
   await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
 })
+// Libro de Reclamaciones de odentIA (tabla global de la plataforma): una hoja
+// de ejemplo, con datos ficticios. Idempotente por su submissionId fijo; no envía correos.
+await db.transaction((tx) =>
+  submitConsumerComplaint(tx, {
+    submissionId: "00000000-0000-4000-8000-0000000c0a01",
+    kind: "reclamo",
+    consumerName: "Marta Salas Vega",
+    consumerAddress: "Av. Arequipa 1234, Lince, Lima",
+    documentType: "DNI",
+    documentNumber: "40123456",
+    phone: "+51 999 111 222",
+    email: "marta.salas@ejemplo.dev",
+    isMinor: false,
+    itemType: "servicio",
+    itemDescription: "Suscripción mensual de odentIA (ejemplo)",
+    amount: "199.00",
+    currency: "PEN",
+    detail: "Ejemplo de la semilla: el cobro del mes aparece dos veces en el estado de cuenta.",
+    request: "Que se anule el cobro repetido.",
+    privacyAccepted: true,
+  }),
+)
 // Lo que hicieron los agentes este mes (ADR 0031), para ver Plan y pagos y
 // «Ver cada acción» con datos: conversaciones, una consulta y una cita, con
 // el precio base del plan de la semilla. Ejemplos; ningún agente los hizo.
