@@ -2759,12 +2759,21 @@ await db.transaction((tx) =>
       submissionId: randomUUID(),
       formVersion: registrationConfig.version,
       answers: {
-        demographics: { displayName: "Thiago Quispe · QR demo", birthDate: "2019-03-02", phone: SHARED_PHONE },
+        demographics: {
+          displayName: "Thiago Quispe · QR demo",
+          givenNames: "Thiago",
+          paternalSurname: "Quispe",
+          birthDate: "2019-03-02",
+          phone: SHARED_PHONE,
+          docType: "DNI",
+          docNumber: "78901299",
+        },
         respondent: "representative",
         representative: {
           displayName: "Valeria Quispe · QR demo",
           relationship: "guardian",
           relationshipDetail: "Madre",
+          phone: SHARED_PHONE,
           docType: "DNI",
           docNumber: "45678920",
         },
