@@ -28,6 +28,18 @@ export interface PlatformDecisions {
 const DEFAULT_TIMEOUT_MS = 5_000
 
 /**
+ * Toda clínica nace con Jev (ADR 0047): sin `JEV_API_KEY` cada mensaje se
+ * atiende sin modelo de decisión y lo ajeno vuelve a cobrarse. API y worker lo
+ * dicen al arrancar, sin detenerse (el agente sigue respondiendo), y cada
+ * corrida abre o suma la clínica al caso «Modelo sin responder» de Soporte.
+ * Con el modelo de demostración no hay cuenta real: no aplica.
+ */
+export function decisionKeyStartProblem(env: { JEV_API_KEY?: string | undefined; LLM_MODEL?: string | undefined }): string | null {
+  if (env.LLM_MODEL?.trim() === "fake" || env.JEV_API_KEY?.trim()) return null
+  return "Falta JEV_API_KEY: Jev es el modelo de decisión de toda clínica. Sin él, los mensajes ajenos a la clínica se atienden con el modelo que escribe y se cobran"
+}
+
+/**
  * Modelo de decisión de una organización. `baseline` construye un modelo de
  * chat propio sin reintentos y con el plazo de decisión (nunca reutiliza el
  * de la corrida); con el LLM falso es el modelo de decisión falso, así

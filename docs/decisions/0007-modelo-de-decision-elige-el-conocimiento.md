@@ -40,7 +40,7 @@ El mismo modelo de decisión responde el triaje **antes** de llamar al modelo qu
 
 - Beneficio: el agente puede usar todas las respuestas vigentes; con modelo de decisión, el modelo que escribe recibe unas pocas en vez de todas.
 - Sacrificio: una llamada más por turno al modelo de decisión, y su acierto eligiendo temas en español no está medido. El umbral 0,6 es un punto de partida.
-- Con mensajes de pacientes reales, enviar el texto del contacto a un proveedor de decisión externo requiere la revisión de tratamiento de datos pendiente; hasta entonces solo la línea base y el modelo falso lo ven salvo que la plataforma configure claves.
+- Con mensajes de pacientes reales, enviar el texto del contacto a un proveedor de decisión externo requiere la revisión de tratamiento de datos pendiente. Desde [0047](0047-jev-decide-en-toda-clinica.md) la plataforma configura `JEV_API_KEY` y Jev es el modelo de decisión de toda clínica; la revisión sigue pendiente antes de tener pacientes reales.
 - Revisar con la evaluación (`eval:decisions`) sobre el banco de preguntas: si un proveedor elige mal estando seguro más de 1 de cada 20 veces, esa organización vuelve al camino sin modelo de decisión; y si el conocimiento supera unos cientos de respuestas, añadir un filtro previo.
 
 ## Referencias

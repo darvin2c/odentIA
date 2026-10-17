@@ -1,5 +1,5 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { type AgentRuntime, consumeAgentRun, createAlreadyTold, decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
@@ -49,6 +49,9 @@ const checkpointer = PostgresSaver.fromConnString(env.DATABASE_URL)
 await checkpointer.setup()
 await setupAgentMemory(ownerDb)
 const embedder = embedderFromEnv(env)
+// Sin la clave de Jev el agente sigue, pero lo ajeno se cobra: que se vea en el registro (ADR 0047).
+const decisionKeyProblem = decisionKeyStartProblem(env)
+if (decisionKeyProblem) console.error(`worker: ${decisionKeyProblem}`)
 const agentRuntime: AgentRuntime = {
   checkpointer,
   // Un modelo que no responde abre el caso automático en Soporte de odentIA.

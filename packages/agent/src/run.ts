@@ -37,6 +37,7 @@ import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
 import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decision/route.js"
+import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
 import { compileAgentGraph } from "./graph.js"
@@ -503,13 +504,17 @@ async function attendAgentRun(
     // construirse (sin credenciales de plataforma) no detiene la corrida.
     let decision: DecisionModel | null = null
     let decisionUnavailable: unknown = null
+    // Sin clave, o con la clave rechazada, lo ajeno vuelve a cobrarse: al terminar se avisa a odentIA.
+    let decisionProblem: DecisionKeyProblem | null = null
     if (inboundMessageId !== null && cfg.decisionProvider !== "none") {
       try {
-        decision = runtime.createDecisionModel
+        const built = runtime.createDecisionModel
           ? runtime.createDecisionModel(cfg.decisionProvider)
           : await createDecisionModel(cfg.decisionProvider, runtime.decisions ?? {}, spec)
+        decision = built && watchDecisionKey(built, (problem) => (decisionProblem ??= problem))
       } catch (error) {
         decisionUnavailable = error
+        decisionProblem = decisionKeyProblem(error)
       }
     }
     toolCtx.decision = decision
@@ -652,6 +657,16 @@ async function attendAgentRun(
           console.error(`agent: sombra de decisión omitida (${error instanceof Error ? error.message : String(error)})`)
         })
       }
+    }
+    // Clave ausente o rechazada: el caso «Modelo sin responder» de Soporte (ADR 0047). Con el
+    // modelo de demostración no hay cuenta real que arreglar.
+    const keyProblem = decisionProblem as DecisionKeyProblem | null
+    if (keyProblem && runtime.ownerDb && spec.provider !== "fake") {
+      await reportDecisionOutage(runtime.ownerDb, { orgId, provider: cfg.decisionProvider, problem: keyProblem, at: startedAt }).catch(
+        (error: unknown) => {
+          console.error(`agent: caso «Modelo sin responder» del modelo de decisión sin abrir (${error instanceof Error ? error.message : String(error)})`)
+        },
+      )
     }
     return "done"
   } catch (error) {

@@ -22,7 +22,7 @@ La suscripción de hoy (`saas_plan`) cobra una cuota fija por plan con topes de 
 - **Tope de gasto por clínica,** con aviso y alarma antes de llegar. Al tope, los casos nuevos pasan al equipo y el paciente siempre recibe respuesta (ADR 0021).
 - **WhatsApp lo paga la clínica directo a Meta.** odentIA muestra una estimación y dice que depende por completo de Meta.
 
-Así la clínica paga por lo que le da valor, entra por lo mismo que el software más básico y el ingreso crece con el uso. Con los costos medidos en #63, el margen queda por encima de 64 % en el peor caso: negociado al mínimo, con todo el crédito gastado en conversaciones y después de una comisión de vendedor del 10 %.
+Así la clínica paga por lo que le da valor, entra por lo mismo que el software más básico y el ingreso crece con el uso. Con los costos medidos en #63, el margen queda por encima de 64 % en el peor caso: negociado al mínimo, con todo el crédito gastado en conversaciones y después de una comisión de vendedor del 10 %. Con Jev en toda clínica ([0047](0047-jev-decide-en-toda-clinica.md)) baja a 63 % solo si la clínica tiene unas 250 respuestas oficiales; los mensajes claramente ajenos a la clínica salen con un texto fijo y no se cobran.
 
 ## Alternativas descartadas
 

@@ -96,9 +96,11 @@ poner la key en una variable `VITE_*`, un campo de conversación ni el repositor
 
 Ver `docs/decisions/0007-modelo-de-decision-elige-el-conocimiento.md`. El worker y la API leen
 `JEV_API_KEY`/`JEV_BASE_URL` y `OPENAI_DECISIONS_API_KEY`/`OPENAI_DECISIONS_BASE_URL`
-(la API, para entender lo que se le pide al Administrador con palabras);
-sin ellas, elegir ese proveedor en Configuración → Agente deja cada triaje como
-fila con error en Agente › Registro técnico. `pnpm --filter @odentia/agent eval:decisions
+(la API, para entender lo que se le pide al Administrador con palabras).
+Toda clínica nace con Jev (`docs/decisions/0047-jev-decide-en-toda-clinica.md`): sin
+`JEV_API_KEY` cada corrida deja una fila «sin credenciales» en Agente › Registro técnico
+y responde sin modelo de decisión; con un modelo que escribe real, además abre el caso
+«Modelo sin responder» en Soporte. `pnpm --filter @odentia/agent eval:decisions
 -- --provider=jev` compara un proveedor con los ejemplos propios de
 `packages/agent/eval/`; no enviar mensajes reales de pacientes sin autorización. `eval:off-topic` mide si reconoce lo que no es de la clínica sin marcar lo que sí lo es. `eval:admin`
 mide, con un proveedor real, cuántos pedidos al Administrador entiende y los tokens

@@ -14,8 +14,14 @@ describe("costo de una llamada", () => {
     expect(costMicrosOf({ model: "text-embedding-3-small", inputTokens: 1_000 })).toBe(20)
   })
 
+  it("Jev cobra solo la entrada: un mensaje típico de Recepción cuesta 57 millonésimas", () => {
+    // Camino, conocimiento e interés: ~1 360 tokens a 0,042 USD por millón; la salida no se cobra.
+    expect(costMicrosOf({ model: "jev-1.13.0", inputTokens: 1_360, outputTokens: 12 })).toBe(57)
+  })
+
   it("sin precio o sin uso reportado no hay costo: nunca 0 ni un estimado", () => {
-    expect(costMicrosOf({ model: "jev-1.13.0", inputTokens: 500, outputTokens: 10 })).toBeNull()
+    // Una versión de Jev que odentIA no fijó ni midió no tiene fila.
+    expect(costMicrosOf({ model: "jev-1.14.0", inputTokens: 500, outputTokens: 10 })).toBeNull()
     expect(costMicrosOf({ model: "gpt-6-luna" })).toBeNull()
     // Salida en un modelo que solo tiene precio de entrada: el precio no lo cubre.
     expect(costMicrosOf({ model: "text-embedding-3-small", inputTokens: 10, outputTokens: 5 })).toBeNull()
@@ -47,7 +53,8 @@ describe("medir una operación", () => {
         audioSeconds: null,
         costMicros: 200 + 10 + 100,
       },
-      { provider: "jev", model: "jev-1.13.0", calls: 1, inputTokens: 300, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: 5, audioSeconds: null, costMicros: null },
+      // 300 de entrada a 0,042: 12,6 millonésimas, redondeadas; la salida de Jev no se cobra.
+      { provider: "jev", model: "jev-1.13.0", calls: 1, inputTokens: 300, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: 5, audioSeconds: null, costMicros: 13 },
       { provider: "anthropic", model: "claude-haiku-5-5", calls: 2, inputTokens: null, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: null, audioSeconds: null, costMicros: null },
     ])
   })

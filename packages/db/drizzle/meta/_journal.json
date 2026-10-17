@@ -50,6 +50,20 @@
       "when": 1792248607698,
       "tag": "0006_respuesta_del_libro_de_reclamaciones_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792253441975,
+      "tag": "0007_jev_por_defecto",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792253454401,
+      "tag": "0008_jev_por_defecto_clinicas",
+      "breakpoints": true
     }
   ]
 }
