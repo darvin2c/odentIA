@@ -12,7 +12,7 @@ odentIA necesita una web pública que venda y explique el producto: inicio, prec
 - **Sin backend ni datos de visitantes.** La web no llama a la API, no tiene formularios que guarden datos y no usa cookies de terceros; enlaza al registro y al ingreso del panel. Las visitas se miden con los registros del servidor.
 - **Única excepción: el Libro de Reclamaciones** (`/pe/libro-de-reclamaciones`). La norma peruana (D.S. 011-2011-PCM) exige una hoja virtual con número correlativo, guardada y con copia a quien reclama, así que ese formulario envía a una ruta pública de la API (`POST /api/public/libro-de-reclamaciones`, con límite por dirección y sin sesión) que la guarda en una tabla de plataforma a la que el rol de la aplicación no accede. Ningún otro formulario de la web envía datos.
 - **Una sola fuente de cifras.** Los precios viven en `apps/web/src/lib/pricing.ts`, alineados con la ADR 0031, y solo los muestran la sección de precio del inicio y `/precios`. El paso siguiente es leerlos del plan por defecto de la administración al compilar.
-- **Dirección:** en producción, el dominio raíz, que `docs/deployment.md` ya reserva para marketing (`WEB_URL` fija la dirección canónica). En local, `www.odentia.localhost`, porque ahí el dominio raíz lo usa la plataforma; `www` ya es un subdominio reservado.
+- **Dirección:** en producción, el dominio raíz, que `docs/deployment.md` ya reserva para marketing (la dirección canónica sale de `VITE_BASE_DOMAIN`; `WEB_URL` es el panel). En local, `www.odentia.localhost`, porque ahí el dominio raíz lo usa la plataforma; `www` ya es un subdominio reservado.
 
 ## Alternativas descartadas
 

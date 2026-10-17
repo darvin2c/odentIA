@@ -5,8 +5,6 @@ on:
   push:
     branches: [main]
 
-# El preview de cada PR vive en preview.yml: su fallo (servidor, DNS, OpenShip)
-# no debe pintar de rojo la verificación del código.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   # No cancelar un deploy productivo.
@@ -32,9 +30,8 @@ jobs:
       - run: pnpm test --filter=!@odentia/e2e
 
   docker-build:
-    # Solo antes de desplegar producción. En un PR la imagen ya la construye
-    # el preview en OpenShip; repetirlo aquí solo retrasaba ese despliegue.
-    if: github.event_name == 'push'
+    # También en cada PR: es lo único que comprueba la imagen antes de fusionar,
+    # y una imagen rota en main detiene el deploy de producción.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +63,9 @@ jobs:
           node-version: 24
       - name: Instalar CLI oficial de OpenShip
         run: npm install --global openship@0.8.1
+      # `login` valida listando tokens, operación que un token scoped no tiene
+      # (falla con «Could not validate the token»); `deploy` comprueba el acceso real.
       - name: Conectar con OpenShip
-        run: openship login --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN"
+        run: openship context add ci --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN" --use
       - name: Desplegar el commit verificado
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 1200000
