@@ -156,10 +156,10 @@ import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
-import { seedAdminCore } from "./seed-admin-core.js"
+import { SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
-import { submitConsumerComplaint } from "./consumer-complaints.js"
+import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-complaints.js"
 import { seedSaasBillingDemo } from "./seed-saas-billing.js"
 import { createService, quickAddServices, updateService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
@@ -3230,6 +3230,37 @@ await db.transaction((tx) =>
     privacyAccepted: true,
   }),
 )
+// Una queja ya respondida por el personal de soporte, para ver «Respondidas» y
+// su respuesta en la administración. Responder otra vez la deja como estaba.
+await db.transaction(async (tx) => {
+  const { sheet } = await submitConsumerComplaint(tx, {
+    submissionId: "00000000-0000-4000-8000-0000000c0a02",
+    kind: "queja",
+    consumerName: "Jorge Mendoza Salas",
+    consumerAddress: "Jr. Junín 456, Cercado de Lima",
+    documentType: "DNI",
+    documentNumber: "41234567",
+    phone: "+51 999 333 444",
+    email: "jorge.mendoza@ejemplo.dev",
+    isMinor: false,
+    itemType: "servicio",
+    itemDescription: "Soporte de odentIA (ejemplo)",
+    detail: "Ejemplo de la semilla: esperé tres días una respuesta de soporte.",
+    request: "Que me respondan más rápido.",
+    privacyAccepted: true,
+  })
+  if (sheet.status === "recibido") {
+    await respondConsumerComplaint(
+      tx,
+      { userId: SEED_STAFF_SUPPORT_ID, role: "support" },
+      sheet.id,
+      {
+        response:
+          "Ejemplo de la semilla: revisamos tu caso, te respondimos por soporte y ajustamos los turnos para responder en el día.",
+      },
+    )
+  }
+})
 // Lo que hicieron los agentes este mes (ADR 0031), para ver Plan y pagos y
 // «Ver cada acción» con datos: conversaciones, una consulta y una cita, con
 // el precio base del plan de la semilla. Ejemplos; ningún agente los hizo.

@@ -15,6 +15,7 @@ import { Route as SecurityRouteImport } from './routes/security'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppBillingRouteImport } from './routes/_app/billing'
 import { Route as AppCommissionsRouteImport } from './routes/_app/commissions'
+import { Route as AppComplaintsRouteImport } from './routes/_app/complaints'
 import { Route as AppOrganizationsRouteImport } from './routes/_app/organizations'
 import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AppTeamRouteImport } from './routes/_app/team'
@@ -49,6 +50,11 @@ const AppCommissionsRoute = AppCommissionsRouteImport.update({
   path: '/commissions',
   getParentRoute: () => AppRoute,
 } as any)
+const AppComplaintsRoute = AppComplaintsRouteImport.update({
+  id: '/complaints',
+  path: '/complaints',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOrganizationsRoute = AppOrganizationsRouteImport.update({
   id: '/organizations',
   path: '/organizations',
@@ -76,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/security': typeof SecurityRoute
   '/billing': typeof AppBillingRoute
   '/commissions': typeof AppCommissionsRoute
+  '/complaints': typeof AppComplaintsRoute
   '/organizations': typeof AppOrganizationsRoute
   '/support': typeof AppSupportRoute
   '/team': typeof AppTeamRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/security': typeof SecurityRoute
   '/billing': typeof AppBillingRoute
   '/commissions': typeof AppCommissionsRoute
+  '/complaints': typeof AppComplaintsRoute
   '/organizations': typeof AppOrganizationsRoute
   '/support': typeof AppSupportRoute
   '/team': typeof AppTeamRoute
@@ -99,6 +107,7 @@ export interface FileRoutesById {
   '/security': typeof SecurityRoute
   '/_app/billing': typeof AppBillingRoute
   '/_app/commissions': typeof AppCommissionsRoute
+  '/_app/complaints': typeof AppComplaintsRoute
   '/_app/organizations': typeof AppOrganizationsRoute
   '/_app/support': typeof AppSupportRoute
   '/_app/team': typeof AppTeamRoute
@@ -113,6 +122,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/billing'
     | '/commissions'
+    | '/complaints'
     | '/organizations'
     | '/support'
     | '/team'
@@ -123,6 +133,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/billing'
     | '/commissions'
+    | '/complaints'
     | '/organizations'
     | '/support'
     | '/team'
@@ -135,6 +146,7 @@ export interface FileRouteTypes {
     | '/security'
     | '/_app/billing'
     | '/_app/commissions'
+    | '/_app/complaints'
     | '/_app/organizations'
     | '/_app/support'
     | '/_app/team'
@@ -192,6 +204,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCommissionsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/complaints': {
+      id: '/_app/complaints'
+      path: '/complaints'
+      fullPath: '/complaints'
+      preLoaderRoute: typeof AppComplaintsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/organizations': {
       id: '/_app/organizations'
       path: '/organizations'
@@ -226,6 +245,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppBillingRoute: typeof AppBillingRoute
   AppCommissionsRoute: typeof AppCommissionsRoute
+  AppComplaintsRoute: typeof AppComplaintsRoute
   AppOrganizationsRoute: typeof AppOrganizationsRoute
   AppSupportRoute: typeof AppSupportRoute
   AppTeamRoute: typeof AppTeamRoute
@@ -236,6 +256,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppBillingRoute: AppBillingRoute,
   AppCommissionsRoute: AppCommissionsRoute,
+  AppComplaintsRoute: AppComplaintsRoute,
   AppOrganizationsRoute: AppOrganizationsRoute,
   AppSupportRoute: AppSupportRoute,
   AppTeamRoute: AppTeamRoute,

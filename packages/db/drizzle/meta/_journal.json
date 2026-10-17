@@ -36,6 +36,20 @@
       "when": 1792247201305,
       "tag": "0004_libro_de_reclamaciones_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792248597600,
+      "tag": "0005_respuesta_del_libro_de_reclamaciones",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792248607698,
+      "tag": "0006_respuesta_del_libro_de_reclamaciones_reglas",
+      "breakpoints": true
     }
   ]
 }

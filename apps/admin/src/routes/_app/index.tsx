@@ -14,7 +14,7 @@ const overviewSchema = z.object({
       label: z.string(),
       count: z.number().int().nonnegative(),
       description: z.string(),
-      path: z.enum(["/support", "/billing", "/commissions", "/organizations", "/users"]),
+      path: z.enum(["/support", "/billing", "/commissions", "/organizations", "/users", "/complaints"]),
     }),
   ),
 })

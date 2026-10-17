@@ -6,3 +6,5 @@ export const adminUrl = (path = "/") => `https://admin.${BASE_DOMAIN}${BASE_PORT
 export const platformUrl = (slug: string, path = "/") =>
   `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
 export const loginUrl = () => panelUrl(`/login?next=${encodeURIComponent(adminUrl())}`)
+/** Web de marketing (Astro), donde vive el formulario del Libro de Reclamaciones. */
+export const webUrl = (path = "/") => `https://www.${BASE_DOMAIN}${BASE_PORT}${path}`
