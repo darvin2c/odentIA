@@ -632,7 +632,6 @@ export interface SaasSubscriptionRow {
   sellerWindowDays: number | null
   sellerStartedAt: Date | null
   sellerEndedAt: Date | null
-  billingEmail: string | null
   discountBps: number
   trialCreditCents: number | null
   trialDays: number | null
@@ -672,7 +671,6 @@ export async function getSaasSubscription(
     sellerWindowDays: row.sellerWindowDays,
     sellerStartedAt: row.sellerStartedAt,
     sellerEndedAt: row.sellerEndedAt,
-    billingEmail: row.billingEmail,
     discountBps: row.discountBps,
     trialCreditCents: row.trialCreditCents,
     trialDays: row.trialDays,
@@ -703,7 +701,6 @@ export async function startSaasTrial(
     planCode?: string
     sellerId?: string
     isDemo?: boolean
-    billingEmail?: string
     billingStart?: SaasBillingStart
   } = {},
   now = new Date(),
@@ -735,8 +732,6 @@ export async function startSaasTrial(
       if (!existing.sellerStartedAt) patch.sellerStartedAt = now
       patch.sellerEndedAt = null
     }
-    if (input.billingEmail?.trim() && !existing.billingEmail)
-      patch.billingEmail = input.billingEmail.trim()
     if (input.isDemo !== undefined && input.isDemo !== existing.isDemo) patch.isDemo = input.isDemo
     if (billingStart === "now" && existing.status === "prueba") {
       patch.status = "activa"
@@ -775,7 +770,6 @@ export async function startSaasTrial(
         sellerRateBps: sellerSnapshot?.rateBps ?? null,
         sellerWindowDays: sellerSnapshot?.windowDays ?? null,
         sellerStartedAt: sellerSnapshot ? now : null,
-        billingEmail: input.billingEmail?.trim() || null,
       })
       .returning()
     if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo iniciar la suscripción")
@@ -810,7 +804,6 @@ export async function startSaasTrial(
       sellerRateBps: sellerSnapshot?.rateBps ?? null,
       sellerWindowDays: sellerSnapshot?.windowDays ?? null,
       sellerStartedAt: sellerSnapshot ? now : null,
-      billingEmail: input.billingEmail?.trim() || null,
     })
     .returning()
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo iniciar la prueba")
@@ -2670,12 +2663,6 @@ export async function tickSaasBilling(
   let restricted = 0
 
   async function orgEmail(orgId: string): Promise<string | null> {
-    const [sub] = await tx
-      .select({ billingEmail: saasSubscription.billingEmail })
-      .from(saasSubscription)
-      .where(eq(saasSubscription.organizationId, orgId))
-      .limit(1)
-    if (sub?.billingEmail?.trim()) return sub.billingEmail.trim()
     // Los avisos los reciben el propietario y el administrador (ADR 0031, decisión 9).
     const owners = await tx
       .select({ email: user.email })

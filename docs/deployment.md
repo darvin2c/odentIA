@@ -16,6 +16,12 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Cambiarlo por una imagen stock sin esas extensiones no es una sustitución válida.
 - `migrate` termina después de aplicar las migraciones; detenido con código cero
   es su estado normal. API y worker dependen de su finalización.
+- La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045). Una
+  base creada antes no se migra a ella: se recrea su volumen. Antes de esa fecha
+  no hubo producción; un preview abierto antes se cierra y se reabre.
+- El rol `dentalagent_app` y sus permisos por defecto los crea el init de la
+  imagen (`infra/dev/postgres/init`), no las migraciones. Un PostgreSQL
+  gestionado necesita crearlos aparte antes de migrar.
 - API, admin, panel y platform publican únicamente en loopback. `admin.<dominio>`
   apunta a admin (host 3012, puerto interno 3000); `app.` a panel, `api.` a API,
   y los hosts de organizaciones a platform. El dominio raíz queda para marketing.
@@ -64,10 +70,24 @@ administrativas ausentes. El bootstrap nominal y TOTP se describen en
 La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta
 (`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`). API y
 worker leen `LLM_OPENAI_API_KEY` y `LLM_ANTHROPIC_API_KEY`; sin la del proveedor
-del modelo elegido, el agente deriva cada caso y avisa a quien lo administra
-nombrando la variable que falta. `LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL`
-solo hacen falta con una pasarela propia. `LLM_MODEL=fake` es solo para previews
-y pruebas.
+del modelo elegido, Recepción no se enciende («El modelo responde»), el agente
+deriva cada caso y Soporte del back-office recibe el caso automático «Modelo sin
+responder» con la variable que falta. La clínica nunca ve la variable.
+`LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL` solo hacen falta con una
+pasarela propia. `LLM_MODEL=fake` es solo para previews y pruebas: con
+`NODE_ENV=production` y canales reales (`CHANNEL_SENDER_MODE=live` en el worker,
+`CHANNEL_VALIDATE_EXTERNAL` distinto de `false` en la API) ni la API ni el worker
+arrancan con él. Las previews corren con la misma imagen (`NODE_ENV=production`)
+pero con canales simulados, así que siguen usándolo.
+
+### Búsqueda con vectores del agente
+
+API y worker leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`
+(cualquier endpoint compatible con OpenAI; `EMBEDDINGS_TIMEOUT_MS` opcional) y la
+base necesita la extensión `vector`. Sin `EMBEDDINGS_MODEL` el agente busca solo
+por palabras: el banco de la ADR 0021 midió 11 de 35 aciertos así, contra 32 de 35
+con vectores. `fake` vectoriza por letras sin red y es solo para previews y
+pruebas. Detalle en `development.md`.
 
 ### SMTP
 
@@ -76,6 +96,10 @@ ofrece. El mailer deja esa selección a Nodemailer y respeta un `secure` explíc
 del caller. SMTP local de desarrollo, como Mailpit en 1025, sigue sin TLS.
 No desactivar la validación de certificados para corregir la conexión. Autenticar
 contra SMTP no demuestra que el proveedor acepte el remitente ni entregue el correo.
+
+`SUPPORT_INBOX_EMAIL` es el buzón de soporte de odentIA: el worker le envía
+«Caso nuevo» y «La clínica respondió», con el botón a Soporte en `ADMIN_URL`.
+Vacío, esos avisos quedan pendientes y el caso sigue en la bandeja de Soporte.
 
 ## CI y despliegue automático
 
@@ -188,7 +212,7 @@ PostgreSQL, SMTP y las consolas administrativas permanecen internos. S3 necesita
 el endpoint `storage.` para las URLs firmadas del navegador.
 
 El servicio one-shot `seed` inicializa cada preview después de `migrate` y
-`minio-init`: ejecuta `seed:cie10`, `seed:procedures` y `db:seed`, en ese orden.
+`minio-init`: ejecuta `seed:diagnoses`, `seed:procedures` y `db:seed`, en ese orden.
 API y worker esperan su salida correcta. Si falla, no escribe el marcador de
 finalización ni permite arrancar sus dependientes.
 

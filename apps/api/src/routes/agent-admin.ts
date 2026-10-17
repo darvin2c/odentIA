@@ -21,7 +21,7 @@ import {
   getMessagePermissions,
   listAdminLinePeople,
   runAdminLineOnce,
-  setConsent,
+  setMessageChoice,
   updateAdminLine,
   updateAdminSettings,
 } from "@odentia/services"
@@ -31,12 +31,9 @@ import { canAccess, canAccessAny, orgContextOf, type Permission } from "../lib/c
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
-const hour = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
-
+// A qué hora escribe no es un ajuste del Administrador: es el «Horario para escribir» de Agente.
 const settingsInput = z.object({
   enabled: z.boolean().optional(),
-  quietStart: hour.optional(),
-  quietEnd: hour.optional(),
 })
 
 const lineInput = z.object({
@@ -66,7 +63,8 @@ const peopleQuery = z.object({
 })
 
 /** Lo que una persona del equipo registra en la ficha: qué aceptó y cómo lo dijo. */
-const permissionInput = operationBodySchema("mensajes.permiso")
+// «Tus mensajes» desde la página de la persona (Datos › Mensajes): la misma operación que su enlace y el agente (ADR 0040).
+const permissionInput = operationBodySchema("mensajes.elegir")
 
 /**
  * Administrador: su página (las líneas), lo que recomienda y lo que pasó con
@@ -266,7 +264,11 @@ export function createAgentAdminRoute(deps: AgentAdminDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
-        await setConsent(tx, orgId, userId, c.req.param("contactId"), parsed.data)
+        await setMessageChoice(tx, orgId, userId, c.req.param("contactId"), {
+          choice: parsed.data.tipo,
+          receive: parsed.data.recibir,
+          source: parsed.data.source,
+        })
         return getMessagePermissions(tx, orgId, c.req.param("contactId"))
       }),
     )

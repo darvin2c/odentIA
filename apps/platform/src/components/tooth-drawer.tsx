@@ -1,4 +1,5 @@
 import {
+  diagnosisCodeLabel,
   surfaceLabel as clinicalSurfaceLabel,
   type FindingDetails,
   type FindingInput,
@@ -41,7 +42,7 @@ import {
 import type { ServiceCatalogItem } from "../lib/services"
 import { FindingPicker } from "./finding-picker"
 import { findingWords, useOdontogramNotation, variantFieldLabel } from "./odontogram-notation"
-import { Cie10Search } from "./patient/cie10-search"
+import { DiagnosisPicker } from "./patient/diagnosis-picker"
 import { NewEncounterButton } from "./patient/new-encounter-button"
 import { ServicePicker } from "./patient/service-picker"
 import { ToothHistory } from "./patient/tooth-history"
@@ -113,7 +114,7 @@ function mutationMessage(err: unknown, fallback: string): string {
 
 /**
  * El panel de la pieza (fase 3, tablero 4): su estado y, dentro de una
- * atención, un solo formulario con el hallazgo, su diagnóstico CIE-10 con el
+ * atención, un solo formulario con el hallazgo, su diagnóstico (lista de la clínica) con el
  * tipo (que es el diagnóstico de la atención) y el tratamiento, que va al plan
  * abierto de la persona. «Registrar y agregar al plan» lo deja todo junto, o
  * nada (`registerToothFinding`). Fuera de una atención el odontograma se
@@ -194,8 +195,9 @@ export function ToothDrawer({
   const [specifications, setSpecifications] = useState("")
   const [observations, setObservations] = useState("")
   const [note, setNote] = useState("")
-  // Diagnóstico de la atención: el CIE-10 del hallazgo con su tipo.
+  // Diagnóstico de la atención: el que propone el hallazgo (o se elige) con su tipo.
   const [diagnosisCode, setDiagnosisCode] = useState("")
+  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(null)
   const [diagnosisDescription, setDiagnosisDescription] = useState("")
   const [diagnosisType, setDiagnosisType] = useState("")
   // Tratamiento: va al plan abierto de la persona, que nace con el primero (ADR 0034).
@@ -360,6 +362,7 @@ export function ToothDrawer({
     resetDetails()
     setCondition("")
     setDiagnosisCode("")
+    setDiagnosisSystem(null)
     setDiagnosisDescription("")
     setDiagnosisType("")
     setNote("")
@@ -425,7 +428,7 @@ export function ToothDrawer({
     }
     const code = diagnosisCode.trim()
     if (code && !diagnosisType) {
-      setFormErrors(["Elige el tipo del diagnóstico: presuntivo, definitivo o repetido."])
+      setFormErrors(["Elige el tipo del diagnóstico: presuntivo o definitivo."])
       return
     }
     if (treatService && !TOOTH_SCOPES.includes(treatService.scope ?? "")) {
@@ -462,7 +465,7 @@ export function ToothDrawer({
           surfaces: !isGroup && !multi && scope === "surface" ? surfaces : [],
           ...(Object.keys(draftDetails).length > 0 ? { details: draftDetails } : {}),
           note: note.trim() || null,
-          diagnosis: code ? { cie10Code: code, diagnosisType } : null,
+          diagnosis: code ? { diagnosisCode: code, diagnosisSystem, diagnosisType } : null,
           treatment: treatService ? { serviceId: treatService.id, detail: treatDetail.trim() || null } : null,
         }),
       })
@@ -988,13 +991,17 @@ export function ToothDrawer({
           >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
               <div>
-                <Cie10Search
+                <DiagnosisPicker
+                  patientId={patientId}
+                  encounterId={null}
+                  finding={condition ? { condition, variant: variant || null, toothNumber: tooth ?? null } : null}
                   value={diagnosisCode}
-                  label="Diagnóstico"
+                  system={diagnosisSystem}
                   disabled={fieldDisabled}
-                  onChange={(code, text) => {
-                    setDiagnosisCode(code)
-                    setDiagnosisDescription(text)
+                  onChange={(choice) => {
+                    setDiagnosisCode(choice.code)
+                    setDiagnosisSystem(choice.code ? choice.system : null)
+                    setDiagnosisDescription(choice.code ? choice.description : "")
                   }}
                 />
                 {diagnosisDescription && (
@@ -1262,7 +1269,7 @@ function ToothContext({
                     <span className="min-w-0 flex-1">
                       {words}
                       {entry.surface ? ` · ${clinicalSurfaceLabel(entry.surface)}` : ""}
-                      {entry.diagnosisCode ? ` · CIE-10 ${entry.diagnosisCode}` : ""}
+                      {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                     </span>
                     {entry.needsReview ? <Badge variant="outline">Requiere revisión</Badge> : null}
                     {entry.leftByPlanItemId ? <Badge variant="outline">Lo dejó un tratamiento</Badge> : null}
@@ -1352,7 +1359,7 @@ function ToothContext({
                           </a>
                         )}
                         {item.diagnosisCode && (
-                          <Badge variant="outline">{item.diagnosisCode}</Badge>
+                          <Badge variant="outline">{diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)}</Badge>
                         )}
                       </li>
                     ))}
@@ -1371,7 +1378,7 @@ function ToothContext({
                         <span className="font-medium">{item.title}</span>
                         <Badge variant="outline">{planStatusLabel(item.status)}</Badge>
                         {item.diagnosisCode && (
-                          <Badge variant="outline">{item.diagnosisCode}</Badge>
+                          <Badge variant="outline">{diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)}</Badge>
                         )}
                       </li>
                     ))}

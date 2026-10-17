@@ -116,20 +116,26 @@ beforeAll(async () => {
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values
         ('K02.1', 'Caries de la dentina'),
         ('K04.0', 'Pulpitis'),
-        ('Z01.2', 'Examen dental')
-        on conflict ("code") do nothing`,
+        ('Z01.2', 'Examen dental')) as v(code, title)
+    on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "specialty", "scope", "price_cents", "currency", "duration_min", "is_active") values
-        (${SVC_CONSULTA}, 'org_a', 'custom', 'CONSULTA', 'Consulta', 'diagnostico', 'general', 5000, 'PEN', 30, true),
-        (${SVC_LIMPIEZA}, 'org_a', 'custom', 'LIMPIEZA', 'Limpieza dental', 'prevencion', 'tooth', 12000, 'PEN', 45, true),
-        (${SVC_ENDO}, 'org_a', 'custom', 'ENDODONCIA', 'Endodoncia', 'endodoncia', 'tooth', 45000, 'PEN', 90, true),
-        (${SVC_USD}, 'org_a', 'custom', 'IMPLANTE', 'Implante', 'implantologia', 'general', 50000, 'USD', 60, true),
-        (${SVC_INACTIVO}, 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'prevencion', 'tooth', 1000, 'PEN', 30, false),
-        (${SVC_OTRA_ORG}, 'org_b', 'custom', 'OTRO', 'Otro servicio', 'prevencion', 'tooth', 999, 'PEN', 15, true)
+    sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "duration_min", "is_active") values
+        (${SVC_CONSULTA}, 'org_a', 'custom', 'CONSULTA', 'Consulta', 'general', 5000, 'PEN', 30, true),
+        (${SVC_LIMPIEZA}, 'org_a', 'custom', 'LIMPIEZA', 'Limpieza dental', 'tooth', 12000, 'PEN', 45, true),
+        (${SVC_ENDO}, 'org_a', 'custom', 'ENDODONCIA', 'Endodoncia', 'tooth', 45000, 'PEN', 90, true),
+        (${SVC_USD}, 'org_a', 'custom', 'IMPLANTE', 'Implante', 'general', 50000, 'USD', 60, true),
+        (${SVC_INACTIVO}, 'org_a', 'custom', 'VIEJO', 'Servicio viejo', 'tooth', 1000, 'PEN', 30, false),
+        (${SVC_OTRA_ORG}, 'org_b', 'custom', 'OTRO', 'Otro servicio', 'tooth', 999, 'PEN', 15, true)
         on conflict ("id") do nothing`,
   )
 }, 180_000)
@@ -847,7 +853,7 @@ it("plan: un histórico sin tarifa no se presenta como gratuito en el resumen", 
     sql`insert into "treatment_budget_item" ("organization_id", "patient_id", "plan_id", "budget_id", "option_id", "plan_item_id", "title", "currency", "decision") values ('org_a', ${patientId}, ${legacyPlanId}, ${legacyBudgetId}, ${optionRow[0]!.id}, ${itemRow[0]!.id}, 'Tratamiento histórico', 'PEN', 'sin_registro')`,
   )
   // El documento queda retirado (las líneas conservan su snapshot). `historico` ya
-  // no existe: la migración 0093 lo pasó a «Anulado».
+  // no existe: es «Anulado».
   await ownerDb.execute(
     sql`update "treatment_budget" set "status" = 'cancelado' where "id" = ${legacyBudgetId}`,
   )

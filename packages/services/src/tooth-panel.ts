@@ -1,6 +1,6 @@
 /**
  * El panel de la pieza en un solo formulario (fase 3, tablero 4): el hallazgo,
- * su diagnóstico CIE-10 con el tipo —que es el diagnóstico de la atención: no
+ * su diagnóstico (de la lista de la clínica) con el tipo —que es el diagnóstico de la atención: no
  * se escribe dos veces— y el tratamiento, que se agrega al plan abierto de la
  * persona (o lo abre: ADR 0034). Todo en la transacción de quien llama: o
  * queda todo o no queda nada. Compone las operaciones de siempre
@@ -28,8 +28,8 @@ export interface RegisterToothFindingInput {
   surfaces?: string[]
   details?: FindingDetails
   note?: string | null
-  /** Diagnóstico CIE-10 con su tipo: cuenta como diagnóstico de la atención. */
-  diagnosis?: { cie10Code: string; diagnosisType: string } | null
+  /** Diagnóstico con su tipo: cuenta como diagnóstico de la atención. */
+  diagnosis?: { diagnosisCode: string; diagnosisSystem?: string | null; diagnosisType: string } | null
   /** Tratamiento por pieza o por superficies que se agrega al plan abierto. */
   treatment?: { serviceId: string; detail?: string | null } | null
 }
@@ -75,13 +75,15 @@ export async function registerToothFinding(
       surfaces,
       details: group ? { ...(input.details ?? {}), relatedTeeth: teeth } : input.details,
       note: input.note ?? null,
-      diagnosisCode: input.diagnosis?.cie10Code ?? null,
+      diagnosisCode: input.diagnosis?.diagnosisCode ?? null,
+      diagnosisSystem: input.diagnosis?.diagnosisSystem ?? null,
     })
     entries.push(...rows)
     if (input.diagnosis) {
       diagnoses.push(
         await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, input.encounterId, {
-          cie10Code: input.diagnosis.cie10Code,
+          diagnosisCode: input.diagnosis.diagnosisCode,
+          diagnosisSystem: input.diagnosis.diagnosisSystem ?? null,
           diagnosisType: input.diagnosis.diagnosisType,
           toothNumber,
           surfaces,
@@ -96,7 +98,8 @@ export async function registerToothFinding(
           toothNumber,
           surfaces: service.scope === "surfaces" ? surfaces : null,
           odontogramEntryId: rows[0]?.id ?? null,
-          diagnosisCode: input.diagnosis?.cie10Code ?? null,
+          diagnosisCode: input.diagnosis?.diagnosisCode ?? null,
+          diagnosisSystem: input.diagnosis?.diagnosisSystem ?? null,
           detail: input.treatment?.detail ?? null,
         }),
       )

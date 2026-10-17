@@ -4,7 +4,7 @@ Fecha: 2026-10-16 · **Estado:** aceptada (fase 3, paso 2A; precisa el [0002](00
 
 ## Problema
 
-En la clínica nada registraba que la persona llegó: recepción caminaba al consultorio a avisar, la doctora no veía quién la esperaba y no se sabía cuánto esperó cada persona. «Atendida» se ofrecía a mano justo a la hora de la cita; pulsarla al llegar liberaba el sillón y dejaba la cita sin poder atenderse. «Atender» pedía motivo y profesional en un formulario (y quien cubría a otro quedaba con la atención a nombre ajeno). El mismo estado tenía tres nombres y «en curso» lo decidía el reloj, no lo que pasaba.
+En la clínica nada registraba que la persona llegó: recepción caminaba al consultorio a avisar, la doctora no veía quién la esperaba y no se sabía cuánto esperó cada persona. «Atendida» se ofrecía a mano justo a la hora de la cita; pulsarla al llegar liberaba la unidad dental y dejaba la cita sin poder atenderse. «Atender» pedía motivo y profesional en un formulario (y quien cubría a otro quedaba con la atención a nombre ajeno). El mismo estado tenía tres nombres y «en curso» lo decidía el reloj, no lo que pasaba.
 
 ## Decisión y motivo
 

@@ -1,3 +1,4 @@
+import type { WritingWeek } from "./writing-hours"
 import type { QueryClient } from "@tanstack/react-query"
 
 /** El agente Administrador tal como lo entrega `/api/agent/admin`: la interfaz no calcula nada de esto. */
@@ -77,8 +78,8 @@ export interface AdminRequestResult {
 
 export interface AdminPage {
   enabled: boolean
-  quietStart: string
-  quietEnd: string
+  /** El «Horario para escribir» de Agente: por día (0 = domingo), sus tramos en minutos. */
+  writingHours: WritingWeek
   receptionOn: boolean
   whatsapp: boolean
   lines: AdminLineView[]

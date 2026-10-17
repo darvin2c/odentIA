@@ -11,7 +11,6 @@ import {
   canAccessSupportCase,
   clientSupportAttachmentUrl,
   createAccessSupportCase,
-  ensureCaseForHelpRequest,
   getAccountSupportCase,
   getMySupportCase,
   getSupportCaseForStaff,
@@ -26,9 +25,9 @@ import {
   revokeSupportGrantAsStaff,
   setSupportCaseStatus,
   staffAttachToSupportCase,
-  type HelpRequestSeed,
+  type SupportCaseListItem,
 } from "./admin-support.js"
-import { helpDedupeKeyOf, sendHelpRequest } from "./help.js"
+import { sendHelpRequest } from "./help.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Soporte: hilos privados por clínica, notas internas separadas y acceso delegado con permiso vigente. */
@@ -47,22 +46,12 @@ function run<T>(fn: (tx: Db) => Promise<T>, org = ORG): Promise<T> {
   return withOrgContext(appDb, org, fn)
 }
 
-async function seedRequest(org: string, userId: string, question: string): Promise<HelpRequestSeed> {
-  const request = await run(
+/** Lo que una persona envía desde la Ayuda: abre su caso (la única fuente). */
+function seedRequest(org: string, userId: string, question: string): Promise<SupportCaseListItem> {
+  return run(
     (tx) => sendHelpRequest(tx, org, { userId, roleLabel: "Recepción" }, { question, screen: "/agenda", kind: "problema" }),
     org,
   )
-  return {
-    id: request.id,
-    userId,
-    kind: request.kind,
-    question: request.question,
-    detail: null,
-    screen: request.screen,
-    role: "Recepción",
-    appVersion: null,
-    dedupeKey: helpDedupeKeyOf(request.question),
-  }
 }
 
 beforeAll(async () => {
@@ -82,7 +71,7 @@ beforeAll(async () => {
 describe("conversación del caso", () => {
   it("staff responde, anota en interno y reasigna; el cliente solo ve lo público y reabre", async () => {
     const seed = await seedRequest(ORG, CLIENT, "La impresora del ticket no responde")
-    const kase = await run((tx) => ensureCaseForHelpRequest(tx, ORG, seed))
+    const kase = seed
     expect(kase.status).toBe("abierto")
 
     await assignSupportCase(ownerDb, staff, kase.id, STAFF_ID)
@@ -111,7 +100,7 @@ describe("conversación del caso", () => {
 
   it("los tenants están aislados: otra clínica no ve ni abre el caso", async () => {
     const seed = await seedRequest(ORG, CLIENT, "Caso privado de la clínica A")
-    const kase = await run((tx) => ensureCaseForHelpRequest(tx, ORG, seed))
+    const kase = seed
     await expect(run((tx) => getMySupportCase(tx, OTHER, OTHER_CLIENT, kase.id), OTHER)).rejects.toThrow(/no encontrado/i)
     await expect(run((tx) => canAccessSupportCase(tx, OTHER, OTHER_CLIENT, kase.id), OTHER)).resolves.toBe(false)
     await expect(run((tx) => listMySupportCases(tx, OTHER, OTHER_CLIENT), OTHER)).resolves.toEqual([])
@@ -119,7 +108,7 @@ describe("conversación del caso", () => {
 
   it("lo colgado de una nota interna no existe para el cliente: ni metadatos ni URL", async () => {
     const seed = await seedRequest(ORG, CLIENT, "Caso con material interno del equipo")
-    const kase = await run((tx) => ensureCaseForHelpRequest(tx, ORG, seed))
+    const kase = seed
     const note = await addSupportInternalNote(ownerDb, staff, kase.id, "Diagnóstico interno del equipo")
     const hidden = await staffAttachToSupportCase(ownerDb, staff, kase.id, {
       messageId: note.id,
@@ -148,8 +137,8 @@ describe("respuesta a varios casos", () => {
   it("sin confirmación exacta de destinatarias no escribe nada; con ella mantiene hilos privados", async () => {
     const seedA = await seedRequest(ORG, CLIENT, "Incidencia común: el recordatorio llega tarde")
     const seedB = await seedRequest(OTHER, OTHER_CLIENT, "Incidencia común: el recordatorio llega tarde")
-    const caseA = await run((tx) => ensureCaseForHelpRequest(tx, ORG, seedA))
-    const caseB = await run((tx) => ensureCaseForHelpRequest(tx, OTHER, seedB), OTHER)
+    const caseA = seedA
+    const caseB = seedB
     expect(caseB.id).not.toBe(caseA.id)
 
     await expect(
@@ -173,7 +162,7 @@ describe("respuesta a varios casos", () => {
 describe("acceso delegado", () => {
   it("solo owner/admin autoriza; sin permiso vigente se deniega y audita; revocar corta el acceso", async () => {
     const seed = await seedRequest(ORG, CLIENT, "Necesito que revisen mi configuración")
-    const kase = await run((tx) => ensureCaseForHelpRequest(tx, ORG, seed))
+    const kase = seed
 
     await expect(run((tx) => grantSupportAccess(tx, ORG, CLIENT, false, kase.id, 30))).rejects.toThrow(/propietario/i)
     const grant = await run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 30))
@@ -191,7 +180,7 @@ describe("acceso delegado", () => {
 
   it("más de una hora se rechaza y el adjunto de otra clínica no se sirve", async () => {
     const seed = await seedRequest(ORG, CLIENT, "Adjunto con captura del error")
-    const kase = await run((tx) => ensureCaseForHelpRequest(tx, ORG, seed))
+    const kase = seed
     await expect(run((tx) => grantSupportAccess(tx, ORG, OWNER, true, kase.id, 61))).rejects.toThrow(/60/)
     const attachment = await run((tx) =>
       attachToMySupportCase(tx, ORG, CLIENT, kase.id, {

@@ -1,5 +1,6 @@
 export * from "./contract.js"
 export * from "./protocol.js"
+export * from "./meta-graph.js"
 export { setTelegramWebhook, telegramBotApiAdapter } from "./telegram-bot-api.js"
 export * from "./gmail.js"
 export * from "./microsoft365.js"

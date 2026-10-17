@@ -139,6 +139,7 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     SMTP_USER: "",
     SMTP_PASS: "",
     SMTP_FROM: `odentIA <no-reply@${runtime.baseDomain}>`,
+    SUPPORT_INBOX_EMAIL: `soporte@${runtime.baseDomain}`,
     S3_ENDPOINT: s3Endpoint,
     S3_REGION: "auto",
     S3_ACCESS_KEY: "minioadmin",

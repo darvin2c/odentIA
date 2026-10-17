@@ -107,7 +107,7 @@ interface Removal {
 
 /**
  * Horarios y ausencias de una sede, en dos grupos: lo de cada profesional (su
- * horario de la semana y los días que no viene) y lo de la sede (sillones,
+ * horario de la semana y los días que no viene) y lo de la sede (unidades dentales,
  * duración de una cita regular, feriados y cierres).
  */
 function AvailabilityPage() {
@@ -169,7 +169,7 @@ function AvailabilityPage() {
   const blocks = blocksQuery.data?.data ?? []
   const absences = blocks.filter((block) => block.dentistUserId === professionalId)
   const closures = blocks.filter((block) => block.dentistUserId === null)
-  // Los sillones de la sede para administrarlos: también los desactivados.
+  // Las unidades dentales de la sede para administrarlas: también las desactivadas.
   const chairsQuery = useQuery({
     queryKey: ["agenda-chairs", resources?.branchId],
     enabled: Boolean(resources?.branchId),
@@ -200,7 +200,7 @@ function AvailabilityPage() {
     )
 
   const [absenceForm, setAbsenceForm] = React.useState<AbsenceScope | null>(null)
-  /** `"new"` añade un sillón; un sillón, lo renombra. El formulario es el mismo. */
+  /** `"new"` añade una unidad dental; una unidad dental, la renombra. El formulario es el mismo. */
   const [chairForm, setChairForm] = React.useState<"new" | ChairSetting | null>(null)
   const [deactivatingChair, setDeactivatingChair] = React.useState<ChairSetting | null>(null)
   const [removal, setRemoval] = React.useState<Removal | null>(null)
@@ -257,7 +257,7 @@ function AvailabilityPage() {
     onSuccess: async (_result, { chair, isActive }) => {
       setDeactivatingChair(null)
       toast.success(
-        isActive ? `${chair.name} vuelve a estar activo` : `${chair.name} quedó desactivado`,
+        isActive ? `${chair.name} vuelve a estar activa` : `${chair.name} quedó desactivada`,
       )
       await invalidateChairs()
     },
@@ -279,13 +279,13 @@ function AvailabilityPage() {
     resourcesQuery.error instanceof ApiError &&
     resourcesQuery.error.status === 404
   const activeChairs = (chairs ?? []).filter((chair) => chair.isActive)
-  /** A qué alcanza un cierre: toda la sede o un sillón, aunque hoy esté desactivado. */
+  /** A qué alcanza un cierre: toda la sede o una unidad dental, aunque hoy esté desactivada. */
   const closureScope = (block: ScheduleBlock) =>
     block.chairId === null
       ? "toda la sede"
       : (chairs?.find((chair) => chair.id === block.chairId)?.name ??
         resources?.chairs.find((chair) => chair.id === block.chairId)?.label ??
-        "un sillón")
+        "una unidad dental")
   const reasonOf = (block: ScheduleBlock) =>
     block.reason ?? (block.kind === "ausencia" ? "Ausencia" : "Cierre")
 
@@ -455,23 +455,23 @@ function AvailabilityPage() {
           <div className="grid gap-4 lg:grid-cols-2">
             <section className={CARD}>
               <CardHead
-                title="Sillones"
+                title="Unidades dentales"
                 action={
                   canConfigure ? (
                     <Button variant="outline" size="sm" onClick={() => setChairForm("new")}>
                       <Plus aria-hidden />
-                      Añadir sillón
+                      Añadir unidad dental
                     </Button>
                   ) : null
                 }
               />
               {chairsQuery.isError && chairs === undefined ? (
-                <CardError what="los sillones" onRetry={() => void chairsQuery.refetch()} />
+                <CardError what="las unidades dentales" onRetry={() => void chairsQuery.refetch()} />
               ) : chairs === undefined ? (
                 <Skeleton className="h-9 w-full" />
               ) : chairs.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Esta sede aún no tiene sillones: sin al menos uno no se puede reservar.
+                  Esta sede aún no tiene unidades dentales: sin al menos una no se puede reservar.
                 </p>
               ) : (
                 <>
@@ -489,7 +489,7 @@ function AvailabilityPage() {
                         >
                           {chair.name}
                         </span>
-                        {chair.isActive ? null : <Badge variant="secondary">Desactivado</Badge>}
+                        {chair.isActive ? null : <Badge variant="secondary">Desactivada</Badge>}
                         {canConfigure ? (
                           <RowActions
                             label={`Acciones de ${chair.name}`}
@@ -521,7 +521,7 @@ function AvailabilityPage() {
                   </ul>
                   {activeChairs.length === 0 ? (
                     <p className="text-sm font-medium text-warning-foreground">
-                      Ningún sillón está activo: sin al menos uno no se puede reservar.
+                      Ninguna unidad dental está activa: sin al menos una no se puede reservar.
                     </p>
                   ) : null}
                 </>
@@ -640,7 +640,7 @@ function AvailabilityPage() {
           key={chairForm === "new" ? "new" : chairForm.id}
           branchId={resources.branchId}
           branchName={resources.branchName}
-          suggestedName={`Sillón ${(chairs?.length ?? resources.chairs.length) + 1}`}
+          suggestedName={`Unidad dental ${(chairs?.length ?? resources.chairs.length) + 1}`}
           chair={chairForm === "new" ? undefined : { id: chairForm.id, name: chairForm.name }}
           onClose={() => setChairForm(null)}
           onSaved={async () => {
@@ -694,18 +694,18 @@ function AvailabilityPage() {
   )
 }
 
-/** Lo que pasa al desactivar un sillón, con sus citas por delante y si es el último activo. */
+/** Lo que pasa al desactivar una unidad dental, con sus citas por delante y si es la última activa. */
 function chairConsequence(chair: ChairSetting, activeCount: number): string {
-  const parts = ["No se podrán reservar citas nuevas en él. Puedes reactivarlo cuando quieras."]
+  const parts = ["No se podrán reservar citas nuevas en ella. Puedes reactivarla cuando quieras."]
   if (chair.upcomingAppointments === 1) {
-    parts.push("Tiene 1 cita por venir: sigue en este sillón y no se mueve sola.")
+    parts.push("Tiene 1 cita por venir: sigue en esta unidad dental y no se mueve sola.")
   } else if (chair.upcomingAppointments > 1) {
     parts.push(
-      `Tiene ${chair.upcomingAppointments} citas por venir: siguen en este sillón y no se mueven solas.`,
+      `Tiene ${chair.upcomingAppointments} citas por venir: siguen en esta unidad dental y no se mueven solas.`,
     )
   }
   if (activeCount <= 1)
-    parts.push("Es el único sillón activo de la sede: sin uno no se puede reservar.")
+    parts.push("Es la única unidad dental activa de la sede: sin una no se puede reservar.")
   return parts.join(" ")
 }
 
@@ -781,7 +781,7 @@ function BlockRow({
   when: string
   /** Quitarlo pregunta antes; sin esto, la fila solo se lee. */
   onRemove?: () => void
-  /** A qué alcanza un cierre: toda la sede o un sillón. */
+  /** A qué alcanza un cierre: toda la sede o una unidad dental. */
   scope?: string
   /** Aviso de la fila: citas que quedaron dentro. */
   note?: React.ReactNode

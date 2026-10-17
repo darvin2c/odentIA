@@ -7,7 +7,7 @@
  */
 import { randomUUID } from "node:crypto"
 import { member, user } from "@odentia/db/schema/auth"
-import { cie10Code, encounter, patientDocument, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, patientDocument, serviceCatalog } from "@odentia/db/schema/clinical"
 import { crmTask } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -29,7 +29,7 @@ import {
   createSpecialty,
   signConsentDocument,
 } from "./clinical-forms.js"
-import { clinicalFixture } from "./clinical-test-fixture.js"
+import { clinicalFixture, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { createContact } from "./contacts.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import {
@@ -57,10 +57,7 @@ const sections = {
 /** Clínica con una exodoncia por pieza, una paciente adulta con su atención abierta y un diagnóstico. */
 async function visit() {
   const f = await clinicalFixture()
-  await ownerDb
-    .insert(cie10Code)
-    .values({ code: "K01.1", description: "Diente impactado" })
-    .onConflictDoNothing()
+  await seedDiagnosisCodes([{ code: "K01.1", title: "Diente impactado" }])
   const [extraction] = await ownerDb
     .insert(serviceCatalog)
     .values({
@@ -81,8 +78,8 @@ async function visit() {
   )
   await f.run((tx) =>
     addEncounterDiagnosis(tx, "org_a", f.actor, lucia.id, draft.id, {
-      cie10Code: "K01.1",
-      diagnosisType: "definitivo",
+      diagnosisCode: "K01.1",
+      diagnosisType: "confirmed",
       toothNumber: 38,
     }),
   )
@@ -172,7 +169,7 @@ it("firma en la clínica sin dibujar la del profesional, y en papel con la foto 
   const signer = await v.self()
   const [first, second] = created as [(typeof created)[number], (typeof created)[number]]
 
-  // En la silla: la persona dibuja; el profesional confirma con su perfil.
+  // En la unidad dental: la persona dibuja; el profesional confirma con su perfil.
   const inChair = await v.run((tx) =>
     signConsentDocument(tx, "org_a", v.actor, first.id, {
       signerKind: "paciente",
@@ -356,7 +353,8 @@ it("los papeles de salud van solo a la persona adulta o a su representante legal
       ],
     }),
   )
-  const today = new Date().toISOString().slice(0, 10)
+  // Hoy en la clínica (Lima): la representación vigente se cuenta con su día, no con UTC.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
   for (const [contactId, kind] of [
     [mother.id, "representante_legal"],
     [payer.id, "responsable_economico"],

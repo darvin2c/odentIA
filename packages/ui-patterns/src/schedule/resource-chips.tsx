@@ -1,6 +1,6 @@
 /**
  * Fichas de recurso: de quién es la agenda que se está viendo. Una fila que se
- * desplaza de lado, con las iniciales de color de cada profesional o sillón.
+ * desplaza de lado, con las iniciales de color de cada profesional o unidad dental.
  * Es la forma de cambiar de recurso en teléfono, donde solo cabe uno, y de
  * elegir «con quién» al reservar.
  */

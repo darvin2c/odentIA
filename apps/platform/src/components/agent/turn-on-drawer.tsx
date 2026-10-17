@@ -1,33 +1,43 @@
 import { Button } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { CircleAlert, CircleCheck } from "lucide-react"
+import { CircleAlert, CircleCheck, LoaderCircle } from "lucide-react"
 import type { FormEvent, ReactNode } from "react"
-import type { AgentOverview } from "../../lib/agent"
+import { type AgentModelStatus, type AgentOverview, MODEL_CHECK_TEXT, modelDownText } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
+import { agentLlmLabel } from "../../lib/crm"
 import { mutationErrorMessage } from "../../lib/query-error"
 
 function Check({
   ok,
+  checking = false,
   title,
   detail,
   action,
 }: {
   ok: boolean
+  /** Todavía se está comprobando: ni listo ni falta. */
+  checking?: boolean
   title: string
   detail: string
   action?: ReactNode
 }) {
   return (
-    <li className="flex flex-wrap items-start gap-2.5 rounded-xl border p-3">
-      <span className={`mt-0.5 shrink-0 [&>svg]:size-5 ${ok ? "text-success" : "text-warning"}`}>
-        {ok ? <CircleCheck aria-hidden /> : <CircleAlert aria-hidden />}
+    <li className="flex flex-wrap items-start gap-2.5 rounded-xl border p-3" aria-busy={checking || undefined}>
+      <span className={`mt-0.5 shrink-0 [&>svg]:size-5 ${checking ? "text-muted-foreground" : ok ? "text-success" : "text-warning"}`}>
+        {checking ? (
+          <LoaderCircle aria-hidden className="animate-spin motion-reduce:animate-none" />
+        ) : ok ? (
+          <CircleCheck aria-hidden />
+        ) : (
+          <CircleAlert aria-hidden />
+        )}
       </span>
       <span className="min-w-0 flex-1 text-sm">
         <span className="font-semibold">{title}</span>
-        <span className="sr-only">{ok ? " (listo)" : " (falta)"}</span>
+        <span className="sr-only">{checking ? " (comprobando)" : ok ? " (listo)" : " (falta)"}</span>
         <span className="block text-muted-foreground">{detail}</span>
       </span>
       {action}
@@ -36,14 +46,18 @@ function Check({
 }
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8"
+const ACTION = "h-auto min-h-11 p-0 sm:min-h-8"
+
+/** «El modelo responde»: el servidor hace una llamada mínima y la guarda 10 minutos. */
+export const AGENT_MODEL_QUERY_KEY = ["agent-model"] as const
 
 /**
- * Encender Recepción por primera vez: cuatro comprobaciones (lo que falta
- * lleva a donde se resuelve). Lo que puede hacer lo dicen sus funciones, en la
- * página; no hay niveles que elegir (ADR 0021). Solo la falta de un
- * canal deja el botón sin efecto: sin canal no le llega ningún mensaje y
- * encender no cambiaría nada. Las otras tres avisan y dejan encender; el
- * servidor no exige ninguna.
+ * Encender Recepción: cinco comprobaciones (lo que falta lleva a donde se
+ * resuelve). Lo que puede hacer lo dicen sus funciones, en la página; no hay
+ * niveles que elegir (ADR 0021). El canal y el modelo impiden encender: sin
+ * canal no le llega ningún mensaje y, sin un modelo que responda, cada
+ * paciente recibiría «una persona te va a responder». El servidor también
+ * rechaza encender sin un modelo que responda. Las otras tres solo avisan.
  */
 export function TurnOnDrawer({
   open,
@@ -58,6 +72,31 @@ export function TurnOnDrawer({
   onTest: () => void
 }) {
   const queryClient = useQueryClient()
+  const model = useQuery({
+    queryKey: AGENT_MODEL_QUERY_KEY,
+    queryFn: () => apiFetch<{ data: AgentModelStatus }>("/api/agent/model"),
+    enabled: open,
+    retry: false,
+    // El servidor ya guarda el resultado 10 minutos: reabrir el cajón no repite la llamada.
+    staleTime: 60_000,
+  })
+  const recheck = useMutation({
+    retry: false,
+    mutationFn: () => apiFetch<{ data: AgentModelStatus }>("/api/agent/model?fresh=1"),
+    onSuccess: (fresh) => queryClient.setQueryData(AGENT_MODEL_QUERY_KEY, fresh),
+  })
+  // «Usar el otro»: lo cambia y lo vuelve a comprobar ahí mismo.
+  const switchModel = useMutation({
+    retry: false,
+    mutationFn: async (llm: AgentModelStatus["llm"]) => {
+      await apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ llm }) })
+      return apiFetch<{ data: AgentModelStatus }>("/api/agent/model")
+    },
+    onSuccess: (fresh) => {
+      queryClient.setQueryData(AGENT_MODEL_QUERY_KEY, fresh)
+      void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
+    },
+  })
   const turnOn = useMutation({
     retry: false,
     mutationFn: () => apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ enabled: true }) }),
@@ -67,6 +106,8 @@ export function TurnOnDrawer({
       }
       onClose()
     },
+    // El servidor rechazó encender: lo que dice el modelo pudo cambiar.
+    onError: () => void queryClient.invalidateQueries({ queryKey: AGENT_MODEL_QUERY_KEY }),
   })
 
   function submit(event: FormEvent) {
@@ -76,6 +117,36 @@ export function TurnOnDrawer({
 
   const { readiness, knows } = overview
   const hasChannel = readiness.channels.length > 0
+  const checking = model.isFetching || (open && model.isPending && !model.isError) || recheck.isPending || switchModel.isPending
+  const status = model.data?.data
+  // Sin respuesta del servidor no se culpa al modelo: es la conexión.
+  const unreachable = !checking && (recheck.isError || switchModel.isError || model.isError || !status)
+  const modelOk = !checking && !unreachable && status?.responds === true
+  const recheckAction = (
+    <Button type="button" variant="link" size="sm" className={ACTION} onClick={() => recheck.mutate()}>
+      Volver a comprobar
+    </Button>
+  )
+  let modelDetail: string = MODEL_CHECK_TEXT.checking
+  let modelAction: ReactNode
+  if (!checking) {
+    if (unreachable || !status) {
+      modelDetail = MODEL_CHECK_TEXT.unreachable
+      modelAction = recheckAction
+    } else if (status.responds) {
+      modelDetail = `Responde · ${agentLlmLabel(status.llm)}`
+    } else {
+      modelDetail = modelDownText(status)
+      const other = status.other
+      modelAction = other?.responds ? (
+        <Button type="button" variant="link" size="sm" className={ACTION} onClick={() => switchModel.mutate(other.llm)}>
+          Usar el otro
+        </Button>
+      ) : (
+        recheckAction
+      )
+    }
+  }
   return (
     <FormDrawer
       open={open}
@@ -84,13 +155,13 @@ export function TurnOnDrawer({
         onClose()
       }}
       title="Encender Recepción"
-      description="Cuatro comprobaciones. Lo que falta te lleva a donde se resuelve."
+      description="Cinco comprobaciones. Lo que falta te lleva a donde se resuelve."
       onSubmit={submit}
       isSubmitting={turnOn.isPending}
       error={mutationErrorMessage(turnOn.error)}
       submitLabel="Encender Recepción"
       cancelLabel="Ahora no"
-      submitDisabled={!hasChannel}
+      submitDisabled={!hasChannel || !modelOk}
     >
       <div className="flex flex-col gap-5">
       <ul className="flex flex-col gap-2">
@@ -110,6 +181,7 @@ export function TurnOnDrawer({
             )
           }
         />
+        <Check ok={modelOk} checking={checking} title="El modelo responde" detail={modelDetail} action={modelAction} />
         <Check
           ok={knows.basicsCovered === knows.basicsTotal}
           title={`Lo básico de tu clínica: ${knows.basicsCovered} de ${knows.basicsTotal}`}
@@ -127,11 +199,11 @@ export function TurnOnDrawer({
           title="Lo probaste"
           detail={
             readiness.sandboxTurns > 0
-              ? `${readiness.sandboxTurns} ${readiness.sandboxTurns === 1 ? "mensaje de prueba" : "mensajes de prueba"}`
+              ? `${readiness.sandboxTurns} ${readiness.sandboxTurns === 1 ? "mensaje de prueba respondido" : "mensajes de prueba respondidos"}`
               : "Todavía no le escribiste ninguna prueba."
           }
           action={
-            <Button type="button" variant="link" size="sm" className="h-auto min-h-11 p-0 sm:min-h-8" onClick={onTest}>
+            <Button type="button" variant="link" size="sm" className={ACTION} onClick={onTest}>
               {readiness.sandboxTurns > 0 ? "Probar otra" : "Probar"}
             </Button>
           }
@@ -154,6 +226,7 @@ export function TurnOnDrawer({
         />
       </ul>
 
+      <p className="text-sm text-muted-foreground">El canal y el modelo impiden encender; lo demás avisa.</p>
       <p className="text-sm text-muted-foreground">Responde siempre al momento. Antes de reservar, mover o cancelar una cita le pide el «sí» al paciente. Lo apagas cuando quieras; lo que esté a medias pasa a tu equipo.</p>
       </div>
     </FormDrawer>

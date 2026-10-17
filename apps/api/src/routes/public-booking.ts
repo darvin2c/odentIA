@@ -11,12 +11,14 @@ import {
   getBookingLinkRegistrationForm,
   getPersonalLinkConsent,
   getPersonalLinkDataForm,
+  getPersonalLinkPaper,
   getPersonalLinkQuestionnaire,
   getPersonalLinkView,
   listBookingLinkSlots,
   registerFromBookingLink,
   reserveBookingLink,
   ServiceError,
+  setPersonalLinkMessages,
   signPersonalLinkConsent,
   submitPersonalLinkData,
   submitPersonalLinkQuestionnaire,
@@ -26,6 +28,7 @@ import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
+import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const WINDOW_MS = 10 * 60 * 1000
 const MAX_BUCKETS = 10000
@@ -88,6 +91,14 @@ const signBody = z.strictObject({
   signatureData: z.unknown(),
 })
 const questionnaireBody = z.strictObject({ token, answers: z.record(z.string(), z.unknown()) })
+// «Tus mensajes»: un interruptor o «ningún mensaje» (ADR 0040).
+const messagesBody = z.strictObject({
+  token,
+  tipo: z.enum(["recordatorio", "seguimiento", "novedades", "ninguno"]),
+  recibir: z.boolean(),
+})
+// «Tus papeles»: el token va en el cuerpo, nunca en la dirección (registros de acceso, proxies, Referer).
+const paperBody = z.strictObject({ token, kind: z.enum(["receta", "comprobante"]) })
 export type BookingRemoteAddress = (c: Context) => string | undefined
 
 /**
@@ -193,7 +204,13 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     const body = registrationBody.safeParse(await bodyOf(c))
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos"), 400)
     const { token: linkToken, ...input } = body.data
-    return answer(c, 201, () => inOrg(c, (tx, orgId) => registerFromBookingLink(tx, orgId, linkToken, input)))
+    return answer(c, 201, () =>
+      inOrg(c, (tx, orgId) => registerFromBookingLink(tx, orgId, linkToken, input)).catch(async (error: unknown) => {
+        // El documento ya era de alguien: queda para recepción y se responde el texto neutro.
+        await keepRegistrationHold(deps.db, (c.get("bookingOrganization") as { id: string }).id, error)
+        throw error
+      }),
+    )
   })
 
   app.post("/:slug/reserve", async (c) => {
@@ -285,6 +302,39 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     const body = questionnaireBody.safeParse(await bodyOf(c))
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus respuestas"), 400)
     return answer(c, 201, () => inOrg(c, (tx, orgId) => submitPersonalLinkQuestionnaire(tx, orgId, body.data.token, body.data.answers)))
+  })
+
+  // «Tus mensajes»: los tres interruptores de quien recibe sus mensajes.
+  app.post("/:slug/messages", async (c) => {
+    const body = messagesBody.safeParse(await bodyOf(c))
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa lo que elegiste"), 400)
+    const { token: linkToken, ...input } = body.data
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => setPersonalLinkMessages(tx, orgId, linkToken, input)))
+  })
+
+  // «Tus papeles»: la receta o el comprobante de los últimos 30 días, como PDF.
+  // Es un POST, como el resto de lo que hace el enlace: el token viaja en el cuerpo.
+  app.post("/:slug/papers/:paperId", async (c) => {
+    const body = paperBody.safeParse(await bodyOf(c))
+    const params = z.object({ paperId: z.uuid() }).safeParse({ paperId: c.req.param("paperId") })
+    if (!body.success || !params.success) return unavailable(c)
+    try {
+      const paper = await inOrg(c, (tx, orgId) =>
+        getPersonalLinkPaper(tx, orgId, body.data.token, { kind: body.data.kind, id: params.data.paperId }),
+      )
+      return new Response(Buffer.from(paper.bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${paper.filename.replace(/[^A-Za-z0-9._-]+/g, "-")}"`,
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        },
+      })
+    } catch (error) {
+      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message), error.status)
+      throw error
+    }
   })
 
   // Terminal: nunca continuar hacia requireSession ni ampliar excepciones a otros /api/*.

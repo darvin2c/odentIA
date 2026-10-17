@@ -30,6 +30,7 @@ import { listBudgets, valueOptionOf, type BudgetWithTotals } from "./budgets.js"
 import { notFound } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { deriveNextAction } from "./treatment-journey.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
 
@@ -104,8 +105,9 @@ export async function getPlanNextStep(
   can: Can,
 ): Promise<PlanNextStep> {
   const [person] = await tx
-    .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+    .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   if (!person) throw notFound("Paciente")

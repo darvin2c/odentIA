@@ -923,22 +923,24 @@ function AccountBlock({ sessionToken }: { sessionToken: string }) {
     <div className="grid gap-4">
       {account.byCurrency.map((row) => (
         <div key={row.currency} className="rounded-md border p-4">
-          <p className="text-sm font-medium">Saldo en {row.currency}</p>
-          <p className="mt-1 text-2xl font-semibold">{formatPortalMoney(row.outstandingCents, row.currency, account.locale)}</p>
-          <p className="text-xs text-muted-foreground">pendiente de pago</p>
+          <p className="text-sm font-medium">Saldo</p>
+          <p className="mt-1 text-2xl font-semibold">{formatPortalMoney(row.saldo, row.currency, account.locale)}</p>
+          <p className="text-xs text-muted-foreground">
+            {row.saldo > 0 ? "pendiente de pago" : row.porCobrar > 0 ? "lo que tienes a favor cubre lo que debes" : "estás al día"}
+          </p>
           <dl className="mt-2 grid grid-cols-2 gap-1 text-sm">
-            <dt className="text-muted-foreground">Tratamiento aceptado</dt>
-            <dd className="text-right">{formatPortalMoney(row.agreedCents, row.currency, account.locale)}</dd>
-            <dt className="text-muted-foreground">Cargado</dt>
-            <dd className="text-right">{formatPortalMoney(row.chargedCents, row.currency, account.locale)}</dd>
-            <dt className="text-muted-foreground">Pagado</dt>
-            <dd className="text-right">{formatPortalMoney(row.paidCents, row.currency, account.locale)}</dd>
-            {row.availableCreditCents > 0 && (
+            <dt className="text-muted-foreground">Debe</dt>
+            <dd className="text-right">{formatPortalMoney(row.porCobrar, row.currency, account.locale)}</dd>
+            {row.aFavor > 0 && (
               <>
-                <dt className="text-muted-foreground">Crédito a favor</dt>
-                <dd className="text-right">{formatPortalMoney(row.availableCreditCents, row.currency, account.locale)}</dd>
+                <dt className="text-muted-foreground">A favor</dt>
+                <dd className="text-right">{formatPortalMoney(row.aFavor, row.currency, account.locale)}</dd>
               </>
             )}
+            <dt className="text-muted-foreground">Tratamiento aceptado</dt>
+            <dd className="text-right">{formatPortalMoney(row.agreedCents, row.currency, account.locale)}</dd>
+            <dt className="text-muted-foreground">Pagado</dt>
+            <dd className="text-right">{formatPortalMoney(row.pagado, row.currency, account.locale)}</dd>
           </dl>
         </div>
       ))}

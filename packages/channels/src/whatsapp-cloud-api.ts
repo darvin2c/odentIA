@@ -4,6 +4,7 @@ import type {
   ChannelAdapterDeps,
   NormalizedInbound,
   NormalizedStatus,
+  NormalizedTemplateCategory,
   NormalizedTemplateStatus,
   OutboundMessage,
   ProviderAccount,
@@ -11,8 +12,10 @@ import type {
   ProviderTemplate,
   TemplateCategory,
   TemplateStatus,
+  TemplateUnsupported,
   WebhookParseResult,
 } from "./protocol.js"
+import { metaGraphVersion } from "./meta-graph.js"
 
 export interface WhatsAppTemplateRef {
   name: string
@@ -37,7 +40,6 @@ export interface WhatsAppCloudConfig {
   templates: WhatsAppTemplateRef[]
 }
 
-const GRAPH_VERSION = "v21.0"
 
 function getConfig(config: Record<string, unknown>): WhatsAppCloudConfig {
   const pick = (k: string): string => {
@@ -191,7 +193,8 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
   // 'sent' y otros no tienen equivalente local.
   if (!status) return null
   const error = status === "failed" ? sendFailureText(s.errors?.[0]) : null
-  return { externalMessageId: s.id, status, ...(error ? { error } : {}) }
+  const notOnWhatsApp = status === "failed" && s.errors?.[0]?.code === NOT_ON_WHATSAPP_CODE
+  return { externalMessageId: s.id, status, ...(error ? { error } : {}), ...(notOnWhatsApp ? { notOnWhatsApp } : {}) }
 }
 
 /**
@@ -201,7 +204,14 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
  * El error llega en la respuesta del envío o después, en el aviso de estado.
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
  */
+/**
+ * «Message undeliverable»: Meta no pudo entregarlo, sobre todo porque el número
+ * no tiene WhatsApp. La ficha dice «Este número no tiene WhatsApp» (decisión 23).
+ */
+const NOT_ON_WHATSAPP_CODE = 131026
+
 const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
+  [NOT_ON_WHATSAPP_CODE]: "WhatsApp no pudo entregarlo: lo más probable es que este número no tenga WhatsApp.",
   // «Business eligibility payment issue»: la cuenta de WhatsApp Business no
   // tiene una forma de pago válida (o su línea de crédito no está activa).
   131042:
@@ -230,7 +240,7 @@ async function graphFetch(
   init: { method?: string; body?: unknown },
   deps: ChannelAdapterDeps,
 ): Promise<{ status: number; json: unknown }> {
-  const res = await deps.fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}`, {
+  const res = await deps.fetch(`https://graph.facebook.com/${metaGraphVersion()}/${path}`, {
     method: init.method ?? "GET",
     headers: {
       Authorization: `Bearer ${cfg.accessToken}`,
@@ -437,11 +447,19 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
   let body = ""
   const buttons: string[] = []
   let link: { title: string; url: string } | null = null
+  // odentIA envía el cuerpo por posición, sin encabezado: un encabezado con
+  // datos o con un archivo pide un parámetro que no se manda.
+  let header = false
   const components = "components" in raw && Array.isArray(raw.components) ? raw.components : []
   for (const component of components) {
     if (!component || typeof component !== "object" || !("type" in component)) continue
     const type = typeof component.type === "string" ? component.type.toUpperCase() : ""
     if (type === "BODY" && "text" in component && typeof component.text === "string") body = component.text
+    if (type === "HEADER") {
+      const format = "format" in component && typeof component.format === "string" ? component.format.toUpperCase() : "TEXT"
+      const headerText = "text" in component && typeof component.text === "string" ? component.text : ""
+      if (format !== "TEXT" || /\{\{[^{}]+\}\}/.test(headerText)) header = true
+    }
     if (type === "BUTTONS" && "buttons" in component && Array.isArray(component.buttons)) {
       for (const button of component.buttons) {
         if (!button || typeof button !== "object") continue
@@ -460,6 +478,11 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
     }
   }
   const positions = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((match) => Number(match[1]))
+  // Datos por nombre (`{{nombre}}`, `parameter_format: NAMED`): odentIA los manda por posición.
+  const named =
+    ("parameter_format" in raw && typeof raw.parameter_format === "string" && raw.parameter_format.toUpperCase() === "NAMED") ||
+    /\{\{\s*[^{}\d\s][^{}]*\}\}/.test(body)
+  const unsupported: TemplateUnsupported | null = header ? "encabezado" : named ? "datos_por_nombre" : null
   return {
     externalId: "id" in raw ? text(raw.id) : null,
     name,
@@ -471,6 +494,35 @@ function toProviderTemplate(raw: unknown): ProviderTemplate | null {
     variables: positions.length > 0 ? Math.max(...positions) : 0,
     buttons,
     link,
+    unsupported,
+  }
+}
+
+/**
+ * Aviso de cambio de categoría (`template_category_update`). La categoría
+ * nueva llega en `new_category`; el aviso previo a un cambio programado la trae
+ * en `correct_category`.
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/template_category_update
+ */
+function toTemplateCategory(value: unknown): NormalizedTemplateCategory | null {
+  if (!value || typeof value !== "object") return null
+  const name = "message_template_name" in value ? text(value.message_template_name) : null
+  const language = "message_template_language" in value ? text(value.message_template_language) : null
+  const next =
+    "new_category" in value && typeof value.new_category === "string"
+      ? value.new_category
+      : "correct_category" in value && typeof value.correct_category === "string"
+        ? value.correct_category
+        : null
+  if (!name || !language || !next) return null
+  const id = "message_template_id" in value ? value.message_template_id : null
+  const previous = "previous_category" in value && typeof value.previous_category === "string" ? value.previous_category : null
+  return {
+    externalId: typeof id === "string" || typeof id === "number" ? String(id) : null,
+    name,
+    language,
+    category: templateCategory(next),
+    previous: previous ? templateCategory(previous) : null,
   }
 }
 
@@ -508,6 +560,7 @@ interface WaChange {
   messages: NormalizedInbound[]
   statuses: NormalizedStatus[]
   templateStatus: NormalizedTemplateStatus | null
+  templateCategory: NormalizedTemplateCategory | null
 }
 
 /** Recorre `entry[].changes[]` de un aviso y normaliza cada cambio por separado. */
@@ -529,7 +582,14 @@ function readChanges(rawBody: string): WaChange[] {
       if ("field" in change && change.field === "message_template_status_update") {
         const update = toTemplateStatus(change.value)
         if (update) {
-          found.push({ accountId, phoneNumberId: null, messages: [], statuses: [], templateStatus: update })
+          found.push({ accountId, phoneNumberId: null, messages: [], statuses: [], templateStatus: update, templateCategory: null })
+        }
+        continue
+      }
+      if ("field" in change && change.field === "template_category_update") {
+        const update = toTemplateCategory(change.value)
+        if (update) {
+          found.push({ accountId, phoneNumberId: null, messages: [], statuses: [], templateStatus: null, templateCategory: update })
         }
         continue
       }
@@ -551,6 +611,7 @@ function readChanges(rawBody: string): WaChange[] {
         messages,
         statuses,
         templateStatus: null,
+        templateCategory: null,
       })
     }
   }
@@ -566,11 +627,12 @@ export interface WhatsAppNumberDelivery {
   statuses: NormalizedStatus[]
 }
 
-/** Lo que un aviso trae para una cuenta: los cambios de estado de sus plantillas. */
+/** Lo que un aviso trae para una cuenta: los cambios de estado y de categoría de sus plantillas. */
 export interface WhatsAppAccountDelivery {
   kind: "account"
   accountId: string
   templateStatuses: NormalizedTemplateStatus[]
+  templateCategories: NormalizedTemplateCategory[]
 }
 
 export type WhatsAppDelivery = WhatsAppNumberDelivery | WhatsAppAccountDelivery
@@ -589,14 +651,16 @@ export function splitWhatsAppWebhook(rawBody: string): WhatsAppDelivery[] {
   const numbers = new Map<string, WhatsAppNumberDelivery>()
   const accounts = new Map<string, WhatsAppAccountDelivery>()
   for (const change of readChanges(rawBody)) {
-    if (change.templateStatus) {
+    if (change.templateStatus || change.templateCategory) {
       if (!change.accountId) continue
       const account = accounts.get(change.accountId) ?? {
         kind: "account",
         accountId: change.accountId,
         templateStatuses: [],
+        templateCategories: [],
       }
-      account.templateStatuses.push(change.templateStatus)
+      if (change.templateStatus) account.templateStatuses.push(change.templateStatus)
+      if (change.templateCategory) account.templateCategories.push(change.templateCategory)
       accounts.set(change.accountId, account)
       continue
     }
@@ -639,12 +703,19 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const messages: NormalizedInbound[] = []
     const statuses: NormalizedStatus[] = []
     const templateStatuses: NormalizedTemplateStatus[] = []
+    const templateCategories: NormalizedTemplateCategory[] = []
     for (const change of readChanges(rawBody)) {
       messages.push(...change.messages)
       statuses.push(...change.statuses)
       if (change.templateStatus) templateStatuses.push(change.templateStatus)
+      if (change.templateCategory) templateCategories.push(change.templateCategory)
     }
-    return { messages, statuses, ...(templateStatuses.length > 0 ? { templateStatuses } : {}) }
+    return {
+      messages,
+      statuses,
+      ...(templateStatuses.length > 0 ? { templateStatuses } : {}),
+      ...(templateCategories.length > 0 ? { templateCategories } : {}),
+    }
   },
 
   async sendMessage(config, msg: OutboundMessage, deps) {
@@ -687,7 +758,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const cfg = getConfig(config)
     const found: ProviderTemplate[] = []
     let path: string | null =
-      `${cfg.wabaId}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=100`
+      `${cfg.wabaId}/message_templates?fields=id,name,language,status,category,components,rejected_reason,parameter_format&limit=100`
     // Tope de páginas: una cuenta no tiene miles de plantillas y el cursor no debe colgar la lectura.
     for (let page = 0; path && page < 10; page++) {
       const { status, json }: { status: number; json: unknown } = await graphFetch(cfg, path, {}, deps)
@@ -703,7 +774,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       const more = paging && typeof paging === "object" && "next" in paging && typeof paging.next === "string"
       path =
         more && after
-          ? `${cfg.wabaId}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=100&after=${encodeURIComponent(after)}`
+          ? `${cfg.wabaId}/message_templates?fields=id,name,language,status,category,components,rejected_reason,parameter_format&limit=100&after=${encodeURIComponent(after)}`
           : null
     }
     return found

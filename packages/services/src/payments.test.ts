@@ -5,10 +5,15 @@ import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
+import { patientContact } from "@odentia/db/schema/clinical"
+import { and, eq, sql } from "drizzle-orm"
+import { getAgentPatientSummary } from "./agent-operations.js"
 import {
   collectCharge,
   createCharge,
   getAccountSummary,
+  getPatientAccount,
+  refundCredit,
   updateCharge,
   voidCharge,
 } from "./payments.js"
@@ -158,4 +163,71 @@ it("cobra multimedio con vuelto, reparte FIFO y anula el concepto sin cobros", a
   await expect(
     f.run((tx) => voidCharge(tx, ...f.args, first.id, { reason: "X" })),
   ).rejects.toMatchObject({ code: "CHARGE_HAS_APPLICATIONS" })
+})
+
+it("el portal dice los mismos montos que Caja: multiplica por sesiones y resta las devoluciones", async () => {
+  const f = await clinicalFixture()
+  const { cash } = await seedMethods(f)
+  const branchId = await seedBranch(f)
+  const item = await f.run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  // Ortodoncia por sesiones: 12 visitas de S/ 1 200.
+  await ownerDb.execute(
+    sql`update treatment_budget_item set billing_mode = 'session', sessions_planned = 12 where budget_id = ${budget.id}`,
+  )
+  await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  await f.run((tx) =>
+    decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }),
+  )
+  // Paga S/ 500 por adelantado y se le devuelven S/ 100.
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      advanceCents: 50000,
+      payments: [{ paymentMethodId: cash.id, amountCents: 50000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  await f.run((tx) => refundCredit(tx, ...f.args, { branchId, amountCents: 10000, reason: "Pagó de más" }))
+  const caja = (await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))).byCurrency.find((c) => c.currency === "PEN")
+  const portal = (await f.run((tx) => getPatientAccount(tx, "org_a", f.patient.id))).byCurrency.find((c) => c.currency === "PEN")
+  expect(portal?.agreedCents).toBe(12 * 120000)
+  expect(portal).toMatchObject({ pagado: 40000, aFavor: 40000, porCobrar: 0, saldo: 0 })
+  expect(portal).toMatchObject({ pagado: caja?.pagado, aFavor: caja?.aFavor, porCobrar: caja?.porCobrar, saldo: caja?.saldo })
+})
+
+it("el saldo descuenta lo que tiene a favor, y «Aplicar» cancela la deuda con un movimiento registrado", async () => {
+  const f = await clinicalFixture()
+  const { cash } = await seedMethods(f)
+  const branchId = await seedBranch(f)
+  await f.run((tx) => createCharge(tx, ...f.args, { description: "Resina", amountCents: 10000 }))
+  await f.run((tx) =>
+    collectCharge(tx, ...f.args, {
+      branchId,
+      advanceCents: 6000,
+      payments: [{ paymentMethodId: cash.id, amountCents: 6000 }],
+      requestId: randomUUID(),
+    }),
+  )
+  const before = (await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))).byCurrency[0]
+  // «Debe: S/ 100 · A favor: S/ 60 · Saldo: S/ 40».
+  expect(before).toMatchObject({ porCobrar: 10000, aFavor: 6000, saldo: 4000 })
+  // El agente dice el mismo saldo, no lo que debe sin descontar.
+  const [self] = await ownerDb
+    .select({ contactId: patientContact.contactId })
+    .from(patientContact)
+    .where(and(eq(patientContact.organizationId, "org_a"), eq(patientContact.patientId, f.patient.id), eq(patientContact.relationship, "self")))
+  const told = await f.run((tx) => getAgentPatientSummary(tx, "org_a", self!.contactId, f.patient.id))
+  expect(told.balance).toEqual([{ currency: before!.currency, outstandingCents: 4000 }])
+  // Aplicar lo que tiene a favor: el mismo cobro de caja, sin dinero nuevo.
+  const applied = await f.run((tx) => collectCharge(tx, ...f.args, { branchId, requestId: randomUUID() }))
+  expect(applied.creditAppliedCents).toBe(6000)
+  // No alcanza: lo que falta.
+  expect(applied.remainingCents).toBe(4000)
+  expect(applied.ticket).toMatchObject({ totalCents: 0, creditAppliedCents: 6000 })
+  expect(applied.account.byCurrency[0]).toMatchObject({ porCobrar: 4000, aFavor: 0, saldo: 4000 })
+  // Lo registrado se ve en sus cobros.
+  expect(applied.account.cobros.some((row) => row.ticketId === applied.ticket.id)).toBe(true)
 })

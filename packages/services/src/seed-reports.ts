@@ -108,7 +108,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<void
   for (const plan of PLANS) {
     const month = addMonths(current, -plan.monthsBack)
     const start = monthStart(timezone, month.year, month.month).getTime()
-    // Cada cita en su propio hueco: día a día desde el 2, de 9 a 16 h, sin solaparse en el sillón.
+    // Cada cita en su propio hueco: día a día desde el 2, de 9 a 16 h, sin solaparse en la unidad dental.
     const slot = (index: number): Date => new Date(start + (1 + Math.floor(index / 8)) * 86_400_000 + (9 + (index % 8)) * 3_600_000)
     const statuses = [
       ...Array<string>(plan.attended).fill("atendida"),

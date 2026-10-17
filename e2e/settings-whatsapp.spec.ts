@@ -18,7 +18,7 @@ import { surface } from "./surface"
 const PHONE_NUMBER_ID = "E2E-PNID"
 const APP_SECRET = "e2e-secret"
 /** Plantillas que el entorno da por aprobadas al declarar la conexión. */
-const REMINDER = { name: "odentia_recordatorio_cita_v1", language: "es" }
+const REMINDER = { name: "odentia_recordatorio_cita_v2", language: "es" }
 const RESUME = { name: "odentia_retomar_conversacion_v1", language: "es" }
 
 interface WhatsAppConnection {

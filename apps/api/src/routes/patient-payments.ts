@@ -4,7 +4,7 @@ import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import { collectCharge, createCharge, getAccountSummary, getTicketReceipt, refundCredit, updateCharge, voidCharge, voidTicket } from "@odentia/services"
+import { collectCharge, createCharge, getAccountSummary, getTicketReceipt, refundCredit, sendTicketReceiptByEmail, ServiceError, updateCharge, voidCharge, voidTicket } from "@odentia/services"
 import type { Context } from "hono"
 
 function forbid(c: Context) {
@@ -50,7 +50,7 @@ const refundInput = z.object({
   reason: z.string().trim().min(1).max(2000),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
 }).strict()
-export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db">) {
+export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
   const app = new Hono()
   // La cuenta exige finance.read; cada mutación exige además finance.write.
   // Guarda acotado a las rutas de caja: montada en "/", un `use("*")` también
@@ -90,20 +90,37 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db">) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     // El dominio no acepta null en opcionales: se normaliza en el borde.
     const body = parsed.data
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
-      collectCharge(tx, orgId, userId, params.data.id, {
-        branchId: body.branchId,
-        payerContactId: body.payerContactId ?? undefined,
-        chargeIds: body.chargeIds ?? undefined,
-        advanceCents: body.advanceCents ?? undefined,
-        payments: (body.payments ?? []).map((p) => ({
-          paymentMethodId: p.paymentMethodId,
-          amountCents: p.amountCents,
-          reference: p.reference ?? undefined,
-        })),
-        cashReceivedCents: body.cashReceivedCents ?? undefined,
-        requestId: body.requestId,
-      })))
+    return runService(c, 201, async () => {
+      const collected = await withOrgContext(deps.db, orgId, tx =>
+        collectCharge(tx, orgId, userId, params.data.id, {
+          branchId: body.branchId,
+          payerContactId: body.payerContactId ?? undefined,
+          chargeIds: body.chargeIds ?? undefined,
+          advanceCents: body.advanceCents ?? undefined,
+          payments: (body.payments ?? []).map((p) => ({
+            paymentMethodId: p.paymentMethodId,
+            amountCents: p.amountCents,
+            reference: p.reference ?? undefined,
+          })),
+          cashReceivedCents: body.cashReceivedCents ?? undefined,
+          requestId: body.requestId,
+        }))
+      // El comprobante sale solo por correo (decisión 20 v2), después de cobrar y
+      // aparte: si el envío falla, el cobro ya quedó. Un reintento no lo repite.
+      if (collected.duplicate) return { ...collected, receipt: null }
+      const receipt = await withOrgContext(deps.db, orgId, tx =>
+        sendTicketReceiptByEmail(tx, orgId, userId, params.data.id, collected.ticket.id, { storage: deps.storage }),
+      ).catch((error: unknown) => {
+        // El cobro ya quedó: un fallo del envío no lo deshace ni lo hace parecer fallido.
+        if (!(error instanceof ServiceError)) console.error("cobro: el comprobante no salió por correo", error)
+        return {
+          sent: null,
+          reason: "sin_conexion" as const,
+          text: `No se pudo enviar el comprobante${error instanceof ServiceError ? `: ${error.message}` : ""}. Entrégalo impreso.`,
+        }
+      })
+      return { ...collected, receipt }
+    })
   })
   // Cargos de caja: concepto manual (fuera del tarifario, con o sin moneda)
   // o cargo de una línea aceptada de la propuesta (hereda precio y promoción).

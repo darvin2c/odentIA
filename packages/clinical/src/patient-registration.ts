@@ -1,3 +1,4 @@
+import { ALLERGY_SEVERITIES } from "./catalogs.js"
 import { z } from "zod"
 import {
   type ClinicalCountryProfile,
@@ -142,7 +143,7 @@ export const demographicsSchema = z.strictObject({
 })
 export type RegistrationDemographics = z.infer<typeof demographicsSchema>
 export const healthAllergyDeclarationSchema = z.strictObject({
-  substance: text(200).min(1), reaction: text(2000).optional(), severity: z.enum(["leve", "moderada", "severa", "desconocida"]),
+  substance: text(200).min(1), reaction: text(2000).optional(), severity: z.enum(ALLERGY_SEVERITIES),
 })
 export const healthConditionDeclarationSchema = z.strictObject({ name: text(200).min(1), notes: text(2000).optional() })
 export const healthMedicationDeclarationSchema = z.strictObject({
@@ -155,7 +156,11 @@ const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
 }).refine(v => v.state === "recorded" ? v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
 export const registrationContactInputSchema = z.strictObject({
-  contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(), isPreferred: z.boolean(),
+  contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(),
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship: z.enum(KINSHIP).nullable().optional(), isPreferred: z.boolean(),
+  /** Contacto de emergencia (decisión 25); sin indicar, queda como estaba. */
+  isEmergency: z.boolean().optional(),
 })
 export type RegistrationContactInput = z.infer<typeof registrationContactInputSchema>
 export const registrationAnswersSchema = z.strictObject({
@@ -277,6 +282,8 @@ function countryErrors(
   if (data.insuranceScheme && !unchanged("insuranceScheme") && !insuranceScheme(profile, data.insuranceScheme))
     errors.insuranceScheme = "Elige el seguro de la lista"
   const regions = profile.address.regions
+  if (data.maritalStatus && !unchanged("maritalStatus") && !profile.maritalStatuses.includes(data.maritalStatus))
+    errors.maritalStatus = "Elige el estado civil de la lista"
   if (regions && data.addressRegion && !unchanged("addressRegion") && !regionOption(profile, data.addressRegion))
     errors.addressRegion = `Elige el ${profile.address.regionLabel.toLowerCase()} de la lista`
 }

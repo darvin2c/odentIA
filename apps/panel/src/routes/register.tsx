@@ -52,7 +52,7 @@ function RegisterPage() {
   return (
     <AuthSplit
       title="Crea tu cuenta"
-      description="Regístrate en Odentia32"
+      description="Regístrate en odentIA"
       footer={
         <>
           ¿Ya tienes cuenta?{" "}

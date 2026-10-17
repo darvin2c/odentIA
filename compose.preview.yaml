@@ -123,7 +123,7 @@ services:
         # esté enrutado). Los tres pasos son idempotentes, así que se reintenta
         # la secuencia completa hasta un límite en vez de fallar al primer intento.
         attempt=1
-        until pnpm --filter @odentia/db seed:cie10 \
+        until pnpm --filter @odentia/db seed:diagnoses \
           && pnpm --filter @odentia/db seed:procedures \
           && pnpm db:seed; do
           if [ "$$attempt" -ge 60 ]; then

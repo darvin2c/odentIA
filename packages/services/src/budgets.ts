@@ -20,7 +20,7 @@ import {
   budgetStateText,
   sumAcceptedCents,
 } from "@odentia/clinical"
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { budgetAwaitsAnswer } from "./budget-awaiting.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
@@ -32,6 +32,7 @@ import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 
 import { requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -453,6 +454,24 @@ export function valueOptionOf<T extends { decision: string; isRecommended: boole
     options[0] ??
     null
   )
+}
+
+/**
+ * La misma regla que `valueOptionOf`, en SQL: la opción que vale de una fila de
+ * `treatment_budget` (la elegida, si no la recomendada, si no la primera). Para
+ * lo que suma presupuestos en la base (Reportes): nunca se suman las opciones.
+ * Cambian juntas; su prueba las compara.
+ */
+export function budgetValueOptionSql(budget: { id: SQLWrapper; organizationId: SQLWrapper }): SQL {
+  return sql`(select value_option.id from treatment_budget_option value_option
+    where value_option.organization_id = ${budget.organizationId} and value_option.budget_id = ${budget.id}
+    order by (value_option.decision = 'elegida') desc, value_option.is_recommended desc, value_option.position
+    limit 1)`
+}
+
+/** Las visitas que cuenta una línea (`budgetLineUnits`), en SQL sobre el alias de la línea. */
+export function budgetLineUnitsSql(line: { billingMode: SQLWrapper; sessionsPlanned: SQLWrapper }): SQL {
+  return sql`(case when ${line.billingMode} = 'session' then greatest(coalesce(${line.sessionsPlanned}, 1), 1) else 1 end)`
 }
 
 function optionTotals(option: BudgetOptionRow, items: BudgetLineWithStatus[]): BudgetOptionWithTotals {
@@ -2057,11 +2076,12 @@ export async function getBudgetPrintPayload(
   if (!profile) throw notFound("Perfil de organización")
   const [patientRow] = await tx
     .select({
-      displayName: patient.displayName,
-      docType: patient.docType,
-      docNumber: patient.docNumber,
+      displayName: patientPerson.displayName,
+      docType: patientPerson.docType,
+      docNumber: patientPerson.docNumber,
     })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   if (!patientRow) throw notFound("Paciente")

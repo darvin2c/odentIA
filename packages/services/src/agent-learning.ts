@@ -39,8 +39,13 @@ const TEAM_TOOK_MINUTES = 120
 const REVIEW_PENDING_LIMIT = 50
 const LESSON_BODY_CHARS = 2000
 const LESSON_TITLE_CHARS = 200
-/** Reglas que caben en el prompt; las más recientes ganan. */
-export const LESSON_RULE_LIMIT = 20
+/**
+ * Reglas que llegan al agente: todas, hasta este tope (decisión 17 de la fase
+ * 4). Una regla que no se olvida vale más que el pequeño costo de llevarla.
+ * Pasado el tope van las más recientes y el agente y «Aprender» dicen cuántas
+ * quedaron fuera.
+ */
+export const LESSON_RULE_LIMIT = 40
 /** Ejemplos que acompañan un turno: solo los parecidos a lo que se pregunta. */
 export const LESSON_EXAMPLE_LIMIT = 2
 /** Puntuación mínima para decir que una pregunta toca el tema de una lección o de un caso. */
@@ -458,10 +463,11 @@ export async function getLesson(tx: Db, orgId: string, id: string): Promise<Less
 }
 
 export async function listLessons(tx: Db, orgId: string, status: LessonStatus): Promise<LessonItem[]> {
+  // Lo que escribió la clínica no se aprendió: vive en «Lo que el agente debe saber».
   const rows = await tx
     .select()
     .from(agentLesson)
-    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, status)))
+    .where(and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, status), eq(agentLesson.source, "aprendida")))
     .orderBy(desc(agentLesson.updatedAt))
     .limit(200)
   return toLessonItems(tx, orgId, rows)
@@ -684,9 +690,33 @@ async function keepTestCase(tx: Db, orgId: string, actorUserId: string, lesson: 
  * oficial entra al conocimiento (nueva, o cambiando la que ya había); una regla
  * o un ejemplo quedan para su agente. Su pregunta queda como caso de prueba.
  */
-export async function approveLesson(tx: Db, orgId: string, actorUserId: string, id: string): Promise<LessonItem> {
+/**
+ * Aprueba una lección. Una regla que contradice otra (`findRuleConflict`) se
+ * avisa antes en la pantalla; con `replaceId` («Reemplazar») la otra deja de
+ * valer en el mismo paso. «Mantener las dos» aprueba sin `replaceId`.
+ */
+export async function approveLesson(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  id: string,
+  opts: { replaceId?: string } = {},
+): Promise<LessonItem> {
   const lesson = await lockLesson(tx, orgId, id)
   if (lesson.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, `La lección ya está ${lesson.status}`)
+  if (opts.replaceId) {
+    if (lesson.kind !== "regla") throw validation("Solo una regla reemplaza a otra")
+    const replaced = await lockLesson(tx, orgId, opts.replaceId)
+    if (replaced.status !== "activa" || replaced.kind !== "regla" || replaced.scope !== lesson.scope) {
+      throw new ServiceError("LESSON_NOT_ACTIVE", 409, "La regla que se iba a reemplazar ya no está activa")
+    }
+    const now = new Date()
+    await tx
+      .update(agentLesson)
+      .set({ status: "retirada", withdrawnBy: actorUserId, withdrawnAt: now, updatedAt: now })
+      .where(eq(agentLesson.id, replaced.id))
+    await audit(tx, orgId, actorUserId, "agent.lesson_replaced", "agent_lesson", replaced.id, { by: id })
+  }
   const applied = lesson.kind === "respuesta_oficial" ? await applyOfficialAnswer(tx, orgId, actorUserId, lesson) : null
   await tx
     .update(agentLesson)
@@ -868,8 +898,10 @@ export async function lessonImpact(tx: Db, orgId: string, lesson: LessonItem): P
 /* ---------- Lo aprendido, dentro del turno del agente ---------- */
 
 export interface TurnLessons {
-  /** Reglas activas del agente: van siempre en su prompt. */
+  /** Reglas activas del agente: van siempre en su prompt (todas, hasta `LESSON_RULE_LIMIT`). */
   rules: Array<{ id: string; title: string; body: string }>
+  /** Reglas activas que no caben pasado el tope: se dicen, nunca se callan. */
+  rulesLeftOut: number
   /** Ejemplos aprobados parecidos a lo que se pregunta ahora. */
   examples: Array<{ id: string; title: string; question: string; body: string }>
   /** Lecciones que tocan el tema del mensaje: las que cuentan como usadas en este turno. */
@@ -890,19 +922,27 @@ export async function lessonsForTurn(
   latestText: string,
   opts: { skipIds?: readonly string[]; extra?: Array<{ id: string; kind: LessonKind; title: string; question: string; body: string }> } = {},
 ): Promise<TurnLessons> {
-  const rows = await tx
-    .select({ id: agentLesson.id, kind: agentLesson.kind, title: agentLesson.title, question: agentLesson.question, body: agentLesson.body })
+  const columns = { id: agentLesson.id, kind: agentLesson.kind, title: agentLesson.title, question: agentLesson.question, body: agentLesson.body }
+  const active = and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.scope, agent))
+  // Las reglas, todas: los ejemplos (que solo van si se parecen a la pregunta) no les quitan lugar.
+  const ruleRows = await tx
+    .select(columns)
     .from(agentLesson)
-    .where(
-      and(
-        eq(agentLesson.organizationId, orgId),
-        eq(agentLesson.status, "activa"),
-        eq(agentLesson.scope, agent),
-        inArray(agentLesson.kind, ["regla", "ejemplo"]),
-      ),
+    .where(and(active, eq(agentLesson.kind, "regla")))
+    // Una sola lista (decisión 24): primero lo que escribió la clínica, en su orden; después lo aprendido.
+    .orderBy(
+      sql`case ${agentLesson.source} when 'escrita' then 0 else 1 end`,
+      sql`case ${agentLesson.source} when 'escrita' then ${agentLesson.createdAt} end asc`,
+      desc(agentLesson.approvedAt),
+      asc(agentLesson.id),
     )
+  const exampleRows = await tx
+    .select(columns)
+    .from(agentLesson)
+    .where(and(active, eq(agentLesson.kind, "ejemplo")))
     .orderBy(desc(agentLesson.approvedAt))
     .limit(200)
+  const rows = [...ruleRows, ...exampleRows]
   const skip = new Set(opts.skipIds ?? [])
   const all = [...(opts.extra ?? []).filter((item) => item.kind !== "respuesta_oficial"), ...rows.filter((row) => !skip.has(row.id))]
   const scored = all.map((lesson) => ({
@@ -911,7 +951,8 @@ export async function lessonsForTurn(
       ? scoreKnowledgeMatch(latestText, { title: lesson.question || lesson.title, body: "", askForms: [] })
       : 0,
   }))
-  const rules = scored.filter((item) => item.lesson.kind === "regla").slice(0, LESSON_RULE_LIMIT)
+  const allRules = scored.filter((item) => item.lesson.kind === "regla")
+  const rules = allRules.slice(0, LESSON_RULE_LIMIT)
   const examples = scored
     .filter((item) => item.lesson.kind === "ejemplo" && item.score >= TOPIC_SCORE)
     .sort((a, b) => b.score - a.score)
@@ -919,18 +960,22 @@ export async function lessonsForTurn(
   const matched = [...rules.filter((item) => item.score >= TOPIC_SCORE), ...examples].map((item) => item.lesson)
   return {
     rules: rules.map(({ lesson }) => ({ id: lesson.id, title: lesson.title, body: lesson.body })),
+    rulesLeftOut: allRules.length - rules.length,
     examples: examples.map(({ lesson }) => ({ id: lesson.id, title: lesson.title, question: lesson.question, body: lesson.body })),
     matchedIds: matched.map((lesson) => lesson.id),
     matched: matched.map((lesson) => ({ id: lesson.id, kind: lesson.kind, title: lesson.title })),
   }
 }
 
-export function formatLessonRules(rules: TurnLessons["rules"]): string {
+export function formatLessonRules(rules: TurnLessons["rules"], leftOut = 0): string {
   if (rules.length === 0) return ""
   return [
-    "Reglas que tu clínica aprobó al corregirte. Cúmplelas siempre; si chocan con los principios de arriba, ganan los principios:",
+    "Lo que debes saber de tu clínica (lo escribió la clínica o lo aprobó al corregirte). Cúmplelo siempre; si choca con los principios de arriba, ganan los principios:",
     ...rules.map((rule) => `- ${shorten(rule.body, 300)}`),
-  ].join("\n")
+    leftOut > 0 ? `(La clínica tiene ${leftOut} reglas más antiguas que no caben aquí; si algo no está en estas, no lo supongas.)` : null,
+  ]
+    .filter(Boolean)
+    .join("\n")
 }
 
 export function formatLessonExamples(examples: TurnLessons["examples"]): string {
@@ -974,6 +1019,8 @@ export interface LearningOverview {
   learned: LessonItem[]
   withdrawn: LessonItem[]
   cases: number
+  /** Cuántas reglas activas de un agente le llegan como mucho (`LESSON_RULE_LIMIT`): pasado el tope, la pantalla lo dice. */
+  ruleLimit: number
 }
 
 export async function getLearningOverview(tx: Db, orgId: string): Promise<LearningOverview> {
@@ -991,6 +1038,7 @@ export async function getLearningOverview(tx: Db, orgId: string): Promise<Learni
     learned: await listLessons(tx, orgId, "activa"),
     withdrawn: await listLessons(tx, orgId, "retirada"),
     cases: cases?.total ?? 0,
+    ruleLimit: LESSON_RULE_LIMIT,
   }
 }
 

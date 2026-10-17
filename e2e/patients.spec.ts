@@ -337,8 +337,8 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   const encounterId = page.url().split("/encounters/")[1]?.split(/[?#]/)[0] ?? ""
   const apiPath = `/api/patients/${ids.patientId}/encounters/${encounterId}`
   await call(page, "POST", `${apiPath}/diagnoses`, owner.org.slug, {
-    cie10Code: "K04.0",
-    diagnosisType: "definitivo",
+    diagnosisCode: "K04.0",
+    diagnosisType: "confirmed",
     toothNumber: 36,
   }, 201)
   await call(page, "PATCH", apiPath, owner.org.slug, {

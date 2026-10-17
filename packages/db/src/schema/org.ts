@@ -19,12 +19,17 @@ export const orgProfile = pgTable("org_profile", {
     .primaryKey()
     .references(() => organization.id),
   legalName: text("legal_name").notNull(),
-  tradeName: text("trade_name"),
+  /**
+   * El nombre que ve la persona en todo (decisión 19): WhatsApp, «Su enlace»,
+   * el portal, el registro, el chat web y los PDF. Obligatorio: vacío, la base
+   * pone la razón social (respaldo de datos viejos) y lo copia en
+   * `organization.name`. La razón social va solo en el comprobante y lo legal.
+   */
+  tradeName: text("trade_name").notNull().default(""),
   // Tipo de identificador fiscal tal como lo nombra el país de la clínica
   // (texto libre); null mientras la clínica no lo tenga.
   fiscalDocType: text("fiscal_doc_type"),
   fiscalDocNumber: text("fiscal_doc_number"),
-  billingEmail: text("billing_email"),
   fiscalAddress: text("fiscal_address"),
   // Perfil regional (ISO 3166-1, ISO 4217, IANA, BCP 47): sin valores por
   // defecto, porque el núcleo no asume ningún país; quien crea el perfil los
@@ -33,6 +38,10 @@ export const orgProfile = pgTable("org_profile", {
   currency: char("currency", { length: 3 }).notNull(),
   timezone: text("timezone").notNull(),
   locale: text("locale").notNull(),
+  // Lista de diagnósticos de la clínica (decisión 26 de la fase 4): CIE-10 o
+  // CIE-11. Nula en perfiles creados sin ella: vale la que recomienda su país
+  // (`clinicalProfileFor(...).diagnosis.recommended`); el alta la guarda.
+  diagnosisSystem: text("diagnosis_system"),
   // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
   receiptWidth: text("receipt_width").notNull().default("80"),
   // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.
@@ -44,6 +53,10 @@ export const orgProfile = pgTable("org_profile", {
 }, (table) => [
   check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
   check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
+  check(
+    "org_profile_diagnosis_system_check",
+    sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11')`,
+  ),
   check("org_profile_ticket_footer_check", sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`),
 ])
 

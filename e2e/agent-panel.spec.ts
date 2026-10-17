@@ -187,12 +187,17 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await expect(agentButton(page)).toBeVisible()
 
-  // Pendientes: primero los casos; la cita aparte, con solo registrar la confirmación del paciente.
+  // «Esperan su sí» (decisión 21): solo la cita propuesta; los casos están en «Te espera» y en el panel.
+  // La unidad dental de la propuesta no existe: el horario ya no está libre y no se ofrece confirmarla.
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Casos del agente" })).toBeVisible()
-  const approvalCard = page.getByRole("listitem").filter({ hasText: "Cita el jueves a las 10:00" })
-  await expect(approvalCard).toContainText("Espera al paciente")
-  await expect(approvalCard.getByRole("button", { name: "Registrar confirmación del interlocutor" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Casos del agente" })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: /^Esperan su sí/ })).toContainText("1")
+  const approvalCard = page.getByRole("listitem").filter({ hasText: "Le propuse el" })
+  await expect(approvalCard).toContainText("Ese horario se ocupó")
+  await expect(approvalCard.getByRole("link", { name: "Ver conversación" })).toBeVisible()
+  await expect(approvalCard.getByRole("button", { name: "Confirmó por teléfono" })).toHaveCount(0)
+  await expect(page.getByText(/Aprobada|Ejecutada|interlocutor|Ejecutar cambio aprobado/)).toHaveCount(0)
   await expect(page.getByRole("button", { name: /Revisar y aprobar|Rechazar/ })).toHaveCount(0)
   // Nadie decide por el paciente: no hay ruta para aprobar o rechazar.
   const decision = await api(page, "POST", `/api/agent/proposals/${randomUUID()}/decision`, org.slug, { decision: "aprobada" })

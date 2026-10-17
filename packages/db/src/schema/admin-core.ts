@@ -1,5 +1,16 @@
 import { sql } from "drizzle-orm"
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import {
+  boolean,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 
 /**
@@ -7,10 +18,10 @@ import { user } from "./auth.js"
  * `member`/OrgRole: el staff NO hereda membresía de ningún tenant y ningún
  * cliente accede a endpoints globales. Solo roles `admin` y `support`.
  */
+// Las claves foráneas de las tablas de administración llevan el nombre que les
+// dio PostgreSQL al crearlas a mano (`<tabla>_<columna>_fkey`).
 export const adminStaff = pgTable("admin_staff", {
-  userId: text("user_id")
-    .primaryKey()
-    .references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").primaryKey(),
   role: text("role").notNull(),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -18,11 +29,14 @@ export const adminStaff = pgTable("admin_staff", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
-})
+}, (table) => [
+  foreignKey({ name: "admin_staff_user_id_fkey", columns: [table.userId], foreignColumns: [user.id] })
+    .onDelete("cascade"),
+])
 
 /**
  * Auditoría administrativa append-only: solo INSERT/SELECT. Sin UPDATE ni
- * DELETE (reforzado en la migración 0071 a nivel de rol).
+ * DELETE (reforzado con REVOKE en `0001_base_reglas.sql`).
  */
 export const adminAudit = pgTable(
   "admin_audit",
@@ -55,17 +69,25 @@ export const adminInvitation = pgTable(
     role: text("role").notNull(),
     status: text("status").notNull().default("pending"),
     /** sha256 hex del token de aceptación (el crudo se entrega una sola vez al invitar). */
-    tokenHash: text("token_hash").notNull().unique(),
+    tokenHash: text("token_hash").notNull(),
     /** Entrega del correo: pending|sent|uncertain (sin afirmar no-enviado; reenvío humano explícito). */
     deliveryStatus: text("delivery_status").notNull().default("pending"),
-    invitedBy: text("invited_by")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    invitedBy: text("invited_by").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    acceptedUserId: text("accepted_user_id").references(() => user.id, { onDelete: "set null" }),
+    acceptedUserId: text("accepted_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("admin_invitation_email_idx").on(table.email)],
+  (table) => [
+    index("admin_invitation_email_idx").on(table.email),
+    unique("admin_invitation_token_hash_key").on(table.tokenHash),
+    foreignKey({ name: "admin_invitation_invited_by_fkey", columns: [table.invitedBy], foreignColumns: [user.id] })
+      .onDelete("cascade"),
+    foreignKey({
+      name: "admin_invitation_accepted_user_id_fkey",
+      columns: [table.acceptedUserId],
+      foreignColumns: [user.id],
+    }).onDelete("set null"),
+  ],
 )
 
 /**
@@ -77,9 +99,7 @@ export const adminSessionVerification = pgTable(
   "admin_session_verification",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
     sessionId: text("session_id").notNull(),
     /** two_factor.id que superó la prueba: si el factor cambia, la prueba vieja muere. */
     factorId: text("factor_id").notNull(),
@@ -92,6 +112,11 @@ export const adminSessionVerification = pgTable(
   (table) => [
     index("admin_session_verification_session_idx").on(table.sessionId),
     index("admin_session_verification_user_idx").on(table.userId),
+    foreignKey({
+      name: "admin_session_verification_user_id_fkey",
+      columns: [table.userId],
+      foreignColumns: [user.id],
+    }).onDelete("cascade"),
   ],
 )
 
@@ -104,14 +129,16 @@ export const twoFactor = pgTable(
   "two_factor",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
     secret: text("secret").notNull(),
     backupCodes: text("backup_codes").notNull(),
     verified: boolean("verified").notNull().default(true),
     failedVerificationCount: integer("failed_verification_count").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
   },
-  (table) => [index("two_factor_user_idx").on(table.userId)],
+  (table) => [
+    index("two_factor_user_idx").on(table.userId),
+    foreignKey({ name: "two_factor_user_id_fkey", columns: [table.userId], foreignColumns: [user.id] })
+      .onDelete("cascade"),
+  ],
 )

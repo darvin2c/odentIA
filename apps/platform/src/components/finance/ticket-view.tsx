@@ -26,6 +26,7 @@ import {
   formatDayLongLocale,
   formatTimeShortLocale,
   voidTicketApi,
+  type CollectReceipt,
   type CollectTicketRow,
 } from "../../lib/finance-collect"
 
@@ -118,6 +119,7 @@ export function TicketView({
   mode = "collected",
   inAccount = false,
   closedAfter = false,
+  receipt = null,
 }: {
   ticket: CollectTicketRow
   /** Lo que quedó por cobrar de esos conceptos (respaldo si el ticket no lo congeló). */
@@ -142,6 +144,8 @@ export function TicketView({
   inAccount?: boolean
   /** La caja de su sede ya cerró después de este cobro: solo administración lo anula. */
   closedAfter?: boolean
+  /** Recién cobrado: si el comprobante salió solo por correo o qué hacer (decisión 20 v2). */
+  receipt?: CollectReceipt | null
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("finance.write")
@@ -215,7 +219,7 @@ export function TicketView({
     staleTime: 30_000,
   })
   const owed = account.data
-    ? (account.data.data.byCurrency.find((row) => row.currency === currency)?.porCobrar ?? 0)
+    ? (account.data.data.byCurrency.find((row) => row.currency === currency)?.saldo ?? 0)
     : null
 
   const voidMutation = useMutation({
@@ -292,6 +296,13 @@ export function TicketView({
                 {owed > 0 ? `${person} todavía debe ${money(owed)}.` : `${person} ya no debe nada.`}
               </p>
             )}
+            {receipt ? (
+              <p className={cn("break-words text-sm", receipt.sent ? "text-muted-foreground" : "font-medium")}>
+                {receipt.sent
+                  ? `El comprobante salió por correo a ${receipt.email}. También queda en su enlace, en «Tus papeles».`
+                  : `${receipt.text}.`}
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}

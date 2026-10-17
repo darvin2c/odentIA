@@ -16,6 +16,8 @@ import {
   type HealthMedicationDeclaration,
   type RegistrationAnswers,
   type RegistrationConfig,
+  ALLERGY_SEVERITIES,
+  CONDITION_STATUSES,
 } from "@odentia/clinical"
 import {
   Badge,
@@ -42,7 +44,7 @@ import {
   type HealthReviewState,
 } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 
 export type HealthDeclaration = NonNullable<RegistrationAnswers["health"]>
 
@@ -65,8 +67,9 @@ export const BLOOD_GROUP_LABELS: Record<BloodGroup, string> = {
   unknown: "No lo sé",
 }
 
-export const ALLERGY_SEVERITY_OPTIONS = ["leve", "moderada", "severa", "desconocida"] as const
-export const CONDITION_STATUS_OPTIONS = ["activa", "resuelta", "inactiva"] as const
+// Las listas de `@odentia/clinical`, las mismas que valida el servidor.
+export const ALLERGY_SEVERITY_OPTIONS = ALLERGY_SEVERITIES
+export const CONDITION_STATUS_OPTIONS = CONDITION_STATUSES
 
 let rowSeq = 0
 function nextRowKey(prefix: string): string {
@@ -256,8 +259,10 @@ const VERIFICATION_LABELS: Record<string, string> = {
 export interface ConditionRowValue {
   key: string
   name: string
-  /** Código CIE-10 que precisa la condición; solo en modo clínico. */
-  cie10Code?: string
+  /** Código de la lista de diagnósticos que precisa la condición; solo en modo clínico. */
+  diagnosisCode?: string
+  /** Su lista: la de la clínica en uno nuevo; uno guardado conserva la suya. */
+  diagnosisSystem?: string | null
   status: string
   startDate: string
   endDate: string
@@ -514,20 +519,21 @@ export function ConditionRows({
           </Field>
           {mode === "clinical" ? (
             <div className="flex flex-col gap-1">
-              <Cie10Search
-                value={row.cie10Code ?? ""}
-                onChange={(code) => patch(row.key, { cie10Code: code })}
-                label="Código CIE-10 (opcional)"
+              <DiagnosisSearch
+                value={row.diagnosisCode ?? ""}
+                system={row.diagnosisSystem ?? null}
+                onChange={(code, _description, system) => patch(row.key, { diagnosisCode: code, diagnosisSystem: system })}
+                label="Código de diagnóstico (opcional)"
                 disabled={readOnly}
               />
-              {row.cie10Code ? (
+              {row.diagnosisCode ? (
                 <button
                   type="button"
                   className="self-start text-xs text-muted-foreground underline underline-offset-4"
                   disabled={readOnly}
-                  onClick={() => patch(row.key, { cie10Code: "" })}
+                  onClick={() => patch(row.key, { diagnosisCode: "", diagnosisSystem: null })}
                 >
-                  Quitar el código {row.cie10Code}
+                  Quitar el código {row.diagnosisCode}
                 </button>
               ) : null}
             </div>

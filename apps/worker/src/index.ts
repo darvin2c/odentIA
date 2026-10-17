@@ -1,5 +1,6 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createMailer } from "@odentia/mail"
@@ -13,6 +14,7 @@ import { createTranscriber } from "./transcribe.js"
 import { runAutomationTick } from "./automation.js"
 import { tickMailboxes } from "./mailboxes.js"
 import { runSaasBillingTick } from "./saas-billing.js"
+import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
@@ -20,6 +22,8 @@ const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 // «Su enlace» va en el aviso de la cita y en las plantillas de WhatsApp: con la dirección pública de cada clínica.
 configurePublicLinks({ webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN })
+// La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
+configureMetaGraphVersion(env.META_GRAPH_VERSION)
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
@@ -47,6 +51,8 @@ await setupAgentMemory(ownerDb)
 const embedder = embedderFromEnv(env)
 const agentRuntime: AgentRuntime = {
   checkpointer,
+  // Un modelo que no responde abre el caso automático en Soporte de odentIA.
+  ownerDb,
   publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
   // Reenviar un presupuesto lleva su PDF.
   storage,
@@ -183,6 +189,7 @@ queues.push({
 
 let nextSaasPoll = 0
 let nextAccountPoll = 0
+let nextSupportPoll = 0
 queues.push({
   name: "saas_billing",
   poll: async () => {
@@ -190,6 +197,21 @@ queues.push({
     nextSaasPoll = Date.now() + 60_000
     await runSaasBillingTick({ ownerDb, mailer })
     return true
+  },
+}, {
+  // Avisos por correo de los casos de soporte: a soporte y a quien preguntó.
+  name: "support_notices",
+  poll: async () => {
+    if (Date.now() < nextSupportPoll) return false
+    nextSupportPoll = Date.now() + 60_000
+    const result = await runSupportNoticesTick({
+      ownerDb,
+      mailer,
+      supportInbox: env.SUPPORT_INBOX_EMAIL,
+      adminUrl: env.ADMIN_URL,
+      webUrl: env.WEB_URL,
+    })
+    return result.mailed > 0
   },
 }, {
   name: "account_lifecycle",

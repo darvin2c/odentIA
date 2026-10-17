@@ -1,3 +1,4 @@
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
 import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
@@ -171,7 +172,8 @@ function PrescriptionPrintPage() {
           ) : null}
           {prescription.diagnosisCode ? (
             <p className="sm:col-span-2">
-              <span className="font-medium">Diagnóstico:</span> {prescription.diagnosisCode}
+              <span className="font-medium">Diagnóstico:</span>{" "}
+              {diagnosisCodeLabel(prescription.diagnosisSystem, prescription.diagnosisCode)}
               {diagnosisDescription ? ` · ${diagnosisDescription}` : ""}
             </p>
           ) : null}

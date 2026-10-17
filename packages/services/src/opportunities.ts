@@ -6,6 +6,7 @@ import {
   patientContact,
   serviceCatalog,
   treatmentBudget,
+  treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { contact, conversation, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import {
@@ -28,6 +29,7 @@ import { requirePatient } from "./patients.js"
 import { ensureDefaultPipeline, momentRank, type SaleMoment, stageOfMoment } from "./pipelines.js"
 import { createTask, settleTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 export type { OpportunityStatus }
 
@@ -706,7 +708,7 @@ function parseLastEvent(raw: string | null): LastEvent | null {
 const listColumns = {
   opp: opportunity,
   contactName: contact.displayName,
-  patientName: patient.displayName,
+  patientName: patientPerson.displayName,
   stageName: pipelineStage.name,
   moment: pipelineStage.moment,
   serviceName: serviceCatalog.name,
@@ -763,6 +765,7 @@ function baseListQuery(tx: Db, orgId: string) {
     .from(opportunity)
     .innerJoin(contact, and(eq(contact.id, opportunity.contactId), eq(contact.organizationId, orgId)))
     .leftJoin(patient, and(eq(patient.id, opportunity.patientId), eq(patient.organizationId, orgId)))
+    .leftJoin(patientPerson, joinPatientPerson(patientPerson))
     .innerJoin(pipelineStage, eq(pipelineStage.id, opportunity.stageId))
     .leftJoin(serviceCatalog, eq(serviceCatalog.id, opportunity.serviceId))
 }
@@ -1108,6 +1111,96 @@ export async function createOpportunity(
     link: created.id,
   })
   return getOpportunity(tx, orgId, created.id)
+}
+
+export type ServiceInterestOutcome = "creada" | "actualizada" | "ya_aceptado"
+
+/**
+ * La persona preguntó por un servicio concreto y muestra interés (decisión 15
+ * de la fase 4): lo anota el sistema, no un modelo. Sin duplicar:
+ * - si quien escribe, o alguien que lleva, ya aceptó un presupuesto con ese
+ *   servicio, no hace nada (ya no es un interesado);
+ * - si ya tiene abierta una oportunidad de ese servicio, la actualiza con lo
+ *   que dijo ahora;
+ * - si no, la crea en «Interesado» y sin responsable, que es de Recepción.
+ */
+export async function noteServiceInterest(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; conversationId: string | null; serviceId: string; said: string },
+): Promise<{ outcome: ServiceInterestOutcome; opportunityId: string | null }> {
+  await requireContact(tx, orgId, input.contactId)
+  const [service] = await tx
+    .select({ id: serviceCatalog.id, name: serviceCatalog.name })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.id, input.serviceId), eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true)))
+    .limit(1)
+  if (!service) throw notFound("Servicio del catálogo")
+  // Los pacientes de quien escribe: ella misma y quienes lleva (la misma relación explícita de siempre).
+  const linked = await tx
+    .select({ patientId: patientContact.patientId })
+    .from(patientContact)
+    .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, input.contactId)))
+  if (linked.length) {
+    const [accepted] = await tx
+      .select({ id: treatmentPlanItem.id })
+      .from(treatmentPlanItem)
+      .where(
+        and(
+          eq(treatmentPlanItem.organizationId, orgId),
+          inArray(
+            treatmentPlanItem.patientId,
+            linked.map((row) => row.patientId),
+          ),
+          eq(treatmentPlanItem.serviceId, service.id),
+          eq(treatmentPlanItem.decisionStatus, "aceptado"),
+        ),
+      )
+      .limit(1)
+    if (accepted) return { outcome: "ya_aceptado", opportunityId: null }
+  }
+  const interestText = input.said.replace(/\s+/g, " ").trim().slice(0, 500) || null
+  // Cualquier oportunidad abierta de ese servicio, sea para quien sea de los suyos: es el mismo interés.
+  const [open] = await tx
+    .select({ id: opportunity.id, conversationId: opportunity.conversationId })
+    .from(opportunity)
+    .where(
+      and(
+        eq(opportunity.organizationId, orgId),
+        eq(opportunity.contactId, input.contactId),
+        eq(opportunity.status, "open"),
+        eq(opportunity.serviceId, service.id),
+      ),
+    )
+    .orderBy(desc(opportunity.createdAt))
+    .limit(1)
+  if (open) {
+    await updateOpportunity(
+      tx,
+      orgId,
+      open.id,
+      {
+        interestText,
+        ...(open.conversationId === null && input.conversationId ? { conversationId: input.conversationId } : {}),
+      },
+      { userId: null, origin: "agente" },
+    )
+    return { outcome: "actualizada", opportunityId: open.id }
+  }
+  const created = await createOpportunity(
+    tx,
+    orgId,
+    {
+      contactId: input.contactId,
+      title: service.name,
+      serviceId: service.id,
+      interestText,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    },
+    { userId: null, origin: "agente" },
+    { reuseOpen: true },
+  )
+  return { outcome: created.reused ? "actualizada" : "creada", opportunityId: created.id }
 }
 
 async function budgetPatient(tx: Db, orgId: string, budgetId: string | null | undefined): Promise<string | null> {

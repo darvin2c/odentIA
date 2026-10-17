@@ -17,8 +17,9 @@ import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
-import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, chairNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
+import { type AttendingRule, attendingRule } from "./specialties.js"
 
 // Sin zona en la sede ni en la organización: UTC, nunca la de un país.
 const FALLBACK_TZ = NEUTRAL_TIMEZONE
@@ -174,7 +175,7 @@ async function requireChairInBranch(tx: Db, orgId: string, chairId: string, bran
       ),
     )
     .limit(1)
-  if (!row) throw notFound("Sillón")
+  if (!row) throw chairNotFound()
   return row
 }
 
@@ -359,7 +360,7 @@ export async function createScheduleBlock(
   if (endsAt <= startsAt) throw validation("El bloqueo debe terminar después de iniciar")
   if (input.dentistUserId) await requireDentist(tx, orgId, input.dentistUserId)
   if (input.chairId) await requireChairInBranch(tx, orgId, input.chairId, input.branchId)
-  // Sin profesional ni sillón, el bloqueo cierra la sede completa.
+  // Sin profesional ni unidad dental, el bloqueo cierra la sede completa.
   const kind = assertBlockKind(input.kind ?? "bloqueo")
   const [created] = await tx
     .insert(scheduleBlock)
@@ -528,7 +529,7 @@ export async function validateAvailability(
   if (clash) {
     throw conflict(
       "APPOINTMENT_CONFLICT",
-      "El profesional o el sillón ya están ocupados en ese horario",
+      "El profesional o la unidad dental ya están ocupados en ese horario",
     )
   }
 }
@@ -544,11 +545,17 @@ export interface SlotsQuery {
   to: string
   durationMin?: number
   timeZone?: string
+  /** Cada cuántos minutos empieza un hueco; sin indicar, `bookingStepMin` de la duración. */
   stepMin?: number
   /** Descarta los huecos que empiezan antes de este instante (lo ya pasado no se ofrece). */
   notBefore?: string
   /** Solo el primer hueco de cada profesional: responde «quién puede atender primero». */
   firstPerDentist?: boolean
+  /**
+   * Como mucho estos huecos por profesional y día, los primeros: así una
+   * lista corta no se la queda una sola persona (decisión 16 de la fase 4).
+   */
+  perDentistPerDay?: number
 }
 
 export interface AvailableSlot {
@@ -562,16 +569,34 @@ export interface AvailableSlot {
 }
 
 export interface AvailableSlotsResult {
+  /** Ordenados por hora, mezclando a los profesionales. */
   slots: AvailableSlot[]
   /** true si se alcanzó el tope de 200: hay más huecos fuera de la respuesta. */
   truncated: boolean
   timeZone: string
+  /**
+   * Si el servicio pedido tiene quien lo atienda en la sede, solo se ofrecen
+   * sus huecos: aquí van su especialidad y quiénes son (ADR 0039).
+   */
+  attending: AttendingRule | null
+}
+
+/**
+ * Cada cuántos minutos se ofrece una hora a quien reserva: una por cada cita
+ * que cabe (redondeada a 5 minutos, entre 15 y 60), no cada cuarto de hora.
+ * Menos opciones y las mismas posibilidades reales. Es una sola regla para el
+ * enlace, el portal y el agente: la persona ve las mismas horas por cualquier vía.
+ */
+export function bookingStepMin(durationMin: number): number {
+  return Math.min(60, Math.max(15, Math.round(durationMin / 5) * 5))
 }
 
 /**
  * Huecos reservables en la zona IANA de la sede (o la pedida si es
  * válida). Solo profesionales con horario explícito; descuenta citas
- * ocupantes, bloqueos y ausencias. Máximo 200 huecos y 62 días por consulta:
+ * ocupantes, bloqueos y ausencias. Con servicio, solo quien lo atiende
+ * (`attendingRule`, la misma regla para recepción, el enlace, el portal y el
+ * agente). Ordenados por hora. Máximo 200 huecos y 62 días por consulta:
  * `truncated` avisa del recorte para acotar el rango o paginar por días.
  */
 export async function listAvailableSlots(
@@ -588,10 +613,6 @@ export async function listAvailableSlots(
   if (to <= from) throw validation("El rango de huecos es inválido")
   if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * 86_400_000) {
     throw validation(`El rango máximo es de ${MAX_RANGE_DAYS} días`)
-  }
-  const step = input.stepMin ?? 15
-  if (!Number.isInteger(step) || step < 5 || step > 120) {
-    throw validation("El paso debe estar entre 5 y 120 minutos")
   }
   let duration = input.durationMin
   if (input.serviceId) {
@@ -615,7 +636,20 @@ export async function listAvailableSlots(
     throw validation("La duración debe estar entre 1 y 480 minutos")
   }
   const slotMin: number = duration
+  const step = input.stepMin ?? bookingStepMin(slotMin)
+  if (!Number.isInteger(step) || step < 5 || step > 120) {
+    throw validation("El paso debe estar entre 5 y 120 minutos")
+  }
+  const perDay = input.perDentistPerDay
+  if (perDay !== undefined && (!Number.isInteger(perDay) || perDay < 1 || perDay > 50)) {
+    throw validation("perDentistPerDay debe estar entre 1 y 50")
+  }
   if (input.dentistUserId) await requireDentist(tx, orgId, input.dentistUserId)
+  // Solo quien atiende el servicio, si alguien lo atiende en esta sede.
+  const attending = input.serviceId ? await attendingRule(tx, orgId, { serviceId: input.serviceId, branchId: input.branchId }) : null
+  if (attending && input.dentistUserId && !attending.dentistUserIds.includes(input.dentistUserId)) {
+    return { slots: [], truncated: false, timeZone, attending }
+  }
   const chairFilter = input.chairId
     ? await requireChairInBranch(tx, orgId, input.chairId, input.branchId)
     : null
@@ -627,6 +661,8 @@ export async function listAvailableSlots(
   ]
   if (input.dentistUserId) {
     scheduleConditions.push(eq(professionalSchedule.dentistUserId, input.dentistUserId))
+  } else if (attending) {
+    scheduleConditions.push(inArray(professionalSchedule.dentistUserId, attending.dentistUserIds))
   }
   const rules = await tx
     .select({ rule: professionalSchedule, dentistName: user.name })
@@ -638,7 +674,7 @@ export async function listAvailableSlots(
       asc(professionalSchedule.weekday),
       asc(professionalSchedule.startMin),
     )
-  if (rules.length === 0) return { slots: [], truncated: false, timeZone }
+  if (rules.length === 0) return { slots: [], truncated: false, timeZone, attending }
   const notBefore = input.notBefore ? parseInstant(input.notBefore, "notBefore") : null
   const dentistsWithRules = new Set(rules.map((entry) => entry.rule.dentistUserId))
   const found = new Set<string>()
@@ -700,10 +736,14 @@ export async function listAvailableSlots(
     const weekday = new Date(
       Date.UTC(Number(dayLabel.slice(0, 4)), Number(dayLabel.slice(5, 7)) - 1, Number(dayLabel.slice(8, 10))),
     ).getUTCDay()
+    // Lo de cada día se junta y se ordena por hora antes de cortar.
+    const daySlots: AvailableSlot[] = []
+    const perDentist = new Map<string, number>()
     for (const entry of rules) {
       if (entry.rule.weekday !== weekday) continue
       if (input.firstPerDentist && found.has(entry.rule.dentistUserId)) continue
       for (let minute = entry.rule.startMin; minute + slotMin <= entry.rule.endMin; minute += step) {
+        if (perDay !== undefined && (perDentist.get(entry.rule.dentistUserId) ?? 0) >= perDay) break
         const startUtc = zonedTimeToUtc(dayLabel, minute, resolved.timeZone)
         const endUtc = new Date(startUtc.getTime() + slotMin * 60000)
         if (endUtc <= from || startUtc >= to) continue
@@ -715,7 +755,7 @@ export async function listAvailableSlots(
             item.endsAt > startUtc,
         )
         if (dentistBusy) continue
-        // Cierra el hueco si un bloqueo alcanza al profesional sin importar el sillón.
+        // Cierra el hueco si un bloqueo alcanza al profesional sin importar la unidad dental.
         const dentistBlocked = blocks.some(
           (block) =>
             (block.dentistUserId === null || block.dentistUserId === entry.rule.dentistUserId) &&
@@ -749,7 +789,7 @@ export async function listAvailableSlots(
           chairId = free.id
           chairName = free.name
         }
-        slots.push({
+        daySlots.push({
           startsAt: startUtc.toISOString(),
           endsAt: endUtc.toISOString(),
           dentistUserId: entry.rule.dentistUserId,
@@ -758,15 +798,26 @@ export async function listAvailableSlots(
           chairName,
           timeZone,
         })
-        if (slots.length >= MAX_SLOTS) return { slots, truncated: true, timeZone }
+        perDentist.set(entry.rule.dentistUserId, (perDentist.get(entry.rule.dentistUserId) ?? 0) + 1)
         if (input.firstPerDentist) {
           found.add(entry.rule.dentistUserId)
           break
         }
       }
-      if (input.firstPerDentist && found.size === dentistsWithRules.size) {
-        return { slots, truncated: false, timeZone }
-      }
+    }
+    // Por hora, mezclando a los profesionales; a la misma hora, por nombre.
+    daySlots.sort(
+      (a, b) =>
+        a.startsAt.localeCompare(b.startsAt) ||
+        a.dentistName.localeCompare(b.dentistName, "es") ||
+        a.dentistUserId.localeCompare(b.dentistUserId),
+    )
+    for (const slot of daySlots) {
+      if (slots.length >= MAX_SLOTS) return { slots, truncated: true, timeZone, attending }
+      slots.push(slot)
+    }
+    if (input.firstPerDentist && found.size === dentistsWithRules.size) {
+      return { slots, truncated: false, timeZone, attending }
     }
     if (dayEnd >= to) break
     const next = new Date(dayStart.getTime() + 86_400_000)
@@ -775,7 +826,7 @@ export async function listAvailableSlots(
     if (nextLabel <= dayLabel) break
     dayLabel = nextLabel
   }
-  return { slots, truncated: false, timeZone }
+  return { slots, truncated: false, timeZone, attending }
 }
 
 /* Disponibilidad a la vista de la agenda */
@@ -832,7 +883,7 @@ export interface AgendaAvailability {
   /**
    * Tramos en que cada profesional puede recibir una cita: su horario menos
    * ausencias, citas en pie (en cualquier sede) y lo ya pasado, y solo mientras
-   * queda algún sillón libre.
+   * queda alguna unidad dental libre.
    */
   free: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
   /** Quienes atienden en la sede (tienen horario), con su próximo hueco reservable. */
@@ -844,6 +895,11 @@ export interface AgendaAvailability {
   /** Tramos de atención del rango, ya como instantes. */
   open: Array<{ dentistUserId: string; startsAt: string; endsAt: string }>
   blocks: ScheduleBlockItem[]
+  /**
+   * Con servicio: si alguien lo atiende en la sede, la agenda ofrece solo a
+   * esas personas y aquí dice su especialidad (la regla de `listAvailableSlots`).
+   */
+  attending: AttendingRule | null
 }
 
 /**
@@ -861,6 +917,8 @@ export async function getAgendaAvailability(
     now?: Date
     /** Al reprogramar: el hueco de esa cita cuenta como libre en los tramos (`free`). */
     ignoreAppointmentId?: string
+    /** «Nueva cita» con servicio: solo quien lo atiende (ADR 0039). */
+    serviceId?: string
   },
 ): Promise<AgendaAvailability> {
   const resolved = await requireBranch(tx, orgId, input.branchId)
@@ -871,6 +929,9 @@ export async function getAgendaAvailability(
     throw validation(`El rango máximo es de ${MAX_RANGE_DAYS} días`)
   }
   const now = input.now ?? new Date()
+  const attending = input.serviceId
+    ? await attendingRule(tx, orgId, { serviceId: input.serviceId, branchId: input.branchId })
+    : null
   const rules = await tx
     .select({ rule: professionalSchedule, dentistName: user.name })
     .from(professionalSchedule)
@@ -880,6 +941,7 @@ export async function getAgendaAvailability(
         eq(professionalSchedule.organizationId, orgId),
         eq(professionalSchedule.branchId, input.branchId),
         eq(professionalSchedule.isActive, true),
+        attending ? inArray(professionalSchedule.dentistUserId, attending.dentistUserIds) : undefined,
       ),
     )
     .orderBy(asc(user.name), asc(professionalSchedule.weekday), asc(professionalSchedule.startMin))
@@ -913,7 +975,10 @@ export async function getAgendaAvailability(
       from: now.toISOString(),
       to: new Date(now.getTime() + NEXT_FREE_DAYS * 86_400_000).toISOString(),
       notBefore: now.toISOString(),
+      // Recepción ve el primer cuarto de hora libre, no la hora que se ofrece a la persona.
+      stepMin: 15,
       firstPerDentist: true,
+      ...(input.serviceId ? { serviceId: input.serviceId } : {}),
     }),
   ])
   const nextByDentist = new Map(next.slots.map((slot) => [slot.dentistUserId, slot]))
@@ -996,5 +1061,6 @@ export async function getAgendaAvailability(
     open,
     blocks,
     free,
+    attending,
   }
 }

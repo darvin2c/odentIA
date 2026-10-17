@@ -4,6 +4,7 @@ import {
   documentIssuerCountry,
   isMinor,
   isRealDate,
+  kinshipFromWords,
   missingPersonData,
   type MissingPersonDatum,
   normalizePhone,
@@ -18,13 +19,12 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
-  patient,
   patientContact,
   patientDataConsent,
   patientRegistration,
   patientRegistrationLink,
 } from "@odentia/db/schema/clinical"
-import { contact, conversation, contactIdentity, channelConnection } from "@odentia/db/schema/crm"
+import { contact, conversation, contactIdentity, channelConnection, crmTask } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes } from "node:crypto"
 import { and, eq, sql, type SQL } from "drizzle-orm"
@@ -32,11 +32,20 @@ import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { createContactNote } from "./crm-workspace.js"
-import { createPatient, patientOrganizationToday, patientPersonId, requirePatient, type PatientRow } from "./patients.js"
+import {
+  createPatient,
+  patientOrganizationToday,
+  REGISTRATION_NOT_COMPLETED_TEXT,
+  type RegistrationHold,
+  requirePatient,
+  type PatientRow,
+} from "./patients.js"
 import { initializeDeclaredPatientHealth } from "./clinical.js"
 import { applyMessagePermissions } from "./data-consents.js"
+import { createPerson, findPersonByDocument } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
+import { completeTask, createTask, discardTask } from "./tasks.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
 const UUID_RE =
@@ -53,10 +62,7 @@ function unavailable(): ServiceError {
 
 /** Conflicto público neutro: no revela ficha, causa ni datos del existente. */
 function notCompleted(): ServiceError {
-  return conflict(
-    "REGISTRATION_NOT_COMPLETED",
-    "No pudimos completar el registro. Comunícate con recepción.",
-  )
+  return conflict("REGISTRATION_NOT_COMPLETED", REGISTRATION_NOT_COMPLETED_TEXT)
 }
 
 /**
@@ -200,7 +206,25 @@ export async function getPatientMissingData(
       ),
     )
     .limit(1)
-  return missingPersonData(config, row as unknown as Record<string, unknown>, { representativeContact: !!spokesperson })
+  // El contacto de emergencia es una persona vinculada con la marca (decisión 25).
+  const [emergency] = await tx
+    .select({ name: contact.displayName, phone: contact.phone })
+    .from(patientContact)
+    .innerJoin(contact, and(eq(contact.organizationId, orgId), eq(contact.id, patientContact.contactId)))
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.patientId, patientId),
+        eq(patientContact.isEmergency, true),
+        eq(contact.isActive, true),
+      ),
+    )
+    .limit(1)
+  return missingPersonData(
+    config,
+    { ...row, emergencyContactName: emergency?.name ?? null, emergencyContactPhone: emergency?.phone ?? null },
+    { representativeContact: !!spokesperson },
+  )
 }
 
 export interface SaveRegistrationConfigInput {
@@ -797,25 +821,23 @@ export async function registerPatient(
   // las notas de su persona, a nombre de quien la registró.
   if (essentials) {
     await tx
-      .update(patient)
+      .update(contact)
       .set({ identityNeedsReview: true })
-      .where(and(eq(patient.id, created.id), eq(patient.organizationId, orgId)))
+      .where(and(eq(contact.id, created.personId), eq(contact.organizationId, orgId)))
     const who = publicContext
       ? `${answers.respondent === "representative" ? "Registró a otra persona" : "Se registró"} desde el enlace de reserva con los datos esenciales`
       : "El equipo creó su ficha con lo mínimo al reservar"
     const note = pendingRegistrationNote(who, config, answers)
     if (conversationId) await addAgentCaseNote(tx, orgId, conversationId, note)
     else {
-      // Su persona la crea la base al cerrar la transacción (disparador diferido,
-      // `ensure_patient_person`): se adelanta con la misma función para anotarle lo pendiente.
-      await tx.execute(sql`select ensure_patient_person(${orgId}, ${created.id}::uuid)`)
-      const personId = await patientPersonId(tx, orgId, created.id)
-      if (personId) await createContactNote(tx, orgId, personId, { body: note }, { userId: actorUserId })
+      // Lo pendiente se anota en su persona, que el alta ya creó (`person_id`).
+      const personId = created.personId
+      await createContactNote(tx, orgId, personId, { body: note }, { userId: actorUserId })
       // Registrarla en «Nueva cita» con su teléfono es un alta manual del equipo: ese
       // número pasa a ser su WhatsApp (ADR 0027), con la misma operación que
       // «Escribirle» y a nombre de quien la registra, para que le lleguen el aviso y
       // los recordatorios. Si ya es de otra persona no se mueve: la cita sigue y se dice.
-      if (personId && newPerson && created.phone && (await hasActiveWhatsApp(tx, orgId))) {
+      if (newPerson && created.phone && (await hasActiveWhatsApp(tx, orgId))) {
         try {
           await claimWhatsAppNumber(tx, orgId, actorUserId, personId, created.phone)
           whatsapp = "creado"
@@ -835,19 +857,22 @@ export async function registerPatient(
   // 6b. Representante del menor (o de quien declara por otro): persona con su
   // documento, vínculo y responsabilidad de representante legal, en la misma
   // transacción. Si el enlace ya lo vinculó, solo se le asigna el rol.
-  const minorPatient =
-    !!demographics.birthDate && isRealDate(demographics.birthDate) && isMinor(demographics.birthDate, today)
+  // Menor según lo que quedó guardado en su persona: desde fuera no se cambia
+  // la fecha de quien ya existía, así que una fecha escrita no la vuelve menor.
+  const minorPatient = !!created.birthDate && isRealDate(created.birthDate) && isMinor(created.birthDate, today)
+  let representativePending = false
   if (answers.representative && minorPatient) {
     const linkedGuardian = links.find((l) => l.relationship === "guardian")
-    await attachLegalRepresentative(tx, orgId, actorUserId, created.id, {
+    const representativeId = await attachLegalRepresentative(tx, orgId, actorUserId, created.id, {
       existingContactId: linkedGuardian?.contactId ?? null,
       representative: answers.representative,
       countryCode,
       today,
     })
+    representativePending = representativeId === null
   }
 
-  // 7. Consentimiento de datos (Ley 29733) con la versión del aviso aceptada y
+  // 7. Consentimiento de datos (la ley de cada país; en Perú, la Ley 29733) con la versión del aviso aceptada y
   // quién lo otorga; se atribuye en servidor (operador interno o null público).
   if (answers.privacyAccepted) {
     // Los permisos de mensajes son finalidades de este mismo consentimiento:
@@ -863,7 +888,11 @@ export async function registerPatient(
       ...(asked.includes("recordatorios") && answers.acceptsReminders ? ["recordatorios"] : []),
       ...(asked.includes("comunicaciones") && answers.acceptsMessages ? ["comunicaciones"] : []),
     ]
-    const grantorId = await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")
+    // Con el representante por confirmar no se escribe a nombre de nadie: el
+    // consentimiento queda como lo dijo el formulario (M1).
+    const grantorId = representativePending
+      ? null
+      : await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")
     if (grantorId && asked.length > 0) {
       await applyMessagePermissions(tx, orgId, actorUserId, grantorId, {
         accepted: purposes,
@@ -908,7 +937,14 @@ export async function registerPatient(
  * El representante legal de un menor, en la misma transacción que sus datos:
  * su persona con documento (con su país emisor), el vínculo `guardian` y la
  * responsabilidad de representante legal desde hoy. Si ya está vinculado,
- * solo se le asigna el rol. Lo usan el registro y «Tus datos» de su enlace.
+ * solo se le asigna el rol. Lo usa el registro de pacientes.
+ *
+ * Quien ya tiene ese documento en la clínica es la misma persona (la madre
+ * que registra a su segundo hijo) y se la reutiliza tal como está, sin tocar
+ * sus datos. Pero desde fuera (sin una persona del equipo) un documento
+ * escrito no prueba quién es: no se la vincula ni se le da el rol, y queda
+ * para que recepción lo confirme con un clic (`confirmPendingRepresentative`).
+ * Devuelve el representante, o null si quedó por confirmar.
  */
 export async function attachLegalRepresentative(
   tx: Db,
@@ -924,43 +960,221 @@ export async function attachLegalRepresentative(
     countryCode: string | null
     today: string
   },
-): Promise<string> {
+): Promise<string | null> {
   let representativeId = input.existingContactId ?? null
   if (!representativeId) {
     const rep = input.representative
-    const [person] = await tx
-      .insert(contact)
+    const docCountry = rep.docNumber
+      ? documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry)
+      : null
+    const existing = await findPersonByDocument(tx, orgId, { docType: rep.docType ?? null, docNumber: rep.docNumber || null, docCountry })
+    if (existing && actorUserId === null) {
+      await leavePendingRepresentative(tx, orgId, patientId, existing, rep.relationshipDetail || null)
+      return null
+    }
+    representativeId =
+      existing ??
+      (
+        await createPerson(
+          tx,
+          orgId,
+          { userId: actorUserId },
+          {
+            displayName: rep.displayName,
+            phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
+            email: rep.email || null,
+            docType: rep.docType ?? null,
+            docNumber: rep.docNumber || null,
+            docCountry,
+          },
+        )
+      ).id
+  }
+  const relationshipDetail = input.existingContactId ? null : input.representative.relationshipDetail || null
+  await linkLegalRepresentative(tx, orgId, actorUserId, patientId, representativeId, {
+    relationshipDetail,
+    kinship: kinshipFromWords(relationshipDetail),
+    linked: !!input.existingContactId,
+    today: input.today,
+  })
+  return representativeId
+}
+
+/**
+ * El vínculo `guardian` (si aún no lo tiene) con el parentesco escrito y su
+ * código HL7, y el rol de representante legal desde hoy.
+ */
+async function linkLegalRepresentative(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  patientId: string,
+  representativeId: string,
+  options: { relationshipDetail: string | null; kinship: string | null; linked: boolean; today: string },
+): Promise<void> {
+  if (!options.linked) {
+    await tx
+      .insert(patientContact)
       .values({
         organizationId: orgId,
-        displayName: rep.displayName,
-        phone: rep.phone ? normalizePhone(rep.phone, input.countryCode) : null,
-        email: rep.email || null,
-        docType: rep.docType ?? null,
-        docNumber: rep.docNumber || null,
-        // El documento con su país emisor, como el de la persona.
-        docCountry: rep.docNumber
-          ? documentIssuerCountry(clinicalProfileFor(input.countryCode), rep.docType, rep.docCountry)
-          : null,
+        patientId,
+        contactId: representativeId,
+        relationship: "guardian",
+        relationshipDetail: options.relationshipDetail,
+        kinship: options.kinship,
+        isPreferred: false,
+        createdBy: actorUserId,
       })
-      .returning({ id: contact.id })
-    if (!person) throw new Error("No se pudo crear al representante")
-    representativeId = person.id
-    await tx.insert(patientContact).values({
-      organizationId: orgId,
-      patientId,
-      contactId: person.id,
-      relationship: "guardian",
-      relationshipDetail: rep.relationshipDetail || null,
-      isPreferred: false,
-      createdBy: actorUserId,
-    })
+      // Ya vinculada (como familiar, por ejemplo): conserva su vínculo y recibe el rol.
+      .onConflictDoNothing({
+        target: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
+      })
   }
   await grantResponsibility(tx, orgId, actorUserId, patientId, {
     contactId: representativeId,
     kind: "representante_legal",
-    startsAt: input.today,
+    startsAt: options.today,
   })
-  return representativeId
+}
+
+/**
+ * Claves estables de las tareas que deja un registro desde fuera: repetir el
+ * envío no duplica la fila. Su clase (`registro_con_documento`,
+ * `confirmar_representante`) dice qué es y qué ofrece la fila.
+ */
+const REGISTRATION_HOLD_KEY = "registro-con-documento:"
+const PENDING_REPRESENTATIVE_KEY = "confirmar-representante:"
+
+async function leavePendingRepresentative(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  representativeId: string,
+  relationshipDetail: string | null,
+): Promise<void> {
+  const [names] = await tx.execute<{ patientName: string; representativeName: string }>(sql`
+    select pp.display_name as "patientName", r.display_name as "representativeName"
+    from patient p
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    join contact r on r.organization_id = p.organization_id and r.id = ${representativeId}
+    where p.organization_id = ${orgId} and p.id = ${patientId}`)
+  const who = relationshipDetail ? ` (${relationshipDetail})` : ""
+  await createTask(tx, orgId, {
+    title: `Confirma si ${names?.representativeName ?? "esta persona"} representa a ${names?.patientName ?? "este paciente"}`,
+    patientId,
+    contactId: representativeId,
+    area: "recepcion",
+    createdBy: "sistema",
+    kind: "confirmar_representante",
+    relationshipDetail,
+    kinship: kinshipFromWords(relationshipDetail),
+    reason: `En el registro en línea escribieron el documento de ${names?.representativeName ?? "una persona de la clínica"} como representante legal${who}. Si es su madre, padre o tutor, confírmalo; si no, elige «No es ella».`,
+    idempotencyKey: `${PENDING_REPRESENTATIVE_KEY}${patientId}:${representativeId}`,
+  })
+}
+
+/**
+ * «Confirmar» en la fila de «Te espera»: recepción confirma que la persona
+ * que nombró el registro en línea es el representante legal del menor. Crea
+ * el vínculo con el parentesco que se escribió («Madre», con su código HL7) y
+ * el rol a nombre de quien confirma, y cierra la tarea. No toca sus datos ni
+ * sus permisos de mensajes.
+ */
+export async function confirmPendingRepresentative(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  taskId: string,
+): Promise<{ representativeId: string }> {
+  const [task] = await tx
+    .select({
+      id: crmTask.id,
+      contactId: crmTask.contactId,
+      status: crmTask.status,
+      relationshipDetail: crmTask.relationshipDetail,
+      kinship: crmTask.kinship,
+    })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.id, taskId),
+        eq(crmTask.patientId, patientId),
+        eq(crmTask.kind, "confirmar_representante"),
+      ),
+    )
+    .for("update")
+  if (!task || !task.contactId) throw notFound("Representante por confirmar")
+  if (task.status !== "open") throw conflict("ALREADY_REVIEWED", "Esto ya se revisó")
+  await linkLegalRepresentative(tx, orgId, actorUserId, patientId, task.contactId, {
+    relationshipDetail: task.relationshipDetail,
+    kinship: task.kinship,
+    linked: false,
+    today: await patientOrganizationToday(tx, orgId),
+  })
+  await completeTask(tx, orgId, task.id, { userId: actorUserId })
+  return { representativeId: task.contactId }
+}
+
+/**
+ * Lo que deja para recepción un alta desde fuera con el documento de una
+ * persona que ya está en la clínica (`RegistrationHeld`): una fila de «Te
+ * espera» («Alguien se registró con el documento de…»), con lo que escribió
+ * para comparar. Se llama en otra transacción, porque la del alta se revierte.
+ * Una por persona y día: repetir el envío no llena la lista.
+ */
+export async function leaveRegistrationHold(tx: Db, orgId: string, hold: RegistrationHold): Promise<void> {
+  const today = await patientOrganizationToday(tx, orgId)
+  const wrote = [hold.declared.displayName, hold.declared.phone, hold.declared.email].filter(Boolean).join(", ")
+  await createTask(tx, orgId, {
+    title: `Alguien se registró con el documento de ${hold.ownerName}`,
+    contactId: hold.ownerId,
+    patientId: hold.ownerPatientId,
+    area: "recepcion",
+    createdBy: "sistema",
+    kind: "registro_con_documento",
+    reason: `Alguien se registró con el documento de ${hold.ownerName}: revisa si es ella. No se guardó nada en su ficha. Escribió: ${wrote}.`,
+    idempotencyKey: `${REGISTRATION_HOLD_KEY}${hold.ownerId}:${today}`,
+  })
+}
+
+/** Motivo con que queda cerrada cada fila del registro en línea al descartarla. */
+const DISCARD_REASON = {
+  confirmar_representante: "No es su representante: no se vinculó",
+  registro_con_documento: "Se revisó y se descartó: no se cambió nada de esa persona",
+} as const
+
+/**
+ * Descarta en «Te espera» lo que dejó un registro en línea: «No es ella» en
+ * «¿… es representante de …?» (no se vincula a nadie) o «Descartar» en
+ * «Alguien se registró con el documento de…». La tarea queda cerrada con su
+ * motivo, a nombre de quien la descarta; no cambia nada de las personas.
+ */
+export async function discardRegistrationTask(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  taskId: string,
+): Promise<{ id: string }> {
+  const [task] = await tx
+    .select({ id: crmTask.id, kind: crmTask.kind, status: crmTask.status })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.id, taskId),
+        sql`${crmTask.kind} in ('confirmar_representante', 'registro_con_documento')`,
+      ),
+    )
+    .for("update")
+  if (!task) throw notFound("Pendiente del registro en línea")
+  if (task.status !== "open") throw conflict("ALREADY_REVIEWED", "Esto ya se revisó")
+  await discardTask(tx, orgId, task.id, {
+    userId: actorUserId,
+    reason: DISCARD_REASON[task.kind as keyof typeof DISCARD_REASON],
+  })
+  return { id: task.id }
 }
 
 /** La clínica tiene un WhatsApp conectado por el que escribir. */

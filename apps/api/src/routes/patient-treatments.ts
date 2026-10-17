@@ -16,6 +16,7 @@ const reviseInput = z
     arch: z.enum(["upper", "lower"]).nullish(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
 const completeInput = z.object({ encounterId: z.uuid() }).strict()

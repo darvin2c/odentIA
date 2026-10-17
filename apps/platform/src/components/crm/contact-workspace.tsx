@@ -41,6 +41,7 @@ import { TaskDrawer } from "./task-drawer"
 import { PersonLink } from "../person-link"
 import { activeOrgLocale } from "../../lib/locale"
 import { amountFromCents } from "../../lib/workspace"
+import { PhoneMatchPrompt } from "./phone-match"
 
 export interface ContactWorkspaceProps {
   contactId: string
@@ -441,6 +442,7 @@ export function ContactWorkspace({
         </p>
       )}
       {completion.dialog}
+      {conversationId ? <PhoneMatchPrompt conversationId={conversationId} /> : null}
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label="Secciones del contexto">
@@ -647,10 +649,10 @@ export function ContactWorkspace({
                               {confirmMutation.isPending ? (
                                 <>
                                   <Spinner className="size-6" aria-hidden />
-                                  Registrar confirmación del interlocutor
+                                  Registrar confirmación
                                 </>
                               ) : (
-                                "Registrar confirmación del interlocutor"
+                                "Registrar confirmación"
                               )}
                             </Button>
                           ) : (

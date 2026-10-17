@@ -16,7 +16,6 @@ import {
   hourLabel,
   normalizeCountry,
   PhoneInput,
-  ResourceSelect,
   type ScheduleColumn,
   type SchedulePreview,
   type ScheduleRangeValue,
@@ -24,12 +23,15 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
-import type { AgendaAppointment, AgendaServiceOption } from "../../lib/agenda"
+import type { AgendaAppointment } from "../../lib/agenda"
+import type { PhoneWhatsApp } from "../../lib/people"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
+import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
+import { ServiceSelect } from "../service-select"
 import { errorMessage, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 
@@ -61,9 +63,25 @@ export interface BookingSeed {
 /**
  * Nueva cita: a quién y cuándo. El «cuándo» es el mismo de reprogramar
  * (`useWhen`): lo blanco está libre, y el bloque se arrastra y se estira. El
- * sillón lo pone la agenda. Quien aún no es paciente se registra aquí mismo
+ * unidad dental la pone la agenda. Quien aún no es paciente se registra aquí mismo
  * con lo mínimo.
  */
+/** A quién le llega el recordatorio de la cita y por dónde (decisión 23). */
+interface ReminderReach {
+  name: string
+  whatsapp: PhoneWhatsApp
+  hasEmail: boolean
+}
+
+/** «Carmen no recibirá el recordatorio: aún no tiene WhatsApp»; nada si le llega por WhatsApp. */
+function reminderWords(reach: ReminderReach | null | undefined): string | null {
+  if (!reach || reach.whatsapp.state === "es_su_whatsapp") return null
+  const why = reach.whatsapp.state === "no_tiene" ? "su número no tiene WhatsApp" : "aún no tiene WhatsApp"
+  return reach.hasEmail
+    ? `${reach.name} recibirá el recordatorio por correo: ${why}.`
+    : `${reach.name} no recibirá el recordatorio: ${why}.`
+}
+
 export function BookingDrawer({
   seed,
   branchId,
@@ -153,11 +171,14 @@ export function BookingDrawer({
     (id) => coordinationQuery.data?.data.treatments.find((row) => row.id === id)?.title ?? null,
   )
   const [reason, setReason] = React.useState("")
-  const servicesQuery = useQuery({
-    queryKey: ["services", "agenda-picker"],
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
+  // El servicio elegido, también el que llega del Plan aunque no esté en la primera página del tarifario.
+  const serviceQuery = useQuery({
+    queryKey: ["services", "one", serviceId],
+    queryFn: () => fetchService(serviceId),
+    enabled: Boolean(serviceId),
+    staleTime: 60_000,
   })
-  const service = (servicesQuery.data?.data ?? []).find((item) => item.id === serviceId)
+  const service = serviceId ? serviceQuery.data?.data : undefined
   const duration = service?.durationMin ?? defaultMinutes
 
   // ----- Cuándo -----
@@ -171,6 +192,8 @@ export function BookingDrawer({
     date: seed.date,
     dentistUserId: seed.dentistUserId,
     startsAt: seed.startsAt,
+    // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
+    serviceId: serviceId || undefined,
   })
   const { shown, state, professional, chosenMinutes, nextFree, hoursThatDay, free } = when
 
@@ -260,7 +283,7 @@ export function BookingDrawer({
               (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
             await apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
               method: "POST",
-              body: JSON.stringify({ purpose: "novedades", granted: generalConsent, source: "telefono" }),
+              body: JSON.stringify({ tipo: "novedades", recibir: generalConsent, source: "telefono" }),
             })
           })().catch(() => {
             consentNote.current = "No se pudo anotar si acepta novedades y promociones: anótalo en su página, en Datos."
@@ -274,7 +297,7 @@ export function BookingDrawer({
         setRegistering(false)
       }
       if (!id) throw new Error("Elige un paciente.")
-      return apiFetch<{ data: AgendaAppointment }>("/api/appointments", {
+      return apiFetch<{ data: AgendaAppointment & { reminderReach?: ReminderReach | null } }>("/api/appointments", {
         method: "POST",
         body: JSON.stringify({
           branchId,
@@ -301,6 +324,7 @@ export function BookingDrawer({
               ? `El agente le avisa a ${result.data.patientName.split(/\s+/)[0]} por su conversación.`
               : null,
             whatsappNote.current,
+            reminderWords(result.data.reminderReach),
             consentNote.current,
           ]
             .filter(Boolean)
@@ -366,7 +390,7 @@ export function BookingDrawer({
       <FormDrawer
         open
         title="Nueva cita"
-        description="Elige a quién y cuándo. El sillón se asigna con el hueco."
+        description="Elige a quién y cuándo. La unidad dental se asigna con el hueco."
         onClose={onClose}
         onSubmit={(event) => {
           event.preventDefault()
@@ -485,6 +509,8 @@ export function BookingDrawer({
                   ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
+              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
+              <p className="text-xs text-muted-foreground">Díselo: «Te avisaremos por WhatsApp sobre tus citas.»</p>
               <div role="group" aria-labelledby="cita-nuevo-permiso" className="grid gap-1.5">
                 <span id="cita-nuevo-permiso" className="text-sm font-medium">
                   ¿Acepta recibir novedades y promociones de la clínica?
@@ -542,24 +568,22 @@ export function BookingDrawer({
             </div>
           )}
 
-          <ResourceSelect
+          <ServiceSelect
             id="cita-servicio"
             label="Servicio (opcional)"
-            options={(servicesQuery.data?.data ?? []).map((item) => ({
-              id: item.id,
-              label: item.name,
-              detail: item.durationMin ? `${item.durationMin} min` : undefined,
-            }))}
             value={serviceId}
             onChange={(next) => {
-              setServiceId(next)
+              if (next) queryClient.setQueryData(["services", "one", next.id], { data: next })
+              setServiceId(next?.id ?? "")
               // Con servicio, el bloque toma lo que dura el servicio.
-              const minutes =
-                (servicesQuery.data?.data ?? []).find((item) => item.id === next)?.durationMin ??
-                defaultMinutes
-              when.resize(minutes)
+              when.resize(next?.durationMin ?? defaultMinutes)
             }}
           />
+          {when.attending ? (
+            <p role="status" className="-mt-2 text-xs text-muted-foreground">
+              {`Solo se ofrecen las horas de quien atiende ${when.attending.specialtyName}.`}
+            </p>
+          ) : null}
 
           <WhenFields when={when} />
 

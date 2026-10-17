@@ -13,6 +13,10 @@ import { type ConnectionItem, usePermission } from "../../lib/crm"
 import type { ConnectResult } from "../../lib/whatsapp"
 
 export const Route = createFileRoute("/_org/settings/integrations/whatsapp")({
+  // `?mensaje=` abre ese mensaje: «Cambiar el texto» de «Te espera» llega así (ADR 0040).
+  validateSearch: (search: Record<string, unknown>) => ({
+    mensaje: typeof search.mensaje === "string" && search.mensaje ? search.mensaje : undefined,
+  }),
   component: WhatsAppPage,
 })
 
@@ -71,6 +75,7 @@ function WhatsAppSkeleton() {
  * enviar, que la clínica puede cambiar.
  */
 function WhatsAppPage() {
+  const { mensaje } = Route.useSearch()
   const canRead = usePermission("settings.read")
   const canWrite = usePermission("settings.write")
   const [fresh, setFresh] = useState<Fresh | null>(null)
@@ -155,6 +160,7 @@ function WhatsAppPage() {
                 showAccount={connections.length > 1}
                 canWrite={canWrite}
                 fixedCreate={activeCount === 1}
+                initialMessageId={mensaje ?? null}
                 onFreshRead={() => setFresh((current) => (current ? { ...current, read: true } : current))}
               />
             )

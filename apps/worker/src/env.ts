@@ -1,3 +1,4 @@
+import { fakeModelStartProblem } from "@odentia/agent"
 import { z } from "zod"
 
 const envSchema = z.object({
@@ -8,6 +9,18 @@ const envSchema = z.object({
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
+  /** Versión del Graph API de Meta, la misma de la API: WhatsApp, Messenger e Instagram. */
+  META_GRAPH_VERSION: z
+    .string()
+    .regex(/^v\d+\.\d+$/, "Se espera la forma v25.0")
+    .default("v25.0"),
+  /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
+  ADMIN_URL: z.string().url(),
+  /**
+   * Buzón de soporte de odentIA: recibe «Caso nuevo» y «La clínica respondió».
+   * Vacío: esos avisos quedan pendientes (el caso sigue en la bandeja de Soporte).
+   */
+  SUPPORT_INBOX_EMAIL: z.union([z.literal(""), z.email()]).default(""),
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int(),
   SMTP_USER: z.string().default(""),
@@ -28,6 +41,8 @@ const envSchema = z.object({
    * `LLM_MODEL=fake`: modelo determinista de desarrollo y pruebas (otro valor no tiene efecto).
    */
   LLM_MODEL: z.string().optional(),
+  /** La imagen lo fija en `production`; desarrollo y pruebas lo dejan vacío o en `test`. */
+  NODE_ENV: z.string().optional(),
   LLM_OPENAI_API_KEY: z.string().optional().default(""),
   LLM_OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
   LLM_ANTHROPIC_API_KEY: z.string().optional().default(""),
@@ -78,6 +93,10 @@ const envSchema = z.object({
   S3_BUCKET: z.string().min(1),
   S3_ATTACHMENTS_BUCKET: z.string().min(1),
   S3_PUBLIC_URL: z.string().url(),
+}).superRefine((data, ctx) => {
+  // Producción no arranca con el modelo de demostración (ver `fakeModelStartProblem`).
+  const problem = fakeModelStartProblem(data, data.CHANNEL_SENDER_MODE === "live")
+  if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
 })
 
 function loadEnv() {

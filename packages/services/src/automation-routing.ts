@@ -8,21 +8,34 @@ import { channelConnection, contact, contactIdentity, conversation } from "@oden
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
-import { type AutomationMessage, type MessageVariable, placePhrase, renderMessage, replyId } from "./automation-messages.js"
-import { findTemplateByName, type TemplateItem } from "./channel-templates.js"
+import {
+  type AutomationMessage,
+  type MessageSpec,
+  type MessageVariable,
+  placePhrase,
+  renderMessage,
+  replyId,
+} from "./automation-messages.js"
+import { findTemplateByName, isPromotionFor, type TemplateItem } from "./channel-templates.js"
 import { isDirectThread } from "./contacts.js"
-import { startContactConversation, WA_FREE_TEXT_WINDOW_MS } from "./conversations.js"
+import { startContactConversation } from "./conversations.js"
 import { ServiceError } from "./errors.js"
 import { openEmailThread } from "./financial-documents.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { acceptsPromotions } from "./message-permission.js"
+import { windowOpen } from "./message-window.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Por dónde le llega un mensaje automático a cada persona y qué dice. El orden
  * es fijo y lo decide el sistema, nunca un modelo:
  *
  * 1. WhatsApp como respuesta, si la persona escribió en las últimas 24 horas.
- * 2. WhatsApp con el mensaje aprobado, si no.
- * 3. Correo, si no hay WhatsApp o su mensaje aún no está aprobado.
+ * 2. WhatsApp con el mensaje aprobado, si no. La categoría manda (ADR 0040):
+ *    si WhatsApp cuenta como promoción un mensaje que se pidió como servicio,
+ *    solo sale así a quien aceptó novedades.
+ * 3. Correo, si no hay WhatsApp o su mensaje aún no está aprobado (o es
+ *    promoción y la persona no aceptó novedades).
  * 4. Si nada de eso se puede, no se intenta: se devuelve el motivo, para que el
  *    equipo sepa por qué y cómo habilitarlo.
  */
@@ -96,8 +109,9 @@ async function isSelf(tx: Db, orgId: string, patientId: string, contactId: strin
 
 async function patientName(tx: Db, orgId: string, patientId: string): Promise<string> {
   const [row] = await tx
-    .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+    .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   return row ? firstName(row) : "tu familiar"
@@ -229,6 +243,9 @@ function controlIdOf(payload: unknown): string | null {
 
 // -------------------------------------------------------------- la vía ---
 
+/** Un mensaje para decidir su vía: la plantilla con la que se pidió y su categoría. */
+export type RouteSpec = Pick<MessageSpec, "template" | "category">
+
 export type MessageRoute =
   | {
       via: AutomationVia
@@ -249,7 +266,7 @@ async function routeFacts(
   tx: Db,
   orgId: string,
   contactId: string,
-  spec: Pick<AutomationMessage, "template"> | null,
+  spec: RouteSpec | null,
 ) {
   const [person] = await tx
     .select({ email: contact.email })
@@ -267,8 +284,10 @@ async function routeFacts(
       ),
     )
     .orderBy(desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
-    .limit(1)
-  const identity = identities[0]
+  // Un número que WhatsApp rechazó («Este número no tiene WhatsApp», decisión
+  // 23, caso 1) no es una vía: sale por correo o, si no hay, se pide la llamada.
+  const identity = identities.find((row) => !row.noWhatsappAt)
+  const noWhatsapp = !identity && identities.length > 0
   const connections = await tx
     .select({ id: channelConnection.id, channel: channelConnection.channel })
     .from(channelConnection)
@@ -284,6 +303,8 @@ async function routeFacts(
   const mailbox = connections.find((row) => row.channel === "email")
   let windowThreadId: string | null = null
   let template: TemplateItem | null = null
+  /** WhatsApp lo cuenta como promoción y la persona no aceptó novedades: no sale con plantilla. */
+  let promotion = false
   if (identity && whatsapp) {
     const threads = await tx
       .select({
@@ -304,22 +325,28 @@ async function routeFacts(
     const thread = threads.find((row) => isDirectThread("whatsapp", row.externalThreadId, identity.externalUserId))
     // Escribir reabre una conversación cerrada (ADR 0024): lo que cuenta es la
     // ventana de 24 horas desde que la persona escribió, no si está abierta.
-    if (
-      thread?.lastInboundAt &&
-      Date.now() - thread.lastInboundAt.getTime() <= WA_FREE_TEXT_WINDOW_MS
-    ) {
+    // Una sola regla con su margen (`windowOpen`, ADR 0042).
+    if (thread && windowOpen(thread.lastInboundAt)) {
       windowThreadId = thread.id
     } else {
       template = spec ? await findTemplateByName(tx, orgId, whatsapp.id, spec.template) : null
+      promotion =
+        !!spec &&
+        !!template &&
+        template.status === "aprobada" &&
+        isPromotionFor(template, spec.category) &&
+        !(await acceptsPromotions(tx, orgId, contactId))
     }
   }
   const email = person?.email?.trim().toLowerCase()
   return {
     identity: identity ?? null,
+    noWhatsapp,
     whatsapp: whatsapp ?? null,
     mailbox: mailbox ?? null,
     windowThreadId,
     template,
+    promotion,
     email: email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
     rawEmail: email ?? null,
   }
@@ -331,8 +358,17 @@ function noRoute(
   mailboxProblem: string | null,
 ): { cause: AutomationCause; detail: string } {
   const { identity, whatsapp, template } = facts
+  if (facts.noWhatsapp && !facts.rawEmail) {
+    return { cause: "no_entregado", detail: "Su número no tiene WhatsApp y no tiene correo registrado" }
+  }
   if (!identity && !facts.rawEmail) {
     return { cause: "sin_destino", detail: "La persona no tiene WhatsApp ni correo registrados" }
+  }
+  if (identity && whatsapp && facts.promotion) {
+    return {
+      cause: "promocion",
+      detail: "WhatsApp considera el mensaje como promoción y la persona no aceptó novedades",
+    }
   }
   if (identity && whatsapp) {
     const state =
@@ -359,17 +395,47 @@ export type RoutePreview =
   | { via: AutomationVia; channel: "whatsapp" | "email" }
   | { cause: AutomationCause; detail: string }
 
+/** Lo que decide la vía de una persona, ya leído. */
+export interface ViaFacts {
+  /** Escribió por WhatsApp hace menos de 24 horas (`windowOpen`). */
+  windowOpen: boolean
+  /** Tiene WhatsApp y la clínica tiene uno conectado. */
+  whatsapp: boolean
+  /** WhatsApp aprobó el mensaje y no lo cuenta como promoción para quien no aceptó novedades. */
+  templateUsable: boolean
+  /** Tiene un correo válido, la clínica uno conectado y el mensaje tiene texto para correo. */
+  email: boolean
+}
+
+/**
+ * El orden fijo de las vías (ADR 0030, 0034 y 0042), sin leer nada: la regla
+ * que usan `previewMessageRoute`, `routeMessage` y «Probar línea» del
+ * Administrador. Nulo: no hay por dónde.
+ */
+export function chooseVia(facts: ViaFacts): { via: AutomationVia; channel: "whatsapp" | "email" } | null {
+  if (facts.windowOpen && facts.whatsapp) return { via: "respuesta", channel: "whatsapp" }
+  if (facts.whatsapp && facts.templateUsable) return { via: "plantilla", channel: "whatsapp" }
+  if (facts.email) return { via: "correo", channel: "email" }
+  return null
+}
+
+function viaFactsOf(facts: Awaited<ReturnType<typeof routeFacts>>, spec: RouteSpec | null): ViaFacts {
+  return {
+    windowOpen: !!facts.windowThreadId,
+    whatsapp: !!facts.identity && !!facts.whatsapp,
+    templateUsable: facts.template?.status === "aprobada" && !facts.promotion,
+    email: !!spec && !!facts.mailbox && !!facts.email,
+  }
+}
+
 export async function previewMessageRoute(
   tx: Db,
   orgId: string,
   contactId: string,
-  spec: Pick<AutomationMessage, "template"> | null,
+  spec: RouteSpec | null,
 ): Promise<RoutePreview> {
   const facts = await routeFacts(tx, orgId, contactId, spec)
-  if (facts.windowThreadId) return { via: "respuesta", channel: "whatsapp" }
-  if (facts.identity && facts.whatsapp && facts.template?.status === "aprobada") return { via: "plantilla", channel: "whatsapp" }
-  if (spec && facts.mailbox && facts.email) return { via: "correo", channel: "email" }
-  return noRoute(facts, null)
+  return chooseVia(viaFactsOf(facts, spec)) ?? noRoute(facts, null)
 }
 
 /**
@@ -382,13 +448,18 @@ export async function routeMessage(
   tx: Db,
   orgId: string,
   contactId: string,
-  spec: Pick<AutomationMessage, "template"> | null,
+  spec: RouteSpec | null,
 ): Promise<MessageRoute> {
   const facts = await routeFacts(tx, orgId, contactId, spec)
   const { identity, whatsapp, mailbox, template } = facts
-  if (facts.windowThreadId) return { via: "respuesta", channel: "whatsapp", conversationId: facts.windowThreadId }
-  if (identity && whatsapp) {
-    if (template?.status === "aprobada") {
+  // El mismo orden que `chooseVia`; aquí además se abre el hilo, y si no se
+  // puede abrir se prueba la vía siguiente.
+  const first = chooseVia(viaFactsOf(facts, spec))
+  if (first?.via === "respuesta" && facts.windowThreadId) {
+    return { via: "respuesta", channel: "whatsapp", conversationId: facts.windowThreadId }
+  }
+  if (identity && whatsapp && template) {
+    if (viaFactsOf(facts, spec).templateUsable) {
       try {
         const started = await startContactConversation(tx, orgId, null, contactId, {
           identityId: identity.id,

@@ -1,4 +1,4 @@
-import { conditionLabel, FDI_ADULT, FDI_CHILD, surfaceLabel } from "@odentia/clinical"
+import { budgetAnswerText, conditionLabel, FDI_ADULT, FDI_CHILD, surfaceLabel } from "@odentia/clinical"
 import {
   Attachment,
   AttachmentActions,
@@ -158,7 +158,7 @@ function NoteCard({
       <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
-          context={item.diagnosisCode ? `CIE-10: ${item.diagnosisCode}` : null}
+          context={item.diagnosisCode ? `Diagnóstico: ${item.diagnosisCode}` : null}
           createdAt={item.createdAt}
           timezone={timezone}
           locale={locale}
@@ -193,7 +193,7 @@ function OdontogramCard({
           context={
             [
               tooth != null ? `Pieza ${tooth}` : null,
-              item.diagnosisCode ? `CIE-10: ${item.diagnosisCode}` : null,
+              item.diagnosisCode ? `Diagnóstico: ${item.diagnosisCode}` : null,
             ]
               .filter(Boolean)
               .join(" · ") || null
@@ -287,20 +287,12 @@ function AnamnesisCard({
   )
 }
 
-/** Etiqueta en español de la decisión vigente de un tratamiento. */
+/**
+ * La decisión vigente de un tratamiento, con las mismas palabras que Plan
+ * (`budgetAnswerText`): «Aceptado», «Lo está pensando», «No aceptó»…
+ */
 function decisionLabel(decision: string): string {
-  switch (decision) {
-    case "aceptado":
-      return "Aceptado"
-    case "rechazado":
-      return "Rechazado"
-    case "pospuesto":
-      return "Pospuesto"
-    case "reemplazado":
-      return "Reemplazado"
-    default:
-      return "Pendiente de decisión"
-  }
+  return budgetAnswerText(decision)
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -314,12 +306,6 @@ const STATUS_LABELS: Record<string, string> = {
   emitida: "Emitida",
   anulada: "Anulada",
   borrador: "Borrador",
-  presentado: "Presentado",
-  aceptado: "Aceptado",
-  parcial: "Parcial",
-  rechazado: "Rechazado",
-  pospuesto: "Pospuesto",
-  sustituido: "Sustituido",
   activo: "Vigente",
   anulado: "Anulado",
 }
@@ -378,7 +364,7 @@ function JourneyCard({
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {item.status ? (
-          <Badge variant="secondary">{STATUS_LABELS[item.status] ?? item.status}</Badge>
+          <Badge variant="secondary">{item.statusText ?? STATUS_LABELS[item.status] ?? item.status}</Badge>
         ) : null}
         {item.dueAt ? (
           <span className="text-xs text-muted-foreground">

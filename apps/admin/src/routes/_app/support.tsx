@@ -16,6 +16,9 @@ import { api } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 
 export const Route = createFileRoute("/_app/support")({
+  // `?caso=<id>`: el enlace del aviso por correo abre ese caso.
+  validateSearch: (search: Record<string, unknown>): { caso?: string } =>
+    typeof search.caso === "string" && search.caso ? { caso: search.caso } : {},
   component: SupportPage,
 })
 
@@ -148,7 +151,8 @@ function SupportPage() {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState<string>("")
   const [page, setPage] = useState(0)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const linkedCase = Route.useSearch().caso ?? null
+  const [selectedId, setSelectedId] = useState<string | null>(linkedCase)
   const [checked, setChecked] = useState<string[]>([])
   const [tab, setTab] = useState<"cola" | "conocimiento" | "metricas">("cola")
   // Borradores por caso: cambiar de ficha conserva cada texto y nunca envía

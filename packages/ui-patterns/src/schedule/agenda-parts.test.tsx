@@ -212,7 +212,8 @@ describe("recursos y días", () => {
   it("las iniciales salen del nombre, no del título, y el tono es estable", () => {
     expect(initialsOf("Dra. Ana Torres")).toBe("AT")
     expect(initialsOf("Dr. Luis Vega")).toBe("LV")
-    expect(initialsOf("Sillón 1")).toBe("S1")
+    expect(initialsOf("Unidad dental 1")).toBe("U1")
+    expect(initialsOf("Unidad dental 12")).toBe("U12")
     expect(scheduleToneAt(0)).toBe(0)
     expect(scheduleToneAt(5)).toBe(0)
     expect(scheduleToneAt(7)).toBe(2)

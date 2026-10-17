@@ -43,13 +43,14 @@ export async function seedChannelTemplates(
   }
 
   // Los trece con los que viene la clínica, en estados distintos.
-  const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date }> = {
+  const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date; category?: string }> = {
     recordatorio_cita: { status: "aprobada", since: lastWeek },
     recordatorio_control: { status: "aprobada", since: lastWeek },
     seguimiento_presupuesto: { status: "en_revision" },
     seguimiento_comercial: { status: "aprobada", since: lastWeek },
     seguimiento_no_asistencia: { status: "rechazada", reason: "INVALID_FORMAT" },
-    cita_cancelada: { status: "aprobada", since: lastWeek },
+    // WhatsApp lo pasó a promoción (ADR 0040): la lista lo marca y «Te espera» pide cambiar el texto.
+    cita_cancelada: { status: "aprobada", since: lastWeek, category: "marketing" },
     aviso_cita_reservada: { status: "aprobada", since: lastWeek },
     // El aviso con «Su enlace» y «Su enlace» mismo, recién pedidos: mientras
     // tanto salen escritos a quien escribió en las últimas 24 horas o por correo.
@@ -66,7 +67,7 @@ export async function seedChannelTemplates(
     if (!spec) continue
     await upsert({
       name: spec.template,
-      category: spec.category,
+      category: states[key].category ?? spec.category,
       status: states[key].status,
       reason: states[key].reason ?? null,
       statusSince: states[key].since ?? yesterday,
@@ -154,6 +155,20 @@ export async function seedChannelTemplates(
     buttons: [],
     messageKey: null,
     requestedAt: null,
+  })
+  // Con encabezado: se ve en la lista, pero odentIA no la sabe enviar (ADR 0040).
+  await upsert({
+    name: "recordatorio_con_logo",
+    category: "utility",
+    status: "aprobada",
+    reason: null,
+    statusSince: null,
+    body: "Hola, {{1}}. Te esperamos en tu cita.",
+    variables: 1,
+    buttons: [],
+    messageKey: null,
+    requestedAt: null,
+    unsupported: "encabezado",
   })
   await upsert({
     name: "promo_blanqueamiento",

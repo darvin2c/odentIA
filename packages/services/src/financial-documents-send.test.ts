@@ -6,19 +6,21 @@
  */
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
+import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { patientContact } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { updateContact } from "./contacts.js"
+import { createContact, updateContact } from "./contacts.js"
 import { getRefundReceiptPdf } from "./financial-document-pdf.js"
-import { getDocumentSendOptions, saveRecipientEmail, sendFinancialDocument } from "./financial-documents.js"
+import { getDocumentSendOptions, saveRecipientEmail, sendFinancialDocument, sendReceiptInConversation } from "./financial-documents.js"
+import { grantResponsibility } from "./responsibilities.js"
 import { collectCharge, createCharge, getAccountSummary, refundCredit } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import type { Storage } from "./storage.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { setTestPatientIdentity } from "./test-patient.js"
 setupTestDb()
 
 function capturingStorage() {
@@ -53,16 +55,8 @@ async function paidTicket() {
   const f = await clinicalFixture()
   const run = f.run as <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
   // La persona del paciente, con correo.
-  const [self] = await ownerDb
-    .insert(contact)
-    .values({ organizationId: "org_a", displayName: "Paciente de prueba", email: `paciente-${randomUUID()}@example.com` })
-    .returning()
-  await ownerDb.insert(patientContact).values({
-    organizationId: "org_a",
-    patientId: f.patient.id,
-    contactId: self!.id,
-    relationship: "self",
-  })
+  await setTestPatientIdentity(ownerDb, f.patient.id, { email: `paciente-${randomUUID()}@example.com` })
+  const [self] = await ownerDb.select().from(contact).where(eq(contact.id, f.patient.personId))
   const [sede] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: `Sede envío ${randomUUID()}` })
@@ -334,4 +328,48 @@ it("la cuenta dice quién es, cómo quedó cada cobro y de qué adelanto viene e
   await expect(run((tx) => getRefundReceiptPdf(tx, "org_a", f.patient.id, randomUUID()))).rejects.toBeTruthy()
   const later = await run((tx) => getAccountSummary(tx, "org_a", f.patient.id))
   expect(later.aFavorOrigen[0]?.availableCents).toBe(3000)
+})
+
+it("por el chat el comprobante solo va a quien decide: quien fue su representante de niño ya no lo recibe al cumplir 18", async () => {
+  const { f, run } = await paidTicket()
+  // La paciente ya es mayor de edad; su madre fue su representante legal desde niña y sigue vinculada.
+  await setTestPatientIdentity(ownerDb, f.patient.id, { birthDate: "1995-03-10" })
+  const former = await run((tx) => createContact(tx, "org_a", { displayName: "Madre De Antes", email: `madre-${randomUUID()}@example.com` }))
+  await ownerDb.insert(patientContact).values({ organizationId: "org_a", patientId: f.patient.id, contactId: former.id, relationship: "guardian" })
+  await run((tx) => grantResponsibility(tx, "org_a", f.actor, f.patient.id, { contactId: former.id, kind: "representante_legal", startsAt: "2000-01-01" }))
+  // La madre escribe por su chat y pide el comprobante de su hija.
+  const [conn] = await ownerDb
+    .insert(channelConnection)
+    .values({
+      organizationId: "org_a",
+      channel: "telegram",
+      provider: "telegram_bot_api",
+      displayName: "Bot",
+      configEncrypted: "prueba",
+      webhookSecret: "prueba",
+      status: "active",
+    })
+    .returning()
+  const externalId = `tg:${randomUUID()}`
+  const [identity] = await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: "org_a", contactId: former.id, channel: "telegram", externalUserId: externalId })
+    .returning()
+  const [thread] = await ownerDb
+    .insert(conversation)
+    .values({
+      organizationId: "org_a",
+      contactId: former.id,
+      channelConnectionId: conn!.id,
+      externalThreadId: externalId,
+      contactIdentityId: identity!.id,
+      lastInboundAt: new Date(),
+    })
+    .returning()
+  const { storage, stored } = capturingStorage()
+  const sent = await run((tx) => sendReceiptInConversation(tx, "org_a", { conversationId: thread!.id, patientId: f.patient.id }, { storage }))
+  expect(sent).toBeNull()
+  expect(stored).toEqual([])
+  const messages = await ownerDb.select().from(message).where(eq(message.conversationId, thread!.id))
+  expect(messages).toEqual([])
 })

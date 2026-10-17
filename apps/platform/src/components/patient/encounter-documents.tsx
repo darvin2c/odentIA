@@ -219,7 +219,9 @@ export function EncounterDocumentsBlock({
     .map((proc) => `${proc.description}${proc.toothNumber != null ? ` · pieza ${proc.toothNumber}` : ""}`)
     .join(", ")
     .slice(0, 500)
-  const firstDiagnosis = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)?.cie10Code
+  const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
+  const firstDiagnosis = firstActive?.diagnosisCode
+  const firstDiagnosisSystem = firstActive?.diagnosisSystem
   const send = recipientWord(patient)
   const who = firstName(patient)
 
@@ -434,6 +436,7 @@ export function EncounterDocumentsBlock({
           drawerOnly
           createOpen
           defaultDiagnosisCode={firstDiagnosis}
+          defaultDiagnosisSystem={firstDiagnosisSystem}
           onCreateOpenChange={(open) => {
             if (!open) {
               setCreating(null)
@@ -449,6 +452,7 @@ export function EncounterDocumentsBlock({
           encounterId={encounterId}
           defaultProcedureRef={procedureRef}
           defaultDiagnosisCode={firstDiagnosis}
+          defaultDiagnosisSystem={firstDiagnosisSystem}
           onClose={() => setCreating(null)}
           onCreated={async () => {
             setCreating(null)
@@ -462,6 +466,7 @@ export function EncounterDocumentsBlock({
           patientId={patientId}
           encounterId={encounterId}
           defaultDiagnosisCode={firstDiagnosis}
+          defaultDiagnosisSystem={firstDiagnosisSystem}
           onClose={() => setCreating(null)}
           onCreated={() => {
             setCreating(null)

@@ -42,15 +42,17 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
   const once = useMutation({
     retry: false,
     mutationFn: () =>
-      apiFetch<{ data: { created: number; total: number; writes: boolean } }>(`/api/agent/admin/recommendations/${recommendationKey}/once`, { method: "POST" }),
+      apiFetch<{ data: { created: number; total: number; writes: boolean; all: number } }>(`/api/agent/admin/recommendations/${recommendationKey}/once`, { method: "POST" }),
     onSuccess: (response) => {
-      const { created, total, writes } = response.data
+      const { created, total, writes, all } = response.data
+      // Si había más casos de los que se atienden de una vez, se dice el número real.
+      const left = all > total ? ` Quedaron ${all - total} de ${all} sin atender: son más de los que se atienden de una vez.` : ""
       setDone(
         created === 0
-          ? "Eso ya se pidió hoy: no se duplicó nada."
+          ? `Eso ya se pidió hoy: no se duplicó nada.${left}`
           : writes
-            ? `Listo: el agente Recepción le${created === 1 ? "" : "s"} escribe a ${created === 1 ? "1 persona" : `${created} personas`} en unos minutos. A quien no pueda, lo verás en Inicio con el motivo.`
-            : `${created} ${created === 1 ? "tarea creada" : "tareas creadas"}${created < total ? `; las otras ${total - created} ya existían` : ""}. Las ves en Tareas.`,
+            ? `Listo: el agente Recepción le${created === 1 ? "" : "s"} escribe a ${created === 1 ? "1 persona" : `${created} personas`} en unos minutos. A quien no pueda, lo verás en Inicio con el motivo.${left}`
+            : `${created} ${created === 1 ? "tarea creada" : "tareas creadas"}${created < total ? `; las otras ${total - created} ya existían` : ""}. Las ves en Tareas.${left}`,
       )
       setConfirmOnce(false)
       refreshAdmin(queryClient)

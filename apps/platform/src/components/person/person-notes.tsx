@@ -96,9 +96,7 @@ export function PersonNotes({ personId }: { personId: string }) {
           {list.map((note) => (
             <li key={note.id} className="flex flex-col gap-1 py-2 first:pt-0 last:pb-0">
               <span className="text-xs text-muted-foreground">
-                {note.legacy
-                  ? "Anotado antes en sus datos, sin autor"
-                  : `${note.authorName ?? "Alguien del equipo"} · ${timeAgo(note.at) || new Date(note.at).toLocaleDateString(activeOrgLocale())}`}
+                {`${note.authorName ?? "Anotado por odentIA"} · ${timeAgo(note.at) || new Date(note.at).toLocaleDateString(activeOrgLocale())}`}
               </span>
               <span className="whitespace-pre-wrap text-sm">{note.body}</span>
             </li>

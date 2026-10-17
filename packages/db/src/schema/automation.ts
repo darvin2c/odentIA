@@ -60,17 +60,15 @@ export const AUTOMATION_CHANNELS = ["whatsapp", "telegram", "messenger", "instag
 export type AutomationChannel = (typeof AUTOMATION_CHANNELS)[number]
 
 /**
- * Qué aceptó recibir una persona sin haber escrito primero: `recordatorio`
- * (citas y controles) y `seguimiento` (inasistencias, presupuestos y oportunidades). Es un
- * permiso de la persona, no de un canal.
+ * Tipos de mensaje de una persona (ADR 0030, precisado por 0040). Los dos
+ * primeros se pueden apagar y no piden permiso: «recordatorio» (los
+ * recordatorios de sus citas) y «seguimiento» (sus controles, si faltó, otra
+ * fecha tras cancelar). «novedades» (novedades y promociones, y lo que Meta
+ * cuenta como promoción) pide su sí. «avisos» es lo que pasó con su cita y sus
+ * papeles: siempre sale y solo se apaga con «No quiero ningún mensaje de la
+ * clínica», que apaga los cuatro.
  */
-/**
- * Tipos de mensaje de una persona. «recordatorio» (su cita y sus controles) y
- * «seguimiento» (presupuestos, oportunidades, inasistencias) son parte del
- * servicio: no piden permiso y su fila solo dice si se dio de baja. Solo
- * «novedades» (novedades y promociones de la clínica) pide su permiso (ADR 0030).
- */
-export const CONSENT_PURPOSES = ["recordatorio", "seguimiento", "novedades"] as const
+export const CONSENT_PURPOSES = ["recordatorio", "seguimiento", "novedades", "avisos"] as const
 export type ConsentPurpose = (typeof CONSENT_PURPOSES)[number]
 
 /** Por dónde salió un mensaje automático. */
@@ -103,6 +101,11 @@ export const AUTOMATION_CAUSES = [
   "sin_conexion",
   /** No escribió hace poco y WhatsApp aún no aprueba el mensaje. */
   "sin_plantilla",
+  /**
+   * No escribió hace poco y WhatsApp cuenta el mensaje como promoción: solo
+   * sale a quien aceptó novedades (ADR 0040).
+   */
+  "promocion",
   /** El canal aceptó el mensaje y después no lo entregó. */
   "no_entregado",
   /** El envío falló en el proveedor. */
@@ -260,6 +263,8 @@ export const CONSENT_SOURCES = [
   "telefono",
   "conversacion",
   "portal",
+  /** Lo eligió en «Tus mensajes», dentro de su enlace (ADR 0040). */
+  "enlace",
   "baja",
   "revocacion_datos",
 ] as const

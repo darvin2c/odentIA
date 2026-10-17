@@ -1,4 +1,4 @@
-import { formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { formatMoneyInput, parseMoney, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -50,15 +50,15 @@ import {
   fetchMostUsedServices,
   fetchServices,
   fetchTreatmentTemplates,
+  PRICE_DISCLOSURE_OPTIONS,
+  type PriceDisclosure,
   type QuickAddServiceBody,
   quickAddServicesApi,
   SERVICE_PLACE_OPTIONS,
-  SPECIALTY_FILTER_OPTIONS,
-  TREATMENT_SPECIALTIES,
-  TREATMENT_SPECIALTY_LABELS,
   type TreatmentTemplateCatalog,
   type TreatmentTemplateItem,
 } from "../../lib/services"
+import { useClinicSpecialties } from "../../lib/clinical-forms"
 
 export const Route = createFileRoute("/_org/services/biblioteca")({
   component: AddServicesPage,
@@ -235,6 +235,15 @@ function AddServicesPage() {
   const search = listSearch.get("q") ?? ""
   const specialtyFilter = listSearch.get("especialidad") ?? "todas"
   const cursor = listSearch.get("cursor")
+  // La biblioteca clasifica con sus claves; el filtro las nombra como las llama la clínica (ADR 0039).
+  const clinicSpecialties = useClinicSpecialties({ enabled: canViewLibrary }).data?.data ?? []
+  const libraryFilterOptions = [
+    { value: "todas", label: "Todas" },
+    ...TREATMENT_SPECIALTIES.map((key) => ({
+      value: key,
+      label: clinicSpecialties.find((item) => item.key === key)?.name ?? key,
+    })),
+  ]
   const hasFilters = search.trim() !== "" || specialtyFilter !== "todas"
   /** «Más usados» es el punto de partida de quien agrega; buscar o filtrar va a la biblioteca. */
   const view: View =
@@ -363,6 +372,14 @@ function AddServicesPage() {
     setOwnOpen(true)
   }, [])
 
+  /**
+   * «¿Cómo dice el agente estos precios?»: una sola pregunta para todo lo que
+   * se guarda, con «Precio exacto» marcado (decisión 5 de la fase 4). Después
+   * se cambia en Servicios, uno por uno o varios a la vez.
+   */
+  const [disclosure, setDisclosure] = useState<PriceDisclosure>("exacto")
+  const disclosureLabelId = useId()
+
   const saveMutation = useMutation({
     mutationFn: async (toSave: AddRow[]) => {
       if (!regional) throw new Error("Falta la moneda de la clínica")
@@ -380,7 +397,7 @@ function AddServicesPage() {
           durationMin: duration.minutes,
         })
       }
-      const result = await quickAddServicesApi(items)
+      const result = await quickAddServicesApi(items, disclosure)
       return { result, savedKeys: toSave.map((row) => row.key) }
     },
     onSuccess: async ({ result, savedKeys }) => {
@@ -744,7 +761,7 @@ function AddServicesPage() {
                 key: "especialidad",
                 label: "Especialidad",
                 type: "select",
-                options: SPECIALTY_FILTER_OPTIONS,
+                options: libraryFilterOptions,
               },
             ]}
             sortOptions={[]}
@@ -770,6 +787,20 @@ function AddServicesPage() {
               // `lg` esa barra es un riel lateral y esta baja hasta el borde.
               className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-border bg-card p-3 shadow-sm lg:bottom-0"
             >
+              {chosen.length > 0 ? (
+                <div className="flex min-w-0 basis-full flex-col gap-1.5">
+                  <span id={disclosureLabelId} className="text-sm font-medium">
+                    ¿Cómo dice el agente estos precios?
+                  </span>
+                  <RadioChips
+                    value={disclosure}
+                    options={PRICE_DISCLOSURE_OPTIONS}
+                    onChange={setDisclosure}
+                    labelledBy={disclosureLabelId}
+                    disabled={saving}
+                  />
+                </div>
+              ) : null}
               <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
                 El nombre es el que verán caja y el paciente; se puede cambiar. El código oficial se
                 conserva.
@@ -869,7 +900,9 @@ function OwnServiceDrawer({
   const id = useId()
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
-  const [specialty, setSpecialty] = useState("")
+  // La especialidad de la clínica (una sola lista, ADR 0039).
+  const [specialtyId, setSpecialtyId] = useState("")
+  const specialtiesQuery = useClinicSpecialties({ activeOnly: true, enabled: open })
   const [scope, setScope] = useState<string>("general")
   const [billingMode, setBillingMode] = useState<BillingMode>("treatment")
   const [price, setPrice] = useState("")
@@ -880,7 +913,7 @@ function OwnServiceDrawer({
   const [submitted, setSubmitted] = useState(false)
 
   const nameIssue = checkName(name)
-  const specialtyIssue = specialty ? null : "Elige la especialidad"
+  const specialtyIssue = specialtyId ? null : "Elige la especialidad"
   const priceCheck = checkPrice(price, regional)
   const priceIssue =
     priceCheck.state === "invalid"
@@ -892,7 +925,7 @@ function OwnServiceDrawer({
   const durationIssue = duration.ok ? null : "Minutos enteros entre 1 y 1440"
   const isDirty =
     name !== "" ||
-    specialty !== "" ||
+    specialtyId !== "" ||
     scope !== "general" ||
     billingMode !== "treatment" ||
     price !== "" ||
@@ -903,7 +936,7 @@ function OwnServiceDrawer({
     mutationFn: (priceCents: number) =>
       createServiceApi({
         name: name.trim(),
-        specialty,
+        specialtyId,
         scope,
         priceCents,
         billingMode,
@@ -951,14 +984,15 @@ function OwnServiceDrawer({
         <FieldLabel htmlFor={`${id}-especialidad`}>Especialidad</FieldLabel>
         <ChoiceSelect
           id={`${id}-especialidad`}
-          value={specialty}
-          placeholder="Elige la especialidad"
+          value={specialtyId}
+          placeholder={specialtiesQuery.isPending ? "Cargando…" : "Elige la especialidad"}
+          disabled={specialtiesQuery.isPending}
           aria-invalid={(submitted && specialtyIssue !== null) || undefined}
-          onChange={(event) => setSpecialty(event.target.value)}
+          onChange={(event) => setSpecialtyId(event.target.value)}
         >
-          {TREATMENT_SPECIALTIES.map((option) => (
-            <option key={option} value={option}>
-              {TREATMENT_SPECIALTY_LABELS[option]}
+          {(specialtiesQuery.data?.data ?? []).map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.name}
             </option>
           ))}
         </ChoiceSelect>

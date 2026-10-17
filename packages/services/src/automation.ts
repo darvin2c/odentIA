@@ -40,6 +40,11 @@ import {
   type AppointmentNoticeKey,
   type AutomationMessage,
   automationMessageOf,
+  CHOOSE_MESSAGES_LINK,
+  isStopWord,
+  optInReply,
+  optOutReply,
+  SWITCHABLE_PURPOSES,
   GENERAL_PERMISSION_NO,
   GENERAL_PERMISSION_QUESTION,
   GENERAL_PERMISSION_YES,
@@ -49,9 +54,11 @@ import {
   withLinkLine,
 } from "./automation-messages.js"
 import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { permissionRefusal, writingTimeFor } from "./message-gate.js"
+import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { issuePersonalLink } from "./booking-links.js"
 import { answerBudgetButton } from "./budget-send.js"
-import { applyTemplateStatuses, type TemplateDeps } from "./channel-templates.js"
+import { applyTemplateStatuses, reviewConnectionTemplates, type TemplateDeps } from "./channel-templates.js"
 import {
   currentAutomationMessage,
   currentAutomationMessageOf,
@@ -63,15 +70,18 @@ import {
 } from "./clinic-messages.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
-import { personalLinkMessageUrl, publicLinksConfigured } from "./public-links.js"
+import { personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { getAgentSpendGate } from "./saas-terms.js"
+import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Automatizaciones: reglas, trabajos durables en DB, consentimientos y
@@ -134,9 +144,13 @@ function assertPurpose(purpose: string): ConsentPurpose {
   return purpose as ConsentPurpose
 }
 
-/** Permiso que la persona tiene que haber dado para recibir el mensaje de una línea. */
+/**
+ * El tipo de mensaje de un trabajo: el que declara su mensaje del catálogo (un
+ * aviso de cita es `avisos` aunque sea de «Recordar la cita») y, sin mensaje,
+ * el de su línea (ADR 0040).
+ */
 export function purposeOfKind(kind: string): ConsentPurpose {
-  return lineOfJobKind(kind)?.agent?.purpose ?? "seguimiento"
+  return automationMessageOf(kind)?.purpose ?? lineOfJobKind(kind)?.agent?.purpose ?? "seguimiento"
 }
 
 /** Lee la config JSONB de una línea campo por campo (sin casts ciegos). */
@@ -366,19 +380,15 @@ export function activeSince(rule: Pick<RuleRow, "enabledAt" | "createdAt">): Dat
 
 /**
  * Lo que el Administrador necesita saber antes de hacer algo por su cuenta:
- * si él y Recepción están encendidos y su horario de silencio.
+ * si él y Recepción están encendidos. A qué hora escribe lo dice el «Horario
+ * para escribir» (`writing-hours.ts`), el mismo para todo lo que sale solo.
  */
 export interface AdminRuntime {
   adminOn: boolean
   receptionOn: boolean
   /** Se usó todo el saldo de prueba: los agentes no escriben y el caso queda para el equipo (ADR 0031). */
   agentsPaused: boolean
-  quietStart: string
-  quietEnd: string
 }
-
-export const DEFAULT_QUIET_START = "21:00"
-export const DEFAULT_QUIET_END = "08:00"
 
 export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime> {
   const [row] = await tx
@@ -391,8 +401,6 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
     adminOn: row?.advisor?.enabled === true,
     receptionOn: row?.enabled === true,
     agentsPaused: gate.trialExhausted,
-    quietStart: row?.advisor?.quietStart ?? DEFAULT_QUIET_START,
-    quietEnd: row?.advisor?.quietEnd ?? DEFAULT_QUIET_END,
   }
 }
 
@@ -400,13 +408,14 @@ export async function adminRuntime(tx: Db, orgId: string): Promise<AdminRuntime>
 
 export type ConsentRow = typeof automationConsent.$inferSelect
 
-/** Los dos permisos que una persona da para que la clínica le escriba primero. */
 /**
- * Lo que la persona dijo de cada tipo de mensaje. Los dos primeros son parte del
- * servicio (solo cuenta si se dio de baja); «novedades» es el único que pide su
- * permiso (ADR 0030).
+ * Lo que la persona dijo de cada tipo de mensaje (ADR 0030, precisado por
+ * 0040). Los tres primeros son los interruptores de «Tus mensajes»:
+ * recordatorios y seguimiento no piden permiso (solo cuenta si los apagó) y
+ * novedades pide su sí. «avisos» es la fila fija de lo que pasó con su cita y
+ * sus papeles: solo se apaga con «No quiero ningún mensaje de la clínica».
  */
-export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento", "novedades"] as const
+export const MESSAGE_PERMISSIONS = ["recordatorio", "seguimiento", "novedades", "avisos"] as const
 export type MessagePermissionKey = (typeof MESSAGE_PERMISSIONS)[number]
 
 /** Lo que deja de recibir quien se da de baja, dicho a la persona: qué es y qué incluye. */
@@ -414,39 +423,43 @@ export interface UnsubscribeWords {
   /** «los recordatorios de tus citas»: completa «Dejar de recibir…» y «Ya no recibirás…». */
   what: string
   detail: string
-  /** Lo que sigue llegando; null si la baja apaga todo lo que la clínica envía sola. */
+  /** Lo que sigue llegando; null si la baja apaga todo lo que la clínica envía. */
   keeps: string | null
 }
 
 /**
  * Cómo se nombra cada tipo de mensaje cuando la persona se da de baja. La baja
  * apaga el tipo del mensaje del que salió el enlace, y no los demás: la página
- * dice cuál, sin hablar de autorizaciones ni de campañas (ADR 0030).
+ * dice cuál, sin hablar de autorizaciones ni de campañas (ADR 0030 y 0040).
  */
 export const UNSUBSCRIBE_WORDS: Record<MessagePermissionKey, UnsubscribeWords> = {
   recordatorio: {
     what: "los recordatorios de tus citas",
-    detail: "Son los recordatorios y avisos de tus citas y de tus controles.",
-    keeps: "Lo demás que te envía la clínica sigue igual.",
+    detail: "Son los recordatorios de un día antes y unas horas antes de tu cita.",
+    keeps: "Si tu cita se reserva, cambia o se cancela, te avisamos igual.",
   },
   seguimiento: {
-    what: "los mensajes de seguimiento",
-    detail:
-      "Son los mensajes sobre un presupuesto pendiente, una cita a la que no pudiste venir o que se canceló, y una conversación por retomar.",
-    keeps: "Los recordatorios de tus citas siguen llegando.",
+    what: "los mensajes de controles y seguimiento",
+    detail: "Son los avisos de tu próximo control y los mensajes cuando faltaste a una cita o se canceló.",
+    keeps: "Los recordatorios y los avisos de tus citas siguen llegando.",
   },
   novedades: {
     what: "las novedades y promociones",
-    detail: "Son los mensajes con las novedades y promociones de la clínica.",
-    keeps: "Los recordatorios de tus citas siguen llegando.",
+    detail: "Son las campañas y ofertas de la clínica, y los mensajes para retomar un presupuesto o una consulta.",
+    keeps: "Los recordatorios y los avisos de tus citas siguen llegando.",
+  },
+  avisos: {
+    what: "todos los mensajes de la clínica",
+    detail: "También los avisos de tus citas y de tus papeles.",
+    keeps: null,
   },
 }
 
-/** Un enlace de baja que no viene de un mensaje concreto apaga los tres tipos. */
+/** Un enlace de baja que no viene de un mensaje concreto apaga los tres interruptores; los avisos siguen. */
 const UNSUBSCRIBE_ALL_WORDS: UnsubscribeWords = {
-  what: "los mensajes automáticos de la clínica",
-  detail: "Son los recordatorios y avisos de tus citas, los mensajes de seguimiento y las novedades y promociones.",
-  keeps: null,
+  what: "los mensajes que la clínica te envía por su cuenta",
+  detail: "Son los recordatorios de tus citas, los controles y el seguimiento, y las novedades y promociones.",
+  keeps: "Si tu cita se reserva, cambia o se cancela, te avisamos igual.",
 }
 
 export function unsubscribeWords(purposes: readonly ConsentPurpose[]): UnsubscribeWords {
@@ -455,7 +468,7 @@ export function unsubscribeWords(purposes: readonly ConsentPurpose[]): Unsubscri
 
 export interface MessagePermission {
   purpose: MessagePermissionKey
-  /** null: nunca se le preguntó. */
+  /** null: nunca se le preguntó ni lo cambió. */
   granted: boolean | null
   /** Cómo quedó registrado (clave de `CONSENT_SOURCES`). */
   source: string | null
@@ -482,8 +495,8 @@ export async function listConsents(
 }
 
 /**
- * Lo que la persona aceptó recibir sin haber escrito primero, para su ficha:
- * siempre las dos filas, con cómo y cuándo quedó cada una.
+ * Lo que la persona dijo de cada tipo de mensaje, para su página y para «Tus
+ * mensajes»: siempre las cuatro filas, con cómo y cuándo quedó cada una.
  */
 export async function getMessagePermissions(
   tx: Db,
@@ -506,6 +519,11 @@ export async function getMessagePermissions(
       at: row?.updatedAt.toISOString() ?? null,
     }
   })
+}
+
+/** Los tipos de trabajo que escriben un mensaje de ese tipo: los que deja de recibir quien lo apaga. */
+function messageKindsOf(purpose: ConsentPurpose): string[] {
+  return JOB_KINDS.filter((kind) => (automationMessageOf(kind) || lineOfJobKind(kind)?.agent) && purposeOfKind(kind) === purpose)
 }
 
 /**
@@ -554,53 +572,53 @@ export async function setConsent(
           eq(automationJob.contactId, contactId),
           eq(automationJob.status, "pendiente"),
           // Solo los mensajes de ese tipo; lo que deja trabajo al equipo no depende del permiso.
-          inArray(
-            automationJob.kind,
-            JOB_KINDS.filter((kind) => lineOfJobKind(kind)?.agent?.purpose === purpose),
-          ),
+          inArray(automationJob.kind, messageKindsOf(purpose)),
         ),
       )
   }
   return row
 }
 
+/** Qué tipo de mensaje elige la persona: uno de los tres interruptores o «ningún mensaje». */
+export const MESSAGE_CHOICES = [...SWITCHABLE_PURPOSES, "ninguno"] as const
+export type MessageChoice = (typeof MESSAGE_CHOICES)[number]
+
 /**
- * ¿Se le puede escribir este tipo de mensaje sin que haya escrito primero? Lo
- * que es parte del servicio que pidió (su cita y su confirmación, sus
- * controles, sus presupuestos y oportunidades, la inasistencia, otra fecha tras
- * cancelar: `recordatorio` y `seguimiento`) sale sin permiso previo, salvo que se
- * haya dado de baja de ese tipo. Solo `novedades` (novedades y promociones) pide
- * su permiso (ADR 0030). Un «no» guardado antes cuenta como baja.
+ * «Tus mensajes» (ADR 0040): la única operación que cambia lo que una persona
+ * recibe, venga de su página en «Su enlace», de recepción (Datos › Mensajes),
+ * del agente o de «BAJA». Apagar un interruptor apaga ese tipo; encender uno
+ * vuelve a encender los avisos si había pedido «ningún mensaje». «Ninguno»
+ * apaga los cuatro (también los avisos de sus citas y papeles) y, al
+ * deshacerlo, vuelven los avisos, los recordatorios y el seguimiento: las
+ * novedades solo con su sí. Devuelve los tipos que cambió.
  */
-export async function mayWriteFirst(
+export async function setMessageChoice(
   tx: Db,
   orgId: string,
+  actorUserId: string | null,
   contactId: string,
-  purpose: ConsentPurpose,
-): Promise<boolean> {
-  const status = await consentStatusOf(tx, orgId, contactId, purpose)
-  return purpose === "novedades" ? status === "granted" : status !== "revoked"
+  input: { choice: string; receive: boolean; source: string },
+): Promise<{ purposes: ConsentPurpose[] }> {
+  if (!(MESSAGE_CHOICES as readonly string[]).includes(input.choice)) throw validation("Tipo de mensaje inválido")
+  const choice = input.choice as MessageChoice
+  const set = (purpose: ConsentPurpose, granted: boolean) =>
+    setConsent(tx, orgId, actorUserId, contactId, { purpose, granted, source: input.source })
+  const purposes: ConsentPurpose[] =
+    choice === "ninguno"
+      ? input.receive
+        ? ["avisos", "recordatorio", "seguimiento"]
+        : ["recordatorio", "seguimiento", "novedades", "avisos"]
+      : [choice]
+  for (const purpose of purposes) await set(purpose, input.receive)
+  // Quien pidió no recibir nada y enciende un tipo vuelve a recibir los avisos de su cita.
+  if (choice !== "ninguno" && input.receive && (await consentStatusOf(tx, orgId, contactId, "avisos")) === "revoked") {
+    await set("avisos", true)
+    purposes.push("avisos")
+  }
+  return { purposes }
 }
 
-async function consentStatusOf(
-  tx: Db,
-  orgId: string,
-  contactId: string,
-  purpose: ConsentPurpose,
-): Promise<string | null> {
-  const [row] = await tx
-    .select({ status: automationConsent.status })
-    .from(automationConsent)
-    .where(
-      and(
-        eq(automationConsent.organizationId, orgId),
-        eq(automationConsent.contactId, contactId),
-        eq(automationConsent.purpose, purpose),
-      ),
-    )
-    .limit(1)
-  return row?.status ?? null
-}
+export { mayWriteFirst } from "./message-permission.js"
 
 /** true solo si la persona aceptó ese tipo de mensaje y no lo retiró después. */
 export async function hasConsent(
@@ -902,38 +920,18 @@ export async function timezoneOf(tx: Db, orgId: string, branchId?: string | null
   return profile?.timezone ?? NEUTRAL_TIMEZONE
 }
 
-/** true si `now` cae en la ventana de silencio (regla de horarios por sede). */
-export function inQuietHours(now: Date, timeZone: string, start?: string, end?: string): boolean {
-  const s = start ?? "21:00"
-  const e = end ?? "08:00"
-  // Lectura técnica de la hora (HH:mm) para comparar, no un texto para personas.
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(now)
-  const [h, m] = parts.split(":").map(Number)
-  const cur = (h ?? 0) * 60 + (m ?? 0)
-  const toMin = (v: string) => {
-    const [hh, mm] = v.split(":").map(Number)
-    return (hh ?? 0) * 60 + (mm ?? 0)
-  }
-  const from = toMin(s)
-  const to = toMin(e)
-  if (from === to) return false
-  if (from < to) return cur >= from && cur < to
-  return cur >= from || cur < to
-}
+/** Lo que queda anotado cuando un recordatorio ya no tiene momento para salir dentro del horario. */
+const OUTSIDE_WRITING_HOURS_LATE = "Fuera del horario para escribir y ya sin una hora de margen antes de la cita"
 
-/** Pospone al primer instante fuera de la ventana de silencio (pasos de 15 min, máx. 24 h). */
-function afterQuietEnd(now: Date, timeZone: string, start?: string, end?: string): Date {
-  let candidate = new Date(now.getTime() + 15 * 60_000)
-  for (let i = 0; i < 96; i++) {
-    if (!inQuietHours(candidate, timeZone, start, end)) return candidate
-    candidate = new Date(candidate.getTime() + 15 * 60_000)
-  }
-  return candidate
+/** Cuándo empieza la cita de un trabajo, para no recordarla con menos de una hora de margen. */
+async function appointmentStartOf(tx: Db, orgId: string, appointmentId: string | null): Promise<Date | null> {
+  if (!appointmentId) return null
+  const [row] = await tx
+    .select({ startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
+    .limit(1)
+  return row?.startsAt ?? null
 }
 
 // ------------------------------------------------------- sincronización ---
@@ -1022,19 +1020,25 @@ export async function syncAppointmentReminders(
       omitidos++
       continue
     }
+    // El «Horario para escribir» se mide con la hora de la sede de la cita.
+    const timeZone = await timezoneOf(tx, orgId, appt.branchId)
+    const schedule = await writingScheduleOf(tx, orgId, timeZone)
     for (const h of hoursList) {
-      const scheduledFor = new Date(appt.startsAt.getTime() - h * 3_600_000)
-      if (scheduledFor.getTime() < now.getTime() - 30 * 60_000) continue
+      const target = new Date(appt.startsAt.getTime() - h * 3_600_000)
+      if (target.getTime() < now.getTime() - 30 * 60_000) continue
+      // Fuera del horario sale en el último momento permitido antes; si no hay,
+      // en el primero después con una hora de margen antes de la cita.
+      const scheduledFor = sendTimeFor(target, now, schedule, appt.startsAt)
+      if (!scheduledFor) continue
       const job = await enqueueJob(tx, orgId, {
         ruleId: rule.id,
         kind: "recordatorio_cita",
         dedupeKey: `recordatorio_cita:${appt.id}:${h}`,
-        scheduledFor: scheduledFor < now ? now : scheduledFor,
+        scheduledFor,
         contactId,
         appointmentId: appt.id,
         patientId: appt.patientId,
-        // El horario de silencio se mide con la hora de la sede de la cita.
-        payload: { timeZone: await timezoneOf(tx, orgId, appt.branchId) },
+        payload: { timeZone },
       })
       if (job) programados++
     }
@@ -1195,7 +1199,7 @@ export async function syncVisitFollowUps(tx: Db, orgId: string, now: Date): Prom
       ruleId: rule.id,
       kind: "seguimiento_no_asistencia",
       dedupeKey: `seguimiento_no_asistencia:${appt.id}`,
-      scheduledFor: at < now ? now : at,
+      scheduledFor: sendTimeFor(at, now, await writingScheduleOf(tx, orgId, timeZone)) ?? (at < now ? now : at),
       contactId,
       appointmentId: appt.id,
       patientId: appt.patientId,
@@ -1505,12 +1509,18 @@ async function stillValid(
   }
   if (job.kind === "cobranza_vencida" && job.patientId) {
     const currency = job.dedupeKey.split(":")[2] ?? ""
+    // Lo que debe, por moneda, menos lo que tiene a favor en esa moneda
+    // (decisión 22): si lo que tiene a favor alcanza, ya no hay saldo vencido.
     const [row] = await tx.execute<{ owed: number }>(sql`
-      select coalesce(sum(c.amount_cents - coalesce((select sum(a.amount_cents) from patient_payment_application a
-        where a.charge_id = c.id and a.organization_id = c.organization_id and a.voided_at is null), 0)), 0)::int as owed
-      from patient_charge c
-      where c.organization_id = ${orgId} and c.patient_id = ${job.patientId} and c.voided_at is null
-        and (${currency} = '' or c.currency = ${currency})`)
+      select coalesce(max(d.owed), 0)::int as owed from (
+        select sum(c.amount_cents - coalesce((select sum(a.amount_cents) from patient_payment_application a
+          where a.charge_id = c.id and a.organization_id = c.organization_id and a.voided_at is null), 0))
+          - greatest(${patientCreditSql(orgId, sql`c.patient_id`, sql`c.currency`)}, 0) as owed
+        from patient_charge c
+        where c.organization_id = ${orgId} and c.patient_id = ${job.patientId} and c.voided_at is null
+          and (${currency} = '' or c.currency = ${currency})
+        group by c.patient_id, c.currency
+      ) d`)
     if (Number(row?.owed ?? 0) <= 0) return { valid: false, reason: "Ya pagó lo que debía" }
     return { valid: true }
   }
@@ -1645,7 +1655,7 @@ const MAX_ATTEMPTS = 5
  * proveedor reintentan; como el reintento corre en una transacción que revierte
  * el encolado al fallar, nunca duplica envíos.
  */
-const DEFINITIVE_CODES = new Set(["WINDOW_CLOSED", "CHANNEL_REQUIRES_INBOUND", "VALIDATION"])
+const DEFINITIVE_CODES = new Set(["WINDOW_CLOSED", "CHANNEL_REQUIRES_INBOUND", "VALIDATION", "TEMPLATE_IS_PROMOTION"])
 
 function isDefinitiveCode(code: string | undefined): boolean {
   return !!code && DEFINITIVE_CODES.has(code)
@@ -1686,8 +1696,14 @@ export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; f
   sin_plantilla: {
     one: "no escribió en las últimas 24 horas y WhatsApp aún no aprueba el mensaje",
     many: "no escribieron en las últimas 24 horas y WhatsApp aún no aprueba el mensaje",
-    fix: "El mensaje ya se pidió: sale cuando WhatsApp lo apruebe. Agregar su correo también lo habilita.",
-    fixMany: "El mensaje ya se pidió: empieza a salir cuando WhatsApp lo apruebe. Agregar su correo también lo habilita.",
+    fix: "Sale cuando WhatsApp apruebe el mensaje: míralo en Configuración › Integraciones › WhatsApp. Agregar su correo también lo habilita.",
+    fixMany: "Empieza a salir cuando WhatsApp apruebe el mensaje: míralo en Configuración › Integraciones › WhatsApp. Agregar su correo también lo habilita.",
+  },
+  promocion: {
+    one: "WhatsApp cuenta el mensaje como promoción y no aceptó novedades",
+    many: "WhatsApp cuenta el mensaje como promoción y no aceptaron novedades",
+    fix: "Cambia el texto para que sea solo el aviso, o agrega su correo.",
+    fixMany: "Para habilitarlo, cambia el texto del mensaje para que sea solo el aviso, o agrega su correo.",
   },
   no_entregado: {
     one: "el canal no entregó el mensaje",
@@ -1705,6 +1721,7 @@ export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; f
 
 /** Motivo de un fallo definitivo según el código que devuelve el envío. */
 function causeOfCode(code: string | undefined): AutomationCause {
+  if (code === "TEMPLATE_IS_PROMOTION") return "promocion"
   return code === "WINDOW_CLOSED" || code === "CHANNEL_REQUIRES_INBOUND" || code === "VALIDATION"
     ? "sin_plantilla"
     : "proveedor"
@@ -1715,30 +1732,27 @@ const GROUP_WINDOW_MS = 30 * 60_000
 
 /**
  * El correo no tiene botones: lleva el mismo texto y, en su lugar, enlaces.
- * Un recordatorio trae los de confirmar y cancelar cada cita; todos traen el
- * de darse de baja de ese tipo de mensaje. La primera línea es el asunto.
+ * Un recordatorio trae los de confirmar y cancelar cada cita. Al pie va «Elegir
+ * mis mensajes» (su página «Tus mensajes», ADR 0040) y, si no hay dirección
+ * para ella, el de darse de baja de ese tipo de mensaje; la baja de un toque va
+ * además en la cabecera `List-Unsubscribe`. La primera línea es el asunto.
  */
 function emailBody(
   message: ComposedMessage,
   clinic: string,
-  links: { appointments: { confirm: string; cancel: string }[]; optOut: string | null },
+  links: { appointments: { confirm: string; cancel: string }[]; optOut: string | null; choose: string | null },
 ): string {
   const lines = links.appointments.map((link, index) => {
     const which = links.appointments.length > 1 ? `Cita ${index + 1}. ` : ""
     return `${which}Para confirmar: ${link.confirm}\n${which}Si no podrás ir: ${link.cancel}`
   })
   const actions = lines.length > 0 ? `\n\n${lines.join("\n")}` : ""
-  const optOut = links.optOut ? `\n\nSi no quieres recibir más estos mensajes: ${links.optOut}` : ""
-  return `${message.subject}\n\n${message.text}${actions}\n\nPuedes responder a este correo.\n\n${clinic}${optOut}`
-}
-
-/** Primer instante de mañana (en la zona dada) fuera del horario de silencio. */
-function tomorrowMorning(now: Date, timeZone: string, quietStart?: string, quietEnd?: string): Date {
-  const hourNow = Number(
-    new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hourCycle: "h23" }).format(now),
-  )
-  const midnight = new Date(now.getTime() + (24 - hourNow) * 3_600_000)
-  return afterQuietEnd(midnight, timeZone, quietStart, quietEnd)
+  const footer = links.choose
+    ? `\n\n${CHOOSE_MESSAGES_LINK.title}: ${links.choose}`
+    : links.optOut
+      ? `\n\nSi no quieres recibir más estos mensajes: ${links.optOut}`
+      : ""
+  return `${message.subject}\n\n${message.text}${actions}\n\nPuedes responder a este correo.\n\n${clinic}${footer}`
 }
 
 /** Fin del día siguiente en la zona dada: el plazo de una tarea que deja el Administrador. */
@@ -1759,7 +1773,14 @@ function endOfTomorrow(now: Date, timeZone: string): Date {
  * de un caso del agente ni las que dejó una persona. Corre en cada ciclo del
  * worker, aunque el Administrador esté apagado. Devuelve cuántas cerró.
  */
-export async function settleTasks(tx: Db, orgId: string, now: Date): Promise<number> {
+export async function settleTasks(
+  tx: Db,
+  orgId: string,
+  now: Date,
+  opts: { batch?: number; perCycle?: number } = {},
+): Promise<number> {
+  const batch = opts.batch ?? BATCH_LIMIT
+  const perCycle = opts.perCycle ?? SETTLE_PER_CYCLE
   let settled = 0
   const ofClosed = await tx
     .select({ id: crmTask.id, status: opportunity.status })
@@ -1770,29 +1791,66 @@ export async function settleTasks(tx: Db, orgId: string, now: Date): Promise<num
   for (const row of ofClosed) {
     if (await settleTask(tx, orgId, row.id, row.status === "won" ? "la oportunidad se ganó" : "la oportunidad se perdió")) settled++
   }
-  const left = await tx
-    .select({ job: automationJob, taskId: crmTask.id, name: sql<string | null>`coalesce(${patient.displayName}, ${contact.displayName})` })
-    .from(crmTask)
-    .innerJoin(automationJob, and(eq(automationJob.organizationId, crmTask.organizationId), eq(automationJob.taskId, crmTask.id)))
-    .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, crmTask.organizationId)))
-    .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, crmTask.organizationId)))
-    .where(
-      and(
-        eq(crmTask.organizationId, orgId),
-        eq(crmTask.status, "open"),
-        eq(crmTask.createdBy, "admin"),
-        sql`${automationJob.kind} <> 'seguimiento_comercial'`,
-      ),
-    )
-    .orderBy(asc(crmTask.createdAt))
-    .limit(BATCH_LIMIT)
-  for (const row of left) {
-    const validity = await stillValid(tx, orgId, row.job, now)
-    if (validity.valid) continue
-    if (await settleTask(tx, orgId, row.taskId, settledWords(validity.reason, row.name))) settled++
+  // Las que dejó el Administrador se revisan avanzando con un cursor: las que
+  // siguen en pie no tapan a las siguientes. Cada ciclo sigue donde quedó el
+  // anterior y, al llegar al final, vuelve a empezar.
+  let cursor = settleCursors.get(orgId) ?? null
+  let checked = 0
+  let wrapped = false
+  while (checked < perCycle) {
+    const size = Math.min(batch, perCycle - checked)
+    const left = await tx
+      .select({
+        job: automationJob,
+        taskId: crmTask.id,
+        // Con sus microsegundos: el cursor no vuelve a tomar la misma tarea.
+        createdAt: sql<string>`${crmTask.createdAt}::text`,
+        name: sql<string | null>`coalesce(${patientPerson.displayName}, ${contact.displayName})`,
+      })
+      .from(crmTask)
+      .innerJoin(automationJob, and(eq(automationJob.organizationId, crmTask.organizationId), eq(automationJob.taskId, crmTask.id)))
+      .leftJoin(patient, and(eq(patient.id, crmTask.patientId), eq(patient.organizationId, crmTask.organizationId)))
+      .leftJoin(patientPerson, joinPatientPerson(patientPerson))
+      .leftJoin(contact, and(eq(contact.id, crmTask.contactId), eq(contact.organizationId, crmTask.organizationId)))
+      .where(
+        and(
+          eq(crmTask.organizationId, orgId),
+          eq(crmTask.status, "open"),
+          eq(crmTask.createdBy, "admin"),
+          sql`${automationJob.kind} <> 'seguimiento_comercial'`,
+          cursor ? sql`(${crmTask.createdAt}, ${crmTask.id}) > (${cursor.createdAt}::timestamptz, ${cursor.id}::uuid)` : undefined,
+        ),
+      )
+      .orderBy(asc(crmTask.createdAt), asc(crmTask.id))
+      .limit(size)
+    for (const row of left) {
+      const validity = await stillValid(tx, orgId, row.job, now)
+      if (!validity.valid && (await settleTask(tx, orgId, row.taskId, settledWords(validity.reason, row.name)))) settled++
+    }
+    checked += left.length
+    const last = left.at(-1)
+    if (!last && cursor && !wrapped) {
+      // El ciclo anterior terminó justo en la última: se vuelve a empezar ahora.
+      cursor = null
+      wrapped = true
+      continue
+    }
+    if (!last || left.length < size) {
+      // Se llegó al final: el próximo ciclo empieza otra vez desde la más vieja.
+      cursor = null
+      break
+    }
+    cursor = { createdAt: last.createdAt, id: last.taskId }
   }
+  if (cursor) settleCursors.set(orgId, cursor)
+  else settleCursors.delete(orgId)
   return settled
 }
+
+/** Tareas del Administrador que se revisan como mucho en un ciclo del worker. */
+const SETTLE_PER_CYCLE = 1000
+/** Dónde quedó la revisión de cada clínica: el ciclo siguiente continúa desde ahí. */
+const settleCursors = new Map<string, { createdAt: string; id: string }>()
 
 /** Por qué se cerró sola, en palabras: «Rosa confirmó su cita», «la cita ya pasó». */
 function settledWords(reason: string | undefined, name: string | null): string {
@@ -1821,8 +1879,9 @@ async function leaveTask(
   let name: string | null = null
   if (job.patientId) {
     const [row] = await tx
-      .select({ name: patient.displayName })
+      .select({ name: patientPerson.displayName })
       .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patient.id, job.patientId), eq(patient.organizationId, orgId)))
       .limit(1)
     name = row?.name ?? null
@@ -2090,23 +2149,32 @@ export async function deliverJob(
     }
     return { jobId: job.id, outcome: status, detail }
   }
-  if (inQuietHours(now, tz, runtime.quietStart, runtime.quietEnd)) {
-    const later = afterQuietEnd(now, tz, runtime.quietStart, runtime.quietEnd)
+  // El tipo es el del mensaje: un aviso de cita es un aviso aunque sea de «Recordar la cita» (ADR 0040).
+  const purpose = purposeOfKind(job.kind)
+  // La hora (ADR 0042): fuera del «Horario para escribir» espera al primer
+  // momento permitido; un recordatorio que ya no llega con una hora de margen
+  // antes de la cita no sale. Los avisos de lo que pasó salen al momento.
+  const timing = await writingTimeFor(tx, orgId, {
+    purpose,
+    now,
+    timeZone: tz,
+    appointmentAt: job.kind === "recordatorio_cita" ? await appointmentStartOf(tx, orgId, job.appointmentId) : null,
+  })
+  if ("never" in timing) {
+    await close(ids(), "cancelado", OUTSIDE_WRITING_HOURS_LATE)
+    return { jobId: job.id, outcome: "cancelado", detail: OUTSIDE_WRITING_HOURS_LATE }
+  }
+  if ("later" in timing) {
     await tx
       .update(automationJob)
-      .set({ scheduledFor: later, updatedAt: now })
+      .set({ scheduledFor: timing.later, updatedAt: now })
       .where(eq(automationJob.id, job.id))
-    return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario de envío" }
+    return { jobId: job.id, outcome: "pospuesto", detail: "Fuera del horario para escribir" }
   }
   if (!job.contactId) return cannot("Sin persona a quien escribirle", "sin_destino")
   const contactId = job.contactId
-  const purpose = line.agent.purpose
   if (!(await mayWriteFirst(tx, orgId, contactId, purpose))) {
-    return cannot(
-      purpose === "novedades" ? `La persona no aceptó mensajes de ${purpose}` : `La persona pidió no recibir mensajes de ${purpose}`,
-      "sin_permiso",
-      { status: "omitido" },
-    )
+    return cannot(permissionRefusal(purpose), "sin_permiso", { status: "omitido" })
   }
 
   if (job.kind === "recordatorio_cita") {
@@ -2162,7 +2230,7 @@ export async function deliverJob(
     if (today?.sent || today?.reminder) {
       await tx
         .update(automationJob)
-        .set({ scheduledFor: tomorrowMorning(now, tz, runtime.quietStart, runtime.quietEnd), updatedAt: now })
+        .set({ scheduledFor: nextWritingDay(now, await writingScheduleOf(tx, orgId, tz)), updatedAt: now })
         .where(eq(automationJob.id, job.id))
       return { jobId: job.id, outcome: "pospuesto", detail: "Ya recibió un mensaje hoy" }
     }
@@ -2170,7 +2238,8 @@ export async function deliverJob(
 
   // Recepción no escribe encima de lo que la persona ya dijo. Lo que una persona
   // pidió «solo esta vez» sale igual: ya lo decidió alguien.
-  if (deps.alreadyTold && purpose !== "recordatorio" && !payload.once) {
+  // No aplica a recordatorios de la cita o del control ni a los avisos de lo que pasó.
+  if (deps.alreadyTold && purpose !== "recordatorio" && purpose !== "avisos" && job.kind !== "recordatorio_control" && !payload.once) {
     const written = await recentlyWritten(tx, orgId, contactId, now)
     let told = false
     if (written.length > 0) {
@@ -2218,6 +2287,7 @@ export async function deliverJob(
         name: route.template.name,
         language: route.template.language,
         params: composed.params,
+        category: spec.category,
         buttons: composed.buttons,
         ...(link ? { link: link.token } : {}),
         preview: composed.text,
@@ -2228,7 +2298,11 @@ export async function deliverJob(
         .from(orgProfile)
         .where(eq(orgProfile.organizationId, orgId))
         .limit(1)
-      const links: Parameters<typeof emailBody>[2] = { appointments: [], optOut: null }
+      const links: Parameters<typeof emailBody>[2] = {
+        appointments: [],
+        optOut: null,
+        choose: await messageChoicesUrl(tx, orgId, contactId, job.patientId, deps),
+      }
       if (deps.publicBaseUrl) {
         const base = deps.publicBaseUrl
         if (job.kind === "recordatorio_cita") {
@@ -2241,7 +2315,8 @@ export async function deliverJob(
             })
           }
         }
-        links.optOut = await createUnsubscribeLink(tx, orgId, contactId, base, { jobId: job.id })
+        // Un aviso de lo que pasó no tiene baja de un toque: solo «Elegir mis mensajes».
+        if (purpose !== "avisos") links.optOut = await createUnsubscribeLink(tx, orgId, contactId, base, { jobId: job.id })
       }
       sent = await sendOutbound(tx, orgId, {
         conversationId: route.conversationId,
@@ -2249,6 +2324,7 @@ export async function deliverJob(
         content: {
           type: "text",
           text: emailBody({ ...composed, text: linkedText }, profile?.tradeName?.trim() || profile?.legalName || "", links),
+          ...(links.optOut ? { listUnsubscribe: links.optOut } : {}),
         },
       })
     } else {
@@ -2491,7 +2567,7 @@ export async function rescheduleAppointmentReminders(
   startsAt: Date,
 ): Promise<void> {
   const pending = await tx
-    .select({ id: automationJob.id, dedupeKey: automationJob.dedupeKey })
+    .select({ id: automationJob.id, dedupeKey: automationJob.dedupeKey, payload: automationJob.payload })
     .from(automationJob)
     .where(
       and(
@@ -2505,11 +2581,14 @@ export async function rescheduleAppointmentReminders(
   for (const job of pending) {
     const hours = Number(job.dedupeKey.split(":").at(-1))
     if (!Number.isFinite(hours)) continue
-    const at = new Date(startsAt.getTime() - hours * 3_600_000)
+    const target = new Date(startsAt.getTime() - hours * 3_600_000)
+    // La misma regla que al programarlo: dentro del «Horario para escribir».
+    const schedule = await writingScheduleOf(tx, orgId, jobPayloadOf(job.payload).timeZone)
+    const at = target.getTime() < now.getTime() ? null : sendTimeFor(target, now, schedule, startsAt)
     await tx
       .update(automationJob)
       .set(
-        at.getTime() < now.getTime()
+        at === null
           ? { status: "cancelado", lastError: "La cita se movió y este recordatorio ya no llega a tiempo", updatedAt: now }
           : { scheduledFor: at, updatedAt: now },
       )
@@ -2667,7 +2746,7 @@ async function unsubscribePurposes(
         .where(and(eq(automationJob.id, link.jobId), eq(automationJob.organizationId, link.organizationId)))
         .limit(1)
     : []
-  return origin ? [purposeOfKind(origin.kind)] : CONSENT_PURPOSES
+  return origin ? [purposeOfKind(origin.kind)] : SWITCHABLE_PURPOSES
 }
 
 async function useLinkToken(tx: Db, token: string, expected: LinkPurpose) {
@@ -2775,7 +2854,8 @@ export async function cancelAppointmentByToken(
 /**
  * Baja verificable. Apaga el tipo de mensaje del que salió el enlace (quien se
  * da de baja de un seguimiento sigue recibiendo el recordatorio de su cita); un
- * enlace que no viene de un mensaje concreto apaga los tres.
+ * enlace que no viene de un mensaje concreto apaga los tres interruptores. Los
+ * avisos de sus citas y papeles siguen (ADR 0040).
  */
 export async function unsubscribeByToken(tx: Db, token: string): Promise<{ contactId: string }> {
   const [link] = await tx
@@ -2823,26 +2903,205 @@ export async function createUnsubscribeLink(
   return publicLink(publicBaseUrl, "baja", token)
 }
 
+// -------------------------------------------------------- «Tus mensajes» ---
+
+/** El paciente que es la propia persona, si lo es: su enlace se emite para él. */
+async function ownPatientOf(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ patientId: patientContact.patientId })
+    .from(patientContact)
+    .where(
+      and(
+        eq(patientContact.organizationId, orgId),
+        eq(patientContact.contactId, contactId),
+        eq(patientContact.relationship, "self"),
+      ),
+    )
+    .limit(1)
+  return row?.patientId ?? null
+}
+
+/**
+ * La dirección de «Tus mensajes» de una persona, dentro de su enlace (ADR
+ * 0040). Se guarda en el mensaje con la referencia de su enlace: el worker
+ * pone el token al enviarlo. Nula sin dirección pública.
+ */
+export async function messageChoicesUrl(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string | null,
+  deps: { secretsKey: Buffer },
+  /** Con el token escrito, para un texto que no pasa por el worker (lo que redacta el agente). */
+  options: { raw?: boolean } = {},
+): Promise<string | null> {
+  if (!publicLinksConfigured()) return null
+  const link = await issuePersonalLink(
+    tx,
+    orgId,
+    { contactId, patientId: patientId ?? (await ownPatientOf(tx, orgId, contactId)) },
+    deps,
+  )
+  const url = options.raw
+    ? await personalLinkUrl(tx, orgId, link.token)
+    : await personalLinkMessageUrl(tx, orgId, link.linkId)
+  return url ? `${url}#mensajes` : null
+}
+
+async function contactFirstName(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ givenNames: contact.givenNames, displayName: contact.displayName })
+    .from(contact)
+    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+    .limit(1)
+  if (!row) return null
+  return row.givenNames?.trim().split(/\s+/)[0] || row.displayName.trim().split(/\s+/)[0] || null
+}
+
+/**
+ * La respuesta a una baja, la misma por botón, por el chat y con «BAJA»: el
+ * texto fijo y, si hay dirección pública, «Elegir mis mensajes» para ver los
+ * tres interruptores. Sale como respuesta: la persona acaba de escribir.
+ */
+export async function optOutReplyText(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  purposes: readonly ConsentPurpose[],
+  options: { patientId?: string | null; secretsKey?: Buffer } = {},
+): Promise<string> {
+  const text = optOutReply(await contactFirstName(tx, orgId, contactId), purposes)
+  if (!options.secretsKey || purposes.includes("avisos")) return text
+  const url = await messageChoicesUrl(tx, orgId, contactId, options.patientId ?? null, { secretsKey: options.secretsKey })
+  return withLinkLine(text, CHOOSE_MESSAGES_LINK, url)
+}
+
+/**
+ * Lo que la persona pide por el chat sobre sus mensajes (G2; ADR 0040), con la
+ * misma operación que el botón y que «Tus mensajes»: dejar de recibir un tipo,
+ * volver a recibirlo o ningún mensaje. Sin tipo, solo se le da «Elegir mis
+ * mensajes» para que elija ella. Devuelve la frase fija para decírselo, con la
+ * dirección de su página si la clínica tiene dirección pública.
+ */
+export async function chooseMessagesInConversation(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; choice: string | null; receive: boolean },
+  deps: { secretsKey: Buffer },
+): Promise<{ reply: string; changed: ConsentPurpose[] }> {
+  const [thread] = await tx
+    .select({ contactId: conversation.contactId })
+    .from(conversation)
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread) throw notFound("Conversación")
+  const name = await contactFirstName(tx, orgId, thread.contactId)
+  const url = await messageChoicesUrl(tx, orgId, thread.contactId, null, deps, { raw: true })
+  if (!input.choice) {
+    return {
+      reply: url
+        ? withLinkLine(`${name ? `${name}, aquí` : "Aquí"} puedes elegir qué mensajes recibes de la clínica.`, CHOOSE_MESSAGES_LINK, url)
+        : "Dime qué mensajes ya no quieres recibir: los recordatorios de tus citas, los de controles y seguimiento, las novedades y promociones o ningún mensaje.",
+      changed: [],
+    }
+  }
+  const { purposes } = await setMessageChoice(tx, orgId, null, thread.contactId, {
+    choice: input.choice,
+    receive: input.receive,
+    source: "conversacion",
+  })
+  const text = input.receive ? optInReply(name, purposes) : optOutReply(name, purposes)
+  return {
+    reply: input.choice === "ninguno" && !input.receive ? text : withLinkLine(text, CHOOSE_MESSAGES_LINK, url),
+    changed: purposes,
+  }
+}
+
+/** Cuánto vale «BAJA» para el último mensaje automático de la conversación. */
+const STOP_WORD_WINDOW_MS = 72 * 3_600_000
+
+/**
+ * «BAJA» o «STOP», solos en el mensaje (ADR 0040): se resuelven sin modelo. Si
+ * en esa conversación salió hace poco un mensaje automático que se puede
+ * apagar, se apaga su tipo; si no, los tres interruptores. Los avisos de su
+ * cita y sus papeles siguen. «Cancelar» nunca es una baja (`isStopWord`).
+ */
+async function stopByWord(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; contactId: string },
+  deps: { secretsKey?: Buffer },
+): Promise<void> {
+  const [last] = await tx
+    .select({ kind: automationJob.kind, patientId: automationJob.patientId })
+    .from(automationJob)
+    .innerJoin(message, and(eq(message.id, automationJob.sentMessageId), eq(message.organizationId, automationJob.organizationId)))
+    .where(
+      and(
+        eq(automationJob.organizationId, orgId),
+        eq(automationJob.contactId, input.contactId),
+        eq(message.conversationId, input.conversationId),
+        gte(message.createdAt, new Date(Date.now() - STOP_WORD_WINDOW_MS)),
+      ),
+    )
+    .orderBy(desc(message.createdAt))
+    .limit(1)
+  const kind = last ? purposeOfKind(last.kind) : null
+  const purposes: ConsentPurpose[] = kind && kind !== "avisos" ? [kind] : [...SWITCHABLE_PURPOSES]
+  for (const purpose of purposes) {
+    await setMessageChoice(tx, orgId, null, input.contactId, { choice: purpose, receive: false, source: "conversacion" })
+  }
+  await audit(tx, orgId, null, "automation_consent.stop_word", input.contactId, {
+    purposes,
+    conversationId: input.conversationId,
+  })
+  await sendOutbound(tx, orgId, {
+    conversationId: input.conversationId,
+    senderKind: "agent",
+    content: {
+      type: "text",
+      text: await optOutReplyText(tx, orgId, input.contactId, purposes, { patientId: last?.patientId ?? null, ...deps }),
+    },
+  })
+}
+
 // ------------------------------------------------ respuestas con botón ---
 
 /**
- * La persona tocó un botón de un mensaje automático. Dos los resuelve el
- * sistema, sin modelo y con un texto fijo de respuesta: «Confirmar» confirma
- * por la operación de la agenda cada cita de ese mensaje, y «No enviar más»
- * retira el permiso de ese tipo de mensaje. Devuelve true si quedó resuelto;
- * con false la conversación sigue su curso normal (el agente o una persona),
- * que es lo que pasa con cualquier otro botón.
+ * La persona tocó un botón de un mensaje automático, o escribió «BAJA». Lo
+ * resuelve el sistema, sin modelo y con un texto fijo de respuesta:
+ * «Confirmar» confirma por la operación de la agenda cada cita de ese mensaje;
+ * «No más recordatorios» o «No enviar más» apaga ese tipo de mensaje y ofrece
+ * «Elegir mis mensajes»; «BAJA» o «STOP» apagan el tipo del último mensaje
+ * automático (o los tres interruptores). Devuelve true si quedó resuelto; con
+ * false la conversación sigue su curso normal (el agente o una persona), que
+ * es lo que pasa con cualquier otro botón o texto.
  *
  * El botón solo vale en la conversación de la persona a la que se le envió.
  */
 export async function handleAutomationReply(
   tx: Db,
   orgId: string,
-  input: { conversationId: string; replyId: string | null | undefined },
-  /** Para «Ver y responder» de «Presupuesto listo», que deja el PDF en la conversación. */
-  deps?: { storage: Storage },
+  input: { conversationId: string; replyId: string | null | undefined; text?: string | null },
+  /** `storage`, para «Ver y responder» de «Presupuesto listo»; `secretsKey`, para el enlace de «Tus mensajes». */
+  deps?: { storage: Storage; secretsKey?: Buffer },
 ): Promise<boolean> {
   const reply = parseReplyId(input.replyId)
+  if (!reply && isStopWord(input.text)) {
+    const [writer] = await tx
+      .select({ contactId: conversation.contactId })
+      .from(conversation)
+      .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
+    if (!writer) return false
+    await stopByWord(
+      tx,
+      orgId,
+      { conversationId: input.conversationId, contactId: writer.contactId },
+      deps?.secretsKey ? { secretsKey: deps.secretsKey } : {},
+    )
+    return true
+  }
   if (!reply || reply.action === "responder") return false
   const [thread] = await tx
     .select({ contactId: conversation.contactId })
@@ -2882,17 +3141,19 @@ export async function handleAutomationReply(
     .limit(1)
   if (!thread || !origin?.sentMessageId || origin.contactId !== thread.contactId) return false
   if (reply.action === "baja") {
+    // Apaga solo el tipo de ese mensaje: «No más recordatorios» deja los avisos de su cita (ADR 0040).
     const purpose = purposeOfKind(origin.kind)
-    await setConsent(tx, orgId, null, thread.contactId, { purpose, granted: false, source: "baja" })
+    if (purpose === "avisos") return false
+    await setMessageChoice(tx, orgId, null, thread.contactId, { choice: purpose, receive: false, source: "baja" })
     await sendOutbound(tx, orgId, {
       conversationId: input.conversationId,
       senderKind: "agent",
       content: {
         type: "text",
-        text:
-          purpose === "recordatorio"
-            ? "Listo: no te enviaremos más recordatorios. Si cambias de opinión, dínoslo por aquí."
-            : "Listo: no te enviaremos más estos mensajes. Si cambias de opinión, dínoslo por aquí.",
+        text: await optOutReplyText(tx, orgId, thread.contactId, [purpose], {
+          patientId: origin.patientId,
+          ...(deps?.secretsKey ? { secretsKey: deps.secretsKey } : {}),
+        }),
       },
     })
     return true
@@ -2915,12 +3176,12 @@ export async function handleAutomationReply(
       .select({
         status: appointment.status,
         startsAt: appointment.startsAt,
-        patientName: patient.displayName,
-        self: sql<boolean>`exists (select 1 from patient_contact pc where pc.organization_id = ${orgId}
-          and pc.patient_id = ${appointment.patientId} and pc.contact_id = ${thread.contactId} and pc.relationship = 'self')`,
+        patientName: patientPerson.displayName,
+        self: sql<boolean>`${patient.personId} = ${thread.contactId}`,
       })
       .from(appointment)
       .innerJoin(patient, and(eq(patient.id, appointment.patientId), eq(patient.organizationId, orgId)))
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(appointment.id, appointmentId), eq(appointment.organizationId, orgId)))
       .for("update", { of: appointment })
       .limit(1)
@@ -3041,6 +3302,8 @@ export async function requestNeededTemplates(
     .orderBy(asc(channelConnection.createdAt), asc(channelConnection.id))
   let requested = 0
   for (const connection of connections) {
+    // Una vez al día se lee la cuenta: estados y categorías al día aunque se haya perdido un aviso.
+    await reviewConnectionTemplates(tx, orgId, connection.id, secretsKey, now, deps)
     const outcome = await requestMissingTemplates(tx, orgId, connection.id, secretsKey, now, deps)
     requested += outcome.requested
     const [first] = outcome.failed

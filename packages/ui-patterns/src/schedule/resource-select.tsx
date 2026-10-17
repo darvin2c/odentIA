@@ -1,5 +1,5 @@
 /**
- * Selector buscable de un recurso dinámico de la agenda (profesional, sillón,
+ * Selector buscable de un recurso dinámico de la agenda (profesional, unidad dental,
  * paciente). Las opciones llegan del consumidor; el componente no decide datos.
  * Las opciones estáticas (p.ej. estado) usan radios, no este combobox.
  */

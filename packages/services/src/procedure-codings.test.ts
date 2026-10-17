@@ -9,6 +9,7 @@ import { addPlanItem, createTreatmentPlan, listPlanItems, updatePlanItem } from 
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { createPatient } from "./patients.js"
 import { createService, listTemplates } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { isUniqueViolation } from "./errors.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -219,10 +220,10 @@ it("el ítem del plan congela el snapshot exacto y no sigue al catálogo", async
 
 it("la oferta propia sin plantilla congela lista vacía", async () => {
   await seedGlobals()
-  const service = await withOrgContext(appDb, "org_a", (tx) =>
+  const service = await withOrgContext(appDb, "org_a", async (tx) =>
     createService(tx, "org_a", ACTOR, {
       name: "Limpieza especial propia",
-      specialty: "prevencion",
+      specialtyId: (await librarySpecialtyIds(tx, "org_a", ["prevencion"])).get("prevencion")!,
       scope: "general",
       priceCents: 12000,
     }),

@@ -14,6 +14,7 @@ import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 import { FiliacionPanel } from "../patient/filiacion-panel"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "../patient/filiacion-section-drawer"
 import { MessagePermissionsSection } from "../patient/message-permissions-section"
+import { PhoneWhatsAppNote } from "./phone-whatsapp"
 import { TagsInput } from "../patient/tags-input"
 import { ChoiceSelect } from "../ui/choice-select"
 
@@ -77,7 +78,10 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
     return (
       <div className="flex min-w-0 flex-col gap-4">
         {detail ? (
-          <FiliacionPanel detail={detail} />
+          <FiliacionPanel
+            detail={detail}
+            phoneNote={<PhoneWhatsAppNote contactId={person.id} value={person.phoneWhatsApp} />}
+          />
         ) : (
           <LoadingState message="Cargando sus datos…" />
         )}
@@ -114,7 +118,14 @@ export function PersonData({ person, detail }: { person: PersonPage; detail?: Pa
         </Card>
         <Card title="Contacto" onEdit={edit("contacto")}>
           <dl className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Item label="Teléfono">{person.phone ? internationalText(person.phone) : null}</Item>
+            <Item label="Teléfono">
+              {person.phone ? (
+                <>
+                  {internationalText(person.phone)}
+                  <PhoneWhatsAppNote contactId={person.id} value={person.phoneWhatsApp} />
+                </>
+              ) : null}
+            </Item>
             <Item label="Correo">{person.email}</Item>
           </dl>
           <MessagePermissionsSection contactId={person.archived ? null : person.id} />

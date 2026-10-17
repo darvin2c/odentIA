@@ -42,7 +42,7 @@ import {
 import { usePermission } from "../../lib/crm"
 import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 
@@ -750,6 +750,7 @@ export function RecetasPanel({
   createOpen: createOpenProp,
   onCreateOpenChange,
   defaultDiagnosisCode,
+  defaultDiagnosisSystem,
 }: {
   patientId: string
   itemId?: string
@@ -768,6 +769,8 @@ export function RecetasPanel({
   onCreateOpenChange?: (open: boolean) => void
   /** El diagnóstico de la atención, ya puesto. */
   defaultDiagnosisCode?: string
+  /** Lista del código propuesto (el de la atención conserva la suya). */
+  defaultDiagnosisSystem?: string
 }): React.JSX.Element {
   const uid = useId()
   const canWrite = usePermission("clinical.write")
@@ -784,6 +787,7 @@ export function RecetasPanel({
   const planItemId = itemId ?? planItemIdState
   const [notes, setNotes] = useState("")
   const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
+  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
   const [validUntil, setValidUntil] = useState("")
   const [acknowledged, setAcknowledged] = useState(false)
   const [createOpenState, setCreateOpenState] = useState(false)
@@ -814,6 +818,7 @@ export function RecetasPanel({
         planItemId: planItemId || null,
         notes: notes.trim() || null,
         diagnosisCode: diagnosisCode || null,
+        diagnosisSystem: diagnosisCode ? diagnosisSystem : null,
         validUntil: validUntil || null,
         acknowledgeAllergies: conflicts.length > 0 && acknowledged,
         items: medications.map((medication) => ({
@@ -1074,10 +1079,14 @@ export function RecetasPanel({
               </label>
             </div>
           ) : null}
-          <Cie10Search
-            label="Diagnóstico (CIE-10, opcional)"
+          <DiagnosisSearch
+            label="Diagnóstico (opcional)"
             value={diagnosisCode}
-            onChange={(code) => setDiagnosisCode(code)}
+            system={diagnosisSystem}
+            onChange={(code, _description, system) => {
+              setDiagnosisCode(code)
+              setDiagnosisSystem(system)
+            }}
           />
           <Field>
             <FieldLabel htmlFor={`${uid}-rx-valid`}>Válida hasta (opcional)</FieldLabel>

@@ -25,7 +25,7 @@ import {
   revokeResponsibilityApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { ageFrom, type PatientDocument, type PatientFull } from "../../lib/patients"
+import type { PatientDocument, PatientFull } from "../../lib/patients"
 import { type PickedPerson, PersonPicker } from "../person-picker"
 import { ChoiceSelect } from "../ui/choice-select"
 
@@ -78,11 +78,10 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
       const contactId = chosen?.id ?? ""
       // Quien aún no está vinculado al paciente se vincula en el mismo paso.
       if (!contacts.some((link) => link.contactId === contactId)) {
-        const age = Number(ageFrom(patient.data?.data.patient.birthDate ?? null))
         await apiFetch(`/api/patients/${patientId}/contacts/${contactId}`, {
           method: "PUT",
           body: JSON.stringify({
-            relationship: Number.isFinite(age) && age < 18 ? "guardian" : "family",
+            relationship: patient.data?.data.isMinor ? "guardian" : "family",
             isPreferred: false,
           }),
         })

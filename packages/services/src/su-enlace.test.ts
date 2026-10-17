@@ -29,7 +29,7 @@ import {
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
 import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
-import { createPatient, patientPersonId, setPatientContact } from "./patients.js"
+import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
 import {
   decidePersonalLinkBudget,
@@ -40,6 +40,7 @@ import {
 } from "./su-enlace.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+import { selectTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -86,14 +87,17 @@ it("uno por persona; «Tus datos» pide solo lo que falta, se envía una vez y n
       data: { birthDate: "1988-02-14", docType: "DNI", docNumber: "47120836", phone: "+51900000000" },
     }),
   )
-  const [saved] = await ownerDb.select().from(patient).where(eq(patient.id, pedro.patientId))
+  const [saved] = await selectTestPatients(ownerDb).where(eq(patient.id, pedro.patientId))
   expect(saved).toMatchObject({ birthDate: "1988-02-14", phone: "+51987111222", identityNeedsReview: false })
   // Una sola vez: después dice «Recibido» y no se vuelve a llenar desde aquí.
   await expect(
     f.run((tx) => submitPersonalLinkData(tx, ORG, first.token, { data: { birthDate: "1990-01-01" } })),
   ).rejects.toMatchObject({ code: "DATA_ALREADY_SENT" })
-  // Sin nada pendiente, el enlace entero ya no sirve.
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, first.token))).status).toBe("vencido")
+  // Sin nada pendiente solo le queda «Tus mensajes» (ADR 0040): ni sus datos ni nada de lo guardado.
+  expect(await f.run((tx) => getPersonalLinkView(tx, ORG, first.token))).toMatchObject({
+    status: "abierto", data: null, budgets: [], consents: [], questionnaire: null, papers: [],
+    messages: { recordatorio: true, seguimiento: true, novedades: false, nothing: false },
+  })
   // Su persona guarda una nota con lo que completó.
   const notes = await ownerDb.select({ body: crmNote.body }).from(crmNote).where(eq(crmNote.contactId, pedro.personId))
   expect(notes.map((note) => note.body).join(" ")).toContain("Completó desde su enlace")
@@ -128,7 +132,7 @@ it("un documento que ya es de otra ficha no se guarda y deja «Posible ficha rep
       submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1991-04-04", docType: "DNI", docNumber: "41231234" } }),
     ),
   ).toEqual({ received: true })
-  const [saved] = await ownerDb.select().from(patient).where(eq(patient.id, otro.patientId))
+  const [saved] = await selectTestPatients(ownerDb).where(eq(patient.id, otro.patientId))
   expect(saved).toMatchObject({ birthDate: "1991-04-04", docNumber: null })
   const tasks = await ownerDb
     .select({ title: crmTask.title, kind: crmTask.kind, area: crmTask.area, reason: crmTask.reason })
@@ -171,7 +175,7 @@ it("si la fecha dice que es menor, desde el enlace no se registra a nadie: queda
     }),
   )
   // Ni la fecha ni un representante: la ficha sigue con lo que falta.
-  const [saved] = await ownerDb.select().from(patient).where(eq(patient.id, nina.patientId))
+  const saved = await f.run((tx) => requirePatient(tx, ORG, nina.patientId))
   expect(saved?.birthDate).toBeNull()
   const reps = await ownerDb.select({ id: patientResponsibility.id }).from(patientResponsibility).where(eq(patientResponsibility.patientId, nina.patientId))
   expect(reps).toEqual([])
@@ -273,8 +277,8 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
   const consent = await f.run((tx) => createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId: lucia.id, procedureRef: "Exodoncia de la pieza 38" }))
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: lucia.id }, { secretsKey: KEY }))
-  // Sin enviarlo a firmar, no aparece en su enlace.
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).status).toBe("vencido")
+  // Sin enviarlo a firmar, no aparece en su enlace (solo «Tus mensajes», ADR 0040).
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([{ id: consent.id, title: "Exodoncia" }])
 
@@ -332,7 +336,7 @@ it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace»
 
     // Un token de «confirmar» de un correo, aún vigente, da su enlace con esa cita.
     const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-    const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón 1" }))
+    const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
     const startsAt = new Date(Date.now() + 3 * 86_400_000)
     const [booked] = await ownerDb
       .insert(appointment)
@@ -380,7 +384,7 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   await f.run((tx) => decidePersonalLinkBudget(tx, ORG, link.token, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }))
 
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" }).returning({ id: branch.id })
-  await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Sillón 1" }))
+  await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
   await f.run((tx) =>
     setProfessionalSchedule(tx, ORG, f.actor, {
       branchId: site!.id,

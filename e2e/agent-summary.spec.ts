@@ -99,8 +99,8 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
-  // Los casos del agente se cuentan en un solo sitio, el menú (ADR 0025): el resumen no repite «Pendientes».
-  await expect(needs.getByRole("link", { name: /Pendientes/ })).toHaveCount(0)
+  // Los casos del agente se cuentan en un solo sitio, el menú (ADR 0025): el resumen no repite «Esperan su sí».
+  await expect(needs.getByRole("link", { name: /Esperan su sí|Pendientes/ })).toHaveCount(0)
   const agents = page.getByRole("region", { name: "Tus agentes" })
   await expect(agents).toContainText("La base que comparten los tres")
   const rows = agents.getByRole("listitem")
@@ -148,7 +148,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const tile of tileBoxes) expect(tile.height).toBeGreaterThanOrEqual(44)
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
   const tabX = async (name: string) => (await box(tabs.getByRole("link", { name: new RegExp(`^${name}`) }))).x
-  const order = [await tabX("Resumen"), await tabX("Aprender"), await tabX("Conocimiento"), await tabX("Pendientes")]
+  const order = [await tabX("Resumen"), await tabX("Aprender"), await tabX("Conocimiento"), await tabX("Esperan su sí")]
   expect(order).toEqual([...order].sort((a, b) => a - b))
   // Una fila por agente, sin botones sueltos ni interruptor: todo eso vive en su página.
   await expect(agents.getByRole("switch")).toHaveCount(0)
@@ -167,6 +167,9 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await expect(page).toHaveURL(tenantPattern(org.slug, "/agent/administrador"))
 
   // --- El proveedor rechaza la conexión: lo dice arriba y lleva a donde se arregla ---
+  // El aviso se va cuando el modelo vuelve a responder, y el de demostración siempre responde.
+  // Se comprueba antes del fallo: lo comprobado vale 10 minutos y es anterior, así que el aviso sigue.
+  expect(await call<{ responds: boolean }>(page, "GET", "/api/agent/model", org.slug)).toMatchObject({ responds: true })
   await fixtureDb.insert(agentRunLedger).values({
     organizationId: org.id, conversationId: alone, model: "fake", status: "error", startedAt: new Date(),
     error: "PROVIDER_REJECTED: HTTP 401: detalle-interno-del-proveedor",
@@ -174,7 +177,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   expect((await overview()).provider.problem).toBe("rechazado")
   await gotoHydrated(page, tenant(org.slug, "/agent"))
   const problem = page.getByRole("alert").filter({ hasText: "El agente no puede responder ahora" })
-  await expect(problem).toContainText("El modelo no está respondiendo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.")
+  await expect(problem).toContainText("Los mensajes pasan a tu equipo. Ya avisamos a odentIA.")
   // El texto del proveedor no llega a la pantalla.
   await expect(page.getByText(/detalle-interno/)).toHaveCount(0)
   expect(await overflow(page)).toBeLessThanOrEqual(0)

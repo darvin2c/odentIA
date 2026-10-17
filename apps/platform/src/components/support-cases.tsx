@@ -63,11 +63,16 @@ const detailEnvelope = z.object({ data: supportCaseDetail })
  * adjuntos reales y consentimiento de acceso diagnóstico. Las notas internas
  * del equipo nunca llegan aquí: la API solo entrega mensajes públicos.
  */
-export function SupportCasesSection() {
+export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: string | null }) {
   const queryClient = useQueryClient()
   const role = useMyRole()
   const canGrant = role === "owner" || role === "admin"
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Abierta desde el correo, la sección se muestra con ese caso abierto.
+  const [selectedId, setSelectedId] = useState<string | null>(initialCaseId)
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (initialCaseId) sectionRef.current?.scrollIntoView({ block: "start" })
+  }, [initialCaseId])
   // Borrador por caso: no se envía el texto de un caso en otro ni se pierde al cambiar.
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [minutes, setMinutes] = useState("30")
@@ -170,7 +175,7 @@ export function SupportCasesSection() {
   }, [selectedId, detail.data, markSeen])
 
   return (
-    <section aria-label="Tus casos con soporte" className="flex flex-col gap-2 border-t pt-3.5">
+    <section ref={sectionRef} aria-label="Tus casos con soporte" className="flex flex-col gap-2 border-t pt-3.5">
       <h3 className="text-sm font-bold">Tus casos con soporte</h3>
       {cases.isPending ? (
         <p className="text-sm text-muted-foreground">Cargando tus casos…</p>

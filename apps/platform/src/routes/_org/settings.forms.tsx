@@ -26,7 +26,7 @@ import { ConfirmDialog, EmptyState, FormDrawer, PageHeader } from "@odentia/ui-p
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ChevronDown, Plus, X } from "lucide-react"
-import { type FormEvent, type ReactNode, useId, useMemo, useState } from "react"
+import { type FormEvent, type ReactNode, useDeferredValue, useId, useMemo, useState } from "react"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
@@ -989,11 +989,20 @@ function ConsentTemplatesPanel() {
     queryKey: ["consent-template-services"],
     queryFn: fetchConsentTemplateServices,
   })
-  const servicesQuery = useQuery({
-    queryKey: ["services", "para-consentimientos"],
-    queryFn: () => fetchServices({ limit: 200 }),
+  // Se nombran por id los servicios ya unidos, estén o no en la primera página del tarifario (tope B3).
+  const linkedIds = [...new Set((linksQuery.data?.data ?? []).flatMap((link) => link.serviceIds))].sort()
+  const namesQuery = useQuery({
+    queryKey: ["services", "para-consentimientos", linkedIds],
+    enabled: linkedIds.length > 0,
+    queryFn: async () => {
+      const pages = []
+      for (let at = 0; at < linkedIds.length; at += 100) {
+        pages.push(fetchServices({ ids: linkedIds.slice(at, at + 100), limit: 100 }))
+      }
+      return (await Promise.all(pages)).flatMap((page) => page.data)
+    },
   })
-  const serviceName = new Map((servicesQuery.data?.data ?? []).map((service) => [service.id, service.name]))
+  const serviceName = new Map((namesQuery.data ?? []).map((service) => [service.id, service.name]))
   const linkedOf = (key: string) => linksQuery.data?.data.find((link) => link.templateKey === key)?.serviceIds ?? []
   const [servicesFor, setServicesFor] = useState<ConsentTemplate | null>(null)
 
@@ -1106,7 +1115,7 @@ function ConsentTemplatesPanel() {
                         <p className="text-sm text-muted-foreground">
                           {linkedOf(latest.key).length > 0
                             ? `Se pide para: ${linkedOf(latest.key)
-                                .map((id) => serviceName.get(id) ?? "un servicio retirado")
+                                .map((id) => serviceName.get(id) ?? "…")
                                 .join(", ")}`
                             : "Aún no se pide para ningún servicio: la atención no lo propone sola"}
                         </p>
@@ -1187,8 +1196,7 @@ function ConsentTemplatesPanel() {
         <ConsentServicesDrawer
           template={servicesFor}
           selected={linkedOf(servicesFor.key)}
-          services={servicesQuery.data?.data ?? []}
-          loading={servicesQuery.isPending}
+          names={serviceName}
           onClose={() => setServicesFor(null)}
           onSaved={() => {
             setServicesFor(null)
@@ -1235,15 +1243,14 @@ function ConsentTemplatesPanel() {
 function ConsentServicesDrawer({
   template,
   selected,
-  services,
-  loading,
+  names,
   onClose,
   onSaved,
 }: {
   template: ConsentTemplate
   selected: string[]
-  services: Array<{ id: string; name: string; isActive?: boolean }>
-  loading: boolean
+  /** Nombres de los servicios ya unidos (de cualquier página del tarifario). */
+  names: Map<string, string>
   onClose: () => void
   onSaved: () => void
 }) {
@@ -1252,6 +1259,14 @@ function ConsentServicesDrawer({
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(selected))
   const [query, setQuery] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // Se busca en el servidor, en todo el tarifario: nunca una lista cortada en silencio.
+  const q = useDeferredValue(query.trim())
+  const searchQuery = useQuery({
+    queryKey: ["services", "para-consentimientos", "buscar", q],
+    queryFn: () => fetchServices({ q: q || undefined, state: "active", limit: 30 }),
+    placeholderData: (previous) => previous,
+  })
+  const [picked, setPicked] = useState<Map<string, string>>(() => new Map(names))
   const dirty = chosen.size !== selected.length || selected.some((id) => !chosen.has(id))
   const save = useMutation({
     mutationFn: () => saveConsentTemplateServices(template.id, [...chosen]),
@@ -1261,12 +1276,14 @@ function ConsentServicesDrawer({
     },
     onError: (e) => setError(errorText(e, "No pudimos guardar los servicios. Vuelve a intentarlo.")),
   })
-  const needle = query.trim().toLowerCase()
-  const shown = services.filter(
-    (service) =>
-      (service.isActive !== false || chosen.has(service.id)) &&
-      (!needle || service.name.toLowerCase().includes(needle)),
-  )
+  const found = searchQuery.data?.data ?? []
+  const total = searchQuery.data?.total ?? 0
+  // Lo elegido va primero, aunque la búsqueda no lo traiga; después, lo encontrado.
+  const shown = [
+    ...[...chosen].map((id) => ({ id, name: picked.get(id) ?? names.get(id) ?? "…" })),
+    ...found.filter((service) => !chosen.has(service.id)).map((service) => ({ id: service.id, name: service.name })),
+  ]
+  const services = found
   return (
     <FormDrawer
       open
@@ -1288,11 +1305,11 @@ function ConsentServicesDrawer({
           <FieldLabel htmlFor={`${ids}-q`}>Buscar un servicio</FieldLabel>
           <Input id={`${ids}-q`} value={query} onChange={(event) => setQuery(event.target.value)} />
         </Field>
-        {loading ? (
+        {searchQuery.isPending ? (
           <p className="text-sm text-muted-foreground">Cargando servicios…</p>
         ) : shown.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {services.length === 0 ? "Aún no hay servicios en la lista de la clínica." : "Ningún servicio coincide."}
+            {q ? "Ningún servicio coincide." : "Aún no hay servicios en la lista de la clínica."}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -1305,8 +1322,10 @@ function ConsentServicesDrawer({
                     onCheckedChange={(value) =>
                       setChosen((current) => {
                         const next = new Set(current)
-                        if (value === true) next.add(service.id)
-                        else next.delete(service.id)
+                        if (value === true) {
+                          next.add(service.id)
+                          setPicked((known) => new Map(known).set(service.id, service.name))
+                        } else next.delete(service.id)
                         return next
                       })
                     }
@@ -1317,6 +1336,11 @@ function ConsentServicesDrawer({
             ))}
           </ul>
         )}
+        {total > services.length ? (
+          <p className="text-xs text-muted-foreground">
+            {`Se ven ${services.length} de ${total} servicios: escribe el nombre para encontrar el resto.`}
+          </p>
+        ) : null}
       </div>
     </FormDrawer>
   )

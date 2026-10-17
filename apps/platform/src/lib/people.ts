@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
+import type { PhoneWhatsApp } from "./phone-whatsapp"
 
 /**
  * La persona y su página (ADR 0029). La dirección es `/people/:personId`,
@@ -24,6 +25,8 @@ export interface PersonResponsibleFor {
   birthDate: string | null
   relationship: string
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship?: string | null
   archived: boolean
 }
 
@@ -36,6 +39,8 @@ export interface PersonSpokenForBy {
   isPatient?: boolean
   relationship: string
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship?: string | null
   isPreferred: boolean
   conversationId: string | null
 }
@@ -50,8 +55,12 @@ export interface PersonPage {
   docNumber: string | null
   docCountry: string | null
   birthDate: string | null
+  /** Menor de edad hoy, con el día de la clínica: lo decide el servidor. */
+  isMinor: boolean
   sex: string | null
   phone: string | null
+  /** Si su teléfono es ya su WhatsApp, aún no o no tiene (decisión 23). */
+  phoneWhatsApp: PhoneWhatsApp
   email: string | null
   archived: boolean
   createdAt: string
@@ -66,6 +75,8 @@ export interface PersonPage {
   spokenForBy: PersonSpokenForBy[]
   channels: string[]
 }
+
+export type { PhoneWhatsApp } from "./phone-whatsapp"
 
 export interface PersonListItem {
   id: string
@@ -113,8 +124,8 @@ export interface PersonNote {
   id: string
   body: string
   at: string
+  /** null si la dejó el sistema (al unir persona y ficha). */
   authorName: string | null
-  legacy: boolean
 }
 
 export function personQueryKey(personId: string) {

@@ -1,6 +1,7 @@
 import {
   IMAGE_TYPE_LABELS,
   type ImageType,
+  type PatientDocumentCategory,
   PHOTO_TYPES,
   RADIOGRAPH_TYPES,
   REPORT_STATUS_LABELS,
@@ -10,13 +11,14 @@ import { timeAgo } from "../../lib/crm"
 import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
 
+/** Lo que se sube: la misma lista que la base (`PATIENT_DOCUMENT_CATEGORIES`), en el orden de la pantalla. */
 export const UPLOAD_CATEGORIES = [
   "radiografia",
   "foto_clinica",
   "consentimiento",
   "informe",
   "otro",
-] as const
+] as const satisfies readonly PatientDocumentCategory[]
 
 const CATEGORY_LABELS: Record<string, string> = {
   radiografia: "Radiografía",

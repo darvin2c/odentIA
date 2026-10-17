@@ -25,6 +25,7 @@ import {
   listActiveKnowledge,
   listKnowledgeEntries,
   listKnowledgeGaps,
+  listKnowledgePage,
   listKnowledgeRevisions,
   recordKnowledgeGap,
   scoreKnowledgeMatch,
@@ -35,7 +36,7 @@ import {
 import { createPaymentMethod, updatePaymentMethod } from "./payment-methods.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Conocimiento del agente: vigencia, búsqueda, lo básico de una clínica y lo que no supo responder. */
 setupTestDb()
@@ -189,10 +190,6 @@ describe("bloque de conocimiento del prompt", () => {
     refusedPaymentMethods: [],
     promotions: [],
     branches: [{ id: "b1", name: "Sede Centro", address: "Av. Larco 123", phone: null, mapsUrl: null, timezone: null }],
-    services: [
-      { id: "s1", name: "Limpieza", code: null, specialty: null, priceCents: 15000, currency: "PEN", durationMin: 45 },
-      { id: "s2", name: "Blanqueamiento", code: null, specialty: null, priceCents: 12000, currency: "USD", durationMin: null },
-    ],
   }
   const entry = (n: number, body: string, branchName: string | null = null): KnowledgeEntryItem => ({
     id: `e${n}`, kind: "faq", title: `Tema ${n}`, body, branchId: branchName ? "b1" : null, branchName,
@@ -200,14 +197,26 @@ describe("bloque de conocimiento del prompt", () => {
     version: 1, createdBy: null, createdAt: "", updatedAt: "",
   })
 
-  it("lleva todas las respuestas vigentes, no solo diez, y cada tarifa con su moneda", () => {
+  it("lleva todas las respuestas vigentes, no solo diez, y los servicios solo como los dice «Informar»", () => {
     const entries = Array.from({ length: 25 }, (_, i) => entry(i + 1, `Respuesta breve ${i + 1}.`))
     expect(knowledgeFitsPrompt(entries)).toBe(true)
-    const block = formatKnowledgeForPrompt(snapshot, [...entries, { ...entry(99, "No debe salir."), state: "vencida" }])
+    const block = formatKnowledgeForPrompt(snapshot, [...entries, { ...entry(99, "No debe salir."), state: "vencida" }], undefined, [
+      "Servicios y cómo decir su precio (cada importe con su moneda):",
+      "- Limpieza (id s1), 45 min: S/ 150.00",
+    ])
     for (let i = 1; i <= 25; i++) expect(block).toContain(`- Tema ${i}: Respuesta breve ${i}.`)
     expect(block).not.toContain("Tema 99")
-    expect(block).toMatch(/- Limpieza \(id [^)]+\): S\/\s150\.00 \(45 min\)/)
-    expect(block).toMatch(/- Blanqueamiento \(id [^)]+\): USD\s120\.00/)
+    expect(block).toContain("- Limpieza (id s1), 45 min: S/ 150.00")
+    // No hay otra lista de servicios con su tarifa cruda: sin las líneas de «Informar», ninguno.
+    expect(formatKnowledgeForPrompt(snapshot, [])).not.toContain("Servicios")
+  })
+
+  it("con «Informar» apagado no habla de medios de pago", () => {
+    const withMethods: ClinicInfoSnapshot = { ...snapshot, paymentMethods: [{ id: "m1", name: "Efectivo", typeCode: "10" }] }
+    const off = formatKnowledgeForPrompt(withMethods, [], undefined, [], { informs: false })
+    expect(off).not.toContain("Efectivo")
+    expect(off).not.toContain("medios de pago")
+    expect(formatKnowledgeForPrompt(withMethods, [])).toContain("Efectivo")
   })
 
   it("lleva los medios de pago activos en una sola línea, y que no se registraron si no hay ninguno", () => {
@@ -302,10 +311,17 @@ it("la lista dice qué respuesta tiene un cambio por aprobar y cuál salió de u
   expect(byId(learned.id)).toMatchObject({ pendingLessonId: null, learned: { uses: 9 } })
 })
 
-it("lo que toma de tus datos cuenta servicios activos con tarifa y sedes activas", async () => {
+it("lo que toma de tus datos cuenta los precios que el agente puede decir y las sedes activas", async () => {
   const before = await run((tx) => getKnowledgeDataSources(tx, ORG))
   await ownerDb.insert(serviceCatalog).values([
-    { organizationId: ORG, name: "Limpieza Fuentes", source: "custom", priceCents: 9000, currency: "PEN" },
+    // «Solo con evaluación»: tiene tarifa, pero el agente no la dice; no cuenta como precio.
+    { organizationId: ORG, name: "Implante Fuentes", source: "custom", priceCents: 300000, currency: "PEN", priceDisclosure: "evaluacion" },
+  ])
+  const onlyEvaluation = await run((tx) => getKnowledgeDataSources(tx, ORG))
+  expect(onlyEvaluation.pricedServices).toBe(before.pricedServices)
+  // «Lo básico: precios» sale de esta misma cuenta: un tarifario «Solo con evaluación» no la cubre.
+  await ownerDb.insert(serviceCatalog).values([
+    { organizationId: ORG, name: "Limpieza Fuentes", source: "custom", priceCents: 9000, currency: "PEN", priceDisclosure: "exacto" },
     { organizationId: ORG, name: "Evaluación Fuentes", source: "custom", priceCents: 0, currency: "PEN" },
     { organizationId: ORG, name: "Retirado Fuentes", source: "custom", priceCents: 5000, currency: "PEN", isActive: false },
   ])
@@ -316,7 +332,7 @@ it("lo que toma de tus datos cuenta servicios activos con tarifa y sedes activas
   ])
   expect(await run((tx) => getKnowledgeDataSources(tx, ORG))).toEqual({
     pricedServices: before.pricedServices + 1,
-    services: before.services + 2,
+    services: before.services + 3,
     branches: before.branches + 1,
   })
 })
@@ -371,4 +387,29 @@ it("lo que no supo responder se agrupa, muestra lo que respondió el equipo y se
   await expect(run((tx) => tx.delete(agentKnowledgeGap).where(eq(agentKnowledgeGap.id, other!)))).rejects.toThrow()
   await expect(withOrgContext(appDb, OTHER, (tx) => getKnowledgeEntry(tx, OTHER, answered.id))).rejects.toMatchObject({ code: "NOT_FOUND" })
   expect((await run((tx) => tx.select({ id: agentKnowledgeEntry.id }).from(agentKnowledgeEntry).where(eq(agentKnowledgeEntry.id, answered.id)))).length).toBe(1)
+})
+
+it("Conocimiento pagina: la respuesta 101 también se abre, y la búsqueda va al servidor", async () => {
+  const orgId = `pagina-${Date.now()}`
+  await insertOrg(ownerDb, orgId, orgId)
+  await ownerDb.insert(agentKnowledgeEntry).values(
+    Array.from({ length: 105 }, (_, index) => ({
+      organizationId: orgId, kind: "faq", title: `Pregunta ${index}`, body: index === 3 ? "Hay estacionamiento." : "Respuesta.",
+      status: "publicada", createdBy: OWNER, updatedAt: new Date(Date.now() - index * 60_000),
+    })),
+  )
+  const page = (input: Parameters<typeof listKnowledgePage>[2]) => withOrgContext(appDb, orgId, (tx) => listKnowledgePage(tx, orgId, input))
+  const first = await page({ limit: 100 })
+  expect(first.items).toHaveLength(100)
+  expect(first.total).toBe(105)
+  expect(first.nextCursor).not.toBeNull()
+  const second = await page({ limit: 100, cursor: first.nextCursor! })
+  expect(second.items.map((entry) => entry.title)).toEqual(["Pregunta 100", "Pregunta 101", "Pregunta 102", "Pregunta 103", "Pregunta 104"])
+  expect(second.nextCursor).toBeNull()
+  // Ninguna se repite ni se pierde entre páginas.
+  expect(new Set([...first.items, ...second.items].map((entry) => entry.id)).size).toBe(105)
+  const found = await page({ q: "estacionamiento" })
+  expect(found).toMatchObject({ total: 1, nextCursor: null })
+  expect(found.items.map((entry) => entry.title)).toEqual(["Pregunta 3"])
+  await expect(page({ cursor: "roto" })).rejects.toMatchObject({ code: "VALIDATION" })
 })

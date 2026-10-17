@@ -221,6 +221,7 @@ it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
       name: "t1",
       language: "es_PE",
       params: ["Ana"],
+      category: "utility",
     }),
   )
   expect(tpl.contentType).toBe("template")
@@ -232,6 +233,7 @@ it("ventana 24h de WhatsApp bloquea texto pero permite plantilla", async () => {
         name: "otra",
         language: "es_PE",
         params: [],
+        category: "utility",
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })

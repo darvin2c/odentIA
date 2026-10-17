@@ -524,7 +524,7 @@ function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
           to="/agent/pendientes"
           className="flex min-h-11 items-center justify-center rounded-full border font-semibold hover:bg-accent/60"
         >
-          Ver todos los pendientes
+          Ver las citas que esperan su sí
         </Link>
       </div>
     </Tabs>
@@ -644,7 +644,8 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
   const [briefFor, setBriefFor] = useState<AgentHandoff | null>(null)
   const query = useQuery({
     queryKey: ["agent-panel-handoffs"],
-    queryFn: () => apiFetch<{ data: AgentHandoff[] }>("/api/agent/handoffs?open=1&limit=50"),
+    // Los urgentes y los que más llevan esperando primero: el tope nunca deja fuera a los más viejos.
+    queryFn: () => apiFetch<{ data: AgentHandoff[] }>("/api/agent/handoffs?open=1&limit=100&order=urgencia"),
   })
   const claim = useMutation({
     mutationFn: (handoff: AgentHandoff) => takeCase(handoff),
@@ -721,6 +722,15 @@ function HandoffsTab({ when }: { when: WhenFormatter }) {
           )
         })}
       </ul>
+      {handoffs.length >= 100 ? (
+        <p className="text-sm text-muted-foreground">
+          Se muestran los 100 más urgentes y antiguos. Cada caso es también una tarea de Recepción en{" "}
+          <Link to="/tasks" search={{ task: undefined, vista: "todas" }} className={INLINE_LINK}>
+            Tareas
+          </Link>
+          .
+        </p>
+      ) : null}
       <CaseBriefDrawer
         conversationId={briefFor?.conversationId ?? null}
         name={briefFor?.contactName ?? "Interlocutor"}

@@ -10,11 +10,17 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
 import { organization, user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
+
+// Las tablas de cobro se crearon a mano: sus claves foráneas llevan el nombre
+// que les dio PostgreSQL (`<tabla>_<columna>_fkey`), las de organización de
+// las tablas de una clínica se borran con ella (`<tabla>_org_cascade_fk`) y
+// las claves únicas son restricciones `UNIQUE` (`*_uidx`).
 
 /**
  * Facturación SaaS de odentIA (slice Billing).
@@ -23,7 +29,7 @@ import { orgFk, timestamps } from "./crm.js"
  *   `saas_payment_method`, `saas_seller`, `saas_commission_settlement` y
  *   `saas_commission_settlement_line`. Solo el rol owner las escribe (rutas
  *   admin con ownerDb tras guard staff); el rol app solo lee planes y
- *   métodos activos. La migración 0072 lo blinda con REVOKE.
+ *   métodos activos. `0001_base_reglas.sql` lo blinda con REVOKE.
  * - Tablas de tenant (con organization_id + RLS `org_isolation`):
  *   `saas_subscription`, `saas_charge`, `saas_payment`,
  *   `saas_seller_commission`, `saas_commission_adjustment`, `saas_notice`,
@@ -94,7 +100,7 @@ export const saasPlan = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("saas_plan_code_uidx").on(table.code),
+    unique("saas_plan_code_uidx").on(table.code),
     uniqueIndex("saas_plan_default_uidx").on(table.isDefault).where(sql`${table.isDefault}`),
     check(
       "saas_plan_action_check",
@@ -133,7 +139,7 @@ export const saasPaymentMethod = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("saas_payment_method_code_uidx").on(table.code),
+    unique("saas_payment_method_code_uidx").on(table.code),
     check("saas_payment_method_code_check", sql`length(trim(${table.code})) BETWEEN 1 AND 80`),
     check("saas_payment_method_name_check", sql`length(trim(${table.name})) BETWEEN 1 AND 120`),
   ],
@@ -144,7 +150,7 @@ export const saasSeller = pgTable(
   "saas_seller",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: text("user_id").references(() => user.id),
+    userId: text("user_id"),
     displayName: text("display_name").notNull(),
     /** Puntos básicos: 1000 = 10 %. Se congela por cobro al confirmar. */
     rateBps: integer("rate_bps").notNull(),
@@ -154,7 +160,8 @@ export const saasSeller = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("saas_seller_user_uidx").on(table.userId),
+    unique("saas_seller_user_uidx").on(table.userId),
+    foreignKey({ name: "saas_seller_user_id_fkey", columns: [table.userId], foreignColumns: [user.id] }),
     check("saas_seller_rate_check", sql`${table.rateBps} BETWEEN 0 AND 10000`),
     check("saas_seller_window_check", sql`${table.windowDays} BETWEEN 0 AND 730`),
   ],
@@ -169,10 +176,8 @@ export const saasSeller = pgTable(
 export const saasSubscription = pgTable(
   "saas_subscription",
   {
-    organizationId: text("organization_id")
-      .primaryKey()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    planId: uuid("plan_id").references(() => saasPlan.id),
+    organizationId: text("organization_id").primaryKey(),
+    planId: uuid("plan_id"),
     status: text("status").notNull().default("prueba"),
     /** Demo: exenta de cobro, restricción y comisiones. */
     isDemo: boolean("is_demo").notNull().default(false),
@@ -186,13 +191,12 @@ export const saasSubscription = pgTable(
     /** Prórroga acotada por comprobante pendiente (no aplaza sin límite). */
     proofExtensionUntil: timestamp("proof_extension_until", { withTimezone: true }),
     proofExtensionCount: integer("proof_extension_count").notNull().default(0),
-    sellerId: uuid("seller_id").references(() => saasSeller.id),
+    sellerId: uuid("seller_id"),
     /** Atribución congelada: porcentaje y ventana vigentes al asignar. */
     sellerRateBps: integer("seller_rate_bps"),
     sellerWindowDays: integer("seller_window_days"),
     sellerStartedAt: timestamp("seller_started_at", { withTimezone: true }),
     sellerEndedAt: timestamp("seller_ended_at", { withTimezone: true }),
-    billingEmail: text("billing_email"),
     /** Descuento negociado sobre el precio base de cada acción (ADR 0031); la cuota no tiene descuento. */
     discountBps: integer("discount_bps").notNull().default(0),
     /** Prueba negociada para esta clínica; null = la del plan. */
@@ -208,6 +212,9 @@ export const saasSubscription = pgTable(
   },
   (table) => [
     index("saas_subscription_status_idx").on(table.status),
+    foreignKey({ name: "saas_subscription_organization_id_fkey", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
+    foreignKey({ name: "saas_subscription_plan_id_fkey", columns: [table.planId], foreignColumns: [saasPlan.id] }),
+    foreignKey({ name: "saas_subscription_seller_id_fkey", columns: [table.sellerId], foreignColumns: [saasSeller.id] }),
     check("saas_subscription_discount_check", sql`${table.discountBps} BETWEEN 0 AND 9000`),
     check(
       "saas_subscription_terms_check",
@@ -230,8 +237,8 @@ export const saasCharge = pgTable(
   "saas_charge",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    planId: uuid("plan_id").references(() => saasPlan.id),
+    organizationId: text("organization_id").notNull(),
+    planId: uuid("plan_id"),
     planCode: text("plan_code").notNull(),
     planName: text("plan_name").notNull(),
     periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
@@ -245,16 +252,22 @@ export const saasCharge = pgTable(
     taxLabel: text("tax_label"),
     status: text("status").notNull().default("pendiente"),
     dueAt: timestamp("due_at", { withTimezone: true }),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by"),
     /** Idempotencia del recurrente automático (`periodo:AAAA-MM`); manual null. */
     dedupeKey: text("dedupe_key"),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
-    voidedBy: text("voided_by").references(() => user.id),
+    voidedBy: text("voided_by"),
     voidReason: text("void_reason"),
   },
   (table) => [
-    uniqueIndex("saas_charge_org_id_uidx").on(table.organizationId, table.id),
+    unique("saas_charge_org_id_uidx").on(table.organizationId, table.id),
+    index("saas_charge_org_period_idx").on(table.organizationId, table.periodStart),
+    index("saas_charge_org_status_idx").on(table.organizationId, table.status),
+    foreignKey({ name: "saas_charge_org_cascade_fk", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
+    foreignKey({ name: "saas_charge_plan_id_fkey", columns: [table.planId], foreignColumns: [saasPlan.id] }),
+    foreignKey({ name: "saas_charge_created_by_fkey", columns: [table.createdBy], foreignColumns: [user.id] }),
+    foreignKey({ name: "saas_charge_voided_by_fkey", columns: [table.voidedBy], foreignColumns: [user.id] }),
     uniqueIndex("saas_charge_org_dedupe_uidx").on(table.organizationId, table.dedupeKey),
     check("saas_charge_amount_check", sql`${table.amountCents} >= 0`),
     check("saas_charge_paid_check", sql`${table.paidCents} >= 0`),
@@ -274,7 +287,7 @@ export const saasPayment = pgTable(
   "saas_payment",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
+    organizationId: text("organization_id").notNull(),
     chargeId: uuid("charge_id"),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
@@ -286,20 +299,25 @@ export const saasPayment = pgTable(
     receiptSize: integer("receipt_size"),
     idempotencyKey: text("idempotency_key").notNull(),
     notes: text("notes"),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
-    confirmedBy: text("confirmed_by").references(() => user.id),
+    confirmedBy: text("confirmed_by"),
     reversedAt: timestamp("reversed_at", { withTimezone: true }),
-    reversedBy: text("reversed_by").references(() => user.id),
+    reversedBy: text("reversed_by"),
     reverseReason: text("reverse_reason"),
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("saas_payment_org_id_uidx").on(table.organizationId, table.id),
-    uniqueIndex("saas_payment_org_key_uidx").on(table.organizationId, table.idempotencyKey),
+    unique("saas_payment_org_id_uidx").on(table.organizationId, table.id),
+    unique("saas_payment_org_key_uidx").on(table.organizationId, table.idempotencyKey),
+    foreignKey({ name: "saas_payment_org_cascade_fk", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
+    foreignKey({ name: "saas_payment_created_by_fkey", columns: [table.createdBy], foreignColumns: [user.id] }),
+    foreignKey({ name: "saas_payment_confirmed_by_fkey", columns: [table.confirmedBy], foreignColumns: [user.id] }),
+    foreignKey({ name: "saas_payment_reversed_by_fkey", columns: [table.reversedBy], foreignColumns: [user.id] }),
     index("saas_payment_org_charge_idx").on(table.organizationId, table.chargeId),
     index("saas_payment_org_status_idx").on(table.organizationId, table.status),
     foreignKey({
+      name: "saas_payment_organization_id_charge_id_fkey",
       columns: [table.organizationId, table.chargeId],
       foreignColumns: [saasCharge.organizationId, saasCharge.id],
     }),
@@ -319,11 +337,9 @@ export const saasSellerCommission = pgTable(
   "saas_seller_commission",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
+    organizationId: text("organization_id").notNull(),
     paymentId: uuid("payment_id"),
-    sellerId: uuid("seller_id")
-      .notNull()
-      .references(() => saasSeller.id),
+    sellerId: uuid("seller_id").notNull(),
     rateBps: integer("rate_bps").notNull(),
     windowDays: integer("window_days").notNull(),
     baseCents: integer("base_cents").notNull(),
@@ -335,9 +351,12 @@ export const saasSellerCommission = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("saas_seller_commission_payment_uidx").on(table.paymentId),
+    unique("saas_seller_commission_payment_uidx").on(table.paymentId),
+    foreignKey({ name: "saas_seller_commission_org_cascade_fk", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
+    foreignKey({ name: "saas_seller_commission_seller_id_fkey", columns: [table.sellerId], foreignColumns: [saasSeller.id] }),
     index("saas_seller_commission_seller_status_idx").on(table.sellerId, table.status),
     foreignKey({
+      name: "saas_seller_commission_organization_id_payment_id_fkey",
       columns: [table.organizationId, table.paymentId],
       foreignColumns: [saasPayment.organizationId, saasPayment.id],
     }),
@@ -357,23 +376,22 @@ export const saasCommissionAdjustment = pgTable(
   "saas_commission_adjustment",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
-    commissionId: uuid("commission_id")
-      .notNull()
-      .references(() => saasSellerCommission.id),
+    organizationId: text("organization_id").notNull(),
+    commissionId: uuid("commission_id").notNull(),
     paymentId: uuid("payment_id"),
-    sellerId: uuid("seller_id")
-      .notNull()
-      .references(() => saasSeller.id),
+    sellerId: uuid("seller_id").notNull(),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
     reason: text("reason").notNull(),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by"),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
-    index("saas_commission_adjustment_seller_idx").on(table.sellerId, table.appliedAt),
+    foreignKey({ name: "saas_commission_adjustment_org_cascade_fk", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
+    foreignKey({ name: "saas_commission_adjustment_commission_id_fkey", columns: [table.commissionId], foreignColumns: [saasSellerCommission.id] }),
+    foreignKey({ name: "saas_commission_adjustment_seller_id_fkey", columns: [table.sellerId], foreignColumns: [saasSeller.id] }),
+    foreignKey({ name: "saas_commission_adjustment_created_by_fkey", columns: [table.createdBy], foreignColumns: [user.id] }),
     check("saas_commission_adjustment_amount_check", sql`${table.amountCents} > 0`),
   ],
 )
@@ -383,9 +401,7 @@ export const saasCommissionSettlement = pgTable(
   "saas_commission_settlement",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    sellerId: uuid("seller_id")
-      .notNull()
-      .references(() => saasSeller.id),
+    sellerId: uuid("seller_id").notNull(),
     periodYear: integer("period_year").notNull(),
     periodMonth: integer("period_month").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
@@ -394,14 +410,17 @@ export const saasCommissionSettlement = pgTable(
     totalCents: integer("total_cents").notNull().default(0),
     status: text("status").notNull().default("liquidada"),
     notes: text("notes"),
-    settledBy: text("settled_by").references(() => user.id),
+    settledBy: text("settled_by"),
     settledAt: timestamp("settled_at", { withTimezone: true }),
     ...timestamps,
     voidedAt: timestamp("voided_at", { withTimezone: true }),
-    voidedBy: text("voided_by").references(() => user.id),
+    voidedBy: text("voided_by"),
     voidReason: text("void_reason"),
   },
   (table) => [
+    foreignKey({ name: "saas_commission_settlement_seller_id_fkey", columns: [table.sellerId], foreignColumns: [saasSeller.id] }),
+    foreignKey({ name: "saas_commission_settlement_settled_by_fkey", columns: [table.settledBy], foreignColumns: [user.id] }),
+    foreignKey({ name: "saas_commission_settlement_voided_by_fkey", columns: [table.voidedBy], foreignColumns: [user.id] }),
     index("saas_settlement_seller_period_idx").on(
       table.sellerId,
       table.periodYear,
@@ -417,14 +436,12 @@ export const saasCommissionSettlementLine = pgTable(
   "saas_commission_settlement_line",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    settlementId: uuid("settlement_id")
-      .notNull()
-      .references(() => saasCommissionSettlement.id, { onDelete: "cascade" }),
+    settlementId: uuid("settlement_id").notNull(),
     kind: text("kind").notNull().default("cobro"),
     sourceKey: text("source_key").notNull(),
-    commissionId: uuid("commission_id").references(() => saasSellerCommission.id),
-    adjustmentId: uuid("adjustment_id").references(() => saasCommissionAdjustment.id),
-    organizationId: text("organization_id").references(() => organization.id),
+    commissionId: uuid("commission_id"),
+    adjustmentId: uuid("adjustment_id"),
+    organizationId: text("organization_id"),
     description: text("description").notNull(),
     amountCents: integer("amount_cents").notNull(),
     currency: char("currency", { length: 3 }).notNull(),
@@ -433,6 +450,10 @@ export const saasCommissionSettlementLine = pgTable(
   },
   (table) => [
     index("saas_settlement_line_settlement_idx").on(table.settlementId),
+    foreignKey({ name: "saas_commission_settlement_line_settlement_id_fkey", columns: [table.settlementId], foreignColumns: [saasCommissionSettlement.id] }).onDelete("cascade"),
+    foreignKey({ name: "saas_commission_settlement_line_commission_id_fkey", columns: [table.commissionId], foreignColumns: [saasSellerCommission.id] }),
+    foreignKey({ name: "saas_commission_settlement_line_adjustment_id_fkey", columns: [table.adjustmentId], foreignColumns: [saasCommissionAdjustment.id] }),
+    foreignKey({ name: "saas_settlement_line_org_cascade_fk", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
     uniqueIndex("saas_settlement_line_source_uidx")
       .on(table.sourceKey)
       .where(sql`${table.voidedAt} IS NULL`),
@@ -448,7 +469,7 @@ export const saasNotice = pgTable(
   "saas_notice",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    organizationId: orgFk("organization_id"),
+    organizationId: text("organization_id").notNull(),
     kind: text("kind").notNull(),
     dedupeKey: text("dedupe_key").notNull(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
@@ -460,8 +481,8 @@ export const saasNotice = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("saas_notice_dedupe_uidx").on(table.organizationId, table.dedupeKey),
-    index("saas_notice_org_kind_idx").on(table.organizationId, table.kind),
+    unique("saas_notice_dedupe_uidx").on(table.organizationId, table.dedupeKey),
+    foreignKey({ name: "saas_notice_org_cascade_fk", columns: [table.organizationId], foreignColumns: [organization.id] }).onDelete("cascade"),
   ],
 )
 
@@ -541,7 +562,11 @@ export const saasChargeLine = pgTable(
   },
   (table) => [
     index("saas_charge_line_charge_idx").on(table.organizationId, table.chargeId, table.sortOrder),
-    foreignKey({ columns: [table.organizationId, table.chargeId], foreignColumns: [saasCharge.organizationId, saasCharge.id] }),
+    foreignKey({
+      name: "saas_charge_line_charge_fk",
+      columns: [table.organizationId, table.chargeId],
+      foreignColumns: [saasCharge.organizationId, saasCharge.id],
+    }),
     check("saas_charge_line_kind_check", sql`${table.kind} IN ('cuota','conversacion','consulta','cita','devolucion','credito','impuesto')`),
     // Solo la devolución resta: la conversación ya cobrada que llevó a una cita recuperada.
     check(
@@ -592,6 +617,7 @@ export const saasAction = pgTable(
   (table) => [
     uniqueIndex("saas_action_org_dedupe_uidx").on(table.organizationId, table.dedupeKey),
     index("saas_action_org_occurred_idx").on(table.organizationId, table.occurredAt),
+    index("saas_action_org_charge_idx").on(table.organizationId, table.chargeId),
     index("saas_action_org_contact_idx").on(table.organizationId, table.contactId, table.kind, table.occurredAt),
     check("saas_action_kind_check", sql`${table.kind} IN ('conversacion','consulta','cita')`),
     check(

@@ -1,7 +1,8 @@
 /**
  * Enviar el presupuesto a la persona (paso 3 de la fase 3, decisión 4).
  *
- * Sale por la regla de siempre (`routeMessage`): WhatsApp primero —con el PDF
+ * Sale por la puerta para escribirle a alguien (`openRoute`, ADR 0042), como
+ * «Su enlace», las recetas y los comprobantes: WhatsApp primero —con el PDF
  * si la persona escribió en las últimas 24 horas, o con «Presupuesto listo»
  * aprobado si no— y correo, con el PDF, si no tiene WhatsApp. Antes salía
  * primero por correo y por WhatsApp solo dentro de las 24 horas.
@@ -15,7 +16,7 @@
  * responde y reserva lo que aceptó; dentro de las 24 horas y por correo va
  * además el PDF, con la dirección de su enlace escrita.
  */
-import { budgetOptionLabel, formatMoney, isMinor } from "@odentia/clinical"
+import { budgetOptionLabel, formatMoney } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -24,6 +25,7 @@ import {
   BUDGET_READY_MESSAGE_KEY,
   BUDGET_READY_SUBJECT,
   type MessageSpec,
+  NOTICE_PURPOSE,
   renderMessage,
   replyId,
   withLinkLine,
@@ -31,28 +33,28 @@ import {
 import { issuePersonalLink } from "./booking-links.js"
 import { personalLinkRef } from "./personal-link-token.js"
 import { personalLinkMessageUrl } from "./public-links.js"
-import { clinicName, firstName, previewMessageRoute, routeMessage } from "./automation-routing.js"
-import { mayWriteFirst } from "./automation.js"
+import { clinicName, firstName } from "./automation-routing.js"
+import { openRoute, previewRoute } from "./message-gate.js"
 import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError } from "./errors.js"
 import { buildBudgetSnapshot, renderBudgetPdf } from "./financial-document-pdf.js"
-import {
-  type DocumentRecipient,
-  deliverDocumentPdf,
-  listDocumentRecipients,
-  type RecipientRelation,
-} from "./financial-documents.js"
+import { type DocumentRecipient, deliverDocumentPdf, type RecipientRelation } from "./financial-documents.js"
+import { listDecisionRecipients } from "./responsibilities.js"
 import { findOrgLocale } from "./locale.js"
 import type { Storage } from "./storage.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Estados en los que el presupuesto se puede enviar (o reenviar). */
 const SENDABLE = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"] as const
 
 /**
  * A quién le llega lo del servicio de un paciente (su presupuesto, «Su
- * enlace»): la propia persona o, si es menor, su representante legal.
+ * enlace»): la regla única de `listDecisionRecipients`. La propia persona si
+ * es mayor de edad o, si es menor, su representante legal vigente. Elegido a
+ * mano, solo alguien de esa lista: nunca un autorizado de información ni el
+ * responsable económico.
  */
 export async function serviceRecipient(
   tx: Db,
@@ -60,29 +62,19 @@ export async function serviceRecipient(
   patientId: string,
   recipientContactId?: string | null,
 ): Promise<DocumentRecipient> {
-  const recipients = await listDocumentRecipients(tx, orgId, patientId)
+  const recipients = await listDecisionRecipients(tx, orgId, patientId)
   if (recipientContactId) {
     const chosen = recipients.find((row) => row.contactId === recipientContactId)
     if (!chosen) {
       throw new ServiceError(
         "DOCUMENT_RECIPIENT_NOT_AUTHORIZED",
         403,
-        "El destinatario no es la persona ni un pagador autorizado del paciente",
+        "El destinatario no es la persona ni su representante legal vigente",
       )
     }
     return chosen
   }
-  const [row] = await tx
-    .select({ birthDate: patient.birthDate })
-    .from(patient)
-    .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
-    .limit(1)
-  const birth = row?.birthDate ? String(row.birthDate).slice(0, 10) : null
-  const minor = birth ? isMinor(birth, new Date().toISOString().slice(0, 10)) : false
-  const self = recipients.find((r) => r.relation === "paciente") ?? null
-  const representative = recipients.find((r) => r.relation === "representante_legal") ?? null
-  // Un menor no decide: sin representante legal no hay a quién enviárselo.
-  const chosen = minor ? representative : (self ?? representative)
+  const chosen = recipients.find((row) => row.isDefault) ?? null
   if (!chosen) {
     throw new ServiceError(
       "BUDGET_NO_RECIPIENT",
@@ -154,10 +146,10 @@ export async function previewBudgetSend(
   if (!(SENDABLE as readonly string[]).includes(budget.status)) {
     return { ...base, channel: null, via: null, label: null, blocked: "Este presupuesto ya no se envía." }
   }
-  const route = await previewMessageRoute(tx, orgId, recipient.contactId, spec)
-  if ("cause" in route) return { ...base, channel: null, via: null, label: null, blocked: route.detail }
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, "seguimiento"))) {
-    return { ...base, channel: null, via: null, label: null, blocked: OPTED_OUT }
+  // La puerta para escribirle a alguien (ADR 0042): un aviso que manda el equipo.
+  const route = await previewRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) {
+    return { ...base, channel: null, via: null, label: null, blocked: route.cause === "sin_permiso" ? OPTED_OUT : route.detail }
   }
   return {
     ...base,
@@ -169,12 +161,13 @@ export async function previewBudgetSend(
 }
 
 const OPTED_OUT =
-  "Pidió no recibir mensajes de seguimiento: entrégaselo impreso, o envíaselo si te escribe por WhatsApp."
+  "Pidió no recibir ningún mensaje de la clínica: entrégaselo impreso, o envíaselo si te escribe por WhatsApp."
 
 async function patientFirstName(tx: Db, orgId: string, patientId: string): Promise<string> {
   const [row] = await tx
-    .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+    .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
     .where(and(eq(patient.id, patientId), eq(patient.organizationId, orgId)))
     .limit(1)
   if (!row) throw notFound("Paciente")
@@ -276,12 +269,13 @@ export async function sendBudget(
   const recipient = await serviceRecipient(tx, orgId, input.patientId, input.recipientContactId)
   const patientName = await patientFirstName(tx, orgId, input.patientId)
   const { spec, params, text } = await readyMessage(tx, orgId, budget, recipient, patientName)
-  const route = await routeMessage(tx, orgId, recipient.contactId, spec)
-  if ("cause" in route) throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
-  // Es parte del servicio (ADR 0030): solo deja de salir si se dio de baja del
-  // seguimiento. Responder a quien acaba de escribir siempre se puede.
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, "seguimiento"))) {
-    throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
+  // Es un aviso (ADR 0040): solo deja de salir con «No quiero ningún mensaje».
+  // Responder a quien acaba de escribir siempre se puede. El permiso se mira
+  // antes de abrir el hilo (`openRoute`, ADR 0042).
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) {
+    if (route.cause === "sin_permiso") throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
+    throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
   }
   const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId)
   const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
@@ -309,6 +303,7 @@ export async function sendBudget(
       name: route.template.name,
       language: route.template.language,
       params,
+      category: spec.category,
       buttons: spec.buttons.map((button) => ({ id: replyId(button.action, input.budgetId), title: button.title })),
       ...(link ? { link: personalLinkRef(link.linkId) } : {}),
       preview: text,

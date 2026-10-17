@@ -395,13 +395,30 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   const refresh = () => {
     for (const key of LESSON_QUERIES) void queryClient.invalidateQueries({ queryKey: [key] })
   }
+  /** La regla activa con la que choca la que se va a aprobar (decisión 24). */
+  const [conflict, setConflict] = useState<{ id: string; body: string } | null>(null)
   const act = useMutation({
     retry: false,
-    mutationFn: (input: { action: "approve" | "discard" | "restore" }) =>
-      apiFetch(`/api/agent/learning/lessons/${lessonId}/${input.action}`, { method: "POST" }),
+    mutationFn: (input: { action: "approve" | "discard" | "restore"; replaceId?: string }) =>
+      apiFetch(`/api/agent/learning/lessons/${lessonId}/${input.action}`, {
+        method: "POST",
+        ...(input.replaceId ? { body: JSON.stringify({ replaceId: input.replaceId }) } : {}),
+      }),
     onSuccess: () => {
+      setConflict(null)
       refresh()
       close()
+    },
+  })
+  // Antes de aprobar una regla se mira si contradice otra: se avisa antes, nunca después.
+  const check = useMutation({
+    retry: false,
+    mutationFn: () =>
+      apiFetch<{ data: { conflictWith: { id: string; body: string } | null } }>(`/api/agent/learning/lessons/${lessonId}/conflict`),
+    onSuccess: (response) => {
+      const found = response.data.conflictWith
+      if (found) setConflict(found)
+      else act.mutate({ action: "approve" })
     },
   })
   const save = useMutation({
@@ -417,6 +434,8 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   function close() {
     act.reset()
     save.reset()
+    check.reset()
+    setConflict(null)
     setWithdrawing(false)
     onClose()
   }
@@ -430,6 +449,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
     event.preventDefault()
     if (!lesson || act.isPending || save.isPending) return
     if (editing) save.mutate({ title: draft.title.trim(), body: draft.body.trim(), kind: draft.kind })
+    else if (proposed && lesson.kind === "regla") check.mutate()
     else if (proposed) act.mutate({ action: "approve" })
     else if (withdrawn) act.mutate({ action: "restore" })
   }
@@ -457,7 +477,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
         isSubmitting={act.isPending || save.isPending}
         isLoading={query.isPending && lessonId !== null}
         isDirty={dirty}
-        error={query.isError ? "No pudimos cargar la lección." : mutationErrorMessage(act.error ?? save.error)}
+        error={query.isError ? "No pudimos cargar la lección." : mutationErrorMessage(act.error ?? save.error ?? check.error)}
         submitLabel={editing ? "Guardar cambios" : "Restaurar"}
         cancelLabel={editing ? "Cancelar" : "Cerrar"}
         hideSubmit={!canWrite || !lesson || ownActions || lesson.status === "descartada"}
@@ -580,7 +600,12 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
 
               {proposed && canWrite ? (
                 <div className={SURFACE_ACTIONS}>
-                  <SubmitButton type="submit" className="min-h-11 w-full" pending={act.isPending && act.variables?.action === "approve"} disabled={act.isPending || save.isPending}>
+                  <SubmitButton
+                    type="submit"
+                    className="min-h-11 w-full"
+                    pending={check.isPending || (act.isPending && act.variables?.action === "approve")}
+                    disabled={act.isPending || save.isPending || check.isPending}
+                  >
                     Aprobar y activar
                   </SubmitButton>
                   <div className="grid grid-cols-2 gap-2">
@@ -615,6 +640,39 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
         </div>
       </FormDrawer>
       <WithdrawLessonDialog lessonId={withdrawing ? lessonId : null} onClose={() => setWithdrawing(false)} onWithdrawn={close} />
+      <ConfirmDialog
+        open={conflict !== null}
+        title="Contradice otra regla"
+        description={conflict ? `Esto contradice «${conflict.body}». ¿Cuál vale?` : ""}
+        confirmLabel="Reemplazar"
+        variant="default"
+        pending={act.isPending}
+        onClose={() => {
+          if (!act.isPending) setConflict(null)
+        }}
+        onConfirm={() => conflict && act.mutate({ action: "approve", replaceId: conflict.id })}
+      >
+        <p className="text-sm text-muted-foreground">«Reemplazar» deja solo la nueva. También puedes mantener las dos o descartar la nueva.</p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={act.isPending} onClick={() => act.mutate({ action: "approve" })}>
+            Mantener las dos
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 text-destructive hover:text-destructive sm:min-h-9"
+            disabled={act.isPending}
+            onClick={() => act.mutate({ action: "discard" })}
+          >
+            Descartar
+          </Button>
+        </div>
+        {act.isError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {mutationErrorMessage(act.error) ?? "No pudimos guardarlo."}
+          </p>
+        ) : null}
+      </ConfirmDialog>
     </>
   )
 }

@@ -167,6 +167,68 @@ it("primera sincronización usa profile.historyId como cursor", async () => {
   expect(got).toEqual({ events: [], nextCursor: "900" })
 })
 
+/**
+ * Buzón falso con la forma de history.list: registros posteriores a
+ * startHistoryId, en páginas de 10 con nextPageToken, y messages.get por id.
+ */
+function fakeGmailMailbox(records: { id: string; messages: { id: string; labelIds?: string[] }[] }[]) {
+  const fetched: string[] = []
+  const fetch = (async (raw: unknown) => {
+    const url = new URL(String(raw))
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+    if (url.pathname.endsWith("/history")) {
+      const start = BigInt(url.searchParams.get("startHistoryId") ?? "0")
+      const after = records.filter((r) => BigInt(r.id) > start)
+      const offset = Number(url.searchParams.get("pageToken") ?? "0")
+      const page = after.slice(offset, offset + 10)
+      return json({
+        history: page.map((r) => ({
+          id: r.id,
+          messagesAdded: r.messages.map((m) => ({ message: { id: m.id, threadId: `t-${m.id}`, labelIds: m.labelIds ?? ["INBOX"] } })),
+        })),
+        historyId: "999",
+        ...(offset + 10 < after.length ? { nextPageToken: String(offset + 10) } : {}),
+      })
+    }
+    const id = decodeURIComponent(url.pathname.split("/").pop() ?? "")
+    fetched.push(id)
+    return json(fullMessage({ id, threadId: `t-${id}` }))
+  }) as unknown as typeof globalThis.fetch
+  return { fetch, fetched }
+}
+
+it("con más mensajes que el tope, ninguno se pierde ni se duplica en dos vueltas", async () => {
+  // 30 registros (101..130) con un mensaje cada uno; el 124 trae tres y el
+  // 110 además uno enviado por la clínica, que no cuenta para el tope.
+  const records = Array.from({ length: 30 }, (_, i) => {
+    const n = 101 + i
+    const messages: { id: string; labelIds?: string[] }[] = [{ id: `m${n}` }]
+    if (n === 124) messages.push({ id: "m124b" }, { id: "m124c" })
+    if (n === 110) messages.push({ id: "propio", labelIds: ["SENT"] })
+    return { id: String(n), messages }
+  })
+  const expected = records.flatMap((r) => r.messages.filter((m) => m.id !== "propio").map((m) => `gmail:${m.id}`))
+  const { fetch, fetched } = fakeGmailMailbox(records)
+  const input = { accessToken: "AT", emailAddress: "clinica@example.com" }
+
+  const first = await pollGmailMailbox({ ...input, cursor: "100" }, { fetch })
+  expect(first.events.length).toBeGreaterThanOrEqual(25)
+  expect(first.events.length).toBeLessThan(expected.length)
+  // El cursor queda en el último registro procesado, no en el historyId final.
+  expect(first.nextCursor).not.toBe("999")
+  const second = await pollGmailMailbox({ ...input, cursor: first.nextCursor }, { fetch })
+  expect(second.nextCursor).toBe("999")
+
+  const all = [...first.events, ...second.events].map((e) => e.externalMessageId)
+  expect(all).toEqual(expected)
+  expect(new Set(all).size).toBe(all.length)
+  expect(fetched).not.toContain("propio")
+
+  const third = await pollGmailMailbox({ ...input, cursor: second.nextCursor }, { fetch })
+  expect(third.events).toEqual([])
+})
+
 it("checkpoint caducado lanza resync (el worker reintenta inicial)", async () => {
   const fetch = (async () => new Response("{}", { status: 404 })) as unknown as typeof globalThis.fetch
   await expect(

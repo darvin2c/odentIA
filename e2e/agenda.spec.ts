@@ -36,7 +36,7 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
     "POST",
     "/api/agenda/chairs",
     owner.org.slug,
-    { branchId: owner.branchId, name: "Sillón 1" },
+    { branchId: owner.branchId, name: "Unidad dental 1" },
     201,
   )
   const patient = await call<{ id: string }>(
@@ -88,7 +88,7 @@ async function prepareAppointment(owner: OwnerFixture): Promise<{
   return { chair, patient, appointment, date, startsAt, endsAt }
 }
 
-test("agenda: alta de sillón, paciente y cita visibles en el tenant", async ({ createOwner }) => {
+test("agenda: alta de unidad dental, paciente y cita visibles en el tenant", async ({ createOwner }) => {
   const owner = await createOwner("agenda")
   const { date } = await prepareAppointment(owner)
 
@@ -98,19 +98,19 @@ test("agenda: alta de sillón, paciente y cita visibles en el tenant", async ({ 
     "/api/agenda/resources",
     owner.org.slug,
   )
-  expect(resources.chairs.map((item) => item.label)).toContain("Sillón 1")
+  expect(resources.chairs.map((item) => item.label)).toContain("Unidad dental 1")
 
   await gotoHydrated(owner.page, tenant(owner.org.slug, `/agenda?date=${date}`))
   await expect(owner.page).toHaveURL(tenantPattern(owner.org.slug, "/agenda"))
   await expect(owner.page.getByRole("heading", { name: "Agenda" })).toBeVisible()
   await expect(owner.page.getByText("Micaela Ríos").first()).toBeVisible()
-  // La rejilla del día pone un carril por profesional; el menú cambia a sillones.
+  // La rejilla del día pone un carril por profesional; el menú cambia a unidades dentales.
   const grid = owner.page.getByRole("region", { name: /^Agenda del/ })
   await expect(grid.getByRole("group", { name: owner.user.name })).toBeVisible()
   // Quien atiende abre la Agenda en su columna (tablero 7): el menú dice de quién es.
   await owner.page.getByRole("button", { name: owner.user.name, exact: true }).click()
-  await owner.page.getByRole("menuitem", { name: "Ver por sillón" }).click()
-  await expect(grid.getByRole("group", { name: "Sillón 1" })).toBeVisible()
+  await owner.page.getByRole("menuitem", { name: "Ver por unidad dental" }).click()
+  await expect(grid.getByRole("group", { name: "Unidad dental 1" })).toBeVisible()
   await expect(grid.getByRole("button", { name: /^Cita de Micaela Ríos/ })).toBeVisible()
 })
 
@@ -167,7 +167,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
     const local = new Date(Date.parse(iso) - 5 * 3_600_000).toISOString()
     return { date: local.slice(0, 10), hour: Number(local.slice(11, 13)) }
   }
-  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   await call(
     page,
     "POST",
@@ -339,11 +339,11 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await expect(page.getByRole("group", { name: "Profesionales" })).not.toContainText("Libre")
   await expect(page.getByRole("region", { name: /^Agenda del/ })).toBeVisible()
   await shot("dia-telefono")
-  // En teléfono también se puede ver por sillón.
+  // En teléfono también se puede ver por unidad dental.
   await page.getByRole("button", { name: /^Profesionales/ }).click()
-  await expect(page.getByRole("group", { name: "Sillones" })).toContainText("Sillón 1")
+  await expect(page.getByRole("group", { name: "Unidades dentales" })).toContainText("Unidad dental 1")
   await shot("dia-telefono-sillones")
-  await page.getByRole("button", { name: /^Sillones/ }).click()
+  await page.getByRole("button", { name: /^Unidades dentales/ }).click()
   await expect(page.getByRole("group", { name: "Profesionales" })).toBeVisible()
   await page.getByRole("button", { name: "Lista", exact: true }).click()
   await expect(page.getByRole("button", { name: /Todas/ })).toBeVisible()
@@ -377,14 +377,14 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
     info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // Sin sillones: la agenda lo dice y deja añadir uno ahí mismo.
+  // Sin unidades dentales: la agenda lo dice y deja añadir una ahí mismo.
   await gotoHydrated(page, tenant(owner.org.slug, "/agenda"))
-  await expect(page.getByText("Esta sede aún no tiene sillones")).toBeVisible()
+  await expect(page.getByText("Esta sede aún no tiene unidades dentales")).toBeVisible()
   await shot("vacio-sin-sillones")
-  await page.getByRole("button", { name: "Añadir sillón" }).click()
-  await page.getByRole("button", { name: "Añadir sillón" }).last().click()
+  await page.getByRole("button", { name: "Añadir unidad dental" }).click()
+  await page.getByRole("button", { name: "Añadir unidad dental" }).last().click()
 
-  // Con sillón pero sin horario: se configura ahí mismo, igual que el sillón.
+  // Con unidad dental pero sin horario: se configura ahí mismo, igual que la unidad dental.
   await expect(page.getByText("Falta el horario de atención")).toBeVisible()
   await shot("vacio-sin-horario")
   await page.getByRole("button", { name: "Configurar horario" }).click()
@@ -412,8 +412,8 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   ).toBeVisible()
   await expect(page.getByLabel("lunes, desde").first()).toContainText("09:00")
   await expect(page.getByLabel("lunes, desde")).toHaveCount(2)
-  await expect(page.getByRole("heading", { name: "Sillones" })).toBeVisible()
-  await expect(page.getByText("Sillón 1", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Unidades dentales" })).toBeVisible()
+  await expect(page.getByText("Unidad dental 1", { exact: true })).toBeVisible()
 
   // Atiende solo mañana: hoy la agenda ofrece ir al próximo día con atención.
   const tomorrow = new Date(Date.now() - 5 * 3_600_000 + 86_400_000)
@@ -447,7 +447,7 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await page.getByRole("button", { name: "Sede Central" }).click()
   await page.getByRole("menuitem", { name: "Sede Norte" }).click()
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
-  await expect(page.getByText("Esta sede aún no tiene sillones")).toBeVisible()
+  await expect(page.getByText("Esta sede aún no tiene unidades dentales")).toBeVisible()
   await shot("sede-elegida")
   await gotoHydrated(page, tenant(owner.org.slug, "/settings/availability"))
   await expect(page.getByRole("button", { name: "Sede Norte" })).toBeVisible()
@@ -470,7 +470,7 @@ test("agenda: una ausencia de varios días avisa de sus citas y saca al profesio
     "POST",
     "/api/agenda/chairs",
     owner.org.slug,
-    { branchId: owner.branchId, name: "Sillón 1" },
+    { branchId: owner.branchId, name: "Unidad dental 1" },
     201,
   )
   const patient = await call<{ id: string }>(
@@ -588,7 +588,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   const { page } = owner
   const shot = async (name: string) =>
     info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
-  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Sillón 1" }, 201)
+  await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
   // Atiende todos los días de 09:00 a 13:00.
   await call(
     page,
@@ -644,6 +644,8 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
   // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
   await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()
+  // El aviso previo que pide WhatsApp para los mensajes de su cita (ADR 0040).
+  await expect(page.getByText("Díselo: «Te avisaremos por WhatsApp sobre tus citas.»")).toBeVisible()
   // Lo único que pide permiso, opcional: lo que dijo por teléfono.
   await expect(page.getByText("¿Acepta recibir novedades y promociones de la clínica?")).toBeVisible()
   await page.getByRole("button", { name: "Sí, aceptó por teléfono" }).click()
@@ -747,7 +749,7 @@ test("agenda: solape responde 409 y movimiento con versión", async ({ createOwn
   expect(moved.version).toBeGreaterThan(appointment.version)
 })
 
-test("agenda: otra organización no ve sillones ni citas ajenas", async ({ createOwner }) => {
+test("agenda: otra organización no ve unidades dentales ni citas ajenas", async ({ createOwner }) => {
   const first = await createOwner("agenda-a")
   const second = await createOwner("agenda-b")
   const { date } = await prepareAppointment(first)

@@ -248,7 +248,6 @@ export interface ContactListItem {
   preferredChannel: string | null
   isActive: boolean
   tags: string[]
-  assignedUserId: string | null
   lastInteractionAt: string | null
   channels: string[]
   openOpportunityCount: number
@@ -271,7 +270,6 @@ export interface ContactFull {
     docNumber: string | null
     birthDate: string | null
     sex: string | null
-    notes: string | null
     customFields: Record<string, unknown>
     createdAt: string
     updatedAt: string
@@ -479,7 +477,6 @@ export interface AgentConfig {
   dailyRunLimit: number
   /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
   decisionProvider: "none" | "baseline" | "jev" | "openai_decisions"
-  systemPrompt: string
   handoffKeywords: string[]
   maxTurns: number
   /** Comprueba precios, fechas y horas de cada respuesta antes de enviarla. */

@@ -436,8 +436,13 @@ async function listAttachments(
 export interface MicrosoftPollInput {
   accessToken: string
   emailAddress: string
-  /** deltaLink persistido (URL completa); null = primera sincronización. */
+  /**
+   * Cursor persistido (URL completa): el deltaLink de una ronda terminada o
+   * el nextLink de una ronda a medias; null = primera sincronización.
+   */
   cursor: string | null
+  /** Reloj inyectable para la primera sincronización (pruebas). */
+  now?: Date
 }
 
 export interface MicrosoftPollResult {
@@ -448,83 +453,106 @@ export interface MicrosoftPollResult {
 const DELTA_SELECT =
   "$select=id,conversationId,subject,bodyPreview,body,from,receivedDateTime,sentDateTime,isRead,hasAttachments,internetMessageId&$top=25"
 
-function initialDeltaUrl(): string {
-  return `${GRAPH_API}/me/mailFolders/inbox/messages/delta?${DELTA_SELECT}`
+/** Páginas por vuelta aunque no se llegue al tope (p. ej. solo propios o eliminados). */
+const POLL_MAX_PAGES = 10
+
+/**
+ * La primera ronda delta recorre la carpeta entera; con el filtro por fecha
+ * (el único que admite delta de mensajes: receivedDateTime ge) solo sigue lo
+ * que llega desde ahora, así no se importa historial ni se queda a medias.
+ */
+function initialDeltaUrl(now: Date): string {
+  const filter = encodeURIComponent(`receivedDateTime ge ${now.toISOString()}`)
+  return `${GRAPH_API}/me/mailFolders/inbox/messages/delta?${DELTA_SELECT}&$filter=${filter}`
+}
+
+async function messageEvents(
+  msg: GraphMessage,
+  fromEmail: string,
+  display: string,
+  accessToken: string,
+  selfEmail: string,
+  deps: ChannelAdapterDeps,
+): Promise<NormalizedInbound[]> {
+  const threadId = threadIdOf(msg)
+  const sentAt = msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString()
+  const mine: NormalizedInbound[] = []
+  const body = extractBody(msg)
+  if (body) {
+    mine.push({
+      externalEventId: `m365:${msg.id}`,
+      externalMessageId: `m365:${msg.id}`,
+      externalThreadId: threadId,
+      senderExternalId: `mail:${fromEmail}`,
+      senderDisplayName: display || fromEmail,
+      content: { type: "text", text: body },
+      sentAt,
+    })
+  }
+  if (msg.hasAttachments) {
+    const atts = await listAttachments(accessToken, msg.id, deps)
+    mine.push(...attachmentEvents(msg, atts, selfEmail))
+  }
+  if (mine.length === 0) {
+    mine.push({
+      externalEventId: `m365:${msg.id}`,
+      externalMessageId: `m365:${msg.id}`,
+      externalThreadId: threadId,
+      senderExternalId: `mail:${fromEmail}`,
+      senderDisplayName: display || fromEmail,
+      content: {
+        type: "text",
+        text: msg.subject ? `(sin cuerpo) ${msg.subject}` : "(correo sin contenido)",
+      },
+      sentAt,
+    })
+  }
+  // La consulta delta no pide encabezados: decide el remitente.
+  return isAutomatedEmail({ from: fromEmail }) ? mine.map((event) => ({ ...event, automated: true })) : mine
 }
 
 /**
- * Sigue nextLinks hasta el deltaLink y avanza SOLO con ese link devuelto por
- * Graph. Si el checkpoint caducó lanza MicrosoftResyncRequired.
+ * Lee la ronda delta página a página sin perder ningún mensaje: procesa
+ * páginas completas hasta juntar POLL_MAX_MESSAGES de otros remitentes (los
+ * propios no cuentan) y, si la ronda sigue, devuelve como cursor el nextLink
+ * pendiente; la próxima vuelta continúa desde esa página. Solo al terminar la
+ * ronda el cursor es el deltaLink. Repetir un mensaje no duplica: el worker
+ * deduplica por id. Si el checkpoint caducó lanza MicrosoftResyncRequired.
  */
 export async function pollMicrosoftMailbox(
   input: MicrosoftPollInput,
   deps: ChannelAdapterDeps,
 ): Promise<MicrosoftPollResult> {
-  let url = input.cursor ?? initialDeltaUrl()
-  let nextCursor: string | null = null
-  const messages: GraphMessage[] = []
-  for (let pages = 0; pages < 10; pages++) {
+  let url = input.cursor ?? initialDeltaUrl(input.now ?? new Date())
+  const selfEmail = input.emailAddress.toLowerCase()
+  const seen = new Set<string>()
+  const events: NormalizedInbound[] = []
+  let processed = 0
+  for (let pages = 1; ; pages++) {
     const { status, json } = await graphApi(input.accessToken, url, deps)
     if (status === 410) throw new MicrosoftResyncRequired()
     if (status >= 400) throw new Error(graphApiError("messages.delta", status, json))
     const rec = asRecord(json)
     const raw = rec?.["value"]
-    if (Array.isArray(raw)) {
-      for (const item of raw) {
-        if (isGraphMessage(item)) messages.push(item)
-      }
+    for (const item of Array.isArray(raw) ? raw : []) {
+      if (!isGraphMessage(item) || seen.has(item.id)) continue
+      seen.add(item.id)
+      const { email: fromEmail, display } = senderOf(item)
+      if (!fromEmail || fromEmail === selfEmail) continue
+      processed += 1
+      events.push(...(await messageEvents(item, fromEmail, display, input.accessToken, selfEmail, deps)))
     }
     const next = rec?.["@odata.nextLink"]
     const delta = rec?.["@odata.deltaLink"]
     if (typeof next === "string") {
+      // Ronda a medias: el cursor es la página que falta, nunca el final.
+      if (processed >= POLL_MAX_MESSAGES || pages >= POLL_MAX_PAGES) return { events, nextCursor: next }
       url = next
       continue
     }
-    if (typeof delta === "string") nextCursor = delta
-    break
+    if (typeof delta === "string") return { events, nextCursor: delta }
+    throw new Error("Microsoft 365 delta sin nextLink ni deltaLink: reintenta el sondeo")
   }
-  if (!nextCursor) throw new Error("Microsoft 365 delta sin deltaLink: reintenta el sondeo")
-  const events: NormalizedInbound[] = []
-  for (const msg of messages.slice(0, POLL_MAX_MESSAGES)) {
-    const { email: fromEmail, display } = senderOf(msg)
-    if (!fromEmail || fromEmail === input.emailAddress.toLowerCase()) continue
-    const threadId = threadIdOf(msg)
-    const sentAt = msg.receivedDateTime ?? msg.sentDateTime ?? new Date().toISOString()
-    const mine: NormalizedInbound[] = []
-    const body = extractBody(msg)
-    if (body) {
-      mine.push({
-        externalEventId: `m365:${msg.id}`,
-        externalMessageId: `m365:${msg.id}`,
-        externalThreadId: threadId,
-        senderExternalId: `mail:${fromEmail}`,
-        senderDisplayName: display || fromEmail,
-        content: { type: "text", text: body },
-        sentAt,
-      })
-    }
-    if (msg.hasAttachments) {
-      const atts = await listAttachments(input.accessToken, msg.id, deps)
-      mine.push(...attachmentEvents(msg, atts, input.emailAddress))
-    }
-    if (mine.length === 0) {
-      mine.push({
-        externalEventId: `m365:${msg.id}`,
-        externalMessageId: `m365:${msg.id}`,
-        externalThreadId: threadId,
-        senderExternalId: `mail:${fromEmail}`,
-        senderDisplayName: display || fromEmail,
-        content: {
-          type: "text",
-          text: msg.subject ? `(sin cuerpo) ${msg.subject}` : "(correo sin contenido)",
-        },
-        sentAt,
-      })
-    }
-    // La consulta delta no pide encabezados: decide el remitente.
-    events.push(...(isAutomatedEmail({ from: fromEmail }) ? mine.map((event) => ({ ...event, automated: true })) : mine))
-  }
-  return { events, nextCursor }
 }
 
 /* ------------------------- Envío con hilo ------------------------- */

@@ -32,7 +32,6 @@ import * as React from "react"
 import {
   type AgendaAppointment,
   type AgendaResources,
-  type AgendaServiceOption,
   type AppointmentContext,
   type AppointmentStatus,
   professionalSaid,
@@ -50,6 +49,8 @@ import { useAppointmentArrival } from "./arrival"
 import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
+import { PhoneWhatsAppNote } from "../person/phone-whatsapp"
+import { ServiceSelect } from "../service-select"
 
 export type AppointmentDrawerMode = "view" | "move" | "cancel"
 
@@ -214,7 +215,7 @@ export function AppointmentDrawer({
   const move = useMutation({
     mutationFn: () => {
       if (!target) throw new Error("Elige una hora libre.")
-      // Sin sillón: la cita conserva el suyo o pasa a uno libre a la nueva hora.
+      // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
       return apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/move`, {
         method: "POST",
         body: JSON.stringify({
@@ -247,11 +248,6 @@ export function AppointmentDrawer({
     serviceId: appointment.serviceId ?? "",
     chairId: appointment.chairId,
     reason: appointment.reason ?? "",
-  })
-  const servicesQuery = useQuery({
-    queryKey: ["services", "agenda-picker"],
-    enabled: mode === "edit",
-    queryFn: () => apiFetch<{ data: AgendaServiceOption[] }>("/api/services?limit=100"),
   })
   const dirty =
     mode === "edit" &&
@@ -349,19 +345,16 @@ export function AppointmentDrawer({
           </div>
         ) : mode === "edit" ? (
           <div className="grid gap-4">
-            <ResourceSelect
+            {/* El de la cita se ve aunque no esté en la primera página del tarifario. */}
+            <ServiceSelect
               id="cita-editar-servicio"
               label="Servicio (opcional)"
-              options={(servicesQuery.data?.data ?? []).map((service) => ({
-                id: service.id,
-                label: service.name,
-              }))}
               value={draft.serviceId}
-              onChange={(serviceId) => setDraft((current) => ({ ...current, serviceId }))}
+              onChange={(service) => setDraft((current) => ({ ...current, serviceId: service?.id ?? "" }))}
             />
             <ResourceSelect
               id="cita-editar-sillon"
-              label="Sillón"
+              label="Unidad dental"
               options={resources.chairs.map((chair) => ({ id: chair.id, label: chair.label }))}
               value={draft.chairId}
               onChange={(chairId) =>
@@ -510,6 +503,9 @@ export function AppointmentDrawer({
                 <DetailField label="Teléfono">
                   {context.person.phone ? internationalText(context.person.phone) : "Sin teléfono"}
                   {context.person.relationship !== "self" ? ` · de ${context.person.name}` : ""}
+                  {context.person.phone ? (
+                    <PhoneWhatsAppNote contactId={context.person.contactId} value={context.person.whatsapp} />
+                  ) : null}
                 </DetailField>
               ) : null}
               {context?.missingData && context.missingData.length > 0 ? (
@@ -526,7 +522,7 @@ export function AppointmentDrawer({
               ) : null}
               <DetailField label="Servicio">{appointment.serviceName ?? "Sin servicio"}</DetailField>
               <DetailField label="Profesional">{appointment.dentistName}</DetailField>
-              <DetailField label="Sillón">{appointment.chairName}</DetailField>
+              <DetailField label="Unidad dental">{appointment.chairName}</DetailField>
               {appointment.reason ? (
                 <DetailField label="Motivo">{appointment.reason}</DetailField>
               ) : null}

@@ -21,6 +21,8 @@ export interface FactCheck {
   ok: boolean
   /** Fuente donde se encontró; nulo si no está en lo consultado. */
   source: string | null
+  /** De qué servicio es un precio sustentado (`subjectKey` de su nombre), si sale de su línea. */
+  subject?: string
 }
 
 export interface ReplyVerdict {
@@ -466,6 +468,7 @@ export function verifyReply(
     .reverse()
   const checks: FactCheck[] = []
   const text = normalize(reply)
+  const segments = priceSegments(evidence, zone.timezone)
 
   const amounts = extractAmounts(text, amountPattern(zone.currency, zone.locale))
   const supportedAmounts: number[] = []
@@ -483,7 +486,8 @@ export function verifyReply(
         continue
       }
       supportedAmounts.push(reading)
-      checks.push({ kind: "precio", value: mention.raw, ok: true, source: found.source })
+      const subject = subjectOf(mention.value, segments, reply)
+      checks.push({ kind: "precio", value: mention.raw, ok: true, source: found.source, ...(subject ? { subject } : {}) })
     } else {
       pendingAmounts.push(mention)
     }
@@ -525,6 +529,76 @@ export function verifyReply(
 
   const unsupported = checks.filter((check) => !check.ok)
   return { ok: unsupported.length === 0, checks, unsupported }
+}
+
+/* ---------- De qué servicio es un precio ---------- */
+
+/** Nombre de un servicio como clave: sin tildes, mayúsculas ni signos. */
+export function subjectKey(name: string): string {
+  return plain(name)
+    .replace(/[^a-z0-9ñ ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+/** Línea de un servicio tal como la recibe el agente: «- Nombre (id …), 45 min: S/ 120.00». */
+const SERVICE_LINE = /^- (.+?) \(id [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)/i
+/** Línea de una promoción: «- Promoción «X»: Servicio: S/ 99 en vez de S/ 120; Otro: …». */
+const PROMOTION_LINE = /^- Promoción «[^»]*»: (.*)$/
+
+interface PriceSegment {
+  subject: string
+  amounts: Set<number>
+}
+
+/**
+ * Los trozos de lo recibido que dicen el precio de un servicio: su línea del
+ * catálogo o su parte de una promoción. Solo esas formas: un presupuesto, un
+ * saldo o una respuesta oficial no son el precio de un servicio de la lista.
+ */
+function priceSegments(evidence: Evidence[], timeZone: string): PriceSegment[] {
+  const out: PriceSegment[] = []
+  const add = (name: string, text: string) => {
+    const subject = subjectKey(name)
+    if (subject) out.push({ subject, amounts: factsOf({ source: "", text }, timeZone).amounts })
+  }
+  for (const item of evidence) {
+    for (const line of normalize(item.text).split("\n")) {
+      const trimmed = line.trim()
+      const service = SERVICE_LINE.exec(trimmed)
+      if (service?.[1]) {
+        add(service[1], trimmed)
+        continue
+      }
+      const promotion = PROMOTION_LINE.exec(trimmed)
+      if (promotion?.[1]) {
+        for (const part of promotion[1].split("; ")) {
+          const at = part.indexOf(": ")
+          if (at > 0) add(part.slice(0, at), part.slice(at + 2))
+        }
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * El servicio de un importe de la respuesta: el trozo que lo trae y, si varios
+ * lo traen, el que más palabras de su nombre comparte con la respuesta.
+ */
+function subjectOf(readings: number[], segments: PriceSegment[], reply: string): string | null {
+  const candidates = segments.filter((segment) => readings.some((reading) => segment.amounts.has(reading)))
+  if (!candidates.length) return null
+  const said = ` ${subjectKey(reply)} `
+  const overlap = (subject: string) => subject.split(" ").filter((word) => word.length >= 4 && said.includes(` ${word} `)).length
+  let best = candidates[0]
+  for (const candidate of candidates) if (best && overlap(candidate.subject) > overlap(best.subject)) best = candidate
+  return best?.subject ?? null
+}
+
+/** Servicios distintos cuyo precio dice la respuesta, según su comprobación. */
+export function pricedSubjectsOf(verdict: ReplyVerdict): string[] {
+  return [...new Set(verdict.checks.flatMap((check) => (check.kind === "precio" && check.ok && check.subject ? [check.subject] : [])))]
 }
 
 /** Texto que recibe el modelo cuando su respuesta no sale por un dato sin sustento. */

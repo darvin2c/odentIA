@@ -33,6 +33,7 @@ const createInput = z
     planItemId: z.uuid().nullish(),
     notes: z.string().max(2000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     validUntil: z.iso.date().nullish(),
     acknowledgeAllergies: z.boolean().optional(),
     items: z.array(item).min(1).max(20),

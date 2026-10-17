@@ -312,7 +312,8 @@ export const agentRunLedger = pgTable(
  * `probar`, `simulacion` y `vista_previa`, las pruebas desde la plataforma;
  * `practica_dictado`, el dictado de práctica; `administrador`, lo que se le
  * pide con palabras; `ya_aviso`, la comprobación antes de un seguimiento;
- * `vectores`, el índice de la búsqueda por significado.
+ * `vectores`, el índice de la búsqueda por significado; `comprobacion`, la
+ * llamada mínima que dice si el modelo responde.
  */
 export const AI_USAGE_ORIGINS = [
   "recepcion",
@@ -325,6 +326,7 @@ export const AI_USAGE_ORIGINS = [
   "ya_aviso",
   "vectores",
   "transcripcion",
+  "comprobacion",
 ] as const
 export type AiUsageOrigin = (typeof AI_USAGE_ORIGINS)[number]
 
@@ -357,7 +359,7 @@ export const aiUsage = pgTable(
     index("ai_usage_org_idx").on(table.organizationId, table.createdAt),
     check(
       "ai_usage_origin_check",
-      sql`${table.origin} in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion')`,
+      sql`${table.origin} in ('recepcion','probar','simulacion','vista_previa','dictado','practica_dictado','administrador','ya_aviso','vectores','transcripcion','comprobacion')`,
     ),
     check("ai_usage_calls_check", sql`${table.calls} >= 1`),
     check("ai_usage_cost_check", sql`${table.costMicros} is null or ${table.costMicros} >= 0`),
@@ -475,6 +477,12 @@ export interface AnswerCheck {
   ok: boolean
   /** Fuente donde se encontró; nulo si no está en lo consultado. */
   source: string | null
+  /**
+   * De qué servicio es el precio, cuando lo es (su nombre normalizado). Con
+   * esto se cuentan los servicios cuyo precio ya se dijo en la conversación:
+   * nunca más de tres (decisión 4 de la fase 4).
+   */
+  subject?: string
 }
 
 export const ANSWER_TRACE_OUTCOMES = ["enviada", "pendiente", "bloqueada", "fallida"] as const
@@ -567,6 +575,10 @@ export type CorrectionFailure = (typeof CORRECTION_FAILURES)[number]
 export const LESSON_STATUSES = ["propuesta", "activa", "retirada", "descartada"] as const
 export type LessonStatus = (typeof LESSON_STATUSES)[number]
 
+/** De dónde sale una regla de «Lo que el agente debe saber»: la escribió la clínica o se aprendió. */
+export const LESSON_SOURCES = ["aprendida", "escrita"] as const
+export type LessonSource = (typeof LESSON_SOURCES)[number]
+
 /**
  * Lección: lo que el agente aprende de una corrección. Nace `propuesta` y no
  * cambia nada hasta que una persona la aprueba; `activa` se usa; `retirada`
@@ -600,6 +612,12 @@ export const agentLesson = pgTable(
     previousBody: text("previous_body"),
     uses: integer("uses").notNull().default(0),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /**
+     * Lo que el agente debe saber (decisión 24): `escrita` la escribió la
+     * clínica (una regla activa desde que se guarda); `aprendida` salió de una
+     * corrección y la aprobó alguien.
+     */
+    source: text("source").$type<LessonSource>().notNull().default("aprendida"),
     proposedBy: text("proposed_by").notNull(),
     approvedBy: text("approved_by"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
@@ -612,6 +630,8 @@ export const agentLesson = pgTable(
     index("agent_lesson_org_idx").on(table.organizationId, table.status, table.createdAt),
     check("agent_lesson_kind_check", sql`${table.kind} in ('respuesta_oficial','regla','ejemplo')`),
     check("agent_lesson_status_check", sql`${table.status} in ('propuesta','activa','retirada','descartada')`),
+    check("agent_lesson_source_check", sql`${table.source} in ('aprendida','escrita')`),
+    check("agent_lesson_written_rule_check", sql`${table.source} = 'aprendida' or ${table.kind} = 'regla'`),
     check(
       "agent_lesson_failure_check",
       sql`${table.failure} is null or ${table.failure} in ('dato_equivocado','falto_dato','tono','no_debio_responder','otra_cosa')`,

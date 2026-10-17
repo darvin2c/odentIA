@@ -90,7 +90,7 @@
       "name": "texto construye messages/text",
       "message": { "to": "wa:51911122233", "kind": { "type": "text", "text": "Hola Luis" } },
       "respondWith": { "messages": [{ "id": "wamid.SENT1" }] },
-      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectUrl": "https://graph.facebook.com/v25.0/PNID/messages",
       "expectBody": { "to": "51911122233", "type": "text" },
       "expectExternalId": "wamid.SENT1"
     },
@@ -106,7 +106,7 @@
         }
       },
       "respondWith": { "messages": [{ "id": "wamid.SENT2" }] },
-      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectUrl": "https://graph.facebook.com/v25.0/PNID/messages",
       "expectBody": {
         "to": "51911122233",
         "type": "template",
@@ -129,7 +129,7 @@
         }
       },
       "respondWith": { "messages": [{ "id": "wamid.SENT3" }] },
-      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectUrl": "https://graph.facebook.com/v25.0/PNID/messages",
       "expectBody": {
         "to": "51911122233",
         "type": "image",
@@ -151,7 +151,7 @@
         }
       },
       "respondWith": { "messages": [{ "id": "wamid.SENT4" }] },
-      "expectUrl": "https://graph.facebook.com/v21.0/PNID/messages",
+      "expectUrl": "https://graph.facebook.com/v25.0/PNID/messages",
       "expectBody": {
         "to": "51911122233",
         "type": "document",

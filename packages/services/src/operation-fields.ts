@@ -16,7 +16,12 @@ type FieldKind =
   /** Instante ISO 8601 con zona. */
   | { kind: "instant" }
   | { kind: "int"; min: number; max?: number }
-  | { kind: "enum"; values: readonly [string, ...string[]] }
+  /**
+   * Una opción de una lista. `agentValues`, si está, es la parte de la lista que
+   * el agente puede elegir (el equipo usa la lista entera): por ejemplo, el
+   * agente nunca cierra una oportunidad porque la persona dejó de responder.
+   */
+  | { kind: "enum"; values: readonly [string, ...string[]]; agentValues?: readonly [string, ...string[]] }
   /** Lista corta de textos (superficies de una pieza). */
   | { kind: "textList"; maxItems: number; maxLength: number }
   /** Lista corta de identificadores UUID (tratamientos de una cita). */
@@ -61,7 +66,7 @@ const reason = {
   kind: "text",
   max: 500,
   label: "Motivo de la propuesta",
-  description: "Por qué se propone, en una frase, para quien deba aprobarla.",
+  description: "Por qué lo hace, en una frase: queda en el historial para el equipo.",
   body: "none",
   agent: "fills",
 } as const satisfies OperationField
@@ -85,7 +90,7 @@ export const OPERATIONS = {
     fields: {
       patientId: { kind: "uuid", label: "Paciente", description: "El paciente que se atiende; debe estar vinculado al interlocutor.", body: "required", agent: "requires" },
       dentistUserId: { kind: "ref", label: "Profesional", description: "El profesional del hueco elegido en buscar_huecos.", body: "required", agent: "requires" },
-      chairId: { kind: "uuid", label: "Sillón", description: "El sillón del hueco elegido en buscar_huecos; sin él, la agenda pone el primero libre de la sede.", body: "optional", agent: "fills" },
+      chairId: { kind: "uuid", label: "Unidad dental", description: "La unidad dental del hueco elegido en buscar_huecos; sin ella, la agenda pone la primera libre de la sede.", body: "optional", agent: "fills" },
       startsAt: { kind: "instant", label: "Inicio", description: "Inicio exacto del hueco elegido, en ISO 8601 con zona.", body: "required", agent: "requires" },
       branchId: { kind: "uuid", label: "Sede", description: "La sede del hueco elegido.", body: "optional", agent: "fills" },
       serviceId: { kind: "uuid", label: "Servicio", description: "El servicio que se va a atender, si se sabe.", body: "optional", agent: "fills" },
@@ -106,7 +111,7 @@ export const OPERATIONS = {
       expectedVersion: { kind: "int", min: 1, label: "Versión", description: "La versión de la cita que se leyó: evita pisar un cambio de otra persona.", body: "required", agent: "requires" },
       startsAt: { kind: "instant", label: "Nuevo inicio", description: "Inicio exacto del hueco nuevo, en ISO 8601 con zona.", body: "required", agent: "requires" },
       dentistUserId: { kind: "ref", label: "Profesional", description: "Solo si cambia de profesional.", body: "optional", agent: "fills" },
-      chairId: { kind: "uuid", label: "Sillón", description: "Solo si cambia de sillón.", body: "optional", agent: "fills" },
+      chairId: { kind: "uuid", label: "Unidad dental", description: "Solo si cambia de unidad dental.", body: "optional", agent: "fills" },
       endsAt: { kind: "instant", label: "Nuevo fin", description: "Fin exacto, cuando cambia la duración.", body: "optional", agent: "person" },
       reason,
     },
@@ -114,7 +119,7 @@ export const OPERATIONS = {
   "cita.confirmar": {
     label: "Confirmar una cita",
     fields: {
-      appointmentId: { kind: "uuid", label: "Cita", description: "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirma la única cita suya que espera confirmación.", body: "path", agent: "fills" },
+      appointmentId: { kind: "uuid", label: "Cita", description: "El id exacto de la cita que la persona confirma, de ver_resumen_paciente. Sin él se confirman, como con el botón, las citas del último recordatorio que recibió; si no hubo recordatorio, la única suya que espera confirmación.", body: "path", agent: "fills" },
     },
   },
   // Lo que la persona aceptó recibir. La pantalla elige el tipo y cómo lo dijo;
@@ -126,6 +131,39 @@ export const OPERATIONS = {
       purpose: { kind: "enum", values: ["recordatorio", "seguimiento", "novedades"], label: "Qué mensajes", description: "Los de su cita y sus controles (recordatorio), los de sus presupuestos y seguimientos (seguimiento) o novedades y promociones (novedades).", body: "required", agent: "context" },
       granted: { kind: "flag", label: "Lo aceptó", description: "true si la persona dijo que sí a recibir novedades y promociones de la clínica; false si dijo que no.", body: "required", agent: "requires" },
       source: { kind: "enum", values: ["presencial", "telefono", "conversacion"], label: "Cómo lo dijo", description: "En persona, por teléfono o por la conversación.", body: "required", agent: "context" },
+    },
+  },
+  // «Tus mensajes» (ADR 0040): la misma operación para la página de la persona,
+  // recepción (Datos › Mensajes), el agente y «BAJA». El agente elige el tipo
+  // por lo que dice la persona; si no queda claro, pregunta.
+  "mensajes.elegir": {
+    label: "Qué mensajes recibe",
+    strict: true,
+    fields: {
+      tipo: {
+        kind: "enum",
+        values: ["recordatorio", "seguimiento", "novedades", "ninguno"],
+        label: "Qué mensajes",
+        description:
+          "Los recordatorios de sus citas (recordatorio), los de controles y seguimiento (seguimiento), las novedades y promociones (novedades) o ningún mensaje de la clínica, también los avisos de sus citas y papeles (ninguno). Sin tipo, solo se le da su página para que elija.",
+        body: "required",
+        agent: "fills",
+      },
+      recibir: {
+        kind: "flag",
+        label: "Los recibe",
+        description: "false si pide dejar de recibirlos; true si pide volver a recibirlos.",
+        body: "required",
+        agent: "fills",
+      },
+      source: {
+        kind: "enum",
+        values: ["presencial", "telefono", "conversacion"],
+        label: "Cómo lo dijo",
+        description: "En persona, por teléfono o por la conversación.",
+        body: "required",
+        agent: "context",
+      },
     },
   },
   // Reenviar lo que la clínica ya entregó (fase 3, decisión 4): la pantalla
@@ -193,8 +231,10 @@ export const OPERATIONS = {
       reason: {
         kind: "enum",
         values: ["precio", "otra_clinica", "no_responde", "no_lo_necesita", "otro", "acepto"],
+        // «No responde» lo decide una persona del equipo: el agente solo cierra por lo que la persona dijo.
+        agentValues: ["precio", "otra_clinica", "no_lo_necesita", "otro", "acepto"],
         label: "Motivo",
-        description: "Perdida: precio, otra_clinica (eligió otra clínica), no_responde, no_lo_necesita (ya no lo necesita) u otro. Ganada: acepto.",
+        description: "Perdida: precio, otra_clinica (eligió otra clínica), no_lo_necesita (ya no lo necesita) u otro. Ganada: acepto.",
         body: "required",
         agent: "requires",
       },
@@ -217,7 +257,8 @@ export const OPERATIONS = {
       reason: { kind: "text", min: 1, max: 500, label: "Motivo", description: "Por qué hace falta una persona.", body: "required", agent: "requires" },
       summary: { kind: "text", min: 1, max: 2000, label: "Resumen", description: "Lo conversado y lo que falta, solo con hechos.", body: "required", agent: "requires" },
       priority: { kind: "enum", values: ["alta", "media", "baja"], default: "media", label: "Prioridad", description: "Alta si hay dolor, urgencia o una queja.", body: "optional", agent: "fills" },
-      assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "fills" },
+      // El agente no conoce los ids del equipo: lo deja en la cola y quien lo toma se lo asigna.
+      assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "person" },
       message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de que una persona continuará: después el agente ya no puede escribirle.", body: "none", agent: "fills" },
       asks: { kind: "text", min: 1, max: 400, label: "Qué pide", description: "Una frase con lo que la persona pide, con hechos que ella dijo. Para quien toma el caso; nunca un consejo clínico.", body: "none", agent: "fills" },
       pending: { kind: "text", min: 1, max: 400, label: "Lo que falta", description: "Lo que aún no se le preguntó o falta hacer para atenderla, en una frase. Vacío si no falta nada.", body: "none", agent: "fills" },
@@ -246,8 +287,9 @@ export const OPERATIONS = {
     label: "Diagnóstico",
     strict: true,
     fields: {
-      cie10Code: { kind: "text", min: 1, max: 10, label: "Código CIE-10", description: "El código CIE-10 que corresponde al diagnóstico que nombró el odontólogo; casi siempre lo dice con palabras y no con el código (por ejemplo, «caries en dentina» es K02.1). Si no nombró ningún diagnóstico, no registres ninguno.", body: "required", agent: "requires" },
-      diagnosisType: { kind: "enum", values: ["presuntivo", "definitivo", "repetido"], label: "Tipo", description: "Presuntivo si aún no está confirmado, definitivo si lo está, repetido si ya se había registrado.", body: "required", agent: "requires" },
+      diagnosisCode: { kind: "text", min: 1, max: 10, label: "Código", description: "El código del diagnóstico que nombró el odontólogo, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno.", body: "required", agent: "requires" },
+      diagnosisSystem: { kind: "text", min: 1, max: 20, label: "Lista", description: "La lista de diagnósticos de la clínica.", body: "optional", nullable: true, agent: "context" },
+      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques.", body: "required", agent: "requires" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI (dieciséis = 16).", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.", body: "optional", nullable: true, agent: "fills" },
       note: { kind: "text", max: 2000, label: "Nota", description: "Una precisión que dijo el odontólogo sobre el diagnóstico.", body: "optional", nullable: true, agent: "fills" },
@@ -394,7 +436,7 @@ export function operationAgentSchema<O extends OperationId>(operation: O): z.Zod
   const shape: Record<string, z.ZodType> = {}
   for (const [name, field] of Object.entries(specOf(operation).fields)) {
     if (field.agent !== "requires" && field.agent !== "fills") continue
-    const schema = fieldSchema(field)
+    const schema = field.kind === "enum" && field.agentValues ? z.enum(field.agentValues) : fieldSchema(field)
     // La descripción va en el esquema final: el envoltorio opcional no hereda la del interior.
     shape[name] = (field.agent === "requires" ? schema : schema.optional()).describe(field.description)
   }
@@ -426,10 +468,10 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
   reprogramar_cita: "cita.mover",
   confirmar_cita: "cita.confirmar",
   responder_permiso_mensajes: "mensajes.permiso",
+  elegir_mensajes: "mensajes.elegir",
   reenviar_presupuesto: "presupuesto.reenviar",
   anotar_respuesta_presupuesto: "presupuesto.respuesta",
   create_opportunity: "oportunidad.crear",
-  move_to_stage: "oportunidad.mover",
   close_opportunity: "oportunidad.cerrar",
   update_followup: "oportunidad.tarea",
   request_human_handoff: "derivacion.crear",
@@ -443,8 +485,8 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
 export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   send_reply: "Enviar un mensaje no es un formulario: el texto es el único campo.",
   despedirse_y_cerrar: "La despedida es un mensaje (el texto es su único campo) y cerrar no tiene campos: el motivo es siempre «resuelta».",
-  send_template: "La plantilla y sus parámetros los define el proveedor del canal.",
   confirmar_propuesta: "Solo lleva el id de la propuesta que el interlocutor confirma.",
+  enviar_comprobante: "Solo lleva el paciente: el comprobante es el de su último pago y ninguna pantalla lo envía por el chat.",
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",
   pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",

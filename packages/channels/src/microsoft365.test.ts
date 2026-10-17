@@ -135,6 +135,54 @@ it("adjuntos generan eventos media además del texto", async () => {
   })
 })
 
+it("con más mensajes que el tope, ninguno se pierde ni se duplica en dos vueltas", async () => {
+  // Ronda delta de 35 mensajes en páginas de 10 (dos son de la clínica y no
+  // cuentan para el tope); el deltaLink solo llega en la última página.
+  const all = Array.from({ length: 35 }, (_, i) =>
+    i === 3 || i === 7
+      ? graphMsg({ id: `propio${i}`, from: { emailAddress: { address: "clinica@example.com" } } })
+      : graphMsg({ id: `n${i}` }),
+  )
+  const requested: string[] = []
+  const fetch = (async (raw: unknown) => {
+    const url = String(raw)
+    requested.push(url)
+    const skip = url.startsWith("https://graph/next?skip=") ? Number(url.split("=")[1]) : url.startsWith("https://graph/delta") ? all.length : 0
+    const page = all.slice(skip, skip + 10)
+    const body =
+      skip + 10 < all.length
+        ? { value: page, "@odata.nextLink": `https://graph/next?skip=${skip + 10}` }
+        : { value: page, "@odata.deltaLink": "https://graph/delta?token=fin" }
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+  }) as unknown as typeof globalThis.fetch
+  const input = { accessToken: "AT", emailAddress: "clinica@example.com" }
+
+  const first = await pollMicrosoftMailbox({ ...input, cursor: "https://graph/next?skip=0" }, { fetch })
+  // Tres páginas: 28 de otros remitentes; queda pendiente la cuarta.
+  expect(first.events).toHaveLength(28)
+  expect(first.nextCursor).toBe("https://graph/next?skip=30")
+  const second = await pollMicrosoftMailbox({ ...input, cursor: first.nextCursor }, { fetch })
+  expect(second.nextCursor).toBe("https://graph/delta?token=fin")
+
+  const ids = [...first.events, ...second.events].map((e) => e.externalMessageId)
+  expect(ids).toEqual(all.filter((m) => !m.id.startsWith("propio")).map((m) => `m365:${m.id}`))
+  expect(new Set(ids).size).toBe(ids.length)
+
+  const third = await pollMicrosoftMailbox({ ...input, cursor: second.nextCursor }, { fetch })
+  expect(third.events).toEqual([])
+  expect(third.nextCursor).toBe("https://graph/delta?token=fin")
+})
+
+it("la primera sincronización solo sigue lo que llega desde ahora", async () => {
+  const captured: { url: string; method: string; body: unknown }[] = []
+  const fetch = createStubFetch([{ value: [], "@odata.deltaLink": "https://graph/delta?token=0" }], captured)
+  await pollMicrosoftMailbox(
+    { accessToken: "AT", emailAddress: "clinica@example.com", cursor: null, now: new Date("2026-10-16T12:00:00Z") },
+    { fetch },
+  )
+  expect(new URL(captured[0]?.url ?? "").searchParams.get("$filter")).toBe("receivedDateTime ge 2026-10-16T12:00:00.000Z")
+})
+
 it("checkpoint caducado (410) lanza resync", async () => {
   const fetch = (async () => new Response("{}", { status: 410 })) as unknown as typeof globalThis.fetch
   await expect(

@@ -65,6 +65,8 @@ function message(patch: Partial<ClinicMessage> = {}): ClinicMessage {
     buttons: [{ title: "Confirmar", does: "La cita queda confirmada al momento." }],
     variables: [PERSONA, CLINICA],
     category: "Utilidad",
+    promotion: false,
+    unsendable: null,
     meanwhile: null,
     editable: true,
     deletable: false,

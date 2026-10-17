@@ -65,6 +65,7 @@ function ModelSettings() {
       toast.success("Modelo del agente guardado")
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
       void queryClient.invalidateQueries({ queryKey: ["agent-overview"] })
+      void queryClient.invalidateQueries({ queryKey: ["agent-model"] })
     },
   })
 

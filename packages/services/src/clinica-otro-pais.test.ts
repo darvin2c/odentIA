@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto"
 import { type Db, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
-import { cie10Code, odontogramEntry } from "@odentia/db/schema/clinical"
+import { odontogramEntry } from "@odentia/db/schema/clinical"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
 import { clinicalProfileFor, DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { and, eq, isNull } from "drizzle-orm"
@@ -17,7 +17,7 @@ import {
   getOdontogramPrint,
   listOdontogramAssessments,
 } from "./clinical.js"
-import { makeSigner } from "./clinical-test-fixture.js"
+import { makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,
   createEncounter,
@@ -30,6 +30,7 @@ import { getPatientMissingData, registerPatient } from "./patient-registration.j
 import { updatePatient } from "./patients.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
 import { createService } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -165,7 +166,8 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
       registrationNumber: "4567",
     }),
   )
-  await ownerDb.insert(cie10Code).values({ code: "K02.1", description: "Caries de la dentina" }).onConflictDoNothing()
+  // Una clínica de Colombia nace con la CIE-11, la lista que recomienda su país (decisión 26).
+  await seedDiagnosisCodes([{ code: "DA08.0", title: "Caries dental" }], "ICD-11")
   const andrea = await c.run((tx) =>
     registerPatient(
       tx,
@@ -176,10 +178,10 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
   )
   const args = [c.orgId, c.dentist, andrea.id] as const
   // Una resina propia que deja una restauración, sin variante: fuera de Perú es opcional.
-  const resin = await c.run((tx) =>
+  const resin = await c.run(async (tx) =>
     createService(tx, c.orgId, c.dentist, {
       name: "Resina compuesta",
-      specialty: "restauradora",
+      specialtyId: (await librarySpecialtyIds(tx, c.orgId, ["restauradora"])).get("restauradora")!,
       scope: "surfaces",
       priceCents: 180000,
       leavesFinding: { condition: "definitive_restoration" },
@@ -193,7 +195,7 @@ it("otra clínica, otro país: la atención y el odontograma son los del núcleo
       toothNumbers: [16],
       condition: "caries",
       surfaces: ["occlusal"],
-      diagnosis: { cie10Code: "K02.1", diagnosisType: "presuntivo" },
+      diagnosis: { diagnosisCode: "DA08.0", diagnosisType: "provisional" },
     }),
   )
   const [caries] = await ownerDb

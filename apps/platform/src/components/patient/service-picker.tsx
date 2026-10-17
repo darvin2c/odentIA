@@ -21,13 +21,8 @@ import { Link } from "@tanstack/react-router"
 import { useId, useMemo, useState } from "react"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import {
-  fetchServices,
-  type ServiceCatalogItem,
-  TREATMENT_SCOPE_LABELS,
-  TREATMENT_SPECIALTIES,
-  TREATMENT_SPECIALTY_LABELS,
-} from "../../lib/services"
+import { useClinicSpecialties } from "../../lib/clinical-forms"
+import { fetchServices, type ServiceCatalogItem, TREATMENT_SCOPE_LABELS } from "../../lib/services"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
 
@@ -60,13 +55,15 @@ export function ServicePicker({
   const canRead = usePermission("clinical.read")
   const canAdmin = usePermission("settings.write")
   const orgLocale = useOrgProfile().data?.locale
+  // Las especialidades de la clínica: la misma lista que Configuración › Especialidades.
+  const specialties = (useClinicSpecialties({ activeOnly: true, enabled: canRead && !disabled }).data?.data ?? [])
 
   const servicesQuery = useQuery({
     queryKey: ["services", "picker", query.trim(), specialty],
     queryFn: () =>
       fetchServices({
         q: query.trim() || undefined,
-        specialty: specialty === NO_SPECIALTY ? undefined : specialty,
+        specialtyId: specialty === NO_SPECIALTY ? undefined : specialty,
         state: "active",
         limit: 30,
       }),
@@ -75,6 +72,7 @@ export function ServicePicker({
   })
 
   const items = useMemo(() => servicesQuery.data?.data ?? [], [servicesQuery.data])
+  const total = servicesQuery.data?.total ?? 0
 
   const selectedItem = items.find((row) => row.id === value) ?? null
 
@@ -86,9 +84,7 @@ export function ServicePicker({
           value={specialty}
           items={{
             [NO_SPECIALTY]: "Todas las especialidades",
-            ...Object.fromEntries(
-              TREATMENT_SPECIALTIES.map((s) => [s, TREATMENT_SPECIALTY_LABELS[s]]),
-            ),
+            ...Object.fromEntries(specialties.map((item) => [item.id, item.name])),
           }}
           onValueChange={(next) => setSpecialty(next ?? NO_SPECIALTY)}
           disabled={disabled}
@@ -98,9 +94,9 @@ export function ServicePicker({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NO_SPECIALTY}>Todas las especialidades</SelectItem>
-            {TREATMENT_SPECIALTIES.map((s) => (
-              <SelectItem key={s} value={s}>
-                {TREATMENT_SPECIALTY_LABELS[s]}
+            {specialties.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -185,9 +181,7 @@ export function ServicePicker({
                     >
                       <span className="font-medium">{item.name}</span>
                       <span className="text-muted-foreground">
-                        {item.specialty
-                          ? `${TREATMENT_SPECIALTY_LABELS[item.specialty] ?? item.specialty} · `
-                          : ""}
+                        {item.specialtyName ? `${item.specialtyName} · ` : ""}
                         {item.scope ? `${TREATMENT_SCOPE_LABELS[item.scope] ?? item.scope} · ` : ""}
                         {item.code ? `${item.code} · ` : ""}
                         {orgLocale ? formatMoney(item.priceCents, item.currency, orgLocale) : "…"}
@@ -197,6 +191,11 @@ export function ServicePicker({
                   ))}
                 </ComboboxList>
                 <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
+                {total > items.length ? (
+                  <p className="border-t p-2 text-xs text-muted-foreground">
+                    {`Se ven ${items.length} de ${total}: escribe el nombre para encontrar el resto.`}
+                  </p>
+                ) : null}
               </>
             )}
           </ComboboxContent>

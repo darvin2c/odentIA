@@ -28,6 +28,7 @@ import {
   SEARCH_MAX_DISTANCE,
   searchClinic,
   searchPublishedKnowledge,
+  librarySpecialtyIds,
   setKnowledgeStatus,
 } from "@odentia/services"
 import { sql } from "drizzle-orm"
@@ -54,6 +55,8 @@ let container: StartedTestContainer
 let ownerDb: Db
 let appDb: Db
 const run = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, ORG, fn)
+/** La especialidad de la clínica por clave de la biblioteca. */
+let specialtyOf = new Map<string, string>()
 
 beforeAll(async () => {
   container = await new GenericContainer(IMAGE)
@@ -70,13 +73,15 @@ beforeAll(async () => {
   await ownerDb.execute(sql`insert into "organization" ("id", "name", "slug", "created_at") values (${ORG}, 'Clínica Sonríe', 'busqueda', now())`)
   await ownerDb.execute(sql`insert into "org_profile" ("organization_id", "legal_name", "trade_name", "country_code", "currency", "timezone", "locale") values (${ORG}, 'Clínica Sonríe', 'Clínica Sonríe', 'PE', 'PEN', 'America/Lima', 'es-PE')`)
   const [sede] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+  // Cada servicio va a la especialidad de la clínica con esa clave de la biblioteca (ADR 0039).
+  specialtyOf = await run((tx) => librarySpecialtyIds(tx, ORG, bank.servicios.map((s) => s.especialidad).concat("general")))
   const services = await ownerDb
     .insert(serviceCatalog)
     .values(
       bank.servicios.map((s) => ({
         organizationId: ORG,
         name: s.nombre,
-        specialty: s.especialidad,
+        specialtyId: specialtyOf.get(s.especialidad) ?? null,
         scope: "general",
         source: "custom",
         priceCents: s.precio,
@@ -241,7 +246,7 @@ it("búsqueda en la clínica: palabras, doble y proveedor real", async () => {
   const extra = Array.from({ length: RELLENO }, (_, i) => ({
     organizationId: ORG,
     name: `${procs[i % procs.length]} pieza ${11 + (i % 38)} variante ${Math.floor(i / 380) + 1}`,
-    specialty: "general",
+    specialtyId: specialtyOf.get("general") ?? null,
     scope: "tooth",
     source: "custom",
     priceCents: 10000 + (i % 50) * 1000,

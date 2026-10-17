@@ -77,7 +77,14 @@ function Section({
  * atenderla» lo calcula el servidor y solo lo recibe quien edita; «Completar»
  * abre solo lo que falta.
  */
-export function FiliacionPanel({ detail }: { detail: PatientFull }) {
+export function FiliacionPanel({
+  detail,
+  phoneNote,
+}: {
+  detail: PatientFull
+  /** Junto al teléfono: si es su WhatsApp (decisión 23). */
+  phoneNote?: ReactNode
+}) {
   const canWrite = usePermission("patients.write")
   const canRead = usePermission("patients.read")
   const profile = useClinicalProfile()
@@ -100,18 +107,20 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
   const age = ageLabel(p.birthDate)
   const edit = (section: FiliacionSectionKey) => (canWrite ? () => setEditing(section) : undefined)
   const gaps = detail.missingData ?? []
-  const emergency = p.emergencyContactName
-    ? [
-        p.emergencyContactName,
-        p.emergencyContactRelationship
-          ? (KINSHIP_LABELS[p.emergencyContactRelationship as keyof typeof KINSHIP_LABELS] ??
-            p.emergencyContactRelationship)
-          : null,
-        p.emergencyContactPhone ? internationalText(p.emergencyContactPhone) : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : null
+  // El contacto de emergencia es una persona vinculada con la marca (decisión 25).
+  const emergency =
+    detail.contacts
+      .filter((link) => link.isEmergency)
+      .map((link) =>
+        [
+          link.displayName,
+          link.kinship ? (KINSHIP_LABELS[link.kinship as keyof typeof KINSHIP_LABELS] ?? link.kinship) : null,
+          link.phone ? internationalText(link.phone) : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      )
+      .join("; ") || null
   const birthPlace = [p.birthPlace, countryText(p.birthCountry)].filter(Boolean).join(", ") || null
 
   return (
@@ -151,10 +160,23 @@ export function FiliacionPanel({ detail }: { detail: PatientFull }) {
           <Item label="Sexo">{p.sex ? sexLabel(p.sex) : null}</Item>
         </Section>
         <Section title="Contacto" onEdit={edit("contacto")}>
-          <Item label="Teléfono">{p.phone ? internationalText(p.phone) : null}</Item>
+          <Item label="Teléfono">
+            {p.phone ? (
+              <>
+                {internationalText(p.phone)}
+                {phoneNote}
+              </>
+            ) : null}
+          </Item>
           <Item label="Correo">{p.email}</Item>
           <Item label="Dirección">{addressLine(profile, p)}</Item>
-          <Item label="Contacto de emergencia">{emergency}</Item>
+          <Item label="Contacto de emergencia">
+            {emergency ?? (
+              <span className="text-muted-foreground">
+                No registrado: márcalo en Datos › Personas vinculadas («Contacto de emergencia»)
+              </span>
+            )}
+          </Item>
         </Section>
         {showInsurance ? (
           <Section title="Seguro" onEdit={edit("seguro")}>

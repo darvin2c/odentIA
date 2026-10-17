@@ -59,6 +59,28 @@ export interface PersonalLinkView {
   budgets: PortalBudget[]
   consents: Array<{ id: string; title: string }>
   questionnaire: { title: string } | null
+  /** «Tus mensajes» (ADR 0040): solo para quien recibe los mensajes. */
+  messages: PersonalLinkMessages | null
+  /** «Tus papeles»: la receta y el comprobante de los últimos 30 días. */
+  papers: PersonalLinkPaper[]
+}
+
+export interface PersonalLinkMessages {
+  recordatorio: boolean
+  seguimiento: boolean
+  novedades: boolean
+  /** Pidió no recibir ningún mensaje de la clínica. */
+  nothing: boolean
+}
+
+export type MessageChoice = "recordatorio" | "seguimiento" | "novedades" | "ninguno"
+
+export interface PersonalLinkPaper {
+  kind: "receta" | "comprobante"
+  id: string
+  title: string
+  issuedAt: string
+  availableUntil: string
 }
 
 export interface BookingSlot {
@@ -94,6 +116,54 @@ const post = <T>(url: string, body: unknown) => publicFetch<T>(url, { method: "P
 
 export function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
   return publicFetch(`${base(slug)}?token=${encodeURIComponent(token)}`)
+}
+
+/** Cambia un interruptor de «Tus mensajes», o «ningún mensaje». */
+export function chooseLinkMessages(
+  slug: string,
+  token: string,
+  input: { tipo: MessageChoice; recibir: boolean },
+): Promise<{ data: PersonalLinkMessages }> {
+  return post(`${base(slug)}/messages`, { token, ...input })
+}
+
+/**
+ * Descarga un papel de «Tus papeles» (PDF). Es un POST con el token en el
+ * cuerpo, como lo demás del enlace: el token no queda en la dirección, ni en
+ * registros de acceso ni en el Referer.
+ */
+export async function downloadLinkPaper(slug: string, token: string, paper: Pick<PersonalLinkPaper, "kind" | "id" | "title">): Promise<void> {
+  const response = await fetch(`${base(slug)}/papers/${encodeURIComponent(paper.id)}`, {
+    method: "POST",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, kind: paper.kind }),
+  })
+  if (!response.ok) {
+    let shape: { code?: string; message?: string; request_id?: string } = {}
+    try {
+      shape = ((await response.json()) as { error?: typeof shape }).error ?? {}
+    } catch {
+      // respuesta no-JSON: sin detalle
+    }
+    throw new ApiError(response.status, shape)
+  }
+  const disposition = response.headers.get("content-disposition") ?? ""
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `${paper.title}.pdf`
+  const url = URL.createObjectURL(await response.blob())
+  try {
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = filename
+    anchor.rel = "noreferrer"
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    // Se libera después del clic: el navegador ya tomó el archivo.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 }
 
 export function fetchBookingSlots(

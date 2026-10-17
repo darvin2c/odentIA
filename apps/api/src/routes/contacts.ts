@@ -42,9 +42,7 @@ const contactFields = {
 const createInput = z.object({
   displayName: z.string().min(1).max(200),
   ...contactFields,
-  notes: z.string().max(2000).optional(),
   tags: rawTags,
-  assignedUserId: z.string().nullable().optional(),
 })
 
 const patchInput = z.object({
@@ -61,9 +59,7 @@ const patchInput = z.object({
   birthDate: z.string().max(10).nullable().optional(),
   sex: z.string().max(1).nullable().optional(),
   isActive: z.boolean().optional(),
-  notes: z.string().max(2000).nullable().optional(),
   tags: rawTags,
-  assignedUserId: z.string().nullable().optional(),
   customFields: z.record(z.string(), z.unknown()).optional(),
 })
 

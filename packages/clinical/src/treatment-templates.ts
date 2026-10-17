@@ -5,23 +5,32 @@
  */
 import { isValidTooth, surfacesForTooth } from "./anatomy.js"
 
-export const TREATMENT_SPECIALTIES = [
-  "diagnostico",
-  "prevencion",
-  "restauradora",
-  "endodoncia",
-  "periodoncia",
-  "cirugia",
-  "protesis",
-  "implantologia",
-  "ortodoncia",
-  "odontopediatria",
-  "estetica",
-  "disfuncion",
-  "anestesia",
-  "general",
+/**
+ * Especialidades de la biblioteca: la clave con que clasifica sus
+ * prestaciones y el nombre con que nace la especialidad de cada clínica
+ * (`org_specialty`, con la misma clave). La clínica puede renombrarlas,
+ * archivarlas o agregar otras: lo que se muestra es siempre su nombre, nunca
+ * este (ADR 0039).
+ */
+export const LIBRARY_SPECIALTIES = [
+  { key: "diagnostico", name: "Diagnóstico" },
+  { key: "prevencion", name: "Prevención" },
+  { key: "restauradora", name: "Restauradora" },
+  { key: "endodoncia", name: "Endodoncia" },
+  { key: "periodoncia", name: "Periodoncia" },
+  { key: "cirugia", name: "Cirugía" },
+  { key: "protesis", name: "Prótesis" },
+  { key: "implantologia", name: "Implantología" },
+  { key: "ortodoncia", name: "Ortodoncia" },
+  { key: "odontopediatria", name: "Odontopediatría" },
+  { key: "estetica", name: "Estética" },
+  { key: "disfuncion", name: "Disfunción" },
+  { key: "anestesia", name: "Anestesia y sedación" },
+  { key: "general", name: "Servicios odontológicos generales" },
 ] as const
-export type TreatmentSpecialty = (typeof TREATMENT_SPECIALTIES)[number]
+export type TreatmentSpecialty = (typeof LIBRARY_SPECIALTIES)[number]["key"]
+/** Las claves de la biblioteca, en su orden. */
+export const TREATMENT_SPECIALTIES: readonly TreatmentSpecialty[] = LIBRARY_SPECIALTIES.map((item) => item.key)
 
 /**
  * Fases del plan de tratamiento odontológico, en el orden en que se ejecutan:

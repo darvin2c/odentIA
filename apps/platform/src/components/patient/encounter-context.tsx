@@ -1,3 +1,4 @@
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -169,7 +170,7 @@ export function EncounterContextBody({
             {conditions.map((condition) => (
               <li key={condition.id}>
                 {condition.name}
-                {condition.cie10Code ? ` · ${condition.cie10Code}` : ""}
+                {condition.diagnosisCode ? ` · ${diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode)}` : ""}
               </li>
             ))}
           </ul>

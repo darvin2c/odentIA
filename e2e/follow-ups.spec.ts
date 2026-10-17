@@ -32,7 +32,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
     slug,
     {
       branchId: owner.branchId,
-      name: "Sillón control",
+      name: "Unidad dental control",
     },
     201,
   )

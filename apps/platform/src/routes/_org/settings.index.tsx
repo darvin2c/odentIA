@@ -25,6 +25,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
+import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
+import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
 import { ApiError } from "../../lib/api"
@@ -83,7 +85,7 @@ const CARD = "elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
 
 const profileSchema = z.object({
   legalName: z.string().trim().min(1, "Escribe la razón social"),
-  tradeName: z.string(),
+  tradeName: z.string().trim().min(1, "Escribe el nombre comercial"),
   fiscalDocType: z.string(),
   fiscalDocNumber: z.string(),
   fiscalAddress: z.string(),
@@ -153,7 +155,7 @@ function countryChoices(country: string, language: string): NamedOption[] {
 function toInput(values: ProfileValues): OrgProfileInput {
   return {
     legalName: values.legalName.trim(),
-    tradeName: values.tradeName.trim() || null,
+    tradeName: values.tradeName.trim(),
     fiscalDocType: values.fiscalDocType.trim() || null,
     fiscalDocNumber: values.fiscalDocNumber.trim() || null,
     fiscalAddress: values.fiscalAddress.trim() || null,
@@ -224,12 +226,21 @@ function OrgProfilePage() {
           <ProfileSkeleton />
         )
       ) : (
-        <ProfileForm
-          key={org.id}
-          values={profile ? toValues(profile) : emptyValues}
-          pending={saveMutation.isPending}
-          onSubmit={(values) => saveMutation.mutateAsync(values)}
-        />
+        <>
+          <ProfileForm
+            key={org.id}
+            values={profile ? toValues(profile) : emptyValues}
+            pending={saveMutation.isPending}
+            onSubmit={(values) => saveMutation.mutateAsync(values)}
+          />
+          {/* Se guardan solos, con su confirmación: no son parte del «Guardar» de arriba. */}
+          {profile ? (
+            <div className="flex max-w-3xl flex-col gap-4">
+              <ClinicLogoSettings logo={profile.logo ?? null} name={profile.tradeName} />
+              <DiagnosisListSettings profile={profile} />
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   )
@@ -382,17 +393,30 @@ function ProfileForm({
             }}
           </form.Field>
           <form.Field name="tradeName">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="org-trade-name">Nombre comercial</FieldLabel>
-                <Input
-                  id="org-trade-name"
-                  maxLength={200}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-              </Field>
-            )}
+            {(field) => {
+              const error = fieldErrorMessages(field.state.meta.errors)[0]
+              return (
+                <Field>
+                  <FieldLabel htmlFor="org-trade-name">Nombre comercial</FieldLabel>
+                  <Input
+                    id="org-trade-name"
+                    maxLength={200}
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? "org-trade-name-error" : "org-trade-name-help"}
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                  {error ? (
+                    <FieldError id="org-trade-name-error">{error}</FieldError>
+                  ) : (
+                    <FieldDescription id="org-trade-name-help">
+                      Así te ven tus pacientes: en WhatsApp, «Su enlace», el portal, el registro y los PDF. La
+                      razón social va solo en el comprobante.
+                    </FieldDescription>
+                  )}
+                </Field>
+              )
+            }}
           </form.Field>
           <form.Field name="fiscalDocType">
             {(field) => (

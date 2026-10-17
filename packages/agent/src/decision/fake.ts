@@ -20,7 +20,9 @@ export function createFakeDecisionModel(): DecisionModel {
                 ? has("no me escriban", "dejen de", "baja")
                 : q.id === "requires_reply"
                   ? !has("gracias", "ok", "listo")
-                  : false
+                  : q.id === "interest"
+                    ? has("cuánto", "cuanto", "precio", "cuesta", "quiero", "me interesa") && !has("lista de precios", "todos sus precios")
+                    : false
           return { id: q.id, kind: "yesno", probability: yes ? 0.92 : 0.08 }
         }
         if (q.kind === "choice" && q.id === "topic") {

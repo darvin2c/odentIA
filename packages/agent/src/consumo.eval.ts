@@ -32,7 +32,7 @@ import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext }
 import { appointment } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { clinicalFollowUp, patient, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
 import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -56,6 +56,7 @@ import {
   tickAutomations,
   updateAdminSettings,
   upsertAgentConfig,
+  librarySpecialtyIds,
 } from "@odentia/services"
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -65,6 +66,7 @@ import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState } from "./adm
 import { createJevDecisionModel, type DecisionModel } from "./decision/index.js"
 import { LLM_CATALOG, platformLlmFromEnv } from "./llm.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
+import { insertTestPatients } from "@odentia/services/test-patient"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("cc".repeat(32))
@@ -303,7 +305,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
     ('m-owner-mes', ${ORG}, ${owner}, 'owner', now()), ('m-usuario-mes-2', ${ORG}, ${dentist}, 'dentist', now())`)
   const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
   const branchId = site!.id
-  const chair = await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Sillón 1" }))
+  const chair = await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental 1" }))
   await inOrg((tx) =>
     setProfessionalSchedule(tx, ORG, owner, {
       branchId,
@@ -316,7 +318,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values ('m-usuario-mes-3', ${ORG}, ${specialist}, 'dentist', now())`)
   const [endo] = await ownerDb.insert(orgSpecialty).values({ organizationId: ORG, key: "endodoncia", name: "Endodoncia" }).returning({ id: orgSpecialty.id })
   await ownerDb.insert(professionalSpecialty).values({ organizationId: ORG, specialtyId: endo!.id, userId: specialist })
-  await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Sillón 2" }))
+  await inOrg((tx) => createChair(tx, ORG, { branchId, name: "Unidad dental 2" }))
   await inOrg((tx) =>
     setProfessionalSchedule(tx, ORG, owner, {
       branchId,
@@ -324,19 +326,21 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
       rules: [2, 4].map((weekday) => ({ weekday, startMin: 15 * 60, endMin: 19 * 60 })),
     }))
   await inOrg(async (tx) => {
-    for (const service of [
+    // Cada servicio va a la especialidad de la clínica con esa clave de la biblioteca (ADR 0039).
+    const specialtyOf = await librarySpecialtyIds(tx, ORG, CATALOG.map(([key]) => key).concat(["diagnostico", "prevencion", "endodoncia", "estetica", "ortodoncia"]))
+    for (const { specialty, ...service } of [
       { name: "Consulta de evaluación", specialty: "diagnostico", scope: "general", priceCents: 5000, durationMin: 30 },
       { name: "Limpieza dental", specialty: "prevencion", scope: "general", priceCents: 12000, durationMin: 40 },
       { name: "Endodoncia (tratamiento de conducto)", specialty: "endodoncia", scope: "tooth", priceCents: 45000, durationMin: 60 },
       { name: "Blanqueamiento", specialty: "estetica", scope: "general", priceCents: 60000, durationMin: 60 },
       { name: "Control de ortodoncia", specialty: "ortodoncia", scope: "general", priceCents: 8000, durationMin: 20 },
-    ]) await createService(tx, ORG, owner, service)
+    ]) await createService(tx, ORG, owner, { ...service, specialtyId: specialtyOf.get(specialty) })
     if (BIG_CATALOG) {
       let price = 4000
       for (const [specialty, scope, names] of CATALOG) {
         for (const name of names) {
           price += 1500
-          await createService(tx, ORG, owner, { name, specialty, scope, priceCents: price, durationMin: 30 })
+          await createService(tx, ORG, owner, { name, specialtyId: specialtyOf.get(specialty), scope, priceCents: price, durationMin: 30 })
         }
       }
     }
@@ -357,7 +361,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   ).id
   await inOrg(async (tx) => {
     await upsertAgentConfig(tx, ORG, { enabled: true, ...(decider ? { decisionProvider: "jev" as const, decisionRoutingEnabled: true } : {}) })
-    await updateAdminSettings(tx, ORG, owner, { enabled: true, quietStart: "21:00", quietEnd: "08:00" })
+    await updateAdminSettings(tx, ORG, owner, { enabled: true })
     for (const [title, body] of [
       ["Horario de atención", "Atendemos de lunes a sábado, de 9:00 a 18:00."],
       ["Pago en partes", "Los tratamientos largos se pueden pagar en partes, con una inicial. Los medios de pago son los que acepta caja."],
@@ -374,15 +378,12 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   // ------------------------------------------------------------------ personas ---
   const names = ["Lucía", "Jorge", "Rosa", "Tomás", "Mariana", "Diego", "Elena", "Pablo", "Carmen", "Luis"]
   const surnames = ["Paredes", "Salas", "Medina", "Rivas", "Soto", "Vega", "Campos", "Núñez", "Flores", "Quispe"]
-  const created = await ownerDb
-    .insert(patient)
-    .values(
+  const created = await insertTestPatients(ownerDb, 
       Array.from({ length: CLINIC.patients }, (_, index) => {
         const given = names[index % names.length]!
         return { organizationId: ORG, displayName: `${given} ${surnames[Math.floor(index / names.length) % surnames.length]} ${index + 1}`, givenNames: given, patientNumber: index + 1 }
       }),
     )
-    .returning({ id: patient.id })
   const links = await ownerDb.select({ patientId: patientContact.patientId, contactId: patientContact.contactId }).from(patientContact).where(eq(patientContact.organizationId, ORG))
   const contactOf = new Map(links.map((row) => [row.patientId, row.contactId]))
   const people: Person[] = created.map((row, index) => ({

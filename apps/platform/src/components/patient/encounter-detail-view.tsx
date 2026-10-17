@@ -1,5 +1,5 @@
 import { label } from "../../lib/glossary"
-import { conditionLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
+import { conditionLabel, diagnosisCodeLabel, formatVitals, surfaceLabel } from "@odentia/clinical"
 import { Badge } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
@@ -259,7 +259,7 @@ export function EncounterDetailView({
             {activeDiagnoses.map((dx) => (
               <li key={dx.id} className="border-b pb-2 text-sm last:border-0">
                 <p>
-                  <span className="font-semibold">{dx.cie10Code}</span>
+                  <span className="font-semibold">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
                   {dx.note ? <span className="text-muted-foreground"> · {dx.note}</span> : null}
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -281,7 +281,7 @@ export function EncounterDetailView({
             <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
               {voidedDiagnoses.map((dx) => (
                 <li key={dx.id}>
-                  <span className="line-through">{dx.cie10Code}</span> · {diagnosisSiteLabel(dx)} ·
+                  <span className="line-through">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span> · {diagnosisSiteLabel(dx)} ·
                   Motivo: {dx.voidReason}
                 </li>
               ))}
@@ -355,7 +355,7 @@ export function EncounterDetailView({
               <li key={note.id} className="border-b pb-2 text-sm last:border-0">
                 <p className="whitespace-pre-wrap">{note.note}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {note.diagnosisCode ? `CIE-10 ${note.diagnosisCode} · ` : ""}
+                  {note.diagnosisCode ? `${diagnosisCodeLabel(note.diagnosisSystem, note.diagnosisCode)} · ` : ""}
                   <time dateTime={note.createdAt}>{formatDateTime(note.createdAt)}</time>
                 </p>
               </li>
@@ -378,7 +378,7 @@ export function EncounterDetailView({
                   Pieza {entry.toothNumber} · {conditionLabel(entry.condition)}
                   {entry.surface ? ` · ${surfaceLabel(entry.surface)}` : ""} ·{" "}
                   {statusLabel(entry.status)}
-                  {entry.diagnosisCode ? ` · CIE-10 ${entry.diagnosisCode}` : ""}
+                  {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                 </p>
                 {entry.note ? (
                   <p className="whitespace-pre-wrap text-xs text-muted-foreground">{entry.note}</p>

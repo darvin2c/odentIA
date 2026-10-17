@@ -2,13 +2,14 @@ import type { Callbacks } from "@langchain/core/callbacks/manager"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { channelAdapters } from "@odentia/channels"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  AGENT_LLMS,
   type AgentConfig,
+  type AgentLlm,
   countAgentModelRunsToday,
   askGeneralPermissionAfterBooking,
   getAgentSpendGate,
@@ -24,6 +25,7 @@ import {
   nextAgentOpening,
   notifyAgentProviderProblem,
   type RecordRunInput,
+  reportModelOutage,
   recordAgentRun,
   type SearchEmbedder,
   type Storage,
@@ -38,6 +40,7 @@ import { offTopicReply, readRoute, ROUTE_QUESTIONS, routeHandoff } from "./decis
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
 import { compileAgentGraph } from "./graph.js"
+import { noteAskedInterest } from "./interest.js"
 import {
   createConfiguredChatModel,
   describeProviderProblem,
@@ -84,6 +87,11 @@ export interface AgentRuntime {
    */
   storage?: Storage
   secretsKey: Buffer
+  /**
+   * Rol owner: con él, un modelo que no responde abre (o suma la clínica a)
+   * el caso automático «Modelo sin responder» en Soporte de odentIA.
+   */
+  ownerDb?: Db
   callbacks?: Callbacks
   /** Reloj de la corrida (pruebas); sin él, la hora real. */
   now?: () => Date
@@ -98,9 +106,9 @@ function handoffReasonFor(problem: ProviderProblem): string {
     case "DAILY_LIMIT":
       return "El agente alcanzó su tope diario de corridas"
     case "PROVIDER_QUOTA":
-      return "El proveedor del modelo del agente no tiene saldo o cuota"
+      return "El proveedor del modelo del agente no tiene saldo o cuota; ya avisamos a odentIA"
     default:
-      return "El agente no puede usar el proveedor del modelo; revisa Configuración › Agente"
+      return "El agente no puede usar el modelo ahora; ya avisamos a odentIA"
   }
 }
 
@@ -116,23 +124,17 @@ const BURST_COVERED = "burst-covered"
 const BURST_WAITING = "burst-waiting"
 
 /**
- * Herramientas que en esta organización no pueden servir: la de plantillas
- * cuando ningún canal activo las admite. Se decide por organización y no por
- * hilo a propósito: las herramientas van al principio de lo que el proveedor
- * guarda en caché, y una lista distinta por hilo partiría esa caché en
- * variantes para ahorrar un esquema.
+ * Herramientas que en esta organización no pueden servir: las de una función
+ * apagada en la ficha del agente. Se decide por organización y no por hilo a
+ * propósito: las herramientas van al principio de lo que el proveedor guarda
+ * en caché, y una lista distinta por hilo partiría esa caché en variantes. El
+ * agente no tiene herramienta de plantillas: fuera de las 24 horas retoma el
+ * sistema (ADR 0040).
  */
-async function orgToolExclusions(tx: Db, orgId: string, cfg: AgentConfig): Promise<string[]> {
-  const connections = await tx
-    .select({ provider: channelConnection.provider })
-    .from(channelConnection)
-    .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.status, "active")))
-  const templates = connections.some(
-    (row) => channelAdapters[row.provider as keyof typeof channelAdapters]?.capabilities.templates === true,
-  )
+async function orgToolExclusions(_tx: Db, _orgId: string, cfg: AgentConfig): Promise<string[]> {
   // Una función apagada en la ficha del agente se lleva sus herramientas: el
   // modelo ni las ve, no depende de que obedezca una instrucción.
-  return [...(templates ? [] : ["send_template"]), ...toolsDisabledBy("recepcion", cfg.disabledFunctions)]
+  return toolsDisabledBy("recepcion", cfg.disabledFunctions)
 }
 
 /**
@@ -283,6 +285,8 @@ async function attendAgentRun(
   // Modelo resuelto, para registrarlo aunque falle antes o después.
   let effectiveModel = llmModelName(DEFAULT_AGENT_LLM, runtime.platform)
   let configProblem: ProviderProblem | null = null
+  // Modelo que eligió la clínica: el caso de Soporte dice cuál no responde.
+  let runLlm: AgentLlm | null = null
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
@@ -290,6 +294,7 @@ async function attendAgentRun(
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
     const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
+      runLlm = cfg.llm
       try {
         return resolveLlmSpec(cfg, runtime.platform)
       } catch (error) {
@@ -560,9 +565,26 @@ async function attendAgentRun(
       // con el mismo formato del canal y la misma comprobación.
       const clinic = await publicClinicName(db, orgId)
       const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
-      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic) })
+      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")) })
     } else {
       await invokeGraph()
+      // Quien preguntó por un servicio concreto queda anotado como oportunidad
+      // en «Interesado» (decisión 15 de la fase 4): lo hace el sistema, no el
+      // modelo que escribe, y solo con «Oportunidades» encendida. Un saludo o
+      // una consulta clínica no son interés en un servicio. Nunca corta la corrida.
+      const interestOn = !cfg.disabledFunctions.includes("seguimiento")
+      const notInterest = toolCtx.route?.path === "saludo" || toolCtx.route?.path === "clinico"
+      if (interestOn && !notInterest && !toolCtx.handedOff && !toolCtx.dryRun && inboundMessageId !== null) {
+        await noteAskedInterest(db, orgId, {
+          contactId: toolCtx.contactId,
+          conversationId,
+          triggerMessageId: inboundMessageId,
+          said: burstTexts.join("\n"),
+          decision,
+        }).catch((error: unknown) => {
+          console.error(`agent: interés no anotado (${error instanceof Error ? error.message : String(error)})`)
+        })
+      }
       // Tras reservar en esta corrida, la pregunta del permiso general, una sola
       // vez por persona y después de la respuesta (ADR 0030). Texto y botones
       // fijos, sin modelo; si no puede salir, la corrida sigue igual.
@@ -677,6 +699,20 @@ async function attendAgentRun(
    */
   async function finishWithProviderProblem(problem: ProviderProblem): Promise<"done"> {
     await withOrgContext(db, orgId, (tx) => notifyAgentProviderProblem(tx, orgId, problem)).catch(() => {})
+    // El aviso a la clínica dice «Ya avisamos a odentIA»: el caso de Soporte lleva el motivo técnico.
+    if (problem.code !== "DAILY_LIMIT" && runtime.ownerDb && runLlm) {
+      const llm: AgentLlm = runLlm
+      await reportModelOutage(runtime.ownerDb, {
+        orgId,
+        llm,
+        llmLabel: AGENT_LLMS.find((option) => option.id === llm)?.label ?? llm,
+        code: problem.code,
+        detail: problem.detail,
+        at: startedAt,
+      }).catch((error: unknown) => {
+        console.error(`agent: caso «Modelo sin responder» sin abrir (${error instanceof Error ? error.message : String(error)})`)
+      })
+    }
     const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, {
       triggerId: inboundMessageId,
     })
@@ -815,6 +851,12 @@ export interface SandboxTurn {
 }
 
 export interface SandboxResult extends SimulationResult {
+  /**
+   * El modelo que escribe contestó en este turno. Los caminos que no lo llaman
+   * (texto fijo, derivar sin redactar) no cuentan: «Lo probaste» solo suma
+   * las pruebas que el modelo respondió.
+   */
+  modelAnswered: boolean
   /** Lo que hizo en este turno, dicho para quien prueba. */
   did: string[]
   /** Lo que queda esperando tras este turno y quién lo decide. */
@@ -896,13 +938,14 @@ export async function simulateAgentSandbox(
   if (toolCtx.route?.path === "fuera_de_tema") {
     const clinic = await publicClinicName(db, orgId)
     return {
-      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic),
+      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")),
       replied: true,
       toolsUsed: [],
       handedOff: false,
       basis: [],
       checks: [],
       did: ["Respondió con el texto fijo para lo que no es de la clínica, sin llamar al modelo que escribe."],
+      modelAnswered: false,
       waiting: [],
       state,
       inputTokens: null,
@@ -920,6 +963,7 @@ export async function simulateAgentSandbox(
       basis: [],
       checks: [],
       did: ["Pasó el caso a una persona sin redactar respuesta: el mensaje lo pide o no le corresponde atenderlo."],
+      modelAnswered: false,
       waiting: [],
       state,
       inputTokens: null,
@@ -946,6 +990,7 @@ export async function simulateAgentSandbox(
     basis: toolCtx.basis ?? [],
     checks: toolCtx.lastChecks ?? [],
     did: toolCtx.toolsUsed.map((name) => TOOL_ACTION_LABEL[name]).filter((label): label is string => Boolean(label)),
+    modelAnswered: replies.length > 0,
     waiting,
     state,
     inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,

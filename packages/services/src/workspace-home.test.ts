@@ -9,7 +9,7 @@ const taskOf = (id: string, due: WaitingTask["due"]): WaitingTask => ({
   id, title: `Tarea ${id}`, dueAt: null, due, href: `/tasks?task=${id}`, mine: true, assigneeName: null, opportunityTitle: null,
 })
 const unconfirmedOf = (id: string): WaitingUnconfirmed => ({
-  id, patientId: `p-${id}`, patientName: "Rosa Quispe", phone: "+51987654100", startsAt: "2026-10-17T15:30:00.000Z",
+  why: "sin_confirmar", id, patientId: `p-${id}`, patientName: "Rosa Quispe", phone: "+51987654100", startsAt: "2026-10-17T15:30:00.000Z",
   branchName: "Centro", serviceName: "Evaluación",
 })
 const nothing: WaitingParts = {
@@ -83,4 +83,9 @@ it("las citas sin confirmar que no caben se resumen en una fila con su cuenta", 
     ...items.map((item) => `unconfirmed:${item.id}`), "more:unconfirmed:4",
   ])
   expect(shape({ unconfirmed: { items: [], total: 0 } })).toEqual([])
+})
+
+it("los casos que no llegaron en la lista también se cuentan en «y N más»", () => {
+  // Llegaron los dos más urgentes de 130: la fila dice cuántos quedan, no los que llegaron.
+  expect(shape({ cases: [caseOf("u1", "alta"), caseOf("h1", "media")], casesTotal: 130 })).toEqual(["case:u1", "case:h1", "more:cases:128"])
 })

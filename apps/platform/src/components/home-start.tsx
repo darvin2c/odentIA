@@ -11,7 +11,7 @@ import type { WorkspaceHome } from "../lib/workspace"
 function setupSteps(setup: NonNullable<WorkspaceHome["setup"]>) {
   return [
     { title: "Definir horarios", description: "Indica cuándo atiende cada profesional.", href: "/settings/availability", done: setup.availability },
-    { title: "Preparar un sillón", description: "Añade el espacio donde se atenderán las citas.", href: "/agenda", done: setup.chairs },
+    { title: "Preparar una unidad dental", description: "Añade el espacio donde se atenderán las citas.", href: "/agenda", done: setup.chairs },
     { title: "Registrar un paciente", description: "Busca primero para evitar fichas duplicadas.", href: "/people", done: setup.patients },
     ...(setup.agent === undefined
       ? []

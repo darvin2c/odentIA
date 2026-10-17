@@ -215,7 +215,7 @@ function ProfilePage() {
       <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Perfil</div>
-          <p className="text-sm text-muted-foreground">Tu información personal en Odentia32.</p>
+          <p className="text-sm text-muted-foreground">Tu información personal en odentIA.</p>
         </div>
         <div>
           <div className="flex items-center gap-4">

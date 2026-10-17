@@ -13,7 +13,7 @@
  * del ámbito como 15849, plantillas internas previas). Los históricos
  * (snapshots en planes/presupuestos/atenciones) no se tocan.
  *
- * Orden en CLI: `pnpm --filter @odentia/db migrate` → `seed:cie10` →
+ * Orden en CLI: `pnpm --filter @odentia/db migrate` → `seed:diagnoses` →
  * `seed:procedures`. Rol owner (bypasea RLS; el rol app solo lee). Los tests
  * lo invocan directo para no divergir del catálogo real.
  */

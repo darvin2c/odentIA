@@ -10,7 +10,7 @@
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "tsx --env-file-if-exists=../../infra/dev/.env src/migrate.ts",
-    "seed:cie10": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-cie10.ts",
+    "seed:diagnoses": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-diagnoses.ts",
     "seed:procedures": "tsx --env-file-if-exists=../../infra/dev/.env src/seed-procedure-codes.ts",
     "import:cpms": "tsx --env-file-if-exists=../../infra/dev/.env src/import-cpms.ts",
     "build": "tsc -p tsconfig.json --noEmit",

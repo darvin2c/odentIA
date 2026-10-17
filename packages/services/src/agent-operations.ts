@@ -27,10 +27,11 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
-import { appointment } from "@odentia/db/schema/agenda"
+import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
-import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
+import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
+import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
   getAppointment,
@@ -40,7 +41,6 @@ import {
 import {
   listMessages,
   sendOutbound,
-  sendTemplateOutbound,
   setAgentStatus,
 } from "./conversations.js"
 import { type AiUsageEntry, knownCostMicros, recordAiUsage } from "./ai-usage.js"
@@ -56,6 +56,7 @@ import {
 } from "./opportunities.js"
 import { confirmationReply } from "./appointment-confirm-words.js"
 import { firstName } from "./automation-routing.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { type SendBudgetDeps, sendBudget } from "./budget-send.js"
 import { type BudgetLineWithStatus, type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
 import { OPERATIONS } from "./operation-fields.js"
@@ -65,6 +66,7 @@ import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getAccountSummary } from "./payments.js"
+import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS, proposalPendingSql } from "./proposal-state.js"
 import { formatOrgMoney, formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -272,9 +274,22 @@ export interface AgentPatientSummary {
     dentistName: string
   }>
   budgets: Array<{ number: number; title: string; status: string }>
+  /** Citas por venir que no caben en `upcomingAppointments`: se dicen con su número. */
+  moreAppointments: number
+  /** Presupuestos más antiguos que no caben en `budgets`. */
+  moreBudgets: number
   /** null = el interlocutor no tiene facultad económica. */
   balance: Array<{ currency: string; outstandingCents: number }> | null
 }
+
+/**
+ * Citas por venir que ve el agente de un paciente: todas las de una persona
+ * en la práctica (un tratamiento con controles mensuales tiene unas pocas). Si
+ * hay más, el resumen dice cuántas y desde qué fecha pedirlas.
+ */
+export const AGENT_APPOINTMENTS_SHOWN = 12
+/** Presupuestos (estado y número) en el resumen; los anteriores se cuentan. */
+export const AGENT_SUMMARY_BUDGETS_SHOWN = 5
 
 /**
  * Resumen mínimo del paciente según la facultad del interlocutor, sin leer
@@ -288,9 +303,11 @@ export async function getAgentPatientSummary(
   orgId: string,
   contactId: string,
   patientId: string,
+  options: { from?: Date } = {},
 ): Promise<AgentPatientSummary> {
   const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
-  const now = new Date()
+  // Desde cuándo: por defecto ahora; el agente puede pedir las de más adelante.
+  const now = options.from && options.from.getTime() > Date.now() ? options.from : new Date()
   const appointments = await tx
     .select({
       appointmentId: appointment.id,
@@ -314,7 +331,7 @@ export async function getAgentPatientSummary(
       ),
     )
     .orderBy(asc(appointment.startsAt))
-    .limit(3)
+    .limit(AGENT_APPOINTMENTS_SHOWN + 1)
   const budgetRows = await tx
     .select({
       number: treatmentBudget.budgetNumber,
@@ -324,20 +341,45 @@ export async function getAgentPatientSummary(
     .from(treatmentBudget)
     .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
     .orderBy(desc(treatmentBudget.budgetNumber))
-    .limit(3)
+    .limit(AGENT_SUMMARY_BUDGETS_SHOWN + 1)
+  // Si algo no cupo, se cuenta entero: el agente dice «y N más», nunca calla.
+  const countMore = async (shown: number, rows: number, total: () => Promise<number>) => (rows > shown ? (await total()) - shown : 0)
+  const moreAppointments = await countMore(AGENT_APPOINTMENTS_SHOWN, appointments.length, async () => {
+    const [row] = await tx
+      .select({ total: count() })
+      .from(appointment)
+      .where(
+        and(
+          eq(appointment.organizationId, orgId),
+          eq(appointment.patientId, patientId),
+          inArray(appointment.status, ["programada", "confirmada"]),
+          gte(appointment.startsAt, now),
+        ),
+      )
+    return row?.total ?? 0
+  })
+  const moreBudgets = await countMore(AGENT_SUMMARY_BUDGETS_SHOWN, budgetRows.length, async () => {
+    const [row] = await tx
+      .select({ total: count() })
+      .from(treatmentBudget)
+      .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.patientId, patientId), ne(treatmentBudget.status, "borrador")))
+    return row?.total ?? 0
+  })
   let balance: AgentPatientSummary["balance"] = null
   const maySeeBalance =
     context.authorization === "self" ||
     context.authorization === "representante_legal" ||
     (await hasEconomicRole(tx, orgId, patientId, contactId))
   if (maySeeBalance) {
-    // La misma cuenta que ve caja: una sola operación para pantalla, portal y agente.
+    // La misma cuenta que ve caja: una sola operación para pantalla, portal y
+    // agente. Lo que dice es el saldo, ya descontado lo que tiene a favor
+    // (`accountBalances`, decisión 22): nunca «debe» a quien no debe nada.
     const account = await getAccountSummary(tx, orgId, patientId)
-    balance = account.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.porCobrar }))
+    balance = account.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.saldo }))
   }
   return {
     context,
-    upcomingAppointments: appointments.map((a) => ({
+    upcomingAppointments: appointments.slice(0, AGENT_APPOINTMENTS_SHOWN).map((a) => ({
       appointmentId: a.appointmentId,
       version: a.version,
       startsAt: a.startsAt.toISOString(),
@@ -347,7 +389,9 @@ export async function getAgentPatientSummary(
       branchTimezone: a.branchTimezone,
       dentistName: a.dentistName,
     })),
-    budgets: budgetRows,
+    budgets: budgetRows.slice(0, AGENT_SUMMARY_BUDGETS_SHOWN),
+    moreAppointments,
+    moreBudgets,
     balance,
   }
 }
@@ -481,12 +525,17 @@ export async function confirmAppointmentByContact(
   }
   const appointments: ContactConfirmedAppointment[] = []
   for (const item of chosen) {
-    if (item.status === "programada") {
-      await setAppointmentStatus(tx, orgId, null, item.appointmentId, "confirmada", {
-        via: "conversacion",
-        conversationId: input.conversationId,
-      })
-    }
+    // La regla de la cita propia (`own-appointment.ts`), la del enlace y el
+    // portal: confirmar una ya confirmada la deja como está.
+    await confirmOwnAppointment(
+      tx,
+      orgId,
+      // Sin autora del equipo: quién confirmó consta en `via` y la conversación.
+      null,
+      { id: item.appointmentId, status: item.status, startsAt: new Date(item.startsAt) },
+      "conversacion",
+      { conversationId: input.conversationId },
+    )
     appointments.push({ ...strip(item), was: item.status === "programada" ? "confirmada" : "ya_confirmada" })
   }
   const reply = confirmationReply(
@@ -582,8 +631,10 @@ export interface AgentBudgetView {
 
 export interface AgentPatientBudgets {
   context: AgentPatientContext
-  /** Los entregados, del más reciente al más antiguo (como mucho tres). */
+  /** Los entregados, del más reciente al más antiguo (como mucho `AGENT_BUDGETS_SHOWN`). */
   budgets: AgentBudgetView[]
+  /** Entregados más antiguos que no van: se dicen con su número. */
+  olderBudgets: number
   /** Hay uno que la clínica aún prepara: se dice que existe, nunca qué lleva. */
   inPreparation: boolean
 }
@@ -641,9 +692,11 @@ export async function getAgentPatientBudgets(
   const context = await resolveAgentPatientContext(tx, orgId, contactId, patientId)
   const all = await listBudgets(tx, orgId, patientId)
   const newest = [...all].reverse()
+  const delivered = newest.filter((budget) => !BUDGET_NOT_DELIVERED.includes(budget.status))
   return {
     context,
-    budgets: newest.filter((budget) => !BUDGET_NOT_DELIVERED.includes(budget.status)).slice(0, AGENT_BUDGETS_SHOWN).map(agentBudgetView),
+    budgets: delivered.slice(0, AGENT_BUDGETS_SHOWN).map(agentBudgetView),
+    olderBudgets: Math.max(0, delivered.length - AGENT_BUDGETS_SHOWN),
     inPreparation: all.some((budget) => budget.status === "borrador"),
   }
 }
@@ -704,8 +757,9 @@ export async function resendBudgetByContact(
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
       .limit(1)
     const [person] = await tx
-      .select({ givenNames: patient.givenNames, displayName: patient.displayName })
+      .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
       .from(patient)
+      .innerJoin(patientPerson, joinPatientPerson(patientPerson))
       .where(and(eq(patient.organizationId, orgId), eq(patient.id, input.patientId)))
       .limit(1)
     const who = asker ? firstName(asker) : "La persona"
@@ -985,6 +1039,11 @@ export interface FreeGapInput {
   durationMin?: number
   branchId?: string
   dentistUserId?: string
+  /**
+   * El identificador del profesional que recibe el agente (`professionalRef`):
+   * «quiero cita con la Dra. Rojas». Solo sirve para pedir sus huecos.
+   */
+  professionalRef?: string
   chairId?: string
   serviceId?: string
 }
@@ -993,6 +1052,8 @@ export interface FreeGap {
   startsAt: string
   endsAt: string
   dentistUserId: string
+  /** Lo que ve el agente en lugar del usuario (`professionalRef`): nunca recibe ids de usuario. */
+  professionalRef: string
   /** Nombre del profesional, para decirlo a la persona. */
   dentistName: string | null
   chairId: string | null
@@ -1013,13 +1074,24 @@ export interface FreeGapResult {
   gaps: FreeGap[]
   truncated: boolean
   timeZone: string
+  /** Si el servicio tiene quien lo atienda en la sede: su especialidad y sus nombres. */
+  attending: { specialtyName: string; names: string[] } | null
+  /** Se pidió un profesional que no atiende ese servicio en la sede. */
+  professionalNotAttending: boolean
 }
+
+/** Huecos que ofrece el agente por profesional y día (decisión 16 de la fase 4). */
+export const GAPS_PER_PROFESSIONAL_PER_DAY = 2
+/** Huecos que caben en una respuesta de `buscar_huecos`. */
+export const GAPS_SHOWN = 20
 
 /**
  * Huecos libres según Agenda (`listAvailableSlots`): respeta horario semanal
- * del profesional, bloqueos y citas ocupantes. Sin horario configurado no hay
- * huecos (el agente debe decirlo, no inventarlos). Si `truncated`, acota el
- * rango o pagina por días.
+ * del profesional, bloqueos y citas ocupantes, y con servicio ofrece solo a
+ * quien lo atiende (la misma regla que recepción y el enlace). Dos huecos por
+ * profesional y día, ordenados por hora: una sola persona no se queda con la
+ * lista. Sin horario configurado no hay huecos (el agente debe decirlo, no
+ * inventarlos). Si `truncated`, acota el rango o pagina por días.
  */
 export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): Promise<FreeGapResult> {
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -1041,9 +1113,15 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
   if (durationMin !== undefined && (!Number.isInteger(durationMin) || durationMin < 10 || durationMin > 480)) {
     throw validation("durationMin debe ser entero entre 10 y 480")
   }
-  const { slots, truncated, timeZone } = await listAvailableSlots(tx, orgId, {
+  let dentistUserId = input.dentistUserId
+  if (input.professionalRef?.trim()) {
+    const resolved = await resolveProfessionalRef(tx, orgId, input.professionalRef)
+    if (!resolved) throw validation("Ese profesional no existe en la clínica: usa el identificador de la lista de profesionales")
+    dentistUserId = resolved
+  }
+  const { slots, truncated, timeZone, attending } = await listAvailableSlots(tx, orgId, {
     branchId: input.branchId,
-    dentistUserId: input.dentistUserId,
+    dentistUserId,
     chairId: input.chairId,
     serviceId: input.serviceId,
     from: from.toISOString(),
@@ -1051,9 +1129,10 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
+    perDentistPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
   })
-  const shown = slots.slice(0, 20)
-  const ids = [...new Set(shown.map((s) => s.dentistUserId))]
+  const shown = slots.slice(0, GAPS_SHOWN)
+  const ids = [...new Set([...shown.map((s) => s.dentistUserId), ...(attending?.dentistUserIds ?? [])])]
   const names = ids.length
     ? new Map(
         (await tx.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, ids))).map((row) => [row.id, row.name]),
@@ -1064,11 +1143,19 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
       startsAt: s.startsAt,
       endsAt: s.endsAt,
       dentistUserId: s.dentistUserId,
+      professionalRef: professionalRef(orgId, s.dentistUserId),
       dentistName: names.get(s.dentistUserId) ?? null,
       chairId: s.chairId,
     })),
-    truncated: truncated || slots.length > 20,
+    truncated: truncated || slots.length > GAPS_SHOWN,
     timeZone,
+    attending: attending
+      ? {
+          specialtyName: attending.specialtyName,
+          names: attending.dentistUserIds.map((id) => names.get(id)).filter((name): name is string => Boolean(name)),
+        }
+      : null,
+    professionalNotAttending: Boolean(attending && dentistUserId && !attending.dentistUserIds.includes(dentistUserId)),
   }
 }
 
@@ -1522,7 +1609,8 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
       if (isUuid(id)) patientIds.add(id)
     }
     if (isUuid(payload.branchId)) branchIds.add(payload.branchId)
-    if (isUuid(payload.dentistUserId)) userIds.add(payload.dentistUserId)
+    // Los ids de usuario no son UUID (los pone el proveedor de identidad).
+    if (typeof payload.dentistUserId === "string" && payload.dentistUserId) userIds.add(payload.dentistUserId)
     if (row.action === "decidir_presupuesto" && isUuid(payload.budgetId)) budgetIds.add(payload.budgetId)
   }
   const [contacts, convs, opps, appts, patients, branches, users, budgets] = await Promise.all([
@@ -1556,7 +1644,7 @@ async function enrichProposals(tx: Db, orgId: string, rows: ProposalRow[]): Prom
           .where(inArray(appointment.id, [...appointmentIds]))
       : [],
     patientIds.size
-      ? tx.select({ id: patient.id, displayName: patient.displayName }).from(patient).where(inArray(patient.id, [...patientIds]))
+      ? tx.select({ id: patient.id, displayName: patientPerson.displayName }).from(patient).innerJoin(patientPerson, joinPatientPerson(patientPerson)).where(inArray(patient.id, [...patientIds]))
       : [],
     branchIds.size
       ? tx.select({ id: branch.id, name: branch.name }).from(branch).where(inArray(branch.id, [...branchIds]))
@@ -2226,6 +2314,199 @@ export async function confirmProposalByContact(
   return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
 }
 
+/* ------------------------------ «Esperan su sí» ------------------------------ */
+
+/** Las propuestas que esperan el sí de la persona: las citas. */
+export const APPOINTMENT_PROPOSAL_ACTIONS = ["reservar_cita", "reprogramar_cita", "cancelar_cita"] as const
+type AppointmentProposalAction = (typeof APPOINTMENT_PROPOSAL_ACTIONS)[number]
+
+/** Lo que dice recepción cuando el horario propuesto ya no está libre. */
+export const SLOT_TAKEN_WORDS = "Ese horario ya no está libre: elige otro en la Agenda"
+
+export interface AwaitingAnswerItem {
+  id: string
+  conversationId: string
+  contactId: string | null
+  contactName: string | null
+  channel: string | null
+  action: AppointmentProposalAction
+  /** «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas». */
+  text: string
+  createdAt: string
+  /** El horario propuesto se ocupó (o la cita cambió) mientras esperaba. */
+  taken: boolean
+}
+
+export interface AwaitingAnswerList {
+  items: AwaitingAnswerItem[]
+  /** Todas las abiertas, también las que no caben en la lista. */
+  total: number
+}
+
+/** «jueves 22 a las 16:30», en la zona de la clínica. */
+function dayAndHour(value: unknown, zone: Pick<OrgLocale, "timezone" | "locale">): string | null {
+  if (typeof value !== "string") return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const day = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, weekday: "long", day: "numeric" })
+    .format(date)
+    .replace(",", "")
+  const hour = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date)
+  return `${day} a las ${hour}`
+}
+
+/**
+ * ¿Sigue libre el horario de una cita propuesta? La misma regla que al
+ * reservar (`validateAvailability`, la que aplica `createAppointment`): solo
+ * lee, no reserva nada.
+ */
+async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, unknown>): Promise<boolean> {
+  if (typeof payload.startsAt !== "string" || typeof payload.dentistUserId !== "string" || typeof payload.chairId !== "string") {
+    return false
+  }
+  const startsAt = new Date(payload.startsAt)
+  if (Number.isNaN(startsAt.getTime())) return false
+  const minutes = typeof payload.durationMin === "number" ? payload.durationMin : 30
+  const endsAt = typeof payload.endsAt === "string" ? new Date(payload.endsAt) : new Date(startsAt.getTime() + minutes * 60_000)
+  let branchId = typeof payload.branchId === "string" ? payload.branchId : null
+  if (!branchId) {
+    const [chair] = await tx
+      .select({ branchId: scheduleChair.branchId })
+      .from(scheduleChair)
+      .where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.id, payload.chairId)))
+      .limit(1)
+    branchId = chair?.branchId ?? null
+  }
+  if (!branchId) return false
+  try {
+    await validateAvailability(tx, orgId, {
+      branchId,
+      dentistUserId: payload.dentistUserId,
+      chairId: payload.chairId,
+      startsAt,
+      endsAt,
+    })
+    return true
+  } catch (error) {
+    if (error instanceof ServiceError) return false
+    throw error
+  }
+}
+
+/**
+ * Agente › «Esperan su sí» (decisión 21, tablero 2c): solo las citas que el
+ * agente propuso y esperan respuesta de la persona. Para saber, no para hacer:
+ * lo ya hecho se ve en la conversación y en la cita. Cada fila dice lo que se
+ * le propuso y si ese horario se ocupó mientras esperaba.
+ */
+export async function listAwaitingAnswer(
+  tx: Db,
+  orgId: string,
+  input: { limit?: number } = {},
+): Promise<AwaitingAnswerList> {
+  await expireDueProposals(tx, orgId)
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 200)
+  const open = and(
+    eq(agentProposal.organizationId, orgId),
+    inArray(agentProposal.action, [...APPOINTMENT_PROPOSAL_ACTIONS]),
+    proposalPendingSql(sql.raw('"agent_proposal"')),
+  )
+  const [counted] = await tx.select({ total: count() }).from(agentProposal).where(open)
+  // Las más viejas primero: llevan más tiempo esperando.
+  const rows = await tx.select().from(agentProposal).where(open).orderBy(asc(agentProposal.createdAt), asc(agentProposal.id)).limit(limit)
+  const zone = await getOrgLocale(tx, orgId)
+  const enriched = await enrichProposals(tx, orgId, rows)
+  const items: AwaitingAnswerItem[] = []
+  for (const proposal of enriched) {
+    const action = proposal.action as AppointmentProposalAction
+    const when = dayAndHour(proposal.payload.startsAt, zone)
+    const dentist = proposal.context.dentistName
+    let text: string
+    let taken: boolean
+    if (action === "reservar_cita") {
+      text = `Le propuse el ${when ?? "horario que eligió"}${dentist ? ` con ${dentist}` : ""}`
+      taken = !(await proposedSlotFree(tx, orgId, proposal.payload))
+    } else if (action === "reprogramar_cita") {
+      text = `Le propuse mover su cita al ${when ?? "nuevo horario"}`
+      taken = proposal.context.isStale === true
+    } else {
+      text = `Le propuse cancelar su cita${proposal.context.currentSummary ? ` (${proposal.context.currentSummary.replace(/^Cita actual: /, "")})` : ""}`
+      taken = proposal.context.isStale === true
+    }
+    items.push({
+      id: proposal.id,
+      conversationId: proposal.conversationId,
+      contactId: proposal.contactId,
+      contactName: proposal.context.contactName,
+      channel: proposal.context.channel,
+      action,
+      text,
+      createdAt: proposal.createdAt,
+      taken,
+    })
+  }
+  return { items, total: Number(counted?.total ?? 0) }
+}
+
+/** Cuántas citas esperan el sí de la persona: el número junto a la pestaña «Esperan su sí». */
+export async function countAwaitingAnswer(tx: Db, orgId: string): Promise<number> {
+  const [row] = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n from agent_proposal p
+    where p.organization_id = ${orgId}
+      and p.action in (${sql.join(APPOINTMENT_PROPOSAL_ACTIONS.map((action) => sql`${action}`), sql`, `)})
+      and ${proposalPendingSql(sql.raw("p"))}`)
+  return row?.n ?? 0
+}
+
+/**
+ * «Confirmó por teléfono»: la persona dijo que sí por otra vía y recepción lo
+ * anota con un clic. La cita se reserva, se mueve o se cancela con la misma
+ * operación que cuando confirma en el chat (`executeProposal`, la del agente).
+ * Si el horario ya no está libre, no se hace nada y se dice: «Ese horario ya
+ * no está libre: elige otro en la Agenda». Quién lo anotó queda auditado.
+ */
+export async function confirmProposalByPhone(
+  tx: Db,
+  orgId: string,
+  staffUserId: string,
+  id: string,
+  opts: { secretsKey?: Buffer } = {},
+): Promise<ProposalItem> {
+  const current = await requireProposal(tx, orgId, id)
+  const expired = await takeExpiredProposal(tx, orgId, staffUserId, id)
+  if (expired) return expired
+  if (current.status !== "propuesta") {
+    throw new ServiceError("PROPOSAL_NOT_PENDING", 409, `La propuesta ya está ${current.status}`)
+  }
+  if (!(APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(current.action)) {
+    throw new ServiceError("PROPOSAL_NOT_APPOINTMENT", 409, "Solo una cita propuesta se confirma por teléfono")
+  }
+  if (current.action === "reservar_cita" && !(await proposedSlotFree(tx, orgId, current.payload))) {
+    throw new ServiceError("SLOT_TAKEN", 409, SLOT_TAKEN_WORDS)
+  }
+  const decidedBy = `staff:${staffUserId}`
+  const [row] = await tx
+    .update(agentProposal)
+    .set({ status: "aprobada", decidedBy, decidedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(agentProposal.id, id), eq(agentProposal.organizationId, orgId), eq(agentProposal.status, "propuesta")))
+    .returning()
+  if (!row) throw await pendingConflict(tx, orgId, id)
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: staffUserId,
+    action: "agent.proposal_confirmed",
+    entity: "agent_proposal",
+    entityId: id,
+    metadata: { via: "telefono" },
+  })
+  const executed = await executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
+  // Se ocupó entre la comprobación y la reserva: nada queda hecho y la fila sigue esperando.
+  if (executed.status === "fallida" && current.action === "reservar_cita") {
+    throw new ServiceError("SLOT_TAKEN", 409, SLOT_TAKEN_WORDS)
+  }
+  return executed
+}
+
 /**
  * Oportunidad del interlocutor bloqueada para ejecutar: la herramienta
  * comercial opera sobre el contacto de ctx/conversación y nunca sobre la
@@ -2345,13 +2626,18 @@ export async function executeProposal(
         zone,
       )
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const moved = await moveAppointment(tx, orgId, actorUserId, appointmentId, {
+      const move = {
         expectedVersion: payload.expectedVersion as number,
         startsAt: payload.startsAt as string,
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
         dentistUserId: typeof payload.dentistUserId === "string" ? (payload.dentistUserId as string) : undefined,
         chairId: typeof payload.chairId === "string" ? (payload.chairId as string) : undefined,
-      }, { notice: false })
+      }
+      // Lo pide la persona en la conversación: la regla de la cita propia,
+      // la misma del enlace y el portal (no empezó, hora futura, horizonte).
+      const moved = locked.contactId
+        ? await moveOwnAppointment(tx, orgId, actorUserId, liveAppt, move)
+        : await moveAppointment(tx, orgId, actorUserId, appointmentId, move, { notice: false })
       result = { appointmentId: moved.id, startsAt: moved.startsAt }
     } else if (action === "cancelar_cita") {
       const appointmentId = payload.appointmentId as string
@@ -2377,7 +2663,11 @@ export async function executeProposal(
         startsAt: liveAppt.startsAt,
       }, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada", { notice: false })
+      // La pide la persona en la conversación: cancelar su cita deja el
+      // motivo «paciente», como desde su enlace o el portal.
+      const cancelled = locked.contactId
+        ? await cancelOwnAppointment(tx, orgId, actorUserId, liveAppt, "La canceló la persona en la conversación")
+        : await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada", { notice: false })
       result = { appointmentId: cancelled.id, status: cancelled.status }
     } else if (action === "decidir_presupuesto") {
       // Decide quien escribe en la conversación (la persona o su representante
@@ -2408,22 +2698,10 @@ export async function executeProposal(
       result = { patientId, budgetId, status: decided.status, stateText: decided.stateText, acceptedCents: decided.acceptedCents }
     } else if (action === "enviar_mensaje") {
       const conversationId = locked.conversationId
+      // El agente no elige plantillas (ADR 0040): fuera de las 24 horas el
+      // sistema envía «Retomar la conversación» (`resumeConversationBySystem`).
       if (payload.kind === "template") {
-        if (!opts.secretsKey) throw validation("Falta la clave de secretos para ejecutar la plantilla")
-        const sent = await sendTemplateOutbound(tx, orgId, opts.secretsKey, {
-          conversationId,
-          senderKind: "agent",
-          senderUserId: teamUserId,
-          name: payload.name as string,
-          language: payload.language as string,
-          params: Array.isArray(payload.params) ? (payload.params as string[]) : [],
-        })
-        result = {
-          messageId: sent.id,
-          kind: "template",
-          name: payload.name,
-          language: payload.language,
-        }
+        throw validation("El agente no envía plantillas: fuera de las 24 horas el sistema retoma la conversación")
       } else {
         // «Sí» / «No» bajo la pregunta que pide confirmar una lista: tocarlos es
         // escribirlo, y el sí llega al agente como cualquier otro.
@@ -2796,6 +3074,8 @@ export interface AgentPanelSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
+  /** Citas propuestas que esperan el sí de la persona: el número de la pestaña «Esperan su sí». */
+  awaitingAnswer: number
   /**
    * Casos que pasó el agente y esperan a quien mira: sin tomar o suyos. Es el
    * único contador (el del menú del Agente); ninguna otra parte lo repite.
@@ -2825,6 +3105,7 @@ export async function getAgentPanelSummary(tx: Db, orgId: string, userId: string
   return {
     enabled: cfg?.enabled ?? false,
     awaitingContact: await countAwaitingContact(tx, orgId),
+    awaitingAnswer: await countAwaitingAnswer(tx, orgId),
     openHandoffs: await countOpenHandoffs(tx, orgId, { forUserId: userId }),
     interventionsToday: today.ok + today.handoff,
     failedToday: today.error + today.sinRespuesta,
@@ -2865,9 +3146,11 @@ export async function countAgentModelRunsToday(tx: Db, orgId: string): Promise<n
 }
 
 /**
- * El proveedor del modelo no sirve (configuración, credencial rechazada,
- * tope diario): aviso a quien administra el agente, uno por problema y día,
- * con enlace a la configuración. No lleva la clave ni datos del interlocutor.
+ * El proveedor del modelo no sirve (configuración, credencial rechazada, sin
+ * saldo) o se alcanzó el tope diario: aviso a quien administra el agente, uno
+ * por problema y día. El del modelo no nombra claves ni variables: la cuenta
+ * es de odentIA, la clínica no puede arreglarla y odentIA ya recibió el caso
+ * en Soporte. El enlace lleva a Recepción. No lleva datos del interlocutor.
  */
 export async function notifyAgentProviderProblem(
   tx: Db,
@@ -2881,26 +3164,27 @@ export async function notifyAgentProviderProblem(
     .limit(20)
   const { timezone } = await getOrgLocale(tx, orgId)
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date())
+  const dailyLimit = problem.code === "DAILY_LIMIT"
   await notifyUsers(
     tx,
     orgId,
     rows.map((r) => r.userId),
     {
       dedupeKey: `agent-provider:${problem.code}:${day}`,
-      title:
-        problem.code === "DAILY_LIMIT"
-          ? "El agente alcanzó su tope diario"
-          : problem.code === "PROVIDER_QUOTA"
-            ? "El proveedor del agente no tiene saldo"
-            : "El agente no puede usar el modelo",
-      body: `${problem.detail.slice(0, 900)} Mientras tanto, los casos pasan al equipo.`,
-      href: "/settings/agent",
+      title: dailyLimit ? "El agente alcanzó su tope diario" : "El agente no puede usar el modelo",
+      body: dailyLimit
+        ? `${problem.detail.slice(0, 900)}. Mientras tanto, los casos pasan al equipo.`
+        : AGENT_MODEL_DOWN_NOTICE,
+      href: "/agent/recepcion",
       permission: "agent.write",
       // Se retira solo cuando el agente vuelve a responder.
       subject: "modelo-del-agente",
     },
   )
 }
+
+/** Lo que dicen Recepción y la campana cuando el modelo deja de responder. */
+export const AGENT_MODEL_DOWN_NOTICE = "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA."
 
 /**
  * La corrida por un mensaje entrante terminó sin responder ni derivar.
@@ -3025,6 +3309,8 @@ export async function createHandoff(
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
+    // Sin área, nadie de recepción la vería en «Mías y de mi área» (M5): el caso es de Recepción.
+    area: "recepcion",
     dueAt: new Date(Date.now() + HANDOFF_DUE_HOURS[priority] * 3_600_000).toISOString(),
     createdBy,
     actorUserId,
@@ -3088,20 +3374,38 @@ export async function annotateHandoff(
     .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
 }
 
+/**
+ * Casos que pasó el agente. Por defecto, del más nuevo al más viejo; con
+ * `order: "urgencia"`, primero «Ahora», después «Hoy» y «Sin apuro», y en cada
+ * una el que más lleva esperando: así el corte del tope nunca deja fuera a los
+ * más viejos ni a los urgentes. `visibleTo`: solo los sin tomar y los de esa
+ * persona (la misma regla que `countOpenHandoffs`).
+ */
 export async function listHandoffs(
   tx: Db,
   orgId: string,
-  input: { conversationId?: string; limit?: number; open?: boolean } = {},
+  input: { conversationId?: string; limit?: number; open?: boolean; order?: "reciente" | "urgencia"; visibleTo?: string } = {},
 ): Promise<HandoffItem[]> {
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
   if (input.open) conditions.push(handoffStillOpen())
+  if (input.visibleTo) {
+    conditions.push(or(isNull(agentHandoff.assigneeUserId), eq(agentHandoff.assigneeUserId, input.visibleTo))!)
+  }
   const limit = input.limit === undefined ? 50 : Math.min(Math.max(input.limit, 1), 100)
+  const order =
+    input.order === "urgencia"
+      ? [
+          sql`case ${agentHandoff.priority} when 'alta' then 0 when 'media' then 1 else 2 end`,
+          asc(agentHandoff.createdAt),
+          asc(agentHandoff.id),
+        ]
+      : [desc(agentHandoff.createdAt), asc(agentHandoff.id)]
   const rows = await tx
     .select()
     .from(agentHandoff)
     .where(and(...conditions))
-    .orderBy(desc(agentHandoff.createdAt), asc(agentHandoff.id))
+    .orderBy(...order)
     .limit(limit)
   return enrichHandoffs(tx, rows)
 }

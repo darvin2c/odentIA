@@ -110,7 +110,7 @@ const fx: ContractFixtures = {
       name: "texto construye Send API",
       message: { to: "msgr:PSID1", kind: { type: "text", text: "Hola" } },
       respondWith: { recipient_id: "PSID1", message_id: "mid.out1" },
-      expectUrl: "https://graph.facebook.com/v21.0/PAGE1/messages",
+      expectUrl: "https://graph.facebook.com/v25.0/PAGE1/messages",
       expectBody: {
         recipient: { id: "PSID1" },
         messaging_type: "RESPONSE",
@@ -128,7 +128,7 @@ const fx: ContractFixtures = {
         },
       },
       respondWith: { recipient_id: "PSID1", message_id: "mid.out2" },
-      expectUrl: "https://graph.facebook.com/v21.0/PAGE1/messages",
+      expectUrl: "https://graph.facebook.com/v25.0/PAGE1/messages",
       expectBody: {
         recipient: { id: "PSID1" },
         message: { attachment: { type: "image", payload: { url: "https://files.example.com/rx.png" } } },

@@ -12,7 +12,7 @@ import {
   type AnswerTraceOutcome,
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { and, count, desc, eq, inArray } from "drizzle-orm"
+import { and, count, desc, eq, gte, inArray } from "drizzle-orm"
 import { listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
 import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
 import { notFound, validation } from "./errors.js"
@@ -279,6 +279,7 @@ export async function recordAnswerTrace(tx: Db, orgId: string, input: RecordAnsw
       value: item.value.slice(0, 80),
       ok: item.ok === true,
       source: item.source ? item.source.slice(0, 80) : null,
+      ...(item.subject ? { subject: item.subject.slice(0, 120) } : {}),
     }))
   const [row] = await tx
     .insert(agentAnswerTrace)
@@ -298,6 +299,35 @@ export async function recordAnswerTrace(tx: Db, orgId: string, input: RecordAnsw
     .returning({ id: agentAnswerTrace.id })
   if (!row) throw new Error("No se pudo registrar la traza de la respuesta")
   return row.id
+}
+
+/**
+ * Precios de servicios que el agente ya dijo en la atención en curso de esta
+ * conversación: los servicios (nombre normalizado) de las respuestas que
+ * salieron o esperan salir. Así la regla de «hasta tres precios» la cuenta el
+ * código, no la memoria del modelo.
+ */
+export async function listPricedSubjects(tx: Db, orgId: string, conversationId: string): Promise<string[]> {
+  const [thread] = await tx
+    .select({ since: conversation.attentionStartedAt })
+    .from(conversation)
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, conversationId)))
+    .limit(1)
+  if (!thread) return []
+  const rows = await tx
+    .select({ checks: agentAnswerTrace.checks })
+    .from(agentAnswerTrace)
+    .where(
+      and(
+        eq(agentAnswerTrace.organizationId, orgId),
+        eq(agentAnswerTrace.conversationId, conversationId),
+        inArray(agentAnswerTrace.outcome, ["enviada", "pendiente"]),
+        gte(agentAnswerTrace.createdAt, thread.since),
+      ),
+    )
+  const subjects = new Set<string>()
+  for (const row of rows) for (const check of row.checks) if (check.kind === "precio" && check.ok && check.subject) subjects.add(check.subject)
+  return [...subjects]
 }
 
 export interface AnswerTraceItem {

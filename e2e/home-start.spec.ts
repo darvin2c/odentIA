@@ -38,11 +38,19 @@ async function activeDay(db: Db, owner: OwnerFixture) {
   const contactId = randomUUID()
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
   await db.insert(user).values({ id: otherDentist, name: "Dra. Otra Profesional", email: `${otherDentist}@inicio.test`, emailVerified: true })
+  // La identidad vive en la persona (ADR 0044): cada ficha apunta a la suya.
+  const [withAppointment, ofOther] = await db
+    .insert(contact)
+    .values([
+      { organizationId, displayName: "Paciente con cita" },
+      { organizationId, displayName: "Paciente de otra profesional" },
+    ])
+    .returning({ id: contact.id })
   await db.insert(patient).values([
-    { id: patientId, organizationId, displayName: "Paciente con cita", patientNumber: 1 },
-    { id: otherPatientId, organizationId, displayName: "Paciente de otra profesional", patientNumber: 2 },
+    { id: patientId, organizationId, personId: withAppointment!.id, patientNumber: 1 },
+    { id: otherPatientId, organizationId, personId: ofOther!.id, patientNumber: 2 },
   ])
-  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Sillón de prueba" })
+  await db.insert(scheduleChair).values({ id: chairId, organizationId, branchId: owner.branchId, name: "Unidad dental de prueba" })
   await db.insert(appointment).values([
     // La de quien inicia sesión es la última del día: la agenda de la sede lista desde la siguiente
     // cita en pie, así que esa fila está a la vista a cualquier hora en que corra la prueba.
@@ -94,9 +102,9 @@ for (const width of [1440, 390]) {
       await prepareSchedule(owner)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       const start = page.getByRole("region", { name: "Siguiente paso" })
-      await expect(start.getByRole("link", { name: "Preparar un sillón", exact: true })).toBeInViewport()
+      await expect(start.getByRole("link", { name: "Preparar una unidad dental", exact: true })).toBeInViewport()
       await observe(page, info, "parcial")
-      await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Sillón inicial" }, 201)
+      await call(page, "POST", "/api/agenda/chairs", owner.org.slug, { branchId: owner.branchId, name: "Unidad dental inicial" }, 201)
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       await expect(start.getByRole("link", { name: "Registrar un paciente", exact: true })).toBeInViewport()
       await call(page, "POST", "/api/patients", owner.org.slug, {

@@ -3,7 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
-import { encounter, encounterProcedure, patient, patientCharge, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { encounter, encounterProcedure, patientCharge, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { automationJob } from "@odentia/db/schema/automation"
 import { product } from "@odentia/db/schema/inventory"
@@ -27,6 +27,7 @@ import {
   settleWorkspaceNotifications,
   type WorkspaceAccess,
 } from "./workspace.js"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 const recipient = randomUUID()
@@ -110,11 +111,11 @@ beforeAll(async () => {
   ])
 
   // Cobros: uno vigente en PEN, uno anulado (excluido) y uno en USD.
-  const [account] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: "Cuenta pulso", patientNumber: 901 }).returning({ id: patient.id })
+  const [account] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Cuenta pulso", patientNumber: 901 })
   await ownerDb.insert(patientPayment).values([
-    { organizationId: "org_a", patientId: account!.id, amountCents: 20000, currency: "PEN", paidAt: new Date(), method: "yape" },
-    { organizationId: "org_a", patientId: account!.id, amountCents: 99999, currency: "PEN", paidAt: new Date(), method: "efectivo", voidedAt: new Date() },
-    { organizationId: "org_a", patientId: account!.id, amountCents: 10000, currency: "USD", paidAt: new Date(Date.now() - 2 * 86_400_000), method: "tarjeta" },
+    { organizationId: "org_a", patientId: account!.id, amountCents: 20000, currency: "PEN", paidAt: new Date(), methodName: "yape" },
+    { organizationId: "org_a", patientId: account!.id, amountCents: 99999, currency: "PEN", paidAt: new Date(), methodName: "efectivo", voidedAt: new Date() },
+    { organizationId: "org_a", patientId: account!.id, amountCents: 10000, currency: "USD", paidAt: new Date(Date.now() - 2 * 86_400_000), methodName: "tarjeta" },
   ])
 })
 
@@ -141,7 +142,7 @@ it("rechaza avisar a una persona que no pertenece a la organización", async () 
 
 
 it("el inicio no revela la caja ni a quién falta cobrar a un rol sin permiso financiero", async () => {
-  const [person] = await ownerDb.insert(patient).values({ organizationId: "org_a", displayName: "Cuenta privada", patientNumber: 403 }).returning()
+  const [person] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: "Cuenta privada", patientNumber: 403 })
   await ownerDb.insert(patientCharge).values({ organizationId: "org_a", patientId: person!.id, description: "Cargo", amountCents: 25000, currency: "PEN" })
   const home = await withOrgContext(appDb, "org_a", tx => getWorkspaceHome(tx, "org_a", recipient, restricted))
   expect(home.cash).toBeNull()
@@ -317,13 +318,13 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
   ])
   const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima", createdAt: new Date(Date.now() - 60_000) }).returning({ id: branch.id })
   const [norte] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Norte", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Sillón 1" }).returning({ id: scheduleChair.id })
-  const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Sillón 2" }).returning({ id: scheduleChair.id })
+  const [chairCentro] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleChair.id })
+  const [chairNorte] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: norte!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
   // Horas fijas del día de la sede: lo atendido al empezar el día y lo pendiente al final,
   // para que «la siguiente» no dependa de la hora en que corre la prueba (salvo el último cuarto de hora).
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date())
   const visit = async (name: string, time: string, status: string, dentistUserId: string, where: "centro" | "norte") => {
-    const [person] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) }).returning({ id: patient.id })
+    const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) })
     const startsAt = new Date(`${day}T${time}:00-05:00`)
     await ownerDb.insert(appointment).values({
       organizationId: orgId, patientId: person!.id, dentistUserId, status, serviceName: "Control",
@@ -353,7 +354,7 @@ it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen
     ["Sin confirmar de Ana", "por_confirmar", false],
     ["No asistió", "no_vino", false],
   ])
-  expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Sillón 1", serviceName: "Control" })
+  expect(first.today!.appointments[0]).toMatchObject({ dentistName: "Dr. Luis Vega", chairName: "Unidad dental 1", serviceName: "Control" })
 
   // La sede pedida filtra; una que no existe cae en la primera, sin mezclar sedes.
   const other = await home(reception, recipient, norte!.id)
@@ -382,7 +383,7 @@ it("los presupuestos que esperan respuesta: quien atiende solo ve los de sus pla
   await insertOrg(ownerDb, orgId, `presupuestos-${orgId.slice(0, 8)}`)
   const [ana, luis] = [randomUUID(), randomUUID()]
   await ownerDb.insert(user).values([ana, luis].map(id => ({ id, name: "Profesional", email: `${id}@presupuestos.test`, emailVerified: true })))
-  const [person] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Paciente con presupuesto", patientNumber: 1 }).returning({ id: patient.id })
+  const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Paciente con presupuesto", patientNumber: 1 })
   const presentedAt = new Date(Date.now() - 9 * 86_400_000)
   for (const [index, createdBy] of [ana, luis].entries()) {
     const [plan] = await ownerDb.insert(treatmentPlan).values({ organizationId: orgId, patientId: person!.id, title: "Plan", createdBy }).returning({ id: treatmentPlan.id })
@@ -440,7 +441,7 @@ it("la producción clínica excluye los actos anulados", async () => {
   await insertOrg(ownerDb, orgId, `produccion-${orgId.slice(0, 8)}`)
   const dentist = randomUUID()
   await ownerDb.insert(user).values({ id: dentist, name: "Dentista fase cero", email: `${dentist}@fase0.test`, emailVerified: true })
-  const [account] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: "Paciente producción", patientNumber: 1 }).returning({ id: patient.id })
+  const [account] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: "Paciente producción", patientNumber: 1 })
   // Ciclo real: borrador → actos (+ anulación en borrador) → cierre con firma.
   // Insertar actos en una atención ya finalizada viola encounter_child_draft_only.
   const [visit] = await ownerDb.insert(encounter).values({ organizationId: orgId, patientId: account!.id, dentistUserId: dentist }).returning({ id: encounter.id })
@@ -566,9 +567,9 @@ it("una cita sin confirmar tras el primer recordatorio del agente aparece para l
   const dentist = randomUUID()
   await ownerDb.insert(user).values({ id: dentist, name: "Dra. Ruiz", email: `${dentist}@llamar.test`, emailVerified: true })
   const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
-  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Sillón 2" }).returning({ id: scheduleChair.id })
+  const [chair] = await ownerDb.insert(scheduleChair).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 2" }).returning({ id: scheduleChair.id })
   const visit = async (name: string, status: string, reminder: "enviado" | "pendiente" | null, hours = 20) => {
-    const [person] = await ownerDb.insert(patient).values({ organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000), phone: "+51987654100" }).returning({ id: patient.id })
+    const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000), phone: "+51987654100" })
     const startsAt = new Date(Date.now() + hours * 3_600_000)
     const [row] = await ownerDb.insert(appointment).values({
       organizationId: orgId, patientId: person!.id, dentistUserId: dentist, status, serviceName: "Evaluación",

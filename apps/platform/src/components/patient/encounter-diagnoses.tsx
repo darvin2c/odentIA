@@ -1,4 +1,4 @@
-import { surfaceLabel } from "@odentia/clinical"
+import { DIAGNOSIS_VERIFICATION, diagnosisCodeLabel, surfaceLabel } from "@odentia/clinical"
 import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
 import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
@@ -7,10 +7,11 @@ import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { addDiagnosisApi, type EncounterDiagnosis, voidDiagnosisApi } from "../../lib/encounters"
 import { DIAGNOSIS_TYPE_LABELS, type EncounterDetail } from "../../lib/patients"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisPicker } from "./diagnosis-picker"
 import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
 
-const TYPES = ["presuntivo", "definitivo", "repetido"] as const
+/** Presuntivo o definitivo (FHIR verificationStatus); «ya diagnosticado antes» lo marca el sistema. */
+const TYPES = DIAGNOSIS_VERIFICATION
 
 function mutationMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.shape.message) return err.shape.message
@@ -25,7 +26,8 @@ export function diagnosisSiteLabel(dx: Pick<EncounterDiagnosis, "toothNumber" | 
 }
 
 /**
- * Diagnósticos de la atención (CIE-10 con tipo HIS y sitio dental). Toda
+ * Diagnósticos de la atención (lista de la clínica, su certeza y sitio dental;
+ * ADR 0041). Se eligen en tres pasos (`DiagnosisPicker`). Toda
  * escritura respeta la barrera del editor: avisa pending, espera
  * `beforeWrite` (flush del borrador), escribe, espera `onChanged` y libera.
  * Un diagnóstico mal registrado se anula con motivo; nunca se borra.
@@ -53,6 +55,7 @@ export function EncounterDiagnoses({
   const typeGroupId = useId()
   const [open, setOpen] = useState(autoOpen && !disabled)
   const [code, setCode] = useState("")
+  const [codeSystem, setCodeSystem] = useState<string | null>(null)
   const [description, setDescription] = useState("")
   // Sin valor por defecto: afirmar la certeza es una decisión explícita del clínico.
   const [diagnosisType, setDiagnosisType] = useState<string>("")
@@ -74,6 +77,7 @@ export function EncounterDiagnoses({
 
   const reset = () => {
     setCode("")
+    setCodeSystem(null)
     setDescription("")
     setDiagnosisType("")
     setSite({ toothNumber: null, surfaces: [] })
@@ -103,7 +107,8 @@ export function EncounterDiagnoses({
     try {
       await write(() =>
         addDiagnosisApi(patientId, encounter.id, {
-          cie10Code: code.trim(),
+          diagnosisCode: code.trim(),
+          diagnosisSystem: codeSystem,
           diagnosisType,
           toothNumber: site.toothNumber,
           surfaces: site.surfaces,
@@ -145,7 +150,7 @@ export function EncounterDiagnoses({
         </h2>
         {editable ? (
           <p className="text-xs text-muted-foreground">
-            Al menos uno con código CIE-10 y su tipo para cerrar la atención.
+            Al menos uno para cerrar la atención; «Presuntivo» basta.
           </p>
         ) : null}
       </div>
@@ -158,17 +163,18 @@ export function EncounterDiagnoses({
             <li key={dx.id} className="flex flex-wrap items-start justify-between gap-3 py-2.5">
               <div className="flex min-w-0 flex-col gap-1">
                 <p className="text-sm">
-                  <span className="font-semibold">{dx.cie10Code}</span>
+                  <span className="font-semibold">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
                   {dx.note ? <span className="text-muted-foreground"> · {dx.note}</span> : null}
                 </p>
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   {dx.diagnosisType ? (
-                    <Badge variant={dx.diagnosisType === "definitivo" ? "success" : "outline"}>
+                    <Badge variant={dx.diagnosisType === "confirmed" ? "success" : "outline"}>
                       {DIAGNOSIS_TYPE_LABELS[dx.diagnosisType] ?? dx.diagnosisType}
                     </Badge>
                   ) : (
                     <Badge variant="outline">Sin tipo (histórico)</Badge>
                   )}
+                  {dx.previouslyDiagnosed ? <Badge variant="secondary">Ya diagnosticado antes</Badge> : null}
                   <span>{diagnosisSiteLabel(dx)}</span>
                   {dx.status === "resuelto" ? <Badge variant="secondary">Resuelto</Badge> : null}
                 </p>
@@ -201,7 +207,7 @@ export function EncounterDiagnoses({
           <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
             {voided.map((dx) => (
               <li key={dx.id}>
-                <span className="line-through">{dx.cie10Code}</span> · {diagnosisSiteLabel(dx)} ·
+                <span className="line-through">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span> · {diagnosisSiteLabel(dx)} ·
                 Motivo: {dx.voidReason}
               </li>
             ))}
@@ -226,7 +232,7 @@ export function EncounterDiagnoses({
             setOpen(false)
           }}
           title="Registrar diagnóstico"
-          description="Código CIE-10, tipo y, si corresponde, la pieza y sus superficies."
+          description="El código de la lista de la clínica, su tipo y, si corresponde, la pieza y sus superficies."
           onSubmit={(event) => void onSubmit(event)}
           isDirty={code.trim() !== "" || diagnosisType !== "" || site.toothNumber !== null}
           isSubmitting={saving}
@@ -235,13 +241,19 @@ export function EncounterDiagnoses({
           error={error}
         >
           <div className="flex flex-col gap-5">
-            <Cie10Search
+            <DiagnosisPicker
+              patientId={patientId}
+              encounterId={encounter.id}
               value={code}
-              onChange={(nextCode, nextDescription) => {
-                setCode(nextCode)
-                setDescription(nextCode ? nextDescription : "")
-              }}
+              system={codeSystem}
               disabled={busy}
+              onChange={(choice, proposedSite) => {
+                setCode(choice.code)
+                setCodeSystem(choice.code ? choice.system : null)
+                setDescription(choice.code ? choice.description : "")
+                // Lo que propone un hallazgo trae su pieza y sus caras, si aún no se eligió otra.
+                if (proposedSite && site.toothNumber === null) setSite(proposedSite)
+              }}
             />
             {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
             <div className="flex flex-col gap-2">
@@ -269,8 +281,8 @@ export function EncounterDiagnoses({
                 ))}
               </div>
               <p className="text-xs text-muted-foreground">
-                Presuntivo mientras se confirma; definitivo cuando se confirma; repetido si ya fue
-                diagnosticado antes.
+                Presuntivo mientras se confirma; definitivo cuando se confirma. Si la persona ya lo
+                tenía, el sistema lo anota solo.
               </p>
             </div>
             <ToothSiteSelector value={site} onChange={setSite} withSurfaces disabled={busy} />
@@ -294,7 +306,7 @@ export function EncounterDiagnoses({
       <ConfirmDialog
         open={voiding !== null}
         title="Anular diagnóstico"
-        description={`${voiding?.cie10Code ?? ""} · ${voiding ? diagnosisSiteLabel(voiding) : ""}. Queda en la historia como anulado, con tu nombre y el motivo.`}
+        description={`${voiding ? diagnosisCodeLabel(voiding.diagnosisSystem, voiding.diagnosisCode) : ""} · ${voiding ? diagnosisSiteLabel(voiding) : ""}. Queda en la historia como anulado, con tu nombre y el motivo.`}
         confirmLabel="Anular diagnóstico"
         pending={saving}
         confirmDisabled={!voidReason.trim()}

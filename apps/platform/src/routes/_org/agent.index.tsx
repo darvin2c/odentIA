@@ -7,8 +7,9 @@ import { ArrowRight, ChevronRight, CircleHelp, Lightbulb, Lock, MessageCircle, M
 import { type ReactNode, useState } from "react"
 import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
+import { WritingHoursCard } from "../../components/agent/writing-hours"
 import { AgentTabs } from "../../components/agent-tabs"
-import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, PROVIDER_PROBLEM } from "../../lib/agent"
+import { AGENT_MODEL_DOWN, type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
@@ -148,8 +149,8 @@ function AgentSummaryPage() {
         <EmptyState
           icon={Lock}
           title="No tienes acceso a esta sección"
-          description={`Pídelo a quien administra la clínica.${canDecide ? " Tus pendientes siguen en su pestaña." : ""}`}
-          {...(canDecide ? { actionLabel: "Ir a Pendientes", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
+          description={`Pídelo a quien administra la clínica.${canDecide ? " Las citas que esperan su sí siguen en «Esperan su sí»." : ""}`}
+          {...(canDecide ? { actionLabel: "Ir a Esperan su sí", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
         />
       </PageShell>
     )
@@ -173,7 +174,7 @@ function AgentSummaryPage() {
           {overview.enabled && overview.provider.problem ? (
             <SummaryNotice
               tone="danger"
-              title="El agente no puede responder ahora"
+              title={AGENT_MODEL_DOWN.title}
               action={
                 canWrite ? (
                   <Link to="/settings/integrations/model" className={outlineLink}>
@@ -182,7 +183,7 @@ function AgentSummaryPage() {
                 ) : null
               }
             >
-              {PROVIDER_PROBLEM[overview.provider.problem]}
+              {AGENT_MODEL_DOWN.body}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
               {canWrite ? "" : " Avisa a quien administra la clínica."}
             </SummaryNotice>
@@ -344,6 +345,8 @@ function AgentSummaryPage() {
               })}
             </ul>
           </section>
+
+          <WritingHoursCard canWrite={canWrite} />
 
           <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
             <section aria-label="Cómo le fue esta semana" className="elevated flex flex-col gap-2 rounded-xl border bg-card px-4 py-3 sm:gap-3 sm:p-6">

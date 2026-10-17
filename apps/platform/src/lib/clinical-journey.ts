@@ -7,6 +7,7 @@
  * verdad y estas funciones solo traducen su contrato a la UI.
  */
 
+import type { FollowUpStatus, ResponsibilityKind } from "@odentia/clinical"
 import type { AppointmentStatus } from "./agenda"
 import { ApiError, apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
@@ -91,8 +92,7 @@ export function instantFromClinicValue(value: string): string | null {
 
 // --- Controles clínicos -----------------------------------------------------
 
-export const FOLLOW_UP_STATUSES = ["pendiente", "programado", "realizado", "cancelado"] as const
-export type FollowUpStatus = (typeof FOLLOW_UP_STATUSES)[number]
+export { FOLLOW_UP_STATUSES, type FollowUpStatus } from "@odentia/clinical"
 
 export const FOLLOW_UP_STATUS_LABELS: Record<FollowUpStatus, string> = {
   pendiente: "Pendiente",
@@ -151,7 +151,7 @@ export type ScheduleFollowUpBody =
       appointment: {
         branchId?: string
         dentistUserId: string
-        /** Sin sillón, la agenda pone uno libre. */
+        /** Sin unidad dental, la agenda pone una libre. */
         chairId?: string
         serviceId?: string
         startsAt: string
@@ -288,6 +288,8 @@ export interface Prescription {
   cancelledAt: string | null
   cancelReason: string | null
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   validUntil?: string | null
   prescriberName?: string | null
   prescriberTitle?: string | null
@@ -352,6 +354,8 @@ export function createPrescriptionApi(
     planItemId?: string | null
     notes?: string | null
     diagnosisCode?: string | null
+    /** Lista del código («ICD-10», «ICD-11»). */
+    diagnosisSystem?: string | null
     validUntil?: string | null
     acknowledgeAllergies?: boolean
     items: PrescriptionMedicationBody[]
@@ -376,12 +380,8 @@ export function cancelPrescriptionApi(
 
 // --- Responsables -----------------------------------------------------------
 
-export const RESPONSIBILITY_KINDS = [
-  "representante_legal",
-  "autorizado_informacion",
-  "responsable_economico",
-] as const
-export type ResponsibilityKind = (typeof RESPONSIBILITY_KINDS)[number]
+// La lista vive en `@odentia/clinical`, la misma que valida el servidor.
+export { RESPONSIBILITY_KINDS, type ResponsibilityKind } from "@odentia/clinical"
 
 export const RESPONSIBILITY_KIND_LABELS: Record<ResponsibilityKind, string> = {
   representante_legal: "Representante legal",
@@ -602,6 +602,8 @@ export function reviseTreatmentApi(
     arch?: "upper" | "lower" | null
     detail?: string | null
     diagnosisCode?: string | null
+    /** Lista del código («ICD-10», «ICD-11»). */
+    diagnosisSystem?: string | null
   },
 ): Promise<{ data: PlanItem }> {
   return apiFetch<{ data: PlanItem }>(`${base(patientId)}/treatments/${itemId}/revise`, {

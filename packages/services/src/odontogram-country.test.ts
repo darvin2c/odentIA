@@ -3,11 +3,9 @@ import { readFileSync } from "node:fs"
 import { LEAVES_BY_PROCEDURE, validateLeavesFinding } from "@odentia/clinical"
 import { user } from "@odentia/db/schema/auth"
 import {
-  cie10Code,
   encounter,
   encounterDiagnosis,
   odontogramEntry,
-  patient,
   serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
@@ -21,7 +19,7 @@ import {
   getOdontogram,
   listOdontogramAssessments,
 } from "./clinical.js"
-import { makeSigner, readyToClose } from "./clinical-test-fixture.js"
+import { makeSigner, readyToClose, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,
   finalizeEncounter,
@@ -31,10 +29,12 @@ import {
 import { nextPatientNumber } from "./patients.js"
 import { addPlanItem, setPlanItemStatus } from "./plan.js"
 import { createService } from "./service-catalog.js"
+import { librarySpecialtyIds } from "./specialties.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { registerToothFinding } from "./tooth-panel.js"
 import { drawTreatedFinding } from "./treated-findings.js"
 import { withOrgContext } from "@odentia/db"
+import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
@@ -57,21 +57,15 @@ async function attending(orgId: string) {
   const actor = randomUUID()
   await ownerDb.insert(user).values({ id: actor, name: "Ana Torres", email: `${actor}@example.test` })
   await makeSigner(orgId, actor)
-  await ownerDb
-    .insert(cie10Code)
-    .values([
-      { code: "K02", description: "Caries dental" },
-      { code: "K02.1", description: "Caries de la dentina" },
+  await seedDiagnosisCodes([
+      { code: "K02", title: "Caries dental" },
+      { code: "K02.1", title: "Caries de la dentina" },
     ])
-    .onConflictDoNothing()
-  const [person] = await ownerDb
-    .insert(patient)
-    .values({
+  const [person] = await insertTestPatients(ownerDb, {
       organizationId: orgId,
       displayName: "Lucía Fernández",
       patientNumber: await nextPatientNumber(ownerDb, orgId),
     })
-    .returning()
   const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
   const open = async () => {
     const [row] = await ownerDb
@@ -230,10 +224,10 @@ it("«Firmar odontograma» firma con el perfil, solo para pedidos y reingreso, y
 it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", async () => {
   const f = await attending("org_a")
   const draft = await f.open()
-  const resin = await f.run((tx) =>
+  const resin = await f.run(async (tx) =>
     createService(tx, f.orgId, f.actor, {
       name: "Resina compuesta",
-      specialty: "restauradora",
+      specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["restauradora"])).get("restauradora")!,
       scope: "surfaces",
       priceCents: 18000,
       leavesFinding: { condition: "definitive_restoration", variant: "resin" },
@@ -241,10 +235,10 @@ it("completar un tratamiento cuyo servicio deja algo lo dibuja una sola vez", as
   )
   // En Perú lo que deja se configura con su variante.
   await expect(
-    f.run((tx) =>
+    f.run(async (tx) =>
       createService(tx, f.orgId, f.actor, {
         name: "Corona",
-        specialty: "protesis",
+        specialtyId: (await librarySpecialtyIds(tx, f.orgId, ["protesis"])).get("protesis")!,
         scope: "tooth",
         priceCents: 50000,
         leavesFinding: { condition: "crown" },
@@ -308,7 +302,6 @@ it("la exodoncia de un servicio directo deja la pieza ausente con su causa en Pe
     .values({
       organizationId: f.orgId,
       name: "Exodoncia simple",
-      specialty: "cirugia",
       scope: "tooth",
       source: "custom",
       priceCents: 9000,
@@ -342,7 +335,6 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
     .values({
       organizationId: f.orgId,
       name: "Resina compuesta",
-      specialty: "restauradora",
       scope: "surfaces",
       source: "custom",
       priceCents: 18000,
@@ -356,7 +348,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
       condition: "caries",
       surfaces: ["occlusal"],
       details: { variant: "dentin" },
-      diagnosis: { cie10Code: "K02.1", diagnosisType: "presuntivo" },
+      diagnosis: { diagnosisCode: "K02.1", diagnosisType: "provisional" },
       treatment: { serviceId: resin!.id },
     }),
   )
@@ -365,7 +357,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
     .select()
     .from(encounterDiagnosis)
     .where(eq(encounterDiagnosis.encounterId, draft))
-  expect(diagnosis).toMatchObject({ cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16, surfaces: ["occlusal"] })
+  expect(diagnosis).toMatchObject({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, surfaces: ["occlusal"] })
   expect(result.planItems[0]).toMatchObject({
     toothNumber: 16,
     surfaces: ["occlusal"],
@@ -386,7 +378,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
         condition: "caries",
         surfaces: ["occlusal"],
         details: { variant: "enamel" },
-        diagnosis: { cie10Code: "K02", diagnosisType: "presuntivo" },
+        diagnosis: { diagnosisCode: "K02", diagnosisType: "provisional" },
         treatment: { serviceId: resin!.id },
       }),
     ),

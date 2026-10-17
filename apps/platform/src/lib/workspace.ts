@@ -61,9 +61,14 @@ export type WaitingRow =
       /** Nadie lo tomó todavía: la fila ofrece «Tomar». */
       unclaimed: boolean
     }
-  /** Una cita sin confirmar después del primer recordatorio del agente: hay que llamar. */
+  /**
+   * Una cita que hay que confirmar llamando: sigue sin confirmar tras el primer
+   * recordatorio (`sin_confirmar`) o es de mañana y no recibe recordatorios
+   * (`sin_recordatorios`, ADR 0040).
+   */
   | {
       kind: "unconfirmed"
+      why: "sin_confirmar" | "sin_recordatorios"
       id: string
       patientId: string
       patientName: string
@@ -96,14 +101,29 @@ export type WaitingRow =
       options: number
     }
   /**
-   * El documento que la persona escribió en «Su enlace» ya es de otra ficha:
-   * no se guardó y recepción revisa si son la misma persona (ADR 0037).
+   * Un documento escrito desde fuera ya es de otra persona y recepción revisa
+   * (nunca se unen solas): el de «Su enlace» (`enlace`), el de alguien que se
+   * registró en línea (`registro`, la fila es de quien tenía el documento) o
+   * el representante que nombró el registro de un menor (`representante`,
+   * espera su «Confirmar»).
    */
-  | { kind: "possibleDuplicate"; id: string; patientId: string; patientName: string; detail: string; createdAt: string }
+  | {
+      kind: "possibleDuplicate"
+      id: string
+      source: "enlace" | "registro" | "representante"
+      patientId: string | null
+      personId: string | null
+      patientName: string
+      personName: string | null
+      detail: string
+      createdAt: string
+    }
   /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
   | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
+  /** Un aviso que WhatsApp pasó a promoción: solo sale a quien aceptó novedades; hay que cambiarle el texto (ADR 0040). */
+  | { kind: "promotion"; messageId: string; title: string }
   | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }
 export interface WorkspaceAppointment {
   id: string

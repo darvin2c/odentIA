@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { type AdminDecider, getAgentConfig, type TickDeps } from "@odentia/services"
+import { type AdminDecider, getAgentConfig, type RuleConflictModel, type TickDeps } from "@odentia/services"
 import { meterAiUse } from "./ai-usage.js"
 import { createDecisionModel, DecisionError, type DecisionModel, type DecisionQuestion, type PlatformDecisions } from "./decision/index.js"
 import { type PlatformLlm, resolveLlmSpec } from "./llm.js"
@@ -95,5 +95,45 @@ export function createAlreadyTold(db: Db, deps: AdminModelDeps): NonNullable<Tic
       const result = await model.decide(alreadyToldState(input), [ALREADY_TOLD_QUESTION])
       const answer = result.answers.find((item) => item.id === "ya_aviso")
       return answer?.kind === "yesno" && answer.probability >= ALREADY_TOLD_MIN
+    })
+}
+
+/* ---------- «Lo que el agente debe saber»: ¿se contradicen? ---------- */
+
+/** Por encima de esto se avisa que la regla nueva choca con otra. */
+export const RULE_CONFLICT_MIN = 0.7
+
+export const RULE_CONFLICT_QUESTION: DecisionQuestion = {
+  id: "regla_contradice",
+  kind: "yesno",
+  instructions:
+    "¿Estas dos indicaciones para el asistente de una clínica se contradicen, es decir, no se pueden cumplir las dos a la vez en algún caso?",
+  criteria: {
+    yes: "Cumplir una obliga a no cumplir la otra en algún caso (por ejemplo, una prohíbe algo que la otra permite u ofrece).",
+    no: "Se pueden cumplir las dos a la vez: hablan de cosas distintas o una solo precisa a la otra.",
+  },
+}
+
+/** Lo que viaja al modelo: solo los dos textos de las reglas, nada de pacientes. */
+export function ruleConflictState(candidate: string, existing: string): string {
+  return `Indicación nueva: ${candidate.slice(0, 600)}\nIndicación que ya tiene: ${existing.slice(0, 600)}`
+}
+
+/**
+ * El modelo de decisión de la clínica, preguntado por dos reglas. Solo si la
+ * clínica lo configuró (decisión 24): sin él, los servicios usan la
+ * comparación simple (`simpleRulesConflict`). Null también con el modelo de
+ * demostración.
+ */
+export async function createRuleConflictModel(db: Db, deps: AdminModelDeps, orgId: string): Promise<RuleConflictModel | null> {
+  const provider = await withOrgContext(db, orgId, async (tx) => (await getAgentConfig(tx, orgId)).decisionProvider)
+  if (provider === "none") return null
+  const model = await createAdminDecisionModel(db, deps, orgId)
+  if (!model) return null
+  return (candidate, existing) =>
+    meterAiUse(db, orgId, "administrador", async () => {
+      const result = await model.decide(ruleConflictState(candidate, existing), [RULE_CONFLICT_QUESTION])
+      const answer = result.answers.find((item) => item.id === RULE_CONFLICT_QUESTION.id)
+      return answer?.kind === "yesno" && answer.probability >= RULE_CONFLICT_MIN
     })
 }

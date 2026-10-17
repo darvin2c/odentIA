@@ -27,7 +27,7 @@ export interface ScheduleAgendaItem {
   /** Cómo decirlo cuando el nombre completo no cabe («Dra. Ana»). */
   resourceShortLabel?: string
   resourceTone?: ScheduleTone
-  /** Dato secundario del recurso: el sillón. */
+  /** Dato secundario del recurso: la unidad dental. */
   resourceDetail?: string
 }
 

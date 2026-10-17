@@ -3,7 +3,6 @@ import { agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agen
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { helpRequest } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, gt } from "drizzle-orm"
 import { updateAdminSettings } from "./agent-admin.js"
 import { upsertAgentConfig } from "./agentConfig.js"
@@ -115,7 +114,7 @@ export async function seedAgent(
   const first = convs[0]
   if (first) {
     // Referencias reales para que aprobar la propuesta en dev ejecute de
-    // verdad: sillón de la sede y una cita futura programada (su versión se
+    // verdad: unidad dental de la sede y una cita futura programada (su versión se
     // lee aquí porque el seed purga y recrea la org en cada ejecución).
     const [chair] = await tx
       .select({ id: scheduleChair.id })
@@ -356,6 +355,50 @@ export async function seedAgent(
         conversationId: corrected?.conversationId ?? null,
         proposedBy: ownerUserId,
       },
+      // «Lo que el agente debe saber» (decisión 24): dos líneas escritas por la
+      // clínica y una regla por aprobar que contradice una de ellas.
+      {
+        id: "00000000-0000-4000-8000-00000000f210",
+        organizationId: orgId,
+        kind: "regla",
+        scope: "recepcion",
+        title: "Responde en español, con tono amable.",
+        body: "Responde en español, con tono amable.",
+        status: "activa",
+        source: "escrita",
+        proposedBy: ownerUserId,
+        approvedBy: ownerUserId,
+        approvedAt: new Date(Date.now() - 40 * 86_400_000),
+        createdAt: new Date(Date.now() - 40 * 86_400_000),
+      },
+      {
+        id: "00000000-0000-4000-8000-00000000f211",
+        organizationId: orgId,
+        kind: "regla",
+        scope: "recepcion",
+        title: "No ofrezcas citas los sábados.",
+        body: "No ofrezcas citas los sábados.",
+        status: "activa",
+        source: "escrita",
+        proposedBy: ownerUserId,
+        approvedBy: ownerUserId,
+        approvedAt: new Date(Date.now() - 39 * 86_400_000),
+        createdAt: new Date(Date.now() - 39 * 86_400_000),
+      },
+      {
+        id: "00000000-0000-4000-8000-00000000f203",
+        organizationId: orgId,
+        kind: "regla",
+        scope: "recepcion",
+        title: "Los sábados atiende la Dra. Ana",
+        question: "¿Atienden el sábado?",
+        body: "Los sábados atiende la Dra. Ana.",
+        failure: "falto_dato",
+        originalReply: "No atendemos los sábados.",
+        status: "propuesta",
+        conversationId: corrected?.conversationId ?? null,
+        proposedBy: ownerUserId,
+      },
       {
         id: "00000000-0000-4000-8000-00000000f202",
         organizationId: orgId,
@@ -414,20 +457,4 @@ export async function seedAgent(
       },
     ])
     .onConflictDoNothing({ target: agentPersonFact.id })
-  // Ayuda: una pregunta que odentIA ya respondió; el botón de Ayuda muestra el aviso.
-  await tx
-    .insert(helpRequest)
-    .values({
-      id: "00000000-0000-4000-8000-00000000f501",
-      organizationId: orgId,
-      userId: ownerUserId,
-      question: "¿Cómo exporto mis pacientes a Excel?",
-      screen: "/patients",
-      role: "Propietario",
-      dedupeKey: "seed-exportar-pacientes",
-      status: "respondida",
-      answer: "Todavía no se puede exportar la lista de pacientes. Lo anotamos para una próxima versión.",
-      answeredAt: new Date(Date.now() - 86_400_000),
-    })
-    .onConflictDoNothing({ target: helpRequest.id })
 }
