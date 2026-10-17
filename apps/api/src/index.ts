@@ -35,7 +35,11 @@ const auth = createAuth({
   trustedOrigins: env.trustedOrigins,
   googleClientId: env.GOOGLE_CLIENT_ID,
   googleClientSecret: env.GOOGLE_CLIENT_SECRET,
+  clientIpHeader: env.CLIENT_IP_HEADER,
 })
+if (env.NODE_ENV === "production" && !env.CLIENT_IP_HEADER) {
+  console.warn("CLIENT_IP_HEADER vacío: todas las personas comparten el límite de intentos de Better Auth (docs/deployment.md).")
+}
 
 const app = createApp({
   auth,
