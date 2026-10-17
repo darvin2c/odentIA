@@ -10,3 +10,5 @@ export const tenantUrl = (slug: string, path = "/") =>
   `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
 
 export const adminUrl = (path = "/") => `https://admin.${BASE_DOMAIN}${BASE_PORT}${path}`
+/** Página de la web de marketing (dominio raíz): términos, privacidad, contacto. */
+export const webUrl = (path = "/") => `https://${BASE_DOMAIN}${BASE_PORT}${path}`

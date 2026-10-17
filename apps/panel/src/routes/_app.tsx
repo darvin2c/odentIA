@@ -1,4 +1,5 @@
 import {
+  AccessLinkPasswordGate,
   AppShell,
   type AppShellNavEntry,
   Brand,
@@ -17,7 +18,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { adminAccessQuery } from "../lib/admin-access"
 import { adminUrl } from "../lib/host"
 import { Building2, CircleHelp, KeyRound, ShieldCheck, UserRound } from "lucide-react"
-import { authClient } from "../lib/auth-client"
+import { authClient, authFetch } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
 import { requireVerifiedSession } from "../lib/guards"
 
@@ -100,6 +101,8 @@ function AppLayout() {
           <SideDockSlot />
         </div>
       </SideDockProvider>
+      {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
+      <AccessLinkPasswordGate request={authFetch} />
     </AppShell>
   )
 }

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { boolean, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
+import { boolean, date, index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk } from "./crm.js"
 
@@ -45,4 +45,19 @@ export const helpAsk = pgTable("help_ask", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   index("help_ask_user_date_idx").on(table.organizationId, table.userId, table.createdAt),
+])
+
+/**
+ * Última vez que cada persona miró Inicio en una clínica, para «Mientras no
+ * estabas»: la primera visita de cada día (en la zona de la clínica) cuenta lo
+ * que hicieron los agentes desde la visita anterior. `greetedOn` es el día en
+ * que ya se le mostró; una vez al día.
+ */
+export const homeVisit = pgTable("home_visit", {
+  organizationId: orgFk("organization_id"),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+  greetedOn: date("greeted_on", { mode: "string" }),
+}, table => [
+  uniqueIndex("home_visit_user_uidx").on(table.organizationId, table.userId),
 ])

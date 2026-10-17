@@ -35,6 +35,7 @@ const auth = createAuth({
   trustedOrigins: env.trustedOrigins,
   googleClientId: env.GOOGLE_CLIENT_ID,
   googleClientSecret: env.GOOGLE_CLIENT_SECRET,
+  passwordBreachCheck: env.PASSWORD_BREACH_CHECK !== "false",
 })
 
 const app = createApp({

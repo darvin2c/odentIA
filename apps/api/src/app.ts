@@ -59,6 +59,7 @@ import {
 import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
+import { createPublicSignUpRoute } from "./routes/public-sign-up.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
@@ -290,6 +291,8 @@ export function createApp(deps: AppDeps) {
       cookieDomain: deps.cookieDomain,
     }),
   )
+  // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.
+  app.route("/api/public/sign-up", createPublicSignUpRoute({ ownerDb: deps.ownerDb }))
   // Libro de Reclamaciones de odentIA: la única ruta que llama la web de marketing.
   app.route(
     "/api/public/libro-de-reclamaciones",

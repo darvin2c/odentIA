@@ -1,10 +1,24 @@
-import { Field, FieldError, FieldGroup, FieldLabel, Input, Separator, toast } from "@odentia/ui"
-import { AuthSplit, fieldErrorMessages, SubmitButton } from "@odentia/ui-patterns"
+import { AGENTS, type DayEvent } from "@odentia/brand-scene"
+import { Checkbox, Field, FieldError, FieldGroup, FieldLabel, Input, Separator } from "@odentia/ui"
+import {
+  AuthAside,
+  AuthSplit,
+  fieldErrorMessages,
+  PasswordInput,
+  SubmitButton,
+  usePasswordRequirements,
+} from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
+import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { Check } from "lucide-react"
+import { useState } from "react"
 import { z } from "zod"
-import { authClient } from "../lib/auth-client"
+import { API_URL, authClient } from "../lib/auth-client"
+import { AuthAlert, AuthLegal } from "../lib/auth-screens"
+import { creditText } from "../lib/credit"
 import { GoogleAuthButton } from "../lib/google-auth"
+import { webUrl } from "../lib/host"
 
 export const Route = createFileRoute("/register")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -13,32 +27,94 @@ export const Route = createFileRoute("/register")({
   }),
   component: RegisterPage,
 })
-const registration = z.object({
-  firstName: z.string().min(1, "Ingresa tu nombre"),
-  lastName: z.string().min(1, "Ingresa tus apellidos"),
-  email: z.string().email("Correo inválido"),
-  password: z.string().min(8, "Mínimo 8 caracteres"),
+
+const signUpInfoSchema = z.object({
+  offer: z.object({ currency: z.string(), creditCents: z.number(), days: z.number() }).nullable(),
+  legalVersion: z.string(),
 })
 
+/** Crédito de prueba y versión de los documentos: los dice el servidor, no la pantalla. */
+const signUpInfoQuery = {
+  queryKey: ["public", "sign-up"],
+  queryFn: async () => {
+    const res = await fetch(`${API_URL}/api/public/sign-up`)
+    if (!res.ok) throw new Error(`Error ${res.status}`)
+    return signUpInfoSchema.parse(await res.json())
+  },
+  staleTime: 5 * 60_000,
+}
+
+const registration = z.object({
+  firstName: z.string().trim().min(1, "Escribe tu nombre"),
+  lastName: z.string().trim().min(1, "Escribe tus apellidos"),
+  email: z.string().email("Escribe un correo válido, como nombre@clinica.com"),
+  password: z.string().min(8, "Usa al menos 8 caracteres"),
+  terms: z.literal(true, { error: "Acepta los documentos para crear tu cuenta" }),
+})
+
+/**
+ * Crear cuenta (lienzo «Crear cuenta odentIA», aprobado el 2026-10-17): vende
+ * sin abrumar. A la izquierda el titular con el crédito, tres frases de
+ * confianza, las piezas de la web y una sola acción de un agente a la vez; a
+ * la derecha el formulario, con el mismo botón que la web.
+ */
 function RegisterPage() {
   const navigate = useNavigate()
   const { email: initialEmail, invitationId } = useSearch({ from: "/register" })
+  const info = useQuery(signUpInfoQuery)
+  const offer = info.data?.offer ?? null
+  const credit =
+    offer && offer.creditCents > 0 ? creditText(offer.currency, offer.creditCents) : null
+  const cta = credit ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
+  const [work, setWork] = useState<DayEvent | null>(null)
+  const [problem, setProblem] = useState<{
+    field: "email" | "password" | "form"
+    text: string
+    reload?: boolean
+  } | null>(null)
+
   const form = useForm({
-    defaultValues: { firstName: "", lastName: "", email: initialEmail ?? "", password: "" },
+    defaultValues: {
+      firstName: "",
+      lastName: "",
+      email: initialEmail ?? "",
+      password: "",
+      terms: false as boolean,
+    },
     validators: { onSubmit: registration },
     onSubmit: async ({ value }) => {
-      const { error: signUpError } = await authClient.signUp.email({
-        name: `${value.firstName} ${value.lastName}`.trim(),
-        firstName: value.firstName,
-        lastName: value.lastName,
+      setProblem(null)
+      if (!info.data) {
+        setProblem({
+          field: "form",
+          text: "No pudimos cargar los documentos. Recarga la página.",
+          reload: true,
+        })
+        return
+      }
+      const { error } = await authClient.signUp.email({
+        name: `${value.firstName.trim()} ${value.lastName.trim()}`.trim(),
+        firstName: value.firstName.trim(),
+        lastName: value.lastName.trim(),
         email: value.email,
         password: value.password,
+        termsVersion: info.data.legalVersion,
         callbackURL: invitationId
           ? `${window.location.origin}/accept-invitation/${encodeURIComponent(invitationId)}`
           : `${window.location.origin}/`,
       })
-      if (signUpError) {
-        toast.error(signUpError.message ?? "No se pudo registrar la cuenta.")
+      if (error) {
+        const code = error.code ?? ""
+        if (code.startsWith("USER_ALREADY_EXISTS")) setProblem({ field: "email", text: "exists" })
+        else if (code === "PASSWORD_COMPROMISED" || code === "PASSWORD_TOO_SHORT")
+          setProblem({ field: "password", text: error.message ?? "Elige otra contraseña." })
+        else if (code === "TERMS_OUTDATED")
+          setProblem({ field: "form", text: error.message ?? "", reload: true })
+        else
+          setProblem({
+            field: "form",
+            text: error.message ?? "No pudimos crear la cuenta. Inténtalo de nuevo.",
+          })
         return
       }
       await navigate(
@@ -49,120 +125,312 @@ function RegisterPage() {
     },
   })
 
+  const trust = [
+    "Sin tarjeta",
+    offer ? `${offer.days} días` : "Prueba gratis",
+    "Sin límite de usuarios",
+  ]
+  const headline = credit ? `Obtén ${credit} de crédito.` : "Prueba odentIA."
+
   return (
     <AuthSplit
-      title="Crea tu cuenta"
-      description="Regístrate en odentIA"
+      title={
+        <span className="flex items-center justify-between gap-3">
+          Crea tu cuenta
+          <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-foreground">
+            1 de 4
+          </span>
+        </span>
+      }
+      aside={
+        <AuthAside
+          tag={offer ? `Prueba de ${offer.days} días` : "Prueba gratis"}
+          title={headline}
+          accent="Tus agentes empiezan hoy."
+        >
+          <TrustChips items={trust} />
+        </AuthAside>
+      }
+      mobileAside={
+        <div className="flex flex-col gap-3 text-left">
+          <p className="text-2xl leading-tight font-extrabold tracking-[-0.02em] text-[#f1f5f9]">
+            {headline} <span className="text-[#4fc3d7]">Tus agentes empiezan hoy.</span>
+          </p>
+          <TrustChips items={trust} />
+        </div>
+      }
+      below={work ? <AgentWork work={work} /> : null}
+      onWork={setWork}
+      legal={<AuthLegal />}
       footer={
         <>
           ¿Ya tienes cuenta?{" "}
-          <Link to="/login" className="underline">
-            Inicia sesión
+          <Link to="/login" className="font-medium text-foreground underline">
+            Entrar
           </Link>
         </>
       }
     >
       <div className="flex flex-col gap-4">
         <GoogleAuthButton
-          label="Regístrate con Google"
+          label="Continuar con Google"
           callbackURL={invitationId ? `/accept-invitation/${invitationId}` : "/"}
         />
-        <div className="flex items-center gap-3" role="separator">
-          <Separator className="flex-1" />
-          <span className="text-xs text-muted-foreground">o</span>
-          <Separator className="flex-1" />
+        <div className="flex items-center gap-3">
+          <Separator className="flex-1" aria-hidden />
+          <span className="text-xs text-muted-foreground">o con tu correo</span>
+          <Separator className="flex-1" aria-hidden />
         </div>
       </div>
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault()
           void form.handleSubmit()
         }}
       >
         <FieldGroup className="gap-4">
-          <form.Field name="firstName">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
-                <Input
-                  id="firstName"
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  aria-describedby={field.state.meta.errors.length ? "firstName-error" : undefined}
-                  autoComplete="given-name"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError id="firstName-error">
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
-              </Field>
-            )}
-          </form.Field>
-          <form.Field name="lastName">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
-                <Input
-                  id="lastName"
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  aria-describedby={field.state.meta.errors.length ? "lastName-error" : undefined}
-                  autoComplete="family-name"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError id="lastName-error">
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
-              </Field>
-            )}
-          </form.Field>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form.Field name="firstName">
+              {(field) => (
+                <Field>
+                  <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
+                  <Input
+                    id="firstName"
+                    aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                    aria-describedby={
+                      field.state.meta.errors.length ? "firstName-error" : undefined
+                    }
+                    autoComplete="given-name"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                  <FieldError id="firstName-error">
+                    {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                  </FieldError>
+                </Field>
+              )}
+            </form.Field>
+            <form.Field name="lastName">
+              {(field) => (
+                <Field>
+                  <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
+                  <Input
+                    id="lastName"
+                    aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                    aria-describedby={field.state.meta.errors.length ? "lastName-error" : undefined}
+                    autoComplete="family-name"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                  <FieldError id="lastName-error">
+                    {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
+                  </FieldError>
+                </Field>
+              )}
+            </form.Field>
+          </div>
           <form.Field name="email">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="email">Correo</FieldLabel>
-                <Input
-                  id="email"
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  aria-describedby={field.state.meta.errors.length ? "email-error" : undefined}
-                  type="email"
-                  autoComplete="email"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError id="email-error">
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
-              </Field>
-            )}
+            {(field) => {
+              const exists = problem?.field === "email"
+              return (
+                <Field>
+                  <FieldLabel htmlFor="email">Correo</FieldLabel>
+                  <Input
+                    id="email"
+                    aria-invalid={field.state.meta.errors.length > 0 || exists || undefined}
+                    aria-describedby={
+                      field.state.meta.errors.length || exists ? "email-error" : undefined
+                    }
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={field.state.value}
+                    onChange={(event) => {
+                      field.handleChange(event.target.value)
+                      if (exists) setProblem(null)
+                    }}
+                  />
+                  <FieldError id="email-error">
+                    {exists ? (
+                      <>
+                        Ya hay una cuenta con este correo.{" "}
+                        <Link to="/login" className="underline">
+                          Entra
+                        </Link>{" "}
+                        o{" "}
+                        <Link
+                          to="/forgot-password"
+                          search={{ email: field.state.value }}
+                          className="underline"
+                        >
+                          recupera tu contraseña
+                        </Link>
+                        .
+                      </>
+                    ) : (
+                      (fieldErrorMessages(field.state.meta.errors)[0] ?? null)
+                    )}
+                  </FieldError>
+                </Field>
+              )
+            }}
           </form.Field>
           <form.Field name="password">
             {(field) => (
-              <Field>
-                <FieldLabel htmlFor="password">Contraseña</FieldLabel>
-                <Input
-                  id="password"
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  aria-describedby={field.state.meta.errors.length ? "password-error" : undefined}
-                  type="password"
-                  autoComplete="new-password"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError id="password-error">
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
-              </Field>
+              <NewPasswordField
+                value={field.state.value}
+                onChange={(v) => {
+                  field.handleChange(v)
+                  if (problem?.field === "password") setProblem(null)
+                }}
+                error={
+                  problem?.field === "password"
+                    ? problem.text
+                    : fieldErrorMessages(field.state.meta.errors)[0]
+                }
+              />
             )}
           </form.Field>
+          <form.Field name="terms">
+            {(field) => {
+              const error = fieldErrorMessages(field.state.meta.errors)[0]
+              return (
+                <Field>
+                  <div className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                    <Checkbox
+                      id="terms"
+                      className="mt-0.5"
+                      checked={field.state.value}
+                      aria-invalid={error ? true : undefined}
+                      aria-describedby={error ? "terms-error" : undefined}
+                      onCheckedChange={(checked) => field.handleChange(checked === true)}
+                    />
+                    <label htmlFor="terms">
+                      Acepto los{" "}
+                      <a
+                        href={webUrl("/terminos")}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-foreground underline"
+                      >
+                        Términos del servicio
+                      </a>
+                      , el{" "}
+                      <a
+                        href={webUrl("/privacidad")}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-foreground underline"
+                      >
+                        Aviso de privacidad
+                      </a>{" "}
+                      y el{" "}
+                      <a
+                        href={webUrl("/encargo-de-tratamiento")}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-foreground underline"
+                      >
+                        Contrato de encargo de tratamiento
+                      </a>
+                      .
+                    </label>
+                  </div>
+                  <FieldError id="terms-error">{error ?? null}</FieldError>
+                </Field>
+              )
+            }}
+          </form.Field>
+          {problem?.field === "form" ? (
+            <AuthAlert>
+              {problem.text}{" "}
+              {problem.reload ? (
+                <button
+                  type="button"
+                  className="font-semibold underline"
+                  onClick={() => window.location.reload()}
+                >
+                  Recargar
+                </button>
+              ) : null}
+            </AuthAlert>
+          ) : null}
           <form.Subscribe selector={(state) => state.isSubmitting}>
             {(isSubmitting) => (
-              <SubmitButton type="submit" pending={isSubmitting}>
-                Registrarme
+              <SubmitButton type="submit" pending={isSubmitting} className="w-full">
+                {cta}
               </SubmitButton>
             )}
           </form.Subscribe>
+          <p className="text-center text-xs text-muted-foreground">
+            Sin tarjeta. Te la pediremos solo cuando elijas tu plan.
+          </p>
         </FieldGroup>
       </form>
     </AuthSplit>
+  )
+}
+
+function TrustChips({ items }: { items: string[] }) {
+  return (
+    <ul className="flex flex-wrap gap-2">
+      {items.map((t) => (
+        <li
+          key={t}
+          className="flex items-center gap-1.5 rounded-full border border-[#23444e] bg-[#4fc3d7]/10 px-3 py-1.5 text-sm font-bold text-[#f1f5f9]"
+        >
+          <Check className="size-3.5 text-[#4fc3d7]" aria-hidden />
+          {t}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** Una sola acción a la vez, con el color del agente que la hizo; cambia con la pieza encendida. */
+function AgentWork({ work }: { work: DayEvent }) {
+  const agent = AGENTS[work.agent]
+  return (
+    <div
+      key={`${work.time}-${work.text}`}
+      className="flex items-center gap-3 rounded-2xl border border-[#23444e] bg-[#061318]/80 px-4 py-3 motion-safe:animate-in motion-safe:fade-in-0"
+    >
+      <span
+        aria-hidden
+        className="size-2.5 shrink-0 rounded-full"
+        style={{ background: agent?.color }}
+      />
+      <span className="shrink-0 text-sm font-extrabold text-[#f1f5f9]">{agent?.name}</span>
+      <span className="min-w-0 flex-1 text-sm text-[#b9cfd5]">{work.text}</span>
+      <span className="shrink-0 font-mono text-xs text-[#8fb0b8]">{work.time}</span>
+    </div>
+  )
+}
+
+function NewPasswordField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string
+  onChange: (value: string) => void
+  error?: string | undefined
+}) {
+  const { requirements } = usePasswordRequirements(value)
+  return (
+    <Field>
+      <FieldLabel htmlFor="password">Contraseña</FieldLabel>
+      <PasswordInput
+        id="password"
+        value={value}
+        onChange={onChange}
+        autoComplete="new-password"
+        invalid={!!error}
+        describedBy={error ? "password-error" : undefined}
+        requirements={requirements}
+      />
+      <FieldError id="password-error">{error ?? null}</FieldError>
+    </Field>
   )
 }

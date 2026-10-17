@@ -6,6 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@odentia/ui"
 import {
+  AccessLinkPasswordGate,
   AppShell,
   Brand,
   type AppShellNavEntry,
@@ -55,7 +56,7 @@ import { WorkspaceNotifications } from "../components/workspace-notifications"
 import { SaasStatusBanner } from "../components/saas-status-banner"
 import { SupportGrantBanner } from "../components/support-grant-banner"
 import { invalidateAppointmentQueries } from "../lib/agenda"
-import { authClient } from "../lib/auth-client"
+import { authClient, authFetch } from "../lib/auth-client"
 import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
 import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
@@ -314,6 +315,8 @@ function OrgLayout() {
           </HeaderUtilitiesProvider>
         </AgentPanelProvider>
       </SideDockProvider>
+      {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
+      <AccessLinkPasswordGate request={authFetch} />
     </AppShell>
   )
 }

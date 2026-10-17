@@ -4,7 +4,6 @@ import {
   changeEmailVerificationTemplate,
   invitationTemplate,
   type Mailer,
-  resetPasswordTemplate,
   verifyEmailTemplate,
 } from "@odentia/mail"
 import { betterAuth } from "better-auth"
@@ -14,6 +13,9 @@ import { organization } from "better-auth/plugins"
 import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access"
 import { twoFactor } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
+import { accessLink } from "./access-link.js"
+import { passwordBreachCheck } from "./password-breach.js"
+import { requireTermsOnSignUp } from "./terms.js"
 
 export interface CreateAuthOptions {
   db: Db
@@ -29,6 +31,8 @@ export interface CreateAuthOptions {
   googleClientSecret: string
   /** Conexión owner: denial de sesiones con bloqueo global activo. */
   ownerDb: Db
+  /** Rechazar contraseñas filtradas (Have I Been Pwned); se apaga en pruebas sin red. */
+  passwordBreachCheck?: boolean
 }
 
 function isChangeEmailToken(token: string): boolean {
@@ -53,6 +57,7 @@ export function createAuth({
   googleClientId,
   googleClientSecret,
   ownerDb,
+  passwordBreachCheck: breachCheck = true,
 }: CreateAuthOptions) {
   return betterAuth({
     appName: "odentIA",
@@ -64,13 +69,12 @@ export function createAuth({
         ? { google: { clientId: googleClientId, clientSecret: googleClientSecret } }
         : {}),
     },
+    // Sin `sendResetPassword`: la contraseña olvidada se recupera con el enlace
+    // de acceso (`access-link.ts`), que deja a la persona adentro.
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
-      sendResetPassword: async ({ user, url }) => {
-        const template = resetPasswordTemplate({ url })
-        await mailer.send({ to: user.email, ...template })
-      },
+      revokeSessionsOnPasswordReset: true,
     },
     emailVerification: {
       sendOnSignUp: true,
@@ -86,6 +90,9 @@ export function createAuth({
       additionalFields: {
         firstName: { type: "string", required: false, defaultValue: "" },
         lastName: { type: "string", required: false, defaultValue: "" },
+        // Lo pone el registro con correo (`requireTermsOnSignUp`); la fecha la escribe el servidor.
+        termsVersion: { type: "string", required: false },
+        termsAcceptedAt: { type: "date", required: false, input: false },
       },
       changeEmail: {
         enabled: true,
@@ -102,6 +109,16 @@ export function createAuth({
     // Denial de sesiones para cuentas con bloqueo global (tabla user_global_block).
     // Sin fallback fail-open: la frontera siempre rechaza closed/blocked.
     databaseHooks: {
+      user: {
+        create: {
+          before: async (data) => {
+            if (typeof data.termsVersion === "string" && data.termsVersion) {
+              return { data: { ...data, termsAcceptedAt: new Date() } }
+            }
+            return { data }
+          },
+        },
+      },
       session: {
         create: {
           before: async (created) => {
@@ -127,6 +144,9 @@ export function createAuth({
       // fresca verificada en /api/admin/access (regla propia); con credencial
       // siempre exige contraseña. Solo lo enrolan staff (única UI).
       twoFactor({ allowPasswordless: true }),
+      accessLink({ mailer, webURL }),
+      passwordBreachCheck({ enabled: breachCheck }),
+      requireTermsOnSignUp(),
       organization({
         // `permissions.ts` decida por dominio. Sin gestión de miembros ni
         // invitaciones (igual que `member`): solo owner/admin administran,
@@ -189,4 +209,6 @@ export async function lockClinicIdentityFields({ organization: changes }: { orga
 
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
+export { ACCESS_LINK_TTL_SECONDS } from "./access-link.js"
+export { LEGAL_VERSION } from "./terms.js"
 export * from "./permissions.js"

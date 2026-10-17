@@ -180,6 +180,9 @@ importers:
       '@fontsource-variable/manrope':
         specifier: 5.3.0
         version: 5.3.0
+      '@odentia/brand-scene':
+        specifier: workspace:*
+        version: link:../../packages/brand-scene
       '@odentia/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -374,6 +377,9 @@ importers:
       '@fontsource/ibm-plex-mono':
         specifier: 5.3.0
         version: 5.3.0
+      '@odentia/brand-scene':
+        specifier: workspace:*
+        version: link:../../packages/brand-scene
       astro:
         specifier: 7.3.5
         version: 7.3.5(@types/node@24.19.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)
@@ -557,6 +563,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      zod:
+        specifier: 4.6.2
+        version: 4.6.2
     devDependencies:
       '@types/node':
         specifier: 22.20.2
@@ -567,6 +576,21 @@ importers:
       vitest:
         specifier: 3.2.7
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
+
+  packages/brand-scene:
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.3.0
+      react:
+        specifier: ^19.2.8
+        version: 19.3.0
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.19.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(lightningcss@1.33.0)(tsx@4.23.13)(yaml@2.9.1)
 
   packages/channels:
     devDependencies:
@@ -809,6 +833,9 @@ importers:
       '@maskito/react':
         specifier: 5.4.0
         version: 5.4.0(@maskito/core@5.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@odentia/brand-scene':
+        specifier: workspace:*
+        version: link:../brand-scene
       '@odentia/ui':
         specifier: workspace:*
         version: link:../ui
