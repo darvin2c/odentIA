@@ -375,7 +375,23 @@ details.q p {
 }
 
 /* La voz de los agentes en IBM Plex Mono; el resto de lo monoespaciado usa la del sistema, como la app. */
-.mono:is(.zmeta, .chstate, .at, .dtime, .dpend, .dict-org, .code, .pz-meta, .pz-ledtitle, .pz-time, .b2-hk, .b2-tm, .pm, .lt, .lw),
+.mono:is(
+  .zmeta,
+  .chstate,
+  .at,
+  .dtime,
+  .dpend,
+  .dict-org,
+  .code,
+  .pz-meta,
+  .pz-ledtitle,
+  .pz-time,
+  .b2-hk,
+  .b2-tm,
+  .pm,
+  .lt,
+  .lw
+),
 .zcap .mono {
   font-family: var(--agent-font);
 }
