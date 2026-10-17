@@ -72,6 +72,29 @@ su DNS y enrutarlo al servicio `admin` antes de habilitar personal. Aplicar las
 migraciones antes de API/worker; no hay fallback de seguridad para tablas
 administrativas ausentes. El bootstrap nominal y TOTP se describen en
 `development.md`.
+
+### IP de quien pide
+
+`CLIENT_IP_HEADER` es la cabecera de la que la API toma la IP de cada persona
+para el límite de intentos de Better Auth (3 inicios de sesión cada 10 s por
+dirección, por ejemplo) y para la IP de cada sesión. Vacía, nadie tiene IP: todas
+las clínicas comparten un límite por ruta, la API lo avisa al arrancar y Better
+Auth con «Rate limiting could not determine a client IP».
+
+En OpenShip va `CLIENT_IP_HEADER=x-real-ip`. Su borde OpenResty la reescribe con
+la dirección que vio conectar, que toma de `CF-Connecting-IP` solo cuando conecta
+un rango de Cloudflare (`set_real_ip_from`). No sirven las otras:
+
+- `cf-connecting-ip`: el VPS acepta HTTPS directo, sin Cloudflare, y el borde la
+  deja pasar tal como llega; cualquiera elegiría su IP y estrenaría un límite en
+  cada intento.
+- `x-forwarded-for`: el borde le añade su dirección a la que trae la petición, así
+  que llega con dos o más y Better Auth no la acepta.
+
+Con otro proxy delante (Compose manual), poner la cabecera que ese proxy
+**reescribe** siempre, nunca una que solo reenvía. Una sola cabecera: si la
+petición no la trae, Better Auth vuelve al límite compartido.
+
 ### Modelo del agente
 
 La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta

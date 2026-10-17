@@ -58,3 +58,14 @@ it("una vista previa (canales simulados), desarrollo y pruebas sí arrancan con 
   // Producción con un modelo real arranca.
   expect((await boot({ ...BASE, CHANNEL_VALIDATE_EXTERNAL: "true", LLM_MODEL: "" })).env).toBeDefined()
 })
+
+it("CLIENT_IP_HEADER: una sola cabecera, en minúsculas; vacía si no se pone", async () => {
+  expect((await boot({ ...BASE, CHANNEL_VALIDATE_EXTERNAL: "false" })).env).toMatchObject({ CLIENT_IP_HEADER: "" })
+  expect((await boot({ ...BASE, CHANNEL_VALIDATE_EXTERNAL: "false", CLIENT_IP_HEADER: " X-Real-IP " })).env).toMatchObject({
+    CLIENT_IP_HEADER: "x-real-ip",
+  })
+  // Dos cabeceras: la que el proxy no reescriba quedaría en manos del cliente.
+  const { error, logged } = await boot({ ...BASE, CHANNEL_VALIDATE_EXTERNAL: "false", CLIENT_IP_HEADER: "x-real-ip, cf-connecting-ip" })
+  expect(String(error)).toContain("exit 1")
+  expect(logged.mock.calls[0]?.[1]).toMatchObject({ CLIENT_IP_HEADER: [expect.stringContaining("Una sola cabecera")] })
+})
