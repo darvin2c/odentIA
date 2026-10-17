@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { supportCase, supportNotice } from "@odentia/db/schema/admin-support"
 import { member, organization, user } from "@odentia/db/schema/auth"
-import { and, asc, eq, gt, isNull, lte, ne, sql } from "drizzle-orm"
+import { and, asc, eq, gt, isNotNull, isNull, lte, ne, sql } from "drizzle-orm"
 import { helpTopicForScreen, helpTopicLabel } from "./help-guide.js"
 
 /* ---------- Avisos por correo de los casos de soporte ---------- */
@@ -97,6 +97,9 @@ export async function tickSupportNotices(ownerDb: Db, now = new Date()): Promise
     .where(
       and(
         ne(supportCase.status, "resuelto"),
+        // Sin autor no hay a quién avisar: el caso automático «Modelo sin
+        // responder» no tiene destinatario y su aviso detendría toda la vuelta.
+        isNotNull(supportCase.openedBy),
         lte(supportCase.lastPublicMessageAt, dueBefore),
         gt(supportCase.lastPublicMessageAt, since),
         sql`(${supportCase.clientSeenAt} is null or ${supportCase.clientSeenAt} < ${supportCase.lastPublicMessageAt})`,

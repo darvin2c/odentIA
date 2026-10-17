@@ -28,6 +28,7 @@ import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
+import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const WINDOW_MS = 10 * 60 * 1000
 const MAX_BUCKETS = 10000
@@ -96,7 +97,8 @@ const messagesBody = z.strictObject({
   tipo: z.enum(["recordatorio", "seguimiento", "novedades", "ninguno"]),
   recibir: z.boolean(),
 })
-const paperQuery = z.strictObject({ token, kind: z.enum(["receta", "comprobante"]) })
+// «Tus papeles»: el token va en el cuerpo, nunca en la dirección (registros de acceso, proxies, Referer).
+const paperBody = z.strictObject({ token, kind: z.enum(["receta", "comprobante"]) })
 export type BookingRemoteAddress = (c: Context) => string | undefined
 
 /**
@@ -202,7 +204,13 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
     const body = registrationBody.safeParse(await bodyOf(c))
     if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos"), 400)
     const { token: linkToken, ...input } = body.data
-    return answer(c, 201, () => inOrg(c, (tx, orgId) => registerFromBookingLink(tx, orgId, linkToken, input)))
+    return answer(c, 201, () =>
+      inOrg(c, (tx, orgId) => registerFromBookingLink(tx, orgId, linkToken, input)).catch(async (error: unknown) => {
+        // El documento ya era de alguien: queda para recepción y se responde el texto neutro.
+        await keepRegistrationHold(deps.db, (c.get("bookingOrganization") as { id: string }).id, error)
+        throw error
+      }),
+    )
   })
 
   app.post("/:slug/reserve", async (c) => {
@@ -305,13 +313,14 @@ export function createPublicBookingRoute(deps: { db: Db; secretsKey: Buffer; rem
   })
 
   // «Tus papeles»: la receta o el comprobante de los últimos 30 días, como PDF.
-  app.get("/:slug/papers/:paperId", async (c) => {
-    const query = paperQuery.safeParse(c.req.query())
+  // Es un POST, como el resto de lo que hace el enlace: el token viaja en el cuerpo.
+  app.post("/:slug/papers/:paperId", async (c) => {
+    const body = paperBody.safeParse(await bodyOf(c))
     const params = z.object({ paperId: z.uuid() }).safeParse({ paperId: c.req.param("paperId") })
-    if (!query.success || !params.success) return unavailable(c)
+    if (!body.success || !params.success) return unavailable(c)
     try {
       const paper = await inOrg(c, (tx, orgId) =>
-        getPersonalLinkPaper(tx, orgId, query.data.token, { kind: query.data.kind, id: params.data.paperId }),
+        getPersonalLinkPaper(tx, orgId, body.data.token, { kind: body.data.kind, id: params.data.paperId }),
       )
       return new Response(Buffer.from(paper.bytes), {
         status: 200,

@@ -4,7 +4,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
+import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
 import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureLibrarySpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -344,7 +344,7 @@ export function createApp(deps: AppDeps) {
       ext,
     })
     if (previousImage) {
-      await deps.storage.deleteByUrl(previousImage).catch(() => {})
+      await deps.storage.deleteByUrl(previousImage, userId).catch(() => {})
     }
     return c.json({ data: { url } }, 201)
   })
@@ -429,14 +429,14 @@ export function createApp(deps: AppDeps) {
     if (file.size > CLINIC_LOGO_MAX_BYTES) return c.json(errorBody(c, "VALIDATION", "El logo no puede superar 2 MB"), 400)
     // Va a la carpeta de la clínica dentro del bucket público de imágenes.
     const { url } = await deps.storage.putAvatar({
-      userId: `clinica-${orgId}`,
+      userId: clinicLogoFolder(orgId),
       body: Buffer.from(await file.arrayBuffer()),
       contentType: file.type,
       ext,
     })
     return runService(c, 200, async () => {
       const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, url))
-      if (saved.previous) await deps.storage.deleteByUrl(saved.previous).catch(() => {})
+      if (saved.previous) await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
       return { logo: saved.logo }
     })
   })
@@ -448,7 +448,7 @@ export function createApp(deps: AppDeps) {
     }
     return runService(c, 200, async () => {
       const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, null))
-      if (saved.previous) await deps.storage.deleteByUrl(saved.previous).catch(() => {})
+      if (saved.previous) await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
       return { logo: null }
     })
   })

@@ -116,10 +116,11 @@ import { setCommissionRate } from "./finance.js"
 import { closeOpportunity, createOpportunity, listOpportunities, moveOpportunity, setOpportunityTask } from "./opportunities.js"
 import {
   createPatientRegistrationLink,
+  leaveRegistrationHold,
   registerPatient,
   savePatientRegistrationConfig,
 } from "./patient-registration.js"
-import { createPatient, patientPersonId, updatePatient } from "./patients.js"
+import { createPatient, patientPersonId, RegistrationHeld, updatePatient } from "./patients.js"
 import { collectCharge, createCharge, refundCredit } from "./payments.js"
 import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
@@ -2744,6 +2745,64 @@ await db.transaction((tx) =>
     },
   ),
 )
+// «Te espera» de recepción con lo que deja el registro en línea cuando el
+// documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
+// espera «Confirmar») y alguien se registra con el DNI de Valeria (no se
+// completa y queda para revisar).
+await db.transaction((tx) =>
+  registerPatient(
+    tx,
+    ORG_A,
+    { kind: "public", entryPoint: "qr" },
+    {
+      submissionId: randomUUID(),
+      formVersion: registrationConfig.version,
+      answers: {
+        demographics: { displayName: "Thiago Quispe · QR demo", birthDate: "2019-03-02", phone: SHARED_PHONE },
+        respondent: "representative",
+        representative: {
+          displayName: "Valeria Quispe · QR demo",
+          relationship: "guardian",
+          relationshipDetail: "Madre",
+          docType: "DNI",
+          docNumber: "45678920",
+        },
+        health: {
+          allergies: { state: "unanswered", items: [] },
+          conditions: { state: "unanswered", items: [] },
+          medications: { state: "unanswered", items: [] },
+        },
+        privacyAccepted: true,
+      },
+    },
+  ),
+)
+await db
+  .transaction((tx) =>
+    registerPatient(
+      tx,
+      ORG_A,
+      { kind: "public", entryPoint: "qr" },
+      {
+        submissionId: randomUUID(),
+        formVersion: registrationConfig.version,
+        answers: {
+          demographics: { displayName: "Alguien Distinto", birthDate: "1990-01-01", phone: "+51987000999", docType: "DNI", docNumber: "45678920" },
+          respondent: "patient",
+          health: {
+            allergies: { state: "unanswered", items: [] },
+            conditions: { state: "unanswered", items: [] },
+            medications: { state: "unanswered", items: [] },
+          },
+          privacyAccepted: true,
+        },
+      },
+    ),
+  )
+  .catch(async (error: unknown) => {
+    if (!(error instanceof RegistrationHeld)) throw error
+    await db.transaction((tx) => leaveRegistrationHold(tx, ORG_A, error.hold))
+  })
 await db.transaction((tx) =>
   updateContact(
     tx,

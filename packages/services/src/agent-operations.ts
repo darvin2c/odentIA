@@ -31,7 +31,7 @@ import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
-import { resolveProfessionalRef } from "./agent-clinic-info.js"
+import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
   getAppointment,
@@ -1052,6 +1052,8 @@ export interface FreeGap {
   startsAt: string
   endsAt: string
   dentistUserId: string
+  /** Lo que ve el agente en lugar del usuario (`professionalRef`): nunca recibe ids de usuario. */
+  professionalRef: string
   /** Nombre del profesional, para decirlo a la persona. */
   dentistName: string | null
   chairId: string | null
@@ -1141,6 +1143,7 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
       startsAt: s.startsAt,
       endsAt: s.endsAt,
       dentistUserId: s.dentistUserId,
+      professionalRef: professionalRef(orgId, s.dentistUserId),
       dentistName: names.get(s.dentistUserId) ?? null,
       chairId: s.chairId,
     })),

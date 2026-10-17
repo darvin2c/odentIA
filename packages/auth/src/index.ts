@@ -157,6 +157,7 @@ export function createAuth({
             ac: ["read"],
           }),
         },
+        organizationHooks: { beforeUpdateOrganization: lockClinicIdentityFields },
         sendInvitationEmail: async ({ email, inviter, organization: org, invitation }) => {
           const template = invitationTemplate({
             organizationName: org.name,
@@ -168,6 +169,22 @@ export function createAuth({
       }),
     ],
   })
+}
+
+/**
+ * `/api/auth/organization/update` no cambia el logo ni el nombre de la
+ * clínica: el logo se sube en «Datos de la clínica» (`/org-profile/logo`, que
+ * solo borra dentro de su carpeta) y el nombre visible sale del nombre
+ * comercial (ADR 0043). Una dirección de logo guardada a mano podría apuntar
+ * al de otra clínica y borrarlo al cambiarlo.
+ */
+export async function lockClinicIdentityFields({ organization: changes }: { organization: Record<string, unknown> }): Promise<void> {
+  if ("logo" in changes || "name" in changes) {
+    throw APIError.from("FORBIDDEN", {
+      code: "ORGANIZATION_FIELD_LOCKED",
+      message: "El logo y el nombre se cambian en «Datos de la clínica»",
+    })
+  }
 }
 
 export type Auth = ReturnType<typeof createAuth>

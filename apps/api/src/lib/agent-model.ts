@@ -63,15 +63,37 @@ async function reportFailed(deps: AgentModelDeps, orgId: string, failed: ModelCh
 }
 
 /** El modelo elegido y, si no responde, el otro: lo que dibuja el cajón y la fila de Integraciones. */
+/** «Volver a comprobar» llama al modelo como mucho una vez por minuto y clínica; antes, responde lo guardado. */
+export const FRESH_MODEL_CHECK_GAP_MS = 60_000
+
+// Cuándo pidió cada clínica su última comprobación nueva, por comprobador (por proceso).
+const freshAt = new WeakMap<ModelChecker, Map<string, number>>()
+
+/** Si esta clínica puede pedir una comprobación nueva ahora; si puede, la anota. */
+export function takeFreshModelCheck(checker: ModelChecker, orgId: string, now = Date.now()): boolean {
+  let byOrg = freshAt.get(checker)
+  if (!byOrg) {
+    byOrg = new Map()
+    freshAt.set(checker, byOrg)
+  }
+  const last = byOrg.get(orgId)
+  if (last !== undefined && now - last < FRESH_MODEL_CHECK_GAP_MS) return false
+  for (const [key, at] of byOrg) if (now - at >= FRESH_MODEL_CHECK_GAP_MS) byOrg.delete(key)
+  byOrg.set(orgId, now)
+  return true
+}
+
 export async function checkOrgModel(
   deps: AgentModelDeps,
   orgId: string,
   llm: AgentLlm,
-  options: { fresh?: boolean } = {},
+  options: { fresh?: boolean; now?: number } = {},
 ): Promise<AgentModelStatus> {
   const checker = modelCheckerOf(deps)
+  // Cada comprobación nueva se paga con la cuenta de odentIA: una por minuto y clínica.
+  const fresh = !!options.fresh && takeFreshModelCheck(checker, orgId, options.now)
   // La llamada mínima se paga: se anota con su origen (ADR 0031). Lo guardado no llama a nadie.
-  const { status, failed } = await meterAiUse(deps.db, orgId, "comprobacion", () => checkAgentModels(checker, llm, options))
+  const { status, failed } = await meterAiUse(deps.db, orgId, "comprobacion", () => checkAgentModels(checker, llm, { fresh }))
   await reportFailed(deps, orgId, failed)
   return status
 }

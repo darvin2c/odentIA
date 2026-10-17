@@ -93,12 +93,22 @@ describe("textos de «Te espera»", () => {
   it("lo que dejaron «Su enlace» y el portal dice qué hacer, sin datos de la otra ficha", () => {
     const createdAt = new Date(Date.now() - 20 * 60_000).toISOString()
     const duplicate: WaitingRow = {
-      kind: "possibleDuplicate", id: "t1", patientId: "p1", patientName: "Pedro Ríos",
+      kind: "possibleDuplicate", id: "t1", source: "enlace", patientId: "p1", personId: null, patientName: "Pedro Ríos", personName: null,
       detail: "El documento ya está en otra ficha", createdAt,
     }
     expect(waitingText(duplicate, context)).toEqual({
       title: "Posible ficha repetida: Pedro Ríos", detail: "Desde su enlace hace 20 min · El documento ya está en otra ficha", action: "Revisar",
     })
+    // Alguien se registró en línea con el documento de una persona que ya estaba.
+    const held: WaitingRow = { ...duplicate, id: "t3", source: "registro", patientId: null, personId: "c1", patientName: "Rosa Ochoa", detail: "Escribió: Juan, +51999" }
+    expect(waitingText(held, context)).toEqual({
+      title: "Alguien se registró con el documento de Rosa Ochoa: revisa si es ella",
+      detail: "Desde el registro en línea hace 20 min · Escribió: Juan, +51999",
+      action: "Revisar",
+    })
+    // El registro de un menor nombró como representante a alguien que ya estaba.
+    const representative: WaitingRow = { ...duplicate, id: "t4", source: "representante", personId: "c2", personName: "Rosa Ochoa", patientName: "Sofía Ochoa", detail: "" }
+    expect(waitingText(representative, context).title).toBe("¿Rosa Ochoa es representante de Sofía Ochoa?")
     const reentry: WaitingRow = { kind: "portalReentry", id: "t2", patientId: "p2", contactName: "Lucía Fernández", grantId: "g1", createdAt }
     expect(waitingText(reentry, context)).toEqual({
       title: "Lucía Fernández quiere volver a entrar al portal", detail: "Lo pidió hace 20 min · su acceso sigue vigente", action: "Enviar nuevo enlace",

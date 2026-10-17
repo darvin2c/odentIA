@@ -94,15 +94,27 @@ export interface WaitingUnsentBudget {
 }
 
 /**
- * El documento que la persona escribió en «Su enlace» ya es de otra ficha: no
- * se guardó y recepción revisa si son la misma persona (nunca se unen solas).
+ * Un documento escrito desde fuera ya es de otra persona y recepción revisa
+ * (nunca se unen solas):
+ * - `enlace`: el que escribió en «Su enlace» es de otra ficha; no se guardó.
+ * - `registro`: alguien se registró en línea con el documento de una persona
+ *   que ya estaba; no se guardó nada en ella ni se completó el registro.
+ * - `representante`: el registro de un menor nombró como representante a una
+ *   persona que ya estaba; el vínculo espera su «Confirmar».
  */
 export interface WaitingPossibleDuplicate {
   /** La tarea que lo recuerda. */
   id: string
-  patientId: string
+  source: "enlace" | "registro" | "representante"
+  /** La ficha que se revisa; en `registro`, la de quien tenía el documento si ya es paciente. */
+  patientId: string | null
+  /** `registro`: quien tenía el documento; `representante`: el representante nombrado. */
+  personId: string | null
+  /** El paciente (`enlace`, `representante`) o quien tenía el documento (`registro`). */
   patientName: string
-  /** De quién es el documento, en palabras. */
+  /** `representante`: su nombre. */
+  personName: string | null
+  /** Qué pasó y lo que escribió, en palabras. */
   detail: string
   createdAt: string
 }

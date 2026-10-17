@@ -41,7 +41,12 @@ export interface Storage {
     key: string
     url: string
   }>
-  deleteByUrl(url: string): Promise<void>
+  /**
+   * Borra una imagen pública subida con `putAvatar`, solo si está en la
+   * carpeta indicada (la del usuario o `clinica-<org>`): una dirección que
+   * apunte a otra carpeta no se toca, aunque alguien la haya guardado.
+   */
+  deleteByUrl(url: string, folder: string): Promise<void>
   putAttachment(input: {
     orgId: string
     conversationId: string
@@ -100,11 +105,11 @@ export function createStorage(env: StorageEnv): Storage {
       )
       return { key, url: `${publicPrefix}${key}` }
     },
-    async deleteByUrl(url) {
+    async deleteByUrl(url, folder) {
       if (!url.startsWith(publicPrefix)) return
-      await client.send(
-        new DeleteObjectCommand({ Bucket: env.avatarsBucket, Key: url.slice(publicPrefix.length) }),
-      )
+      const key = url.slice(publicPrefix.length)
+      if (!isInAvatarFolder(key, folder)) return
+      await client.send(new DeleteObjectCommand({ Bucket: env.avatarsBucket, Key: key }))
     },
     async putAttachment({ orgId, conversationId, bytes, contentType, ext }) {
       const objectKey = `${orgId}/${conversationId}/${crypto.randomUUID()}.${ext}`
@@ -177,4 +182,19 @@ export function createStorage(env: StorageEnv): Storage {
       }
     },
   }
+}
+
+/**
+ * La clave está dentro de `avatars/<carpeta>/` y no sale de ella: lo único
+ * que `deleteByUrl` puede borrar.
+ */
+export function isInAvatarFolder(key: string, folder: string): boolean {
+  if (!folder || folder.includes("/") || folder.includes("..")) return false
+  const prefix = `avatars/${folder}/`
+  return key.startsWith(prefix) && !key.slice(prefix.length).includes("/") && !key.includes("..")
+}
+
+/** La carpeta del logo de una clínica en el bucket público. */
+export function clinicLogoFolder(orgId: string): string {
+  return `clinica-${orgId}`
 }

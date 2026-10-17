@@ -22,7 +22,7 @@ import {
   confirmBooking,
   fetchBookingLink,
   fetchBookingSlots,
-  linkPaperUrl,
+  downloadLinkPaper,
   type MessageChoice,
   type PersonalLinkMessages,
   type PersonalLinkView,
@@ -392,6 +392,10 @@ function paperDay(iso: string): string {
  * días, para descargar. Pasados los 30 días se le piden a la clínica.
  */
 function Papers({ slug, token, papers }: { slug: string; token: string; papers: PersonalLinkView["papers"] }) {
+  const download = useMutation({
+    mutationFn: (paper: PersonalLinkView["papers"][number]) => downloadLinkPaper(slug, token, paper),
+  })
+  const busy = download.isPending ? download.variables : null
   return (
     <section aria-label="Tus papeles" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
       <h2 className="font-semibold">Tus papeles</h2>
@@ -404,17 +408,24 @@ function Papers({ slug, token, papers }: { slug: string; token: string; papers: 
                 {capital(paperDay(paper.issuedAt))} · disponible hasta el {paperDay(paper.availableUntil)}
               </span>
             </span>
-            <a
-              href={linkPaperUrl(slug, token, paper)}
-              rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium"
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={busy?.id === paper.id && busy.kind === paper.kind}
+              onClick={() => download.mutate(paper)}
             >
               <FileDown className="size-4" aria-hidden />
-              Descargar
-            </a>
+              {busy?.id === paper.id && busy.kind === paper.kind ? "Descargando…" : "Descargar"}
+            </Button>
           </li>
         ))}
       </ul>
+      {download.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          No pudimos descargar el papel. Inténtalo de nuevo o pídeselo a la clínica.
+        </p>
+      ) : null}
       <p className="text-sm text-muted-foreground">Cada papel queda aquí 30 días. Después, pídeselo a la clínica.</p>
     </section>
   )

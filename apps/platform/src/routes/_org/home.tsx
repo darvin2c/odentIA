@@ -51,6 +51,7 @@ const HOME_EVENTS = [
 type BudgetsRow = Extract<WaitingRow, { kind: "budgets" }>
 type CaseRow = Extract<WaitingRow, { kind: "case" }>
 type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
+type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -84,12 +85,27 @@ function HomePage() {
   })
   // «Hecha»: si la tarea resolviera una conversación, antes se muestra lo mismo que «Resolver».
   const completion = useCompleteTask(refresh)
+  // «Confirmar» el representante que nombró un registro en línea: vínculo y rol a nombre de quien confirma.
+  const canWritePatients = usePermission("patients.write")
+  const confirmRepresentative = useMutation({
+    mutationFn: (row: DuplicateRow) =>
+      apiFetch(`/api/patients/${row.patientId}/responsibilities/pending/${row.id}/confirm`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: (_result, row) => {
+      toast.success(`${row.personName ?? "La persona"} quedó como representante de ${row.patientName}`)
+      refresh()
+    },
+  })
   const busyKey = take.isPending && take.variables
     ? waitingKey(take.variables)
-    : completion.pendingId
-      ? `task:${completion.pendingId}`
-      : null
-  const actionError = (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ?? completion.error
+    : confirmRepresentative.isPending && confirmRepresentative.variables
+      ? waitingKey(confirmRepresentative.variables)
+      : completion.pendingId
+        ? `task:${completion.pendingId}`
+        : null
+  const actionError =
+    (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ??
+    (confirmRepresentative.error ? mutationErrorMessage(confirmRepresentative.error) ?? "No se pudo confirmar el representante." : null) ??
+    completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
@@ -142,6 +158,7 @@ function HomePage() {
               onTake: canTake ? (row) => take.mutate(row) : undefined,
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
+              onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,
               onVoidEncounter: (row) => {
                 setDiscardReason("")
                 setDiscarding(row)

@@ -101,10 +101,23 @@ export type WaitingRow =
       options: number
     }
   /**
-   * El documento que la persona escribió en «Su enlace» ya es de otra ficha:
-   * no se guardó y recepción revisa si son la misma persona (ADR 0037).
+   * Un documento escrito desde fuera ya es de otra persona y recepción revisa
+   * (nunca se unen solas): el de «Su enlace» (`enlace`), el de alguien que se
+   * registró en línea (`registro`, la fila es de quien tenía el documento) o
+   * el representante que nombró el registro de un menor (`representante`,
+   * espera su «Confirmar»).
    */
-  | { kind: "possibleDuplicate"; id: string; patientId: string; patientName: string; detail: string; createdAt: string }
+  | {
+      kind: "possibleDuplicate"
+      id: string
+      source: "enlace" | "registro" | "representante"
+      patientId: string | null
+      personId: string | null
+      patientName: string
+      personName: string | null
+      detail: string
+      createdAt: string
+    }
   /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */

@@ -1,6 +1,6 @@
 import type { RegistrationAnswers } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { randomUUID } from "node:crypto"
 import { expect, it } from "vitest"
 import { getCaseBrief } from "./agent-case-brief.js"
@@ -14,17 +14,25 @@ import {
   getPatient,
   listPatients,
   listPatientsByContact,
+  patientOrganizationToday,
+  RegistrationHeld,
 } from "./patients.js"
 import {
+  attachLegalRepresentative,
+  confirmPendingRepresentative,
   createPatientRegistrationLink,
   getPatientRegistrationConfig,
   getPublicPatientRegistration,
+  leaveRegistrationHold,
+  PENDING_REPRESENTATIVE_KEY,
   registerPatient,
+  REGISTRATION_HOLD_KEY,
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
 import { listPersonNotes } from "./people.js"
-import { listResponsibilities } from "./responsibilities.js"
+import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
+import { listDecisionRecipients, listResponsibilities } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { and, eq, sql } from "drizzle-orm"
@@ -36,6 +44,12 @@ const ACTOR = "u-registration"
 const KEY = secretsKeyFromEnv("dd".repeat(32))
 const NOTICE = "Aviso de demostración: tus datos se usan solo para tu atención."
 const ADULT_BIRTH = "1990-05-01"
+/** Recepción en «Te espera»: pacientes y tareas de toda la clínica. */
+const RECEPTION: WorkspaceAccess = { patients: true, appointments: false, conversations: false, tasks: true, finance: false, clinical: false, crm: false, agent: false, allTasks: true, configure: false, ownAppointments: false }
+const waitingRow = async (taskId: string) =>
+  (await withOrgContext(appDb, "org_a", (tx) => getWorkspaceHome(tx, "org_a", ACTOR, RECEPTION))).waiting.find(
+    (row) => row.kind === "possibleDuplicate" && row.id === taskId,
+  )
 const MINOR_BIRTH = "2020-05-06"
 
 async function seedActor(): Promise<void> {
@@ -262,7 +276,7 @@ it("menor público sin responsable falla 400 sin escrituras", async () => {
   expect(dupes).toEqual([])
 })
 
-it("la madre registra a su segundo hijo con su mismo documento: es la misma persona, sin error", async () => {
+it("la madre registra a su segundo hijo con su mismo documento: es la misma persona, y recepción la confirma con un clic", async () => {
   await publish("org_a")
   const version = await publishedVersion("org_a")
   const child = (displayName: string, phone: string): RegistrationAnswers => ({
@@ -283,19 +297,203 @@ it("la madre registra a su segundo hijo con su mismo documento: es la misma pers
     withOrgContext(appDb, "org_a", (tx) =>
       registerPatient(tx, "org_a", { kind: "public", entryPoint: "qr" }, { submissionId: randomUUID(), formVersion: version, answers }),
     )
-  const first = await register(child("Mateo Segundo Hijo", "+51977000178"))
-  const second = await register(child("Sofía Segundo Hijo", "+51977000179"))
   const representativeOf = async (patientId: string) =>
     (await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", patientId))).find(
       (row) => row.kind === "representante_legal",
     )?.contactId
+  const first = await register(child("Mateo Segundo Hijo", "+51977000178"))
   const mother = await representativeOf(first.id)
   expect(mother).toBeTruthy()
+  const permissionsOf = async () =>
+    ownerDb.execute<{ purpose: string; status: string }>(
+      sql`select purpose, status from automation_consent where organization_id = 'org_a' and contact_id = ${mother!} order by purpose`,
+    )
+  const permissionsBefore = [...(await permissionsOf())]
+
+  // El segundo, desde fuera: el documento ya es de una persona, así que el
+  // vínculo espera a recepción y no se escriben sus permisos (M1).
+  const second = await register({ ...child("Sofía Segundo Hijo", "+51977000179"), acceptsReminders: false })
+  expect(await representativeOf(second.id)).toBeUndefined()
+  const secondDetail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", second.id))
+  expect(secondDetail.contacts.map((link) => link.contactId)).not.toContain(mother)
+  expect([...(await permissionsOf())]).toEqual(permissionsBefore)
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.patientId, second.id), eq(crmTask.contactId, mother!))),
+  )
+  expect(pending).toMatchObject({ status: "open", kind: "ficha_repetida", area: "recepcion" })
+  expect(pending!.idempotencyKey?.startsWith(PENDING_REPRESENTATIVE_KEY)).toBe(true)
+  expect(pending!.title).toBe("Confirma si Rosa Segundo Hijo representa a Sofía Segundo Hijo")
+  expect(await waitingRow(pending!.id)).toMatchObject({
+    source: "representante",
+    patientId: second.id,
+    personId: mother,
+    patientName: "Sofía Segundo Hijo",
+    personName: "Rosa Segundo Hijo",
+  })
+
+  // «Confirmar» en «Te espera»: el vínculo y el rol, sin tocar sus datos ni sus permisos.
+  await withOrgContext(appDb, "org_a", (tx) => confirmPendingRepresentative(tx, "org_a", ACTOR, second.id, pending!.id))
   expect(await representativeOf(second.id)).toBe(mother)
+  expect([...(await permissionsOf())]).toEqual(permissionsBefore)
+  const [done] = await withOrgContext(appDb, "org_a", (tx) => tx.select({ status: crmTask.status }).from(crmTask).where(eq(crmTask.id, pending!.id)))
+  expect(done!.status).toBe("done")
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => confirmPendingRepresentative(tx, "org_a", ACTOR, second.id, pending!.id)),
+  ).rejects.toMatchObject({ code: "ALREADY_REVIEWED" })
   const [{ count }] = await ownerDb.execute<{ count: number }>(
     sql`select count(*)::int as count from contact where organization_id = 'org_a' and doc_number = '41529977'`,
   )
   expect(count).toBe(1)
+})
+
+it("un anónimo se registra con el DNI de una madre existente: no cambia su correo, no recibe nada y queda para recepción", async () => {
+  await seedActor()
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  // La madre: persona con su DNI y su correo, representante legal de su hijo, sin ficha propia.
+  const son = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, { displayName: "Hijo De Madre Real", birthDate: MINOR_BIRTH }),
+  )
+  const motherId = await withOrgContext(appDb, "org_a", async (tx) =>
+    attachLegalRepresentative(tx, "org_a", ACTOR, son.id, {
+      representative: {
+        displayName: "Madre Real Ochoa",
+        relationshipDetail: "Madre",
+        docType: "DNI",
+        docNumber: "45678123",
+        email: "madre.real@example.com",
+        phone: "+51977600001",
+      },
+      countryCode: "PE",
+      today: await patientOrganizationToday(tx, "org_a"),
+    }),
+  )
+  expect(motherId).toBeTruthy()
+  const motherBefore = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", motherId!))
+
+  const attempt = (answers: RegistrationAnswers) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(tx, "org_a", { kind: "public", entryPoint: "qr" }, { submissionId: randomUUID(), formVersion: version, answers }),
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    )
+  // Como paciente, con su propio correo y teléfono.
+  const asPatient = await attempt({
+    demographics: {
+      displayName: "Intruso Anónimo",
+      birthDate: ADULT_BIRTH,
+      phone: "+51977600099",
+      email: "intruso@example.com",
+      docType: "DNI",
+      docNumber: "45678123",
+    },
+    respondent: "patient",
+    health: emptyClinical(),
+    privacyAccepted: true,
+  })
+  // La variante: con fecha de menor, «registro a otra persona», él como representante.
+  const asGuardian = await attempt({
+    demographics: { displayName: "Madre Real Ochoa", birthDate: MINOR_BIRTH, phone: "+51977600098", docType: "DNI", docNumber: "45678123" },
+    respondent: "representative",
+    representative: {
+      displayName: "Intruso Tutor",
+      relationship: "guardian",
+      relationshipDetail: "Padre",
+      phone: "+51977600097",
+      email: "intruso.tutor@example.com",
+      docType: "DNI",
+      docNumber: "70000001",
+    },
+    health: emptyClinical(),
+    privacyAccepted: true,
+  })
+  for (const failure of [asPatient, asGuardian]) {
+    // A quien se registra, el texto neutro: no confirma que el documento exista ni de quién es.
+    expect(failure).toBeInstanceOf(RegistrationHeld)
+    expect(failure).toMatchObject({ code: "REGISTRATION_NOT_COMPLETED", status: 409, message: "No pudimos completar el registro. Comunícate con recepción." })
+    expect((failure as Error).message).not.toContain("Madre Real Ochoa")
+  }
+
+  // Nada de la madre cambió: ni identidad, ni ficha, ni representante, ni quién recibe por su hijo.
+  const motherAfter = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", motherId!))
+  expect(motherAfter.contact).toMatchObject({
+    displayName: "Madre Real Ochoa",
+    email: "madre.real@example.com",
+    phone: "+51977600001",
+    birthDate: motherBefore.contact.birthDate,
+  })
+  const [{ ownRecords }] = await ownerDb.execute<{ ownRecords: number }>(
+    sql`select count(*)::int as "ownRecords" from patient where organization_id = 'org_a' and person_id = ${motherId!}`,
+  )
+  expect(ownRecords).toBe(0)
+  const recipients = await withOrgContext(appDb, "org_a", (tx) => listDecisionRecipients(tx, "org_a", son.id))
+  expect(recipients).toEqual([expect.objectContaining({ contactId: motherId, email: "madre.real@example.com", phone: "+51977600001" })])
+  const [{ strangers }] = await ownerDb.execute<{ strangers: number }>(
+    sql`select count(*)::int as strangers from contact where organization_id = 'org_a' and (email like 'intruso%' or display_name like 'Intruso%')`,
+  )
+  expect(strangers).toBe(0)
+  // No recibe nada: ningún mensaje salió hacia ella.
+  const sent = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ id: message.id })
+      .from(message)
+      .innerJoin(conversation, eq(conversation.id, message.conversationId))
+      .where(eq(conversation.contactId, motherId!)),
+  )
+  expect(sent).toEqual([])
+
+  // Lo que deja la ruta, en otra transacción: una fila de «Te espera» para recepción, una por día.
+  for (const failure of [asPatient, asGuardian]) {
+    await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (failure as RegistrationHeld).hold))
+  }
+  const holds = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.contactId, motherId!), eq(crmTask.kind, "ficha_repetida"))),
+  )
+  expect(holds).toHaveLength(1)
+  expect(holds[0]!.idempotencyKey?.startsWith(REGISTRATION_HOLD_KEY)).toBe(true)
+  expect(holds[0]!.reason).toContain("Alguien se registró con el documento de Madre Real Ochoa: revisa si es ella")
+  expect(holds[0]!.area).toBe("recepcion")
+  expect(await waitingRow(holds[0]!.id)).toMatchObject({ source: "registro", patientId: null, personId: motherId, patientName: "Madre Real Ochoa" })
+  const unchanged = await withOrgContext(appDb, "org_a", (tx) => tx.select({ email: contact.email }).from(contact).where(eq(contact.id, motherId!)))
+  expect(unchanged[0]!.email).toBe("madre.real@example.com")
+})
+
+it("con el enlace de su conversación se completa lo vacío y nunca se reemplaza lo que ya tenía", async () => {
+  await seedActor()
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  const { person, threadId } = await makeContactWithConversation("org_a", "Lucía Enlace Propio")
+  await ownerDb.execute(
+    sql`update contact set email = 'lucia.real@example.com', birth_date = ${ADULT_BIRTH}, given_names = 'Lucía' where id = ${person.id}`,
+  )
+  const { token } = await makeLink("org_a", person.id, threadId)
+  const created = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(
+      tx,
+      "org_a",
+      { kind: "public", token, entryPoint: "public_link" },
+      {
+        submissionId: randomUUID(),
+        formVersion: version,
+        answers: {
+          demographics: { displayName: "Otro Nombre Escrito", birthDate: "1985-01-01", phone: "+51977000100", email: "otro@example.com", docType: "DNI", docNumber: "47000111" },
+          respondent: "patient",
+          health: emptyClinical(),
+          privacyAccepted: true,
+        },
+      },
+    ),
+  )
+  const after = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", person.id))
+  // Lo que ya tenía queda; lo vacío (el documento) se completa.
+  expect(after.contact).toMatchObject({ displayName: "Lucía", email: "lucia.real@example.com", birthDate: ADULT_BIRTH, docNumber: "47000111" })
+  expect(created.birthDate).toBe(ADULT_BIRTH)
+  // Lo distinto queda en sus notas para revisar.
+  const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", person.id))
+  expect(JSON.stringify(notes)).toContain("otro@example.com")
+  expect(JSON.stringify(notes)).toContain("1985-01-01")
+  expect(JSON.stringify(notes)).toContain("Otro Nombre Escrito")
 })
 
 it("menor con enlace contextual queda como guardian sin modificar el contacto", async () => {

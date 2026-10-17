@@ -51,7 +51,7 @@ import {
   addAgentGuidance,
   removeAgentGuidance,
 } from "@odentia/services"
-import { closeConversationWith } from "@odentia/services"
+import { closeConversationWith, professionalRef } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -1007,7 +1007,9 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   const [, startClock, endClock] = firstLine.match(/(\d{2}:\d{2})–(\d{2}:\d{2})/) ?? []
   expect(optionBranch).toBe(branchId)
   expect(optionChair).toBe(chairId)
-  expect(optionDentist).toBe(dentistId)
+  // El agente ve la referencia del profesional, nunca su usuario.
+  expect(optionDentist).toBe(professionalRef("org_a", dentistId))
+  expect(out).not.toContain(dentistId)
   if (!optionStart || !startClock || !endClock || !optionDentist || !optionChair || !optionBranch) {
     throw new Error("El hueco no contiene los datos necesarios para reservar")
   }
@@ -1257,9 +1259,11 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
     toolsUsed: [], usage: emptyUsage(),
   }
   const tools = makeAgentTools(ctx)
+  // El agente solo conoce al profesional por su referencia: la de alguien con horario en la clínica.
+  const { dentistId } = await bookingFixture(conversationId, "doble-si")
   // La cita propuesta espera el sí del interlocutor (los datos solo tienen que validar).
   const booked = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({
-    patientId: randomUUID(), dentistUserId: "dentista-doble-si", chairId: randomUUID(),
+    patientId: randomUUID(), dentistUserId: professionalRef("org_a", dentistId), chairId: randomUUID(),
     startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
   }))
   expect(booked).toContain("pide al interlocutor que confirme")
@@ -2594,4 +2598,30 @@ it("pospuesta hasta que abre su horario, la corrida atiende todo lo que quedó s
       .where(eq(agentRunLedger.conversationId, first.conversationId)))
   expect(rows).toContainEqual({ trigger: first.messageId, status: "omitida", error: "burst-covered" })
   expect(rows).toContainEqual({ trigger: second.messageId, status: "ok", error: null })
+})
+
+it("buscar_huecos nunca muestra el usuario del profesional: proponer_cita recibe su referencia y el servidor la resuelve", async () => {
+  const { conversationId } = await ingestText("tg:ref-profesional", "evt-ref-profesional", "Quiero una cita")
+  const fx = await bookingFixture(conversationId, "ref-profesional")
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: fx.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const tools = makeAgentTools(ctx)
+  const day = upcomingMonday()
+  const gaps = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45,
+  }))
+  expect(gaps).not.toContain(fx.dentistId)
+  const line = gaps.split("\n").find((row) => row.startsWith("- "))!
+  const ref = line.match(/profesional (pro-[0-9a-f]{10})\]/)?.[1]
+  expect(ref).toBe(professionalRef("org_a", fx.dentistId))
+  const propose = tools.find((t) => t.name === "proponer_cita")!
+  const slot = { patientId: fx.patientId, chairId: fx.chairId, branchId: fx.branchId, startsAt: line.match(ISO_INSTANT)![0], durationMin: 45 }
+  // Un id de usuario escrito por el modelo no sirve.
+  expect(String(await propose.invoke({ ...slot, dentistUserId: fx.dentistId }))).toContain("no es de un hueco de buscar_huecos")
+  await propose.invoke({ ...slot, dentistUserId: ref })
+  const [proposal] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect(proposal?.payload).toMatchObject({ dentistUserId: fx.dentistId })
 })

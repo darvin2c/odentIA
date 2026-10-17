@@ -166,6 +166,20 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         action: "Enviar",
       }
     case "possibleDuplicate":
+      if (row.source === "registro") {
+        return {
+          title: `Alguien se registró con el documento de ${row.patientName}: revisa si es ella`,
+          detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
+          action: "Revisar",
+        }
+      }
+      if (row.source === "representante") {
+        return {
+          title: `¿${row.personName ?? "Esta persona"} es representante de ${row.patientName}?`,
+          detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
+          action: "Revisar",
+        }
+      }
       return {
         title: `Posible ficha repetida: ${row.patientName}`,
         detail: joined([`Desde su enlace ${ago(row.createdAt)}`, row.detail]),

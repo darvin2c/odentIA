@@ -67,6 +67,7 @@ import {
   resumeConversationBySystem,
   sendReceiptInConversation,
   rankByMeaning,
+  resolveProfessionalRef,
   searchClinic,
   searchPublishedKnowledge,
   ServiceError,
@@ -184,6 +185,10 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
 
 /** Respuestas seguidas sin sustento que el agente puede intentar antes de pasar el caso a una persona. */
 const MAX_UNSUPPORTED_REPLIES = 2
+
+/** El profesional no es una referencia de buscar_huecos: el agente nunca escribe ids de usuario. */
+const UNKNOWN_PROFESSIONAL =
+  "Ese profesional no es de un hueco de buscar_huecos: usa el dato «profesional» exacto (pro-…) del hueco elegido. Nunca inventes identificadores."
 
 /**
  * Cambios de lo aprendido que valen solo para una prueba: lecciones que se
@@ -1105,7 +1110,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       from: string
       to: string
       durationMin?: number
-      dentistUserId?: string
       profesional?: string
       chairId?: string
       serviceId?: string
@@ -1137,7 +1141,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           const chair = g.chairId ?? "sin unidad dental asignada: filtra por una unidad dental real o deriva"
           return (
             `- ${day.format(start)}, ${clock.format(start)}–${clock.format(end)}${g.dentistName ? ` con ${g.dentistName}` : ""}` +
-            ` [startsAt ${g.startsAt} · sede ${input.branchId} · unidad dental ${chair} · profesional ${g.dentistUserId}]`
+            ` [startsAt ${g.startsAt} · sede ${input.branchId} · unidad dental ${chair} · profesional ${g.professionalRef}]`
           )
         }),
         "Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, unidad dental y profesional): nunca inventes IDs ni horas.",
@@ -1154,7 +1158,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         from: z.string().min(1),
         to: z.string().min(1),
         durationMin: z.number().int().min(10).max(480).optional(),
-        dentistUserId: z.string().optional(),
         profesional: z
           .string()
           .optional()
@@ -1255,7 +1258,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`
       }
-      const { reason, ...payload } = input
+      // El agente solo conoce al profesional por su referencia («pro-…»): el usuario lo pone el servidor.
+      const dentistUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.dentistUserId))
+      if (!dentistUserId) return UNKNOWN_PROFESSIONAL
+      const { reason, ...payload } = { ...input, dentistUserId }
       return propose("reservar_cita", payload, "proponer_cita", reason)
     },
     {
@@ -1279,7 +1285,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reprogramar la cita ${input.appointmentId} al ${input.startsAt}.`
       }
-      const { reason, ...payload } = input
+      let dentistUserId: string | undefined
+      if (input.dentistUserId) {
+        dentistUserId = (await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.dentistUserId as string))) ?? undefined
+        if (!dentistUserId) return UNKNOWN_PROFESSIONAL
+      }
+      const { reason, ...payload } = { ...input, ...(dentistUserId ? { dentistUserId } : {}) }
       return propose("reprogramar_cita", payload, "reprogramar_cita", reason)
     },
     {

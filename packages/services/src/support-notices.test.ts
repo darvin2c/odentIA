@@ -15,6 +15,7 @@ import {
   setSupportCaseStatus,
 } from "./admin-support.js"
 import { sendHelpRequest } from "./help.js"
+import { reportModelOutage } from "./model-outage.js"
 import {
   claimSupportNotice,
   completeSupportNotice,
@@ -168,6 +169,26 @@ describe("a quien preguntó", () => {
     await setSupportCaseStatus(ownerDb, staff, kase.id, "resuelto")
     expect(await claimSupportNotice(ownerDb, notice!.id)).toBeNull()
     expect((await personNoticesOf(kase.id))[0]).toMatchObject({ emailState: "omitido" })
+  })
+
+  it("el caso automático «Modelo sin responder» no tiene a quién avisar: responderle o pedirle algo no detiene los avisos de las demás clínicas", async () => {
+    const outage = await reportModelOutage(ownerDb, {
+      orgId: ORG,
+      llm: "chatgpt_6",
+      llmLabel: "ChatGPT",
+      code: "PROVIDER_QUOTA",
+      detail: "prueba: sin saldo",
+      at: new Date(),
+    })
+    // Soporte le responde en público por error y lo pasa a «Esperando a la clínica».
+    await replyToSupportCase(ownerDb, staff, outage.caseId, "Respondido por error en público.")
+    await setSupportCaseStatus(ownerDb, staff, outage.caseId, "esperando_clinica")
+    const other = await ask("¿Cómo cambio el horario para escribir?")
+    await replyToSupportCase(ownerDb, staff, other.id, "En Agente › Horario para escribir.")
+    const latest = Math.max(await lastAnswerOf(outage.caseId), await lastAnswerOf(other.id))
+    await expect(tickSupportNotices(ownerDb, new Date(latest + SUPPORT_REPLY_NOTICE_DELAY_MS + MIN))).resolves.toBeDefined()
+    expect(await personNoticesOf(outage.caseId)).toEqual([])
+    expect((await personNoticesOf(other.id)).map((row) => [row.kind, row.recipientUserId])).toEqual([["respuesta", ANA]])
   })
 
   it("si ya no está en la clínica no se le envía; el caso lo siguen propietario y administrador", async () => {

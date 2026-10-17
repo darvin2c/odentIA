@@ -1174,10 +1174,11 @@ export async function sendReceiptInConversation(
     .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
   if (!thread) throw notFound("Conversación")
-  const recipients = await listDocumentRecipients(tx, orgId, input.patientId)
-  const recipient = recipients.find(
-    (row) => row.contactId === thread.contactId && (row.relation === "paciente" || row.relation === "representante_legal" || row.relation === "responsable_economico"),
-  )
+  // El comprobante lista lo que se le hizo (datos de salud): por el chat solo
+  // va a quien decide por el paciente, con la regla única y el corte a los 18
+  // años con el día de la clínica (`listDecisionRecipients`).
+  const decides = await listDecisionRecipients(tx, orgId, input.patientId)
+  const recipient = decides.find((row) => row.contactId === thread.contactId)
   if (!recipient) return null
   const [ticket] = await tx
     .select({ id: paymentTicket.id })

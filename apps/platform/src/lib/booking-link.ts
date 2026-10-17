@@ -127,10 +127,43 @@ export function chooseLinkMessages(
   return post(`${base(slug)}/messages`, { token, ...input })
 }
 
-/** La dirección que descarga un papel de «Tus papeles» (PDF). */
-export function linkPaperUrl(slug: string, token: string, paper: Pick<PersonalLinkPaper, "kind" | "id">): string {
-  const query = new URLSearchParams({ token, kind: paper.kind })
-  return `${base(slug)}/papers/${encodeURIComponent(paper.id)}?${query.toString()}`
+/**
+ * Descarga un papel de «Tus papeles» (PDF). Es un POST con el token en el
+ * cuerpo, como lo demás del enlace: el token no queda en la dirección, ni en
+ * registros de acceso ni en el Referer.
+ */
+export async function downloadLinkPaper(slug: string, token: string, paper: Pick<PersonalLinkPaper, "kind" | "id" | "title">): Promise<void> {
+  const response = await fetch(`${base(slug)}/papers/${encodeURIComponent(paper.id)}`, {
+    method: "POST",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, kind: paper.kind }),
+  })
+  if (!response.ok) {
+    let shape: { code?: string; message?: string; request_id?: string } = {}
+    try {
+      shape = ((await response.json()) as { error?: typeof shape }).error ?? {}
+    } catch {
+      // respuesta no-JSON: sin detalle
+    }
+    throw new ApiError(response.status, shape)
+  }
+  const disposition = response.headers.get("content-disposition") ?? ""
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `${paper.title}.pdf`
+  const url = URL.createObjectURL(await response.blob())
+  try {
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = filename
+    anchor.rel = "noreferrer"
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    // Se libera después del clic: el navegador ya tomó el archivo.
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 }
 
 export function fetchBookingSlots(

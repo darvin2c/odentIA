@@ -8,6 +8,7 @@ import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
+import { keepRegistrationHold } from "../lib/registration-hold.js"
 
 const submissionSchema = z.strictObject({
   submissionId: z.uuid(), formVersion: z.number().int().nonnegative(), token: z.string().max(256).optional(),
@@ -86,6 +87,8 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
       await withOrgContext(deps.db, org.id, tx => registerPatient(tx, org.id, { kind: "public", token, entryPoint }, input))
       return c.json({ data: { registered: true } }, 201)
     } catch (error) {
+      // El documento ya era de alguien: queda para recepción y se responde lo mismo que siempre.
+      await keepRegistrationHold(deps.db, org.id, error)
       if (error instanceof ServiceError) {
         if (error.status === 404) return unavailable(c)
         return c.json(errorBody(c, error.code, error.message), error.status)

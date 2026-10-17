@@ -30,6 +30,7 @@ import {
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { PENDING_REPRESENTATIVE_KEY, REGISTRATION_HOLD_KEY } from "./patient-registration.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -563,9 +564,12 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
 }
 
 /**
- * Lo que dejaron «Su enlace» y el portal para recepción, con su propia fila:
- * la posible ficha repetida y quien pide volver a entrar al portal (ADR 0037).
- * Son tareas abiertas de su área; se van al hacerlas.
+ * Lo que dejaron «Su enlace», el registro en línea y el portal para
+ * recepción, con su propia fila: la posible ficha repetida, alguien que se
+ * registró con el documento de otra persona, el representante por confirmar
+ * y quien pide volver a entrar al portal (ADR 0037). Son tareas abiertas de
+ * su área; se van al hacerlas. La clase de la tarea es `ficha_repetida` para
+ * las tres primeras: el prefijo de su clave dice cuál es.
  */
 async function waitingSystemTasks(
   tx: Db,
@@ -577,32 +581,56 @@ async function waitingSystemTasks(
   const rows = await tx.execute<{
     id: string
     kind: string
-    patientId: string
-    patientName: string
+    key: string | null
+    patientId: string | null
+    patientName: string | null
+    contactId: string | null
     contactName: string | null
     reason: string | null
     createdAt: string
     grantId: string | null
   }>(sql`
-    select t.id, t.kind, t.patient_id as "patientId", pp.display_name as "patientName", ct.display_name as "contactName",
-      t.reason, ${iso(sql`t.created_at`)} as "createdAt",
+    select t.id, t.kind, t.idempotency_key as key, t.patient_id as "patientId", pp.display_name as "patientName",
+      t.contact_id as "contactId", ct.display_name as "contactName", t.reason, ${iso(sql`t.created_at`)} as "createdAt",
       (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
         and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId"
-    from task t join patient p on p.id = t.patient_id and p.organization_id = t.organization_id join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    from task t
+    left join patient p on p.id = t.patient_id and p.organization_id = t.organization_id
+    left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
     where t.organization_id = ${orgId} and t.status = 'open' and t.kind is not null
+      and (t.patient_id is not null or t.contact_id is not null)
       and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
     order by t.created_at, t.id limit 20`)
+  const sourceOf = (key: string | null): WaitingPossibleDuplicate["source"] =>
+    key?.startsWith(REGISTRATION_HOLD_KEY) ? "registro" : key?.startsWith(PENDING_REPRESENTATIVE_KEY) ? "representante" : "enlace"
   return {
     duplicates: rows
       .filter((row) => row.kind === "ficha_repetida")
-      .map((row) => ({ id: row.id, patientId: row.patientId, patientName: row.patientName, detail: row.reason ?? "", createdAt: row.createdAt })),
+      .flatMap((row): WaitingPossibleDuplicate[] => {
+        const source = sourceOf(row.key)
+        // En «registro» la fila es de quien tenía el documento (con ficha o sin ella).
+        const name = source === "registro" ? (row.contactName ?? row.patientName) : row.patientName
+        if (!name || (source !== "registro" && !row.patientId)) return []
+        return [
+          {
+            id: row.id,
+            source,
+            patientId: row.patientId,
+            personId: source === "enlace" ? null : row.contactId,
+            patientName: name,
+            personName: source === "representante" ? row.contactName : null,
+            detail: row.reason ?? "",
+            createdAt: row.createdAt,
+          },
+        ]
+      }),
     reentries: rows
-      .filter((row) => row.kind === "volver_al_portal")
+      .filter((row) => row.kind === "volver_al_portal" && row.patientId)
       .map((row) => ({
         id: row.id,
-        patientId: row.patientId,
-        contactName: row.contactName ?? row.patientName,
+        patientId: row.patientId as string,
+        contactName: row.contactName ?? row.patientName ?? "",
         grantId: row.grantId,
         createdAt: row.createdAt,
       })),

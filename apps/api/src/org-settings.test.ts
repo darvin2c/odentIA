@@ -3,7 +3,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
-import { type Storage, secretsKeyFromEnv } from "@odentia/services"
+import { isInAvatarFolder, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
@@ -54,9 +54,12 @@ const authStub = {
 const unused = async () => {
   throw new Error("no usado")
 }
+const deleted: Array<{ url: string; folder: string }> = []
 const storageStub = {
   putAvatar: unused,
-  deleteByUrl: async () => {},
+  deleteByUrl: async (url: string, folder: string) => {
+    deleted.push({ url, folder })
+  },
   putAttachment: unused,
   attachmentUrl: unused,
   deleteAttachment: async () => {},
@@ -272,4 +275,19 @@ it("sedes: desactivar y reactivar exigen configuración y no cruzan de organizac
   expect(await missing.json()).toMatchObject({
     error: { code: "NOT_FOUND", message: "Sede no encontrada" },
   })
+})
+
+it("logo: quitarlo solo borra dentro de la carpeta de la clínica, aunque el guardado apunte al de otra", async () => {
+  // Alguien dejó en `organization.logo` la dirección del logo de otra clínica.
+  const foreign = "https://cdn.example.com/avatars/clinica-org_settings_b/logo.png"
+  await ownerDb.execute(sql`update "organization" set "logo" = ${foreign} where "id" = ${ORG}`)
+  deleted.length = 0
+  const removed = await request("owner", "DELETE", "/org-profile/logo")
+  expect(removed.status).toBe(200)
+  // La ruta pide borrar solo en su carpeta, y esa dirección no está en ella.
+  expect(deleted).toEqual([{ url: foreign, folder: `clinica-${ORG}` }])
+  expect(isInAvatarFolder("avatars/clinica-org_settings_b/logo.png", `clinica-${ORG}`)).toBe(false)
+  expect(isInAvatarFolder(`avatars/clinica-${ORG}/logo.png`, `clinica-${ORG}`)).toBe(true)
+  expect(isInAvatarFolder(`avatars/clinica-${ORG}/../clinica-org_settings_b/logo.png`, `clinica-${ORG}`)).toBe(false)
+  expect(isInAvatarFolder("avatars/u-otra/foto.png", `clinica-${ORG}`)).toBe(false)
 })

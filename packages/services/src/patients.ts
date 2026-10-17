@@ -189,15 +189,63 @@ type IdentityInput = {
  * manda lo que trae la ficha (nombre y documento que verificó el equipo) y se
  * completa con lo que solo la persona conocía. Un teléfono o correo distinto
  * de la persona no se pierde: queda en sus notas.
+ *
+ * `onlyFill` es lo que escribe alguien desde fuera (el registro en línea con
+ * el enlace de su conversación): nunca reemplaza un dato que la persona ya
+ * tenía, solo completa los vacíos, y lo distinto queda en sus notas para que
+ * recepción lo revise. El nombre visible solo se cambia si la persona aún no
+ * tenía identidad registrada (ni nombres ni documento: la creó un canal).
  */
-async function adoptIdentity(tx: Db, orgId: string, personId: string, identity: IdentityInput): Promise<void> {
+async function adoptIdentity(
+  tx: Db,
+  orgId: string,
+  personId: string,
+  identity: IdentityInput,
+  options: { onlyFill?: boolean } = {},
+): Promise<void> {
   const [current] = await tx.select().from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, personId))).for("update")
   if (!current) throw notFound("Contacto")
-  const kept: string[] = []
-  if (identity.phone && current.phone && identity.phone !== current.phone) kept.push(`Teléfono anterior del contacto: ${current.phone}`)
-  if (identity.email && current.email && identity.email.toLowerCase() !== current.email.toLowerCase())
-    kept.push(`Correo anterior del contacto: ${current.email}`)
   const withDocument = Boolean(identity.docNumber)
+  const otherPhone = !!identity.phone && !!current.phone && identity.phone !== current.phone
+  const otherEmail = !!identity.email && !!current.email && identity.email.toLowerCase() !== current.email.toLowerCase()
+  if (options.onlyFill) {
+    const told: string[] = []
+    if (otherPhone) told.push(`teléfono ${identity.phone}`)
+    if (otherEmail) told.push(`correo ${identity.email}`)
+    if (identity.docNumber && current.docNumber && identity.docNumber !== current.docNumber) told.push(`documento ${identity.docNumber}`)
+    if (identity.birthDate && current.birthDate && identity.birthDate !== current.birthDate) told.push(`fecha de nacimiento ${identity.birthDate}`)
+    const provisional = !current.givenNames && !current.docNumber
+    if (!provisional && identity.displayName && identity.displayName !== current.displayName) told.push(`nombre ${identity.displayName}`)
+    const takesDocument = !current.docNumber && withDocument
+    await tx
+      .update(contact)
+      .set({
+        displayName: provisional ? identity.displayName : current.displayName,
+        givenNames: current.givenNames ?? identity.givenNames ?? null,
+        paternalSurname: current.paternalSurname ?? identity.paternalSurname ?? null,
+        maternalSurname: current.maternalSurname ?? identity.maternalSurname ?? null,
+        docType: takesDocument ? (identity.docType ?? null) : current.docType,
+        docNumber: takesDocument ? (identity.docNumber ?? null) : current.docNumber,
+        docCountry: takesDocument ? (identity.docCountry ?? null) : current.docCountry,
+        birthDate: current.birthDate ?? identity.birthDate ?? null,
+        sex: current.sex ?? identity.sex ?? null,
+        phone: current.phone ?? identity.phone ?? null,
+        email: current.email ?? identity.email ?? null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
+    if (told.length) {
+      await tx.insert(crmNote).values({
+        organizationId: orgId,
+        contactId: personId,
+        body: `En el registro en línea escribió otros datos, que no se guardaron: ${told.join(", ")}. Revisa cuáles valen.`,
+      })
+    }
+    return
+  }
+  const kept: string[] = []
+  if (otherPhone) kept.push(`Teléfono anterior del contacto: ${current.phone}`)
+  if (otherEmail) kept.push(`Correo anterior del contacto: ${current.email}`)
   await tx
     .update(contact)
     .set({
@@ -216,6 +264,40 @@ async function adoptIdentity(tx: Db, orgId: string, personId: string, identity: 
     })
     .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
   if (kept.length) await tx.insert(crmNote).values({ organizationId: orgId, contactId: personId, body: kept.join("\n") })
+}
+
+/**
+ * Lo que queda para recepción cuando un alta desde fuera (registro en línea,
+ * enlace de reserva) escribe el documento de una persona que ya está en la
+ * clínica: no se adopta ni se cambia nada de ella (ADR 0001: un dato que
+ * escribe el propio interesado no verifica identidad).
+ */
+export interface RegistrationHold {
+  /** La persona que ya tenía ese documento. */
+  ownerId: string
+  ownerName: string
+  /** Su ficha, si ya es paciente. */
+  ownerPatientId: string | null
+  /** Lo que escribió quien se registró, para comparar. */
+  declared: { displayName: string; phone: string | null; email: string | null }
+}
+
+/** Texto neutro para quien se registra: no confirma que el documento exista. */
+export const REGISTRATION_NOT_COMPLETED_TEXT = "No pudimos completar el registro. Comunícate con recepción."
+
+/**
+ * El alta desde fuera no se completó porque el documento ya es de otra
+ * persona. Lleva lo que debe quedar para recepción: la ruta lo deja con
+ * `leaveRegistrationHold` en otra transacción (esta se revierte entera) y
+ * responde el texto neutro.
+ */
+export class RegistrationHeld extends ServiceError {
+  declare readonly hold: RegistrationHold
+  constructor(hold: RegistrationHold) {
+    super("REGISTRATION_NOT_COMPLETED", 409, REGISTRATION_NOT_COMPLETED_TEXT)
+    // No enumerable: si algo serializa el error, no sale de quién era el documento.
+    Object.defineProperty(this, "hold", { value: hold, enumerable: false })
+  }
 }
 
 /**
@@ -259,12 +341,34 @@ export async function createPatient(
     birthDate: (rawIdentity.birthDate as string | null | undefined) || null,
     sex: (rawIdentity.sex as string | null | undefined) || null,
   }
-  // El documento con su país: si ya es de otra ficha se dice de quién.
-  await assertDocumentFree(tx, orgId, identity, { patientsOnly: true })
   const selfLink = links.find((link) => link.relationship === "self")
   const others = links.filter((link) => link.relationship !== "self")
+  // Desde fuera (sin una persona del equipo: registro en línea, enlace de
+  // reserva) nunca se adopta ni se cambia a quien ya tiene ese documento,
+  // sea o no paciente: queda para recepción.
+  const fromOutside = actorUserId === null
+  if (fromOutside) {
+    const owner = await findPersonByDocument(tx, orgId, identity)
+    if (owner && owner !== selfLink?.contactId) {
+      const [row] = await tx
+        .select({ displayName: contact.displayName, patientId: patient.id })
+        .from(contact)
+        .leftJoin(patient, and(eq(patient.organizationId, contact.organizationId), eq(patient.personId, contact.id)))
+        .where(and(eq(contact.organizationId, orgId), eq(contact.id, owner)))
+        .limit(1)
+      throw new RegistrationHeld({
+        ownerId: owner,
+        ownerName: row?.displayName ?? "otra persona",
+        ownerPatientId: row?.patientId ?? null,
+        declared: { displayName: identity.displayName, phone: identity.phone ?? null, email: identity.email ?? null },
+      })
+    }
+  }
+  // El documento con su país: si ya es de otra ficha se dice de quién.
+  await assertDocumentFree(tx, orgId, identity, { patientsOnly: true })
   try {
-    // Una persona sin ficha con ese documento es la misma persona (ADR 0001).
+    // Una persona sin ficha con ese documento es la misma persona (ADR 0001),
+    // pero solo cuando registra el equipo: desde fuera ya se cortó arriba.
     const documentOwner = await findPersonByDocument(tx, orgId, identity)
     if (documentOwner && selfLink && documentOwner !== selfLink.contactId) {
       const [owner] = await tx.select({ displayName: contact.displayName }).from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, documentOwner)))
@@ -275,7 +379,8 @@ export async function createPatient(
     if (existing) {
       const [already] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.personId, existing))).limit(1)
       if (already) throw conflict("ALREADY_PATIENT", "El contacto ya tiene una ficha propia")
-      await adoptIdentity(tx, orgId, existing, identity)
+      // Desde fuera solo puede ser su propio contacto (el de su conversación): se completa, no se reemplaza.
+      await adoptIdentity(tx, orgId, existing, identity, { onlyFill: fromOutside })
       personId = existing
     } else {
       personId = (await createPerson(tx, orgId, { userId: actorUserId }, identity)).id

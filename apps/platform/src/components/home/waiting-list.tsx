@@ -20,6 +20,8 @@ export interface WaitingHandlers {
   onDone?: (row: RowOf<"task">) => void
   /** «Revisada» una posible ficha repetida: cierra la tarea que la recuerda. */
   onReviewed?: (row: RowOf<"possibleDuplicate">) => void
+  /** «Confirmar» el representante que nombró un registro en línea: lo vincula y cierra la tarea. */
+  onConfirmRepresentative?: (row: RowOf<"possibleDuplicate">) => void
   /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
   onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
   /** La fila cuya acción está en curso: su botón se desactiva y dice que trabaja. */
@@ -88,7 +90,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "plan", budgetId: row.id }} {...props} />
     case "possibleDuplicate":
       // Datos personales de la persona: ahí se ve el documento y se decide si son la misma.
-      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "filiacion" }} {...props} />
+      if (row.patientId) return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "filiacion" }} {...props} />
+      // Quien tenía el documento aún no es paciente: su página de persona.
+      return row.personId ? <Link to="/people/$personId" params={{ personId: row.personId }} {...props} /> : null
     case "portalReentry":
       // Datos › Acceso al portal: la fila de su acceso dice «Pidió volver a entrar» y ofrece «Enviar nuevo enlace».
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
@@ -137,6 +141,10 @@ function quickAction(row: WaitingRow, handlers: WaitingHandlers): { label: strin
   if (row.kind === "staleEncounter" && handlers.onVoidEncounter) {
     const discard = handlers.onVoidEncounter
     return { label: "Anular con motivo", run: () => discard(row), primary: false }
+  }
+  if (row.kind === "possibleDuplicate" && row.source === "representante" && handlers.onConfirmRepresentative) {
+    const confirm = handlers.onConfirmRepresentative
+    return { label: "Confirmar", run: () => confirm(row), primary: true }
   }
   if (row.kind === "possibleDuplicate" && handlers.onReviewed) {
     const reviewed = handlers.onReviewed
