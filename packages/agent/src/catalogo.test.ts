@@ -8,9 +8,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { agentDecisionLog } from "@odentia/db/schema/agent"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
@@ -236,10 +235,7 @@ beforeAll(async () => {
   await ownerDb
     .insert(branch)
     .values({ organizationId: ORG, name: "Sede Centro", timezone: "America/Lima" })
-  const checkpointer = PostgresSaver.fromConnString(ownerUri)
-  await checkpointer.setup()
-  await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY }
+  runtime = { platform: { fake: true }, secretsKey: KEY }
   connectionId = (
     await withOrgContext(appDb, ORG, (tx) =>
       createConnection(
@@ -286,7 +282,6 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
-  await runtime?.checkpointer.end().catch(() => {})
   await container?.stop()
 })
 
