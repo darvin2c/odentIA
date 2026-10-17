@@ -22,10 +22,10 @@ no se comparte con OpenShip ni con las demás aplicaciones.
 - El rol `dentalagent_app` y sus permisos por defecto los crea el init de la
   imagen (`infra/dev/postgres/init`), no las migraciones. Un PostgreSQL
   gestionado necesita crearlos aparte antes de migrar.
-- API, admin, panel, platform y web publican únicamente en loopback (puerto
-  interno 3000, salvo la API): `api.` a API (host 3101), `app.` a panel (3010),
-  los hosts de organizaciones `*.` a platform (3011), `admin.` a admin (3012) y el
-  dominio raíz y `www.` a la web de marketing (3013), que redirige `www.` a la raíz.
+- La entrada pública es Cloudflare Tunnel (servicio `tunnel`, ver «Entrada por
+  Cloudflare Tunnel»). API, admin, panel, platform y web además publican en loopback
+  (API en el host 3101, panel 3010, platform 3011, admin 3012 y web 3013) solo como
+  vuelta atrás por el borde de OpenShip. La web redirige `www.` a la raíz.
 - La web (`apps/web`, ADR 0046) es HTML generado al compilar la imagen y servido por
   `apps/web/server.mjs`, sin variables de runtime. Su dirección canónica, su mapa del
   sitio y sus enlaces a `app.` y `api.` salen de `VITE_BASE_DOMAIN`: la canónica es
@@ -47,8 +47,54 @@ docker compose --env-file infra/prod/.env -f compose.prod.yaml up -d --build
 ```
 
 Las rutas se resuelven desde la raíz, donde vive `compose.prod.yaml`. No copiar el
-archivo a otro directorio sin conservar el árbol del repositorio. El borde no
-forma parte del stack: fuera de OpenShip es necesario un proxy HTTPS propio.
+archivo a otro directorio sin conservar el árbol del repositorio. El túnel forma
+parte del stack: fuera de OpenShip basta su clave, sin proxy HTTPS propio ni
+puertos abiertos.
+
+## Entrada por Cloudflare Tunnel
+
+Toda visita a odentIA entra por Cloudflare. El servicio `tunnel` (cloudflared) solo
+abre conexiones de salida hacia Cloudflare y entrega cada visita por la red interna
+del stack, así que nadie llega a odentIA yendo directo a la IP del servidor. El
+servidor es compartido: sus puertos 80 y 443 siguen abiertos para las demás
+aplicaciones de OpenShip, pero ya no llevan a odentIA. Se cierran solo cuando todas
+entren por su propio túnel.
+
+Un túnel y una clave por proyecto. Se crea en Cloudflare (Networking → Tunnels,
+tipo Cloudflared); de su comando de instalación solo se usa la clave, que va en
+`CLOUDFLARE_TUNNEL_TOKEN` del entorno production del proyecto. Sin ella Compose
+rechaza el archivo. Quien tiene la clave puede recibir las visitas de odentIA: no
+copiarla fuera de OpenShip y, si se filtra, renovarla en Cloudflare.
+
+Rutas del túnel («Published application routes»), con el comodín al final:
+
+| Dirección | Servicio |
+| --- | --- |
+| `api.<dominio>` | `http://api:3001` |
+| `app.<dominio>` | `http://panel:3000` |
+| `admin.<dominio>` | `http://admin:3000` |
+| `<dominio>` y `www.<dominio>` | `http://web:3000` |
+| `*.<dominio>` | `http://platform:3000` |
+
+Cloudflare crea el registro DNS de cada ruta salvo el del comodín: el CNAME `*` a
+`<id del túnel>.cfargotunnel.com`, con proxy, se crea a mano. El certificado
+universal de Cloudflare cubre `<dominio>` y `*.<dominio>`. Todas las direcciones
+quedan sujetas a los límites de Cloudflare (en el plan gratuito, 100 MB por
+petición y 100 s hasta la respuesta).
+
+Cambio desde el borde de OpenShip, una vez y con unos minutos sin servicio:
+
+1. Clave en `CLOUDFLARE_TUNNEL_TOKEN` y despliegue: el túnel queda «Healthy», sin rutas.
+2. Quitar en OpenShip los dominios de odentIA. OpenShip borra los registros DNS que
+   creó; borrar a mano los que queden con esos nombres.
+3. Añadir las rutas y el CNAME `*`.
+4. `CLIENT_IP_HEADER=cf-connecting-ip` y Apply/refresh de la API.
+
+Comprobar que cada dirección responde y que la IP del servidor ya no lleva a
+odentIA: `curl --resolve api.<dominio>:443:<IP del servidor> https://api.<dominio>/health`
+debe recibir la página «Service not found» de OpenShip. Vuelta atrás: quitar las
+rutas y el CNAME `*`, volver a exponer los dominios en OpenShip y
+`CLIENT_IP_HEADER=x-real-ip`.
 
 ## Variables: una sola fuente
 
@@ -81,19 +127,19 @@ dirección, por ejemplo) y para la IP de cada sesión. Vacía, nadie tiene IP: t
 las clínicas comparten un límite por ruta, la API lo avisa al arrancar y Better
 Auth con «Rate limiting could not determine a client IP».
 
-En OpenShip va `CLIENT_IP_HEADER=x-real-ip`. Su borde OpenResty la reescribe con
-la dirección que vio conectar, que toma de `CF-Connecting-IP` solo cuando conecta
-un rango de Cloudflare (`set_real_ip_from`). No sirven las otras:
+Va una cabecera que **reescribe** siempre quien está delante, nunca una que solo
+reenvía: cualquier otra la escribe el cliente y estrena un límite en cada intento.
+Una sola: si la petición no la trae, Better Auth vuelve al límite compartido.
 
-- `cf-connecting-ip`: el VPS acepta HTTPS directo, sin Cloudflare, y el borde la
-  deja pasar tal como llega; cualquiera elegiría su IP y estrenaría un límite en
-  cada intento.
-- `x-forwarded-for`: el borde le añade su dirección a la que trae la petición, así
-  que llega con dos o más y Better Auth no la acepta.
-
-Con otro proxy delante (Compose manual), poner la cabecera que ese proxy
-**reescribe** siempre, nunca una que solo reenvía. Una sola cabecera: si la
-petición no la trae, Better Auth vuelve al límite compartido.
+- Con el túnel: `CLIENT_IP_HEADER=cf-connecting-ip`. Cloudflare la reescribe en cada
+  visita y el túnel es la única entrada. Deja de ser segura si los dominios de
+  odentIA vuelven al borde de OpenShip: el servidor acepta HTTPS directo, sin
+  Cloudflare, y el borde la deja pasar tal como llega.
+- Por el borde de OpenShip (vuelta atrás): `CLIENT_IP_HEADER=x-real-ip`. El borde
+  la reescribe con la dirección que vio conectar, que toma de `CF-Connecting-IP`
+  solo cuando conecta un rango de Cloudflare (`set_real_ip_from`).
+- Nunca `x-forwarded-for`: los proxies le añaden su dirección a la que trae la
+  petición, así que llega con dos o más y Better Auth no la acepta.
 
 ### Modelo del agente
 
@@ -164,11 +210,12 @@ OpenShip publica además un check `build:<servicio>` por servicio desplegado y
 marca como fallidos los que no llegaron a desplegarse porque otro falló antes;
 esos checks no los crea el repositorio y no indican un fallo de código.
 
-Cada superficie HTTP se expone una vez en el proyecto (el dominio nace al exponer
-el servicio): `api.` (api, 3001), `app.` (panel, 3000), `admin.` (admin, 3000), el
-dominio raíz y `www.` (web, 3000) y el comodín `*.` (platform, 3000), que requiere DNS-01
-con el proveedor DNS conectado a OpenShip; el resto usa HTTP-01. Un servicio nuevo
-del Compose no recibe dominio solo.
+Los dominios de odentIA no se exponen en OpenShip: son rutas del túnel. Exponerlos
+reabre la entrada directa al servidor y hace falsificable `cf-connecting-ip`; solo
+como vuelta atrás (ver «Entrada por Cloudflare Tunnel»), y entonces cada superficie
+se expone una vez: `api.` (api, 3001), `app.` (panel, 3000), `admin.` (admin,
+3000), el dominio raíz y `www.` (web, 3000) y el comodín `*.` (platform, 3000), que
+requiere DNS-01 con el proveedor DNS conectado a OpenShip; el resto usa HTTP-01.
 
 Configurar `composePath=compose.prod.yaml` y dejar el directorio raíz vacío en el
 proyecto. No importar una copia temporal de Compose con placeholders interpolados.
