@@ -201,13 +201,14 @@ it("una ráfaga de mensajes se atiende con una sola corrida y una sola respuesta
 
 it("solo se omite el mensaje que una corrida leyó: ni la hora de creación ni una corrida sin respuesta lo dan por atendido", async () => {
   // Una corrida que no respondió no cubre nada: la siguiente del hilo se ejecuta.
-  const silentThenReply = new RecordingModel((call) => (call === 1 ? new AIMessage({ content: "Pensando…" }) : null))
+  // Escribe sin enviar también tras el aviso de que su texto no salió (llamadas 1 y 2).
+  const silentThenReply = new RecordingModel((call) => (call <= 2 ? new AIMessage({ content: "Pensando…" }) : null))
   const first = await ingest("tg:uso-s", "uso-s-1", "¿Atienden sábados?")
   const second = await ingest("tg:uso-s", "uso-s-2", "¿Y domingos?")
   expect(await run(silentThenReply, first.conversationId, first.messageId)).toBe("done")
   expect(await ledgerOf(first.conversationId)).toEqual(["sin_respuesta"])
   expect(await run(silentThenReply, second.conversationId, second.messageId)).toBe("done")
-  expect(silentThenReply.calls).toHaveLength(2)
+  expect(silentThenReply.calls).toHaveLength(3)
   expect(await repliesOf(first.conversationId)).toHaveLength(1)
 
   // Un mensaje que se confirma tarde con una hora de creación anterior a la de
@@ -480,9 +481,9 @@ it("una corrida sin respuesta o que falla no se cobra, aunque haya llamado al mo
     expect(result).toBe("done")
     return inbound.conversationId
   }
-  // Escribe sin usar send_reply: a la persona no le llegó nada.
+  // Escribe sin usar send_reply, también tras el aviso: a la persona no le llegó nada.
   const silent = await attend("tg:cobro-silencio", new RecordingModel(() => new AIMessage({ content: "Pensando…" })), 0)
-  expect(await runRowOf(silent)).toMatchObject({ status: "sin_respuesta", llmCalls: 1 })
+  expect(await runRowOf(silent)).toMatchObject({ status: "sin_respuesta", llmCalls: 2 })
   expect(await chargedConversationsOf(silent)).toHaveLength(0)
   // Consulta las sedes y en la llamada siguiente el proveedor se cae, en el último intento de la cola.
   const failing = new RecordingModel((call) => {
