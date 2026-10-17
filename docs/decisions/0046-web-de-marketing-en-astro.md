@@ -24,7 +24,7 @@ odentIA necesita una web pública que venda y explique el producto: inicio, prec
 
 - La web se despliega como archivos estáticos detrás del mismo borde HTTPS; cambiar un texto o un precio requiere compilar y publicar de nuevo.
 - Astro y su integración de React son dependencias nuevas, solo de `apps/web`, que usa TypeScript 5.9 porque `astro check` todavía no admite TypeScript 7.
-- Las páginas legales existen con su estructura pero sin texto: van con `noindex` y un aviso hasta que las redacte un abogado. La web no se publica antes.
+- Las páginas legales existen con su estructura pero sin texto: van con `noindex` y un aviso hasta que las redacte un abogado.
 - Revisar esta decisión si la web necesita contenido que cambie en cada visita (por ejemplo, un agente que converse con las clínicas) o si pasa a tener muchos contenidos editoriales que convenga gestionar fuera del código.
 
 ## Referencias
