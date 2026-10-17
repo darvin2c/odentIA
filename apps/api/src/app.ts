@@ -21,6 +21,7 @@ import { createAccountRoute } from "./routes/account.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAccountBillingRoute, createSaasBillingRoute, createSaasPreAuthGuard, requireSaasAccess } from "./routes/saas-billing.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
+import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
@@ -261,6 +262,7 @@ export function createApp(deps: AppDeps) {
   }))
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
+  app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.get("/api/admin/overview", (c) => runService(c, 200, () =>
     deps.ownerDb.transaction((tx) => getBackofficeOverview(tx, adminContextOf(c))),
   ))

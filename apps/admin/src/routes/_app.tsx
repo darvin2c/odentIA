@@ -6,9 +6,10 @@ import {
   SideDockProvider,
   SideDockSlot,
 } from "@odentia/ui-patterns"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, Outlet, useRouterState } from "@tanstack/react-router"
 import {
+  BookOpen,
   Building2,
   CircleHelp,
   Coins,
@@ -18,6 +19,8 @@ import {
   UserRound,
   Users,
 } from "lucide-react"
+import { z } from "zod"
+import { api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
 import { panelUrl } from "../lib/host"
@@ -37,6 +40,15 @@ function AdminLayout() {
   const { adminSession } = appRoute.useRouteContext()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const queryClient = useQueryClient()
+  // Hojas sin responder: el número rojo del menú (decisión 6 del lienzo).
+  const complaints = useQuery({
+    queryKey: ["admin", "complaints-summary"],
+    queryFn: async () =>
+      z
+        .object({ pending: z.number() })
+        .parse(await api<unknown>("/api/admin/consumer-complaints/summary")),
+    staleTime: 60_000,
+  })
   const items: AppShellNavEntry[] = [
     { label: "Inicio", to: "/", icon: Home },
     { label: "Organizaciones", to: "/organizations", icon: Building2 },
@@ -48,6 +60,12 @@ function AdminLayout() {
         ]
       : []),
     { label: "Soporte", to: "/support", icon: CircleHelp },
+    {
+      label: "Libro de Reclamaciones",
+      to: "/complaints",
+      icon: BookOpen,
+      badge: complaints.data?.pending || undefined,
+    },
     ...(adminSession.actor.role === "admin"
       ? [{ label: "Equipo y actividad", to: "/team", icon: ShieldCheck }]
       : []),

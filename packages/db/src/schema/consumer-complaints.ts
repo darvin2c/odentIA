@@ -9,6 +9,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core"
+import { user } from "./auth.js"
 
 /**
  * Libro de Reclamaciones virtual de odentIA (Perú: Ley 29571 y D.S.
@@ -57,6 +58,12 @@ export const consumerComplaint = pgTable(
     request: text("request").notNull(),
     providerResponse: text("provider_response"),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
+    /** Quién del personal respondió (migración 0005); nulo si su cuenta se borró. */
+    respondedByUserId: text("responded_by_user_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    /** La respuesta llegó al servidor de correo de quien reclamó; si no, se reenvía a mano. */
+    responseEmailSent: boolean("response_email_sent").notNull().default(false),
     privacyAcceptedAt: timestamp("privacy_accepted_at", { withTimezone: true }).notNull(),
     emailSent: boolean("email_sent").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

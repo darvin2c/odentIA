@@ -5,12 +5,16 @@
 // Es de la plataforma, no de una clínica: la hoja se guarda en tablas globales
 // que solo toca el rol owner (migraciones 0003 y 0004). La API pública es la única que
 // escribe aquí y lo hace con `ownerDb.transaction`.
+import { isAdminRole } from "@odentia/auth/admin-permissions"
 import type { Db } from "@odentia/db"
+import { user } from "@odentia/db/schema/auth"
 import { consumerComplaint, consumerComplaintCounter } from "@odentia/db/schema/consumer-complaints"
 import { escapeHtml, type MailTemplate } from "@odentia/mail"
-import { eq, sql } from "drizzle-orm"
+import { and, asc, count, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
-import { notFound, validation } from "./errors.js"
+import { type AdminActor, writeAdminAudit } from "./admin-core.js"
+import { notFound, ServiceError, validation } from "./errors.js"
+import { addPeruBusinessDays, limaDate, peruBusinessDaysBetween } from "./peru-business-days.js"
 
 /**
  * Datos del proveedor que encabezan la Hoja de Reclamación (Anexo I).
@@ -329,7 +333,11 @@ function sheetSections(
     },
     {
       title: "4. Observaciones y acciones adoptadas por el proveedor",
-      rows: [["Estado", sheet.providerResponse ?? "Pendiente: te responderemos por correo."]],
+      rows: [
+        sheet.providerResponse === null
+          ? ["Estado", "Pendiente: te responderemos por correo."]
+          : ["Respuesta", sheet.providerResponse],
+      ],
     },
   ]
 }
@@ -354,7 +362,7 @@ function sheetText(sheet: ConsumerComplaintSheet): string {
   return lines.join("\n")
 }
 
-function sheetHtml(sheet: ConsumerComplaintSheet, intro: string): string {
+function sheetHtml(sheet: ConsumerComplaintSheet, intro: string, leadHtml = ""): string {
   const sections = sheetSections(sheet)
     .map(
       (section) =>
@@ -375,6 +383,7 @@ function sheetHtml(sheet: ConsumerComplaintSheet, intro: string): string {
       <h1 style="margin:0 0 4px;font-size:20px">Hoja de Reclamación N.º ${escapeHtml(sheet.number)}</h1>
       <p style="margin:0 0 16px;font-size:14px;color:#475569">Fecha: ${escapeHtml(formatComplaintDate(sheet.createdAt))}</p>
       <p style="margin:0;font-size:14px;line-height:1.6">${escapeHtml(intro)}</p>
+      ${leadHtml}
       ${sections}
       ${NOTICES.map((n) => `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#475569">${escapeHtml(n)}</p>`).join("")}
     </div>
@@ -403,6 +412,353 @@ export function consumerComplaintEmails(sheet: ConsumerComplaintSheet): {
       subject: `Libro de Reclamaciones: ${kind} N.º ${sheet.number}`,
       text: `${noticeIntro}\n\n${sheetText(sheet)}`,
       html: sheetHtml(sheet, noticeIntro),
+    },
+  }
+}
+
+// --- Respuesta desde la administración --------------------------------------
+//
+// El personal de odentIA (Administración y Soporte) lee las hojas y las
+// responde dentro del plazo, con `ownerDb` y auditado en `admin_audit`. Lo
+// enviado no cambia: la base lo impide (migración 0006).
+
+/** Quedan estos días hábiles o menos: la hoja se marca «por vencer». */
+export const CONSUMER_COMPLAINT_DUE_SOON_DAYS = 5
+export const CONSUMER_COMPLAINT_RESPONSE_LIMIT = 3000
+
+/** Plazo de una hoja según los días hábiles de Perú. */
+export interface ConsumerComplaintTimeline {
+  /** Último día para responder (día civil de Lima, ISO 8601). */
+  dueDate: string
+  /** Días hábiles después de hoy y hasta el último día; 0 si vence hoy o ya venció. */
+  daysLeft: number
+  /** Sin responder y el último día ya pasó. */
+  overdue: boolean
+  /** Respondida a tiempo; null mientras no se responda. */
+  respondedOnTime: boolean | null
+}
+
+/**
+ * El plazo cuenta desde el día hábil siguiente a la hoja: la del viernes
+ * empieza a contar el lunes. El día 15 es el último para responder.
+ */
+export function consumerComplaintTimeline(
+  sheet: Pick<ConsumerComplaintSheet, "createdAt" | "respondedAt">,
+  now: Date,
+): ConsumerComplaintTimeline {
+  const dueDate = addPeruBusinessDays(limaDate(sheet.createdAt), CONSUMER_COMPLAINT_RESPONSE_DAYS)
+  const today = limaDate(now)
+  const responded = sheet.respondedAt ? limaDate(sheet.respondedAt) : null
+  return {
+    dueDate,
+    daysLeft: peruBusinessDaysBetween(today, dueDate),
+    overdue: responded === null && today > dueDate,
+    respondedOnTime: responded === null ? null : responded <= dueDate,
+  }
+}
+
+function assertStaff(actor: AdminActor): void {
+  if (!isAdminRole(actor.role)) {
+    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de odentIA")
+  }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export const CONSUMER_COMPLAINT_STATUS_FILTERS = ["recibido", "respondido", "todas"] as const
+export type ConsumerComplaintStatusFilter = (typeof CONSUMER_COMPLAINT_STATUS_FILTERS)[number]
+
+export interface ConsumerComplaintListFilters {
+  status?: ConsumerComplaintStatusFilter
+  /** Número de hoja, nombre o documento de quien reclamó. */
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export interface ConsumerComplaintListItem {
+  id: string
+  number: string
+  createdAt: Date
+  kind: string
+  consumerName: string
+  status: string
+  respondedAt: Date | null
+  responseEmailSent: boolean
+  timeline: ConsumerComplaintTimeline
+}
+
+export interface ConsumerComplaintSummary {
+  pending: number
+  dueSoon: number
+  overdue: number
+}
+
+/**
+ * Hojas sin responder: cuántas, cuántas vencen pronto y cuántas vencieron.
+ * Solo cuenta, sin datos de nadie: no se audita (la usan el menú e Inicio).
+ */
+export async function consumerComplaintSummary(
+  tx: Db,
+  actor: AdminActor,
+  now: Date = new Date(),
+): Promise<ConsumerComplaintSummary> {
+  assertStaff(actor)
+  const rows = await tx
+    .select({ createdAt: consumerComplaint.createdAt })
+    .from(consumerComplaint)
+    .where(eq(consumerComplaint.status, "recibido"))
+  const summary: ConsumerComplaintSummary = { pending: rows.length, dueSoon: 0, overdue: 0 }
+  for (const row of rows) {
+    const timeline = consumerComplaintTimeline({ createdAt: row.createdAt, respondedAt: null }, now)
+    if (timeline.overdue) summary.overdue++
+    else if (timeline.daysLeft <= CONSUMER_COMPLAINT_DUE_SOON_DAYS) summary.dueSoon++
+  }
+  return summary
+}
+
+/**
+ * Lista del libro. Sin responder, primero la que vence antes (el plazo sigue
+ * el orden de llegada); respondidas, la más reciente primero; en «todas», las
+ * pendientes arriba.
+ */
+export async function listConsumerComplaints(
+  tx: Db,
+  actor: AdminActor,
+  filters: ConsumerComplaintListFilters = {},
+  now: Date = new Date(),
+): Promise<{
+  items: ConsumerComplaintListItem[]
+  total: number
+  summary: ConsumerComplaintSummary
+}> {
+  assertStaff(actor)
+  const status = filters.status ?? "recibido"
+  const limit = Math.min(Math.max(filters.limit ?? 50, 1), 100)
+  const offset = Math.max(filters.offset ?? 0, 0)
+  const conditions: (SQL | undefined)[] = [
+    status === "todas" ? undefined : eq(consumerComplaint.status, status),
+  ]
+  const search = filters.search?.trim()
+  if (search) {
+    const pattern = `%${search.replace(/[\\%_]/g, (m) => `\\${m}`)}%`
+    conditions.push(
+      or(
+        ilike(consumerComplaint.number, pattern),
+        ilike(consumerComplaint.consumerName, pattern),
+        ilike(consumerComplaint.documentNumber, pattern),
+      ),
+    )
+  }
+  const pendingFirst = sql`case when ${consumerComplaint.status} = 'recibido' then 0 else 1 end`
+  const order =
+    status === "recibido"
+      ? [asc(consumerComplaint.createdAt)]
+      : status === "respondido"
+        ? [desc(consumerComplaint.respondedAt)]
+        : [
+            pendingFirst,
+            sql`case when ${consumerComplaint.status} = 'recibido' then ${consumerComplaint.createdAt} end asc`,
+            desc(consumerComplaint.createdAt),
+          ]
+  const where = and(...conditions)
+  const rows = await tx
+    .select()
+    .from(consumerComplaint)
+    .where(where)
+    .orderBy(...order)
+    .limit(limit)
+    .offset(offset)
+  const [totalRow] = await tx.select({ total: count() }).from(consumerComplaint).where(where)
+  await writeAdminAudit(tx, actor, {
+    action: "consumer_complaint.list",
+    metadata: { status, searched: Boolean(search), results: rows.length },
+  })
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      number: row.number,
+      createdAt: row.createdAt,
+      kind: row.kind,
+      consumerName: row.consumerName,
+      status: row.status,
+      respondedAt: row.respondedAt,
+      responseEmailSent: row.responseEmailSent,
+      timeline: consumerComplaintTimeline(row, now),
+    })),
+    total: totalRow?.total ?? 0,
+    summary: await consumerComplaintSummary(tx, actor, now),
+  }
+}
+
+export interface ConsumerComplaintDetail extends ConsumerComplaintSheet {
+  respondedByName: string | null
+  timeline: ConsumerComplaintTimeline
+}
+
+async function findDetail(tx: Db, id: string, now: Date): Promise<ConsumerComplaintDetail | null> {
+  if (!UUID.test(id)) return null
+  const [row] = await tx
+    .select({ sheet: consumerComplaint, respondedByName: user.name })
+    .from(consumerComplaint)
+    .leftJoin(user, eq(user.id, consumerComplaint.respondedByUserId))
+    .where(eq(consumerComplaint.id, id))
+    .limit(1)
+  if (!row) return null
+  return {
+    ...row.sheet,
+    respondedByName: row.respondedByName ?? null,
+    timeline: consumerComplaintTimeline(row.sheet, now),
+  }
+}
+
+/** Hoja completa para el personal. Ver los datos de quien reclamó queda auditado. */
+export async function getConsumerComplaint(
+  tx: Db,
+  actor: AdminActor,
+  id: string,
+  now: Date = new Date(),
+): Promise<ConsumerComplaintDetail> {
+  assertStaff(actor)
+  const detail = await findDetail(tx, id, now)
+  if (!detail) throw notFound("Hoja de reclamación")
+  await writeAdminAudit(tx, actor, {
+    action: "consumer_complaint.view",
+    entityId: detail.id,
+    metadata: { number: detail.number },
+  })
+  return detail
+}
+
+/** Cuerpo de la respuesta. La ruta lo usa para validar y el servicio vuelve a aplicarlo. */
+export const consumerComplaintResponseSchema = z.strictObject({
+  response: z
+    .string({ error: "Escribe la respuesta" })
+    .trim()
+    .min(10, "Escribe la respuesta: qué hicieron y qué le responden")
+    .max(
+      CONSUMER_COMPLAINT_RESPONSE_LIMIT,
+      `Usa como máximo ${CONSUMER_COMPLAINT_RESPONSE_LIMIT} caracteres en la respuesta`,
+    ),
+})
+
+/**
+ * Responde una hoja: llena el bloque 4, la pasa a «respondido» y anota quién
+ * respondió. El cambio es condicional, así dos personas que envían a la vez no
+ * se pisan: la segunda recibe un conflicto con el nombre de quien respondió.
+ * El correo lo envía quien llama, después de confirmar la transacción.
+ */
+export async function respondConsumerComplaint(
+  tx: Db,
+  actor: AdminActor,
+  id: string,
+  input: unknown,
+  now: Date = new Date(),
+): Promise<ConsumerComplaintDetail> {
+  assertStaff(actor)
+  const parsed = consumerComplaintResponseSchema.safeParse(input)
+  if (!parsed.success) {
+    throw validation(parsed.error.issues[0]?.message ?? "Revisa la respuesta")
+  }
+  if (!UUID.test(id)) throw notFound("Hoja de reclamación")
+  const updated = await tx
+    .update(consumerComplaint)
+    .set({
+      status: "respondido",
+      providerResponse: parsed.data.response,
+      respondedAt: sql`now()`,
+      respondedByUserId: actor.userId,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(consumerComplaint.id, id), eq(consumerComplaint.status, "recibido")))
+    .returning({ id: consumerComplaint.id })
+  const detail = await findDetail(tx, id, now)
+  if (!detail) throw notFound("Hoja de reclamación")
+  if (updated.length === 0) {
+    throw new ServiceError(
+      "ALREADY_RESPONDED",
+      409,
+      `${detail.respondedByName ?? "Otra persona del equipo"} ya respondió esta hoja`,
+    )
+  }
+  await writeAdminAudit(tx, actor, {
+    action: "consumer_complaint.respond",
+    entityId: detail.id,
+    // Sin el texto: la auditoría no copia lo que se le respondió a la persona.
+    metadata: { number: detail.number, onTime: detail.timeline.respondedOnTime },
+  })
+  return detail
+}
+
+/**
+ * Antes de reenviar a mano la respuesta: solo si la hoja está respondida y su
+ * correo no salió. Deja en la auditoría quién lo reenvía.
+ */
+export async function prepareComplaintResponseResend(
+  tx: Db,
+  actor: AdminActor,
+  id: string,
+  now: Date = new Date(),
+): Promise<ConsumerComplaintDetail> {
+  assertStaff(actor)
+  const detail = await findDetail(tx, id, now)
+  if (!detail) throw notFound("Hoja de reclamación")
+  if (detail.status !== "respondido") {
+    throw new ServiceError("NOT_RESPONDED", 409, "Esta hoja aún no tiene respuesta")
+  }
+  if (detail.responseEmailSent) {
+    throw new ServiceError("RESPONSE_EMAIL_SENT", 409, "La respuesta ya salió por correo")
+  }
+  await writeAdminAudit(tx, actor, {
+    action: "consumer_complaint.response_email.resend",
+    entityId: detail.id,
+    metadata: { number: detail.number },
+  })
+  return detail
+}
+
+/** Marca que la respuesta llegó al servidor de correo de quien reclamó. */
+export async function markComplaintResponseEmailSent(tx: Db, id: string): Promise<void> {
+  const rows = await tx
+    .update(consumerComplaint)
+    .set({ responseEmailSent: true, updatedAt: sql`now()` })
+    .where(and(eq(consumerComplaint.id, id), eq(consumerComplaint.status, "respondido")))
+    .returning({ id: consumerComplaint.id })
+  if (rows.length === 0) throw notFound("Hoja de reclamación respondida")
+}
+
+/**
+ * Respuesta para quien reclamó (arriba la respuesta, debajo su hoja completa
+ * con el bloque 4 lleno) y su copia para el buzón de reclamos de odentIA. Lo
+ * escrito por personas va escapado.
+ */
+export function consumerComplaintResponseEmails(sheet: ConsumerComplaintSheet): {
+  response: MailTemplate
+  copy: MailTemplate
+} {
+  if (sheet.providerResponse === null || sheet.respondedAt === null) {
+    throw new Error("La hoja aún no tiene respuesta")
+  }
+  const kind = (KIND_LABELS[sheet.kind as ConsumerComplaintKind] ?? sheet.kind).toLowerCase()
+  const answeredAt = `Respondida el ${formatComplaintDate(sheet.respondedAt)}.`
+  const intro = `Respondemos tu ${kind}. Abajo está nuestra respuesta y, debajo, tu hoja completa como la enviaste.`
+  const copyIntro = `Copia de la respuesta enviada a ${sheet.email}.`
+  const lead =
+    `<h2 style="margin:24px 0 8px;font-size:15px">Nuestra respuesta</h2>` +
+    `<p style="margin:0;font-size:14px;line-height:1.6;white-space:pre-wrap;background:#f1f5f9;border-radius:8px;padding:12px 14px">${escapeHtml(sheet.providerResponse)}</p>` +
+    `<p style="margin:8px 0 0;font-size:13px;color:#475569">${escapeHtml(answeredAt)}</p>`
+  const text = (head: string) =>
+    `${head}\n\nNUESTRA RESPUESTA\n${sheet.providerResponse}\n${answeredAt}\n\n${sheetText(sheet)}`
+  return {
+    response: {
+      subject: `Respuesta a tu Hoja de Reclamación N.º ${sheet.number} — odentIA`,
+      text: text(intro),
+      html: sheetHtml(sheet, intro, lead),
+    },
+    copy: {
+      subject: `Libro de Reclamaciones: respuesta a la hoja N.º ${sheet.number}`,
+      text: text(copyIntro),
+      html: sheetHtml(sheet, copyIntro, lead),
     },
   }
 }
