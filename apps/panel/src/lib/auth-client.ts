@@ -30,6 +30,7 @@ export const authClient = createAuthClient({
         firstName: { type: "string", required: false, defaultValue: "" },
         lastName: { type: "string", required: false, defaultValue: "" },
         termsVersion: { type: "string", required: false },
+        processingAgreementVersion: { type: "string", required: false },
       },
     }),
   ],

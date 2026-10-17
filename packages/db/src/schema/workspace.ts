@@ -61,3 +61,31 @@ export const homeVisit = pgTable("home_visit", {
 }, table => [
   uniqueIndex("home_visit_user_uidx").on(table.organizationId, table.userId),
 ])
+
+/**
+ * El Contrato de encargo de tratamiento lo acepta la clínica: quién lo aceptó
+ * en su nombre, qué versión y cuándo. Solo se agrega; cada versión nueva es una
+ * fila más.
+ */
+export const processingAgreementAcceptance = pgTable("processing_agreement_acceptance", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: orgFk("organization_id"),
+  version: text("version").notNull(),
+  acceptedBy: text("accepted_by").notNull().references(() => user.id),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex("processing_agreement_acceptance_version_uidx").on(table.organizationId, table.version),
+])
+
+/**
+ * Aviso por correo de una versión nueva de los documentos, un mes antes de que
+ * rija: una vez por persona y versión. Global, sin clínica; solo lo escribe el
+ * envío de la plataforma.
+ */
+export const legalNotice = pgTable("legal_notice", {
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  version: text("version").notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  uniqueIndex("legal_notice_user_version_uidx").on(table.userId, table.version),
+])

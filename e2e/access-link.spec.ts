@@ -88,7 +88,9 @@ for (const viewport of [
         await again.getByLabel("Correo").fill(owner.user.email)
         await again.getByLabel("Contraseña").fill(NEW_PASSWORD)
         await again.getByRole("button", { name: "Entrar", exact: true }).click()
-        await expect(again).toHaveURL(panelPattern("/"))
+        // Entró: ya no está en la pantalla de entrar (el patrón de «/» también coincide con /login).
+        await expect(again).not.toHaveURL(/\/login/)
+        await expect(again.getByRole("heading", { level: 1 })).toBeVisible()
         await api(again, "POST", "/api/auth/sign-out", undefined, {})
         await gotoHydrated(again, `${PANEL}/login`)
         await expect(again.getByRole("heading", { level: 1 })).toContainText(

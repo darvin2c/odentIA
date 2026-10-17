@@ -17,6 +17,13 @@ export const user = pgTable("user", {
    */
   termsVersion: text("terms_version"),
   termsAcceptedAt: timestamp("terms_accepted_at"),
+  /**
+   * Versión del Contrato de encargo de tratamiento que aceptó al abrir una
+   * clínica, y cuándo. La clínica que crea la copia a
+   * `processing_agreement_acceptance`; quien entra invitado no lo acepta.
+   */
+  processingAgreementVersion: text("processing_agreement_version"),
+  processingAgreementAcceptedAt: timestamp("processing_agreement_accepted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()

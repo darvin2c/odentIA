@@ -59,6 +59,7 @@ import {
 import { createPublicBookingRoute } from "./routes/public-booking.js"
 import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
+import { createLegalRoute } from "./routes/legal.js"
 import { createPublicSignUpRoute } from "./routes/public-sign-up.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
@@ -742,6 +743,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/appointments", createAppointmentsRoute(crmDeps))
   guarded.route("/fields", createFieldsRoute(crmDeps))
   guarded.route("/workspace", createWorkspaceRoute(crmDeps))
+  guarded.route("/legal", createLegalRoute(crmDeps))
   guarded.route("/reports", createReportsRoute(crmDeps))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))

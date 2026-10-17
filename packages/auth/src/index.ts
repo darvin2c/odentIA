@@ -15,7 +15,8 @@ import { twoFactor } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
 import { accessLink } from "./access-link.js"
 import { passwordBreachCheck } from "./password-breach.js"
-import { requireTermsOnSignUp } from "./terms.js"
+import { AGREEMENT_VERSION } from "./legal.js"
+import { legalAcceptance } from "./terms.js"
 
 export interface CreateAuthOptions {
   db: Db
@@ -90,9 +91,12 @@ export function createAuth({
       additionalFields: {
         firstName: { type: "string", required: false, defaultValue: "" },
         lastName: { type: "string", required: false, defaultValue: "" },
-        // Lo pone el registro con correo (`requireTermsOnSignUp`); la fecha la escribe el servidor.
+        // Lo pone el registro con correo (`legalAcceptance`); la fecha la escribe el servidor.
         termsVersion: { type: "string", required: false },
         termsAcceptedAt: { type: "date", required: false, input: false },
+        // Contrato de encargo: solo quien abre una clínica; la clínica lo copia al crearse.
+        processingAgreementVersion: { type: "string", required: false },
+        processingAgreementAcceptedAt: { type: "date", required: false, input: false },
       },
       changeEmail: {
         enabled: true,
@@ -112,10 +116,16 @@ export function createAuth({
       user: {
         create: {
           before: async (data) => {
-            if (typeof data.termsVersion === "string" && data.termsVersion) {
-              return { data: { ...data, termsAcceptedAt: new Date() } }
+            const now = new Date()
+            return {
+              data: {
+                ...data,
+                ...(typeof data.termsVersion === "string" && data.termsVersion ? { termsAcceptedAt: now } : {}),
+                ...(typeof data.processingAgreementVersion === "string" && data.processingAgreementVersion
+                  ? { processingAgreementAcceptedAt: now }
+                  : {}),
+              },
             }
-            return { data }
           },
         },
       },
@@ -146,7 +156,7 @@ export function createAuth({
       twoFactor({ allowPasswordless: true }),
       accessLink({ mailer, webURL }),
       passwordBreachCheck({ enabled: breachCheck }),
-      requireTermsOnSignUp(),
+      legalAcceptance(),
       organization({
         // `permissions.ts` decida por dominio. Sin gestión de miembros ni
         // invitaciones (igual que `member`): solo owner/admin administran,
@@ -177,7 +187,19 @@ export function createAuth({
             ac: ["read"],
           }),
         },
-        organizationHooks: { beforeUpdateOrganization: lockClinicIdentityFields },
+        organizationHooks: {
+          beforeUpdateOrganization: lockClinicIdentityFields,
+          // La clínica nace con el contrato de encargo que aceptó quien la abre; si no lo
+          // aceptó (entró invitado a otra), se le pide en la clínica al entrar.
+          afterCreateOrganization: async ({ organization: org, user }) => {
+            if ((user as { processingAgreementVersion?: string | null }).processingAgreementVersion !== AGREEMENT_VERSION) return
+            await ownerDb.execute(sql`
+              insert into processing_agreement_acceptance (organization_id, version, accepted_by, accepted_at)
+              values (${org.id}, ${AGREEMENT_VERSION}, ${user.id}, coalesce(
+                (select processing_agreement_accepted_at from "user" where id = ${user.id}), now()))
+              on conflict (organization_id, version) do nothing`)
+          },
+        },
         sendInvitationEmail: async ({ email, inviter, organization: org, invitation }) => {
           const template = invitationTemplate({
             organizationName: org.name,
@@ -210,5 +232,6 @@ export async function lockClinicIdentityFields({ organization: changes }: { orga
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
 export { ACCESS_LINK_TTL_SECONDS } from "./access-link.js"
-export { LEGAL_VERSION } from "./terms.js"
+export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
+export { termsState } from "./terms.js"
 export * from "./permissions.js"

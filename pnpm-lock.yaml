@@ -420,6 +420,9 @@ importers:
       '@odentia/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@odentia/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@odentia/channels':
         specifier: workspace:*
         version: link:../../packages/channels
@@ -466,6 +469,9 @@ importers:
       '@axe-core/playwright':
         specifier: 4.13.0
         version: 4.13.0(playwright-core@1.63.0)
+      '@odentia/auth':
+        specifier: workspace:*
+        version: link:../packages/auth
       '@odentia/db':
         specifier: workspace:*
         version: link:../packages/db

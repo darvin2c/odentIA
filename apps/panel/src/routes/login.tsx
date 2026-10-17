@@ -8,7 +8,7 @@ import { authClient } from "../lib/auth-client"
 import { AuthAlert, AuthLegal, WelcomeAside } from "../lib/auth-screens"
 import { countdown } from "../lib/countdown"
 import { GoogleAuthButton } from "../lib/google-auth"
-import { BASE_DOMAIN } from "../lib/host"
+import { safeNext } from "../lib/safe-next"
 import {
   forgetUser,
   greeting,
@@ -28,24 +28,6 @@ export const Route = createFileRoute("/login")({
   }),
   component: LoginPage,
 })
-
-/** Solo redirige a URLs https del dominio base (panel, tenants, admin) o loopback en dev. */
-function safeNext(next: string | undefined): string | null {
-  if (!next) return null
-  try {
-    const url = new URL(next)
-    const host = url.hostname
-    if (host === "localhost" || host === "127.0.0.1") {
-      if (url.protocol !== "http:" && url.protocol !== "https:") return null
-      return url.href
-    }
-    if (url.protocol !== "https:") return null
-    if (host !== BASE_DOMAIN && !host.endsWith(`.${BASE_DOMAIN}`)) return null
-    return url.href
-  } catch {
-    return null
-  }
-}
 
 const credentials = z.object({
   email: z.string().email("Escribe un correo válido, como nombre@clinica.com"),

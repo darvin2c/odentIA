@@ -169,6 +169,36 @@ export function passwordChangedTemplate({
   }
 }
 
+/**
+ * Aviso de una versión nueva de los Términos del servicio y el Aviso de
+ * privacidad, un mes antes de que rija: qué cambió en pocas líneas y que se
+ * aceptan al entrar.
+ */
+export function legalUpdateTemplate({
+  firstName,
+  effectiveText,
+  changes,
+  url,
+}: {
+  firstName?: string | undefined
+  effectiveText: string
+  changes: readonly string[]
+  url: string
+}): MailTemplate {
+  const list = changes.map((c) => `<li>${escapeHtml(c)}</li>`).join("")
+  return {
+    subject: "Actualizamos los términos de odentIA",
+    html: layout(
+      firstName ? `Hola, ${escapeHtml(firstName)}` : "Actualizamos los términos",
+      `Los Términos del servicio y el Aviso de privacidad cambian y rigen desde el ${escapeHtml(effectiveText)}. Lo que cambió:<ul style="margin:12px 0 0;padding-left:18px">${list}</ul>`,
+      url,
+      "Leer y aceptar",
+      "La próxima vez que entres te pediremos aceptarlos. Si no estás de acuerdo, responde este correo antes de esa fecha.",
+    ),
+    text: `Actualizamos los términos de odentIA. Rigen desde el ${effectiveText}. Lo que cambió: ${changes.join(" ")} Léelos y acéptalos al entrar: ${url}`,
+  }
+}
+
 export function invitationTemplate({
   organizationName,
   inviterName,

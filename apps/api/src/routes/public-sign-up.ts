@@ -1,4 +1,4 @@
-import { LEGAL_VERSION } from "@odentia/auth"
+import { AGREEMENT_VERSION, LEGAL_VERSION } from "@odentia/auth"
 import type { Db } from "@odentia/db"
 import { getPublicTrialOffer } from "@odentia/services"
 import { Hono } from "hono"
@@ -14,7 +14,7 @@ export function createPublicSignUpRoute(deps: { ownerDb: Db }) {
   app.get("/", async (c) => {
     c.header("Cache-Control", "public, max-age=300")
     const offer = await getPublicTrialOffer(deps.ownerDb)
-    return c.json({ offer, legalVersion: LEGAL_VERSION })
+    return c.json({ offer, legalVersion: LEGAL_VERSION, agreementVersion: AGREEMENT_VERSION })
   })
   return app
 }

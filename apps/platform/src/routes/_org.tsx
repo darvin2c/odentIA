@@ -7,6 +7,8 @@ import {
 } from "@odentia/ui"
 import {
   AccessLinkPasswordGate,
+  type ClinicAgreementStatus,
+  LegalGate,
   AppShell,
   Brand,
   type AppShellNavEntry,
@@ -57,8 +59,9 @@ import { SaasStatusBanner } from "../components/saas-status-banner"
 import { SupportGrantBanner } from "../components/support-grant-banner"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient, authFetch } from "../lib/auth-client"
-import { requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
-import { orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
+import { requireTermsAccepted, requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
+import { apiFetch } from "../lib/api"
+import { legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { useOrgEvents } from "../lib/org-events"
@@ -100,6 +103,7 @@ async function loadOrgRegion(): Promise<OrgRegion> {
 export const Route = createFileRoute("/_org")({
   beforeLoad: async ({ location }) => {
     const session = await requireVerifiedSession(location)
+    await requireTermsAccepted(location)
     const slug = orgSlugFromHostname(requestHostname())
     if (!slug) {
       throw redirect({ href: panelUrl("/") })
@@ -120,6 +124,14 @@ export const Route = createFileRoute("/_org")({
   },
   component: OrgLayout,
 })
+
+/** El contrato de encargo de la clínica: lo pide la ventana a quien la administra. */
+const clinicAgreement = {
+  load: async () => (await apiFetch<{ data: ClinicAgreementStatus }>("/api/legal/clinic")).data,
+  accept: async (version: string) => {
+    await apiFetch("/api/legal/clinic/accept", { method: "POST", body: JSON.stringify({ version }) })
+  },
+}
 
 /** `unlessPermission`: la entrada sobra para quien ya llega a lo mismo por otra pantalla. */
 type NavChild = AppShellNavItem & { permission?: string; unlessPermission?: string }
@@ -317,6 +329,8 @@ function OrgLayout() {
       </SideDockProvider>
       {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
       <AccessLinkPasswordGate request={authFetch} />
+      {/* Términos nuevos de cada persona y, para quien administra, el contrato de encargo de la clínica. */}
+      <LegalGate request={authFetch} clinic={clinicAgreement} links={legalLinks} />
     </AppShell>
   )
 }

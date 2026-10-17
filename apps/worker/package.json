@@ -15,6 +15,7 @@
     "@langchain/core": "1.2.11",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",
     "@odentia/agent": "workspace:*",
+    "@odentia/auth": "workspace:*",
     "@odentia/channels": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/mail": "workspace:*",

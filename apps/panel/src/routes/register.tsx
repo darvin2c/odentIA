@@ -31,6 +31,7 @@ export const Route = createFileRoute("/register")({
 const signUpInfoSchema = z.object({
   offer: z.object({ currency: z.string(), creditCents: z.number(), days: z.number() }).nullable(),
   legalVersion: z.string(),
+  agreementVersion: z.string(),
 })
 
 /** Crédito de prueba y versión de los documentos: los dice el servidor, no la pantalla. */
@@ -65,7 +66,8 @@ function RegisterPage() {
   const offer = info.data?.offer ?? null
   const credit =
     offer && offer.creditCents > 0 ? creditText(offer.currency, offer.creditCents) : null
-  const cta = credit ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
+  // Quien entra invitado no abre una clínica: no recibe el crédito.
+  const cta = credit && !invitationId ? `Obtén ${credit} de crédito` : "Crear mi cuenta"
   const [work, setWork] = useState<DayEvent | null>(null)
   const [problem, setProblem] = useState<{
     field: "email" | "password" | "form"
@@ -99,6 +101,8 @@ function RegisterPage() {
         email: value.email,
         password: value.password,
         termsVersion: info.data.legalVersion,
+        // El contrato de encargo lo acepta quien abre la clínica; quien entra invitado, no (decisión 2).
+        ...(invitationId ? {} : { processingAgreementVersion: info.data.agreementVersion }),
         callbackURL: invitationId
           ? `${window.location.origin}/accept-invitation/${encodeURIComponent(invitationId)}`
           : `${window.location.origin}/`,
@@ -316,7 +320,7 @@ function RegisterPage() {
                       >
                         Términos del servicio
                       </a>
-                      , el{" "}
+                      {invitationId ? " y el " : ", el "}
                       <a
                         href={webUrl("/privacidad")}
                         target="_blank"
@@ -324,16 +328,21 @@ function RegisterPage() {
                         className="text-foreground underline"
                       >
                         Aviso de privacidad
-                      </a>{" "}
-                      y el{" "}
-                      <a
-                        href={webUrl("/encargo-de-tratamiento")}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-foreground underline"
-                      >
-                        Contrato de encargo de tratamiento
                       </a>
+                      {invitationId ? null : (
+                        <>
+                          {" "}
+                          y el{" "}
+                          <a
+                            href={webUrl("/encargo-de-tratamiento")}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-foreground underline"
+                          >
+                            Contrato de encargo de tratamiento
+                          </a>
+                        </>
+                      )}
                       .
                     </label>
                   </div>

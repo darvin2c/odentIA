@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./permissions": "./src/permissions.ts",
-    "./admin-permissions": "./src/admin-permissions.ts"
+    "./admin-permissions": "./src/admin-permissions.ts",
+    "./legal": "./src/legal.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
