@@ -25,7 +25,7 @@ no se comparte con OpenShip ni con las demás aplicaciones.
 - API, admin, panel, platform y web publican únicamente en loopback (puerto
   interno 3000, salvo la API): `api.` a API (host 3101), `app.` a panel (3010),
   los hosts de organizaciones `*.` a platform (3011), `admin.` a admin (3012) y el
-  dominio raíz a la web de marketing (3013).
+  dominio raíz y `www.` a la web de marketing (3013), que redirige `www.` a la raíz.
 - La web (`apps/web`, ADR 0046) es HTML generado al compilar la imagen y servido por
   `apps/web/server.mjs`, sin variables de runtime. Su dirección canónica, su mapa del
   sitio y sus enlaces a `app.` y `api.` salen de `VITE_BASE_DOMAIN`: la canónica es
@@ -143,7 +143,7 @@ esos checks no los crea el repositorio y no indican un fallo de código.
 
 Cada superficie HTTP se expone una vez en el proyecto (el dominio nace al exponer
 el servicio): `api.` (api, 3001), `app.` (panel, 3000), `admin.` (admin, 3000), el
-dominio raíz (web, 3000) y el comodín `*.` (platform, 3000), que requiere DNS-01
+dominio raíz y `www.` (web, 3000) y el comodín `*.` (platform, 3000), que requiere DNS-01
 con el proveedor DNS conectado a OpenShip; el resto usa HTTP-01. Un servicio nuevo
 del Compose no recibe dominio solo.
 
