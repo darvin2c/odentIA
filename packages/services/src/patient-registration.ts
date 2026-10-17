@@ -4,6 +4,7 @@ import {
   documentIssuerCountry,
   isMinor,
   isRealDate,
+  kinshipFromWords,
   missingPersonData,
   type MissingPersonDatum,
   normalizePhone,
@@ -44,7 +45,7 @@ import { applyMessagePermissions } from "./data-consents.js"
 import { createPerson, findPersonByDocument } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
-import { completeTask, createTask } from "./tasks.js"
+import { completeTask, createTask, discardTask } from "./tasks.js"
 
 const LINK_TTL_MS = 72 * 60 * 60 * 1000
 const UUID_RE =
@@ -989,22 +990,27 @@ export async function attachLegalRepresentative(
         )
       ).id
   }
+  const relationshipDetail = input.existingContactId ? null : input.representative.relationshipDetail || null
   await linkLegalRepresentative(tx, orgId, actorUserId, patientId, representativeId, {
-    relationshipDetail: input.existingContactId ? null : input.representative.relationshipDetail || null,
+    relationshipDetail,
+    kinship: kinshipFromWords(relationshipDetail),
     linked: !!input.existingContactId,
     today: input.today,
   })
   return representativeId
 }
 
-/** El vínculo `guardian` (si aún no lo tiene) y el rol de representante legal desde hoy. */
+/**
+ * El vínculo `guardian` (si aún no lo tiene) con el parentesco escrito y su
+ * código HL7, y el rol de representante legal desde hoy.
+ */
 async function linkLegalRepresentative(
   tx: Db,
   orgId: string,
   actorUserId: string | null,
   patientId: string,
   representativeId: string,
-  options: { relationshipDetail: string | null; linked: boolean; today: string },
+  options: { relationshipDetail: string | null; kinship: string | null; linked: boolean; today: string },
 ): Promise<void> {
   if (!options.linked) {
     await tx
@@ -1015,6 +1021,7 @@ async function linkLegalRepresentative(
         contactId: representativeId,
         relationship: "guardian",
         relationshipDetail: options.relationshipDetail,
+        kinship: options.kinship,
         isPreferred: false,
         createdBy: actorUserId,
       })
@@ -1031,12 +1038,12 @@ async function linkLegalRepresentative(
 }
 
 /**
- * Claves de las tareas de «Te espera» que deja un registro desde fuera. La
- * clase de tarea (`ficha_repetida`) es la misma de «Su enlace»; el prefijo
- * dice cuál es y qué ofrece la fila.
+ * Claves estables de las tareas que deja un registro desde fuera: repetir el
+ * envío no duplica la fila. Su clase (`registro_con_documento`,
+ * `confirmar_representante`) dice qué es y qué ofrece la fila.
  */
-export const REGISTRATION_HOLD_KEY = "registro-con-documento:"
-export const PENDING_REPRESENTATIVE_KEY = "confirmar-representante:"
+const REGISTRATION_HOLD_KEY = "registro-con-documento:"
+const PENDING_REPRESENTATIVE_KEY = "confirmar-representante:"
 
 async function leavePendingRepresentative(
   tx: Db,
@@ -1058,8 +1065,10 @@ async function leavePendingRepresentative(
     contactId: representativeId,
     area: "recepcion",
     createdBy: "sistema",
-    kind: "ficha_repetida",
-    reason: `En el registro en línea escribieron el documento de ${names?.representativeName ?? "una persona de la clínica"} como representante legal${who}. Si es su madre, padre o tutor, confírmalo; si no, déjalo así.`,
+    kind: "confirmar_representante",
+    relationshipDetail,
+    kinship: kinshipFromWords(relationshipDetail),
+    reason: `En el registro en línea escribieron el documento de ${names?.representativeName ?? "una persona de la clínica"} como representante legal${who}. Si es su madre, padre o tutor, confírmalo; si no, elige «No es ella».`,
     idempotencyKey: `${PENDING_REPRESENTATIVE_KEY}${patientId}:${representativeId}`,
   })
 }
@@ -1067,8 +1076,9 @@ async function leavePendingRepresentative(
 /**
  * «Confirmar» en la fila de «Te espera»: recepción confirma que la persona
  * que nombró el registro en línea es el representante legal del menor. Crea
- * el vínculo y el rol a nombre de quien confirma y cierra la tarea. No toca
- * sus datos ni sus permisos de mensajes.
+ * el vínculo con el parentesco que se escribió («Madre», con su código HL7) y
+ * el rol a nombre de quien confirma, y cierra la tarea. No toca sus datos ni
+ * sus permisos de mensajes.
  */
 export async function confirmPendingRepresentative(
   tx: Db,
@@ -1078,14 +1088,28 @@ export async function confirmPendingRepresentative(
   taskId: string,
 ): Promise<{ representativeId: string }> {
   const [task] = await tx
-    .select({ id: crmTask.id, contactId: crmTask.contactId, status: crmTask.status, key: crmTask.idempotencyKey })
+    .select({
+      id: crmTask.id,
+      contactId: crmTask.contactId,
+      status: crmTask.status,
+      relationshipDetail: crmTask.relationshipDetail,
+      kinship: crmTask.kinship,
+    })
     .from(crmTask)
-    .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.id, taskId), eq(crmTask.patientId, patientId)))
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.id, taskId),
+        eq(crmTask.patientId, patientId),
+        eq(crmTask.kind, "confirmar_representante"),
+      ),
+    )
     .for("update")
-  if (!task || !task.contactId || !task.key?.startsWith(PENDING_REPRESENTATIVE_KEY)) throw notFound("Representante por confirmar")
+  if (!task || !task.contactId) throw notFound("Representante por confirmar")
   if (task.status !== "open") throw conflict("ALREADY_REVIEWED", "Esto ya se revisó")
   await linkLegalRepresentative(tx, orgId, actorUserId, patientId, task.contactId, {
-    relationshipDetail: null,
+    relationshipDetail: task.relationshipDetail,
+    kinship: task.kinship,
     linked: false,
     today: await patientOrganizationToday(tx, orgId),
   })
@@ -1109,10 +1133,48 @@ export async function leaveRegistrationHold(tx: Db, orgId: string, hold: Registr
     patientId: hold.ownerPatientId,
     area: "recepcion",
     createdBy: "sistema",
-    kind: "ficha_repetida",
+    kind: "registro_con_documento",
     reason: `Alguien se registró con el documento de ${hold.ownerName}: revisa si es ella. No se guardó nada en su ficha. Escribió: ${wrote}.`,
     idempotencyKey: `${REGISTRATION_HOLD_KEY}${hold.ownerId}:${today}`,
   })
+}
+
+/** Motivo con que queda cerrada cada fila del registro en línea al descartarla. */
+const DISCARD_REASON = {
+  confirmar_representante: "No es su representante: no se vinculó",
+  registro_con_documento: "Se revisó y se descartó: no se cambió nada de esa persona",
+} as const
+
+/**
+ * Descarta en «Te espera» lo que dejó un registro en línea: «No es ella» en
+ * «¿… es representante de …?» (no se vincula a nadie) o «Descartar» en
+ * «Alguien se registró con el documento de…». La tarea queda cerrada con su
+ * motivo, a nombre de quien la descarta; no cambia nada de las personas.
+ */
+export async function discardRegistrationTask(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  taskId: string,
+): Promise<{ id: string }> {
+  const [task] = await tx
+    .select({ id: crmTask.id, kind: crmTask.kind, status: crmTask.status })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.id, taskId),
+        sql`${crmTask.kind} in ('confirmar_representante', 'registro_con_documento')`,
+      ),
+    )
+    .for("update")
+  if (!task) throw notFound("Pendiente del registro en línea")
+  if (task.status !== "open") throw conflict("ALREADY_REVIEWED", "Esto ya se revisó")
+  await discardTask(tx, orgId, task.id, {
+    userId: actorUserId,
+    reason: DISCARD_REASON[task.kind as keyof typeof DISCARD_REASON],
+  })
+  return { id: task.id }
 }
 
 /** La clínica tiene un WhatsApp conectado por el que escribir. */

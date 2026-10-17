@@ -142,7 +142,9 @@ function TasksPage() {
                 </span>
               ) : null}
               {task.settledReason ? (
-                <span className="text-sm text-muted-foreground">Se cerró sola: {task.settledReason}</span>
+                <span className="text-sm text-muted-foreground">
+                  {task.status === "cancelled" ? "Descartada" : "Se cerró sola"}: {task.settledReason}
+                </span>
               ) : task.reason ? (
                 <span className="text-sm text-muted-foreground">{task.reason}</span>
               ) : null}

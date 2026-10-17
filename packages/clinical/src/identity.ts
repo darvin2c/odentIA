@@ -199,6 +199,44 @@ export const KINSHIP_LABELS: Record<Kinship, string> = {
   FRND: "Amigo(a)",
   NBOR: "Vecino(a)",
 }
+/**
+ * Las palabras con que una persona escribe su parentesco («Madre», «mamá»,
+ * «Tía»), en minúsculas y sin tildes, con su código. Lo ambiguo no tiene
+ * código: «abuela» sola no dice si es materna o paterna, y «tutor» no es un
+ * parentesco.
+ */
+const KINSHIP_WORDS: Readonly<Record<string, Kinship>> = {
+  madre: "MTH", mama: "MTH",
+  padre: "FTH", papa: "FTH",
+  hijo: "CHILD", hija: "CHILD",
+  conyuge: "SPS", esposo: "SPS", esposa: "SPS",
+  pareja: "DOMPART",
+  hermano: "SIB", hermana: "SIB",
+  "abuelo materno": "MGRPRN", "abuela materna": "MGRPRN",
+  "abuelo paterno": "PGRPRN", "abuela paterna": "PGRPRN",
+  nieto: "GRNDCHILD", nieta: "GRNDCHILD",
+  tia: "AUNT", tio: "UNCLE",
+  primo: "COUSN", prima: "COUSN",
+  "otro familiar": "FAMMEMB",
+  amigo: "FRND", amiga: "FRND",
+  vecino: "NBOR", vecina: "NBOR",
+}
+
+/**
+ * El código HL7 RoleCode del parentesco que se escribió a mano (el «Detalle
+ * (Madre, Padre…)» del registro), o null si no es uno de la lista.
+ */
+export function kinshipFromWords(text: string | null | undefined): Kinship | null {
+  if (!text) return null
+  const words = text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  return KINSHIP_WORDS[words] ?? null
+}
 /** Solo los familiares, para los antecedentes familiares. */
 export const FAMILY_KINSHIP_LABELS: Record<FamilyKinship, string> = Object.fromEntries(
   FAMILY_KINSHIP.map((code) => [code, KINSHIP_LABELS[code]]),

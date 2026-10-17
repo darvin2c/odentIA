@@ -170,7 +170,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         return {
           title: `Alguien se registró con el documento de ${row.patientName}: revisa si es ella`,
           detail: joined([`Desde el registro en línea ${ago(row.createdAt)}`, row.detail]),
-          action: "Revisar",
+          action: `Ver a ${row.patientName}`,
         }
       }
       if (row.source === "representante") {
@@ -242,6 +242,25 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
 export function waitingOpenText(row: WaitingRow, context: HomeTextContext): string {
   if (row.kind === "case" && row.conversationId) return "Ver el caso"
   return waitingText(row, context).action
+}
+
+type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
+
+/**
+ * Los botones de una fila de documento repetido, además de la fila que lleva
+ * a la persona: el representante por confirmar ofrece «Confirmar» y «No es
+ * ella»; quien se registró con el documento de otra, «Descartar»; la posible
+ * ficha repetida de «Su enlace», «Revisada».
+ */
+export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descartar" | "revisada"; label: string; primary: boolean }[] {
+  if (row.source === "representante") {
+    return [
+      { id: "confirmar", label: "Confirmar", primary: true },
+      { id: "descartar", label: "No es ella", primary: false },
+    ]
+  }
+  if (row.source === "registro") return [{ id: "descartar", label: "Descartar", primary: false }]
+  return [{ id: "revisada", label: "Revisada", primary: false }]
 }
 
 /** Identidad estable de una fila para React. */

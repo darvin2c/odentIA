@@ -3,7 +3,7 @@ import { AgentMark } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
 import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
+import { duplicateActions, type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import type { WaitingRow } from "../../lib/workspace"
 import { HandoffUrgency } from "../agent/handoff-badges"
 
@@ -22,10 +22,18 @@ export interface WaitingHandlers {
   onReviewed?: (row: RowOf<"possibleDuplicate">) => void
   /** «Confirmar» el representante que nombró un registro en línea: lo vincula y cierra la tarea. */
   onConfirmRepresentative?: (row: RowOf<"possibleDuplicate">) => void
+  /**
+   * «No es ella» en el representante por confirmar y «Descartar» en «Alguien
+   * se registró con el documento de…»: cierra la tarea con su motivo, sin
+   * vincular ni cambiar a nadie.
+   */
+  onDiscard?: (row: RowOf<"possibleDuplicate">) => void
   /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
   onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
-  /** La fila cuya acción está en curso: su botón se desactiva y dice que trabaja. */
+  /** La fila cuya acción está en curso: sus botones se desactivan y el de la acción dice que trabaja. */
   busyKey?: string | null
+  /** Con dos botones, cuál está en curso (`confirmar`, `descartar`); sin esto, el primero. */
+  busyAction?: string | null
 }
 
 /** Toda la fila es el control: mismo alto, mismo orden y la acción a la derecha. */
@@ -127,42 +135,46 @@ function open(row: WaitingRow, handlers: WaitingHandlers) {
   else if (row.kind === "budgets") handlers.onBudgets(row)
 }
 
+type QuickAction = { id: string; label: string; run: () => void; primary: boolean }
+
 /**
- * La acción que la fila hace sin salir de Inicio: «Tomar» un caso que nadie
- * tomó y «Hecha» en una tarea. Es un botón aparte de la fila, que sigue
- * abriendo el caso o la tarea.
+ * Lo que la fila hace sin salir de Inicio: «Tomar» un caso que nadie tomó,
+ * «Hecha» en una tarea, «Confirmar» o «No es ella» en un representante por
+ * confirmar. Son botones aparte de la fila, que sigue abriendo el caso, la
+ * tarea o la persona.
  */
-function quickAction(row: WaitingRow, handlers: WaitingHandlers): { label: string; run: () => void; primary: boolean } | null {
+function quickActions(row: WaitingRow, handlers: WaitingHandlers): QuickAction[] {
   // «Tomar» toma la conversación del caso, como en la Bandeja: sin conversación la fila lleva a su tarea.
   if (row.kind === "case" && row.unclaimed && row.conversationId && handlers.onTake) {
     const take = handlers.onTake
-    return { label: "Tomar", run: () => take(row), primary: true }
+    return [{ id: "tomar", label: "Tomar", run: () => take(row), primary: true }]
   }
   if (row.kind === "staleEncounter" && handlers.onVoidEncounter) {
     const discard = handlers.onVoidEncounter
-    return { label: "Anular con motivo", run: () => discard(row), primary: false }
+    return [{ id: "anular", label: "Anular con motivo", run: () => discard(row), primary: false }]
   }
-  if (row.kind === "possibleDuplicate" && row.source === "representante" && handlers.onConfirmRepresentative) {
-    const confirm = handlers.onConfirmRepresentative
-    return { label: "Confirmar", run: () => confirm(row), primary: true }
-  }
-  if (row.kind === "possibleDuplicate" && handlers.onReviewed) {
-    const reviewed = handlers.onReviewed
-    return { label: "Revisada", run: () => reviewed(row), primary: false }
+  // Un documento repetido: la fila lleva a la persona y los botones confirman o descartan (sin permiso, no hay botón).
+  if (row.kind === "possibleDuplicate") {
+    const run = { confirmar: handlers.onConfirmRepresentative, descartar: handlers.onDiscard, revisada: handlers.onReviewed }
+    return duplicateActions(row).flatMap((action) => {
+      const handler = run[action.id]
+      return handler ? [{ ...action, run: () => handler(row) }] : []
+    })
   }
   if (row.kind === "task" && row.more === 0 && handlers.onDone) {
     const done = handlers.onDone
-    return { label: "Hecha", run: () => done(row), primary: false }
+    return [{ id: "hecha", label: "Hecha", run: () => done(row), primary: false }]
   }
-  return null
+  return []
 }
 
 function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow; context: HomeTextContext; handlers: WaitingHandlers; className?: string }) {
   const text = waitingText(row, context)
   const badge = badgeOf(row)
-  const action = quickAction(row, handlers)
+  const actions = quickActions(row, handlers)
   const key = waitingKey(row)
   const busy = handlers.busyKey === key
+  const busyId = busy ? (handlers.busyAction ?? actions[0]?.id) : null
   const content = (
     <>
       {iconOf(row)}
@@ -178,7 +190,7 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
         </span>
       </span>
       {/* Con un botón propio, la fila solo abre: a la vista lo dice el botón, y la fila sigue nombrando a dónde lleva para el lector de pantalla. En teléfono la acción no ocupa sitio, pero sigue nombrando la fila. */}
-      {action ? (
+      {actions.length > 0 ? (
         <span className="sr-only">{waitingOpenText(row, context)}</span>
       ) : (
         <span className="sr-only shrink-0 font-semibold text-primary sm:not-sr-only">{text.action}</span>
@@ -193,18 +205,23 @@ function WaitingRowItem({ row, context, handlers, className }: { row: WaitingRow
           {content}
         </Button>
       )}
-      {action ? (
-        <Button
-          type="button"
-          size="sm"
-          variant={action.primary ? "default" : "outline"}
-          className="min-h-11 shrink-0 sm:min-h-8"
-          disabled={busy}
-          aria-label={`${action.label}: ${text.title}`}
-          onClick={action.run}
-        >
-          {busy ? "Guardando…" : action.label}
-        </Button>
+      {actions.length > 0 ? (
+        <span className="flex shrink-0 flex-col gap-1.5 sm:flex-row sm:items-center">
+          {actions.map((action) => (
+            <Button
+              key={action.id}
+              type="button"
+              size="sm"
+              variant={action.primary ? "default" : "outline"}
+              className="min-h-11 shrink-0 sm:min-h-8"
+              disabled={busy}
+              aria-label={`${action.label}: ${text.title}`}
+              onClick={action.run}
+            >
+              {busyId === action.id ? "Guardando…" : action.label}
+            </Button>
+          ))}
+        </span>
       ) : null}
     </li>
   )

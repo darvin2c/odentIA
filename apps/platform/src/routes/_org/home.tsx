@@ -95,16 +95,28 @@ function HomePage() {
       refresh()
     },
   })
+  // «No es ella» y «Descartar»: lo que dejó un registro en línea queda cerrado con su motivo, sin cambiar a nadie.
+  const discardRegistration = useMutation({
+    mutationFn: (row: DuplicateRow) => apiFetch(`/api/tasks/${row.id}/discard`, { method: "POST", body: JSON.stringify({}) }),
+    onSuccess: (_result, row) => {
+      toast.success(row.source === "representante" ? `No se vinculó a ${row.personName ?? "esa persona"}` : "Se descartó")
+      refresh()
+    },
+  })
   const busyKey = take.isPending && take.variables
     ? waitingKey(take.variables)
     : confirmRepresentative.isPending && confirmRepresentative.variables
       ? waitingKey(confirmRepresentative.variables)
-      : completion.pendingId
-        ? `task:${completion.pendingId}`
-        : null
+      : discardRegistration.isPending && discardRegistration.variables
+        ? waitingKey(discardRegistration.variables)
+        : completion.pendingId
+          ? `task:${completion.pendingId}`
+          : null
+  const busyAction = discardRegistration.isPending ? "descartar" : null
   const actionError =
     (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ??
     (confirmRepresentative.error ? mutationErrorMessage(confirmRepresentative.error) ?? "No se pudo confirmar el representante." : null) ??
+    (discardRegistration.error ? mutationErrorMessage(discardRegistration.error) ?? "No se pudo descartar." : null) ??
     completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
@@ -159,11 +171,13 @@ function HomePage() {
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,
+              onDiscard: canDoTasks ? (row) => discardRegistration.mutate(row) : undefined,
               onVoidEncounter: (row) => {
                 setDiscardReason("")
                 setDiscarding(row)
               },
               busyKey,
+              busyAction,
             }}
           />
         </div>

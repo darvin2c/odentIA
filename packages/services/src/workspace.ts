@@ -30,7 +30,6 @@ import {
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { PENDING_REPRESENTATIVE_KEY, REGISTRATION_HOLD_KEY } from "./patient-registration.js"
 
 export interface WorkspaceAccess {
   patients: boolean
@@ -568,8 +567,9 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
  * recepción, con su propia fila: la posible ficha repetida, alguien que se
  * registró con el documento de otra persona, el representante por confirmar
  * y quien pide volver a entrar al portal (ADR 0037). Son tareas abiertas de
- * su área; se van al hacerlas. La clase de la tarea es `ficha_repetida` para
- * las tres primeras: el prefijo de su clave dice cuál es.
+ * su área; se van al hacerlas. La clase de la tarea dice cuál es
+ * (`ficha_repetida`, `registro_con_documento`, `confirmar_representante`,
+ * `volver_al_portal`).
  */
 async function waitingSystemTasks(
   tx: Db,
@@ -581,7 +581,6 @@ async function waitingSystemTasks(
   const rows = await tx.execute<{
     id: string
     kind: string
-    key: string | null
     patientId: string | null
     patientName: string | null
     contactId: string | null
@@ -590,7 +589,7 @@ async function waitingSystemTasks(
     createdAt: string
     grantId: string | null
   }>(sql`
-    select t.id, t.kind, t.idempotency_key as key, t.patient_id as "patientId", pp.display_name as "patientName",
+    select t.id, t.kind, t.patient_id as "patientId", pp.display_name as "patientName",
       t.contact_id as "contactId", ct.display_name as "contactName", t.reason, ${iso(sql`t.created_at`)} as "createdAt",
       (select g.id from portal_grant g where g.organization_id = t.organization_id and g.patient_id = t.patient_id
         and g.contact_id = t.contact_id and g.status = 'activo' limit 1) as "grantId"
@@ -602,13 +601,16 @@ async function waitingSystemTasks(
       and (t.patient_id is not null or t.contact_id is not null)
       and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
     order by t.created_at, t.id limit 20`)
-  const sourceOf = (key: string | null): WaitingPossibleDuplicate["source"] =>
-    key?.startsWith(REGISTRATION_HOLD_KEY) ? "registro" : key?.startsWith(PENDING_REPRESENTATIVE_KEY) ? "representante" : "enlace"
+  const SOURCE: Record<string, WaitingPossibleDuplicate["source"]> = {
+    ficha_repetida: "enlace",
+    registro_con_documento: "registro",
+    confirmar_representante: "representante",
+  }
   return {
     duplicates: rows
-      .filter((row) => row.kind === "ficha_repetida")
       .flatMap((row): WaitingPossibleDuplicate[] => {
-        const source = sourceOf(row.key)
+        const source = SOURCE[row.kind]
+        if (!source) return []
         // En «registro» la fila es de quien tenía el documento (con ficha o sin ella).
         const name = source === "registro" ? (row.contactName ?? row.patientName) : row.patientName
         if (!name || (source !== "registro" && !row.patientId)) return []

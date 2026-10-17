@@ -474,9 +474,13 @@ export type TaskArea = (typeof TASK_AREAS)[number]
 /**
  * Pendientes que deja el sistema para recepción, cada uno con su fila en «Te
  * espera»: el documento escrito en «Su enlace» ya es de otra ficha
- * (`ficha_repetida`) y quien pide volver a entrar al portal (`volver_al_portal`).
+ * (`ficha_repetida`), quien pide volver a entrar al portal (`volver_al_portal`),
+ * alguien que se registró en línea con el documento de una persona que ya
+ * estaba (`registro_con_documento`) y el representante que nombró el registro
+ * en línea de un menor y espera que recepción lo confirme
+ * (`confirmar_representante`).
  */
-export const TASK_KINDS = ["ficha_repetida", "volver_al_portal"] as const
+export const TASK_KINDS = ["ficha_repetida", "volver_al_portal", "registro_con_documento", "confirmar_representante"] as const
 export type TaskKind = (typeof TASK_KINDS)[number]
 
 export const crmTask = pgTable(
@@ -504,9 +508,11 @@ export const crmTask = pgTable(
     // Por qué se creó, en una frase, cuando la deja el Administrador.
     reason: text("reason"),
     /**
-     * Por qué se cerró sola, cuando su motivo desapareció (la cita pasó, la
-     * persona confirmó, la oportunidad se cerró…): «Rosa confirmó su cita».
-     * Nulo si la cerró una persona.
+     * Por qué se cerró sin hacerse. Hecha (`done`): se cerró sola porque su
+     * motivo desapareció (la cita pasó, la persona confirmó, la oportunidad se
+     * cerró…): «Rosa confirmó su cita». Descartada (`cancelled`): el motivo con
+     * que recepción descartó un pendiente del sistema («No es su
+     * representante»). Nulo si una persona la hizo, la cerró o la reabrió.
      */
     settledReason: text("settled_reason"),
     /** Clave estable por trigger del agente: la reentrega no duplica la tarea. */
@@ -516,9 +522,25 @@ export const crmTask = pgTable(
      * (`TASK_KINDS`, ADR 0037); nulo en una tarea cualquiera.
      */
     kind: text("kind"),
+    /**
+     * `confirmar_representante`: el parentesco que escribió el registro en
+     * línea («Madre») y su código HL7 RoleCode (`KINSHIP`) si se reconoce. Se
+     * aplican al vínculo `guardian` al confirmar; nulos en cualquier otra tarea.
+     */
+    relationshipDetail: text("relationship_detail"),
+    kinship: text("kinship"),
     ...timestamps,
   },
   (table) => [
+    check("task_relationship_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
+    check(
+      "task_kinship_check",
+      sql`${table.kinship} IS NULL OR ${table.kinship} IN ('MTH','FTH','CHILD','SPS','DOMPART','SIB','MGRPRN','PGRPRN','GRNDCHILD','AUNT','UNCLE','COUSN','FAMMEMB','FRND','NBOR')`,
+    ),
+    check(
+      "task_relationship_kind_check",
+      sql`(${table.relationshipDetail} IS NULL AND ${table.kinship} IS NULL) OR ${table.kind} = 'confirmar_representante'`,
+    ),
     uniqueIndex("task_org_id_uidx").on(table.organizationId, table.id),
     // La próxima acción de una oportunidad es una tarea, y solo una abierta.
     uniqueIndex("task_org_opp_open_uidx")

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { clinicalProfileFor } from "./country-profiles.js"
-import { documentText, identityDocumentError } from "./identity.js"
+import { documentText, identityDocumentError, kinshipFromWords } from "./identity.js"
 import {
   DEFAULT_REGISTRATION_CONFIG,
   missingPersonData,
@@ -113,6 +113,17 @@ describe("contrato de registro", () => {
     expect(validateRegistrationAnswers(config, { ...adult, demographics: { ...adult.demographics, docType: "DIE", docNumber: "ABC123" } }, publicContext)).toHaveProperty("demographics.docCountry")
     expect(validateRegistrationAnswers(config, { ...adult, demographics: { ...adult.demographics, docType: "DIE", docNumber: "ABC123", docCountry: "PE" } }, publicContext)).toHaveProperty("demographics.docCountry")
   })
+})
+
+it("el parentesco escrito a mano se lee como su código HL7, y lo ambiguo queda sin código", () => {
+  expect(kinshipFromWords("Madre")).toBe("MTH")
+  expect(kinshipFromWords(" mamá ")).toBe("MTH")
+  expect(kinshipFromWords("PADRE.")).toBe("FTH")
+  expect(kinshipFromWords("Abuela paterna")).toBe("PGRPRN")
+  expect(kinshipFromWords("Tía")).toBe("AUNT")
+  expect(kinshipFromWords("abuela")).toBeNull()
+  expect(kinshipFromWords("Tutor legal")).toBeNull()
+  expect(kinshipFromWords("")).toBeNull()
 })
 
 describe("lo de cada país en los datos de la persona", () => {

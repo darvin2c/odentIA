@@ -443,6 +443,12 @@ export async function createTask(
     actorUserId?: string | null
     /** Pendiente del sistema con su propia fila en «Te espera» (`TASK_KINDS`). */
     kind?: TaskKind | null
+    /**
+     * `confirmar_representante`: el parentesco escrito y su código HL7, que se
+     * aplican al vínculo al confirmar.
+     */
+    relationshipDetail?: string | null
+    kinship?: string | null
   },
 ): Promise<TaskItem> {
   const title = input.title.trim()
@@ -519,6 +525,8 @@ export async function createTask(
     reason,
     idempotencyKey: idemKey,
     kind: input.kind ?? null,
+    relationshipDetail: input.relationshipDetail?.trim() ? input.relationshipDetail.trim().slice(0, 100) : null,
+    kinship: input.kinship ?? null,
   }
   // El índice único es parcial (solo claves no nulas): el upsert aplica solo
   // cuando el llamador trae clave estable; el resto inserta directo.
@@ -680,6 +688,26 @@ export async function completeTask(
   actor?: { userId: string | null },
 ): Promise<TaskItem> {
   return updateTask(tx, orgId, id, { status: "done", actorUserId: actor?.userId ?? null })
+}
+
+/**
+ * «Descartar» un pendiente del sistema en «Te espera»: queda cancelada a
+ * nombre de quien la descarta y con su motivo («No es su representante»).
+ */
+export async function discardTask(
+  tx: Db,
+  orgId: string,
+  id: string,
+  input: { userId: string; reason: string },
+): Promise<TaskItem> {
+  await updateTask(tx, orgId, id, { status: "cancelled", actorUserId: input.userId })
+  const [discarded] = await tx
+    .update(crmTask)
+    .set({ settledReason: input.reason.trim().slice(0, 300) })
+    .where(and(eq(crmTask.id, id), eq(crmTask.organizationId, orgId)))
+    .returning()
+  if (!discarded) throw notFound("Tarea")
+  return withNames(tx, orgId, discarded)
 }
 
 /**

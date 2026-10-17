@@ -21,16 +21,16 @@ import {
   attachLegalRepresentative,
   confirmPendingRepresentative,
   createPatientRegistrationLink,
+  discardRegistrationTask,
   getPatientRegistrationConfig,
   getPublicPatientRegistration,
   leaveRegistrationHold,
-  PENDING_REPRESENTATIVE_KEY,
   registerPatient,
-  REGISTRATION_HOLD_KEY,
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
 import { listPersonNotes } from "./people.js"
+import { createTask } from "./tasks.js"
 import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import { listDecisionRecipients, listResponsibilities } from "./responsibilities.js"
 import { secretsKeyFromEnv } from "./secrets.js"
@@ -320,8 +320,8 @@ it("la madre registra a su segundo hijo con su mismo documento: es la misma pers
   const [pending] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(and(eq(crmTask.patientId, second.id), eq(crmTask.contactId, mother!))),
   )
-  expect(pending).toMatchObject({ status: "open", kind: "ficha_repetida", area: "recepcion" })
-  expect(pending!.idempotencyKey?.startsWith(PENDING_REPRESENTATIVE_KEY)).toBe(true)
+  // Lo que escribieron como parentesco se guarda con su código para aplicarlo al confirmar.
+  expect(pending).toMatchObject({ status: "open", kind: "confirmar_representante", area: "recepcion", relationshipDetail: "Madre", kinship: "MTH" })
   expect(pending!.title).toBe("Confirma si Rosa Segundo Hijo representa a Sofía Segundo Hijo")
   expect(await waitingRow(pending!.id)).toMatchObject({
     source: "representante",
@@ -331,9 +331,15 @@ it("la madre registra a su segundo hijo con su mismo documento: es la misma pers
     personName: "Rosa Segundo Hijo",
   })
 
-  // «Confirmar» en «Te espera»: el vínculo y el rol, sin tocar sus datos ni sus permisos.
+  // «Confirmar» en «Te espera»: el vínculo con su parentesco y el rol, sin tocar sus datos ni sus permisos.
   await withOrgContext(appDb, "org_a", (tx) => confirmPendingRepresentative(tx, "org_a", ACTOR, second.id, pending!.id))
   expect(await representativeOf(second.id)).toBe(mother)
+  const confirmed = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", second.id))
+  expect(confirmed.contacts.find((link) => link.contactId === mother)).toMatchObject({ relationship: "guardian", relationshipDetail: "Madre", kinship: "MTH" })
+  // Ya confirmado, no se puede descartar.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => discardRegistrationTask(tx, "org_a", ACTOR, pending!.id)),
+  ).rejects.toMatchObject({ code: "ALREADY_REVIEWED" })
   expect([...(await permissionsOf())]).toEqual(permissionsBefore)
   const [done] = await withOrgContext(appDb, "org_a", (tx) => tx.select({ status: crmTask.status }).from(crmTask).where(eq(crmTask.id, pending!.id)))
   expect(done!.status).toBe("done")
@@ -448,15 +454,80 @@ it("un anónimo se registra con el DNI de una madre existente: no cambia su corr
     await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (failure as RegistrationHeld).hold))
   }
   const holds = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select().from(crmTask).where(and(eq(crmTask.contactId, motherId!), eq(crmTask.kind, "ficha_repetida"))),
+    tx.select().from(crmTask).where(and(eq(crmTask.contactId, motherId!), eq(crmTask.kind, "registro_con_documento"))),
   )
   expect(holds).toHaveLength(1)
-  expect(holds[0]!.idempotencyKey?.startsWith(REGISTRATION_HOLD_KEY)).toBe(true)
   expect(holds[0]!.reason).toContain("Alguien se registró con el documento de Madre Real Ochoa: revisa si es ella")
   expect(holds[0]!.area).toBe("recepcion")
   expect(await waitingRow(holds[0]!.id)).toMatchObject({ source: "registro", patientId: null, personId: motherId, patientName: "Madre Real Ochoa" })
   const unchanged = await withOrgContext(appDb, "org_a", (tx) => tx.select({ email: contact.email }).from(contact).where(eq(contact.id, motherId!)))
   expect(unchanged[0]!.email).toBe("madre.real@example.com")
+
+  // «Descartar»: la fila se va, la tarea queda cancelada con su motivo y la madre sigue igual.
+  await withOrgContext(appDb, "org_a", (tx) => discardRegistrationTask(tx, "org_a", ACTOR, holds[0]!.id))
+  expect(await waitingRow(holds[0]!.id)).toBeUndefined()
+  const [discarded] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(crmTask).where(eq(crmTask.id, holds[0]!.id)))
+  expect(discarded).toMatchObject({ status: "cancelled", settledReason: "Se revisó y se descartó: no se cambió nada de esa persona" })
+  const afterDiscard = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", motherId!))
+  expect(afterDiscard.contact).toMatchObject({ displayName: "Madre Real Ochoa", email: "madre.real@example.com", phone: "+51977600001" })
+})
+
+it("«No es ella»: el representante que nombró el registro en línea no se vincula y la tarea queda cerrada con su motivo", async () => {
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  // Una persona de la clínica con su DNI (la registró el equipo).
+  const stranger = await withOrgContext(appDb, "org_a", (tx) =>
+    createPatient(tx, "org_a", ACTOR, { displayName: "Persona Ajena", birthDate: ADULT_BIRTH, docType: "DNI", docNumber: "41529001" }),
+  )
+  const [{ personId: strangerId }] = await ownerDb.execute<{ personId: string }>(
+    sql`select person_id as "personId" from patient where organization_id = 'org_a' and id = ${stranger.id}`,
+  )
+  const child = await withOrgContext(appDb, "org_a", (tx) =>
+    registerPatient(tx, "org_a", { kind: "public", entryPoint: "qr" }, {
+      submissionId: randomUUID(),
+      formVersion: version,
+      answers: {
+        demographics: { displayName: "Niña Del Registro", birthDate: MINOR_BIRTH, phone: "+51977000301" },
+        respondent: "representative",
+        representative: {
+          displayName: "Quien Dice Ser Tutor",
+          relationship: "guardian",
+          relationshipDetail: "Tutor legal",
+          phone: "+51977000302",
+          docType: "DNI",
+          docNumber: "41529001",
+        },
+        health: emptyClinical(),
+        privacyAccepted: true,
+      },
+    }),
+  )
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.patientId, child.id), eq(crmTask.kind, "confirmar_representante"))),
+  )
+  // Un parentesco que no es de la lista se guarda escrito, sin código.
+  expect(pending).toMatchObject({ contactId: strangerId, relationshipDetail: "Tutor legal", kinship: null })
+  expect(await waitingRow(pending!.id)).toMatchObject({ source: "representante", personName: "Persona Ajena", patientName: "Niña Del Registro" })
+
+  await withOrgContext(appDb, "org_a", (tx) => discardRegistrationTask(tx, "org_a", ACTOR, pending!.id))
+  expect(await waitingRow(pending!.id)).toBeUndefined()
+  const [closed] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(crmTask).where(eq(crmTask.id, pending!.id)))
+  expect(closed).toMatchObject({ status: "cancelled", settledReason: "No es su representante: no se vinculó" })
+  const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", child.id))
+  expect(detail.contacts.map((link) => link.contactId)).not.toContain(strangerId)
+  expect(
+    (await withOrgContext(appDb, "org_a", (tx) => listResponsibilities(tx, "org_a", child.id))).map((row) => row.contactId),
+  ).not.toContain(strangerId)
+  // Descartado, ya no se puede confirmar ni volver a descartar.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => confirmPendingRepresentative(tx, "org_a", ACTOR, child.id, pending!.id)),
+  ).rejects.toMatchObject({ code: "ALREADY_REVIEWED" })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => discardRegistrationTask(tx, "org_a", ACTOR, pending!.id)),
+  ).rejects.toMatchObject({ code: "ALREADY_REVIEWED" })
+  // Solo descarta lo del registro en línea: una tarea cualquiera no.
+  const other = await withOrgContext(appDb, "org_a", (tx) => createTask(tx, "org_a", { title: "Llamar", createdBy: "user", patientId: child.id }))
+  await expect(withOrgContext(appDb, "org_a", (tx) => discardRegistrationTask(tx, "org_a", ACTOR, other.id))).rejects.toMatchObject({ status: 404 })
 })
 
 it("con el enlace de su conversación se completa lo vacío y nunca se reemplaza lo que ya tenía", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { agendaSummary, attendedPercent, daysAgo, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
+import { agendaSummary, attendedPercent, daysAgo, duplicateActions, longDay, patientsSummary, waitingKey, waitingOpenText, waitingText, type HomeTextContext } from "./home"
 import type { WaitingRow } from "./workspace"
 
 const context: HomeTextContext = { today: "2026-10-12", timezone: "America/Lima", locale: "es-PE", allTasks: false }
@@ -104,11 +104,19 @@ describe("textos de «Te espera»", () => {
     expect(waitingText(held, context)).toEqual({
       title: "Alguien se registró con el documento de Rosa Ochoa: revisa si es ella",
       detail: "Desde el registro en línea hace 20 min · Escribió: Juan, +51999",
-      action: "Revisar",
+      action: "Ver a Rosa Ochoa",
     })
+    // La fila lleva a la persona; el botón la descarta.
+    expect(duplicateActions(held as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.label)).toEqual(["Descartar"])
     // El registro de un menor nombró como representante a alguien que ya estaba.
     const representative: WaitingRow = { ...duplicate, id: "t4", source: "representante", personId: "c2", personName: "Rosa Ochoa", patientName: "Sofía Ochoa", detail: "" }
     expect(waitingText(representative, context).title).toBe("¿Rosa Ochoa es representante de Sofía Ochoa?")
+    // Confirmar la vincula; «No es ella» la descarta sin vincular.
+    expect(duplicateActions(representative as Extract<WaitingRow, { kind: "possibleDuplicate" }>)).toEqual([
+      { id: "confirmar", label: "Confirmar", primary: true },
+      { id: "descartar", label: "No es ella", primary: false },
+    ])
+    expect(duplicateActions(duplicate as Extract<WaitingRow, { kind: "possibleDuplicate" }>).map((action) => action.id)).toEqual(["revisada"])
     const reentry: WaitingRow = { kind: "portalReentry", id: "t2", patientId: "p2", contactName: "Lucía Fernández", grantId: "g1", createdAt }
     expect(waitingText(reentry, context)).toEqual({
       title: "Lucía Fernández quiere volver a entrar al portal", detail: "Lo pidió hace 20 min · su acceso sigue vigente", action: "Enviar nuevo enlace",
