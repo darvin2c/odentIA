@@ -23,7 +23,7 @@
     "@langchain/core": "1.2.11",
     "@langchain/langgraph": "1.4.15",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",
-    "@langchain/openai": "1.5.3",
+    "@langchain/openai": "1.5.13",
     "@odentia/channels": "workspace:*",
     "@odentia/db": "workspace:*",
     "@odentia/services": "workspace:*",

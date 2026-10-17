@@ -15,7 +15,7 @@ import {
 } from "@odentia/services"
 import { z } from "zod"
 import { reportReplyUse } from "./ai-usage.js"
-import { createConfiguredChatModel, resolveLlmSpec } from "./llm.js"
+import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "./llm.js"
 import type { AgentRuntime } from "./run.js"
 
 /**
@@ -69,7 +69,7 @@ type Extraction = z.infer<typeof extraction>
 
 const TOOL_NAME = "registrar_dictado"
 
-function systemPrompt(input: { services: string[]; today: string; timezone: string; diagnosisList: string }): string {
+function systemPrompt(input: { services: string[]; diagnosisList: string }): string {
   return [
     "Eres el asistente clínico de una clínica dental. El odontólogo dicta mientras atiende y tú ordenas lo dictado en registros para que él los revise.",
     `Principios que no cambian: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
@@ -82,9 +82,61 @@ function systemPrompt(input: { services: string[]; today: string; timezone: stri
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
-    `Hoy es ${input.today} (zona ${input.timezone}). Un control «en seis meses» se cuenta desde hoy.`,
+    "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",
     `Responde únicamente llamando a ${TOOL_NAME}, una sola vez, con todo lo dictado.`,
   ].join("\n")
+}
+
+/**
+ * Cómo se marca el fin de la parte fija para la caché de cada proveedor.
+ * Anthropic solo guarda lo marcado. OpenAI admite el mismo corte en Chat
+ * Completions; con `explicitCache` (`createConfiguredChatModel`) guarda solo
+ * hasta ahí y no escribe, además, lo de cada pausa, que nunca se vuelve a leer.
+ */
+const CACHE_MARK: Partial<Record<LlmSpec["provider"], Record<string, unknown>>> = {
+  anthropic: { cache_control: { type: "ephemeral" } },
+  openai: { prompt_cache_breakpoint: { mode: "explicit" } },
+}
+
+/** Lo que se le pregunta al modelo en una pausa del dictado, con lo de la clínica ya leído. */
+export interface DictationAsk {
+  provider: LlmSpec["provider"]
+  services: string[]
+  diagnosisList: string
+  zone: { locale: string; timezone: string }
+  now: Date
+  transcript: string
+  /** Lo último ya ordenado de este dictado: ayuda a entender lo nuevo y no se registra otra vez. */
+  context: string
+  pending: DictationPending[]
+}
+
+/**
+ * Los mensajes de una pausa. La parte fija (instrucciones y servicios; las
+ * herramientas van antes) es igual en toda la atención y va marcada para la
+ * caché del proveedor: la primera pausa la escribe y las siguientes la leen a
+ * la décima parte. Lo que cambia en cada pausa (la fecha, lo ya ordenado, lo
+ * pendiente y lo nuevo) va después, en el mensaje de la pausa. Con la hora en
+ * las instrucciones, cada pausa escribía la caché y no la leía nunca (medido
+ * el 2026-10-17, ADR 0012).
+ */
+export function dictationMessages(input: DictationAsk): BaseMessage[] {
+  const fixed = systemPrompt({ services: input.services, diagnosisList: input.diagnosisList })
+  const mark = CACHE_MARK[input.provider]
+  const today = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full" }).format(input.now)
+  const context = input.context.trim().slice(-600)
+  const human = [
+    `Hoy es ${today}, ${input.now.toISOString()} (zona ${input.zone.timezone}).`,
+    context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
+    input.pending.length ? `Sugerencias pendientes de este dictado:\n${input.pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}` : "",
+    `Lo nuevo que dictó:\n«${input.transcript}»`,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+  return [
+    new SystemMessage({ content: mark ? [{ type: "text", text: fixed, ...mark }] : fixed }),
+    new HumanMessage({ content: human }),
+  ]
 }
 
 const loose = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim()
@@ -296,33 +348,28 @@ export async function extractDictation(
   const now = new Date()
   const pending = (input.pending ?? []).slice(0, 40)
   if (spec.provider === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending, diagnosisSystem.key), model: spec.modelName }
-  // Con dictado en curso, lo nuevo va al final y separado de lo que solo da contexto.
-  const context = (input.context ?? "").trim().slice(-600)
-  const human =
-    context || pending.length
-      ? [
-          context ? `Ya ordenado antes en este dictado (no lo registres otra vez):\n«${context}»` : "",
-          pending.length ? `Sugerencias pendientes de este dictado:\n${pending.map((item, index) => `${index + 1}. ${item.label}`).join("\n")}` : "",
-          `Lo nuevo que dictó:\n«${transcript}»`,
-        ]
-          .filter(Boolean)
-          .join("\n\n")
-      : transcript
 
   const record = tool(async () => "registrado", {
     name: TOOL_NAME,
     description: "Registra, de una sola vez, todo lo que el odontólogo dictó, ordenado por bloques de la atención.",
     schema: extraction,
   })
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec)
+  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec, { explicitCache: true })
   const bound = (model as unknown as { bindTools?: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools
     ? (model as unknown as { bindTools: (tools: unknown[]) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }).bindTools([record])
     : model
-  const today = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, dateStyle: "full" }).format(now)
-  const reply = await bound.invoke([
-    new SystemMessage({ content: systemPrompt({ services, today: `${today}, ${now.toISOString()}`, timezone: zone.timezone, diagnosisList: diagnosisSystem.title }) }),
-    new HumanMessage({ content: human }),
-  ])
+  const reply = await bound.invoke(
+    dictationMessages({
+      provider: spec.provider,
+      services,
+      diagnosisList: diagnosisSystem.title,
+      zone,
+      now,
+      transcript,
+      context: input.context ?? "",
+      pending,
+    }),
+  )
   reportReplyUse(spec.provider, spec.modelName, reply)
   const call = reply instanceof AIMessage || "tool_calls" in reply ? (reply as AIMessage).tool_calls?.find((item) => item.name === TOOL_NAME) : undefined
   const parsed = call ? extraction.safeParse(call.args) : null

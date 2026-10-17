@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { costMicrosOf, reportAiUse, summarizeAiUses, takeAiUsage, withAiMeter } from "./ai-usage.js"
+import { costMicrosOf, reportAiUse, reportReplyUse, summarizeAiUses, takeAiUsage, withAiMeter } from "./ai-usage.js"
 
 describe("costo de una llamada", () => {
   it("cobra aparte lo leído y lo escrito en la caché de Claude", () => {
@@ -7,6 +7,20 @@ describe("costo de una llamada", () => {
     expect(
       costMicrosOf({ model: "claude-haiku-5-5", inputTokens: 3_000, cachedInputTokens: 2_000, cacheWriteTokens: 400, outputTokens: 50 }),
     ).toBe(60 + 20 + 50 + 25)
+  })
+
+  it("cobra a su precio lo escrito en la caché de ChatGPT 6", async () => {
+    // Una pausa del dictado con la hora en las instrucciones, medida el 2026-10-17: OpenAI escribe
+    // 2.063 tokens en su caché a 0,125 y no lee nada. Sin la escritura se anotaban 262 de 314.
+    const reply = { usage_metadata: { input_tokens: 2_066, output_tokens: 111, total_tokens: 2_177, input_token_details: { audio: 0, cache_read: 0, cache_creation: 2_063 } } }
+    const saved: unknown[] = []
+    await withAiMeter(
+      async () => reportReplyUse("openai", "gpt-6-luna", reply),
+      async (entries) => {
+        saved.push(...entries)
+      },
+    )
+    expect(saved).toEqual([expect.objectContaining({ inputTokens: 2_066, cachedInputTokens: 0, cacheWriteTokens: 2_063, outputTokens: 111, costMicros: 314 })])
   })
 
   it("el audio se cobra por minuto y los vectores solo por entrada", () => {

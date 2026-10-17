@@ -6,7 +6,7 @@ import { type AiUsageEntry, recordAiUsage } from "@odentia/services"
 /**
  * Precio de lista de un modelo en USD: por millón de tokens o por minuto de
  * audio. `cachedInput` es lo servido desde la caché y `cacheWrite`, lo que se
- * escribe en ella (Anthropic lo cobra aparte); sin ellos vale `input`.
+ * escribe en ella (Anthropic y OpenAI lo cobran aparte); sin ellos vale `input`.
  */
 interface ModelPrice {
   input?: number
@@ -24,9 +24,10 @@ interface ModelPrice {
  * - claude-haiku-5-5: precio de Anthropic hasta 100K tokens de entrada por
  *   llamada (el agente queda muy por debajo); caché: lectura 0,1× y
  *   escritura 1,25× de la entrada.
- * - gpt-6-luna: el de su lanzamiento según la prensa; vale también para
- *   OpenAI Decisions, que cobra los tokens de ese modelo. Confirmar con la
- *   factura de OpenAI.
+ * - gpt-6-luna: el de la página de precios de OpenAI, leída el 2026-10-17;
+ *   caché: lectura 0,1× y escritura 1,25× de la entrada. Chat Completions
+ *   cobra la escritura (medido el 2026-10-17, ADR 0012). Vale también para
+ *   OpenAI Decisions, que cobra los tokens de ese modelo.
  * - text-embedding-3-small, whisper-1 y gpt-4o-mini-transcribe: precios de
  *   lista de OpenAI.
  * - jev-1.13.0 (modelo de decisión de toda clínica, ADR 0047): el de
@@ -34,7 +35,7 @@ interface ModelPrice {
  */
 export const AI_PRICES: Record<string, ModelPrice> = {
   "claude-haiku-5-5": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
-  "gpt-6-luna": { input: 0.1, cachedInput: 0.01, output: 0.5 },
+  "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
   "jev-1.13.0": { input: 0.042, output: 0 },
   "text-embedding-3-small": { input: 0.02 },
   "whisper-1": { perMinute: 0.006 },
