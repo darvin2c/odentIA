@@ -42,6 +42,16 @@ export interface MailTemplate {
   text: string
 }
 
+/** Escapa texto escrito por otra persona antes de ponerlo en el HTML de un correo (contenido y atributos). */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
 function layout(title: string, bodyHtml: string, ctaUrl: string, ctaLabel: string): string {
   return `<!doctype html>
 <html lang="es">
@@ -136,14 +146,6 @@ export function invitationTemplate({
 }
 
 /* ---------- Avisos de soporte: solo avisan, nunca llevan el texto del caso ---------- */
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-}
 
 const SUPPORT_KIND_LABEL = { pregunta: "Pregunta", problema: "Problema", acceso: "Acceso" } as const
 export type SupportCaseKindLabel = keyof typeof SUPPORT_KIND_LABEL

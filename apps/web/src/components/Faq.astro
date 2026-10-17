@@ -1,0 +1,31 @@
+---
+// Preguntas frecuentes plegables. Los datos estructurados FAQPage salen de faqJsonLd() en la página.
+import type { FaqItem } from "../lib/faq"
+
+interface Props {
+  items: FaqItem[]
+  title?: string
+  tag?: string
+}
+const { items, title = "Lo que nos preguntan.", tag = "Preguntas" } = Astro.props
+---
+<section class="section wrap faq" id="preguntas">
+  <div class="head">
+    <span class="tag">[ {tag} ]</span>
+    <h2 class="h2">{title}</h2>
+  </div>
+  <div class="list">
+    {items.map((q) => (
+      <details class="q">
+        <summary>{q.q}<span class="plus" aria-hidden="true">+</span></summary>
+        <p>{q.a}</p>
+      </details>
+    ))}
+  </div>
+</section>
+
+<style>
+  .faq { display: flex; flex-wrap: wrap; gap: 48px; }
+  .head { flex: 1 1 300px; display: flex; flex-direction: column; gap: 18px; }
+  .list { flex: 999 1 560px; min-width: 0; }
+</style>

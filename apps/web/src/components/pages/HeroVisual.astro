@@ -1,0 +1,309 @@
+---
+// Ilustraciones sencillas (HTML y SVG, sin WebGL) para la portada de cada página del sistema.
+// Son decorativas: el mismo contenido está explicado en el texto de la página.
+import type { HeroVisualKind } from "../../lib/pages-data"
+import { contactEmail } from "../../lib/site"
+
+interface Props {
+  kind: HeroVisualKind
+}
+const { kind } = Astro.props
+const upper = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28]
+const lower = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]
+---
+<div class="hv" aria-hidden="true">
+  {kind === "agenda" && (
+    <div class="panel">
+      <div class="ph"><span>Agenda · jueves 22 · Sede Norte</span><span class="ex">ejemplo</span></div>
+      <div class="cols">
+        {[
+          { who: "Dra. Paredes", slots: [["09:00", "busy", "Ocupado"], ["10:30", "new", "Andrea Ramos · Evaluación"], ["12:00", "busy", "Ocupado"], ["15:00", "free", "Libre"]] },
+          { who: "Dr. Ríos", slots: [["09:00", "free", "Libre"], ["10:30", "busy", "Ocupado"], ["16:30", "free", "Libre"], ["17:30", "busy", "Ocupado"]] },
+        ].map((c) => (
+          <div class="col">
+            <span class="cw">{c.who}</span>
+            {c.slots.map(([t, k, l]) => <div class:list={["slot", k]}><span class="mono">{t}</span><span>{l}</span></div>)}
+          </div>
+        ))}
+      </div>
+      <div class="chip c-rec"><i></i>Agendó Sofi · por WhatsApp, a las 23:41</div>
+    </div>
+  )}
+
+  {kind === "odontograma" && (
+    <div class="panel">
+      <div class="ph"><span>Odontograma · Carlos Medina</span><span class="ex">ejemplo</span></div>
+      <svg viewBox="0 0 480 170" class="teeth">
+        {upper.map((n, i) => (
+          <g transform={`translate(${8 + i * 29 + (i > 7 ? 6 : 0)} 18)`}>
+            <rect width="24" height="40" rx="8" class="tooth" />
+            <text x="12" y="-5" class="tn">{n}</text>
+          </g>
+        ))}
+        <line x1="242" y1="10" x2="242" y2="160" class="mid" />
+        <line x1="4" y1="85" x2="476" y2="85" class="mid" />
+        {lower.map((n, i) => (
+          <g transform={`translate(${8 + i * 29 + (i > 7 ? 6 : 0)} 104)`}>
+            <rect width="24" height="40" rx="8" class:list={["tooth", { hit: n === 36 }]} />
+            <text x="12" y="58" class="tn">{n}</text>
+          </g>
+        ))}
+      </svg>
+      <div class="dx"><span class="code mono">K02.1</span><span>Caries de la dentina · pieza 36</span></div>
+      <div class="chip c-cli"><i></i>Propuesto del dictado · confirmado por la Dra. Paredes</div>
+    </div>
+  )}
+
+  {kind === "presupuestos" && (
+    <div class="panel">
+      <div class="ph"><span>Presupuesto de Jorge · ortodoncia</span><span class="ex">ejemplo</span></div>
+      <div class="opts">
+        {[["Opción 1", "Tratamiento completo", "por aceptar"], ["Opción 2", "Por etapas", "por aceptar"], ["Opción 3", "Solo la primera fase", "por aceptar"]].map(([n, t, s], i) => (
+          <div class:list={["opt", { pick: i === 1 }]}><span class="mono on">{n}</span><strong>{t}</strong><span class="st mono">{s}</span><span class="bars"><b></b><b></b><b></b></span></div>
+        ))}
+      </div>
+      <div class="chip c-adm"><i></i>Sin respuesta en una semana: el Administrador lo retomó</div>
+    </div>
+  )}
+
+  {kind === "caja" && (
+    <div class="panel">
+      <div class="ph"><span>Caja · Sede Norte · hoy</span><span class="ex">ejemplo</span></div>
+      <ul class="moves">
+        <li><span class="mono">08:40</span><span>Cobro · primera atención del día</span><span class="pill-s ok">cobrado</span></li>
+        <li><span class="mono">12:15</span><span>Adelanto · tratamiento de Lucía</span><span class="pill-s ok">cobrado</span></li>
+        <li><span class="mono">15:00</span><span>Gasto · materiales</span><span class="pill-s">gasto</span></li>
+        <li><span class="mono">17:20</span><span>Saldo a favor · Jorge</span><span class="pill-s fav">a favor</span></li>
+      </ul>
+      <div class="aging">
+        <span class="mono ak">Quién debe</span>
+        <div class="ag-row"><span>Hasta 30 días</span><span class="bar"><b style="width:72%"></b></span></div>
+        <div class="ag-row"><span>Más de 30 días</span><span class="bar"><b style="width:38%"></b></span></div>
+        <div class="ag-row"><span>Más de 90 días</span><span class="bar"><b style="width:14%" class="late"></b></span></div>
+      </div>
+      <div class="close">Cerrar caja e imprimir la hoja para firmar</div>
+    </div>
+  )}
+
+  {kind === "enlace" && (
+    <div class="phone">
+      <div class="notch"></div>
+      <span class="mono pk">Su enlace · Clínica Sonrisa Norte</span>
+      <strong class="hi">Hola, Rosa</strong>
+      <div class="next"><span class="mono">Tu próxima cita</span><strong>Viernes 24 · 11:00</strong><span>Control · Dra. Paredes</span></div>
+      <div class="acts">
+        <span class="act main">Reservar una cita</span>
+        <span class="act">Cambiar mi cita</span>
+        <span class="act">Mis documentos</span>
+        <span class="act">Presupuesto <em>por responder</em></span>
+        <span class="act">Consentimiento <em>por firmar</em></span>
+      </div>
+      <span class="ex mono">ejemplo</span>
+    </div>
+  )}
+
+  {kind === "reportes" && (
+    <div class="panel">
+      <div class="ph"><span>Reportes · este mes · todas las sedes</span><span class="ex">ejemplo</span></div>
+      <div class="tiles">
+        {[
+          ["Atención", "Cómo respondimos a quien escribió", "M0 30 L20 26 L40 28 L60 18 L80 20 L100 10 L120 12", "var(--sky)"],
+          ["Citas", "Si vinieron y quién los atendió", "M0 24 L20 22 L40 14 L60 18 L80 12 L100 14 L120 8", "var(--mint)"],
+          ["Pacientes y ventas", "El trabajo nuevo y el que se hizo", "M0 28 L20 20 L40 22 L60 16 L80 18 L100 12 L120 10", "var(--amber)"],
+          ["Finanzas", "Lo que entró, se gastó y falta cobrar", "M0 26 L20 24 L40 18 L60 20 L80 14 L100 16 L120 9", "var(--sky-2)"],
+        ].map(([t, s, d, c]) => (
+          <div class="tile"><strong>{t}</strong><span>{s}</span><svg viewBox="0 0 120 36" class="spark"><path d={d} style={`stroke:${c}`} /></svg></div>
+        ))}
+      </div>
+    </div>
+  )}
+
+  {kind === "sedes" && (
+    <div class="panel sedes">
+      <div class="ph"><span>Clínica Sonrisa · tres sedes</span><span class="ex">ejemplo</span></div>
+      <div class="hub"><span class="mono">Un equipo</span><strong>Clínica Sonrisa</strong></div>
+      <svg viewBox="0 0 420 60" class="links"><path d="M210 0 V20 M210 20 H70 V60 M210 20 V60 M210 20 H350 V60" /></svg>
+      <div class="sites">
+        {["Norte", "Centro", "Sur"].map((s) => (
+          <div class="site"><strong>Sede {s}</strong><span class="mono">Agenda</span><span class="mono">Caja</span><span class="mono">Unidades dentales</span></div>
+        ))}
+      </div>
+      <div class="chip c-cli"><i></i>Lucía Ramos · una sola historia en las tres sedes</div>
+    </div>
+  )}
+
+  {kind === "whatsapp" && (
+    <div class="phone wa">
+      <div class="notch"></div>
+      <div class="wah"><span class="wav">S</span><span><strong>Clínica Sonrisa Norte</strong><span class="mono">Sofi · asistente virtual</span></span></div>
+      <div class="bub in">Hola, soy la mamá de Lucía. ¿Podemos pasar su control del martes al viernes?</div>
+      <div class="bub out">Hola, Carmen. Claro: tengo el viernes 31 a las 16:00 con la Dra. Paredes. ¿Te lo dejo?</div>
+      <div class="bub in">Sí, por favor.</div>
+      <div class="bub out ok">Listo: viernes 31 a las 16:00. Te lo recuerdo un día antes.</div>
+      <span class="ex mono">ejemplo</span>
+    </div>
+  )}
+
+  {kind === "seguridad" && (
+    <div class="panel">
+      <div class="ph"><span>Clínica Sonrisa Norte · separada de las demás</span><span class="ex">ejemplo</span></div>
+      <div class="roles">
+        {[
+          ["Recepción", "Agenda y conversaciones", "var(--sky)"],
+          ["Odontólogos", "Historia clínica de sus pacientes", "var(--mint)"],
+          ["Caja", "Cobros, gastos y cierre", "var(--amber)"],
+        ].map(([r, s, c]) => (
+          <div class="role" style={`--rc:${c}`}>
+            <svg viewBox="0 0 24 24" class="lock"><rect x="5" y="11" width="14" height="10" rx="2.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+            <span><strong>{r}</strong><span>{s}</span></span>
+          </div>
+        ))}
+      </div>
+      <div class="audit">
+        <span class="mono ak">Registro</span>
+        <div><span class="mono">09:41</span><span>Asistente clínico propuso la nota de Carlos</span></div>
+        <div><span class="mono">09:43</span><span>Dra. Paredes la confirmó y firmó</span></div>
+      </div>
+    </div>
+  )}
+
+  {kind === "contacto" && (
+    <div class="panel mail">
+      <div class="ph"><span>Nuevo correo</span><span class="ex">borrador</span></div>
+      <div class="mf"><span class="mono">Para</span><span>{contactEmail}</span></div>
+      <div class="mf"><span class="mono">Asunto</span><span>Quiero ver odentIA en mi clínica</span></div>
+      <div class="mbody">
+        <span>Hola, tenemos dos sedes y nos escriben por WhatsApp e Instagram.</span>
+        <span>¿Cómo empezamos?</span>
+        <span class="line"></span><span class="line short"></span>
+      </div>
+      <div class="send">Responde una persona del equipo</div>
+    </div>
+  )}
+</div>
+
+<style>
+  .hv { position: relative; display: flex; justify-content: center; animation: float 7s ease-in-out infinite; }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  .panel { width: min(520px, 100%); padding: 22px; border-radius: 24px; background: rgba(8,26,32,.78); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 40px 80px -40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 14px; color: #e2eef1; }
+  .ph { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: #9fb8bf; text-transform: uppercase; }
+  .ex { font-family: var(--mono); font-size: 11px; text-transform: lowercase; color: var(--on-night-3); padding: 2px 8px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+  .chip { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; color: #e7f5f8; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--cc); animation: pulse 2.4s ease-in-out infinite; }
+  .c-rec { --cc: var(--sky); } .c-cli { --cc: var(--mint); } .c-adm { --cc: var(--amber); }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--cc); } 50% { box-shadow: 0 0 0 5px transparent; } }
+  .mono { font-family: var(--mono); }
+
+  /* Agenda */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .col { display: flex; flex-direction: column; gap: 8px; }
+  .cw { font-weight: 700; font-size: 14px; }
+  .slot { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; font-size: 13px; }
+  .slot .mono { font-size: 11.5px; color: #9fb8bf; }
+  .slot.busy { background: rgba(255,255,255,.06); color: #9fb8bf; }
+  .slot.free { border: 1px dashed rgba(255,255,255,.2); color: #b9cfd5; }
+  .slot.new { background: rgba(79,195,215,.18); box-shadow: inset 0 0 0 1.5px var(--sky); color: #fff; font-weight: 700; }
+
+  /* Odontograma */
+  .teeth { width: 100%; height: auto; }
+  .tooth { fill: rgba(255,255,255,.08); stroke: rgba(255,255,255,.22); stroke-width: 1; }
+  .tooth.hit { fill: rgba(166,240,216,.35); stroke: var(--mint); stroke-width: 2; }
+  .tn { font-family: var(--mono); font-size: 10px; fill: #9fb8bf; text-anchor: middle; }
+  .mid { stroke: rgba(255,255,255,.12); stroke-dasharray: 3 4; }
+  .dx { display: flex; gap: 10px; align-items: center; font-size: 14.5px; }
+  .code { font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: rgba(166,240,216,.16); color: var(--mint); }
+
+  /* Presupuestos */
+  .opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .opt { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 14px; background: rgba(255,255,255,.06); }
+  .opt.pick { box-shadow: inset 0 0 0 1.5px var(--amber); background: rgba(245,196,107,.1); }
+  .opt .on { font-size: 11px; color: #9fb8bf; }
+  .opt strong { font-size: 14px; line-height: 1.3; }
+  .opt .st { font-size: 11px; color: var(--amber); }
+  .bars { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+  .bars b { height: 5px; border-radius: 3px; background: rgba(255,255,255,.14); }
+  .bars b:nth-child(2) { width: 75%; } .bars b:nth-child(3) { width: 50%; }
+
+  /* Caja */
+  .moves { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .moves li { display: grid; grid-template-columns: 46px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 13.5px; }
+  .moves .mono { font-size: 11.5px; color: #9fb8bf; }
+  .pill-s { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.08); color: #cfe2e7; }
+  .pill-s.ok { background: rgba(166,240,216,.16); color: var(--mint); }
+  .pill-s.fav { background: rgba(79,195,215,.16); color: var(--sky-2); }
+  .aging { display: flex; flex-direction: column; gap: 8px; }
+  .ak { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #9fb8bf; }
+  .ag-row { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; font-size: 13px; }
+  .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .bar b { display: block; height: 100%; border-radius: 4px; background: var(--sky); }
+  .bar b.late { background: var(--amber); }
+  .close { align-self: flex-start; padding: 10px 14px; border-radius: 999px; background: var(--sky); color: #03252e; font-weight: 700; font-size: 13.5px; }
+
+  /* Teléfono (Su enlace y WhatsApp) */
+  .phone { position: relative; width: min(320px, 100%); padding: 40px 18px 22px; border-radius: 40px; background: #f6f8fb; color: var(--ink); box-shadow: 0 0 0 10px #0d2a33, 0 40px 80px -30px rgba(0,0,0,.7); display: flex; flex-direction: column; gap: 12px; }
+  .notch { position: absolute; top: 12px; left: 50%; width: 90px; height: 18px; margin-left: -45px; border-radius: 999px; background: #0d2a33; }
+  .phone .ex { position: absolute; right: 18px; bottom: -36px; color: var(--on-night-3); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
+  .pk { font-size: 11px; color: var(--soft); }
+  .hi { font-size: 24px; letter-spacing: -.02em; }
+  .next { display: flex; flex-direction: column; gap: 2px; padding: 14px; border-radius: 16px; background: var(--night); color: #e2eef1; }
+  .next .mono { font-size: 11px; color: var(--sky-2); }
+  .next span:last-child { font-size: 13px; color: var(--on-night-2); }
+  .acts { display: flex; flex-direction: column; gap: 8px; }
+  .act { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 14px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); font-weight: 700; font-size: 14px; }
+  .act.main { background: var(--teal); color: #fff; box-shadow: none; }
+  .act em { font-style: normal; font-family: var(--mono); font-weight: 500; font-size: 11px; color: #9a6a12; background: #fff4dc; padding: 2px 6px; border-radius: 6px; }
+  .wa { background: #ece5dd; }
+  .wah { display: flex; gap: 10px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid rgba(15,23,42,.08); }
+  .wah > span:last-child { display: flex; flex-direction: column; font-size: 14px; }
+  .wah .mono { font-size: 11px; color: var(--soft); }
+  .wav { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--teal); color: #fff; font-weight: 800; }
+  .bub { max-width: 86%; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; box-shadow: 0 1px 0 rgba(0,0,0,.06); }
+  .bub.in { align-self: flex-start; background: #fff; border-top-left-radius: 3px; }
+  .bub.out { align-self: flex-end; background: #d9fdd3; border-top-right-radius: 3px; }
+  .bub.ok { animation: pop 3.6s ease-in-out infinite; }
+  @keyframes pop { 0%, 20% { opacity: .35; transform: translateY(6px); } 30%, 100% { opacity: 1; transform: none; } }
+
+  /* Reportes */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 14px; background: rgba(255,255,255,.06); }
+  .tile strong { font-size: 14.5px; }
+  .tile span { font-size: 12.5px; color: #9fb8bf; line-height: 1.4; }
+  .spark { margin-top: 8px; width: 100%; height: 40px; }
+  .spark path { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Sedes */
+  .hub { align-self: center; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 22px; border-radius: 16px; background: var(--sky); color: #03252e; }
+  .hub .mono { font-size: 11px; }
+  .links { width: 100%; height: 44px; margin: -8px 0; }
+  .links path { fill: none; stroke: rgba(127,214,228,.5); stroke-width: 1.5; stroke-dasharray: 4 5; }
+  .sites { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .site { display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 14px; background: rgba(255,255,255,.06); }
+  .site strong { font-size: 14px; }
+  .site .mono { font-size: 11px; color: #9fb8bf; }
+
+  /* Seguridad */
+  .roles { display: flex; flex-direction: column; gap: 10px; }
+  .role { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.06); box-shadow: inset 3px 0 0 var(--rc); }
+  .role > span { display: flex; flex-direction: column; font-size: 13px; color: #9fb8bf; }
+  .role strong { color: #fff; font-size: 14.5px; }
+  .lock { width: 24px; height: 24px; flex: none; fill: none; stroke: var(--rc); stroke-width: 1.8; }
+  .audit { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: rgba(0,0,0,.2); }
+  .audit div { display: grid; grid-template-columns: 46px 1fr; gap: 8px; font-size: 13px; }
+  .audit .mono { font-size: 11.5px; color: #9fb8bf; }
+
+  /* Contacto */
+  .mf { display: grid; grid-template-columns: 70px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 14px; }
+  .mf .mono { font-size: 12px; color: #9fb8bf; }
+  .mbody { display: flex; flex-direction: column; gap: 8px; font-size: 14.5px; line-height: 1.5; }
+  .line { height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); }
+  .line.short { width: 60%; }
+  .send { align-self: flex-start; padding: 10px 14px; border-radius: 999px; background: var(--sky); color: #03252e; font-weight: 700; font-size: 13.5px; }
+
+  @media (max-width: 720px) {
+    .panel { padding: 16px; }
+    .opts, .sites { grid-template-columns: 1fr; }
+    .opt .bars { display: none; }
+    .tiles { grid-template-columns: 1fr 1fr; }
+    .ag-row { grid-template-columns: 100px 1fr; }
+  }
+</style>

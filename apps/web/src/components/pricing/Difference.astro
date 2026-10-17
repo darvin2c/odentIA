@@ -1,0 +1,101 @@
+---
+// «La diferencia»: tabla en pantallas anchas; en el teléfono, cada fila apilada (como en su tablero).
+const rows = [
+  {
+    k: "Cómo se vende",
+    was: "Con una lista de funciones y módulos.",
+    now: "Con lo que logra en tu clínica.",
+    wasM: "una lista de funciones y módulos.",
+    nowM: "lo que logra en tu clínica.",
+  },
+  {
+    k: "Cómo se cobra",
+    was: "Por odontólogo, agenda o sede, cada mes.",
+    now: "Por conversación, consulta o cita recuperada.",
+    wasM: "por odontólogo, agenda o sede.",
+    nowM: "por conversación, consulta o cita recuperada.",
+  },
+  {
+    k: "Si crece tu equipo",
+    was: "Sube la cuota.",
+    now: "La cuota no cambia.",
+    wasM: "sube la cuota.",
+    nowM: "la cuota no cambia.",
+  },
+  {
+    k: "El WhatsApp de noche",
+    was: "Espera al día siguiente.",
+    now: "Se responde y se agenda.",
+    wasM: "espera al día siguiente.",
+    nowM: "se responde y se agenda.",
+  },
+  {
+    k: "Quien no volvió",
+    was: "Alguien tiene que acordarse de llamar.",
+    now: "El agente le escribe con su enlace para reservar.",
+    wasM: "alguien tiene que acordarse de llamar.",
+    nowM: "el agente le escribe con su enlace para reservar.",
+  },
+  {
+    k: "Un mes tranquilo",
+    was: "Pagas lo mismo.",
+    now: "Pagas menos.",
+    wasM: "pagas lo mismo.",
+    nowM: "pagas menos.",
+  },
+]
+---
+<section class="section section-white">
+  <div class="wrap in">
+    <div class="head">
+      <span class="tag">[ La diferencia ]</span>
+      <h2 class="h2">El software de siempre se vende por sus funciones. odentIA, por lo que resuelve.</h2>
+    </div>
+    <table class="cmp">
+      <caption class="sr">Comparación entre el software de siempre y odentIA</caption>
+      <thead>
+        <tr><td></td><th scope="col">Lo de siempre</th><th scope="col" class="us">odentIA</th></tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr><th scope="row">{r.k}</th><td>{r.was}</td><td class="us">{r.now}</td></tr>
+        ))}
+      </tbody>
+    </table>
+    <div class="stack-m">
+      {rows.map((r) => (
+        <div class="dif"><strong>{r.k}</strong><span class="was">Lo de siempre: {r.wasM}</span><span class="now">odentIA: {r.nowM}</span></div>
+      ))}
+    </div>
+    <p class="links">Mira cómo lo hacen <a href="/agentes">los tres agentes</a> y cómo <a href="/omnicanal">todos tus canales</a> llegan a un mismo lugar.</p>
+  </div>
+</section>
+
+<style>
+  .in { display: flex; flex-direction: column; gap: 40px; }
+  .head { display: flex; flex-direction: column; gap: 18px; max-width: 860px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+  .cmp th, .cmp td { padding: 18px 20px; border-top: 1px solid var(--line); font-size: 15.5px; line-height: 1.5; text-align: left; vertical-align: top; }
+  .cmp tbody th { font-weight: 800; }
+  .cmp thead th, .cmp thead td { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); border-top: 0; }
+  .cmp col:first-child, .cmp th[scope="row"] { width: 34%; }
+  .cmp .us { background: var(--night); color: #e2eef1; }
+  .cmp thead .us { color: var(--sky-2); border-radius: 16px 16px 0 0; }
+  .cmp tbody tr:last-child .us { border-radius: 0 0 16px 16px; }
+  .stack-m { display: none; }
+  .links { color: var(--muted); font-size: 15.5px; }
+  @media (max-width: 860px) { .cmp th, .cmp td { padding: 14px 10px; font-size: 14px; } }
+  @media (max-width: 720px) {
+    .in { gap: 8px; }
+    .head { gap: 14px; padding-bottom: 10px; }
+    .h2 { font-size: 34px; }
+    .cmp { display: none; }
+    .stack-m { display: flex; flex-direction: column; }
+    .dif { display: flex; flex-direction: column; gap: 6px; padding: 14px 0; border-top: 1px solid var(--line); }
+    .dif strong { font-size: 15px; }
+    .was { font-size: 14px; color: var(--soft); line-height: 1.45; }
+    .now { align-self: flex-start; font-size: 14px; line-height: 1.45; padding: 6px 10px; border-radius: 10px; background: var(--night); color: #e2eef1; }
+    .links { font-size: 14px; padding-top: 12px; }
+  }
+</style>

@@ -80,7 +80,7 @@ const FICTIONAL_METHODS = [
 
 /**
  * El plan de la ADR 0031 para probar el cobro por acción: USD 29 que vuelven
- * en crédito, precio base por acción y prueba de USD 50 y 30 días. Es el plan
+ * en crédito, precio base por acción y prueba de USD 100 y 30 días. Es el plan
  * por defecto de la semilla; en producción lo configura administración.
  */
 const ACTION_PLAN = {
@@ -97,7 +97,7 @@ const ACTION_PLAN = {
   recoveryMicros: 4_000_000,
   maxDiscountBps: 6000,
   sellerDiscountBps: 1000,
-  trialCreditCents: 5000,
+  trialCreditCents: 10000,
   trialDays: 30,
   trialMaxCreditCents: 13000,
   trialMaxDays: 60,

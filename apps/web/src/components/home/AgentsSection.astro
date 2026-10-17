@@ -1,0 +1,40 @@
+---
+// 02 · Agéntica: agentes que actúan, no solo conversan.
+import ActsLog from "./ActsLog"
+import AgentTabs from "./AgentTabs"
+---
+<section id="agentes" class="hs">
+  <div class="wrap hs-in hs-in-48">
+    <div class="sr hs-head">
+      <span class="tag">[ 02 ]</span>
+      <h2 class="h2 h2-xl">Agéntica</h2>
+      <p class="lead">Agentes que actúan, no solo conversan. Agendan y mueven citas, preparan la nota clínica, recuerdan, retoman presupuestos y te avisan cuando hace falta una persona. Siempre dentro de lo que tú les permites.</p>
+    </div>
+    <div class="ag-top">
+      <div class="card ag-log">
+        <div class="ag-log-h">
+          <strong>Actúan, no solo conversan.</strong>
+          <span class="mono d-only">Registro de acciones · ejemplo</span>
+        </div>
+        <p class="ag-log-p d-only">Un chatbot responde y deja el resto para una persona. Los agentes de odentIA hacen el cambio en tu sistema, y queda registrado quién lo hizo.</p>
+        <p class="ag-log-p m-only">Un chatbot responde. Los agentes de odentIA hacen el cambio en tu sistema, y queda registrado.</p>
+        <ActsLog client:visible />
+        <span class="mono m-only ag-log-m">Registro de acciones · ejemplo</span>
+      </div>
+      <div class="card ag-mx">
+        <span class="tag tag-g d-only">Dónde está cada uno</span>
+        <div class="mx" role="img" aria-label="odentIA está en la casilla de todos los canales y hacer el trabajo; las demás opciones cubren solo un canal o solo responden">
+          <div class="mono mx-y" aria-hidden="true">un canal → todos, una persona</div>
+          <div class="mxq"><strong>Programas de mensajería</strong><span>Todos los canales en una bandeja, sin agenda clínica ni historia.</span></div>
+          <div class="mxq us"><strong>odentIA</strong><span>Todos los canales en una sola ficha por persona, y agentes que actúan en tu clínica.</span></div>
+          <div class="mxq"><strong>Chatbots de un canal</strong><span>Responden por WhatsApp y pasan el resto a alguien del equipo.</span></div>
+          <div class="mxq"><strong>Un canal que sí agenda</strong><span>Un asistente aparte o por voz: agenda, pero en uno o dos canales.</span></div>
+          <div class="mx-0" aria-hidden="true"></div>
+          <div class="mono mx-x" aria-hidden="true">solo conversan → actúan</div>
+        </div>
+        <span class="mono m-only mx-m" aria-hidden="true">arriba: todos los canales · derecha: actúan</span>
+      </div>
+    </div>
+    <AgentTabs client:visible={{ rootMargin: "200px" }} />
+  </div>
+</section>

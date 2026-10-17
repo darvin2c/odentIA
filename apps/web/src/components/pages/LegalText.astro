@@ -1,0 +1,20 @@
+---
+// Texto de un documento legal: convierte «[texto](/ruta)» en enlaces y pasa el resto a Rich, que resalta
+// los marcadores «[Por completar…]» y «[Por confirmar…]».
+import Rich from "./Rich.astro"
+
+interface Props {
+  text: string
+}
+// Solo rutas internas, mailto: y https:; un marcador nunca va seguido de «(».
+const LINK = /\[([^\]]+)\]\(((?:\/|mailto:|https:)[^)\s]*)\)/
+const pieces = Astro.props.text.split(new RegExp(LINK.source, "g"))
+// split con dos grupos devuelve [texto, etiqueta, href, texto, etiqueta, href, …].
+const parts: ({ text: string } | { label: string; href: string })[] = []
+for (let i = 0; i < pieces.length; i += 3) {
+  if (pieces[i]) parts.push({ text: pieces[i] as string })
+  if (i + 2 < pieces.length)
+    parts.push({ label: pieces[i + 1] as string, href: pieces[i + 2] as string })
+}
+---
+{parts.map((p) => ("href" in p ? <a href={p.href}>{p.label}</a> : <Rich text={p.text} />))}

@@ -56,6 +56,7 @@ import {
   type RegistrationRemoteAddress,
 } from "./routes/public-patient-registration.js"
 import { createPublicBookingRoute } from "./routes/public-booking.js"
+import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
@@ -85,6 +86,8 @@ export interface AppDeps {
   webURL: string
   adminURL: string
   mailer: Mailer
+  /** Correo de odentIA que recibe el aviso de cada hoja del Libro de Reclamaciones (COMPLAINTS_EMAIL). */
+  complaintsEmail?: string | undefined
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
@@ -283,6 +286,16 @@ export function createApp(deps: AppDeps) {
       storage: deps.storage,
       webURL: deps.webURL,
       cookieDomain: deps.cookieDomain,
+    }),
+  )
+  // Libro de Reclamaciones de odentIA: la única ruta que llama la web de marketing.
+  app.route(
+    "/api/public/libro-de-reclamaciones",
+    createPublicConsumerComplaintsRoute({
+      ownerDb: deps.ownerDb,
+      mailer: deps.mailer,
+      complaintsEmail: deps.complaintsEmail,
+      remoteAddress: deps.registrationRemoteAddress,
     }),
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))

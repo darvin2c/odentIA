@@ -1,0 +1,239 @@
+---
+// Una sección de contenido de las páginas interiores. Los tipos (tarjetas, pasos, texto con puntos,
+// conversación, registro de acciones y nota clínica) salen de src/lib/pages-data.ts.
+import {
+  AGENT_DARK,
+  AGENT_LIGHT,
+  AGENT_NAMES,
+  type Block,
+  type CardItem,
+} from "../../lib/pages-data"
+import Rich from "./Rich.astro"
+
+interface Props {
+  block: Block
+  white?: boolean
+}
+const { block: b, white = false } = Astro.props
+const agentStyle = (i: CardItem["agent"]) =>
+  i === undefined ? undefined : `--ac: ${AGENT_LIGHT[i]}; --ad: ${AGENT_DARK[i]}`
+---
+<section class:list={["section", "cb", { "section-white": white }]}>
+  <div class="wrap">
+    <div class:list={["head", { narrow: b.kind !== "split" }]}>
+      <span class="tag">[ {b.tag} ]</span>
+      <h2 class="h2">{b.title}</h2>
+      {"lead" in b && b.lead && <p class="lead"><Rich text={b.lead} /></p>}
+    </div>
+
+    {b.kind === "cards" && (
+      <>
+        <div class="grid-auto cards">
+          {b.items.map((it) => {
+            const Tag = it.href ? "a" : "div"
+            return (
+              <Tag class:list={["card", "item", { link: it.href, ag: it.agent !== undefined }]} href={it.href} style={agentStyle(it.agent)}>
+                {it.agent !== undefined && <span class="who"><i aria-hidden="true" />{AGENT_NAMES[it.agent]}</span>}
+                <strong class="h3 t">{it.title}</strong>
+                {it.label && it.agent !== undefined && <span class="sub">{it.label}</span>}
+                <p><Rich text={it.text} /></p>
+                {it.href && <span class="go">{it.label && it.agent === undefined ? it.label : "Ver más"} <span aria-hidden="true">→</span></span>}
+              </Tag>
+            )
+          })}
+        </div>
+        {b.note && <p class="note"><Rich text={b.note} /></p>}
+      </>
+    )}
+
+    {b.kind === "steps" && (
+      <>
+        <ol class="steps">
+          {b.steps.map((s, i) => (
+            <li class="step" style={agentStyle(s.agent)}>
+              <span class="num mono" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+              <div class="body">
+                {(s.when || s.channel) && <span class="meta mono">{s.when}{s.when && s.channel && " · "}{s.channel}</span>}
+                <strong class="st">{s.title}</strong>
+                {s.text && <p><Rich text={s.text} /></p>}
+                {s.agent !== undefined && <span class="who"><i aria-hidden="true" />{AGENT_NAMES[s.agent]}</span>}
+              </div>
+            </li>
+          ))}
+        </ol>
+        {b.note && <p class="note">{b.note}</p>}
+      </>
+    )}
+
+    {b.kind === "split" && (
+      <div class="split">
+        <div class="paras">
+          {b.paragraphs.map((p) => <p class="lead"><Rich text={p} /></p>)}
+          {b.link && <a class="btn btn-l" href={b.link.href}>{b.link.label} <span aria-hidden="true">→</span></a>}
+        </div>
+        {b.points && (
+          <ul class="points">
+            {b.points.map((p) => (
+              <li style={agentStyle(p.agent)} class:list={{ ag: p.agent !== undefined }}>
+                {p.href ? <a href={p.href}><strong>{p.title}</strong></a> : <strong>{p.title}</strong>}
+                <span><Rich text={p.text} /></span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    )}
+
+    {b.kind === "chat" && (
+      <div class="chat">
+        <aside class="card person">
+          <div class="pid"><span class="av" aria-hidden="true">{b.person.initials}</span><span><strong>{b.person.name}</strong><span class="mono pm">{b.person.sub}</span></span></div>
+          <p>{b.person.text}</p>
+          <ul class="chs" aria-label="Canales de esta conversación">
+            {[...new Set(b.messages.map((m) => m.ch))].map((c) => <li class="mono">{c}</li>)}
+          </ul>
+        </aside>
+        <div class="card thread">
+          <div class="th"><strong>Conversación con {b.person.name}</strong><span class="mono">{b.summary}</span></div>
+          <ol class="msgs">
+            {b.messages.map((m) => (
+              <li class:list={["msg", m.side]}>
+                <span class="mw mono"><span class="mc">{m.ch}</span>{m.who}</span>
+                <span>{m.text}</span>
+              </li>
+            ))}
+          </ol>
+          {b.note && <p class="note">{b.note}</p>}
+        </div>
+      </div>
+    )}
+
+    {b.kind === "log" && (
+      <div class="card log">
+        <p class="logk mono">Registro de acciones · ejemplo</p>
+        <ol>
+          {b.entries.map((x) => (
+            <li style={agentStyle(x.agent)}>
+              <span class="mono lt">{x.t}</span>
+              <i aria-hidden="true" />
+              <span><strong>{x.verb}</strong> {x.obj}<span class="sr"> ({AGENT_NAMES[x.agent]})</span></span>
+              <span class="mono lw">{x.where}</span>
+            </li>
+          ))}
+        </ol>
+        <p class="note">{b.note}</p>
+      </div>
+    )}
+
+    {b.kind === "sheet" && (
+      <div class="card sheet" style={agentStyle(1)}>
+        <div class="sh"><strong>{b.sheet.head}</strong><span class="mono">{b.sheet.meta}</span></div>
+        <dl>
+          {b.sheet.rows.map((r) => (
+            <div class="row">
+              <dt class="mono">{r.label}</dt>
+              <dd>{r.code && <span class="code mono">{r.code}</span>} {r.text}</dd>
+            </div>
+          ))}
+        </dl>
+        <p class="done"><span aria-hidden="true">✓</span> {b.sheet.done}</p>
+        {b.note && <p class="note">{b.note}</p>}
+      </div>
+    )}
+  </div>
+</section>
+
+<style>
+  .head { display: flex; flex-direction: column; gap: 18px; margin-bottom: 48px; max-width: 860px; }
+  .note { margin-top: 18px; font-size: 14px; color: var(--soft); }
+  .who { display: inline-flex; align-items: center; gap: 8px; font-family: var(--agent-font); font-size: 12px; color: var(--ac, var(--teal)); }
+  .who i { width: 8px; height: 8px; border-radius: 50%; background: var(--ac); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* Tarjetas */
+  .item { display: flex; flex-direction: column; gap: 10px; padding: 26px; color: var(--ink); text-decoration: none; }
+  .section-white .item { background: var(--bg); box-shadow: none; }
+  .item.ag { box-shadow: inset 0 3px 0 var(--ad), 0 12px 40px -18px rgba(15,23,42,.18); }
+  .section-white .item.ag { box-shadow: inset 0 3px 0 var(--ad); }
+  .item .t { font-size: 20px; }
+  .item .sub { font-weight: 700; color: var(--ink-2); font-size: 15px; }
+  .item p { color: var(--muted); font-size: 16px; line-height: 1.55; }
+  .item .go { margin-top: auto; padding-top: 6px; font-weight: 700; color: var(--teal); }
+  .item.link { transition: transform .2s ease, box-shadow .2s ease; }
+  .item.link:hover { transform: translateY(-2px); color: var(--ink); }
+
+  /* Pasos */
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; max-width: 920px; }
+  .step { display: grid; grid-template-columns: 56px 1fr; gap: 18px; padding: 20px 22px; border-radius: 18px; background: var(--paper); box-shadow: inset 3px 0 0 var(--ad, #cbd5e1); }
+  .section-white .step { background: var(--bg); }
+  .num { font-size: 14px; font-weight: 600; color: var(--soft); padding-top: 3px; }
+  .body { display: flex; flex-direction: column; gap: 6px; }
+  .meta { font-size: 12px; color: var(--soft); letter-spacing: .02em; }
+  .st { font-size: 18px; line-height: 1.35; }
+  .body p { color: var(--muted); line-height: 1.55; }
+
+  /* Texto con puntos */
+  .split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+  .paras { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
+  .points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .points li { display: flex; flex-direction: column; gap: 4px; padding: 18px 20px; border-radius: 16px; background: var(--paper); box-shadow: inset 3px 0 0 var(--ad, var(--teal)); }
+  .section-white .points li { background: var(--bg); }
+  .points span { color: var(--muted); }
+  .points a { color: var(--teal); }
+
+  /* Conversación */
+  .chat { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 18px; align-items: start; }
+  .person { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .section-white .person, .section-white .thread, .section-white .log, .section-white .sheet { background: var(--bg); box-shadow: none; }
+  .pid { display: flex; gap: 12px; align-items: center; }
+  .pid > span:last-child { display: flex; flex-direction: column; }
+  .av { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--teal-soft); color: var(--teal); font-weight: 800; }
+  .pm { font-size: 12px; color: var(--soft); }
+  .person p { color: var(--muted); line-height: 1.55; }
+  .chs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chs li { font-size: 12px; padding: 6px 10px; border-radius: 999px; background: var(--teal-soft); color: #0b5568; }
+  .thread { padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+  .th { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .th .mono { font-size: 12px; color: var(--soft); }
+  .msgs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .msg { display: flex; flex-direction: column; gap: 4px; max-width: 82%; padding: 12px 14px; border-radius: 16px; font-size: 15.5px; line-height: 1.5; }
+  .msg.in { align-self: flex-start; background: #eef2f6; border-bottom-left-radius: 4px; }
+  .msg.out { align-self: flex-end; background: var(--night); color: #e2eef1; border-bottom-right-radius: 4px; }
+  .mw { display: flex; gap: 8px; align-items: center; font-size: 11.5px; color: var(--soft); }
+  .msg.out .mw { color: var(--sky-2); }
+  .mc { padding: 2px 6px; border-radius: 6px; background: rgba(14,116,144,.12); color: var(--teal); }
+  .msg.out .mc { background: rgba(127,214,228,.16); color: var(--sky-2); }
+
+  /* Registro de acciones */
+  .log { padding: 24px; max-width: 920px; }
+  .logk { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); margin-bottom: 12px; }
+  .log ol { list-style: none; margin: 0; padding: 0; }
+  .log li { display: grid; grid-template-columns: 52px 10px 1fr auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 15.5px; }
+  .log li i { width: 8px; height: 8px; border-radius: 50%; background: var(--ad); }
+  .lt { font-size: 13px; color: var(--soft); }
+  .lw { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #eef2f6; color: var(--ink-2); }
+
+  /* Nota clínica */
+  .sheet { padding: 26px; max-width: 860px; box-shadow: inset 0 3px 0 var(--ad), 0 12px 40px -18px rgba(15,23,42,.18); }
+  .sh { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .sh .mono { font-size: 12.5px; color: var(--soft); }
+  dl { margin: 0; }
+  .row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  dt { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--soft); padding-top: 3px; }
+  dd { margin: 0; line-height: 1.55; }
+  .code { font-size: 12.5px; padding: 2px 8px; border-radius: 6px; background: #e4f6ef; color: #146c54; }
+  .done { margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: #e4f6ef; color: #0f5a45; font-weight: 600; }
+
+  @media (max-width: 860px) {
+    .split, .chat { grid-template-columns: 1fr; gap: 24px; }
+  }
+  @media (max-width: 720px) {
+    .head { margin-bottom: 32px; }
+    .item { padding: 22px; }
+    .step { grid-template-columns: 1fr; gap: 6px; padding: 18px; }
+    .msg { max-width: 92%; }
+    .log li { grid-template-columns: 44px 10px 1fr; }
+    .lw { display: none; }
+    .row { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>

@@ -1,0 +1,48 @@
+---
+// Inicio de la web: portada «D3» y las secciones del lienzo aprobado, en su orden.
+import CtaBand from "../components/CtaBand.astro"
+import Faq from "../components/Faq.astro"
+import AgentsSection from "../components/home/AgentsSection.astro"
+import CaseSection from "../components/home/CaseSection.astro"
+import ControlSection from "../components/home/ControlSection.astro"
+import { HOME_FAQ } from "../components/home/faqItems"
+import HomeHero from "../components/home/HomeHero"
+import OmniSection from "../components/home/OmniSection.astro"
+import StickyCta from "../components/home/StickyCta.astro"
+import SystemSection from "../components/home/SystemSection.astro"
+import TrustSection from "../components/home/TrustSection.astro"
+import ValueSection from "../components/home/ValueSection.astro"
+import "../components/home/home.css"
+import Base from "../layouts/Base.astro"
+import { faqJsonLd } from "../lib/faq"
+import { CTA, registerUrl } from "../lib/site"
+
+const title = "odentIA · Software dental omnicanal y agéntico con IA"
+const description =
+  "Software para clínicas dentales: WhatsApp, Instagram, correo y más en una sola ficha por persona, con agentes de IA que agendan, documentan la consulta y traen de vuelta a tus pacientes."
+// La pregunta pendiente de confirmar se muestra en la página, pero no se publica en los datos estructurados.
+const faqLd = faqJsonLd(HOME_FAQ.filter((q) => !q.pending))
+const softwareLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "odentIA",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web",
+  description,
+}
+---
+<Base title={title} description={description} jsonLd={[softwareLd, faqLd]}>
+  <div class="home">
+    <HomeHero client:load ctaHref={registerUrl} ctaLabel={CTA} />
+    <OmniSection />
+    <AgentsSection />
+    <CaseSection />
+    <ControlSection />
+    <ValueSection />
+    <SystemSection />
+    <TrustSection />
+    <Faq items={HOME_FAQ} tag="08 · Preguntas" />
+    <CtaBand text="Pruébalo 30 días: tus agentes trabajan en tu clínica desde el primer día, con el crédito de prueba. Sin límite de odontólogos, sedes ni usuarios." />
+    <StickyCta />
+  </div>
+</Base>

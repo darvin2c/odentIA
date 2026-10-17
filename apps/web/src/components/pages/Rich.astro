@@ -1,0 +1,13 @@
+---
+// Texto plano que resalta los marcadores «[Por confirmar…]» y «[Por completar…]» para que nadie los pase
+// por alto antes de publicar.
+interface Props {
+  text: string
+}
+const parts = Astro.props.text.split(/(\[Por (?:confirmar|completar)[^\]]*\])/)
+---
+{parts.map((p) => (/^\[Por (confirmar|completar)/.test(p) ? <mark class="tbc">{p}</mark> : p))}
+
+<style>
+  .tbc { background: #fff1d6; color: #7a4a00; padding: 1px 6px; border-radius: 6px; font-family: var(--mono); font-size: .86em; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+</style>

@@ -1,0 +1,34 @@
+---
+// Cierre de cada página: una sola llamada a la acción y otra para hablar con una persona.
+import { CTA, registerUrl } from "../lib/site"
+
+interface Props {
+  title?: string
+  text?: string
+}
+const {
+  title = "Tu equipo, de vuelta con sus pacientes.",
+  text = "Pruébalo 30 días: tus agentes trabajan en tu clínica desde el primer día, sin tarjeta.",
+} = Astro.props
+---
+<section class="hero band" id="empezar">
+  <div class="grain" aria-hidden="true"></div>
+  <div class="wrap in">
+    <span class="tag tag-d">[ Empieza hoy ]</span>
+    <h2 class="t">{title}</h2>
+    <p class="lead lead-d">{text}</p>
+    <div class="ctas">
+      <a class="btn btn-p" href={registerUrl}>{CTA}</a>
+      <a class="btn btn-g" href="/contacto">Habla con nosotros</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .band { padding: 128px 0 112px; }
+  .in { position: relative; display: flex; flex-direction: column; gap: 26px; align-items: center; text-align: center; }
+  .t { font-size: clamp(38px, 5.6vw, 80px); line-height: 1; letter-spacing: -.045em; font-weight: 800; max-width: 980px; text-wrap: balance; }
+  .lead { max-width: 620px; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  @media (max-width: 720px) { .band { padding: 72px 0 64px; } .ctas .btn { flex: 1 1 100%; } }
+</style>
