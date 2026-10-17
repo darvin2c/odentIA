@@ -788,3 +788,260 @@ it("los mensajes de WhatsApp de una clínica se aíslan por tenant, no se borran
     ownerDb.execute(sql`insert into clinic_message (organization_id, key) values ('org_a', 'recordatorio_cita')`),
   ).rejects.toMatchObject({ cause: { code: "23505" } })
 })
+
+// Estado final que aseguraban las pruebas de migraciones viejas (ADR 0045):
+// se comprueba sobre la base nueva, sin aplicar migraciones parciales.
+
+it("la atención y sus diagnósticos: firma para cerrar, motivo para anular y lo registrado no se reescribe", async () => {
+  const persona = "e1000000-0000-4000-8000-000000000001"
+  const paciente = "e1000000-0000-4000-8000-000000000002"
+  const cerrada = "e1000000-0000-4000-8000-000000000011"
+  const borrador = "e1000000-0000-4000-8000-000000000012"
+  const guarda = (constraint: string) => ({ cause: { code: "23514", constraint_name: constraint } })
+  await ownerDb.execute(
+    sql`insert into "user" (id,name,email) values ('rls-dentist','Dentista','rls@example.test') on conflict (id) do nothing`,
+  )
+  await ownerDb.execute(sql`insert into diagnosis_code_release (system_key, edition, official, license, code_count)
+    values ('ICD-10', 'rls', false, 'Solo pruebas', 2) on conflict do nothing`)
+  await ownerDb.execute(sql`insert into diagnosis_code (system_key, code, edition, title, is_dental, search_text) values
+    ('ICD-10', 'K02.1', 'rls', 'Caries de la dentina', true, 'k02.1 caries de la dentina'),
+    ('ICD-10', 'K05.1', 'rls', 'Gingivitis crónica', true, 'k05.1 gingivitis cronica')
+    on conflict do nothing`)
+  await insertContact(ownerDb, persona, "org_a", "Paciente Diagnóstico")
+  await insertPatient(ownerDb, paciente, "org_a", persona, 9101, "Paciente Diagnóstico")
+  const diagnostico = (encounterId: string, code: string) =>
+    sql`insert into encounter_diagnosis (organization_id, patient_id, encounter_id, diagnosis_system, diagnosis_code, diagnosis_type)
+        values ('org_a', ${paciente}::uuid, ${encounterId}::uuid, 'ICD-10', ${code}, 'confirmed') returning id`
+
+  // Cerrar exige la firma con colegiatura.
+  await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, dentist_user_id)
+    values (${cerrada}::uuid, 'org_a', ${paciente}::uuid, 'rls-dentist')`)
+  const [d1] = await ownerDb.execute<{ id: string }>(diagnostico(cerrada, "K02.1"))
+  await expect(
+    ownerDb.execute(sql`update encounter set status = 'finalizada', finalized_at = now() where id = ${cerrada}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_signature_required"))
+  await ownerDb.execute(sql`update encounter set status = 'finalizada', finalized_at = now(),
+    signer_name = 'Dra. Prueba', signer_registration = 'COP 1' where id = ${cerrada}::uuid`)
+  // Cerrada: no entra un diagnóstico nuevo ni se anula uno; su estado clínico sí sigue al paciente.
+  await expect(ownerDb.execute(diagnostico(cerrada, "K05.1"))).rejects.toMatchObject(guarda("encounter_child_draft_only"))
+  await ownerDb.execute(sql`update encounter_diagnosis set status = 'resuelto', resolved_at = now() where id = ${d1!.id}::uuid`)
+  await expect(
+    ownerDb.execute(sql`update encounter_diagnosis set voided_at = now(), voided_by = 'rls-dentist', void_reason = 'Error'
+      where id = ${d1!.id}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_child_draft_only"))
+
+  // En borrador lo registrado no se reescribe: se anula, y la anulación es definitiva.
+  await ownerDb.execute(sql`insert into encounter (id, organization_id, patient_id, dentist_user_id)
+    values (${borrador}::uuid, 'org_a', ${paciente}::uuid, 'rls-dentist')`)
+  const [d2] = await ownerDb.execute<{ id: string }>(diagnostico(borrador, "K05.1"))
+  await expect(
+    ownerDb.execute(sql`update encounter_diagnosis set note = 'otra' where id = ${d2!.id}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_child_draft_only"))
+  await expect(
+    ownerDb.execute(sql`update encounter_diagnosis set diagnosis_code = 'K02.1' where id = ${d2!.id}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_child_draft_only"))
+  await ownerDb.execute(sql`update encounter_diagnosis set voided_at = now(), voided_by = 'rls-dentist', void_reason = 'Duplicado'
+    where id = ${d2!.id}::uuid`)
+  await expect(
+    ownerDb.execute(sql`update encounter_diagnosis set voided_at = null, voided_by = null, void_reason = null
+      where id = ${d2!.id}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_child_draft_only"))
+
+  // Anular la atención exige motivo y lo anulado no se reescribe.
+  await expect(
+    ownerDb.execute(sql`update encounter set status = 'anulada' where id = ${borrador}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_void_check"))
+  await ownerDb.execute(sql`update encounter set status = 'anulada', voided_at = now(), voided_by = 'rls-dentist',
+    void_reason = 'Paciente equivocado' where id = ${borrador}::uuid`)
+  await expect(
+    ownerDb.execute(sql`update encounter set reason = 'Otro' where id = ${borrador}::uuid`),
+  ).rejects.toMatchObject(guarda("encounter_finalized_immutable"))
+
+  // La cita de una atención existe y es del mismo paciente.
+  await expect(
+    ownerDb.execute(sql`insert into encounter (organization_id, patient_id, dentist_user_id, appointment_id)
+      values ('org_a', ${paciente}::uuid, 'rls-dentist', gen_random_uuid())`),
+  ).rejects.toMatchObject({ cause: { code: "23503" } })
+  const [unidad] = await ownerDb.execute<{ id: string }>(sql`
+    insert into schedule_chair (organization_id, branch_id, name)
+    values ('org_a', '11111111-1111-1111-1111-111111111111', 'Unidad dental FK') returning id`)
+  const [ajena] = await ownerDb.execute<{ id: string }>(sql`
+    insert into appointment (organization_id, branch_id, patient_id, dentist_user_id, chair_id, starts_at, ends_at, duration_min, status)
+    values ('org_a', '11111111-1111-1111-1111-111111111111', '99999999-9999-9999-9999-999999999999', 'rls-dentist', ${unidad!.id},
+      now() + interval '3 days', now() + interval '3 days 30 minutes', 30, 'cancelada')
+    returning id`)
+  await expect(
+    ownerDb.execute(sql`insert into encounter (organization_id, patient_id, dentist_user_id, appointment_id)
+      values ('org_a', ${paciente}::uuid, 'rls-dentist', ${ajena!.id}::uuid)`),
+  ).rejects.toMatchObject({ cause: { code: "23503" } })
+
+  // Diagnósticos: aislados por organización y sin borrado para la app.
+  const consulta = sql`select id from encounter_diagnosis where patient_id = ${paciente}::uuid`
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(consulta))).toHaveLength(2)
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(consulta))).toHaveLength(0)
+  expect(await appDb.execute(consulta)).toHaveLength(0)
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from encounter_diagnosis where patient_id = ${paciente}::uuid`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+
+  // La lista de diagnósticos es global: la app la lee sin contexto y no la escribe.
+  expect(await appDb.execute(sql`select code from diagnosis_code where edition = 'rls'`)).toHaveLength(2)
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`insert into diagnosis_code (system_key, code, edition, title, is_dental, search_text)
+        values ('ICD-10', 'K99.9', 'rls', 'Intrusa', false, 'k99.9')`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`update diagnosis_code set title = 'hack' where edition = 'rls'`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+})
+
+it("persona única: una ficha por persona, su vínculo propio lo cuida la base y el documento es de una sola persona", async () => {
+  const persona = "e2000000-0000-4000-8000-000000000001"
+  const ficha = "e2000000-0000-4000-8000-000000000002"
+  const otra = "e2000000-0000-4000-8000-000000000003"
+  await insertContact(ownerDb, persona, "org_a", "Persona Única")
+  await insertPatient(ownerDb, ficha, "org_a", persona, 9102, "Persona Única")
+  const propio = async () =>
+    (await ownerDb.execute<{ contact_id: string }>(
+      sql`select contact_id from patient_contact where patient_id = ${ficha}::uuid and relationship = 'self'`,
+    )) as unknown as { contact_id: string }[]
+  // La base crea el vínculo propio desde person_id.
+  expect([...(await propio())]).toEqual([{ contact_id: persona }])
+  // Sin persona no hay ficha, y una persona tiene una sola ficha.
+  await expect(
+    ownerDb.execute(sql`insert into patient (organization_id, patient_number) values ('org_a', 9103)`),
+  ).rejects.toMatchObject({ cause: { code: "23502" } })
+  await expect(
+    ownerDb.execute(sql`insert into patient (organization_id, person_id, patient_number) values ('org_a', ${persona}::uuid, 9104)`),
+  ).rejects.toMatchObject({ cause: { code: "23505" } })
+  // El vínculo propio no se retira ni se degrada.
+  await expect(
+    ownerDb.execute(sql`delete from patient_contact where patient_id = ${ficha}::uuid and relationship = 'self'`),
+  ).rejects.toMatchObject({ cause: { code: "23514" } })
+  await expect(
+    ownerDb.execute(sql`update patient_contact set relationship = 'family' where patient_id = ${ficha}::uuid and relationship = 'self'`),
+  ).rejects.toMatchObject({ cause: { code: "23514" } })
+  // Cambiar la persona de la ficha mueve su vínculo propio, sin dejar otro.
+  await insertContact(ownerDb, otra, "org_a", "Persona Real")
+  await ownerDb.execute(sql`update patient set person_id = ${otra}::uuid where id = ${ficha}::uuid`)
+  expect([...(await propio())]).toEqual([{ contact_id: otra }])
+  expect(await ownerDb.execute(sql`select 1 from patient_contact where patient_id = ${ficha}::uuid`)).toHaveLength(1)
+  // El documento es único por organización junto con su país emisor; sin país también (NULLS NOT DISTINCT).
+  await ownerDb.execute(sql`update contact set doc_type = 'DNI', doc_number = '40009901', doc_country = 'PE' where id = ${otra}::uuid`)
+  await expect(
+    ownerDb.execute(sql`insert into contact (organization_id, display_name, doc_type, doc_number, doc_country)
+      values ('org_a', 'Doble', 'DNI', '40009901', 'PE')`),
+  ).rejects.toMatchObject({ cause: { code: "23505" } })
+  await ownerDb.execute(sql`insert into contact (organization_id, display_name, doc_type, doc_number) values ('org_a', 'Sin país', 'CE', 'X-9901')`)
+  await expect(
+    ownerDb.execute(sql`insert into contact (organization_id, display_name, doc_type, doc_number) values ('org_a', 'Sin país 2', 'CE', 'X-9901')`),
+  ).rejects.toMatchObject({ cause: { code: "23505" } })
+  await ownerDb.execute(sql`insert into contact (organization_id, display_name, doc_type, doc_number, doc_country)
+    values ('org_b', 'Otra clínica', 'DNI', '40009901', 'PE')`)
+  // El nombre visible se deriva del nombre separado.
+  const [nombre] = await ownerDb.execute<{ display_name: string }>(sql`
+    insert into contact (organization_id, display_name, given_names, paternal_surname, maternal_surname)
+    values ('org_a', 'x', 'Rosa María', 'Quispe', 'Huamán') returning display_name`)
+  expect(nombre?.display_name).toBe("Rosa María Quispe Huamán")
+})
+
+it("vínculos y altas: únicos, sin cruzar de clínica, aislados y la alta no se reescribe", async () => {
+  const persona = "e3000000-0000-4000-8000-000000000001"
+  const ficha = "e3000000-0000-4000-8000-000000000002"
+  const madre = "e3000000-0000-4000-8000-000000000003"
+  await insertContact(ownerDb, persona, "org_a", "Registro Uno")
+  await insertContact(ownerDb, madre, "org_a", "Registro Madre")
+  await insertPatient(ownerDb, ficha, "org_a", persona, 9105, "Registro Uno")
+  const vinculo = (patientId: string, contactId: string, relationship: string, preferred = false) =>
+    sql`insert into patient_contact (organization_id, patient_id, contact_id, relationship, is_preferred)
+        values ('org_a', ${patientId}::uuid, ${contactId}::uuid, ${relationship}, ${preferred})`
+  // El mismo par, un segundo propio o un segundo preferente (el propio nació preferente) no entran.
+  await expect(ownerDb.execute(vinculo(ficha, persona, "family"))).rejects.toMatchObject({ cause: { code: "23505" } })
+  await expect(ownerDb.execute(vinculo(ficha, madre, "self"))).rejects.toMatchObject({ cause: { code: "23505" } })
+  await expect(ownerDb.execute(vinculo(ficha, madre, "guardian", true))).rejects.toMatchObject({ cause: { code: "23505" } })
+  await ownerDb.execute(vinculo(ficha, madre, "guardian"))
+  // Ni contacto ni paciente de otra organización.
+  await expect(
+    ownerDb.execute(vinculo(ficha, "44444444-4444-4444-4444-444444444444", "family")),
+  ).rejects.toMatchObject({ cause: { code: "23503" } })
+  await expect(
+    ownerDb.execute(vinculo("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", madre, "family")),
+  ).rejects.toMatchObject({ cause: { code: "23503" } })
+  const vinculos = sql`select contact_id from patient_contact where patient_id = ${ficha}::uuid`
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(vinculos))).toHaveLength(2)
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(vinculos))).toHaveLength(0)
+  expect(await appDb.execute(vinculos)).toHaveLength(0)
+
+  // Catálogos de la ficha: grupo sanguíneo y severidad de la alergia.
+  await expect(
+    ownerDb.execute(sql`update patient set blood_group = 'X' where id = ${ficha}::uuid`),
+  ).rejects.toMatchObject({ cause: { code: "23514" } })
+  await ownerDb.execute(sql`update patient set blood_group = 'O+' where id = ${ficha}::uuid`)
+  const alergia = (severity: string) =>
+    sql`insert into patient_allergy (organization_id, patient_id, substance, severity) values ('org_a', ${ficha}::uuid, 'Penicilina', ${severity})`
+  await expect(ownerDb.execute(alergia("grave"))).rejects.toMatchObject({ cause: { code: "23514" } })
+  await ownerDb.execute(alergia("severa"))
+
+  // La alta es de solo anexado para la app y se aísla por organización.
+  await ownerDb.execute(sql`insert into patient_registration (organization_id, patient_id, entry_point, answers)
+    values ('org_a', ${ficha}::uuid, 'platform', '{}'::jsonb)`)
+  const altas = sql`select id from patient_registration where patient_id = ${ficha}::uuid`
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(altas))).toHaveLength(1)
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(altas))).toHaveLength(0)
+  expect(await appDb.execute(altas)).toHaveLength(0)
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`update patient_registration set privacy_notice = 'revisado' where patient_id = ${ficha}::uuid`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`delete from patient_registration where patient_id = ${ficha}::uuid`),
+    ),
+  ).rejects.toMatchObject({ cause: { code: "42501" } })
+
+  // La configuración del registro de otra clínica no se ve.
+  await ownerDb.execute(sql`insert into patient_registration_config (organization_id, fields) values ('org_b', '{}'::jsonb)`)
+  const config = sql`select organization_id from patient_registration_config where organization_id = 'org_b'`
+  expect(await withOrgContext(appDb, "org_a", (tx) => tx.execute(config))).toHaveLength(0)
+  expect(await withOrgContext(appDb, "org_b", (tx) => tx.execute(config))).toHaveLength(1)
+
+  // La huella del enlace de registro es única en toda la base, no solo en la clínica.
+  const enlace = (org: string, contactId: string, conversationId: string) =>
+    sql`insert into patient_registration_link (organization_id, contact_id, conversation_id, token_hash, expires_at)
+        values (${org}, ${contactId}::uuid, ${conversationId}::uuid, 'rls-hash-unico', now() + interval '3 days')`
+  await ownerDb.execute(enlace("org_a", "33333333-3333-3333-3333-333333333333", "77777777-7777-7777-7777-777777777777"))
+  await expect(
+    ownerDb.execute(enlace("org_b", "44444444-4444-4444-4444-444444444444", "88888888-8888-8888-8888-888888888888")),
+  ).rejects.toMatchObject({ cause: { code: "23505" } })
+})
+
+it("ventas: solo los cuatro pasos fijos y una sola tarea abierta por oportunidad", async () => {
+  const [pipe] = await ownerDb.execute<{ id: string }>(
+    sql`insert into pipeline (organization_id, name) values ('org_a', 'Ventas RLS') returning id`,
+  )
+  const paso = (name: string, position: number, moment: string) =>
+    sql`insert into pipeline_stage (organization_id, pipeline_id, name, position, moment)
+        values ('org_a', ${pipe!.id}::uuid, ${name}, ${position}, ${moment}) returning id`
+  const [interesado] = await ownerDb.execute<{ id: string }>(paso("Interesado", 0, "interesado"))
+  await expect(ownerDb.execute(paso("Contactado", 1, "contactado"))).rejects.toMatchObject({ cause: { code: "23514" } })
+  await expect(ownerDb.execute(paso("Otro interesado", 2, "interesado"))).rejects.toMatchObject({ cause: { code: "23505" } })
+  const [opp] = await ownerDb.execute<{ id: string }>(sql`
+    insert into opportunity (organization_id, contact_id, pipeline_id, stage_id, title, currency)
+    values ('org_a', '33333333-3333-3333-3333-333333333333', ${pipe!.id}::uuid, ${interesado!.id}::uuid, 'Implante RLS', 'PEN')
+    returning id`)
+  const tarea = (title: string) =>
+    sql`insert into task (organization_id, contact_id, opportunity_id, title, created_by)
+        values ('org_a', '33333333-3333-3333-3333-333333333333', ${opp!.id}::uuid, ${title}, 'user') returning id`
+  const [primera] = await ownerDb.execute<{ id: string }>(tarea("Llamar"))
+  await expect(ownerDb.execute(tarea("Otra"))).rejects.toMatchObject({ cause: { code: "23505" } })
+  // Hecha la primera, la siguiente sí entra.
+  await ownerDb.execute(sql`update task set status = 'done' where id = ${primera!.id}::uuid`)
+  await ownerDb.execute(tarea("Siguiente"))
+})

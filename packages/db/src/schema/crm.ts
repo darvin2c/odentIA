@@ -279,9 +279,9 @@ export const pipelineStage = pgTable(
 
 /**
  * Persona que la clínica conoce: quien escribe, paga, representa o se atiende.
- * Todo paciente es exactamente una persona (su vínculo `self`); la identidad
- * (nombre, documento, nacimiento, sexo, teléfono, correo) se mantiene igual en
- * ambos registros por triggers de la migración de persona única.
+ * Todo paciente es exactamente una persona (`patient.person_id`); la identidad
+ * (nombre, documento, nacimiento, sexo, teléfono, correo) vive solo aquí
+ * (ADR 0044).
  */
 /**
  * Medio preferido de la persona para avisos y documentos (Fase 7 Finanzas).
@@ -322,7 +322,7 @@ export const contact = pgTable("contact", {
 }, table => [
   uniqueIndex("contact_org_id_uidx").on(table.organizationId, table.id),
   // El documento, junto con su país emisor, identifica a una sola persona por
-  // organización (NULLS NOT DISTINCT en la migración 0095). Es el único índice
+  // organización (NULLS NOT DISTINCT en `0001_base_reglas.sql`: Drizzle no lo declara en un índice). Es el único índice
   // de documento: la ficha de paciente no lo guarda (ADR 0044).
   uniqueIndex("contact_org_doc_uidx")
     .on(table.organizationId, table.docCountry, table.docType, table.docNumber)
@@ -487,10 +487,10 @@ export const crmTask = pgTable(
     contactId: uuid("contact_id").references(() => contact.id),
     conversationId: uuid("conversation_id").references(() => conversation.id),
     // Oportunidad vinculada. Sin FK en TS para evitar el ciclo con opportunities.ts;
-    // la migración del coordinador añade la FK con ON DELETE SET NULL.
+    // `0001_base_reglas.sql` añade la FK con ON DELETE SET NULL.
     opportunityId: uuid("opportunity_id"),
     // Paciente al que se refiere la tarea. Sin FK en TS para evitar el ciclo con
-    // clinical.ts; la migración añade la FK compuesta por organización.
+    // clinical.ts; `0001_base_reglas.sql` añade la FK compuesta por organización.
     patientId: uuid("patient_id"),
     assigneeUserId: text("assignee_user_id").references(() => user.id),
     title: text("title").notNull(),

@@ -3,7 +3,7 @@
 // El `state` que viaja al proveedor es nonce firmada con HMAC (SECRETS_KEY);
 // el codeVerifier PKCE NUNCA sale del servidor y vive solo en esta tabla.
 // La tabla NO es append-only: las filas se borran al consumir o caducar.
-// El padre genera la migración + RLS (ver local://mailbox-constraints.sql).
+// RLS, CHECK y permisos en `0001_base_reglas.sql`.
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
 import { orgFk } from "./crm.js"

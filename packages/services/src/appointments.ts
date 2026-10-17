@@ -1,6 +1,6 @@
 /**
  * Agenda operativa: reserva real de citas. La exclusión anti-solapamiento la
- * impone PostgreSQL (ver migración 0024); aquí se valida pertenencia al
+ * impone PostgreSQL (EXCLUDE en `0001_base_reglas.sql`); aquí se valida pertenencia al
  * tenant, horario del profesional en la sede, bloqueos/ausencias y se mapea
  * el conflicto. Comparte invariantes con availability.ts (misma validación
  * que usa la consulta de huecos, para que agentes y portal no calculen por

@@ -1,5 +1,5 @@
 /**
- * Claves compuestas de la fase 3 (migración 0097): lo que nombra otra fila
+ * Claves compuestas de la fase 3: lo que nombra otra fila
  * clínica la nombra dentro de la misma organización y del mismo paciente.
  */
 import { odontogramAssessment, odontogramEntry, treatmentBudgetOption } from "@odentia/db/schema/clinical"

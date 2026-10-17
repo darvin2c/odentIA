@@ -16,6 +16,12 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   Cambiarlo por una imagen stock sin esas extensiones no es una sustitución válida.
 - `migrate` termina después de aplicar las migraciones; detenido con código cero
   es su estado normal. API y worker dependen de su finalización.
+- La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045). Una
+  base creada antes no se migra a ella: se recrea su volumen. Antes de esa fecha
+  no hubo producción; un preview abierto antes se cierra y se reabre.
+- El rol `dentalagent_app` y sus permisos por defecto los crea el init de la
+  imagen (`infra/dev/postgres/init`), no las migraciones. Un PostgreSQL
+  gestionado necesita crearlos aparte antes de migrar.
 - API, admin, panel y platform publican únicamente en loopback. `admin.<dominio>`
   apunta a admin (host 3012, puerto interno 3000); `app.` a panel, `api.` a API,
   y los hosts de organizaciones a platform. El dominio raíz queda para marketing.

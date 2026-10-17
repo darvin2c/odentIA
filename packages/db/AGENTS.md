@@ -3,6 +3,7 @@
 Objetivo: integridad e aislamiento de organización reforzados en PostgreSQL, con evolución reproducible del esquema.
 
 - Drizzle + migraciones versionadas. No aplicar cambios manuales al esquema.
+- La historia empieza en la base del 2026-10-16 (ADR 0045): `0000_base.sql` (drizzle-kit desde `schema/*.ts`) y `0001_base_reglas.sql` (lo que TS no declara, ordenado por tabla). Un cambio de tablas se genera con `generate`; una regla a mano va en una migración nueva, nunca editando la base. El `when` de cada entrada del journal es mayor que el anterior (`journal.test.ts`): el migrador salta en silencio las fechas anteriores. Una base anterior a la del 2026-10-16 se recrea, no se migra.
 - `DATABASE_URL`: owner para migraciones/semillas, bypass RLS. `APP_DATABASE_URL`: app runtime, sujeto a RLS.
 - Tablas de dominio con `organization_id`; las listas de diagnósticos (`diagnosis_code_system`, `diagnosis_code_release`, `diagnosis_code`) e `inbound_event` son globales sin RLS. Vínculos compuestos deben impedir referencias entre tenants.
 - Las tablas internas `admin_*` no conceden acceso al rol app; solo operaciones de backoffice autorizadas usan owner. `two_factor` pertenece al adaptador de identidad. Los casos personales de soporte sin organización se consultan por su autor mediante rutas de cuenta; sus hijas verifican también la igualdad de organización nula. Un caso sin autor (`opened_by` nulo) es automático de odentIA y nunca tiene organización (`support_case_opener_check`): ninguna clínica lo ve. Auditoría y mensajes conservan su historial.

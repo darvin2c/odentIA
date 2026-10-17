@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "pipeline_org_default_uidx" ON "pipeline" USING btree ("organization_id") WHERE "is_default";

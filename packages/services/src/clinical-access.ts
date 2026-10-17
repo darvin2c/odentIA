@@ -50,7 +50,7 @@ export async function recordClinicalAccess(
       bucket: sql`date_trunc('hour', now())`,
     })
     .onConflictDoUpdate({
-      // La clave primaria es la franja (0103): repetir la lectura en la misma
+      // La clave primaria es la franja: repetir la lectura en la misma
       // hora solo suma, sin tocar ningún índice (actualización HOT).
       target: [
         clinicalAccessLog.organizationId,

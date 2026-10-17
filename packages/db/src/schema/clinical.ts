@@ -571,7 +571,9 @@ export const patientDocument = pgTable(
     ),
     check(
       "patient_document_category_check",
-      sql`${table.category} IN ('consentimiento','radiografia','foto_clinica','informe','presupuesto','receta','comprobante_pago','otro')`,
+      // Los documentos que genera la clínica (presupuesto, receta, comprobante) no
+      // se guardan como archivo: se leen de su registro.
+      sql`${table.category} IN ('consentimiento','radiografia','foto_clinica','informe','otro')`,
     ),
   ],
 )
@@ -584,7 +586,7 @@ export const patientDocument = pgTable(
  * Un solo índice: la clave primaria es la propia franja, con `bucket` antes
  * que `user_id` para servir también al listado por paciente. `last_at` y
  * `hits` quedan fuera de todo índice para que contar «una vez más» sea una
- * actualización HOT; la migración 0103 fija además `fillfactor = 90`, que
+ * actualización HOT; `0001_base_reglas.sql` fija además `fillfactor = 90`, que
  * drizzle no declara en tablas.
  */
 export const clinicalAccessLog = pgTable(
@@ -661,7 +663,7 @@ export const odontogramEntry = pgTable(
      * Lo tratado queda dibujado: el tratamiento completado que dejó este
      * hallazgo en la pieza (la resina deja una restauración), según lo que su
      * servicio dice que deja (`service_catalog.leaves_finding`). Del mismo
-     * paciente y organización: la migración 0097 añade la FK
+     * paciente y organización: `0001_base_reglas.sql` añade la FK
      * compuesta `odontogram_entry_left_by_plan_item_fk` (sin FK en TS para
      * evitar el ciclo con `treatment_plan_item`).
      */

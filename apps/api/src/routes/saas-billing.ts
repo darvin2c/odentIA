@@ -1229,7 +1229,7 @@ export async function readSaasSubscription(db: Db, orgId: string) {
  *   se gestiona por identidad: aquí nunca se levanta al pagar.
  * - `invite-member` y `accept-invitation` (suman asientos) exigen estar al
  *   día comercial y cupo en el plan (`SAAS_RESTRICTED` / `SAAS_SEAT_LIMIT`).
- *   Refuerzo contra races en DB (`saas_seat_cap_*`, migración 0072).
+ *   Refuerzo contra races en DB (`saas_seat_cap_*`, `0001_base_reglas.sql`).
  * - Tras un `create` 2xx, `startSaasTrial` rellena plan/datos en la fila que
  *   ya dejó el trigger `saas_trial_on_org_create` en la misma transacción
  *   (garantía real; databaseHooks no cubre el modelo organization).

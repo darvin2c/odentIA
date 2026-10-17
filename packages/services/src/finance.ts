@@ -273,8 +273,7 @@ export async function ensureOpenShift(
 
 /**
  * Un cobro es electrónico por su tipo UN/CEFACT 4461 (10 = efectivo). El
- * nombre del medio nunca decide: la migración 0048 dejó el tipo en todo
- * movimiento con medio.
+ * nombre del medio nunca decide: todo movimiento con medio lleva el tipo.
  */
 function isElectronic(m: { kind: string; methodTypeCode: string | null }): boolean {
   if (m.kind !== "cobro") return false

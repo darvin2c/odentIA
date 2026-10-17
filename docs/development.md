@@ -20,13 +20,34 @@ pnpm db:seed
 
 Infra definida en `infra/dev/compose.yaml`: PostgreSQL :5432, MinIO :9000/:9001 y Mailpit :1025/:8025. En Windows lanzar `pnpm dev` desde Git Bash con pnpm en PATH; proxies Portless en 443. Panel: `app.odentia.localhost`; administración: `admin.odentia.localhost`; plataforma: `odentia.localhost`.
 
+### Migraciones
+
+La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045): `0000_base.sql`, generada por drizzle-kit desde `packages/db/src/schema/*.ts`, y `0001_base_reglas.sql`, con lo que el esquema TS no declara (RLS, permisos, funciones, disparadores, CHECK, colas y cron). Las 108 migraciones anteriores están en git hasta el commit `405b732`.
+
+- Un cambio de tablas se hace en `schema/*.ts` y se genera con `pnpm db:generate`; una regla a mano va en un archivo nuevo con el número siguiente.
+- Cada entrada nueva de `meta/_journal.json` lleva un `when` mayor que la anterior: el migrador salta en silencio las fechas anteriores a la última aplicada. `packages/db/src/journal.test.ts` lo comprueba sin base de datos.
+
+**Una base creada antes del 2026-10-16 no se puede migrar a la nueva**: el migrador la daría por al día o intentaría crear tablas que ya existen. Hay que recrear el volumen, porque el rol de la aplicación y las extensiones los crea el init de la imagen solo sobre un volumen vacío. No hay datos reales; la semilla rehace la demo:
+
+```sh
+podman compose -f infra/dev/compose.yaml down
+podman volume rm dentalagent-dev_pgdata
+podman compose -f infra/dev/compose.yaml up -d postgres
+pnpm --filter @odentia/db migrate
+pnpm --filter @odentia/db seed:diagnoses
+pnpm --filter @odentia/db seed:procedures
+pnpm db:seed
+```
+
+Un preview de PR abierto antes de esa fecha conserva su volumen: cerrarlo y reabrirlo (ver `docs/deployment.md`).
+
 ### Administración de odentIA
 
 `apps/admin` usa la API compartida, no un backend ni una base independientes.
 Configurar `ADMIN_URL` con el origen HTTPS exacto del backoffice. La cuenta del
 cliente conserva organizaciones, invitaciones, soporte y Plan y pagos en `panel`.
-`admin` y `storage` son subdominios reservados: la migración rechaza una colisión
-con una clínica existente para que se resuelva explícitamente antes del despliegue.
+`admin` y `storage` son subdominios reservados (`RESERVED_ORG_SLUGS`): la API
+rechaza crear una clínica con ellos, desde el panel o desde la administración.
 
 Para el primer administrador, registrar y verificar antes su cuenta nominal y,
 con `DATABASE_URL` propietario disponible, ejecutar:

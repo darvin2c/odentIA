@@ -74,9 +74,7 @@ export const supportMessage = pgTable(
   "support_message",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => supportCase.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id").notNull(),
     organizationId: text("organization_id").references(() => organization.id),
     authorKind: text("author_kind").notNull().default("cliente"),
     authorUserId: text("author_user_id").references(() => user.id),
@@ -90,11 +88,14 @@ export const supportMessage = pgTable(
       "support_message_author_check",
       sql`${table.authorKind} in ('cliente','staff','sistema')`,
     ),
+    foreignKey({ name: "support_message_case_id_case_id_fk", columns: [table.caseId], foreignColumns: [supportCase.id] })
+      .onDelete("cascade"),
     // Impide cruces de organización: el mensaje vive en la org de su caso.
     foreignKey({
+      name: "support_message_case_org_fk",
       columns: [table.caseId, table.organizationId],
       foreignColumns: [supportCase.id, supportCase.organizationId],
-    }),
+    }).onDelete("cascade"),
     // Destino de la FK compuesta de adjuntos: el mensaje pertenece a su caso.
     uniqueIndex("support_message_id_case_uidx").on(table.id, table.caseId),
   ],
@@ -104,10 +105,8 @@ export const supportAttachment = pgTable(
   "support_attachment",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => supportCase.id, { onDelete: "cascade" }),
-    messageId: uuid("message_id").references(() => supportMessage.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id").notNull(),
+    messageId: uuid("message_id"),
     organizationId: text("organization_id").references(() => organization.id),
     objectKey: text("object_key").notNull().unique(),
     mimeType: text("mime_type").notNull(),
@@ -120,15 +119,24 @@ export const supportAttachment = pgTable(
   },
   (table) => [
     index("support_attachment_case_idx").on(table.caseId, table.createdAt),
+    foreignKey({ name: "support_attachment_case_id_case_id_fk", columns: [table.caseId], foreignColumns: [supportCase.id] })
+      .onDelete("cascade"),
     foreignKey({
+      name: "support_attachment_message_id_message_id_fk",
+      columns: [table.messageId],
+      foreignColumns: [supportMessage.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "support_attachment_case_org_fk",
       columns: [table.caseId, table.organizationId],
       foreignColumns: [supportCase.id, supportCase.organizationId],
-    }),
+    }).onDelete("cascade"),
     // El adjunto no puede colgar de un mensaje de otro caso.
     foreignKey({
+      name: "support_attachment_message_case_fk",
       columns: [table.messageId, table.caseId],
       foreignColumns: [supportMessage.id, supportMessage.caseId],
-    }),
+    }).onDelete("cascade"),
   ],
 )
 
@@ -142,9 +150,7 @@ export const supportAccessGrant = pgTable(
   "support_access_grant",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => supportCase.id, { onDelete: "cascade" }),
+    caseId: uuid("case_id").notNull(),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id),
@@ -166,10 +172,13 @@ export const supportAccessGrant = pgTable(
       "support_access_grant_duration_check",
       sql`${table.expiresAt} <= ${table.createdAt} + interval '1 hour'`,
     ),
+    foreignKey({ name: "support_access_grant_case_id_case_id_fk", columns: [table.caseId], foreignColumns: [supportCase.id] })
+      .onDelete("cascade"),
     foreignKey({
+      name: "support_access_grant_case_org_fk",
       columns: [table.caseId, table.organizationId],
       foreignColumns: [supportCase.id, supportCase.organizationId],
-    }),
+    }).onDelete("cascade"),
     uniqueIndex("support_access_grant_id_case_org_uidx").on(
       table.id,
       table.caseId,
@@ -186,10 +195,8 @@ export const supportAccessAudit = pgTable(
   "support_access_audit",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    grantId: uuid("grant_id").references(() => supportAccessGrant.id, { onDelete: "set null" }),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => supportCase.id, { onDelete: "cascade" }),
+    grantId: uuid("grant_id"),
+    caseId: uuid("case_id").notNull(),
     organizationId: text("organization_id")
       .notNull()
       .references(() => organization.id),
@@ -206,12 +213,21 @@ export const supportAccessAudit = pgTable(
       "support_access_audit_action_check",
       sql`${table.action} in ('vista_diagnostica','denegado_sin_permiso','revocado')`,
     ),
+    foreignKey({ name: "support_access_audit_case_id_case_id_fk", columns: [table.caseId], foreignColumns: [supportCase.id] })
+      .onDelete("cascade"),
     foreignKey({
+      name: "support_access_audit_grant_id_grant_id_fk",
+      columns: [table.grantId],
+      foreignColumns: [supportAccessGrant.id],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "support_access_audit_case_org_fk",
       columns: [table.caseId, table.organizationId],
       foreignColumns: [supportCase.id, supportCase.organizationId],
-    }),
+    }).onDelete("cascade"),
     // La lectura auditada corresponde al permiso que dice usar.
     foreignKey({
+      name: "support_access_audit_grant_case_org_fk",
       columns: [table.grantId, table.caseId, table.organizationId],
       foreignColumns: [
         supportAccessGrant.id,
@@ -267,8 +283,9 @@ export const supportNotice = pgTable(
       sql`(${table.kind} in ('caso_nuevo','clinica_respondio')) = (${table.recipientUserId} is null)`,
     ),
     foreignKey({
+      name: "support_notice_case_org_fk",
       columns: [table.caseId, table.organizationId],
       foreignColumns: [supportCase.id, supportCase.organizationId],
-    }),
+    }).onDelete("cascade"),
   ],
 )

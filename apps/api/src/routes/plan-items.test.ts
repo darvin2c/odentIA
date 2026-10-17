@@ -853,7 +853,7 @@ it("plan: un histórico sin tarifa no se presenta como gratuito en el resumen", 
     sql`insert into "treatment_budget_item" ("organization_id", "patient_id", "plan_id", "budget_id", "option_id", "plan_item_id", "title", "currency", "decision") values ('org_a', ${patientId}, ${legacyPlanId}, ${legacyBudgetId}, ${optionRow[0]!.id}, ${itemRow[0]!.id}, 'Tratamiento histórico', 'PEN', 'sin_registro')`,
   )
   // El documento queda retirado (las líneas conservan su snapshot). `historico` ya
-  // no existe: la migración 0093 lo pasó a «Anulado».
+  // no existe: es «Anulado».
   await ownerDb.execute(
     sql`update "treatment_budget" set "status" = 'cancelado' where "id" = ${legacyBudgetId}`,
   )

@@ -2,10 +2,9 @@ import { withOrgContext } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { patientContact, patientResponsibility } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import { portalLink, portalSession } from "@odentia/db/schema/portal"
-import { portalGrant, portalPasskey } from "@odentia/db/schema/portal-access"
+import { portalLink } from "@odentia/db/schema/portal"
+import { portalPasskey } from "@odentia/db/schema/portal-access"
 import { createHash, randomBytes } from "node:crypto"
-import { readFileSync } from "node:fs"
 import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
 import {
@@ -189,7 +188,7 @@ it("el canje exige grant verificado aunque el PIN sea correcto", async () => {
 })
 
 it("la emisión exige grant verificado y es discreta", async () => {
-  await withOrgContext(appDb, ORG, (tx) =>
+  const grant = await withOrgContext(appDb, ORG, (tx) =>
     createPortalGrant(tx, ORG, ACTOR, {
       patientId,
       contactId,
@@ -199,6 +198,8 @@ it("la emisión exige grant verificado y es discreta", async () => {
       evidenceNote: "DNI revisado en recepción.",
     }),
   )
+  // El acceso no vence: dura hasta «Quitar acceso».
+  expect(grant.expiresAt).toBeNull()
   const issued = await withOrgContext(appDb, ORG, (tx) =>
     issuePortalLink(
       tx,
@@ -659,43 +660,4 @@ it("la hija cumple 18: la representación de menor termina y su madre ya no entr
   // Ya no es candidata a entrar por ella: ahora entra la propia hija.
   const summary = await withOrgContext(appDb, ORG, (tx) => getPortalAccessSummary(tx, ORG, daughter))
   expect(summary.candidates.map((row) => row.contactId)).not.toContain(contactId)
-})
-
-it("la migración 0096 no revive lo vencido: lo revoca con su sesión, y solo lo vigente deja de vencer", async () => {
-  const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Vencida", patientNumber: 9403 })
-  const [fresh] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Paciente Vigente", patientNumber: 9404 })
-  const grantOf = async (patientId: string, expiresAt: Date) => {
-    await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId, contactId, relationship: "guardian", createdBy: ACTOR })
-    const [row] = await ownerDb
-      .insert(portalGrant)
-      .values({ organizationId: ORG, patientId, contactId, scope: { appointments: true, budgets: false, account: false, documents: [] }, verifiedMethod: "presencial_documento", expiresAt })
-      .returning({ id: portalGrant.id })
-    return row!.id
-  }
-  const expired = await grantOf(created!.id, new Date(Date.now() - 86_400_000))
-  const live = await grantOf(fresh!.id, new Date(Date.now() + 86_400_000))
-  const [session] = await ownerDb
-    .insert(portalSession)
-    .values({
-      organizationId: ORG,
-      patientId: created!.id,
-      contactId,
-      grantId: expired,
-      scope: { appointments: true, budgets: false, account: false, documents: [] },
-      tokenHash: randomBytes(32).toString("hex"),
-      expiresAt: new Date(Date.now() + 3_600_000),
-    })
-    .returning({ id: portalSession.id })
-  const file = readFileSync(new URL("../../db/drizzle/0096_su_enlace_y_portal_en_un_paso.sql", import.meta.url), "utf8")
-  const tail = file.slice(file.indexOf("-- El acceso ya no vence solo."))
-  for (const statement of tail.split("--> statement-breakpoint")) {
-    if (statement.trim()) await ownerDb.execute(sql.raw(statement))
-  }
-  const [gone] = await ownerDb.select().from(portalGrant).where(eq(portalGrant.id, expired))
-  expect(gone).toMatchObject({ status: "revocado" })
-  expect(gone?.revokedAt).toBeInstanceOf(Date)
-  const [kept] = await ownerDb.select().from(portalGrant).where(eq(portalGrant.id, live))
-  expect(kept).toMatchObject({ status: "activo", expiresAt: null })
-  const [closed] = await ownerDb.select().from(portalSession).where(eq(portalSession.id, session!.id))
-  expect(closed?.revokedAt).toBeInstanceOf(Date)
 })

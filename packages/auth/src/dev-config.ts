@@ -8,8 +8,7 @@
  *
  * Debe listar las tablas: user, session, account, verification,
  * organization, member, invitation, twoFactor. OJO: regenerar SOBREESCRIBE
- * auth.ts (incluye tablas hand-written y la columna two_factor_enabled de
- * la 0071): difuminar a mano, nunca pisar destructivo.
+ * auth.ts (incluye tablas hand-written y la columna two_factor_enabled): difuminar a mano, nunca pisar destructivo.
  */
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
