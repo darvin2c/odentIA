@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { demoExtraction, demoSegment, groundSource } from "./dictation.js"
+import { type DictationAsk, demoExtraction, demoSegment, dictationMessages, groundSource } from "./dictation.js"
 
 /** Extracción de demostración: reglas simples para ver el recorrido sin proveedor. No mide a ningún modelo. */
 const SERVICES = ["Resina compuesta", "Endodoncia multirradicular", "Profilaxis dental"]
@@ -57,5 +57,36 @@ describe("dictado en modo de demostración", () => {
     expect(groundSource("Control en 6 meses. El paciente tiene diabetes.", heard)).toBe("Control en 6 meses.")
     expect(groundSource("Caries profunda en la pieza 16", heard)).toBe("")
     expect(groundSource(undefined, heard)).toBe("")
+  })
+})
+
+describe("lo que recibe el modelo en cada pausa", () => {
+  const ask = (provider: DictationAsk["provider"], now: Date, transcript: string) =>
+    dictationMessages({
+      provider,
+      services: SERVICES,
+      diagnosisList: "CIE-10 (OMS)",
+      zone: { locale: "es-PE", timezone: "America/Lima" },
+      now,
+      transcript,
+      context: "",
+      pending: [],
+    })
+
+  it("la parte fija es igual en todas las pausas y va marcada para la caché; la fecha va con lo dictado", () => {
+    for (const provider of ["anthropic", "openai"] as const) {
+      const [first, firstHuman] = ask(provider, NOW, "Viene por dolor.")
+      const [later, laterHuman] = ask(provider, new Date(NOW.getTime() + 61_234), "Control en 6 meses.")
+      // Una pausa un minuto después repite la parte fija tal cual: la caché del proveedor la lee.
+      expect(later?.content).toEqual(first?.content)
+      const [block] = (first?.content ?? []) as Array<Record<string, unknown>>
+      expect(block).toMatchObject(provider === "anthropic" ? { cache_control: { type: "ephemeral" } } : { prompt_cache_breakpoint: { mode: "explicit" } })
+      expect(String(block?.["text"])).not.toContain("2026")
+      expect(firstHuman?.content).toContain("2026-10-12T15:00:00.000Z")
+      expect(laterHuman?.content).toContain("2026-10-12T15:01:01.234Z")
+      expect(laterHuman?.content).toContain("Lo nuevo que dictó:\n«Control en 6 meses.»")
+    }
+    // Un modelo sin caché (el de demostración) recibe el mismo texto, sin marca.
+    expect(ask("fake", NOW, "Viene por dolor.")[0]?.content).toBe(((ask("anthropic", NOW, "x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
   })
 })
