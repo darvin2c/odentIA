@@ -32,7 +32,8 @@ Una sola puerta (`message-gate.ts`), con una regla por pregunta:
 
 - Beneficio: la prueba de una línea dice lo mismo que el envío; un solo ajuste de horario para todo lo que sale solo; la pantalla de un documento y la vía de un mensaje ven la misma ventana.
 - Sacrificio: un recordatorio que cae en domingo sale el sábado (o el lunes si la cita es tarde); en la Bandeja el texto libre se cierra 15 minutos antes que en WhatsApp.
-- Pendiente: `budget-send.ts` repite todavía su comprobación del permiso con `mayWriteFirst` y la excepción de la respuesta; debe pasar a `previewRoute` / `openRoute`.
+- El presupuesto (`budget-send.ts`) también pasa por `previewRoute` / `openRoute`.
+- Un número que WhatsApp rechazó («Este número no tiene WhatsApp», `contact_identity.no_whatsapp_at`) no es una vía: sale por correo o queda la llamada en «Te espera».
 - Revisar si una clínica necesita horarios para escribir distintos por sede.
 
 ## Referencias

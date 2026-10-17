@@ -428,7 +428,8 @@ export async function testAdminLine(
       ${mayWriteFirstSql(orgId, sql`who.cid`, purpose)} as consent,
       ${mayWriteFirstSql(orgId, sql`who.cid`, "novedades")} as novedades,
       exists (select 1 from contact_identity i
-        where i.organization_id = ${orgId} and i.contact_id = who.cid and i.channel = 'whatsapp') as whatsapp,
+        -- Un número que WhatsApp rechazó no cuenta (decisión 23, caso 1), como en el envío real.
+        where i.organization_id = ${orgId} and i.contact_id = who.cid and i.channel = 'whatsapp' and i.no_whatsapp_at is null) as whatsapp,
       -- Abierta o cerrada: escribir la reabre (ADR 0024); cuenta desde cuándo escribió.
       (select max(v.last_inbound_at)::text from conversation v
         join channel_connection n on n.id = v.channel_connection_id and n.organization_id = v.organization_id and n.channel = 'whatsapp'

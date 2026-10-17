@@ -51,8 +51,8 @@ async function twoMonths(db: Db, owner: OwnerFixture) {
   await visit("Diego Ruiz", new Date(Date.now() + 7 * 86_400_000), "programada")
 
   await db.insert(patientPayment).values([
-    { organizationId, patientId: people["Ana Paz"]!, branchId: owner.branchId, amountCents: 30000, currency: "PEN", paidAt: inMonth(1, 10, 16), method: "efectivo", methodName: "Efectivo", methodTypeCode: "10" },
-    { organizationId, patientId: people["Ana Paz"]!, branchId: owner.branchId, amountCents: 20000, currency: "PEN", paidAt: inMonth(2, 10, 16), method: "efectivo", methodName: "Efectivo", methodTypeCode: "10" },
+    { organizationId, patientId: people["Ana Paz"]!, branchId: owner.branchId, amountCents: 30000, currency: "PEN", paidAt: inMonth(1, 10, 16), methodName: "Efectivo", methodTypeCode: "10" },
+    { organizationId, patientId: people["Ana Paz"]!, branchId: owner.branchId, amountCents: 20000, currency: "PEN", paidAt: inMonth(2, 10, 16), methodName: "Efectivo", methodTypeCode: "10" },
   ])
 
   const contactId = randomUUID()

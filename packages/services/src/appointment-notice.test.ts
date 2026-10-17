@@ -9,7 +9,7 @@ import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { portalSession } from "@odentia/db/schema/portal"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
-import { confirmAppointmentByContact } from "./agent-operations.js"
+import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } from "./agent-operations.js"
 import { createAppointment, getAppointmentContext, moveAppointment, setAppointmentStatus } from "./appointments.js"
 import { AUTOMATION_MESSAGES, type AutomationMessageKey, GENERAL_PERMISSION_QUESTION, GENERAL_PERMISSION_YES, replyId } from "./automation-messages.js"
 import {
@@ -454,6 +454,35 @@ describe("la persona confirma por escrito", () => {
     expect(many.outcome === "varias" ? many.options : []).toHaveLength(2)
     const statuses = await ownerDb.select({ status: appointment.status }).from(appointment).where(eq(appointment.organizationId, c.orgId))
     expect(statuses.every((item) => item.status === "programada")).toBe(true)
+  })
+})
+
+describe("la persona cambia su cita en la conversación con la regla de la cita propia", () => {
+  it("cancelar deja el motivo «paciente» y no se lleva la cita más allá de lo que permite el enlace", async () => {
+    const c = await clinic()
+    const rosa = await person(c, "Rosa Quispe", { openWindow: true })
+    const booked = await book(c, rosa.patientId, later(3 * DAY), { notice: false })
+    const propose = (action: string, payload: Record<string, unknown>) =>
+      run(c, (tx) =>
+        createProposal(tx, c.orgId, { conversationId: rosa.conversationId!, action, payload, idempotencyKey: `prueba:${randomUUID()}` }),
+      )
+    // Más allá del horizonte de la cita propia (120 días): no se mueve.
+    const far = await propose("reprogramar_cita", {
+      appointmentId: booked.id, expectedVersion: booked.version, startsAt: later(200 * DAY).toISOString(),
+    })
+    const refused = await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, far.id))
+    expect(refused.status).toBe("fallida")
+    expect(refused.error).toMatch(/120 días/)
+    const [same] = await ownerDb.select({ startsAt: appointment.startsAt }).from(appointment).where(eq(appointment.id, booked.id))
+    expect(same?.startsAt.toISOString()).toBe(booked.startsAt)
+    // Cancelarla deja el motivo «paciente», como desde su enlace o el portal.
+    const cancel = await propose("cancelar_cita", { appointmentId: booked.id })
+    expect((await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, cancel.id))).status).toBe("ejecutada")
+    const [trail] = await ownerDb
+      .select({ metadata: auditEvent.metadata })
+      .from(auditEvent)
+      .where(and(eq(auditEvent.organizationId, c.orgId), eq(auditEvent.entityId, booked.id), eq(auditEvent.action, "appointment.status_cancelada")))
+    expect(trail?.metadata).toMatchObject({ cancelReason: "paciente" })
   })
 })
 

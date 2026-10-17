@@ -1,7 +1,8 @@
 /**
  * Enviar el presupuesto a la persona (paso 3 de la fase 3, decisión 4).
  *
- * Sale por la regla de siempre (`routeMessage`): WhatsApp primero —con el PDF
+ * Sale por la puerta para escribirle a alguien (`openRoute`, ADR 0042), como
+ * «Su enlace», las recetas y los comprobantes: WhatsApp primero —con el PDF
  * si la persona escribió en las últimas 24 horas, o con «Presupuesto listo»
  * aprobado si no— y correo, con el PDF, si no tiene WhatsApp. Antes salía
  * primero por correo y por WhatsApp solo dentro de las 24 horas.
@@ -32,8 +33,8 @@ import {
 import { issuePersonalLink } from "./booking-links.js"
 import { personalLinkRef } from "./personal-link-token.js"
 import { personalLinkMessageUrl } from "./public-links.js"
-import { clinicName, firstName, previewMessageRoute, routeMessage } from "./automation-routing.js"
-import { mayWriteFirst } from "./automation.js"
+import { clinicName, firstName } from "./automation-routing.js"
+import { openRoute, previewRoute } from "./message-gate.js"
 import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
@@ -144,10 +145,10 @@ export async function previewBudgetSend(
   if (!(SENDABLE as readonly string[]).includes(budget.status)) {
     return { ...base, channel: null, via: null, label: null, blocked: "Este presupuesto ya no se envía." }
   }
-  const route = await previewMessageRoute(tx, orgId, recipient.contactId, spec)
-  if ("cause" in route) return { ...base, channel: null, via: null, label: null, blocked: route.detail }
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
-    return { ...base, channel: null, via: null, label: null, blocked: OPTED_OUT }
+  // La puerta para escribirle a alguien (ADR 0042): un aviso que manda el equipo.
+  const route = await previewRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) {
+    return { ...base, channel: null, via: null, label: null, blocked: route.cause === "sin_permiso" ? OPTED_OUT : route.detail }
   }
   return {
     ...base,
@@ -266,12 +267,13 @@ export async function sendBudget(
   const recipient = await serviceRecipient(tx, orgId, input.patientId, input.recipientContactId)
   const patientName = await patientFirstName(tx, orgId, input.patientId)
   const { spec, params, text } = await readyMessage(tx, orgId, budget, recipient, patientName)
-  const route = await routeMessage(tx, orgId, recipient.contactId, spec)
-  if ("cause" in route) throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
   // Es un aviso (ADR 0040): solo deja de salir con «No quiero ningún mensaje».
-  // Responder a quien acaba de escribir siempre se puede.
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
-    throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
+  // Responder a quien acaba de escribir siempre se puede. El permiso se mira
+  // antes de abrir el hilo (`openRoute`, ADR 0042).
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  if ("cause" in route) {
+    if (route.cause === "sin_permiso") throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
+    throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
   }
   const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId)
   const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`

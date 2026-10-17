@@ -3,7 +3,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
-import { encounter, patient, patientCharge, patientContact, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
+import { encounter, patient, patientCharge, patientContact, patientPayment, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { agentConfig, contact, crmTask, pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { branch } from "@odentia/db/schema/org"
@@ -392,6 +392,45 @@ describe("las líneas que dejan trabajo al equipo", () => {
     expect((await tasksOf(c)).find((task) => task.id === last.id)).toMatchObject({ status: "done" })
     // Al llegar al final vuelve a empezar: nada más que cerrar.
     expect(await cycle()).toBe(0)
+  })
+})
+
+describe("saldo vencido descuenta lo que la persona tiene a favor (decisión 22)", () => {
+  const charge = (c: Clinic, patientId: string, amountCents: number) =>
+    ownerDb.insert(patientCharge).values({
+      organizationId: c.orgId, patientId, description: "Cargo", amountCents, currency: "PEN", createdAt: new Date(Date.now() - 45 * DAY),
+    })
+  const credit = (c: Clinic, patientId: string, amountCents: number) =>
+    ownerDb.insert(patientPayment).values({
+      organizationId: c.orgId, patientId, branchId: c.branchId, methodName: "Efectivo", methodTypeCode: "10", amountCents, currency: "PEN", paidAt: new Date(),
+    })
+
+  it("con lo que tiene a favor alcanzando no hay caso; si no alcanza, dice lo que falta, y la tarea se cierra cuando alcanza", async () => {
+    const c = await clinic()
+    const pedro = await person(c, "Pedro Lara")
+    await charge(c, pedro, 25000)
+    const lucia = await person(c, "Lucía Soto")
+    await charge(c, lucia, 25000)
+    await credit(c, lucia, 30000)
+    const mario = await person(c, "Mario Cruz")
+    await charge(c, mario, 25000)
+    await credit(c, mario, 10000)
+    const advice = await run(c, (tx) => getAdminRecommendation(tx, c.orgId, all, "cobranza_vencida"))
+    expect(advice.total).toBe(2)
+    expect(advice.items.map((item) => item.personName).sort()).toEqual(["Mario Cruz", "Pedro Lara"])
+    expect(advice.items.find((item) => item.personName === "Mario Cruz")?.line).toMatch(/^Debe S\/\s?150\.00 · /)
+
+    // La tarea de Mario se cierra sola cuando lo que tiene a favor cubre lo que debe.
+    await turnedOn(c, "cobranza_vencida", 0, 30)
+    await ownerDb.update(automationRule).set({ enabledAt: new Date(Date.now() - 20 * DAY) }).where(eq(automationRule.organizationId, c.orgId))
+    expect(await run(c, (tx) => syncTeamLines(tx, c.orgId, new Date()))).toBe(2)
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["tarea", "tarea"])
+    expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(0)
+    await credit(c, mario, 15000)
+    expect(await run(c, (tx) => settleTasks(tx, c.orgId, new Date()))).toBe(1)
+    const settled = (await tasksOf(c)).find((task) => task.patientId === mario)
+    expect(settled).toMatchObject({ status: "done" })
+    expect(settled?.settledReason).toMatch(/pagó/)
   })
 })
 

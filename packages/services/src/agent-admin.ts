@@ -55,6 +55,7 @@ import type { TemplateDeps } from "./channel-templates.js"
 import { shouldSkipSaasOrg } from "./saas-billing.js"
 import { type ConversationCareDeps, tickConversationCare } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { patientCreditSql } from "./payments.js"
 import { getPatientRegistrationConfig } from "./patient-registration.js"
 import { formatOrgMoney, getOrgLocale, type OrgLocale } from "./locale.js"
 import { getWritingHours, type WritingWeek } from "./writing-hours.js"
@@ -396,14 +397,17 @@ async function unsignedEncounters(tx: Db, orgId: string, zone: OrgLocale, days: 
 }
 
 /**
- * Deuda vieja: lo que la persona debe (conceptos vigentes menos lo aplicado)
- * cuando su concepto más antiguo sin pagar pasa del plazo. No hay cuotas con
- * fecha: la deuda es el saldo de la cuenta, igual que en Caja.
+ * Deuda vieja: lo que la persona debe (conceptos vigentes menos lo aplicado,
+ * menos lo que tiene a favor) cuando su concepto más antiguo sin pagar pasa
+ * del plazo. No hay cuotas con fecha: la deuda es el saldo de la cuenta, igual
+ * que en Caja (`accountBalances`, decisión 22); con lo que tiene a favor
+ * alcanzando, no hay saldo vencido.
  */
 async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: number, scope?: Fresh, limit: number = ADMIN_LIST_LIMIT): Promise<CaseResult> {
+  const credit = sql`greatest(${patientCreditSql(orgId, sql`p.id`, sql`c.currency`)}, 0)`
   const rows = await tx.execute<{ patient_id: string; name: string; currency: string; owed: number; since: Date | string; since_day: string; total: number }>(sql`
     select p.id as patient_id, p.display_name as name, c.currency,
-           sum(c.amount_cents - coalesce(a.applied, 0))::int as owed, min(c.created_at) as since,
+           (sum(c.amount_cents - coalesce(a.applied, 0)) - ${credit})::int as owed, min(c.created_at) as since,
            to_char(min(c.created_at), 'YYYY-MM-DD') as since_day,
            count(*) over ()::int as total
     from patient_charge c
@@ -416,6 +420,7 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
     where c.organization_id = ${orgId} and c.voided_at is null and c.amount_cents > coalesce(a.applied, 0)
     group by p.id, p.display_name, p.organization_id, c.currency
     having min(c.created_at) < now() - make_interval(days => ${days})
+      and sum(c.amount_cents - coalesce(a.applied, 0)) > ${credit}
       ${fresh(scope, sql`(p.id::text || ':' || c.currency || ':' || to_char(min(c.created_at), 'YYYY-MM-DD'))`, sql`min(c.created_at) + make_interval(days => ${days})`)}
     order by min(c.created_at) asc
     limit ${limit}`)
@@ -432,7 +437,7 @@ async function overdueCollections(tx: Db, orgId: string, zone: OrgLocale, days: 
     })),
     title: `${total} ${plural(total, "persona debe", "personas deben")} desde hace más de ${days} días`,
     detail: total > rows.length ? `Se muestran las ${rows.length} más antiguas.` : "Ordenadas de la deuda más antigua a la más reciente.",
-    how: `Conceptos por cobrar sin anular cuyo saldo sigue pendiente y que se anotaron hace más de ${days} días.`,
+    how: `Conceptos por cobrar sin anular cuyo saldo sigue pendiente, descontado lo que la persona tiene a favor, y que se anotaron hace más de ${days} días.`,
   }
 }
 

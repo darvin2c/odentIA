@@ -7,6 +7,8 @@
 import { randomUUID } from "node:crypto"
 import { scheduleChair } from "@odentia/db/schema/agenda"
 import { member, user } from "@odentia/db/schema/auth"
+import { automationConsent } from "@odentia/db/schema/automation"
+import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import {
   appointmentPlanItem,
   encounterPlanItem,
@@ -357,4 +359,33 @@ it("enviar: dice antes por dónde saldría; sin vía no entrega nada, y el agent
   await expect(
     f.run((tx) => sendBudget(tx, "org_a", { userId: null, by: "agente" }, { ...input, requestId: randomUUID() }, { storage: noStorage })),
   ).rejects.toMatchObject({ code: "BUDGET_NOT_READY" })
+})
+
+it("enviar a quien pidió no recibir ningún mensaje pasa por la puerta única: lo dice antes y no abre ninguna conversación", async () => {
+  const { f, items } = await withItems(1)
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [items[0]!.id] }))
+  const contactId = (await f.run((tx) => previewBudgetSend(tx, "org_a", f.patient.id, draft.id))).recipient.contactId
+  await ownerDb.update(contact).set({ email: `persona-${randomUUID().slice(0, 8)}@example.com` }).where(eq(contact.id, contactId))
+  const [mailbox] = await ownerDb
+    .insert(channelConnection)
+    .values({
+      organizationId: "org_a", channel: "email", provider: "gmail", displayName: "Correo de la clínica",
+      externalId: `clinica-${randomUUID().slice(0, 8)}@example.com`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
+    })
+    .returning({ id: channelConnection.id })
+  try {
+    expect(await f.run((tx) => previewBudgetSend(tx, "org_a", f.patient.id, draft.id))).toMatchObject({ channel: "email", via: "correo", blocked: null })
+    await ownerDb.insert(automationConsent).values({ organizationId: "org_a", contactId, purpose: "avisos", status: "revoked" })
+    expect((await f.run((tx) => previewBudgetSend(tx, "org_a", f.patient.id, draft.id))).blocked).toMatch(/^Pidió no recibir ningún mensaje/)
+    // El permiso se mira antes de abrir el hilo: no queda una conversación vacía.
+    const outcome = await f.run(async (tx) => {
+      const error = await sendBudget(tx, "org_a", { userId: f.actor }, { patientId: f.patient.id, budgetId: draft.id }, { storage: {} as Storage })
+        .then(() => null, (failure: unknown) => failure as { code?: string })
+      const threads = await tx.select({ id: conversation.id }).from(conversation).where(eq(conversation.contactId, contactId))
+      return { code: error?.code, threads: threads.length }
+    })
+    expect(outcome).toEqual({ code: "BUDGET_OPTED_OUT", threads: 0 })
+  } finally {
+    await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, mailbox!.id))
+  }
 })

@@ -5,11 +5,12 @@
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
-import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
+import { channelConnection, channelTemplate, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { confirmPhoneMatch, phoneMatchOf, phoneWhatsAppState, usePhoneAsWhatsApp } from "./contacts.js"
 import { applyStatus } from "./conversations.js"
+import { previewRoute } from "./message-gate.js"
 import { createPerson } from "./people.js"
 import { appDb, insertOrg, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 
@@ -67,6 +68,36 @@ it("caso 1: si WhatsApp rechaza el mensaje porque el número no tiene WhatsApp, 
   expect((await c.run((tx) => phoneWhatsAppState(tx, c.orgId, carmen.id))).state).toBe("no_tiene")
   // Recepción lo vuelve a marcar como su WhatsApp (ya lo instaló): se intenta de nuevo.
   expect((await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, carmen.id))).state).toBe("es_su_whatsapp")
+})
+
+it("caso 1: a un número sin WhatsApp no se le escribe por WhatsApp: sale por correo o, sin correo, se pide la llamada", async () => {
+  const c = await clinic()
+  await ownerDb.insert(channelConnection).values({
+    organizationId: c.orgId, channel: "email", provider: "gmail", displayName: "Correo de la clínica",
+    externalId: `clinica-${c.orgId}@example.com`, configEncrypted: "prueba", webhookSecret: "prueba", status: "active",
+  })
+  // WhatsApp aprobó el mensaje: con un número que sí tiene WhatsApp, saldría por ahí.
+  await ownerDb.insert(channelTemplate).values({
+    organizationId: c.orgId, connectionId: c.connectionId, name: "recordatorio_cita", language: "es", category: "utility", status: "aprobada",
+  })
+  const spec = { template: "recordatorio_cita", category: "utility" as const }
+  const gate = { purpose: "avisos" as const, initiative: "propia" as const }
+  const person = async (name: string, phone: string, email: string | null) => {
+    const created = await c.run((tx) =>
+      createPerson(tx, c.orgId, { userId: null }, { givenNames: name, paternalSurname: "Sin WhatsApp", phone, ...(email ? { email } : {}) }),
+    )
+    await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, created.id))
+    await ownerDb.update(contactIdentity).set({ noWhatsappAt: new Date() }).where(eq(contactIdentity.contactId, created.id))
+    return created.id
+  }
+  const conCorreo = await person("Rosa", "+51987650505", "rosa@example.com")
+  expect(await c.run((tx) => previewRoute(tx, c.orgId, conCorreo, spec, gate))).toEqual({ via: "correo", channel: "email" })
+  // Sin correo no hay por dónde: el motivo lleva a llamarla desde «Te espera».
+  const sinCorreo = await person("Inés", "+51987650606", null)
+  expect(await c.run((tx) => previewRoute(tx, c.orgId, sinCorreo, spec, gate))).toMatchObject({ cause: "no_entregado" })
+  // Si vuelve a escribir desde ese número (o el equipo lo marca otra vez), WhatsApp vuelve a ser su vía.
+  await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, sinCorreo))
+  expect(await c.run((tx) => previewRoute(tx, c.orgId, sinCorreo, spec, gate))).toEqual({ via: "plantilla", channel: "whatsapp" })
 })
 
 it("caso 3: un mensaje desde el teléfono de una ficha pregunta «¿Es ella?» y solo se une con «Sí, es Carmen»", async () => {

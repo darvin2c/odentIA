@@ -282,8 +282,10 @@ async function routeFacts(
       ),
     )
     .orderBy(desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
-    .limit(1)
-  const identity = identities[0]
+  // Un número que WhatsApp rechazó («Este número no tiene WhatsApp», decisión
+  // 23, caso 1) no es una vía: sale por correo o, si no hay, se pide la llamada.
+  const identity = identities.find((row) => !row.noWhatsappAt)
+  const noWhatsapp = !identity && identities.length > 0
   const connections = await tx
     .select({ id: channelConnection.id, channel: channelConnection.channel })
     .from(channelConnection)
@@ -337,6 +339,7 @@ async function routeFacts(
   const email = person?.email?.trim().toLowerCase()
   return {
     identity: identity ?? null,
+    noWhatsapp,
     whatsapp: whatsapp ?? null,
     mailbox: mailbox ?? null,
     windowThreadId,
@@ -353,6 +356,9 @@ function noRoute(
   mailboxProblem: string | null,
 ): { cause: AutomationCause; detail: string } {
   const { identity, whatsapp, template } = facts
+  if (facts.noWhatsapp && !facts.rawEmail) {
+    return { cause: "no_entregado", detail: "Su número no tiene WhatsApp y no tiene correo registrado" }
+  }
   if (!identity && !facts.rawEmail) {
     return { cause: "sin_destino", detail: "La persona no tiene WhatsApp ni correo registrados" }
   }

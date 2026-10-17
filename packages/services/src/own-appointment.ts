@@ -48,13 +48,17 @@ type OwnRow = { id: string; status: string; startsAt: Date }
 export async function confirmOwnAppointment(
   tx: Db,
   orgId: string,
-  actor: string,
+  actor: string | null,
   row: OwnRow,
   via: string,
+  detail: { conversationId?: string } = {},
 ): Promise<{ item: AppointmentItem; already: boolean }> {
   assertOwnAppointmentChangeable(row)
   const already = row.status === "confirmada"
-  const item = await setAppointmentStatus(tx, orgId, actor, row.id, "confirmada", { via })
+  const item = await setAppointmentStatus(tx, orgId, actor, row.id, "confirmada", {
+    via,
+    ...(detail.conversationId ? { conversationId: detail.conversationId } : {}),
+  })
   return { item, already }
 }
 
@@ -74,13 +78,16 @@ export async function cancelOwnAppointment(
   })
 }
 
-/** Cambia su cita a otra hora libre de la semana (misma sede y duración). */
+/**
+ * Cambia su cita a otra hora libre (misma sede). Sin profesional ni fin, la
+ * cita conserva los suyos y su duración, como en la Agenda.
+ */
 export async function moveOwnAppointment(
   tx: Db,
   orgId: string,
   actor: string,
   row: OwnRow & { version: number },
-  input: { startsAt: string; dentistUserId: string; chairId?: string; expectedVersion?: number },
+  input: { startsAt: string; endsAt?: string; dentistUserId?: string; chairId?: string; expectedVersion?: number },
 ): Promise<AppointmentItem> {
   assertOwnAppointmentChangeable(row)
   const startsAt = assertOwnNewTime(input.startsAt)
@@ -92,7 +99,8 @@ export async function moveOwnAppointment(
     {
       expectedVersion: input.expectedVersion ?? row.version,
       startsAt: startsAt.toISOString(),
-      dentistUserId: input.dentistUserId,
+      ...(input.endsAt ? { endsAt: input.endsAt } : {}),
+      ...(input.dentistUserId ? { dentistUserId: input.dentistUserId } : {}),
       ...(input.chairId ? { chairId: input.chairId } : {}),
     },
     { notice: false },

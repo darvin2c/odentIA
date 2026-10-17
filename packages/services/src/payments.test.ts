@@ -5,7 +5,9 @@ import { expect, it } from "vitest"
 import { createBudget, decideBudget, deliverBudget, reviseBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
-import { sql } from "drizzle-orm"
+import { patientContact } from "@odentia/db/schema/clinical"
+import { and, eq, sql } from "drizzle-orm"
+import { getAgentPatientSummary } from "./agent-operations.js"
 import {
   collectCharge,
   createCharge,
@@ -212,6 +214,13 @@ it("el saldo descuenta lo que tiene a favor, y «Aplicar» cancela la deuda con 
   const before = (await f.run((tx) => getAccountSummary(tx, "org_a", f.patient.id))).byCurrency[0]
   // «Debe: S/ 100 · A favor: S/ 60 · Saldo: S/ 40».
   expect(before).toMatchObject({ porCobrar: 10000, aFavor: 6000, saldo: 4000 })
+  // El agente dice el mismo saldo, no lo que debe sin descontar.
+  const [self] = await ownerDb
+    .select({ contactId: patientContact.contactId })
+    .from(patientContact)
+    .where(and(eq(patientContact.organizationId, "org_a"), eq(patientContact.patientId, f.patient.id), eq(patientContact.relationship, "self")))
+  const told = await f.run((tx) => getAgentPatientSummary(tx, "org_a", self!.contactId, f.patient.id))
+  expect(told.balance).toEqual([{ currency: before!.currency, outstandingCents: 4000 }])
   // Aplicar lo que tiene a favor: el mismo cobro de caja, sin dinero nuevo.
   const applied = await f.run((tx) => collectCharge(tx, ...f.args, { branchId, requestId: randomUUID() }))
   expect(applied.creditAppliedCents).toBe(6000)

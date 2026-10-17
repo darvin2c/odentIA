@@ -70,6 +70,7 @@ import {
 } from "./clinic-messages.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData } from "./patient-registration.js"
@@ -1507,12 +1508,18 @@ async function stillValid(
   }
   if (job.kind === "cobranza_vencida" && job.patientId) {
     const currency = job.dedupeKey.split(":")[2] ?? ""
+    // Lo que debe, por moneda, menos lo que tiene a favor en esa moneda
+    // (decisión 22): si lo que tiene a favor alcanza, ya no hay saldo vencido.
     const [row] = await tx.execute<{ owed: number }>(sql`
-      select coalesce(sum(c.amount_cents - coalesce((select sum(a.amount_cents) from patient_payment_application a
-        where a.charge_id = c.id and a.organization_id = c.organization_id and a.voided_at is null), 0)), 0)::int as owed
-      from patient_charge c
-      where c.organization_id = ${orgId} and c.patient_id = ${job.patientId} and c.voided_at is null
-        and (${currency} = '' or c.currency = ${currency})`)
+      select coalesce(max(d.owed), 0)::int as owed from (
+        select sum(c.amount_cents - coalesce((select sum(a.amount_cents) from patient_payment_application a
+          where a.charge_id = c.id and a.organization_id = c.organization_id and a.voided_at is null), 0))
+          - greatest(${patientCreditSql(orgId, sql`c.patient_id`, sql`c.currency`)}, 0) as owed
+        from patient_charge c
+        where c.organization_id = ${orgId} and c.patient_id = ${job.patientId} and c.voided_at is null
+          and (${currency} = '' or c.currency = ${currency})
+        group by c.patient_id, c.currency
+      ) d`)
     if (Number(row?.owed ?? 0) <= 0) return { valid: false, reason: "Ya pagó lo que debía" }
     return { valid: true }
   }

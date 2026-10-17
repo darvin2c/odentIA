@@ -65,6 +65,7 @@ import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getAccountSummary } from "./payments.js"
+import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { CONFIRM_TTL_HOURS, proposalPendingSql } from "./proposal-state.js"
 import { formatOrgMoney, formatZoned, getOrgLocale, type OrgLocale } from "./locale.js"
@@ -369,9 +370,11 @@ export async function getAgentPatientSummary(
     context.authorization === "representante_legal" ||
     (await hasEconomicRole(tx, orgId, patientId, contactId))
   if (maySeeBalance) {
-    // La misma cuenta que ve caja: una sola operación para pantalla, portal y agente.
+    // La misma cuenta que ve caja: una sola operación para pantalla, portal y
+    // agente. Lo que dice es el saldo, ya descontado lo que tiene a favor
+    // (`accountBalances`, decisión 22): nunca «debe» a quien no debe nada.
     const account = await getAccountSummary(tx, orgId, patientId)
-    balance = account.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.porCobrar }))
+    balance = account.byCurrency.map((b) => ({ currency: b.currency, outstandingCents: b.saldo }))
   }
   return {
     context,
@@ -521,12 +524,17 @@ export async function confirmAppointmentByContact(
   }
   const appointments: ContactConfirmedAppointment[] = []
   for (const item of chosen) {
-    if (item.status === "programada") {
-      await setAppointmentStatus(tx, orgId, null, item.appointmentId, "confirmada", {
-        via: "conversacion",
-        conversationId: input.conversationId,
-      })
-    }
+    // La regla de la cita propia (`own-appointment.ts`), la del enlace y el
+    // portal: confirmar una ya confirmada la deja como está.
+    await confirmOwnAppointment(
+      tx,
+      orgId,
+      // Sin autora del equipo: quién confirmó consta en `via` y la conversación.
+      null,
+      { id: item.appointmentId, status: item.status, startsAt: new Date(item.startsAt) },
+      "conversacion",
+      { conversationId: input.conversationId },
+    )
     appointments.push({ ...strip(item), was: item.status === "programada" ? "confirmada" : "ya_confirmada" })
   }
   const reply = confirmationReply(
@@ -2613,13 +2621,18 @@ export async function executeProposal(
         zone,
       )
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const moved = await moveAppointment(tx, orgId, actorUserId, appointmentId, {
+      const move = {
         expectedVersion: payload.expectedVersion as number,
         startsAt: payload.startsAt as string,
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
         dentistUserId: typeof payload.dentistUserId === "string" ? (payload.dentistUserId as string) : undefined,
         chairId: typeof payload.chairId === "string" ? (payload.chairId as string) : undefined,
-      }, { notice: false })
+      }
+      // Lo pide la persona en la conversación: la regla de la cita propia,
+      // la misma del enlace y el portal (no empezó, hora futura, horizonte).
+      const moved = locked.contactId
+        ? await moveOwnAppointment(tx, orgId, actorUserId, liveAppt, move)
+        : await moveAppointment(tx, orgId, actorUserId, appointmentId, move, { notice: false })
       result = { appointmentId: moved.id, startsAt: moved.startsAt }
     } else if (action === "cancelar_cita") {
       const appointmentId = payload.appointmentId as string
@@ -2645,7 +2658,11 @@ export async function executeProposal(
         startsAt: liveAppt.startsAt,
       }, zone)
       if (fresh.isStale) throw staleError(fresh.reason, fresh.currentSummary)
-      const cancelled = await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada", { notice: false })
+      // La pide la persona en la conversación: cancelar su cita deja el
+      // motivo «paciente», como desde su enlace o el portal.
+      const cancelled = locked.contactId
+        ? await cancelOwnAppointment(tx, orgId, actorUserId, liveAppt, "La canceló la persona en la conversación")
+        : await setAppointmentStatus(tx, orgId, actorUserId, appointmentId, "cancelada", { notice: false })
       result = { appointmentId: cancelled.id, status: cancelled.status }
     } else if (action === "decidir_presupuesto") {
       // Decide quien escribe en la conversación (la persona o su representante

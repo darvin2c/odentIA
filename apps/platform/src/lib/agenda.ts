@@ -7,7 +7,7 @@ import {
   type ScheduleState,
 } from "@odentia/ui-patterns"
 import type { QueryClient } from "@tanstack/react-query"
-import type { PhoneWhatsApp } from "./people"
+import type { PhoneWhatsApp } from "./phone-whatsapp"
 
 /** Una cita afecta disponibilidad y seguimiento, también en superficies no montadas. */
 export async function invalidateAppointmentQueries(client: QueryClient): Promise<void> {

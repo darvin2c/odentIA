@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
+import type { PhoneWhatsApp } from "./phone-whatsapp"
 
 /**
  * La persona y su página (ADR 0029). La dirección es `/people/:personId`,
@@ -75,13 +76,7 @@ export interface PersonPage {
   channels: string[]
 }
 
-/** Su teléfono y su WhatsApp (decisión 23), como lo dice el servidor. */
-export interface PhoneWhatsApp {
-  state: "sin_telefono" | "es_su_whatsapp" | "aun_no" | "no_tiene"
-  phone: string | null
-  /** La clínica tiene WhatsApp conectado: «Usarlo como su WhatsApp» sirve. */
-  canUse: boolean
-}
+export type { PhoneWhatsApp } from "./phone-whatsapp"
 
 export interface PersonListItem {
   id: string

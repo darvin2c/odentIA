@@ -13,8 +13,8 @@ Cada cosa tiene una regla o un dato, y todas las vías lo leen:
 - **Nombre visible**: el nombre comercial, obligatorio, en todo lo que ve la persona; la razón social solo en el comprobante y lo legal. La base lo copia en `organization.name` (disparador), así las pantallas de la cuenta, el chat web y el registro público leen lo mismo sin que nadie lo sincronice a mano.
 - **A quién se le manda**: la regla de quién decide (`listDecisionRecipients`), con la edad contada con el día de la clínica.
 - **Personas**: `createPerson` es la única forma de crearlas; quien ya tiene ese documento se reutiliza. Un solo buscador.
-- **La cita de la persona**: una regla (`own-appointment.ts`) para el enlace y el portal; las horas que se ofrecen usan el mismo paso para enlace, portal y agente.
-- **Montos**: una fórmula (`accountBalances`): «Debe · A favor · Saldo», con el saldo descontando lo que tiene a favor. Aplicarlo es el cobro de caja sin dinero nuevo, que deja su ticket.
+- **La cita de la persona**: una regla (`own-appointment.ts`) para el enlace, el portal y lo que pide en la conversación al agente (cancelar deja el motivo «paciente»); las horas que se ofrecen usan el mismo paso para enlace, portal y agente.
+- **Montos**: una fórmula (`accountBalances`): «Debe · A favor · Saldo», con el saldo descontando lo que tiene a favor. El agente dice ese saldo, y «Saldo vencido» del Administrador resta lo que tiene a favor (`patientCreditSql`). Aplicarlo es el cobro de caja sin dinero nuevo, que deja su ticket.
 - **Contacto de emergencia**: una marca sobre una persona vinculada, con el parentesco HL7, como `Patient.contact` de FHIR.
 - **Teléfono y WhatsApp** (precisa ADR 0027): el teléfono pasa a ser su WhatsApp solo por decisión del equipo («Usarlo como su WhatsApp»); si WhatsApp lo rechaza, la identidad queda marcada («Este número no tiene WhatsApp»); un mensaje desde el teléfono de una ficha solo pregunta «¿Es ella?» y se une con «Reasignar canal» al confirmarlo alguien.
 
