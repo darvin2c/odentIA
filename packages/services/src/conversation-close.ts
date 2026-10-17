@@ -36,6 +36,9 @@ import { updateTask } from "./tasks.js"
 export const CONVERSATION_CLOSE_REASONS = ["resuelta", "sin_respuesta", "equipo", "manual"] as const
 export type ConversationCloseReason = (typeof CONVERSATION_CLOSE_REASONS)[number]
 
+/** Retraso del ciclo tras el que ya no se da por puntual: pasado esto, una despedida espera al «Horario para escribir». */
+const CARE_LATE_MS = 15 * 60 * 1000
+
 /** Horas desde el último mensaje del agente tras las que insiste, una sola vez por atención. */
 export const NUDGE_AFTER_HOURS = 3
 /** Límites de `close_after_hours`: la ventana de WhatsApp es de 24 horas. */
@@ -504,6 +507,26 @@ export async function closurePendingReason(tx: Db, orgId: string, id: string): P
   return null
 }
 
+/**
+ * Por qué el agente ya no debe enviar lo que redactó: mientras el modelo
+ * escribía (puede tardar minutos), una persona tomó la conversación o la
+ * cerró. Enviar igual le hablaría encima al equipo y, en una cerrada, la
+ * reabriría (`sendOutbound`). Nulo si la conversación sigue siendo del agente.
+ */
+export async function agentReplyBlockedReason(tx: Db, orgId: string, id: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ status: conversation.status, agentStatus: conversation.agentStatus })
+    .from(conversation)
+    .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row) return "La conversación ya no existe: no envíes nada."
+  if (row.status !== "open") return "El equipo cerró la conversación mientras preparabas la respuesta: no envíes nada."
+  if (row.agentStatus !== "on") {
+    return "Una persona del equipo tomó la conversación mientras preparabas la respuesta: no envíes nada; la sigue ella."
+  }
+  return null
+}
+
 /* ------------------------------ El ciclo: insistir y cerrar ------------------------------ */
 
 export interface ConversationCareDeps {
@@ -639,6 +662,13 @@ export async function tickConversationCare(
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
     const writable = canWriteNow(row, now)
     if (now.getTime() >= closeAt.getTime()) {
+      // La despedida nunca sale fuera del «Horario para escribir». `closeAt` ya
+      // cae en él (a veces en su último minuto); si el ciclo llega tarde y el
+      // horario cerró, espera a que abra (si para entonces ya no se puede
+      // escribir, cierra sin despedida, como cualquier ventana vencida).
+      const late = now.getTime() - closeAt.getTime() > CARE_LATE_MS
+      if (writable && late && !isWritingTime(now, schedule)) return null
+      if (!(await stillQuiet(inner, row))) return null
       if (writable) {
         // Antes de cerrar, porque al cerrar vence la propuesta.
         const proposedWhen = await proposedAppointmentWhen(inner, orgId, row.id)
@@ -658,6 +688,7 @@ export async function tickConversationCare(
     const asks = (last.body ?? "").trim().endsWith("?")
     if (!row.proposalPending && !asks && !offered) return null
     const when = proposed ? proposalWhen(proposed.payload["startsAt"], zone) : null
+    if (!(await stillQuiet(inner, row))) return null
     const text = nudgeText(voice, greetingName(row.contactName), proposed && when ? { action: proposed.action, when } : null)
     await sendFixed(inner, orgId, row.id, format(text, row.channel), { senderKind: "agent" })
     await inner
@@ -665,6 +696,22 @@ export async function tickConversationCare(
       .set({ nudgedAt: now })
       .where(and(eq(conversation.id, row.id), eq(conversation.organizationId, orgId)))
     return "nudged"
+  }
+
+  /**
+   * La fila se leyó al empezar el ciclo; antes de escribir o cerrar se bloquea
+   * y se comprueba que la persona no escribió entretanto ni la cerró alguien.
+   * Sin esto, un mensaje que entra en ese momento quedaba en una conversación
+   * cerrada y fuera de «Te espera».
+   */
+  async function stillQuiet(inner: Db, row: CareRow): Promise<boolean> {
+    const [fresh] = await inner
+      .select({ status: conversation.status, lastInboundAt: conversation.lastInboundAt })
+      .from(conversation)
+      .where(and(eq(conversation.id, row.id), eq(conversation.organizationId, orgId)))
+      .for("update")
+    if (!fresh || fresh.status !== "open") return false
+    return (fresh.lastInboundAt?.getTime() ?? 0) === (row.lastInboundAt?.getTime() ?? 0)
   }
 
   function format(text: string, channel: string): string {

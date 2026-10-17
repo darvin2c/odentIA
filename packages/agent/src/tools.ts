@@ -27,6 +27,7 @@ import {
   createBookingLink,
   requestPortalReentry,
   annotateHandoff,
+  agentReplyBlockedReason,
   closeConversationWith,
   closurePendingReason,
   createHandoff,
@@ -323,6 +324,11 @@ export interface AgentToolCtx {
   treatment?: "tu" | "usted" | null
   /** El agente se despidió y cerró la conversación en esta corrida. */
   closed?: boolean
+  /**
+   * Mientras el modelo escribía, el equipo tomó o cerró la conversación: lo
+   * redactado no sale y la corrida termina sin respuesta del agente.
+   */
+  takenOver?: boolean
   /** En una prueba, los servicios cuyo precio ya dijo el agente (no hay traza que leer). */
   pricedSubjects?: string[]
 }
@@ -485,6 +491,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `No se le puede escribir: ${outcome.waiting} El caso pasó a una persona; no envíes más mensajes.`
   }
   /**
+   * Justo antes de enviar: si el equipo tomó o cerró la conversación mientras
+   * el modelo redactaba, no sale nada y el turno termina (`takenOver`). Con
+   * una derivación de esta misma corrida el agente ya se apagó a sí mismo.
+   */
+  const teamTookOver = async (): Promise<string | null> => {
+    if (ctx.dryRun || ctx.handedOff) return null
+    const reason = await inOrg((tx) => agentReplyBlockedReason(tx, ctx.orgId, ctx.conversationId))
+    if (!reason) return null
+    ctx.takenOver = true
+    ctx.replySettled = true
+    return reason
+  }
+  /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
    * + payload. En modo directo se ejecuta en el mismo acto; si exige la
    * confirmación del interlocutor, queda pendiente con su recorrido real. Los
@@ -512,7 +531,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
             conversationId: ctx.conversationId,
             triggerId: ctx.triggerId,
             tool: toolName,
-            payload,
+            // Un mensaje es uno por disparador y herramienta, diga lo que diga:
+            // si la corrida se reintenta, el modelo redacta otro texto y, con
+            // el texto en la clave, la persona recibía dos respuestas. Un envío
+            // fallido no bloquea el siguiente (`createProposal` le da otra clave).
+            payload: action === "enviar_mensaje" && ctx.triggerId ? { message: "reply" } : payload,
           }),
           secretsKey: ctx.secretsKey,
         }),
@@ -759,6 +782,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose retoma la
       // conversación con el sistema. Lo que sí lanza (infra 429/5xx incluida)
       // no reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
+      const takenOver = await teamTookOver()
+      if (takenOver) return takenOver
       const sent: ProposalItem[] = []
       // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
       const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
@@ -799,6 +824,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ctx.simulatedReply = text
         return `[SIMULACIÓN] Se enviaría la despedida y se cerraría la conversación: ${text}`
       }
+      const takenOver = await teamTookOver()
+      if (takenOver) return takenOver
       const sent: ProposalItem[] = []
       const outcome = await propose("enviar_mensaje", { kind: "text", text }, "despedirse_y_cerrar", undefined, (proposal) => {
         sent.push(proposal)

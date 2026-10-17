@@ -5,7 +5,9 @@ import {
   closureBand,
   closureWords,
   conversationWords,
+  messageTimeWords,
   resolveWords,
+  whenWords,
 } from "./conversation-state"
 import type { ConversationAttention } from "./crm"
 import { setOrgLocale } from "./locale"
@@ -101,6 +103,14 @@ describe("cómo se cerró", () => {
     expect(closureBand({ reason: "sin_respuesta", at: "2026-10-14T23:42:00.000Z", byName: null }, NOW)).toBe(
       "Cerrada por el agente · sin respuesta del paciente · ayer 18:42",
     )
+  })
+
+  it("la hora de un mensaje dice el día cuando no es de hoy, y el año si es de otro", () => {
+    expect(messageTimeWords("2026-10-15T15:00:00.000Z", NOW)).toBe("10:00")
+    expect(messageTimeWords("2026-10-14T23:42:00.000Z", NOW)).toBe("ayer 18:42")
+    // 12 de octubre 16:00 en Lima: antes de ayer, con su día.
+    expect(messageTimeWords("2026-10-12T21:00:00.000Z", NOW)).toBe("12/10 16:00")
+    expect(whenWords("2025-03-12T23:42:00.000Z", NOW)).toBe("12/3/2025 18:42")
   })
 })
 

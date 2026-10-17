@@ -98,6 +98,7 @@ interface WaMessage {
   image?: WaMedia
   document?: WaMedia
   audio?: WaMedia
+  video?: WaMedia
   /** Respuesta rápida de una plantilla. */
   button?: { payload?: string; text?: string }
   /** Botón de un mensaje interactivo enviado dentro de la ventana. */
@@ -165,7 +166,9 @@ function messageToNormalized(
         ? m.document
         : m.type === "audio"
           ? m.audio
-          : undefined
+          : m.type === "video"
+            ? m.video
+            : undefined
   if (media) {
     const withCaption = typeof media.caption === "string" ? { caption: media.caption } : {}
     return {
@@ -179,7 +182,7 @@ function messageToNormalized(
       },
     }
   }
-  // Tipos no soportados (reaction, sticker, location…): se ignoran.
+  // Tipos no soportados (reaction, sticker, location, contacts…): se ignoran.
   return null
 }
 

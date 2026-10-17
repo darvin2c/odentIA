@@ -11,6 +11,7 @@ import {
   type AgentConfig,
   type AgentLlm,
   countAgentModelRunsToday,
+  countContactModelRunsToday,
   askGeneralPermissionAfterBooking,
   getAgentSpendGate,
   hasOpenConversationAction,
@@ -121,6 +122,13 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
 
 /** Motivo en el libro de un mensaje que otra corrida leyó y atendió. */
 const BURST_COVERED = "burst-covered"
+/** El equipo tomó o cerró la conversación mientras el modelo redactaba: nada salió. */
+const TEAM_TOOK_OVER = "team-took-over"
+/**
+ * Corridas con modelo por persona y día. Una conversación real larga no llega:
+ * cada corrida atiende una ráfaga entera de mensajes.
+ */
+export const CONTACT_DAILY_RUN_LIMIT = 40
 /** La corrida se pospuso porque la persona seguía escribiendo; no deja fila en el libro. */
 const BURST_WAITING = "burst-waiting"
 
@@ -490,6 +498,27 @@ async function attendAgentRun(
       })
       return "done"
     }
+    // Tope por persona: quien escribe sin parar (un bot, una cadena) pasa al
+    // equipo antes de agotar el tope diario de la clínica; los demás siguen
+    // atendidos. El agente queda apagado en ese hilo: no hay más corridas.
+    const contactToday = await withOrgContext(db, orgId, (tx) =>
+      countContactModelRunsToday(tx, orgId, toolCtx.contactId),
+    )
+    if (contactToday >= CONTACT_DAILY_RUN_LIMIT) {
+      await performHandoff(toolCtx, `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`)
+      await noticeAfterHandoff(toolCtx)
+      await ledger(db, orgId, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        model: effectiveModel,
+        status: "handoff",
+        startedAt,
+        endedAt: new Date(),
+        llmCalls: 0,
+        error: "CONTACT_DAILY_LIMIT",
+      })
+      return "done"
+    }
     // Tope diario: acota el gasto ante ráfagas o abuso del canal público. Al
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
     const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))
@@ -603,7 +632,7 @@ async function attendAgentRun(
       // Tras reservar en esta corrida, la pregunta del permiso general, una sola
       // vez por persona y después de la respuesta (ADR 0030). Texto y botones
       // fijos, sin modelo; si no puede salir, la corrida sigue igual.
-      if (toolCtx.replySettled && !toolCtx.handedOff && !toolCtx.dryRun) {
+      if (toolCtx.replySettled && !toolCtx.handedOff && !toolCtx.takenOver && !toolCtx.dryRun) {
         await withOrgContext(db, orgId, (tx) =>
           askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: startedAt }),
         ).catch(() => false)
@@ -625,7 +654,10 @@ async function attendAgentRun(
       conversationId,
       triggerMessageId: inboundMessageId,
       model: effectiveModel,
-      status: toolCtx.handedOff ? "handoff" : unanswered ? "sin_respuesta" : "ok",
+      // Si el equipo la tomó o cerró mientras el modelo escribía, nada salió:
+      // queda omitida (no es una conversación atendida por el agente).
+      status: toolCtx.handedOff ? "handoff" : toolCtx.takenOver ? "omitida" : unanswered ? "sin_respuesta" : "ok",
+      ...(toolCtx.takenOver ? { error: TEAM_TOOK_OVER } : {}),
       startedAt,
       endedAt: new Date(),
       latencyMs: Date.now() - startedAt.getTime(),

@@ -9,10 +9,11 @@ import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { addAgentCaseNote, getAgentCaseState, formatAgentCaseForPrompt } from "./agent-case.js"
-import { createHandoff } from "./agent-operations.js"
+import { countContactModelRunsToday, createHandoff } from "./agent-operations.js"
 import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
 import { describeAuditEvent } from "./audit-words.js"
 import {
+  agentReplyBlockedReason,
   closeConversation,
   closeConversationWith,
   closurePendingReason,
@@ -400,5 +401,37 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     await ownerDb.update(agentConfig).set({ enabled: true }).where(eq(agentConfig.organizationId, c.orgId))
     await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Caso", summary: "Caso", createdBy: "agent" }))
     expect(await tick(c, new Date("2026-10-14T17:00:00Z"))).toEqual({ nudged: 0, closed: 0 })
+  })
+})
+
+describe("lo que el agente redactó no sale si el equipo ya la tomó o la cerró", () => {
+  it("abierta y con el agente: sale; tomada por una persona o cerrada: no sale y se dice por qué", async () => {
+    const c = await clinic()
+    const own = await c.thread("Ana Paredes")
+    const taken = await c.thread("Bruno Díaz", { assignedUserId: c.receptionId, agentStatus: "off" })
+    const closed = await c.thread("Carla Ríos", { status: "closed", closedAt: new Date(), closeReason: "manual" })
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, own.id))).toBeNull()
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, taken.id))).toMatch(/tomó la conversación/)
+    expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, closed.id))).toMatch(/cerró la conversación/)
+  })
+})
+
+describe("tope por persona", () => {
+  it("cuenta solo las corridas con modelo de hoy en las conversaciones de esa persona", async () => {
+    const c = await clinic()
+    const bot = await c.thread("Número desconocido")
+    const other = await c.thread("Ana Paredes")
+    const now = new Date()
+    const ledgerRow = (conversationId: string, llmCalls: number, startedAt = now) =>
+      ({ organizationId: c.orgId, conversationId, model: "fake", status: "ok", startedAt, llmCalls }) as const
+    await ownerDb.insert(agentRunLedger).values([
+      ledgerRow(bot.id, 2),
+      ledgerRow(bot.id, 1),
+      ledgerRow(bot.id, 0),
+      ledgerRow(bot.id, 1, new Date(now.getTime() - 3 * 24 * HOUR)),
+      ledgerRow(other.id, 1),
+    ])
+    expect(await c.run((tx) => countContactModelRunsToday(tx, c.orgId, bot.contactId))).toBe(2)
+    expect(await c.run((tx) => countContactModelRunsToday(tx, c.orgId, other.contactId))).toBe(1)
   })
 })

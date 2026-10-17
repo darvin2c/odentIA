@@ -60,6 +60,14 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/webp": "webp",
   "application/pdf": "pdf",
   "audio/ogg": "ogg",
+  "audio/mpeg": "mp3",
+  "audio/mp4": "m4a",
+  "audio/aac": "aac",
+  "audio/amr": "amr",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/3gpp": "3gp",
 }
 
 export interface IngestDeps {
@@ -342,7 +350,8 @@ export async function ingestInbound(
       const media = await adapter.fetchMedia(providerConfig, content.mediaExternalId, {
         fetch: deps.fetch,
       })
-      const ext = EXT_BY_MIME[media.mimeType] ?? "bin"
+      // WhatsApp manda parámetros («audio/ogg; codecs=opus»): la extensión sale del tipo solo.
+      const ext = EXT_BY_MIME[media.mimeType.split(";")[0]!.trim().toLowerCase()] ?? "bin"
       const ref = await deps.storage.putAttachment({
         orgId,
         conversationId,

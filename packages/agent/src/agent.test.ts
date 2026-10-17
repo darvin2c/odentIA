@@ -60,7 +60,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
-import { type AgentRuntime, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
+import { type AgentRuntime, CONTACT_DAILY_RUN_LIMIT, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
 import { compileAgentGraph } from "./graph.js"
 import { extractDictation } from "./dictation.js"
 import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
@@ -2682,4 +2682,77 @@ it("buscar_huecos nunca muestra el usuario del profesional: proponer_cita recibe
   await propose.invoke({ ...slot, dentistUserId: ref })
   const [proposal] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect(proposal?.payload).toMatchObject({ dentistUserId: fx.dentistId })
+})
+
+/** Un modelo que, mientras «redacta», deja que pase algo en la base (el equipo toma o cierra la conversación). */
+class SlowScriptedModel extends ScriptedModel {
+  constructor(
+    script: (messages: BaseMessage[], call: number) => AIMessage,
+    private readonly meanwhile: () => Promise<unknown>,
+  ) {
+    super(script)
+  }
+  override async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+    await this.meanwhile()
+    return super._generate(messages)
+  }
+}
+
+it("si el equipo toma o cierra la conversación mientras el modelo escribe, lo redactado no sale ni se cobra", async () => {
+  for (const [thread, meanwhile] of [
+    ["tg:tomada-en-curso", (id: string) => ownerDb.update(conversation).set({ agentStatus: "off" }).where(eq(conversation.id, id))],
+    ["tg:cerrada-en-curso", (id: string) => withOrgContext(appDb, "org_a", (tx) => closeConversationWith(tx, "org_a", id, { reason: "manual", byUserId: null }))],
+  ] as const) {
+    const { conversationId, messageId } = await ingestText(thread, `evt-${thread}`, "Hola, ¿tienen cita el lunes?")
+    const model = new SlowScriptedModel(
+      () => toolCall("send_reply", { text: "Sí, el lunes a primera hora." }, "call-1"),
+      () => meanwhile(conversationId),
+    )
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(model.seen).toHaveLength(1)
+    expect(await agentMessages(conversationId)).toEqual([])
+    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+    expect(row).toEqual({ status: "omitida", error: "team-took-over" })
+    const [conv] = await ownerDb.select({ status: conversation.status }).from(conversation).where(eq(conversation.id, conversationId))
+    expect(conv?.status).toBe(thread === "tg:cerrada-en-curso" ? "closed" : "open")
+  }
+})
+
+it("quien escribe sin parar pasa al equipo sin llamar al modelo, y los demás siguen atendidos", async () => {
+  const { conversationId, messageId } = await ingestText("tg:sin-parar", "evt-sin-parar", "Hola otra vez")
+  await ownerDb.insert(agentRunLedger).values(
+    Array.from({ length: CONTACT_DAILY_RUN_LIMIT }, () => ({
+      organizationId: "org_a", conversationId, model: "fake", status: "ok", startedAt: new Date(), llmCalls: 1,
+    })),
+  )
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen).toHaveLength(0)
+  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
+  expect(await agentStatusOf(conversationId)).toBe("off")
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(and(eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.status, "handoff"))))
+  expect(rows).toEqual([{ error: "CONTACT_DAILY_LIMIT" }])
+
+  const other = await ingestText("tg:otra-persona", "evt-otra-persona", "Hola, quiero info")
+  const answering = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime en qué te ayudo." }, "call-1"))
+  expect(await runScripted(answering, other.conversationId, other.messageId)).toBe("done")
+  expect(await agentMessages(other.conversationId)).toEqual(["Hola, dime en qué te ayudo."])
+})
+
+it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no como «[adjunto]»", async () => {
+  const { conversationId } = await ingestText("tg:imagen", "evt-imagen-1", "Les mando la foto")
+  const [image] = await ownerDb
+    .insert(message)
+    .values({
+      organizationId: "org_a", conversationId, direction: "in", senderKind: "contact", status: "received",
+      contentType: "image", body: null, externalId: "evt-imagen-2", createdAt: new Date(Date.now() + 1000),
+    })
+    .returning({ id: message.id })
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Gracias, ¿qué te molesta?" }, "call-1"))
+  expect(await runScripted(model, conversationId, image!.id)).toBe("done")
+  const said = model.seen[0]!.map((m) => String(m.content)).join("\n")
+  expect(said).toContain("Envió una imagen que no puedes ver")
+  expect(said).not.toContain("[adjunto]")
 })

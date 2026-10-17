@@ -167,6 +167,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<void
     if (!connection) continue
     for (const [index, reply] of plan.replies.entries()) {
       const inboundAt = new Date(start + (3 + index) * 86_400_000 + 16 * 3_600_000)
+      const sentAt = reply ? new Date(inboundAt.getTime() + reply.seconds * 1000) : null
       const [thread] = await tx
         .insert(conversation)
         .values({
@@ -175,8 +176,22 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<void
           channelConnectionId: connection.id,
           externalThreadId: `seed-reportes-${plan.monthsBack}-${index}`,
           status: reply ? "closed" : "open",
-          // Una cerrada dice cuándo y por qué (ADR 0024): la respondida se resolvió ese día.
-          ...(reply ? { closedAt: new Date(inboundAt.getTime() + 3_600_000), closeReason: "resuelta" as const } : {}),
+          // Las fechas del hilo son las de sus mensajes: sin ellas la Bandeja lo
+          // ordenaba por la fecha de la semilla, sin hora, y decía que la
+          // persona «todavía no escribió por aquí» con su mensaje a la vista.
+          createdAt: inboundAt,
+          attentionStartedAt: inboundAt,
+          lastInboundAt: inboundAt,
+          lastMessageAt: sentAt ?? inboundAt,
+          ...(sentAt ? { lastOutboundAt: sentAt } : {}),
+          // Una cerrada dice cuándo, por qué y quién (ADR 0024): la respondida se resolvió ese día.
+          ...(reply
+            ? {
+                closedAt: new Date(inboundAt.getTime() + 3_600_000),
+                closeReason: "resuelta" as const,
+                ...(reply.by === "user" ? { closedByUserId: input.ownerUserId } : {}),
+              }
+            : {}),
         })
         .returning({ id: conversation.id })
       if (!thread) continue
@@ -189,8 +204,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<void
         body: "Hola, quisiera una cita",
         createdAt: inboundAt,
       })
-      if (!reply) continue
-      const sentAt = new Date(inboundAt.getTime() + reply.seconds * 1000)
+      if (!reply || !sentAt) continue
       await tx.insert(message).values({
         organizationId: input.orgId,
         conversationId: thread.id,

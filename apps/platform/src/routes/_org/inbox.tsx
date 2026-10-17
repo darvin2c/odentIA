@@ -13,7 +13,9 @@ import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
+  ScrollArea,
   Spinner,
+  toast,
 } from "@odentia/ui"
 import {
   Attachment,
@@ -53,7 +55,9 @@ import {
   ConfirmDialog,
   DataRefreshMarker,
   EmptyState,
+  ErrorState,
   FilterBar,
+  LoadingState,
   PageHeader,
   PageShell,
   RowActions,
@@ -119,6 +123,8 @@ import {
   closureBand,
   type ConversationWords,
   conversationWords,
+  fullWhenWords,
+  messageTimeWords,
   pendingWords,
   resolveWords,
 } from "../../lib/conversation-state"
@@ -566,9 +572,33 @@ function InboxPage() {
               searching={search.trim() !== ""}
             />
           ) : showContext ? (
-            (workspace ?? (
-              <p className="p-4 text-sm text-muted-foreground">Cargando contexto…</p>
-            ))
+            (workspace ??
+              // Sin «Contexto» que mostrar (sin `crm.read` o sin la persona del hilo) siempre hay salida al hilo.
+              (!canReadCrm ? (
+                <EmptyState
+                  title="Sin acceso al contexto"
+                  description="Tu rol no ve los datos de la persona en el CRM."
+                  actionLabel="Volver a la conversación"
+                  onAction={closeContextMobile}
+                />
+              ) : contactFallbackQuery.isError ? (
+                <div className="flex flex-col gap-2">
+                  <ErrorState
+                    message="No se pudo cargar el contexto de la persona."
+                    onRetry={() => void contactFallbackQuery.refetch()}
+                  />
+                  <Button variant="ghost" className="min-h-11 self-center" onClick={closeContextMobile}>
+                    Volver a la conversación
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <LoadingState message="Cargando contexto…" />
+                  <Button variant="ghost" className="min-h-11 self-center" onClick={closeContextMobile}>
+                    Volver a la conversación
+                  </Button>
+                </div>
+              )))
           ) : (
             thread
           )}
@@ -771,7 +801,9 @@ function ConversationList({
   searching?: boolean
 }) {
   return (
-    <div className="elevated flex min-h-0 flex-1 flex-col divide-y overflow-y-auto rounded-xl border bg-card">
+    // El desplazamiento de la lista es el de la aplicación (ScrollArea), no la barra nativa.
+    <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
+    <div className="flex flex-col divide-y">
       {items.map((item) => {
         const selected = item.id === selectedId
         const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
@@ -829,9 +861,7 @@ function ConversationList({
         </div>
       ) : null}
       {isLoading && !hasItems && (
-        <p className="p-4 text-sm text-muted-foreground" role="status">
-          Cargando conversaciones…
-        </p>
+        <LoadingState className="m-3" message="Cargando conversaciones…" />
       )}
       {isError && !hasItems && !isLoading && (
         <div className="flex flex-wrap items-center gap-2 p-4">
@@ -884,6 +914,7 @@ function ConversationList({
         </Button>
       )}
     </div>
+    </ScrollArea>
   )
 }
 
@@ -1167,6 +1198,13 @@ function ThreadView({
       )
       setOlder((prev) => [...page.data, ...prev])
       setOlderCursor(page.nextCursor)
+    } catch (error) {
+      // Lo ya cargado se conserva; se avisa y el botón queda para volver a intentarlo.
+      toast.error(
+        error instanceof ApiError && error.shape.message
+          ? error.shape.message
+          : "No se pudieron cargar los mensajes anteriores. Vuelve a intentarlo.",
+      )
     } finally {
       setLoadingOlder(false)
     }
@@ -1175,9 +1213,12 @@ function ThreadView({
   // Sin detalle aún no hay estructura que anticipar; con detalle en caché el
   // refetch (automático o manual) nunca lo retira: sigue visible abajo.
   if (detailQuery.isPending && !detail) {
-    return <p className="p-4 text-sm text-muted-foreground">Cargando…</p>
+    return <LoadingState className="min-h-0 flex-1" message="Cargando la conversación…" />
   }
   if (!detail) {
+    // Solo 404/403 dicen que no está o que no hay acceso; otro fallo (red, servidor) se reintenta.
+    const gone =
+      detailQuery.error instanceof ApiError && (detailQuery.error.status === 404 || detailQuery.error.status === 403)
     return (
       <div className="flex flex-col gap-2 p-4">
         {showBack && (
@@ -1185,17 +1226,24 @@ function ThreadView({
             <ChevronLeft className="size-4" />
           </Button>
         )}
-        <p className="text-sm text-destructive" role="alert">
-          Esta conversación ya no está disponible o no tienes acceso.
-        </p>
-        <span className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => void detailQuery.refetch()}>
-            Reintentar
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            Volver a la bandeja
-          </Button>
-        </span>
+        {gone ? (
+          <EmptyState
+            title="Conversación no disponible"
+            description="Esta conversación ya no está disponible o no tienes acceso."
+            actionLabel="Volver a la bandeja"
+            onAction={onBack}
+          />
+        ) : (
+          <>
+            <ErrorState
+              message="No se pudo cargar la conversación. Revisa la conexión y vuelve a intentarlo."
+              onRetry={() => void detailQuery.refetch()}
+            />
+            <Button variant="ghost" size="sm" className="self-center" onClick={onBack}>
+              Volver a la bandeja
+            </Button>
+          </>
+        )}
       </div>
     )
   }
@@ -1453,7 +1501,9 @@ function ThreadView({
       </ConfirmDialog>
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-        <MessageScroller className="min-h-0 flex-1">
+        {/* El historial conserva siempre un alto útil: la zona de escritura (p. ej. los
+            mensajes aprobados) no puede dejarlo en cero. */}
+        <MessageScroller className="min-h-32 flex-1">
           <MessageScrollerViewport preserveScrollOnPrepend className="bg-canvas/60 p-4">
             {(olderCursor ?? detail.messagesCursor) && (
               <Button
@@ -1533,7 +1583,10 @@ function ThreadView({
       <CorrectDrawer target={correcting} onClose={() => setCorrecting(null)} />
       <LessonDrawer lessonId={lessonId} canWrite={canManageAgent} onClose={() => setLessonId(null)} />
       <AgentPendingBand conversationId={id} attention={threadAttention} canSeeProposals={canSeeProposals} />
-      <div className="border-t p-3">
+      {/* Como mucho el 60 % del hilo y con su propio desplazamiento: con la ventana de WhatsApp
+          cerrada, el aviso y los mensajes aprobados no se comen el historial (antes quedaba en 0 px). */}
+      <ScrollArea className="flex max-h-[60%] min-h-0 flex-col border-t [&_[data-slot=scroll-area-viewport]]:h-auto [&_[data-slot=scroll-area-viewport]]:min-h-0 [&_[data-slot=scroll-area-viewport]]:flex-1">
+      <div className="flex flex-col p-3">
         {detail.contact.isActive === false && (
           <p className="mb-2 text-xs text-muted-foreground">
             Contacto archivado: las conversaciones siguen accesibles, pero reactívalo para iniciar
@@ -1639,6 +1692,7 @@ function ThreadView({
           </div>
         )}
       </div>
+      </ScrollArea>
     </div>
   )
 }
@@ -1766,10 +1820,10 @@ function MessageBubble({
         <div
           className={`flex items-center gap-1 text-xs text-muted-foreground ${out ? "justify-end" : ""}`}
         >
-          {new Date(msg.createdAt).toLocaleTimeString(activeOrgLocale(), {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {/* Fecha cuando no es de hoy y siempre en la zona de la clínica; el título la dice completa. */}
+          <time dateTime={msg.createdAt} title={fullWhenWords(msg.createdAt)}>
+            {messageTimeWords(msg.createdAt)}
+          </time>
           {out && statusIcon(msg.status)}
         </div>
         {onShowTrace ? (

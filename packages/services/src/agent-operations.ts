@@ -3146,6 +3146,22 @@ export async function countAgentModelRunsToday(tx: Db, orgId: string): Promise<n
 }
 
 /**
+ * Corridas con modelo de hoy (zona de la clínica) en las conversaciones de una
+ * persona. Acota a quien escribe sin parar (un bot, una cadena): sin este tope
+ * por persona, un solo número podía agotar el tope diario de la clínica y
+ * dejar sin agente a todos los demás.
+ */
+export async function countContactModelRunsToday(tx: Db, orgId: string, contactId: string): Promise<number> {
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const [row] = await tx.execute<{ count: number }>(sql`
+    select count(*)::int as count from agent_run_ledger l
+    join conversation c on c.id = l.conversation_id and c.organization_id = l.organization_id
+    where l.organization_id = ${orgId} and c.contact_id = ${contactId} and l.llm_calls > 0
+      and (l.started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date`)
+  return row?.count ?? 0
+}
+
+/**
  * El proveedor del modelo no sirve (configuración, credencial rechazada, sin
  * saldo) o se alcanzó el tope diario: aviso a quien administra el agente, uno
  * por problema y día. El del modelo no nombra claves ni variables: la cuenta

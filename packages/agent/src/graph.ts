@@ -77,7 +77,27 @@ interface ThreadMessage {
   direction: string
   senderKind: string
   body: string | null
+  /** «text», «image», «audio» o «document»; ausente en una prueba. */
+  contentType?: string
   createdAt?: string
+}
+
+/**
+ * Lo que el modelo lee de un mensaje. El agente no ve imágenes, no escucha
+ * audios ni abre archivos: se le dice qué llegó para que no finja haberlo
+ * visto. Una nota de voz transcrita ya llega como texto en `body`.
+ */
+const ATTACHMENT_WORDS: Record<string, string> = {
+  image: "una imagen",
+  audio: "un audio",
+  document: "un archivo",
+}
+function messageForModel(item: { contentType?: string; body: string | null }): string {
+  const what = item.contentType ? ATTACHMENT_WORDS[item.contentType] : undefined
+  if (!what) return item.body ?? "[adjunto]"
+  if (item.contentType === "audio" && item.body) return item.body
+  const note = `[Envió ${what} que no puedes ${item.contentType === "audio" ? "escuchar" : "ver"}: no digas que lo revisaste; si hace falta, pide que lo cuente por escrito o pasa el caso al equipo.]`
+  return item.body ? `${note} ${item.body}` : note
 }
 
 interface ThreadContext {
@@ -335,7 +355,7 @@ function trackUsage(ctx: AgentToolCtx, reply: AIMessage): void {
  * no lo imite al escribir.
  */
 function historyToMessages(
-  items: { direction: string; senderKind: string; body: string | null; createdAt?: string }[],
+  items: { direction: string; senderKind: string; body: string | null; contentType?: string; createdAt?: string }[],
   zone: OrgLocale,
 ): BaseMessage[] {
   const stamp = (iso: string | undefined): string => {
@@ -353,7 +373,7 @@ function historyToMessages(
   }
   const out: BaseMessage[] = []
   for (const item of items) {
-    const text = item.body ?? "[adjunto]"
+    const text = item.direction === "in" ? messageForModel(item) : (item.body ?? "[adjunto]")
     if (item.direction === "in") {
       out.push(new HumanMessage({ content: `${stamp(item.createdAt)}${text}` }))
     } else if (item.senderKind === "agent") {

@@ -83,7 +83,10 @@ function dayKey(date: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date)
 }
 
-/** Cuándo pasó algo, corto y en la hora de la clínica: «hoy 09:10», «ayer 18:42», «12/3 18:42». */
+/**
+ * Cuándo pasó algo, corto y en la hora de la clínica: «hoy 09:10», «ayer 18:42»,
+ * «12/3 18:42» y, si fue otro año, «12/3/2025 18:42».
+ */
 export function whenWords(iso: string, now: Date = new Date()): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ""
@@ -92,8 +95,30 @@ export function whenWords(iso: string, now: Date = new Date()): string {
   const day = dayKey(date, timeZone)
   if (day === dayKey(now, timeZone)) return `hoy ${time}`
   if (day === dayKey(new Date(now.getTime() - 86_400_000), timeZone)) return `ayer ${time}`
-  const date_ = date.toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "numeric", timeZone })
+  const otherYear = day.slice(0, 4) !== dayKey(now, timeZone).slice(0, 4)
+  const date_ = date.toLocaleDateString(activeOrgLocale(), {
+    day: "numeric",
+    month: "numeric",
+    ...(otherYear ? { year: "numeric" as const } : {}),
+    timeZone,
+  })
   return `${date_} ${time}`
+}
+
+/**
+ * Hora de un mensaje en el hilo: solo la hora si es de hoy («09:10»); si no,
+ * con su día como `whenWords` («ayer 18:42», «12/3 18:42»).
+ */
+export function messageTimeWords(iso: string, now: Date = new Date()): string {
+  const words = whenWords(iso, now)
+  return words.startsWith("hoy ") ? words.slice("hoy ".length) : words
+}
+
+/** Fecha y hora completas en la zona de la clínica, para el título de un mensaje. */
+export function fullWhenWords(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toLocaleString(activeOrgLocale(), { dateStyle: "full", timeStyle: "short", timeZone: activeOrgTimeZone() })
 }
 
 /** La franja del hilo cerrado: cómo y cuándo se cerró. */

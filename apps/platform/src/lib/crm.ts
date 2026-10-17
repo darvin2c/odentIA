@@ -1,7 +1,7 @@
 import { canAccess } from "@odentia/auth/permissions"
 import { getRouteApi } from "@tanstack/react-router"
 import { useCallback } from "react"
-import { activeOrgLocale } from "./locale"
+import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 const orgRouteApi = getRouteApi("/_org")
 
@@ -224,7 +224,10 @@ export function useMemberName(): (userId: string) => string {
     members.find((member) => member.userId === userId)?.user.name ?? "Profesional fuera del equipo"
 }
 
-/** Hace cuánto (corto, formato de la clínica): "hace 5 min", "ayer", "12/03". */
+/**
+ * Hace cuánto (corto, formato y zona de la clínica): "hace 5 min", "ayer",
+ * "12/3" y, si fue otro año, "12/3/2025".
+ */
 export function timeAgo(iso: string | null): string {
   if (!iso) return ""
   const diff = Date.now() - new Date(iso).getTime()
@@ -237,7 +240,15 @@ export function timeAgo(iso: string | null): string {
   const days = Math.floor(hours / 24)
   if (days === 1) return "ayer"
   if (days < 7) return `hace ${days} días`
-  return new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "numeric" })
+  const timeZone = activeOrgTimeZone()
+  const year = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(date)
+  const date = new Date(iso)
+  return date.toLocaleDateString(activeOrgLocale(), {
+    day: "numeric",
+    month: "numeric",
+    ...(year(date) !== year(new Date()) ? { year: "numeric" as const } : {}),
+    timeZone,
+  })
 }
 
 export interface ContactListItem {
