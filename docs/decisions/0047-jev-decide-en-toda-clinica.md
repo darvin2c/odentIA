@@ -26,6 +26,8 @@ Toda clínica nacía sin modelo de decisión (`agent_config.decision_provider = 
   - API y worker también lo dicen en el registro al arrancar.
   - La clínica no recibe aviso: no puede arreglarlo y su agente sigue respondiendo.
   - Con el modelo de demostración (`LLM_MODEL=fake`) no aplica.
+- **Jev no debe retrasar la respuesta:** camino y conocimiento se le preguntan uno tras otro antes de responder. El plazo por llamada baja de 5 s a 2 s (`DECISIONS_TIMEOUT_MS`): con Jev colgado la respuesta se retrasa como mucho 4 s, y Jev tarda 70–500 ms por decisión según TypeSafe. El modelo que escribe, cuando responde preguntas cerradas, conserva 5 s.
+- **Si Jev no responde, el interés lo decide el modelo que escribe:** la misma pregunta de sí o no, una vez, con los mismos criterios. La regla por palabras («preguntó el precio o la disponibilidad») solo entiende español y deja pasar «quiero ponerme brackets»; sin anotar nada, la clínica pierde el interés mientras Jev falla. Va después de la respuesta: la persona no espera.
 - **odentIA puede apagarlo en una clínica concreta:** `decisionProvider` sigue en `PUT /agent`, como prevé 0007 si se equivoca estando seguro. Ninguna pantalla de la clínica lo muestra.
 
 ## Alternativas descartadas

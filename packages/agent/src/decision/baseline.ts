@@ -22,7 +22,10 @@ export function createBaselineDecisionModel(
       const startedAt = Date.now()
       const spec = questions
         .map((q) => {
-          if (q.kind === "yesno") return `- "${q.id}": true or false. ${q.instructions}`
+          // Los mismos criterios que recibe Jev: el respaldo decide con la misma regla.
+          if (q.kind === "yesno") {
+            return `- "${q.id}": true or false. ${q.instructions}${q.criteria ? ` True: ${q.criteria.yes} False: ${q.criteria.no}` : ""}`
+          }
           if (q.kind === "choice") {
             return `- "${q.id}": exactly one of ${q.options.map((o) => JSON.stringify(o.value)).join(", ")}. ${q.instructions}${q.options.some((o) => o.description) ? ` Options: ${q.options.map((o) => `${o.value} = ${o.description ?? o.value}`).join("; ")}.` : ""}`
           }

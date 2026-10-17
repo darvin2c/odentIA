@@ -586,6 +586,16 @@ async function attendAgentRun(
           triggerMessageId: inboundMessageId,
           said: burstTexts.join("\n"),
           decision,
+          // Si Jev no se pudo preparar o falla, la misma pregunta la responde
+          // el modelo que escribe. Con la línea base elegida ya respondió ese.
+          ...(cfg.decisionProvider !== "none" && cfg.decisionProvider !== "baseline"
+            ? {
+                fallback: async () =>
+                  runtime.createDecisionModel
+                    ? runtime.createDecisionModel("baseline")
+                    : createDecisionModel("baseline", runtime.decisions ?? {}, spec),
+              }
+            : {}),
         }).catch((error: unknown) => {
           console.error(`agent: interés no anotado (${error instanceof Error ? error.message : String(error)})`)
         })

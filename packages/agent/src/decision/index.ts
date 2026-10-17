@@ -21,11 +21,22 @@ export type DecisionProvider = (typeof DECISION_PROVIDERS)[number]
 export interface PlatformDecisions {
   jev?: { apiKey: string; baseUrl?: string; model?: string }
   openai?: { apiKey: string; baseUrl?: string; model?: string }
-  /** Plazo total por llamada; acota también a la línea base. */
+  /** Plazo total por llamada; la línea base nunca baja de `CHAT_DECISION_TIMEOUT_MS`. */
   timeoutMs?: number
 }
 
-const DEFAULT_TIMEOUT_MS = 5_000
+/**
+ * Camino y conocimiento se deciden uno tras otro antes de responder: con Jev
+ * colgado, lo peor son 4 s más de espera. Jev tarda 70–500 ms por decisión
+ * (TypeSafe); `latency_ms` del libro de decisiones dice cuánto en la práctica.
+ */
+const DEFAULT_TIMEOUT_MS = 2_000
+/**
+ * El modelo que escribe no es un clasificador y tarda más: cuando responde
+ * preguntas cerradas (línea base) no baja de este plazo aunque el de los
+ * modelos de decisión sea menor.
+ */
+const CHAT_DECISION_TIMEOUT_MS = 5_000
 
 /**
  * Toda clínica nace con Jev (ADR 0047): sin `JEV_API_KEY` cada mensaje se
@@ -82,8 +93,9 @@ async function buildDecisionModel(
       return null
     case "baseline": {
       if (chat.provider === "fake") return createFakeDecisionModel()
-      const model = await createConfiguredChatModel({ ...chat, maxRetries: 0, timeoutMs })
-      return createBaselineDecisionModel(model, chat.modelName, timeoutMs)
+      const chatTimeoutMs = Math.max(timeoutMs, CHAT_DECISION_TIMEOUT_MS)
+      const model = await createConfiguredChatModel({ ...chat, maxRetries: 0, timeoutMs: chatTimeoutMs })
+      return createBaselineDecisionModel(model, chat.modelName, chatTimeoutMs)
     }
     case "jev":
       if (!platform.jev) throw new DecisionError("CONFIG", "La plataforma no tiene credenciales de Jev (JEV_API_KEY)")
