@@ -38,7 +38,8 @@ const items = hrefs.flatMap((href) => (LINKS[href] ? [{ href, ...LINKS[href] }] 
   .lk strong { font-size: 17px; }
   .lk span { color: var(--muted); font-size: 15px; line-height: 1.5; }
   .lk .arr { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: var(--teal); font-size: 20px; }
-  .lk.price { background: var(--night); box-shadow: none; }
+  /* Precios va siempre en oscuro, también dentro de una sección blanca. */
+  .lk.price, .section-white .lk.price { background: var(--night); box-shadow: none; }
   .lk.price strong { color: #fff; }
   .lk.price span { color: var(--on-night-2); }
   .lk.price .arr { color: var(--sky); }
