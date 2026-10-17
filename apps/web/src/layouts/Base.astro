@@ -15,7 +15,9 @@ interface Props {
 }
 
 const { title, description, jsonLd, header = "dark", noindex = false } = Astro.props
-const canonical = new URL(Astro.url.pathname, Astro.site)
+// Al compilar la ruta es el archivo (/precios.html, /index.html); la dirección pública,
+// la del mapa del sitio y los enlaces, va sin .html.
+const canonical = new URL(Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/", Astro.site)
 const fullTitle = title.includes("odentIA") ? title : `${title} · odentIA`
 const org = {
   "@context": "https://schema.org",

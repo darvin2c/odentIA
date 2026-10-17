@@ -39,8 +39,6 @@ pnpm --filter @odentia/db seed:procedures
 pnpm db:seed
 ```
 
-Un preview de PR abierto antes de esa fecha conserva su volumen: cerrarlo y reabrirlo (ver `docs/deployment.md`).
-
 ### Administración de odentIA
 
 `apps/admin` usa la API compartida, no un backend ni una base independientes.
