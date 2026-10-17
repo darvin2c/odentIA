@@ -1,3 +1,5 @@
+import type { AgentLlm } from "./crm"
+
 /**
  * La urgencia de un caso que pasó al equipo, en una palabra. La insignia
  * (`HandoffUrgency`) le suma icono y color; donde no cabe, va la palabra sola.
@@ -238,15 +240,41 @@ export interface AgentLearned {
 /** Clase del problema del proveedor del modelo; nunca su texto. */
 export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
-/** Qué pasó con el proveedor, con palabras de la clínica; el texto del proveedor no llega a la pantalla. */
 /**
- * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede arreglarla,
- * así que se dice qué pasa con los mensajes y qué sí puede hacer.
+ * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede
+ * arreglar una clave, un saldo o un rechazo, así que nunca ve cuál fue. Se
+ * dice qué pasa con los mensajes y que odentIA ya lo sabe (el caso
+ * automático en Soporte lleva el motivo técnico).
  */
-export const PROVIDER_PROBLEM: Record<AgentProviderProblem, string> = {
-  rechazado: "El modelo no está respondiendo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
-  sin_saldo: "La cuenta de odentIA para este modelo se quedó sin saldo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
-  sin_configurar: "Este modelo no está disponible por ahora. Elige el otro en Modelo del agente.",
+export const AGENT_MODEL_DOWN = {
+  title: "El agente no puede responder ahora",
+  body: "Los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+  /** En una línea: «El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.» */
+  line: "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+} as const
+
+/**
+ * «El modelo responde» (`GET /api/agent/model`): el modelo elegido y, si no
+ * responde, si el otro sí. El servidor lo guarda 10 minutos; nunca entrega el
+ * motivo técnico.
+ */
+export interface AgentModelStatus {
+  llm: AgentLlm
+  responds: boolean
+  other: { llm: AgentLlm; responds: boolean } | null
+  checkedAt: string
+}
+
+export const MODEL_CHECK_TEXT = {
+  checking: "Comprobando el modelo…",
+  otherWorks: "El modelo de odentIA no está disponible ahora. Ya avisamos a odentIA; mientras tanto puedes usar el otro.",
+  noneWorks: "Ningún modelo de odentIA responde ahora. Ya avisamos a odentIA y te escribimos cuando vuelva.",
+  unreachable: "No pudimos comprobar el modelo. Revisa tu conexión y vuelve a intentarlo.",
+} as const
+
+/** Lo que dice la comprobación cuando el modelo elegido no responde. */
+export function modelDownText(status: AgentModelStatus): string {
+  return status.other?.responds ? MODEL_CHECK_TEXT.otherWorks : MODEL_CHECK_TEXT.noneWorks
 }
 
 export interface AgentOverview {

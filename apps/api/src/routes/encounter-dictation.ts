@@ -1,5 +1,5 @@
-import { describeProviderProblem, extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
-import { withOrgContext } from "@odentia/db"
+import { extractDictation, isProviderConfigError, meterAiUse, type PlatformLlm } from "@odentia/agent"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertAgentsNotPaused,
   confirmDictationSuggestion,
@@ -18,6 +18,7 @@ import {
 import { Hono } from "hono"
 import { z } from "zod"
 import { orgContextOf } from "../lib/context.js"
+import { modelProblemResponse } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -37,6 +38,8 @@ const patchInput = z.record(z.string().max(40), z.union([z.string().max(10_000),
 
 export interface EncounterDictationDeps extends CrmDeps {
   llm: PlatformLlm
+  /** Rol owner: el caso «Modelo sin responder» en Soporte de odentIA. */
+  ownerDb?: Db
 }
 
 /**
@@ -114,10 +117,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         return { ...saved, sources, model: extracted.model }
       })
     } catch (error) {
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El asistente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
       throw error
     }
   })

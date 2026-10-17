@@ -325,6 +325,8 @@ async function requireCaseReader(
   userId: string,
 ): Promise<void> {
   if (kase.openedBy === userId) return
+  // Un caso sin autor es automático de odentIA: no es de ninguna clínica.
+  if (kase.openedBy === null) throw notFound("Caso")
   if (!(await isOrgOwnerOrAdmin(tx, userId, orgId))) throw notFound("Caso")
   const [opener] = await tx
     .select({ id: member.id })

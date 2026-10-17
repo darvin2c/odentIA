@@ -559,19 +559,25 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
         .from(agentHandoff)
         .where(eq(agentHandoff.conversationId, first.conversationId)),
     )
-    expect(handoff?.reason).toBe("El agente no puede usar el proveedor del modelo; revisa Configuración › Agente")
+    expect(handoff?.reason).toBe("El agente no puede usar el modelo ahora; ya avisamos a odentIA")
     expect(handoff?.summary).not.toContain("Incorrect API key")
     // Segunda conversación el mismo día: otra derivación, pero un solo aviso.
     const second = await ingestText("tg:ag-401-b", "evt-ag-401-b", "Buenas")
     expect(await runAgent(second.conversationId, second.messageId, 0, platform)).toBe("done")
     const notices = await withOrgContext(appDb, "org_a", (tx) =>
       tx
-        .select({ title: workspaceNotification.title, href: workspaceNotification.href })
+        .select({ title: workspaceNotification.title, body: workspaceNotification.body, href: workspaceNotification.href })
         .from(workspaceNotification)
-        .where(and(eq(workspaceNotification.userId, adminId), eq(workspaceNotification.href, "/settings/agent"))),
+        .where(and(eq(workspaceNotification.userId, adminId), eq(workspaceNotification.subject, "modelo-del-agente"))),
     )
-    // Las derivaciones generan sus propios avisos; el del proveedor es uno solo.
-    expect(notices).toEqual([{ title: "El agente no puede usar el modelo", href: "/settings/agent" }])
+    // Las derivaciones generan sus propios avisos; el del proveedor es uno solo, sin claves ni variables, y lleva a Recepción.
+    expect(notices).toEqual([
+      {
+        title: "El agente no puede usar el modelo",
+        body: "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA.",
+        href: "/agent/recepcion",
+      },
+    ])
   } finally {
     await provider.close()
   }
@@ -601,7 +607,7 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
       tx
         .select({ title: workspaceNotification.title })
         .from(workspaceNotification)
-        .where(and(eq(workspaceNotification.href, "/settings/agent"), eq(workspaceNotification.title, "El proveedor del agente no tiene saldo"))),
+        .where(and(eq(workspaceNotification.href, "/agent/recepcion"), eq(workspaceNotification.title, "El agente no puede usar el modelo"))),
     )
     expect(notices.length).toBeGreaterThan(0)
   } finally {

@@ -1,5 +1,4 @@
 import {
-  describeProviderProblem,
   isProviderConfigError,
   meterAiUse,
   type PlatformDecisions,
@@ -7,7 +6,7 @@ import {
   simulateAgentSandbox,
   simulateAgentTurn,
 } from "@odentia/agent"
-import { withOrgContext } from "@odentia/db"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   assertAgentTestBudget,
   confirmProposalByContact,
@@ -34,12 +33,15 @@ import {
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
+import { modelProblemResponse } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 export interface AgentOpsDeps extends CrmDeps {
   /** Proveedor de la plataforma; la configuración de la organización prevalece. */
   llm: PlatformLlm
+  /** Rol owner: el caso «Modelo sin responder» en Soporte de odentIA. */
+  ownerDb?: Db
   /** Credenciales del modelo de decisión: «Probar» elige el camino igual que una conversación real. */
   decisions?: PlatformDecisions
   embedder?: SearchEmbedder
@@ -347,8 +349,8 @@ const sandboxInput = z.object({
 
   /**
    * «Probar»: un turno de una conversación de prueba, sin hilo ni persona
-   * real. No envía ni escribe; cuenta que la clínica probó a su agente y lo
-   * que gastó, dentro del tope de pruebas (ADR 0031).
+   * real. No envía ni escribe; cuenta que la clínica probó a su agente (si
+   * el modelo respondió) y lo que gastó, dentro del tope de pruebas (ADR 0031).
    */
   app.post("/sandbox", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
@@ -365,14 +367,12 @@ const sandboxInput = z.object({
             { orgId, ...parsed.data },
           ),
         )
-        await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
+        // «Lo probaste» cuenta solo las pruebas que el modelo respondió.
+        if (result.modelAnswered) await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
         return result
       })
     } catch (error) {
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "agente")
       throw error
     }
   })
@@ -402,10 +402,7 @@ const sandboxInput = z.object({
       // Proveedor inutilizable (configuración, credencial, cuota): es un
       // estado de la organización, no un error del servidor, y nunca se
       // reenvía el cuerpo crudo del proveedor.
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "agente")
       throw error
     }
   })

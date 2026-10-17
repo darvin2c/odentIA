@@ -1,3 +1,4 @@
+import { fakeModelStartProblem } from "@odentia/agent"
 import { z } from "zod"
 
 const envSchema = z.object({
@@ -58,6 +59,8 @@ const envSchema = z.object({
    * `LLM_MODEL=fake`: modelo determinista de desarrollo y pruebas (otro valor no tiene efecto).
    */
   LLM_MODEL: z.string().optional(),
+  /** La imagen lo fija en `production`; desarrollo y pruebas lo dejan vacío o en `test`. */
+  NODE_ENV: z.string().optional(),
   LLM_OPENAI_API_KEY: z.string().optional(),
   LLM_OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
   LLM_ANTHROPIC_API_KEY: z.string().optional(),
@@ -82,6 +85,10 @@ const envSchema = z.object({
   EMBEDDINGS_API_KEY: z.string().optional().default(""),
   EMBEDDINGS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),
   PORT: z.coerce.number().int().default(3001),
+}).superRefine((data, ctx) => {
+  // Producción no arranca con el modelo de demostración (ver `fakeModelStartProblem`).
+  const problem = fakeModelStartProblem(data, data.CHANNEL_VALIDATE_EXTERNAL !== "false")
+  if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
 })
 
 function loadEnv() {

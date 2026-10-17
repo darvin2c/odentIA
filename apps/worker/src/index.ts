@@ -51,6 +51,8 @@ await setupAgentMemory(ownerDb)
 const embedder = embedderFromEnv(env)
 const agentRuntime: AgentRuntime = {
   checkpointer,
+  // Un modelo que no responde abre el caso automático en Soporte de odentIA.
+  ownerDb,
   publicUrl: { webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN },
   // Reenviar un presupuesto lleva su PDF.
   storage,

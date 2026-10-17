@@ -176,7 +176,8 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     })
     .from(supportCase)
     .leftJoin(organization, eq(organization.id, supportCase.organizationId))
-    .innerJoin(user, eq(user.id, supportCase.openedBy))
+    // Sin autor: el caso automático de odentIA («Modelo sin responder»).
+    .leftJoin(user, eq(user.id, supportCase.openedBy))
     .where(eq(supportCase.id, notice.caseId))
     .limit(1)
   const omit = async (reason: string) => {
@@ -218,12 +219,13 @@ export async function claimSupportNotice(ownerDb: Db, id: string): Promise<Claim
     caseId: kase.id,
     to,
     organizationId: kase.organizationId,
-    clinicName: row.clinicName,
+    // El automático no es de una clínica: su título la nombra («Modelo sin responder · Clínica Smile»).
+    clinicName: row.clinicName ?? (kase.openedBy === null ? kase.question.split(" · ").slice(1).join(" · ") || null : null),
     clinicSlug: row.clinicSlug,
     caseKind,
     screen: topic ? helpTopicLabel(topic) : kase.screen,
     topic: topic?.title ?? kase.screen,
-    who: row.openerName,
+    who: row.openerName ?? "odentIA",
     role: kase.role,
   }
 }

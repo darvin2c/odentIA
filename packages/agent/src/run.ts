@@ -7,7 +7,9 @@ import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
+  AGENT_LLMS,
   type AgentConfig,
+  type AgentLlm,
   countAgentModelRunsToday,
   askGeneralPermissionAfterBooking,
   getAgentSpendGate,
@@ -23,6 +25,7 @@ import {
   nextAgentOpening,
   notifyAgentProviderProblem,
   type RecordRunInput,
+  reportModelOutage,
   recordAgentRun,
   type SearchEmbedder,
   type Storage,
@@ -84,6 +87,11 @@ export interface AgentRuntime {
    */
   storage?: Storage
   secretsKey: Buffer
+  /**
+   * Rol owner: con él, un modelo que no responde abre (o suma la clínica a)
+   * el caso automático «Modelo sin responder» en Soporte de odentIA.
+   */
+  ownerDb?: Db
   callbacks?: Callbacks
   /** Reloj de la corrida (pruebas); sin él, la hora real. */
   now?: () => Date
@@ -98,9 +106,9 @@ function handoffReasonFor(problem: ProviderProblem): string {
     case "DAILY_LIMIT":
       return "El agente alcanzó su tope diario de corridas"
     case "PROVIDER_QUOTA":
-      return "El proveedor del modelo del agente no tiene saldo o cuota"
+      return "El proveedor del modelo del agente no tiene saldo o cuota; ya avisamos a odentIA"
     default:
-      return "El agente no puede usar el proveedor del modelo; revisa Configuración › Agente"
+      return "El agente no puede usar el modelo ahora; ya avisamos a odentIA"
   }
 }
 
@@ -277,6 +285,8 @@ async function attendAgentRun(
   // Modelo resuelto, para registrarlo aunque falle antes o después.
   let effectiveModel = llmModelName(DEFAULT_AGENT_LLM, runtime.platform)
   let configProblem: ProviderProblem | null = null
+  // Modelo que eligió la clínica: el caso de Soporte dice cuál no responde.
+  let runLlm: AgentLlm | null = null
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
@@ -284,6 +294,7 @@ async function attendAgentRun(
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
     const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
+      runLlm = cfg.llm
       try {
         return resolveLlmSpec(cfg, runtime.platform)
       } catch (error) {
@@ -688,6 +699,20 @@ async function attendAgentRun(
    */
   async function finishWithProviderProblem(problem: ProviderProblem): Promise<"done"> {
     await withOrgContext(db, orgId, (tx) => notifyAgentProviderProblem(tx, orgId, problem)).catch(() => {})
+    // El aviso a la clínica dice «Ya avisamos a odentIA»: el caso de Soporte lleva el motivo técnico.
+    if (problem.code !== "DAILY_LIMIT" && runtime.ownerDb && runLlm) {
+      const llm: AgentLlm = runLlm
+      await reportModelOutage(runtime.ownerDb, {
+        orgId,
+        llm,
+        llmLabel: AGENT_LLMS.find((option) => option.id === llm)?.label ?? llm,
+        code: problem.code,
+        detail: problem.detail,
+        at: startedAt,
+      }).catch((error: unknown) => {
+        console.error(`agent: caso «Modelo sin responder» sin abrir (${error instanceof Error ? error.message : String(error)})`)
+      })
+    }
     const toolCtx = baseToolCtx(db, orgId, conversationId, "", runtime.secretsKey, {
       triggerId: inboundMessageId,
     })
@@ -826,6 +851,12 @@ export interface SandboxTurn {
 }
 
 export interface SandboxResult extends SimulationResult {
+  /**
+   * El modelo que escribe contestó en este turno. Los caminos que no lo llaman
+   * (texto fijo, derivar sin redactar) no cuentan: «Lo probaste» solo suma
+   * las pruebas que el modelo respondió.
+   */
+  modelAnswered: boolean
   /** Lo que hizo en este turno, dicho para quien prueba. */
   did: string[]
   /** Lo que queda esperando tras este turno y quién lo decide. */
@@ -914,6 +945,7 @@ export async function simulateAgentSandbox(
       basis: [],
       checks: [],
       did: ["Respondió con el texto fijo para lo que no es de la clínica, sin llamar al modelo que escribe."],
+      modelAnswered: false,
       waiting: [],
       state,
       inputTokens: null,
@@ -931,6 +963,7 @@ export async function simulateAgentSandbox(
       basis: [],
       checks: [],
       did: ["Pasó el caso a una persona sin redactar respuesta: el mensaje lo pide o no le corresponde atenderlo."],
+      modelAnswered: false,
       waiting: [],
       state,
       inputTokens: null,
@@ -957,6 +990,7 @@ export async function simulateAgentSandbox(
     basis: toolCtx.basis ?? [],
     checks: toolCtx.lastChecks ?? [],
     did: toolCtx.toolsUsed.map((name) => TOOL_ACTION_LABEL[name]).filter((label): label is string => Boolean(label)),
+    modelAnswered: replies.length > 0,
     waiting,
     state,
     inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,

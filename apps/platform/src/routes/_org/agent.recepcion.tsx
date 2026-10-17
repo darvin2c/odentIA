@@ -28,6 +28,7 @@ import { AgentSandbox } from "../../components/agent/sandbox"
 import { TurnOnDrawer } from "../../components/agent/turn-on-drawer"
 import { useAgentPanel } from "../../components/agent-panel"
 import {
+  AGENT_MODEL_DOWN,
   type AgentFunction,
   type AgentOverview,
   type AgentRoles,
@@ -431,6 +432,13 @@ function ReceptionPage() {
           )
         }
       />
+
+      {/* El modelo dejó de responder: los casos pasan al equipo y odentIA ya tiene el caso. Se va solo cuando vuelve a responder. */}
+      {overview.enabled && overview.provider.problem ? (
+        <p role="alert" className={`rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm font-semibold ${besideTest}`}>
+          {AGENT_MODEL_DOWN.line}
+        </p>
+      ) : null}
 
       {/* Hoy: lo que pasó en conversaciones, no en mensajes. En teléfono va resumido en la cabecera. */}
       <section

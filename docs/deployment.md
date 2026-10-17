@@ -64,10 +64,24 @@ administrativas ausentes. El bootstrap nominal y TOTP se describen en
 La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta
 (`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`). API y
 worker leen `LLM_OPENAI_API_KEY` y `LLM_ANTHROPIC_API_KEY`; sin la del proveedor
-del modelo elegido, el agente deriva cada caso y avisa a quien lo administra
-nombrando la variable que falta. `LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL`
-solo hacen falta con una pasarela propia. `LLM_MODEL=fake` es solo para previews
-y pruebas.
+del modelo elegido, Recepción no se enciende («El modelo responde»), el agente
+deriva cada caso y Soporte del back-office recibe el caso automático «Modelo sin
+responder» con la variable que falta. La clínica nunca ve la variable.
+`LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL` solo hacen falta con una
+pasarela propia. `LLM_MODEL=fake` es solo para previews y pruebas: con
+`NODE_ENV=production` y canales reales (`CHANNEL_SENDER_MODE=live` en el worker,
+`CHANNEL_VALIDATE_EXTERNAL` distinto de `false` en la API) ni la API ni el worker
+arrancan con él. Las previews corren con la misma imagen (`NODE_ENV=production`)
+pero con canales simulados, así que siguen usándolo.
+
+### Búsqueda con vectores del agente
+
+API y worker leen `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL` y `EMBEDDINGS_API_KEY`
+(cualquier endpoint compatible con OpenAI; `EMBEDDINGS_TIMEOUT_MS` opcional) y la
+base necesita la extensión `vector`. Sin `EMBEDDINGS_MODEL` el agente busca solo
+por palabras: el banco de la ADR 0021 midió 11 de 35 aciertos así, contra 32 de 35
+con vectores. `fake` vectoriza por letras sin red y es solo para previews y
+pruebas. Detalle en `development.md`.
 
 ### SMTP
 

@@ -13,7 +13,7 @@ import {
   switchableFunctions,
   toolsDisabledBy,
 } from "./agent-roles.js"
-import { getAgentConfig, upsertAgentConfig } from "./agentConfig.js"
+import { type AgentModelCheck, getAgentConfig, MODEL_NOT_RESPONDING, upsertAgentConfig } from "./agentConfig.js"
 import { createConnection } from "./connections.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
 import { KNOWLEDGE_BASICS } from "./knowledge.js"
@@ -276,7 +276,7 @@ describe("resumen del agente", () => {
     expect((await run((tx) => getAgentOverview(tx, OTHER), OTHER)).learned.latest).toBeNull()
   })
 
-  it("avisa de un problema del proveedor solo si es lo último que pasó y nadie tocó la configuración", async () => {
+  it("avisa de un problema del proveedor solo si es lo último que pasó", async () => {
     const provider = async () => (await run((tx) => getAgentOverview(tx, ORG))).provider
     const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000)
     const entry = (status: string, startedAt: Date, extra: { error?: string; llmCalls?: number } = {}) =>
@@ -300,14 +300,58 @@ describe("resumen del agente", () => {
     expect((await provider()).problem).toBeNull()
   })
 
-  it("cambiar la configuración del agente retira el aviso hasta el siguiente intento", async () => {
-    const provider = async () => (await run((tx) => getAgentOverview(tx, OTHER), OTHER)).provider
+  it("el aviso sigue al guardar otro ajuste y se va solo cuando el modelo vuelve a responder", async () => {
+    const failedAt = new Date(Date.now() - 60_000)
+    const provider = async (modelCheck?: AgentModelCheck) =>
+      (await run((tx) => getAgentOverview(tx, OTHER, modelCheck ? { modelCheck } : {}), OTHER)).provider
     await ownerDb.insert(agentRunLedger).values({
-      organizationId: OTHER, model: "fake", status: "error", startedAt: new Date(Date.now() - 60_000), error: "PROVIDER_REJECTED: HTTP 401",
+      organizationId: OTHER, model: "fake", status: "error", startedAt: failedAt, error: "PROVIDER_REJECTED: HTTP 401",
     })
     expect((await provider()).problem).toBe("rechazado")
+    // Apagar una función o cambiar el tono no arregla la cuenta de odentIA.
     await run((tx) => upsertAgentConfig(tx, OTHER, { tone: "neutro" }), OTHER)
-    expect((await provider()).problem).toBeNull()
+    expect(await provider()).toEqual({ problem: "rechazado", at: failedAt.toISOString() })
+    // Una comprobación anterior al fallo, o una que dice que no responde, no lo retira.
+    const asked: string[] = []
+    const check = (responds: boolean, checkedAt: Date): AgentModelCheck => async (llm) => {
+      asked.push(llm)
+      return { responds, checkedAt: checkedAt.toISOString() }
+    }
+    expect((await provider(check(true, new Date(failedAt.getTime() - 1000)))).problem).toBe("rechazado")
+    expect((await provider(check(false, new Date()))).problem).toBe("rechazado")
+    // Una comprobación que falla no inventa nada: queda lo que dice el libro.
+    expect((await provider(async () => { throw new Error("sin red") })).problem).toBe("rechazado")
+    // El modelo responde después del fallo: el aviso se va.
+    expect(await provider(check(true, new Date()))).toEqual({ problem: null, at: null })
+    expect(asked).toEqual(["chatgpt_6", "chatgpt_6", "chatgpt_6"])
+  })
+
+  it("encender exige un modelo que responda; los demás ajustes no lo comprueban", async () => {
+    const asked: string[] = []
+    const check = (responds: boolean): AgentModelCheck => async (llm) => {
+      asked.push(llm)
+      return { responds, checkedAt: new Date().toISOString() }
+    }
+    await expect(run((tx) => upsertAgentConfig(tx, OTHER, { enabled: true }, { modelCheck: check(false) }), OTHER)).rejects.toMatchObject({
+      code: MODEL_NOT_RESPONDING,
+      status: 409,
+    })
+    expect((await run((tx) => getAgentConfig(tx, OTHER), OTHER)).enabled).toBe(false)
+    // Encender con otro modelo comprueba ese.
+    await expect(run((tx) => upsertAgentConfig(tx, OTHER, { enabled: true, llm: "claude_5_5" }, { modelCheck: check(false) }), OTHER)).rejects.toMatchObject({
+      code: MODEL_NOT_RESPONDING,
+    })
+    expect((await run((tx) => getAgentConfig(tx, OTHER), OTHER)).llm).toBe("chatgpt_6")
+    expect((await run((tx) => upsertAgentConfig(tx, OTHER, { enabled: true }, { modelCheck: check(true) }), OTHER)).enabled).toBe(true)
+    // Encendido, cambiar a un modelo que no responde también se rechaza.
+    await expect(run((tx) => upsertAgentConfig(tx, OTHER, { llm: "claude_5_5" }, { modelCheck: check(false) }), OTHER)).rejects.toMatchObject({
+      code: MODEL_NOT_RESPONDING,
+    })
+    // Apagar o cambiar el tono no llama al modelo.
+    await run((tx) => upsertAgentConfig(tx, OTHER, { tone: "formal" }, { modelCheck: check(false) }), OTHER)
+    await run((tx) => upsertAgentConfig(tx, OTHER, { enabled: false }, { modelCheck: check(false) }), OTHER)
+    expect(asked).toEqual(["chatgpt_6", "claude_5_5", "chatgpt_6", "claude_5_5"])
+    expect((await run((tx) => getAgentConfig(tx, OTHER), OTHER)).enabled).toBe(false)
   })
 
   it("contar una prueba no enciende el agente ni cambia su configuración", async () => {

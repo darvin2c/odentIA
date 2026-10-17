@@ -1,6 +1,7 @@
 process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { randomUUID } from "node:crypto"
 
+import type { PlatformLlm } from "@odentia/agent"
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import {
@@ -65,7 +66,7 @@ function stubOrg(role: string) {
   }
 }
 
-function buildApp(role: string): Hono {
+function buildApp(role: string, llm: PlatformLlm = { fake: true }): Hono {
   const deps: CrmDeps = {
     db: appDb,
     secretsKey: KEY,
@@ -80,10 +81,9 @@ function buildApp(role: string): Hono {
   app.route("/pipelines", createPipelinesRoute(deps))
   app.route("/opportunities", createOpportunitiesRoute(deps))
   app.route("/channels/connections", createConnectionsRoute(deps))
-  const llm = { fake: true }
-  app.route("/agent/learning", createAgentLearningRoute({ ...deps, llm }))
-  app.route("/agent", createAgentRoute({ ...deps, llm }))
-  app.route("/agent", createAgentOpsRoute({ ...deps, llm }))
+  app.route("/agent/learning", createAgentLearningRoute({ ...deps, llm, ownerDb }))
+  app.route("/agent", createAgentRoute({ ...deps, llm, ownerDb }))
+  app.route("/agent", createAgentOpsRoute({ ...deps, llm, ownerDb }))
   app.route("/tasks", createTasksRoute(deps))
   app.route("/fields", createFieldsRoute(deps))
   return app
@@ -822,6 +822,52 @@ it("fichas, resumen y prueba del agente", async () => {
   expect(noAccess.status).toBe(403)
 
   await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "equilibrado" }) })
+})
+
+it("sin un modelo que responda no se enciende, «Probar» no cuenta y odentIA recibe el caso", async () => {
+  // Sin las claves de la plataforma: ningún modelo responde y no se llama a ningún proveedor.
+  const app = buildApp("owner", {})
+  const json = { "content-type": "application/json" }
+  await ownerDb.execute(
+    sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
+  )
+  await app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ enabled: false, llm: "chatgpt_6" }) })
+
+  const model = await app.request("/agent/model")
+  expect(model.status).toBe(200)
+  const status = ((await model.json()) as { data: Record<string, unknown> }).data
+  expect(status).toMatchObject({ llm: "chatgpt_6", responds: false, other: { llm: "claude_5_5", responds: false } })
+  // La clínica nunca recibe el motivo técnico.
+  expect(JSON.stringify(status)).not.toMatch(/LLM_|clave|API_KEY/)
+
+  // El servidor rechaza encender aunque se llame sin el botón.
+  const turnOn = await app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ enabled: true }) })
+  expect(turnOn.status).toBe(409)
+  expect(((await turnOn.json()) as { error: { code: string } }).error.code).toBe("MODEL_NOT_RESPONDING")
+  const config = (await (await app.request("/agent/config")).json()) as { data: { enabled: boolean } }
+  expect(config.data.enabled).toBe(false)
+  // Otros ajustes se guardan igual.
+  expect((await app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ maxTurns: 10 }) })).status).toBe(200)
+
+  // «Probar» sin modelo: un texto para la clínica, sin variables, y no cuenta como prueba.
+  const turns = async () => ((await (await app.request("/agent/overview")).json()) as { data: { readiness: { sandboxTurns: number } } }).data.readiness.sandboxTurns
+  const before = await turns()
+  const failed = await app.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })
+  expect(failed.status).toBe(409)
+  const message = ((await failed.json()) as { error: { message: string } }).error.message
+  expect(message).toBe("El agente no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA.")
+  expect(await turns()).toBe(before)
+  // Con un modelo que responde, la prueba sí cuenta.
+  expect((await buildApp("owner").request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })).status).toBe(200)
+  expect(await turns()).toBe(before + 1)
+
+  // Soporte de odentIA tiene un solo caso por motivo, con el motivo técnico.
+  const cases = await ownerDb.execute<{ question: string; detail: string }>(
+    sql`select question, detail from support_case where dedupe_key = 'modelo-sin-responder:chatgpt_6:API_KEY_REQUIRED'`,
+  )
+  expect(cases).toHaveLength(1)
+  expect(cases[0]?.question).toBe("Modelo sin responder · Clínica")
+  expect(cases[0]?.detail).toContain("LLM_OPENAI_API_KEY")
 })
 
 it("aprender: lectura, corrección y aprobación piden permisos distintos y validan su entrada", async () => {

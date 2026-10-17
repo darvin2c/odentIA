@@ -2927,9 +2927,11 @@ export async function countAgentModelRunsToday(tx: Db, orgId: string): Promise<n
 }
 
 /**
- * El proveedor del modelo no sirve (configuración, credencial rechazada,
- * tope diario): aviso a quien administra el agente, uno por problema y día,
- * con enlace a la configuración. No lleva la clave ni datos del interlocutor.
+ * El proveedor del modelo no sirve (configuración, credencial rechazada, sin
+ * saldo) o se alcanzó el tope diario: aviso a quien administra el agente, uno
+ * por problema y día. El del modelo no nombra claves ni variables: la cuenta
+ * es de odentIA, la clínica no puede arreglarla y odentIA ya recibió el caso
+ * en Soporte. El enlace lleva a Recepción. No lleva datos del interlocutor.
  */
 export async function notifyAgentProviderProblem(
   tx: Db,
@@ -2943,26 +2945,27 @@ export async function notifyAgentProviderProblem(
     .limit(20)
   const { timezone } = await getOrgLocale(tx, orgId)
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date())
+  const dailyLimit = problem.code === "DAILY_LIMIT"
   await notifyUsers(
     tx,
     orgId,
     rows.map((r) => r.userId),
     {
       dedupeKey: `agent-provider:${problem.code}:${day}`,
-      title:
-        problem.code === "DAILY_LIMIT"
-          ? "El agente alcanzó su tope diario"
-          : problem.code === "PROVIDER_QUOTA"
-            ? "El proveedor del agente no tiene saldo"
-            : "El agente no puede usar el modelo",
-      body: `${problem.detail.slice(0, 900)} Mientras tanto, los casos pasan al equipo.`,
-      href: "/settings/agent",
+      title: dailyLimit ? "El agente alcanzó su tope diario" : "El agente no puede usar el modelo",
+      body: dailyLimit
+        ? `${problem.detail.slice(0, 900)}. Mientras tanto, los casos pasan al equipo.`
+        : AGENT_MODEL_DOWN_NOTICE,
+      href: "/agent/recepcion",
       permission: "agent.write",
       // Se retira solo cuando el agente vuelve a responder.
       subject: "modelo-del-agente",
     },
   )
 }
+
+/** Lo que dicen Recepción y la campana cuando el modelo deja de responder. */
+export const AGENT_MODEL_DOWN_NOTICE = "El agente no puede responder ahora: los mensajes pasan a tu equipo. Ya avisamos a odentIA."
 
 /**
  * La corrida por un mensaje entrante terminó sin responder ni derivar.

@@ -165,6 +165,21 @@ export function platformLlmFromEnv(env: PlatformLlmEnv): PlatformLlm {
 }
 
 /**
+ * Producción no arranca con el modelo de demostración: cada paciente
+ * recibiría «Te atiendo enseguida» y nadie lo atendería. La imagen fija
+ * `NODE_ENV=production` también en las vistas previas de cada PR, que se
+ * distinguen por sus canales simulados (`CHANNEL_SENDER_MODE=mock` en el
+ * worker, `CHANNEL_VALIDATE_EXTERNAL=false` en la API): ahí ningún mensaje
+ * llega a una persona y `fake` sigue permitido. Devuelve el motivo para el
+ * error de arranque, o null.
+ */
+export function fakeModelStartProblem(env: { LLM_MODEL?: string | undefined; NODE_ENV?: string | undefined }, channelsLive: boolean): string | null {
+  if (env.LLM_MODEL?.trim() !== "fake") return null
+  if (env.NODE_ENV !== "production" || !channelsLive) return null
+  return "LLM_MODEL=fake es el modelo de demostración: en producción, con canales reales, el servidor no arranca con él"
+}
+
+/**
  * Evaluaciones: el modelo que se pide con `--llm=` (por defecto el de toda
  * clínica) y las cuentas que se le pasan.
  */

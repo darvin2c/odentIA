@@ -229,20 +229,35 @@ describe("correo", () => {
 })
 
 describe("modelo del agente", () => {
-  it("dice el modelo elegido por su nombre simple, sin afirmar que funciona", () => {
-    expect(modelRow({ llm: "chatgpt_6" }, { problem: null, at: null }, since)).toMatchObject({
-      status: "Conectado",
+  const checked = minutesAgo(1)
+
+  it("dice «Responde» solo con la comprobación del servidor, y el modelo por su nombre simple", () => {
+    expect(modelRow({ llm: "chatgpt_6" }, { llm: "chatgpt_6", responds: true, other: null, checkedAt: checked })).toMatchObject({
+      tone: "ok",
+      status: "Responde",
       detail: { kind: "account", account: "ChatGPT 6", activity: null },
+      problem: null,
     })
-    expect(modelRow({ llm: "claude_5_5" }, undefined, since).detail).toMatchObject({ account: "Claude 5.5" })
+    // Sin comprobación todavía no afirma nada.
+    expect(modelRow({ llm: "claude_5_5" }, undefined)).toMatchObject({ tone: "off", status: "Comprobando el modelo…", detail: { account: "Claude 5.5" } })
   })
 
-  it("un fallo del proveedor pide atención y dice qué puede hacer la clínica", () => {
-    expect(modelRow({ llm: "chatgpt_6" }, { problem: "sin_saldo", at: minutesAgo(3) }, since)).toMatchObject({
+  it("«No responde» dice qué hacer, sin el motivo técnico", () => {
+    const otherWorks = modelRow(
+      { llm: "chatgpt_6" },
+      { llm: "chatgpt_6", responds: false, other: { llm: "claude_5_5", responds: true }, checkedAt: checked },
+    )
+    expect(otherWorks).toMatchObject({
       tone: "attention",
-      problem: "La cuenta de odentIA para este modelo se quedó sin saldo. Mientras tanto los mensajes pasan a tu equipo; puedes cambiar al otro modelo.",
-      detail: { activity: "el último intento falló hace 3 minutos" },
+      status: "No responde",
+      problem: "El modelo de odentIA no está disponible ahora. Ya avisamos a odentIA; mientras tanto puedes usar el otro.",
     })
+    const none = modelRow(
+      { llm: "chatgpt_6" },
+      { llm: "chatgpt_6", responds: false, other: { llm: "claude_5_5", responds: false }, checkedAt: checked },
+    )
+    expect(none.problem).toBe("Ningún modelo de odentIA responde ahora. Ya avisamos a odentIA y te escribimos cuando vuelva.")
+    expect(JSON.stringify([otherWorks, none])).not.toMatch(/LLM_|clave|saldo/)
   })
 })
 

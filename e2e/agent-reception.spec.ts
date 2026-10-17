@@ -257,7 +257,11 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // --- Encender: ya hay canal y ya se probó; no hay nivel que elegir ---
   await page.getByRole("switch", { name: "Encender Recepción" }).click()
   await expect(turnOn).toContainText("Telegram")
-  await expect(turnOn).toContainText("2 mensajes de prueba")
+  await expect(turnOn).toContainText("Cinco comprobaciones.")
+  // El modelo de demostración responde: la quinta comprobación lo dice y deja encender.
+  await expect(turnOn).toContainText("Responde · ChatGPT 6")
+  await expect(turnOn).toContainText("2 mensajes de prueba respondidos")
+  await expect(turnOn).toContainText("El canal y el modelo impiden encender; lo demás avisa.")
   await expect(turnOn.getByRole("button", { name: "Probar otra" })).toBeVisible()
   await expect(turnOn.getByRole("radio")).toHaveCount(0)
   await expect(turnOn).toContainText("Responde siempre al momento.")

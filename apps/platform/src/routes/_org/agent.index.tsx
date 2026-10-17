@@ -8,7 +8,7 @@ import { type ReactNode, useState } from "react"
 import type { AdminOverview } from "../../lib/admin"
 import { AgentBaseDrawer } from "../../components/agent/base-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
-import { type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles, PROVIDER_PROBLEM } from "../../lib/agent"
+import { AGENT_MODEL_DOWN, type AgentLearned, type AgentOverview, type AgentRole, type AgentRoles } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
@@ -173,7 +173,7 @@ function AgentSummaryPage() {
           {overview.enabled && overview.provider.problem ? (
             <SummaryNotice
               tone="danger"
-              title="El agente no puede responder ahora"
+              title={AGENT_MODEL_DOWN.title}
               action={
                 canWrite ? (
                   <Link to="/settings/integrations/model" className={outlineLink}>
@@ -182,7 +182,7 @@ function AgentSummaryPage() {
                 ) : null
               }
             >
-              {PROVIDER_PROBLEM[overview.provider.problem]}
+              {AGENT_MODEL_DOWN.body}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
               {canWrite ? "" : " Avisa a quien administra la clínica."}
             </SummaryNotice>

@@ -34,9 +34,11 @@ export const supportCase = pgTable(
     dedupeKey: text("dedupe_key").notNull(),
     status: text("status").notNull().default("abierto"),
     assigneeStaffId: text("assignee_staff_id").references(() => user.id),
-    openedBy: text("opened_by")
-      .notNull()
-      .references(() => user.id),
+    /**
+     * Quien lo abrió. Nulo solo en los casos automáticos de odentIA («Modelo
+     * sin responder»), que tampoco son de una clínica: ninguna clínica los ve.
+     */
+    openedBy: text("opened_by").references(() => user.id),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     reopenedCount: integer("reopened_count").notNull().default(0),
     /** Última respuesta pública del equipo: lo que la clínica aún no abre es no leído. */
@@ -55,6 +57,7 @@ export const supportCase = pgTable(
     // Destino de las FK compuestas de mensajes/adjuntos/permisos: impide cruces de organización.
     uniqueIndex("support_case_id_org_uidx").on(table.id, table.organizationId),
     check("support_case_kind_check", sql`${table.kind} in ('pregunta','problema','acceso')`),
+    check("support_case_opener_check", sql`${table.openedBy} is not null or ${table.organizationId} is null`),
     check(
       "support_case_status_check",
       sql`${table.status} in ('abierto','en_atencion','esperando_clinica','resuelto')`,

@@ -1,5 +1,5 @@
-import { describeProviderProblem, isProviderConfigError, meterAiUse, type PlatformLlm, previewLesson } from "@odentia/agent"
-import { withOrgContext } from "@odentia/db"
+import { isProviderConfigError, meterAiUse, type PlatformLlm, previewLesson } from "@odentia/agent"
+import { type Db, withOrgContext } from "@odentia/db"
 import {
   approveLesson,
   correctAnswer,
@@ -19,6 +19,7 @@ import {
 import { type Context, Hono } from "hono"
 import { z } from "zod"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
+import { modelProblemResponse } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
@@ -44,6 +45,8 @@ const withdrawInput = z.object({ withdrawCase: z.boolean().optional() })
 
 export interface AgentLearningDeps extends CrmDeps {
   llm: PlatformLlm
+  /** Rol owner: el caso «Modelo sin responder» en Soporte de odentIA. */
+  ownerDb?: Db
 }
 
 /**
@@ -164,10 +167,7 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
         )
       })
     } catch (error) {
-      if (isProviderConfigError(error)) {
-        const problem = describeProviderProblem(error)
-        return c.json(errorBody(c, "LLM_CONFIG", `El agente no puede usar el modelo (${problem.detail})`), 409)
-      }
+      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "agente")
       throw error
     }
   })
