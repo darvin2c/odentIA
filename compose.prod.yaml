@@ -117,6 +117,17 @@ services:
     depends_on:
       - api
 
+  # Web de marketing (ADR 0046): HTML generado al compilar, sin variables de runtime
+  # ni dependencias. Solo el Libro de Reclamaciones envía a la API desde el navegador.
+  web:
+    build: *app-build
+    command: ["pnpm", "--filter", "@odentia/web", "start"]
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3013:3000"
+
   backup:
     build: infra/prod/backup
     restart: unless-stopped

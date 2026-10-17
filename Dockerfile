@@ -1,4 +1,4 @@
-# Receta compartida de producción para admin, panel, platform, api y worker.
+# Receta compartida de producción para admin, panel, platform, web, api y worker.
 # OpenShip construye un artefacto por servicio; cada uno cambia su comando.
 
 FROM node:24-slim AS base
@@ -15,6 +15,7 @@ COPY apps/worker/package.json apps/worker/
 COPY apps/panel/package.json apps/panel/
 COPY apps/admin/package.json apps/admin/
 COPY apps/platform/package.json apps/platform/
+COPY apps/web/package.json apps/web/
 COPY packages/agent/package.json packages/agent/
 COPY packages/auth/package.json packages/auth/
 COPY packages/channels/package.json packages/channels/
@@ -32,16 +33,19 @@ RUN pnpm install --frozen-lockfile \
   --filter @odentia/worker... \
   --filter @odentia/panel... \
   --filter @odentia/admin... \
-  --filter @odentia/platform...
+  --filter @odentia/platform... \
+  --filter @odentia/web...
 
 FROM deps AS build
 COPY . .
 # VITE_* se incrustan en build; deben coincidir con los dominios públicos.
+# La web toma de VITE_BASE_DOMAIN su dirección canónica (el dominio raíz).
 ARG VITE_API_URL
 ARG VITE_BASE_DOMAIN
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_BASE_DOMAIN=$VITE_BASE_DOMAIN
-RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/platform build
+RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/platform build \
+  && pnpm --filter @odentia/web build
 
 FROM base AS runtime
 ENV NODE_ENV=production

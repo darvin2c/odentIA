@@ -7,6 +7,7 @@
     "dev": "node --import ../../scripts/local-network.mjs ../../node_modules/portless/dist/cli.js",
     "dev:app": "astro dev",
     "build": "astro build",
+    "start": "node server.mjs",
     "preview": "astro preview",
     "typecheck": "astro check",
     "test": "vitest run --passWithNoTests"
@@ -18,7 +19,8 @@
     "@fontsource/ibm-plex-mono": "5.3.0",
     "astro": "7.3.5",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "srvx": "0.11.22"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
