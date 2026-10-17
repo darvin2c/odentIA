@@ -13,6 +13,7 @@ import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext }
 import { agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { message } from "@odentia/db/schema/crm"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
+import { saasAction } from "@odentia/db/schema/saas-billing"
 import {
   createConnection,
   createKnowledgeEntry,
@@ -27,6 +28,9 @@ import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
+import { reportAiUse } from "./ai-usage.js"
+import type { DecisionModel, DecisionResult } from "./decision/index.js"
+import { ROUTE_OFF_TOPIC } from "./decision/route.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -386,6 +390,109 @@ it("con Claude, la parte fija va marcada para su caché y la corrida guarda su c
   } finally {
     await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { llm: "chatgpt_6" }))
   }
+})
+
+/** Conversaciones que se cobran a la clínica por un hilo (ADR 0031). */
+async function chargedConversationsOf(conversationId: string) {
+  return ownerDb.select({ id: saasAction.id }).from(saasAction)
+    .where(and(eq(saasAction.conversationId, conversationId), eq(saasAction.kind, "conversacion")))
+}
+
+async function runRowOf(conversationId: string) {
+  const [row] = await withOrgContext(appDb, ORG, (tx) =>
+    tx.select().from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+  return row
+}
+
+/**
+ * Modelo de decisión que lee el mensaje como ajeno a la clínica con la
+ * certeza indicada. Anota su llamada como el de verdad (`createDecisionModel`):
+ * se paga, pero no es una llamada del modelo que escribe.
+ */
+function offTopicDecision(certainty: number): DecisionModel {
+  return {
+    provider: "jev",
+    reportsProbabilities: true,
+    async decide(_state, questions) {
+      reportAiUse({ provider: "jev", model: "jev-prueba", inputTokens: 40, outputTokens: 1 })
+      const answers = questions.map((q): DecisionResult["answers"][number] => {
+        if (q.kind === "yesno") return { id: q.id, kind: "yesno", probability: q.id === "requires_reply" ? 0.95 : 0.02 }
+        if (q.kind === "score") return { id: q.id, kind: "score", score: 0, probabilities: null, confidence: null }
+        if (q.id === "intent") {
+          return { id: q.id, kind: "choice", choice: "off_topic", probabilities: { off_topic: certainty, other: 1 - certainty }, confidence: certainty }
+        }
+        // Elegir conocimiento: ningún tema.
+        return { id: q.id, kind: "choice", choice: "none", probabilities: { none: 0.9 }, confidence: 0.9 }
+      })
+      return { answers, model: "jev-prueba", usage: { inputTokens: 40, outputTokens: 1 }, latencyMs: 1 }
+    },
+  }
+}
+
+it("lo ajeno a la clínica con el texto fijo no se cobra; con duda o sin modelo de decisión responde el que escribe y se cobra", async () => {
+  // Alguien escribe «¿Venden zapatillas?» al canal de la clínica (issue 87).
+  const ask = async (thread: string, certainty: number) => {
+    const model = new RecordingModel()
+    const inbound = await ingest(thread, `${thread}-1`, "¿Venden zapatillas?")
+    const result = await processAgentRun(
+      appDb,
+      { ...runtime, createModel: async () => model, createDecisionModel: () => offTopicDecision(certainty) },
+      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: ORG, conversationId: inbound.conversationId, messageId: inbound.messageId } },
+    )
+    expect(result).toBe("done")
+    return { conversationId: inbound.conversationId, writerCalls: model.calls.length }
+  }
+  await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { decisionProvider: "jev" }))
+  try {
+    // Seguro de que es ajeno (desde 0,9): sale el texto fijo sin llamar al modelo que escribe.
+    const sure = await ask("tg:cobro-ajeno", ROUTE_OFF_TOPIC)
+    expect(sure.writerCalls).toBe(0)
+    const replies = await withOrgContext(appDb, ORG, (tx) =>
+      tx.select({ body: message.body }).from(message)
+        .where(and(eq(message.conversationId, sure.conversationId), eq(message.senderKind, "agent"))))
+    expect(replies).toEqual([{ body: expect.stringContaining("Solo puedo ayudarte con temas de la clínica") }])
+    expect(await runRowOf(sure.conversationId)).toMatchObject({ status: "ok", llmCalls: 0 })
+    // La llamada al modelo de decisión se paga y queda en el costo de la corrida, pero no cuenta como del que escribe.
+    const usage = await withOrgContext(appDb, ORG, (tx) => tx.select().from(aiUsage).where(eq(aiUsage.conversationId, sure.conversationId)))
+    expect(usage).toEqual([expect.objectContaining({ origin: "recepcion", provider: "jev", calls: 1 })])
+    expect(await chargedConversationsOf(sure.conversationId)).toHaveLength(0)
+    // Con duda (medido: 0,64 en un mensaje de la clínica) va al camino abierto: responde el que escribe y cuenta.
+    const doubt = await ask("tg:cobro-duda", 0.64)
+    expect(doubt.writerCalls).toBe(1)
+    expect(await runRowOf(doubt.conversationId)).toMatchObject({ status: "ok", llmCalls: 1 })
+    expect(await chargedConversationsOf(doubt.conversationId)).toHaveLength(1)
+    // Sin modelo de decisión (lo que trae una clínica nueva) no hay camino «fuera de tema»: también cuenta.
+    await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { decisionProvider: "none" }))
+    const without = await ask("tg:cobro-sin-decision", 0.99)
+    expect(without.writerCalls).toBe(1)
+    expect(await chargedConversationsOf(without.conversationId)).toHaveLength(1)
+  } finally {
+    await withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { decisionProvider: "none" }))
+  }
+})
+
+it("una corrida sin respuesta o que falla no se cobra, aunque haya llamado al modelo que escribe", async () => {
+  const attend = async (thread: string, model: RecordingModel, readCt: number) => {
+    const inbound = await ingest(thread, `${thread}-1`, "¿Qué sedes tienen?")
+    const result = await processAgentRun(appDb, { ...runtime, createModel: async () => model }, {
+      msg_id: 1, read_ct: readCt, message: { kind: "inbound_message", orgId: ORG, conversationId: inbound.conversationId, messageId: inbound.messageId },
+    })
+    expect(result).toBe("done")
+    return inbound.conversationId
+  }
+  // Escribe sin usar send_reply: a la persona no le llegó nada.
+  const silent = await attend("tg:cobro-silencio", new RecordingModel(() => new AIMessage({ content: "Pensando…" })), 0)
+  expect(await runRowOf(silent)).toMatchObject({ status: "sin_respuesta", llmCalls: 1 })
+  expect(await chargedConversationsOf(silent)).toHaveLength(0)
+  // Consulta las sedes y en la llamada siguiente el proveedor se cae, en el último intento de la cola.
+  const failing = new RecordingModel((call) => {
+    if (call > 1) throw new Error("proveedor caído")
+    return new AIMessage({ content: "", tool_calls: [{ name: "ver_sedes_y_servicios", args: {}, id: "cobro-sedes", type: "tool_call" }] })
+  })
+  const broken = await attend("tg:cobro-error", failing, 2)
+  expect(failing.calls).toHaveLength(2)
+  expect(await runRowOf(broken)).toMatchObject({ status: "error", llmCalls: 1 })
+  expect(await chargedConversationsOf(broken)).toHaveLength(0)
 })
 
 it("sin saldo de prueba los agentes se pausan: el caso pasa al equipo sin llamar al modelo", async () => {
