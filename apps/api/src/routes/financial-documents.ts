@@ -119,7 +119,7 @@ const refundPdfQuery = z.object({
   paper: z.enum(["A4", "Letter"]).optional(),
 })
 
-export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
+export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storage" | "secretsKey">) {
   const app = new Hono()
 
   app.get("/:id/financial-document-options", async (c) => {
@@ -247,7 +247,7 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
             message: parsed.data.message ?? undefined,
             requestId: parsed.data.requestId ?? undefined,
           },
-          { storage: deps.storage },
+          { storage: deps.storage, secretsKey: deps.secretsKey },
         ),
       ),
     )

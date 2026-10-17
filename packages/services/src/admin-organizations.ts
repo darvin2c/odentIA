@@ -747,6 +747,7 @@ export async function createAssistedOrganization(
     currency: region.currency,
     timezone: region.timezone,
     locale: region.locale,
+    diagnosisSystem: region.diagnosisSystem,
   })
   // La clínica nace con las especialidades de la biblioteca (ADR 0039).
   await ensureLibrarySpecialties(tx, organizationId)

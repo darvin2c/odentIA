@@ -47,7 +47,7 @@ export function EncounterHistoryCard({
         </div>
         <p className="text-xs text-muted-foreground">
           <time dateTime={item.createdAt}>{timeAgo(item.createdAt)}</time>
-          {diagnoses.length > 0 ? ` · CIE-10 ${diagnoses.join(", ")}` : ""}
+          {diagnoses.length > 0 ? ` · ${diagnoses.join(", ")}` : ""}
         </p>
       </div>
       <div className="flex flex-col gap-3">

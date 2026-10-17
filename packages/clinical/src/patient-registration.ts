@@ -155,7 +155,9 @@ const declaration = <T extends z.ZodType>(item: T) => z.strictObject({
   state: z.enum(["unanswered", "unknown", "none", "recorded"]), items: z.array(item).max(50),
 }).refine(v => v.state === "recorded" ? v.items.length > 0 : v.items.length === 0, "Indica entradas solo cuando la respuesta sea Sí")
 export const registrationContactInputSchema = z.strictObject({
-  contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(), isPreferred: z.boolean(),
+  contactId: z.uuid(), relationship: z.enum(CONTACT_RELATIONSHIPS), relationshipDetail: text(100).nullable().optional(),
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship: z.enum(KINSHIP).nullable().optional(), isPreferred: z.boolean(),
 })
 export type RegistrationContactInput = z.infer<typeof registrationContactInputSchema>
 export const registrationAnswersSchema = z.strictObject({
@@ -277,6 +279,8 @@ function countryErrors(
   if (data.insuranceScheme && !unchanged("insuranceScheme") && !insuranceScheme(profile, data.insuranceScheme))
     errors.insuranceScheme = "Elige el seguro de la lista"
   const regions = profile.address.regions
+  if (data.maritalStatus && !unchanged("maritalStatus") && !profile.maritalStatuses.includes(data.maritalStatus))
+    errors.maritalStatus = "Elige el estado civil de la lista"
   if (regions && data.addressRegion && !unchanged("addressRegion") && !regionOption(profile, data.addressRegion))
     errors.addressRegion = `Elige el ${profile.address.regionLabel.toLowerCase()} de la lista`
 }

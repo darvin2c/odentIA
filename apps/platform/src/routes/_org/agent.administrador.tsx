@@ -262,7 +262,7 @@ function MissingNotices({
             <p className="font-semibold">Sin WhatsApp conectado: solo puede escribir por correo</p>
             <p>A quien no tenga correo no le llega nada: avisa por qué y, si la línea tiene su tarea prendida, queda la tarea de llamada.</p>
           </div>
-          <Link to="/settings/integrations/whatsapp" className={LINK}>
+          <Link to="/settings/integrations/whatsapp" search={{ mensaje: undefined }} className={LINK}>
             Conectar WhatsApp
           </Link>
         </div>

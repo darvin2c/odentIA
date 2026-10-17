@@ -12,7 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
-import { cie10Code, encounter, orgSpecialty, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
+import { diagnosisCodeRef, encounter, orgSpecialty, patient, serviceCatalog, treatmentPlanItem } from "./clinical.js"
 import { orgFk, timestamps } from "./crm.js"
 
 /**
@@ -331,7 +331,8 @@ export const consentDocument = pgTable(
     revokeReason: text("revoke_reason"),
     /** Snapshot de las secciones aceptadas (inmutable). */
     sectionsSnapshot: jsonb("sections_snapshot"),
-    /** CIE-10 que motiva el procedimiento. */
+    /** Diagnóstico que motiva el procedimiento: lista y código. */
+    diagnosisSystem: text("diagnosis_system"),
     diagnosisCode: text("diagnosis_code"),
     /** Profesional que informa: snapshot de su perfil y firma manuscrita. */
     informedAt: timestamp("informed_at", { withTimezone: true }),
@@ -373,6 +374,7 @@ export const consentDocument = pgTable(
     ...timestamps,
   },
   (table) => [
+    ...diagnosisCodeRef("consent_document", table),
     index("consent_document_org_patient_idx").on(table.organizationId, table.patientId),
     index("consent_document_org_status_idx").on(table.organizationId, table.status),
     index("consent_document_org_template_idx").on(table.organizationId, table.templateId),
@@ -453,8 +455,9 @@ export const clinicalOrder = pgTable(
     resultText: text("result_text"),
     resultAt: timestamp("result_at", { withTimezone: true }),
     completedBy: text("completed_by").references(() => user.id),
-    /** CIE-10 de la atención que motiva la orden. */
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    /** Diagnóstico de la atención que motiva la orden: lista y código. */
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     /** Resultado subido a la propia orden (FK compuesta en la migración). */
     resultDocumentId: uuid("result_document_id"),
     /** Derivación a un colega de la clínica: recibe la tarea. */
@@ -466,6 +469,7 @@ export const clinicalOrder = pgTable(
   },
   (table) => [
     index("clinical_order_org_patient_idx").on(table.organizationId, table.patientId),
+    ...diagnosisCodeRef("clinical_order", table),
     index("clinical_order_org_status_idx").on(table.organizationId, table.status),
     index("clinical_order_org_specialty_idx").on(table.organizationId, table.specialtyId),
     check(

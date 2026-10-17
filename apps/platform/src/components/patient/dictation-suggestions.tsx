@@ -145,7 +145,7 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, Array<{ key: string; labe
     { key: "prognosis", label: "Pronóstico" },
   ],
   diagnostico: [
-    { key: "cie10Code", label: "Código CIE-10" },
+    { key: "diagnosisCode", label: "Código" },
     { key: "toothNumber", label: "Pieza", number: true },
     { key: "note", label: "Nota", long: true },
   ],

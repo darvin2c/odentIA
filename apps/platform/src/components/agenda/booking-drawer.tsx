@@ -266,7 +266,7 @@ export function BookingDrawer({
               (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
             await apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
               method: "POST",
-              body: JSON.stringify({ purpose: "novedades", granted: generalConsent, source: "telefono" }),
+              body: JSON.stringify({ tipo: "novedades", recibir: generalConsent, source: "telefono" }),
             })
           })().catch(() => {
             consentNote.current = "No se pudo anotar si acepta novedades y promociones: anótalo en su página, en Datos."
@@ -491,6 +491,8 @@ export function BookingDrawer({
                   ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
+              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
+              <p className="text-xs text-muted-foreground">Díselo: «Te avisaremos por WhatsApp sobre tus citas.»</p>
               <div role="group" aria-labelledby="cita-nuevo-permiso" className="grid gap-1.5">
                 <span id="cita-nuevo-permiso" className="text-sm font-medium">
                   ¿Acepta recibir novedades y promociones de la clínica?

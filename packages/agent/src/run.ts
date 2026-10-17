@@ -2,7 +2,6 @@ import type { Callbacks } from "@langchain/core/callbacks/manager"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
-import { channelAdapters } from "@odentia/channels"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
@@ -117,23 +116,17 @@ const BURST_COVERED = "burst-covered"
 const BURST_WAITING = "burst-waiting"
 
 /**
- * Herramientas que en esta organización no pueden servir: la de plantillas
- * cuando ningún canal activo las admite. Se decide por organización y no por
- * hilo a propósito: las herramientas van al principio de lo que el proveedor
- * guarda en caché, y una lista distinta por hilo partiría esa caché en
- * variantes para ahorrar un esquema.
+ * Herramientas que en esta organización no pueden servir: las de una función
+ * apagada en la ficha del agente. Se decide por organización y no por hilo a
+ * propósito: las herramientas van al principio de lo que el proveedor guarda
+ * en caché, y una lista distinta por hilo partiría esa caché en variantes. El
+ * agente no tiene herramienta de plantillas: fuera de las 24 horas retoma el
+ * sistema (ADR 0040).
  */
-async function orgToolExclusions(tx: Db, orgId: string, cfg: AgentConfig): Promise<string[]> {
-  const connections = await tx
-    .select({ provider: channelConnection.provider })
-    .from(channelConnection)
-    .where(and(eq(channelConnection.organizationId, orgId), eq(channelConnection.status, "active")))
-  const templates = connections.some(
-    (row) => channelAdapters[row.provider as keyof typeof channelAdapters]?.capabilities.templates === true,
-  )
+async function orgToolExclusions(_tx: Db, _orgId: string, cfg: AgentConfig): Promise<string[]> {
   // Una función apagada en la ficha del agente se lleva sus herramientas: el
   // modelo ni las ve, no depende de que obedezca una instrucción.
-  return [...(templates ? [] : ["send_template"]), ...toolsDisabledBy("recepcion", cfg.disabledFunctions)]
+  return toolsDisabledBy("recepcion", cfg.disabledFunctions)
 }
 
 /**

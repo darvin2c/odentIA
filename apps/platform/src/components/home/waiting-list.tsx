@@ -53,6 +53,7 @@ function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
   if (row.kind === "stillOpen") return <TypeIcon icon={MessagesSquare} />
   if (row.kind === "advice") return <TypeIcon icon={Lightbulb} />
+  if (row.kind === "promotion") return <TypeIcon icon={MessageCircle} />
   if (row.kind === "possibleDuplicate") return <TypeIcon icon={UsersRound} />
   if (row.kind === "portalReentry") return <TypeIcon icon={KeyRound} />
   if (row.kind === "budgets" || row.kind === "unsentBudget" || row.kind === "consentToPublish" || (row.kind === "more" && row.of === "unsentBudgets"))
@@ -92,6 +93,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "portal" }} {...props} />
     case "consentToPublish":
       return <Link to="/settings/forms" search={{ tab: "consentimientos" }} {...props} />
+    case "promotion":
+      // El mensaje abierto, listo para cambiarle el texto.
+      return <Link to="/settings/integrations/whatsapp" search={{ mensaje: row.messageId }} {...props} />
     case "conversations":
       return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
     case "stillOpen":

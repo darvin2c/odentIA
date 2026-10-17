@@ -133,6 +133,39 @@ export const OPERATIONS = {
       source: { kind: "enum", values: ["presencial", "telefono", "conversacion"], label: "Cómo lo dijo", description: "En persona, por teléfono o por la conversación.", body: "required", agent: "context" },
     },
   },
+  // «Tus mensajes» (ADR 0040): la misma operación para la página de la persona,
+  // recepción (Datos › Mensajes), el agente y «BAJA». El agente elige el tipo
+  // por lo que dice la persona; si no queda claro, pregunta.
+  "mensajes.elegir": {
+    label: "Qué mensajes recibe",
+    strict: true,
+    fields: {
+      tipo: {
+        kind: "enum",
+        values: ["recordatorio", "seguimiento", "novedades", "ninguno"],
+        label: "Qué mensajes",
+        description:
+          "Los recordatorios de sus citas (recordatorio), los de controles y seguimiento (seguimiento), las novedades y promociones (novedades) o ningún mensaje de la clínica, también los avisos de sus citas y papeles (ninguno). Sin tipo, solo se le da su página para que elija.",
+        body: "required",
+        agent: "fills",
+      },
+      recibir: {
+        kind: "flag",
+        label: "Los recibe",
+        description: "false si pide dejar de recibirlos; true si pide volver a recibirlos.",
+        body: "required",
+        agent: "fills",
+      },
+      source: {
+        kind: "enum",
+        values: ["presencial", "telefono", "conversacion"],
+        label: "Cómo lo dijo",
+        description: "En persona, por teléfono o por la conversación.",
+        body: "required",
+        agent: "context",
+      },
+    },
+  },
   // Reenviar lo que la clínica ya entregó (fase 3, decisión 4): la pantalla
   // elige además a quién; el agente solo dice de qué paciente y, si lo sabe, cuál.
   "presupuesto.reenviar": {
@@ -254,8 +287,9 @@ export const OPERATIONS = {
     label: "Diagnóstico",
     strict: true,
     fields: {
-      cie10Code: { kind: "text", min: 1, max: 10, label: "Código CIE-10", description: "El código CIE-10 que corresponde al diagnóstico que nombró el odontólogo; casi siempre lo dice con palabras y no con el código (por ejemplo, «caries en dentina» es K02.1). Si no nombró ningún diagnóstico, no registres ninguno.", body: "required", agent: "requires" },
-      diagnosisType: { kind: "enum", values: ["presuntivo", "definitivo", "repetido"], label: "Tipo", description: "Presuntivo si aún no está confirmado, definitivo si lo está, repetido si ya se había registrado.", body: "required", agent: "requires" },
+      diagnosisCode: { kind: "text", min: 1, max: 10, label: "Código", description: "El código del diagnóstico que nombró el odontólogo, en la lista de diagnósticos de la clínica (CIE-10 o CIE-11); casi siempre lo dice con palabras y no con el código. Si no nombró ningún diagnóstico, no registres ninguno.", body: "required", agent: "requires" },
+      diagnosisSystem: { kind: "text", min: 1, max: 20, label: "Lista", description: "La lista de diagnósticos de la clínica.", body: "optional", nullable: true, agent: "context" },
+      diagnosisType: { kind: "enum", values: ["provisional", "confirmed"], label: "Tipo", description: "provisional si el odontólogo aún no lo confirma (presuntivo); confirmed si lo da por seguro (definitivo). Si ya lo tenía antes lo anota el sistema: no lo indiques.", body: "required", agent: "requires" },
       toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI (dieciséis = 16).", body: "optional", nullable: true, agent: "fills" },
       surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza, como las dijo: oclusal o incisal, mesial, distal, vestibular, palatina o lingual.", body: "optional", nullable: true, agent: "fills" },
       note: { kind: "text", max: 2000, label: "Nota", description: "Una precisión que dijo el odontólogo sobre el diagnóstico.", body: "optional", nullable: true, agent: "fills" },
@@ -434,6 +468,7 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
   reprogramar_cita: "cita.mover",
   confirmar_cita: "cita.confirmar",
   responder_permiso_mensajes: "mensajes.permiso",
+  elegir_mensajes: "mensajes.elegir",
   reenviar_presupuesto: "presupuesto.reenviar",
   anotar_respuesta_presupuesto: "presupuesto.respuesta",
   create_opportunity: "oportunidad.crear",
@@ -450,8 +485,8 @@ export const TOOL_OPERATION: Record<string, OperationId> = {
 export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   send_reply: "Enviar un mensaje no es un formulario: el texto es el único campo.",
   despedirse_y_cerrar: "La despedida es un mensaje (el texto es su único campo) y cerrar no tiene campos: el motivo es siempre «resuelta».",
-  send_template: "La plantilla y sus parámetros los define el proveedor del canal.",
   confirmar_propuesta: "Solo lleva el id de la propuesta que el interlocutor confirma.",
+  enviar_comprobante: "Solo lleva el paciente: el comprobante es el de su último pago y ninguna pantalla lo envía por el chat.",
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",
   pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",

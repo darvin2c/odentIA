@@ -1,7 +1,7 @@
-import { CONSENT_DECLARATION, CONSENT_SECTION_LABELS } from "@odentia/clinical"
+import { CONSENT_DECLARATION, CONSENT_SECTION_LABELS, diagnosisCodeLabel } from "@odentia/clinical"
 import { type ConsentDocument, consentSignatureWords } from "../../lib/clinical-forms"
-import { FirmaView } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
+import { FirmaView } from "./firma-pad"
 
 function when(value: string | null | undefined): string {
   return value
@@ -52,7 +52,7 @@ export function ConsentSheet({
           {document.diagnosisCode ? (
             <Block title={CONSENT_SECTION_LABELS.diagnosis}>
               <p>
-                {document.diagnosisCode}
+                {diagnosisCodeLabel(document.diagnosisSystem, document.diagnosisCode)}
                 {diagnosisDescription ? ` · ${diagnosisDescription}` : ""}
               </p>
             </Block>
@@ -112,7 +112,9 @@ export function ConsentSheet({
               label={`Firma de ${document.informerName ?? "el profesional"}`}
             />
           ) : document.informerName ? (
-            <p className="text-xs">Informó y resolvió sus dudas · firma con su perfil profesional.</p>
+            <p className="text-xs">
+              Informó y resolvió sus dudas · firma con su perfil profesional.
+            </p>
           ) : paper ? (
             <div className="aspect-[22/7] w-full rounded-md border" aria-hidden="true" />
           ) : null}

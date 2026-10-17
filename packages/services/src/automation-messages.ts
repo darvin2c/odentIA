@@ -82,18 +82,30 @@ export const MESSAGE_VARIABLES = {
   cita_pasada: { label: "Fecha de la cita que no se dio", example: "lunes 12 de octubre" },
   control: { label: "Control pendiente", example: "Control de ortodoncia" },
   presupuesto: { label: "Título del presupuesto", example: "Ortodoncia" },
-  resumen_presupuesto: { label: "Tratamientos y total del presupuesto", example: "3 tratamientos por S/ 540" },
+  // El ejemplo que se manda a WhatsApp lleva la moneda de la clínica (`exampleValues` en `clinic-messages.ts`).
+  resumen_presupuesto: { label: "Tratamientos y total del presupuesto", example: "3 tratamientos por 540" },
   oportunidad: { label: "Título de la oportunidad", example: "Ortodoncia" },
 } as const
 export type MessageVariable = keyof typeof MESSAGE_VARIABLES
 
-/** Todo mensaje deja darse de baja con un toque, de ese tipo de mensaje y no de los demás. */
+/**
+ * Lo que se puede apagar se apaga con un toque, de ese tipo de mensaje y no de
+ * los demás. Los avisos de lo que pasó no lo llevan: siempre salen (ADR 0040).
+ */
 const OPT_OUT: MessageButton = { action: "baja", title: "No enviar más" }
+/**
+ * El atajo del recordatorio: apaga solo los recordatorios. WhatsApp admite 20
+ * caracteres en un botón dentro de las 24 horas: «No quiero recordatorios» no
+ * entra, y por eso dice «No más recordatorios».
+ */
+const NO_REMINDERS: MessageButton = { action: "baja", title: "No más recordatorios" }
 
 /**
  * Avisos de «Recordar la cita» cuando la cita cambia: se reservó, se movió o se
- * canceló. Son de la misma línea (su permiso es el de recordatorios) y cada uno
- * es un trabajo de su propio tipo, con la clave de su mensaje (ADR 0027).
+ * canceló. Son de la misma línea y cada uno es un trabajo de su propio tipo,
+ * con la clave de su mensaje (ADR 0027). Son avisos de lo que pasó: salen
+ * siempre, sin botón de baja, y solo los frena «No quiero ningún mensaje de la
+ * clínica» (ADR 0040).
  */
 export const APPOINTMENT_NOTICE_KEYS = ["aviso_cita_reservada", "aviso_cita_movida", "aviso_cita_cancelada"] as const
 export type AppointmentNoticeKey = (typeof APPOINTMENT_NOTICE_KEYS)[number]
@@ -127,23 +139,25 @@ export const AUTOMATION_MESSAGE_KEYS = [
 export type AutomationMessageKey = (typeof AUTOMATION_MESSAGE_KEYS)[number]
 
 export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage> = {
+  // «Recordatorios de tus citas»: el único que se apaga con «No más recordatorios».
   recordatorio_cita: {
     key: "recordatorio_cita",
     purpose: "recordatorio",
     category: "utility",
-    template: "odentia_recordatorio_cita_v1",
+    template: "odentia_recordatorio_cita_v2",
     body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}. Si necesitas cambiarla, responde a este mensaje.",
     variables: ["persona", "lugar", "citas"],
     buttons: [
       { action: "confirmar", title: "Confirmar" },
       { action: "responder", title: "No podré ir", asks: "cambiar" },
-      OPT_OUT,
+      NO_REMINDERS,
     ],
     subject: "Recordatorio de cita",
   },
+  // «Controles y seguimiento»: se apaga aparte de los recordatorios de la cita.
   recordatorio_control: {
     key: "recordatorio_control",
-    purpose: "recordatorio",
+    purpose: "seguimiento",
     category: "utility",
     template: "odentia_recordatorio_control_v1",
     body: "Hola, {{1}}. En {{2}} tienes pendiente este control: {{3}}. Responde a este mensaje y te buscamos un horario.",
@@ -151,9 +165,10 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     buttons: [{ action: "responder", title: "Quiero agendar", asks: "reservar" }, OPT_OUT],
     subject: "Tienes un control pendiente",
   },
+  // WhatsApp lo cuenta como promoción: solo a quien aceptó novedades (ADR 0040).
   seguimiento_presupuesto: {
     key: "seguimiento_presupuesto",
-    purpose: "seguimiento",
+    purpose: "novedades",
     category: "marketing",
     template: "odentia_seguimiento_presupuesto_v1",
     body: "Hola, {{1}}. El presupuesto «{{2}}» que te presentamos en {{3}} sigue pendiente. ¿Quieres retomarlo o tienes alguna duda?",
@@ -163,10 +178,10 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
   },
   // Retoma una consulta que quedó con su próxima acción vencida. El botón no fija
   // camino: la persona sigue la conversación con Recepción, que sabe de qué
-  // oportunidad viene por su contacto.
+  // oportunidad viene por su contacto. Es promoción: solo con su sí de novedades.
   seguimiento_comercial: {
     key: "seguimiento_comercial",
-    purpose: "seguimiento",
+    purpose: "novedades",
     category: "marketing",
     template: "odentia_seguimiento_oportunidad_v1",
     body: "Hola, {{1}}. Te escribimos de {{2}} sobre tu consulta de «{{3}}». ¿Seguimos conversando?",
@@ -197,46 +212,46 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     subject: "¿Te buscamos otra fecha?",
   },
   // Los tres avisos de «Recordar la cita». No piden confirmar: eso lo pide el
-  // recordatorio, cerca de la fecha.
+  // recordatorio, cerca de la fecha. Son avisos: sin botón de baja (ADR 0040).
   aviso_cita_reservada: {
     key: "aviso_cita_reservada",
-    purpose: "recordatorio",
+    purpose: "avisos",
     category: "utility",
-    template: "odentia_aviso_cita_reservada_v1",
+    template: "odentia_aviso_cita_reservada_v2",
     body: "Hola, {{1}}. Tu cita en {{2}} quedó reservada: {{3}}. Si necesitas cambiarla, responde a este mensaje.",
     variables: ["persona", "lugar", "citas"],
-    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, OPT_OUT],
+    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }],
     subject: "Tu cita quedó reservada",
   },
   aviso_cita_reservada_datos: {
     key: "aviso_cita_reservada_datos",
-    purpose: "recordatorio",
+    purpose: "avisos",
     category: "utility",
-    template: "odentia_aviso_cita_datos_v1",
+    template: "odentia_aviso_cita_datos_v2",
     body: "Hola, {{1}}. Te esperamos en {{2}}: {{3}}. Antes de venir, completa tus datos aquí.",
     variables: ["persona", "lugar", "citas"],
     link: { title: "Ver mi cita y mis datos" },
-    buttons: [OPT_OUT],
+    buttons: [],
     subject: "Tu cita quedó reservada: completa tus datos",
   },
   aviso_cita_movida: {
     key: "aviso_cita_movida",
-    purpose: "recordatorio",
+    purpose: "avisos",
     category: "utility",
-    template: "odentia_aviso_cita_movida_v1",
+    template: "odentia_aviso_cita_movida_v2",
     body: "Hola, {{1}}. Tu cita en {{2}} cambió de fecha: ahora es {{3}}. Si no te queda bien, responde a este mensaje.",
     variables: ["persona", "lugar", "citas"],
-    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, OPT_OUT],
+    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }],
     subject: "Tu cita cambió de fecha",
   },
   aviso_cita_cancelada: {
     key: "aviso_cita_cancelada",
-    purpose: "recordatorio",
+    purpose: "avisos",
     category: "utility",
-    template: "odentia_aviso_cita_cancelada_v1",
+    template: "odentia_aviso_cita_cancelada_v2",
     body: "Hola, {{1}}. Tu cita del {{2}} en {{3}} quedó cancelada. ¿Te buscamos otra fecha?",
     variables: ["persona", "cita_pasada", "clinica"],
-    buttons: [{ action: "responder", title: "Sí, otra fecha", asks: "reservar" }, OPT_OUT],
+    buttons: [{ action: "responder", title: "Sí, otra fecha", asks: "reservar" }],
     subject: "Tu cita quedó cancelada",
   },
 }
@@ -248,10 +263,12 @@ export function automationMessageOf(kind: string): AutomationMessage | null {
 }
 
 /**
- * El mensaje que no sale solo: lo envía una persona desde la Bandeja cuando
- * pasaron 24 horas y WhatsApp ya no deja escribir con libertad. Continúa una
- * consulta que la persona inició, así que no responde a ningún permiso de
- * mensajes y solo se ofrece en una conversación donde ella ya escribió.
+ * El mensaje que retoma una consulta pasadas 24 horas, cuando WhatsApp ya no
+ * deja escribir con libertad: lo envía una persona desde la Bandeja o el
+ * sistema cuando el agente tiene que responder fuera de la ventana (un caso
+ * que el equipo devolvió tarde; ADR 0040). Continúa una consulta que la
+ * persona inició: no pide permiso, solo se ofrece donde ella ya escribió y
+ * solo lo frena «No quiero ningún mensaje».
  */
 export const RESUME_MESSAGE_KEY = "retomar_conversacion"
 export const RESUME_MESSAGE: MessageSpec = {
@@ -266,9 +283,9 @@ export const RESUME_MESSAGE: MessageSpec = {
 /**
  * «Presupuesto listo» (paso 3 de la fase 3): lo envía quien entrega el
  * presupuesto desde Plan o el cierre de la atención, y el agente cuando la
- * persona se lo pide por el chat. Es parte del servicio: no pide permiso
- * previo (ADR 0030) y deja de salir solo si se dio de baja de los mensajes de
- * seguimiento. «Ver y responder» abre «Su enlace», donde lo ve y responde
+ * persona se lo pide por el chat. Es un aviso de lo que pasó (ADR 0040): no
+ * pide permiso y solo deja de salir con «No quiero ningún mensaje».
+ * «Ver y responder» abre «Su enlace», donde lo ve y responde
  * (ADR 0037). Por WhatsApp dentro de las 24 horas sale con el PDF y su
  * enlace; por correo, con el PDF adjunto y su enlace.
  */
@@ -288,8 +305,10 @@ export const BUDGET_READY_SUBJECT = "Tu presupuesto está listo"
 /**
  * «Su enlace» (ADR 0037): lo envía recepción con «Enviarle su enlace» (datos
  * por completar, un consentimiento por firmar) y lleva solo el botón que lo
- * abre. Es parte del servicio, como el aviso de su cita: no pide permiso y
- * deja de salir solo si se dio de baja de los recordatorios.
+ * abre. Es un aviso, como el de su cita (ADR 0040): no pide permiso y solo
+ * deja de salir con «No quiero ningún mensaje». También avisa de sus papeles
+ * fuera de las 24 horas («Tus papeles», decisión 8): el texto ya aprobado dice
+ * «te dejamos aquí lo que tienes pendiente».
  */
 export const PERSONAL_LINK_MESSAGE_KEY = "su_enlace"
 export const PERSONAL_LINK_MESSAGE: MessageSpec = {
@@ -303,6 +322,13 @@ export const PERSONAL_LINK_MESSAGE: MessageSpec = {
 }
 /** Asunto cuando «Su enlace» sale por correo. */
 export const PERSONAL_LINK_SUBJECT = "Lo que tienes pendiente con la clínica"
+
+/**
+ * El tipo de los avisos que no son de una línea: «Presupuesto listo», «Su
+ * enlace», «Retomar la conversación» y los papeles (receta y comprobante).
+ * Salen siempre y solo los frena «No quiero ningún mensaje» (ADR 0040).
+ */
+export const NOTICE_PURPOSE = "avisos" satisfies ConsentPurpose
 
 /** Los mensajes con los que viene cada clínica: los que envía el agente, el de la Bandeja, el del presupuesto y «Su enlace». */
 export const CATALOG_MESSAGE_KEYS = [
@@ -442,6 +468,86 @@ export function replyId(action: ReplyAction, jobId: string): string {
 export const GENERAL_PERMISSION_QUESTION = "¿Te podemos escribir para enviarte novedades y promociones de la clínica?"
 export const GENERAL_PERMISSION_YES = "¡Listo! Te enviaremos novedades y promociones. Puedes darte de baja cuando quieras."
 export const GENERAL_PERMISSION_NO = "Entendido: no te enviaremos novedades ni promociones."
+
+// ---------------------------------------------------------- «Tus mensajes» ---
+
+/** El enlace que abre «Tus mensajes» dentro de «Su enlace» (ADR 0040). */
+export const CHOOSE_MESSAGES_LINK = { title: "Elegir mis mensajes" } as const
+
+/** Los tres tipos que la persona puede apagar, en el orden de la página. */
+export const SWITCHABLE_PURPOSES = ["recordatorio", "seguimiento", "novedades"] as const satisfies readonly ConsentPurpose[]
+export type SwitchablePurpose = (typeof SWITCHABLE_PURPOSES)[number]
+
+/**
+ * Cómo se llama cada tipo de mensaje, para la persona y para el equipo: el
+ * título de su interruptor, lo que trae y cómo se dice al darse de baja
+ * («ya no te enviaremos recordatorios»).
+ */
+export const MESSAGE_KIND_WORDS: Record<ConsentPurpose, { title: string; detail: string; stops: string }> = {
+  recordatorio: {
+    title: "Recordatorios de tus citas",
+    detail: "Te avisamos un día antes y unas horas antes.",
+    stops: "recordatorios",
+  },
+  seguimiento: {
+    title: "Controles y seguimiento",
+    detail: "Cuándo te toca tu control, o si faltaste a una cita.",
+    stops: "mensajes de controles y seguimiento",
+  },
+  novedades: {
+    title: "Novedades y promociones",
+    detail: "Campañas y ofertas de la clínica.",
+    stops: "novedades ni promociones",
+  },
+  avisos: {
+    title: "Avisos de tus citas y papeles",
+    detail:
+      "Si tu cita se reserva, cambia o se cancela, y cuando tu presupuesto o tu receta están listos. Siempre te llegan, porque son parte de tu atención.",
+    stops: "ningún mensaje de la clínica",
+  },
+}
+
+/**
+ * La respuesta fija a una baja, venga del botón, del chat o de «BAJA»:
+ * «Listo, Lucía, ya no te enviaremos recordatorios. Si tu cita cambia, te
+ * avisamos igual.». Con «nada» tampoco salen los avisos, y no se promete ese aviso.
+ */
+export function optOutReply(name: string | null, purposes: readonly ConsentPurpose[]): string {
+  const who = name ? `Listo, ${name}` : "Listo"
+  if (purposes.includes("avisos")) return `${who}, ya no te enviaremos ningún mensaje de la clínica.`
+  const what = SWITCHABLE_PURPOSES.filter((purpose) => purposes.includes(purpose)).map(
+    (purpose) => MESSAGE_KIND_WORDS[purpose].stops,
+  )
+  const list = what.length > 1 ? `${what.slice(0, -1).join(", ")} ni ${what.at(-1)}` : (what[0] ?? "mensajes")
+  return `${who}, ya no te enviaremos ${list}. Si tu cita cambia, te avisamos igual.`
+}
+
+/** Lo que se le dice cuando vuelve a recibir un tipo: «Listo, Lucía, te volveremos a enviar: recordatorios de tus citas.». */
+export function optInReply(name: string | null, purposes: readonly ConsentPurpose[]): string {
+  const who = name ? `Listo, ${name}` : "Listo"
+  const what = SWITCHABLE_PURPOSES.filter((purpose) => purposes.includes(purpose)).map((purpose) =>
+    MESSAGE_KIND_WORDS[purpose].title.toLowerCase(),
+  )
+  return what.length > 0
+    ? `${who}, te volveremos a enviar: ${what.join(", ")}.`
+    : `${who}, te volveremos a enviar los avisos de tus citas y papeles.`
+}
+
+/**
+ * Las palabras de baja que se resuelven sin modelo (ADR 0040): «BAJA» o
+ * «STOP», solas en el mensaje. «Cancelar» nunca es una baja: quien la escribe
+ * quiere cancelar su cita.
+ */
+export function isStopWord(text: string | null | undefined): boolean {
+  const word = (text ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase()
+  return word === "BAJA" || word === "STOP" || word === "DAR DE BAJA"
+}
 
 export function generalPermissionButtons(contactId: string): Array<{ id: string; title: string }> {
   return [

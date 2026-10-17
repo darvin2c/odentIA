@@ -24,6 +24,8 @@ export interface PersonResponsibleFor {
   birthDate: string | null
   relationship: string
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship?: string | null
   archived: boolean
 }
 
@@ -36,6 +38,8 @@ export interface PersonSpokenForBy {
   isPatient?: boolean
   relationship: string
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship?: string | null
   isPreferred: boolean
   conversationId: string | null
 }

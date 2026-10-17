@@ -664,6 +664,8 @@ function buildTextMime(input: {
   inReplyTo: string | null
   references: string | null
   text: string
+  /** Enlace de baja (RFC 2369): solo en un correo automático. */
+  listUnsubscribe?: string | undefined
 }): string {
   const lines = [
     `From: ${asciiHeader(input.from)}`,
@@ -675,6 +677,7 @@ function buildTextMime(input: {
   ]
   if (input.inReplyTo) lines.push(`In-Reply-To: ${asciiHeader(input.inReplyTo)}`)
   if (input.references) lines.push(`References: ${asciiHeader(input.references)}`)
+  if (input.listUnsubscribe) lines.push(`List-Unsubscribe: <${asciiHeader(input.listUnsubscribe)}>`)
   const encoded = Buffer.from(input.text, "utf8").toString("base64")
   return `${lines.join("\r\n")}\r\n\r\n${encoded}`
 }
@@ -813,7 +816,15 @@ export const gmailAdapter: ChannelAdapter = {
       if (msg.kind.type === "text") {
         if (!msg.kind.text.trim()) throw new Error("El texto del mensaje es obligatorio")
         const { subject, body } = splitColdSubject(msg.kind.text)
-        const raw = buildTextMime({ from: cfg.emailAddress, to, subject, text: body, inReplyTo: null, references: null })
+        const raw = buildTextMime({
+          from: cfg.emailAddress,
+          to,
+          subject,
+          text: body,
+          inReplyTo: null,
+          references: null,
+          listUnsubscribe: msg.listUnsubscribe,
+        })
         return { externalId: await sendNewMessage(accessToken, raw, deps) }
       }
       if (msg.kind.type !== "media") throw new Error("Tipo de mensaje no soportado por Gmail")
@@ -835,7 +846,7 @@ export const gmailAdapter: ChannelAdapter = {
     const target = await resolveReplyTarget(accessToken, threadId, cfg.emailAddress, deps)
     if (msg.kind.type === "text") {
       if (!msg.kind.text.trim()) throw new Error("El texto del mensaje es obligatorio")
-      const raw = buildTextMime({ from: cfg.emailAddress, ...target, text: msg.kind.text })
+      const raw = buildTextMime({ from: cfg.emailAddress, ...target, text: msg.kind.text, listUnsubscribe: msg.listUnsubscribe })
       return { externalId: await sendThreadMessage(accessToken, threadId, raw, deps) }
     }
     if (msg.kind.type !== "media") throw new Error("Tipo de mensaje no soportado por Gmail")

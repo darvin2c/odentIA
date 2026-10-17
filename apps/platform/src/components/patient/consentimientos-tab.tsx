@@ -31,7 +31,7 @@ import {
   generateConsentPdf,
   revokeConsent,
 } from "../../lib/clinical-forms"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 import { ConsentSheet } from "./consent-sheet"
 import { ConsentSigningScreen, PaperSignDrawer, useSignerChoices } from "./consent-signing"
 import { FirmaPad } from "./firma-pad"
@@ -59,6 +59,7 @@ export function NewConsentDrawer({
   planItemId,
   defaultProcedureRef,
   defaultDiagnosisCode,
+  defaultDiagnosisSystem,
   onCreated,
 }: {
   open: boolean
@@ -69,12 +70,14 @@ export function NewConsentDrawer({
   /** Desde la atención: lo que se registró (procedimiento y pieza) y su diagnóstico. */
   defaultProcedureRef?: string
   defaultDiagnosisCode?: string
+  defaultDiagnosisSystem?: string
   onCreated: (id: string) => Promise<void>
 }) {
   const ids = useId()
   const [templateId, setTemplateId] = useState("")
   const [procedureRef, setProcedureRef] = useState(defaultProcedureRef ?? "")
   const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
+  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
   const [error, setError] = useState<string | null>(null)
   const templatesQuery = useQuery({
     queryKey: ["consent-templates-published"],
@@ -91,6 +94,7 @@ export function NewConsentDrawer({
         planItemId: planItemId ?? null,
         procedureRef: procedureRef.trim() || null,
         diagnosisCode: diagnosisCode || null,
+        diagnosisSystem: diagnosisCode ? diagnosisSystem : null,
       }),
     onSuccess: async (result) => {
       toast.success("Consentimiento generado: pendiente de firma")
@@ -166,9 +170,13 @@ export function NewConsentDrawer({
             placeholder="p. ej. Exodoncia pieza 38"
           />
         </Field>
-        <Cie10Search
+        <DiagnosisSearch
           value={diagnosisCode}
-          onChange={(code) => setDiagnosisCode(code)}
+          system={diagnosisSystem}
+          onChange={(code, _description, system) => {
+            setDiagnosisCode(code)
+            setDiagnosisSystem(system)
+          }}
           label="Diagnóstico que lo motiva (opcional)"
         />
       </div>

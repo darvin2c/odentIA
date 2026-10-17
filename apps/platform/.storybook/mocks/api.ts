@@ -294,11 +294,14 @@ const services = [
   },
 ]
 
-const cie10 = [
-  { code: "K02.1", description: "Caries de la dentina" },
-  { code: "K04.0", description: "Pulpitis" },
-  { code: "K08.1", description: "Pérdida de dientes por accidente, extracción o enfermedad" },
+/** Unos códigos de la lista de la clínica (CIE-10), con el texto ya sin tildes para buscar. */
+const diagnosisCodes = [
+  { system: "ICD-10", code: "K02.1", description: "Caries de la dentina" },
+  { system: "ICD-10", code: "K04.0", description: "Pulpitis" },
+  { system: "ICD-10", code: "K08.1", description: "Pérdida de dientes por accidente, extracción o enfermedad" },
+  { system: "ICD-10", code: "S02.5", description: "Fractura de los dientes" },
 ]
+const plainText = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
 
 /** Vista vigente del odontograma: el servidor la calcula, aquí sale del historial. */
 function odontogramState(): OdontogramState {
@@ -354,7 +357,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     if (rest === "odontogram/findings" && method === "POST") {
       const teeth = (body.toothNumbers as number[] | undefined) ?? []
       const surfaces = (body.surfaces as string[] | undefined) ?? []
-      const diagnosis = body.diagnosis as { cie10Code?: string } | null | undefined
+      const diagnosis = body.diagnosis as { diagnosisCode?: string; diagnosisSystem?: string | null } | null | undefined
       const created: OdontogramEntry[] = teeth.flatMap((toothNumber) =>
         (surfaces.length ? surfaces : [null]).map((surface) => ({
           id: nextId("entry"),
@@ -362,7 +365,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
           surface,
           condition: String(body.condition),
           status: "recorded",
-          diagnosisCode: diagnosis?.cie10Code ?? null,
+          diagnosisCode: diagnosis?.diagnosisCode ?? null,
+          diagnosisSystem: diagnosis?.diagnosisCode ? (diagnosis.diagnosisSystem ?? "ICD-10") : null,
           note: (body.note as string | null) ?? null,
           encounterId: (body.encounterId as string | null) ?? null,
           details: (body.details as OdontogramEntry["details"]) ?? {},
@@ -591,11 +595,20 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     }) as T
   }
 
-  if (segments[1] === "cie10" && method === "GET") {
-    const q = (query.get("q") ?? "").toLowerCase()
-    const rows = cie10.filter(
-      (row) =>
-        !q || row.code.toLowerCase().includes(q) || row.description.toLowerCase().includes(q),
+  if (segments[1] === "diagnosis-codes" && segments[2] === "suggestions" && method === "GET") {
+    const proposed =
+      query.get("condition") === "caries"
+        ? [{ ...diagnosisCodes[0]!, finding: "Lesión de caries dental", toothNumber: Number(query.get("toothNumber")) || null, surfaces: [] }]
+        : []
+    return json({
+      data: { system: "ICD-10", systemTitle: "CIE-10 (OMS)", proposed, mostUsed: diagnosisCodes.slice(1, 3) },
+    }) as T
+  }
+
+  if (segments[1] === "diagnosis-codes" && method === "GET") {
+    const q = plainText(query.get("q") ?? "")
+    const rows = diagnosisCodes.filter(
+      (row) => !q || plainText(`${row.code} ${row.description}`).includes(q),
     )
     return json({ data: rows }) as T
   }

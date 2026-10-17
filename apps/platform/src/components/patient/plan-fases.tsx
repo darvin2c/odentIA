@@ -1,4 +1,9 @@
-import { TREATMENT_PHASE_LABELS, TREATMENT_PHASES, type TreatmentPhase } from "@odentia/clinical"
+import {
+  diagnosisCodeLabel,
+  TREATMENT_PHASE_LABELS,
+  TREATMENT_PHASES,
+  type TreatmentPhase,
+} from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -20,8 +25,8 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
+import { type PlanItem, planStatusLabel, type TreatmentJourneySummary } from "../../lib/patients"
 
 const CLOSED = ["realizado", "cancelado", "reemplazado"]
 
@@ -209,7 +214,9 @@ function PlanPhasesGroup({
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {[
-                            item.diagnosisCode,
+                            item.diagnosisCode
+                              ? diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode)
+                              : null,
                             planDecisionLabel(item.decisionStatus),
                             `${sessions} de ${plural(planned, "sesión", "sesiones")}`,
                             !closed && next ? NEXT_ACTION_LABELS[next] : null,

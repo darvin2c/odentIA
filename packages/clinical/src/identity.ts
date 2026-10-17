@@ -37,6 +37,35 @@ export const DOC_TYPE_LABELS: Record<IdentityDocType, string> = {
   OTRO: "Otro",
 }
 /**
+ * Código de cada tipo en la tabla 0203 de HL7 v2 (Identifier Type, CC0;
+ * `http://terminology.hl7.org/CodeSystem/v2-0203`), para enviarlo como FHIR
+ * `Identifier.type`: pasaporte PPN, carné de extranjería PRC (residente
+ * extranjero), certificado de nacido vivo BCT. Un documento nacional (el DNI,
+ * el de otro país) es NN más su país emisor en ISO 3166-1 alfa-3 («NNPER»);
+ * si no se conoce ese país, NI. «Otro» no tiene código: va solo con su texto.
+ */
+export const HL7_IDENTIFIER_TYPE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v2-0203"
+const FIXED_HL7_DOC: Partial<Record<IdentityDocType, string>> = { PASAPORTE: "PPN", CE: "PRC", CNV: "BCT" }
+const NATIONAL_DOCS: ReadonlySet<IdentityDocType> = new Set(["NACIONAL", "DNI", "DIE"])
+/** ISO 3166-1 alfa-2 → alfa-3 de los países con los que hoy trabaja odentIA y sus vecinos. */
+const ALPHA3: Record<string, string> = {
+  AR: "ARG", BO: "BOL", BR: "BRA", CL: "CHL", CO: "COL", CR: "CRI", CU: "CUB", DO: "DOM",
+  EC: "ECU", ES: "ESP", GT: "GTM", HN: "HND", MX: "MEX", NI: "NIC", PA: "PAN", PE: "PER",
+  PR: "PRI", PY: "PRY", SV: "SLV", US: "USA", UY: "URY", VE: "VEN",
+}
+export function hl7DocumentTypeCode(
+  docType: string | null | undefined,
+  issuerCountry?: string | null,
+): string | null {
+  if (!docType) return null
+  const fixed = FIXED_HL7_DOC[docType as IdentityDocType]
+  if (fixed) return fixed
+  if (!NATIONAL_DOCS.has(docType as IdentityDocType)) return null
+  const alpha3 = issuerCountry ? ALPHA3[issuerCountry.trim().toUpperCase()] : undefined
+  return alpha3 ? `NN${alpha3}` : "NI"
+}
+
+/**
  * Un documento como se lee en pantalla, con la etiqueta del catálogo y nunca
  * el código guardado: «Pasaporte AB1234567», «Carné de extranjería 001234567».
  */
@@ -45,75 +74,135 @@ export function documentText(docType: string | null | undefined, docNumber: stri
   return `${label} ${docNumber}`.trim()
 }
 
-/** Estado civil (catálogo de RENIEC/INEI). */
+/**
+ * Estado civil con HL7 v3 MaritalStatus (`http://terminology.hl7.org/CodeSystem/v3-MaritalStatus`):
+ * S soltero, M casado, T pareja de hecho (Domestic partner), L separado
+ * (Legally Separated), D divorciado y W viudo. El perfil del país puede
+ * cambiar una palabra por la suya («Conviviente» en Perú): ese valor se guarda
+ * tal cual, con el país delante (`PE:conviviente`), y solo se traduce a HL7 al
+ * enviarlo a otro sistema (`maritalStatusToHl7`). Decisión 28 de la fase 4: la
+ * tabla v2→FHIR de HL7 lleva «convivencia» y «pareja registrada» a T; C es un
+ * tipo de matrimonio y no se usa.
+ */
+export const HL7_MARITAL_STATUSES = ["S", "M", "T", "L", "D", "W"] as const
+export type Hl7MaritalStatus = (typeof HL7_MARITAL_STATUSES)[number]
+/** Valores con nombre propio de un país y su código HL7. */
+export const NATIONAL_MARITAL_STATUSES = {
+  "PE:conviviente": { label: "Conviviente", hl7: "T" },
+} as const satisfies Record<string, { label: string; hl7: Hl7MaritalStatus }>
+export type NationalMaritalStatus = keyof typeof NATIONAL_MARITAL_STATUSES
 export const MARITAL_STATUSES = [
-  "soltero",
-  "casado",
-  "conviviente",
-  "viudo",
-  "divorciado",
-  "separado",
-] as const
-export const MARITAL_STATUS_LABELS: Record<(typeof MARITAL_STATUSES)[number], string> = {
-  soltero: "Soltero(a)",
-  casado: "Casado(a)",
-  conviviente: "Conviviente",
-  viudo: "Viudo(a)",
-  divorciado: "Divorciado(a)",
-  separado: "Separado(a)",
+  ...HL7_MARITAL_STATUSES,
+  ...(Object.keys(NATIONAL_MARITAL_STATUSES) as NationalMaritalStatus[]),
+] as [Hl7MaritalStatus, ...(Hl7MaritalStatus | NationalMaritalStatus)[]]
+export type MaritalStatus = Hl7MaritalStatus | NationalMaritalStatus
+export const MARITAL_STATUS_LABELS: Record<MaritalStatus, string> = {
+  S: "Soltero(a)",
+  M: "Casado(a)",
+  T: "Pareja de hecho",
+  L: "Separado(a)",
+  D: "Divorciado(a)",
+  W: "Viudo(a)",
+  "PE:conviviente": NATIONAL_MARITAL_STATUSES["PE:conviviente"].label,
+}
+const HL7_MARITAL_DISPLAY: Record<Hl7MaritalStatus, string> = {
+  S: "Never Married",
+  M: "Married",
+  T: "Domestic partner",
+  L: "Legally Separated",
+  D: "Divorced",
+  W: "Widowed",
+}
+export const HL7_MARITAL_STATUS_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus"
+
+/**
+ * El estado civil como se envía a otro sistema (FHIR `Patient.maritalStatus`):
+ * el código HL7, su nombre y, como texto, la palabra que se eligió en la
+ * clínica. «Conviviente» sale como T, con el texto «Conviviente». Null si no
+ * hay dato o el valor no se conoce.
+ */
+export function maritalStatusToHl7(
+  value: string | null | undefined,
+): { system: string; code: Hl7MaritalStatus; display: string; text: string } | null {
+  if (!value) return null
+  const national = (NATIONAL_MARITAL_STATUSES as Record<string, { label: string; hl7: Hl7MaritalStatus }>)[value]
+  const code = national ? national.hl7 : (HL7_MARITAL_STATUSES as readonly string[]).includes(value) ? (value as Hl7MaritalStatus) : null
+  if (!code) return null
+  return {
+    system: HL7_MARITAL_STATUS_SYSTEM,
+    code,
+    display: HL7_MARITAL_DISPLAY[code],
+    text: MARITAL_STATUS_LABELS[value as MaritalStatus],
+  }
 }
 
-/** Nivel educativo alcanzado (categorías censales del INEI). */
-export const EDUCATION_LEVELS = [
-  "sin_nivel",
-  "inicial",
-  "primaria_incompleta",
-  "primaria_completa",
-  "secundaria_incompleta",
-  "secundaria_completa",
-  "superior_no_universitaria_incompleta",
-  "superior_no_universitaria_completa",
-  "superior_universitaria_incompleta",
-  "superior_universitaria_completa",
-  "posgrado",
-] as const
-export const EDUCATION_LEVEL_LABELS: Record<(typeof EDUCATION_LEVELS)[number], string> = {
-  sin_nivel: "Sin nivel",
-  inicial: "Inicial",
-  primaria_incompleta: "Primaria incompleta",
-  primaria_completa: "Primaria completa",
-  secundaria_incompleta: "Secundaria incompleta",
-  secundaria_completa: "Secundaria completa",
-  superior_no_universitaria_incompleta: "Superior no universitaria incompleta",
-  superior_no_universitaria_completa: "Superior no universitaria completa",
-  superior_universitaria_incompleta: "Superior universitaria incompleta",
-  superior_universitaria_completa: "Superior universitaria completa",
-  posgrado: "Posgrado",
+/**
+ * Nivel educativo alcanzado con la CINE 2011 de la UNESCO (ISCED 2011,
+ * niveles 0 a 8). Se guarda el número del nivel. Las categorías del censo de
+ * un país (INEI en Perú) no se guardan: si un reporte las pidiera, irían como
+ * correspondencia en el perfil de ese país.
+ */
+export const EDUCATION_LEVELS = ["0", "1", "2", "3", "4", "5", "6", "7", "8"] as const
+export type EducationLevel = (typeof EDUCATION_LEVELS)[number]
+export const EDUCATION_LEVEL_LABELS: Record<EducationLevel, string> = {
+  "0": "Sin estudios o solo inicial",
+  "1": "Primaria",
+  "2": "Secundaria, primer ciclo",
+  "3": "Secundaria completa",
+  "4": "Postsecundaria no superior",
+  "5": "Superior técnica de ciclo corto",
+  "6": "Universitaria (grado o licenciatura)",
+  "7": "Maestría",
+  "8": "Doctorado",
 }
 
-/** Parentesco del contacto de emergencia o del familiar. */
-export const KINSHIP = [
-  "madre",
-  "padre",
-  "hijo",
-  "conyuge",
-  "hermano",
-  "abuelo",
-  "tio",
-  "otro_familiar",
-  "no_familiar",
+/**
+ * Parentesco con HL7 v3 RoleCode (PersonalRelationshipRoleType,
+ * `http://terminology.hl7.org/CodeSystem/v3-RoleCode`). Se distingue el abuelo
+ * materno del paterno. Los antecedentes familiares solo admiten familiares
+ * (`FAMILY_KINSHIP`); el contacto de emergencia y las personas vinculadas,
+ * también amistades y vecinos.
+ */
+export const FAMILY_KINSHIP = [
+  "MTH",
+  "FTH",
+  "CHILD",
+  "SPS",
+  "DOMPART",
+  "SIB",
+  "MGRPRN",
+  "PGRPRN",
+  "GRNDCHILD",
+  "AUNT",
+  "UNCLE",
+  "COUSN",
+  "FAMMEMB",
 ] as const
-export const KINSHIP_LABELS: Record<(typeof KINSHIP)[number], string> = {
-  madre: "Madre",
-  padre: "Padre",
-  hijo: "Hijo(a)",
-  conyuge: "Cónyuge o pareja",
-  hermano: "Hermano(a)",
-  abuelo: "Abuelo(a)",
-  tio: "Tío(a)",
-  otro_familiar: "Otro familiar",
-  no_familiar: "No familiar",
+export const KINSHIP = [...FAMILY_KINSHIP, "FRND", "NBOR"] as const
+export type Kinship = (typeof KINSHIP)[number]
+export type FamilyKinship = (typeof FAMILY_KINSHIP)[number]
+export const HL7_ROLE_CODE_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-RoleCode"
+export const KINSHIP_LABELS: Record<Kinship, string> = {
+  MTH: "Madre",
+  FTH: "Padre",
+  CHILD: "Hijo(a)",
+  SPS: "Cónyuge",
+  DOMPART: "Pareja",
+  SIB: "Hermano(a)",
+  MGRPRN: "Abuelo(a) materno(a)",
+  PGRPRN: "Abuelo(a) paterno(a)",
+  GRNDCHILD: "Nieto(a)",
+  AUNT: "Tía",
+  UNCLE: "Tío",
+  COUSN: "Primo(a)",
+  FAMMEMB: "Otro familiar",
+  FRND: "Amigo(a)",
+  NBOR: "Vecino(a)",
 }
+/** Solo los familiares, para los antecedentes familiares. */
+export const FAMILY_KINSHIP_LABELS: Record<FamilyKinship, string> = Object.fromEntries(
+  FAMILY_KINSHIP.map((code) => [code, KINSHIP_LABELS[code]]),
+) as Record<FamilyKinship, string>
 
 export const ISO_COUNTRY_RE = /^[A-Z]{2}$/
 

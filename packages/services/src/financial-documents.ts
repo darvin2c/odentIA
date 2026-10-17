@@ -6,9 +6,11 @@
  * - Destinatario: la propia persona o un pagador autorizado (responsable
  *   económico, representante legal o autorizado de información vigente). Nunca
  *   se verifica identidad por coincidencia de teléfono.
- * - Canal: correo si la persona tiene uno y hay conexión de correo activa;
- *   si no, su medio preferido entre los conectados; quien envía puede
- *   cambiarlo. Sin canal utilizable se devuelve el texto para configurar.
+ * - Canal (decisión 20 v2): cada papel por su canal natural. El comprobante
+ *   (ticket del cobro) por correo, y al cobrar se envía solo
+ *   (`sendTicketReceiptByEmail`); por WhatsApp sale solo si la persona lo pide
+ *   en el chat. El presupuesto, primero por WhatsApp y, si no, por correo.
+ *   Quien envía puede cambiarlo. Sin canal utilizable se devuelve el texto para configurar.
  * - El envío queda en la conversación de la persona como adjunto PDF y vuelve
  *   en estado `encolado`: el worker lo entrega por el adaptador real y solo
  *   entonces pasa a `enviado`. Nunca se presenta encolado como entregado.
@@ -29,9 +31,11 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
+import { NOTICE_PURPOSE } from "./automation-messages.js"
 import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
 import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { mayWriteFirst } from "./message-permission.js"
 import { budgetStateText } from "@odentia/clinical"
 import { deliverBudget, requireOwnBudget } from "./budgets.js"
 import {
@@ -293,13 +297,22 @@ async function listMediaConnections(tx: Db, orgId: string): Promise<UsableConnec
     .map((row) => ({ id: row.id, channel: row.channel, provider: row.provider, displayName: row.displayName }))
 }
 
-/** Propuesta pura de canal: correo con conexión > preferido utilizable > última conversación > primero utilizable. */
+/**
+ * Propuesta pura de canal (decisión 20 v2). El comprobante: correo con
+ * conexión > preferido utilizable > última conversación > primero utilizable.
+ * El presupuesto, que hay que leer enseguida (`first: "whatsapp"`): WhatsApp
+ * utilizable > correo > lo demás.
+ */
 export function proposeChannel<T extends { channel: string; usable: boolean; hasThread: boolean; connectionId: string }>(
   options: T[],
-  input: { email: string | null; preferredChannel: string | null; lastChannel: string | null },
+  input: { email: string | null; preferredChannel: string | null; lastChannel: string | null; first?: "email" | "whatsapp" },
 ): T | null {
   const usable = options.filter((o) => o.usable)
   if (usable.length === 0) return null
+  if (input.first === "whatsapp") {
+    const whatsapp = usable.find((o) => o.channel === "whatsapp")
+    if (whatsapp) return whatsapp
+  }
   if (input.email) {
     const email = usable.find((o) => o.channel === "email")
     if (email) return email
@@ -339,6 +352,7 @@ export async function getDocumentSendOptions(
     email: recipient.email,
     preferredChannel,
     lastChannel,
+    first: documentType === "budget" ? "whatsapp" : "email",
   })
   if (proposed) proposed.isProposed = true
   const patientRow = await requirePatient(tx, orgId, patientId)
@@ -1004,6 +1018,160 @@ export async function sendFinancialDocument(
     deliveredBudget,
     sentToEmail,
   }
+}
+
+export type TicketReceiptOutcome =
+  | { sent: "correo"; email: string; conversationId: string; messageId: string }
+  /** Lo que dice Caja: «Sin correo: entrégalo impreso o pídele su correo». */
+  | { sent: null; reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"; text: string }
+
+const RECEIPT_WORDS: Record<"sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso", string> = {
+  sin_correo: "Sin correo: entrégalo impreso o pídele su correo",
+  sin_conexion: "La clínica no tiene un correo conectado: entrégalo impreso",
+  correo_ajeno: "Su correo está vinculado a otra persona: entrégalo impreso",
+  sin_permiso: "Pidió no recibir ningún mensaje de la clínica: entrégalo impreso",
+}
+
+/**
+ * Al cobrar, el comprobante (el ticket) sale solo por correo a quien pagó o a
+ * la persona (decisión 20 v2) y queda en «Tus papeles». Por WhatsApp no se
+ * envía: solo si la persona lo pide en el chat, y entonces lo manda el agente
+ * en esa conversación (`sendReceiptInConversation`). Sin correo no sale nada y
+ * Caja lo dice. Es un aviso de lo que pasó: solo lo frena «No quiero ningún mensaje».
+ */
+export async function sendTicketReceiptByEmail(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  ticketId: string,
+  deps: SendDeps,
+): Promise<TicketReceiptOutcome> {
+  const { preferContactId } = await loadDocumentMeta(tx, orgId, patientId, "ticket", ticketId)
+  const recipient = await requireAuthorizedRecipient(tx, orgId, patientId, undefined, preferContactId)
+  const no = (reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"): TicketReceiptOutcome => ({
+    sent: null,
+    reason,
+    text: RECEIPT_WORDS[reason],
+  })
+  if (!recipient.email?.trim()) return no("sin_correo")
+  if (!(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) return no("sin_permiso")
+  const [mailbox] = await tx
+    .select()
+    .from(channelConnection)
+    .where(
+      and(
+        eq(channelConnection.organizationId, orgId),
+        eq(channelConnection.channel, "email"),
+        eq(channelConnection.status, "active"),
+      ),
+    )
+    .orderBy(channelConnection.createdAt)
+    .limit(1)
+  if (!mailbox) return no("sin_conexion")
+  const conn = await requireDocumentConnection(tx, orgId, mailbox.id)
+  const snap = await buildTicketSnapshot(tx, orgId, patientId, ticketId)
+  const pdf = await renderTicketPdf(snap, null)
+  let delivered: { conversationId: string; messageId: string }
+  try {
+    delivered = await deliverDocumentPdf(
+      tx,
+      orgId,
+      actorUserId,
+      {
+        recipient,
+        conn,
+        pdf,
+        filename: asciiFilename(`Comprobante-${snap.numberLabel}.pdf`),
+        caption: captionWithSubject(
+          `Comprobante N.º ${snap.numberLabel} · ${snap.org.tradeName}`,
+          "Te enviamos el comprobante de tu pago en PDF. También lo encuentras en tu enlace, en «Tus papeles».",
+        ),
+      },
+      deps,
+    )
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === "AMBIGUOUS_CHANNEL_HISTORY") return no("correo_ajeno")
+    throw error
+  }
+  const email = recipient.email.trim().toLowerCase()
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "financial_document.sent",
+    entity: "message",
+    entityId: delivered.messageId,
+    metadata: {
+      patientId,
+      documentType: "ticket",
+      documentId: ticketId,
+      recipientContactId: recipient.contactId,
+      connectionId: conn.id,
+      conversationId: delivered.conversationId,
+      channel: "email",
+      sentToEmail: email,
+      automatic: true,
+    },
+  })
+  return { sent: "correo", email, ...delivered }
+}
+
+/**
+ * El comprobante por WhatsApp, cuando la persona lo pide en el chat (decisión
+ * 20 v2): el agente lo deja como respuesta en esa misma conversación, sin
+ * gastar un mensaje aprobado. Solo de un paciente por el que quien escribe
+ * decide (la propia persona o su representante legal) y de los últimos 30
+ * días, como «Tus papeles». Sin uno, devuelve null.
+ */
+export async function sendReceiptInConversation(
+  tx: Db,
+  orgId: string,
+  input: { conversationId: string; patientId: string },
+  deps: SendDeps,
+): Promise<{ label: string; messageId: string } | null> {
+  const [thread] = await tx
+    .select({ contactId: conversation.contactId })
+    .from(conversation)
+    .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread) throw notFound("Conversación")
+  const recipients = await listDocumentRecipients(tx, orgId, input.patientId)
+  const recipient = recipients.find(
+    (row) => row.contactId === thread.contactId && (row.relation === "paciente" || row.relation === "representante_legal" || row.relation === "responsable_economico"),
+  )
+  if (!recipient) return null
+  const [ticket] = await tx
+    .select({ id: paymentTicket.id })
+    .from(paymentTicket)
+    .where(
+      and(
+        eq(paymentTicket.organizationId, orgId),
+        eq(paymentTicket.patientId, input.patientId),
+        isNull(paymentTicket.voidedAt),
+        sql`${paymentTicket.createdAt} >= now() - interval '30 days'`,
+      ),
+    )
+    .orderBy(desc(paymentTicket.createdAt))
+    .limit(1)
+  if (!ticket) return null
+  const snap = await buildTicketSnapshot(tx, orgId, input.patientId, ticket.id)
+  const pdf = await renderTicketPdf(snap, null)
+  const label = `Comprobante N.º ${snap.numberLabel}`
+  const delivered = await deliverDocumentPdf(
+    tx,
+    orgId,
+    null,
+    {
+      recipient,
+      conversationId: input.conversationId,
+      pdf,
+      filename: asciiFilename(`Comprobante-${snap.numberLabel}.pdf`),
+      caption: label,
+      senderKind: "agent",
+    },
+    deps,
+  )
+  return { label, messageId: delivered.messageId }
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   insuranceChoiceOf,
   insuranceChoices,
   insuranceFromChoice,
+  maritalChoices,
 } from "../../lib/person-data"
 import type { Patient } from "../../lib/patients"
 import { SearchSelect } from "../settings/search-select"
@@ -63,6 +64,7 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
   return useMemo(() => {
     const address = profile.address
     const docType = typeof stored.docType === "string" ? stored.docType : null
+    const maritalStatus = typeof stored.maritalStatus === "string" ? stored.maritalStatus : null
     const addressFields: SectionField[] = [
       { key: "address", label: "Calle y número", type: { kind: "text", max: 500, wide: true } },
       { key: "addressCity", label: address.cityLabel, type: { kind: "text", max: 100 } },
@@ -136,7 +138,7 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
           { key: "nationality", label: "Nacionalidad", type: { kind: "country" } },
           { key: "birthCountry", label: "País de nacimiento", type: { kind: "country" } },
           { key: "birthPlace", label: "Lugar de nacimiento", hint: "Ciudad o localidad.", type: { kind: "text", max: 200 } },
-          { key: "maritalStatus", label: "Estado civil", type: { kind: "select", options: options(MARITAL_STATUS_LABELS) } },
+          { key: "maritalStatus", label: "Estado civil", type: { kind: "select", options: maritalChoices(profile, maritalStatus) } },
           {
             key: "educationLevel",
             label: "Nivel educativo",
@@ -150,7 +152,7 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
         ],
       },
     }
-  }, [profile, stored.docType])
+  }, [profile, stored.docType, stored.maritalStatus])
 }
 
 /** Qué campos abre «Completar» por cada dato que falta. */

@@ -4,7 +4,7 @@ import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureLibrarySpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { assertSaasBranchAvailable, configurePublicLinks, CONVERSATION_STATE_ACTIONS, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureLibrarySpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -29,7 +29,7 @@ import { createAgentLearningRoute } from "./routes/agent-learning.js"
 import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
 import { createPublicAutomationsRoute } from "./routes/automations.js"
-import { createCie10Route } from "./routes/cie10.js"
+import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
 import { createConnectionsRoute } from "./routes/connections.js"
 import { createContactsRoute } from "./routes/contacts.js"
@@ -465,6 +465,22 @@ export function createApp(deps: AppDeps) {
     }))
   })
 
+  // Lista de diagnósticos de la clínica (decisión 26): los nuevos se eligen en ella; nada se reescribe.
+  guarded.put("/org-profile/diagnosis-system", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "settings.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar la lista de diagnósticos"), 403)
+    }
+    const parsed = z
+      .object({ diagnosisSystem: z.string().min(1).max(20) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => setOrgDiagnosisSystem(tx, orgId, userId, parsed.data.diagnosisSystem)),
+    )
+  })
+
   // Ancho del ticket, tamaño de hoja y frase al pie: no tocan la región ni la identidad.
   guarded.put("/org-profile/printing", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
@@ -659,7 +675,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/org/payment-methods", createPaymentMethodsRoute(crmDeps))
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
-  guarded.route("/cie10", createCie10Route(crmDeps))
+  guarded.route("/diagnosis-codes", createDiagnosisCodesRoute(crmDeps))
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
   guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))

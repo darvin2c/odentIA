@@ -38,11 +38,17 @@ async function seedUserAndCie(): Promise<void> {
         on conflict ("id") do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values
         ('K02.1', 'Caries de la dentina'),
         ('K04.0', 'Pulpitis'),
-        ('Z01.2', 'Examen dental')
-        on conflict ("code") do nothing`,
+        ('Z01.2', 'Examen dental')) as v(code, title)
+    on conflict do nothing`,
   )
 }
 

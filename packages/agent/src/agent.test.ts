@@ -2208,8 +2208,9 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
-        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "pedir_volver_al_portal",
-        "reenviar_presupuesto", "request_human_handoff", "send_reply", "send_template", "ver_presupuesto", "ver_sedes_y_servicios",
+        "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "elegir_mensajes",
+        "enviar_comprobante", "pedir_volver_al_portal", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
+        "ver_sedes_y_servicios",
       ],
     )
 
@@ -2367,13 +2368,13 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
 
   const ok = await extract({
     nota: { reason: "Dolor al masticar", dicho: "Viene por dolor al masticar." },
-    diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16, dicho: "En la dieciséis hay caries en dentina" }],
+    diagnosticos: [{ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, dicho: "En la dieciséis hay caries en dentina" }],
     indicaciones: [{ service: "resina", toothNumber: 16 }],
     controles: [],
   })
   expect(ok.drafts).toEqual([
     { kind: "nota", payload: { reason: "Dolor al masticar" }, sourceText: "Viene por dolor al masticar." },
-    { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina" },
+    { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina" },
     { kind: "plan", payload: { service: "resina", toothNumber: 16 }, sourceText: "" },
   ])
   const system = systemTextOf(seen[0] ?? [])
@@ -2405,7 +2406,7 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
   expect(asked).toContain("Lo nuevo que dictó:")
 
   // Un tipo de diagnóstico que no existe, o ninguna llamada: no se ordena nada a medias.
-  await expect(extract({ diagnosticos: [{ cie10Code: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
+  await expect(extract({ diagnosticos: [{ diagnosisCode: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
   await expect(extract(null)).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
   await expect(extractDictation(appDb, deps, { orgId: "org_a", transcript: "  " })).rejects.toMatchObject({ code: "VALIDATION" })
   // Con el modelo de demostración responde por reglas, sin proveedor.

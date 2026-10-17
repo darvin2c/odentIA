@@ -1,3 +1,4 @@
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -177,7 +178,7 @@ export function ClinicalAlertsCard({
             key={condition.id}
             tone="warning"
             title={condition.name}
-            detail={condition.cie10Code ? `CIE-10 ${condition.cie10Code}` : "Antecedente activo"}
+            detail={condition.diagnosisCode ? diagnosisCodeLabel(condition.diagnosisSystem, condition.diagnosisCode) : "Antecedente activo"}
           />
         ))}
         {medications.length > 0 ? (

@@ -3,7 +3,6 @@ import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from 
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
-  cie10Code,
   clinicalFollowUp,
   clinicalNote,
   encounter,
@@ -35,6 +34,7 @@ import {
 } from "./clinical.js"
 import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -123,6 +123,8 @@ export interface AddEncounterProcedureInput {
   quadrant?: number | null
   arch?: string | null
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
   /** Ítem aceptado del plan: descripción y sitio se toman del ítem, sin cambios. */
   planItemId?: string | null
   /** Acto libre (sin servicio ni tratamiento): descripción obligatoria; nunca genera cargo. */
@@ -144,7 +146,7 @@ export interface EncounterDetail {
   teeth: number[]
   /** Incluye los anulados (con motivo) para conservar la traza del borrador. */
   procedures: EncounterProcedureRow[]
-  /** Diagnósticos CIE-10 de la atención, anulados incluidos. */
+  /** Diagnósticos de la atención (lista y código), anulados incluidos. */
   diagnoses: EncounterDiagnosisRow[]
   /** Notas de evolución sin código (los diagnósticos históricos viven en `diagnoses`). */
   notes: EncounterNoteRow[]
@@ -204,15 +206,6 @@ async function audit(
     entityId,
     metadata: metadata ?? null,
   })
-}
-
-async function assertDiagnosisCode(tx: Db, code: string): Promise<void> {
-  const [row] = await tx
-    .select({ code: cie10Code.code })
-    .from(cie10Code)
-    .where(eq(cie10Code.code, code))
-    .limit(1)
-  if (!row) throw validation(`Código CIE-10 inexistente: ${code}`)
 }
 
 function assertFdi(tooth: number): void {
@@ -908,7 +901,7 @@ export async function listEncounters(
   const ids = page.map((row) => row.id)
   const codes = ids.length
     ? await tx
-        .select({ encounterId: encounterDiagnosis.encounterId, code: encounterDiagnosis.cie10Code })
+        .select({ encounterId: encounterDiagnosis.encounterId, code: encounterDiagnosis.diagnosisCode })
         .from(encounterDiagnosis)
         .where(
           and(
@@ -1122,6 +1115,7 @@ export async function addEncounterProcedure(
   let planQuadrant: number | null = null
   let planArch: string | null = null
   let planDiagnosis: string | null = null
+  let planDiagnosisSystem: string | null = null
   let planCodings: Array<{ system: string; code: string; version: string; display: string }> = []
   let planPriceCents: number | null = null
   let planCurrency: string | null = null
@@ -1174,6 +1168,7 @@ export async function addEncounterProcedure(
     planArch = plan.arch
     planScope = plan.scope
     planDiagnosis = plan.diagnosisCode
+    planDiagnosisSystem = plan.diagnosisSystem
     planTitle = plan.title
     planServiceId = plan.serviceId
     planCodings = [...plan.codings]
@@ -1264,6 +1259,7 @@ export async function addEncounterProcedure(
       quadrant,
       arch,
       diagnosisCode: input.diagnosisCode ?? null,
+      diagnosisSystem: input.diagnosisSystem ?? null,
       odontogramEntryId: input.odontogramEntryId ?? null,
     })
     directPlanItemId = indicated.id
@@ -1275,7 +1271,11 @@ export async function addEncounterProcedure(
         .where(eq(treatmentPlanItem.id, indicated.id))
     }
   }
-  if (input.diagnosisCode) await assertDiagnosisCode(tx, input.diagnosisCode)
+  // Sin indicar, el acto lleva el diagnóstico de su tratamiento, con su lista.
+  const diagnosis =
+    input.diagnosisCode === undefined
+      ? { diagnosisSystem: planDiagnosis ? planDiagnosisSystem : null, diagnosisCode: planDiagnosis }
+      : await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   const [row] = await tx
     .insert(encounterProcedure)
     .values({
@@ -1289,7 +1289,7 @@ export async function addEncounterProcedure(
       arch,
       description,
       quantity,
-      diagnosisCode: input.diagnosisCode === undefined ? planDiagnosis : input.diagnosisCode,
+      ...diagnosis,
       planItemId: input.planItemId ?? directPlanItemId,
       priceCents,
       currency,
@@ -1504,13 +1504,14 @@ export interface ClosingCheck {
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
   reason: "el motivo de consulta",
-  diagnosis: "al menos un diagnóstico CIE-10 con su tipo",
+  diagnosis: "al menos un diagnóstico con su tipo (presuntivo basta)",
   evolution: "la evolución",
   signature: "tu colegiatura en el perfil profesional",
 }
 
 /**
- * Mínimo para cerrar (ADR 0003): motivo, un diagnóstico CIE-10 con tipo,
+ * Mínimo para cerrar (ADR 0003 y 0041): motivo, un diagnóstico de la lista con
+ * su tipo («Presuntivo» basta),
  * evolución y firma con colegiatura. Funciones vitales y pronóstico quedan
  * opcionales (los exámenes auxiliares son órdenes de la atención): documentar
  * una consulta no obliga a inventar.

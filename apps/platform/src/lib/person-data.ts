@@ -11,6 +11,8 @@ import {
   type IdentityDocType,
   INSURANCE_TYPE_LABELS,
   type InsuranceType,
+  MARITAL_STATUS_LABELS,
+  type MaritalStatus,
   insuranceScheme,
   regionOption,
 } from "@odentia/clinical"
@@ -38,6 +40,20 @@ export function countryChoices(clinicCountry: string | null): Array<{ value: str
   if (first) return options
   const collator = new Intl.Collator(language, { sensitivity: "base" })
   return [...options].sort((a, b) => collator.compare(a.label, b.label))
+}
+
+/**
+ * Estados civiles que se ofrecen en la clínica (HL7 MaritalStatus o la palabra
+ * de su país, decisión 28), más el guardado si ya no se ofrece.
+ */
+export function maritalChoices(
+  profile: ClinicalCountryProfile,
+  stored?: string | null,
+): Array<{ value: string; label: string }> {
+  const options = profile.maritalStatuses.map((code) => ({ value: code as string, label: MARITAL_STATUS_LABELS[code] }))
+  if (stored && !options.some((option) => option.value === stored))
+    options.push({ value: stored, label: MARITAL_STATUS_LABELS[stored as MaritalStatus] ?? stored })
+  return options
 }
 
 /** Tipos de documento que se ofrecen en la clínica, más el guardado si ya no se ofrece. */

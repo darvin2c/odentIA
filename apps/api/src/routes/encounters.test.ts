@@ -218,7 +218,7 @@ async function prepareClosing(app: Hono, patientId: string, encounterId: string)
   const dx = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cie10Code: "K02.1", diagnosisType: "definitivo" }),
+    body: JSON.stringify({ diagnosisCode: "K02.1", diagnosisType: "confirmed" }),
   })
   expect(dx.status).toBe(201)
   const detail = await app.request(`/patients/${patientId}/encounters/${encounterId}`)
@@ -303,11 +303,17 @@ beforeAll(async () => {
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values
         ('K02.1', 'Caries de la dentina'),
         ('K04.0', 'Pulpitis'),
-        ('Z01.2', 'Examen dental')
-        on conflict ("code") do nothing`,
+        ('Z01.2', 'Examen dental')) as v(code, title)
+    on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "duration_min", "is_active") values
@@ -1039,13 +1045,13 @@ it("encounters: cierre guiado por requisitos, diagnósticos anulables, anulació
   const badType = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cie10Code: "K02.1", diagnosisType: "probable" }),
+    body: JSON.stringify({ diagnosisCode: "K02.1", diagnosisType: "probable" }),
   })
   expect(badType.status).toBe(400)
   const dx = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cie10Code: "K04.0", diagnosisType: "presuntivo", toothNumber: 46 }),
+    body: JSON.stringify({ diagnosisCode: "K04.0", diagnosisType: "provisional", toothNumber: 46 }),
   })
   expect(dx.status).toBe(201)
   const dxId = ((await dx.json()) as { data: { id: string } }).data.id

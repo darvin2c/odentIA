@@ -288,6 +288,8 @@ export interface Prescription {
   cancelledAt: string | null
   cancelReason: string | null
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   validUntil?: string | null
   prescriberName?: string | null
   prescriberTitle?: string | null
@@ -352,6 +354,8 @@ export function createPrescriptionApi(
     planItemId?: string | null
     notes?: string | null
     diagnosisCode?: string | null
+    /** Lista del código («ICD-10», «ICD-11»). */
+    diagnosisSystem?: string | null
     validUntil?: string | null
     acknowledgeAllergies?: boolean
     items: PrescriptionMedicationBody[]
@@ -602,6 +606,8 @@ export function reviseTreatmentApi(
     arch?: "upper" | "lower" | null
     detail?: string | null
     diagnosisCode?: string | null
+    /** Lista del código («ICD-10», «ICD-11»). */
+    diagnosisSystem?: string | null
   },
 ): Promise<{ data: PlanItem }> {
   return apiFetch<{ data: PlanItem }>(`${base(patientId)}/treatments/${itemId}/revise`, {

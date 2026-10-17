@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { ADMINISTRATION_ROUTES, allergyWarnings, findMedication } from "@odentia/clinical"
 import {
-  cie10Code,
+  diagnosisCatalog,
   encounter,
   orgCounter,
   patient,
@@ -12,15 +12,16 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 
 /**
- * Medicamento de la receta con los datos que exige una receta válida en Perú
- * (Manual de Buenas Prácticas de Prescripción del MINSA y Reglamento de
- * Establecimientos Farmacéuticos, DS 014-2011-SA): DCI, concentración, forma
- * farmacéutica, vía, dosis, frecuencia, duración y cantidad.
+ * Medicamento de la receta con los datos de la Guía de la buena prescripción
+ * de la OMS: DCI, concentración, forma farmacéutica, vía, dosis, frecuencia,
+ * duración y cantidad. Son también los que piden las normas de cada país (en
+ * Perú, el Manual de Buenas Prácticas de Prescripción del MINSA).
  */
 export interface PrescriptionMedicationInput {
   /** Denominación Común Internacional: obligatoria. */
@@ -41,6 +42,8 @@ export interface CreatePrescriptionInput {
   planItemId?: string | null
   notes?: string | null
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
   /** Fecha (AAAA-MM-DD) hasta la que la receta es válida. */
   validUntil?: string | null
   /** La persona que prescribe vio el aviso de alergia y prescribe igual. */
@@ -105,14 +108,10 @@ export async function createPrescription(
       )
     if (!item) throw notFound("Tratamiento")
   }
-  const diagnosisCode = optional(input.diagnosisCode, "El diagnóstico", 10)
-  if (diagnosisCode) {
-    const [known] = await tx
-      .select({ code: cie10Code.code })
-      .from(cie10Code)
-      .where(eq(cie10Code.code, diagnosisCode))
-    if (!known) throw validation(`Código CIE-10 inexistente: ${diagnosisCode}`)
-  }
+  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, {
+    code: optional(input.diagnosisCode, "El diagnóstico", 10),
+    system: input.diagnosisSystem,
+  })
   let validUntil: string | null = null
   if (input.validUntil) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.validUntil) || Number.isNaN(Date.parse(input.validUntil)))
@@ -181,7 +180,7 @@ export async function createPrescription(
       encounterId: input.encounterId,
       planItemId: input.planItemId,
       notes: optional(input.notes, "Las notas", 2000),
-      diagnosisCode,
+      ...diagnosis,
       validUntil,
       prescriberName: signer.name,
       prescriberTitle: signer.title,
@@ -299,12 +298,18 @@ export async function getPrescriptionPrint(tx: Db, orgId: string, patientId: str
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
-  const [dx] = detail.diagnosisCode
-    ? await tx
-        .select({ description: cie10Code.description })
-        .from(cie10Code)
-        .where(eq(cie10Code.code, detail.diagnosisCode))
-    : []
+  const [dx] =
+    detail.diagnosisCode && detail.diagnosisSystem
+      ? await tx
+          .select({ description: diagnosisCatalog.title })
+          .from(diagnosisCatalog)
+          .where(
+            and(
+              eq(diagnosisCatalog.systemKey, detail.diagnosisSystem),
+              eq(diagnosisCatalog.code, detail.diagnosisCode),
+            ),
+          )
+      : []
   return {
     prescription: detail,
     diagnosisDescription: dx?.description ?? null,

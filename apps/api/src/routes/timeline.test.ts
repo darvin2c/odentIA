@@ -108,7 +108,14 @@ beforeAll(async () => {
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values ('K02.1', 'Caries de la dentina')) as v(code, title)
+    on conflict do nothing`,
   )
 }, 180_000)
 
@@ -286,7 +293,7 @@ async function finalizeEncounter(app: Hono, patientId: string, encounterId: stri
   const dx = await app.request(`/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cie10Code: "K02.1", diagnosisType: "definitivo" }),
+    body: JSON.stringify({ diagnosisCode: "K02.1", diagnosisType: "confirmed" }),
   })
   expect(dx.status).toBe(201)
   const proc = await app.request(`/patients/${patientId}/encounters/${encounterId}/procedures`, {

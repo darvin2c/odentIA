@@ -1,15 +1,18 @@
 import { randomUUID } from "node:crypto"
+import { type DiagnosisSystemKey, diagnosisSearchText, isDentalDiagnosis } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import {
-  cie10Code,
+  diagnosisCatalog,
+  diagnosisCodeRelease,
   encounter,
   patient,
   serviceCatalog,
   treatmentPlan,
 } from "@odentia/db/schema/clinical"
 import { professionalProfile } from "@odentia/db/schema/clinical-forms"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
+import { orgDiagnosisSystem } from "./diagnosis-codes.js"
 import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { updateEncounterDraft } from "./encounters.js"
 import { appDb, ownerDb } from "./test-setup.js"
@@ -48,22 +51,58 @@ export async function makeSigner(orgId: string, userId: string): Promise<void> {
 
 /**
  * Deja una atención en borrador lista para cerrarse con el mínimo clínico
- * (ADR 0003): un diagnóstico CIE-10 con tipo y la evolución.
+ * (ADR 0003): un diagnóstico de la lista con tipo y la evolución.
  */
+/**
+ * Códigos de una lista para la prueba, en una edición de prueba que no es
+ * oficial (como la semilla de desarrollo). Sin `system`, la CIE-10.
+ */
+export async function seedDiagnosisCodes(
+  codes: Array<{ code: string; title: string; isCategory?: boolean }>,
+  system: DiagnosisSystemKey = "ICD-10",
+): Promise<void> {
+  await ownerDb
+    .insert(diagnosisCodeRelease)
+    .values({ systemKey: system, edition: "prueba", official: false, license: "Solo pruebas", codeCount: codes.length })
+    .onConflictDoNothing()
+  for (const item of codes) {
+    await ownerDb
+      .insert(diagnosisCatalog)
+      .values({
+        systemKey: system,
+        code: item.code,
+        edition: "prueba",
+        title: item.title,
+        isCategory: item.isCategory ?? false,
+        isDental: isDentalDiagnosis(system, item.code),
+        searchText: diagnosisSearchText(item.code, item.title),
+      })
+      .onConflictDoNothing()
+  }
+  // Como el cargador: una categoría es el comienzo de otro código de la misma lista.
+  await ownerDb.execute(sql`
+    update "diagnosis_code" c set "is_category" = true
+    where c."system_key" = ${system} and exists (
+      select 1 from "diagnosis_code" sub
+      where sub."system_key" = c."system_key" and sub."code" <> c."code" and starts_with(sub."code", c."code")
+    )`)
+}
+
 export async function readyToClose(
   orgId: string,
   actorUserId: string,
   patientId: string,
   encounterId: string,
 ): Promise<void> {
-  await ownerDb
-    .insert(cie10Code)
-    .values({ code: "K02.1", description: "Caries de la dentina" })
-    .onConflictDoNothing()
+  // En la lista de la clínica: la de su país (una de Colombia trabaja con la CIE-11).
+  const system = await withOrgContext(appDb, orgId, (tx) => orgDiagnosisSystem(tx, orgId))
+  const caries =
+    system === "ICD-11" ? { code: "DA08.0", title: "Caries dental" } : { code: "K02.1", title: "Caries de la dentina" }
+  await seedDiagnosisCodes([caries], system)
   await withOrgContext(appDb, orgId, async (tx) => {
     await addEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, {
-      cie10Code: "K02.1",
-      diagnosisType: "definitivo",
+      diagnosisCode: caries.code,
+      diagnosisType: "confirmed",
     })
     await updateEncounterDraft(tx, orgId, actorUserId, patientId, encounterId, {
       evolution: "Evolución favorable",

@@ -169,7 +169,8 @@ const familyHistoryItem = z
   .object({
     relationship: z.string().min(1).max(30),
     condition: z.string().min(1).max(200),
-    cie10Code: z.string().max(10).nullish(),
+    diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     notes: z.string().max(2000).nullish(),
   })
   .strict()
@@ -177,7 +178,8 @@ const healthCondition = z
   .object({
     id: z.uuid().optional(),
     name: z.string().min(1).max(200),
-    cie10Code: z.string().max(10).nullish(),
+    diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     status: z.string().min(1).max(20),
     startDate: z.string().max(10).nullish(),
     endDate: z.string().max(10).nullish(),
@@ -228,6 +230,7 @@ const healthSaveInput = z
 const noteInput = z.object({
   note: z.string().min(1).max(4000),
   diagnosisCode: z.string().max(10).nullish(),
+  diagnosisSystem: z.string().max(20).nullish(),
   diagnosisType: z.string().max(20).nullish(),
   toothNumber: z.number().int().nullish(),
   encounterId: z.uuid().optional(),
@@ -265,10 +268,11 @@ const odontogramInput = z
     details: findingDetailsInput.optional(),
     note: z.string().max(2000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     encounterId: z.uuid(),
   })
   .strict()
-// El panel de la pieza: hallazgo, diagnóstico CIE-10 con su tipo y
+// El panel de la pieza: hallazgo, diagnóstico de la lista de la clínica con su tipo y
 // tratamiento en una sola operación (`registerToothFinding`).
 const toothFindingInput = z
   .object({
@@ -279,7 +283,11 @@ const toothFindingInput = z
     details: findingDetailsInput.optional(),
     note: z.string().max(2000).nullish(),
     diagnosis: z
-      .object({ cie10Code: z.string().trim().min(1).max(10), diagnosisType: z.string().max(20) })
+      .object({
+        diagnosisCode: z.string().trim().min(1).max(10),
+        diagnosisSystem: z.string().max(20).nullish(),
+        diagnosisType: z.string().max(20),
+      })
       .strict()
       .nullish(),
     treatment: z
@@ -346,6 +354,7 @@ const procedureInput = z
     quadrant: z.number().int().min(1).max(8).nullish(),
     arch: z.enum(["upper", "lower"]).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     planItemId: z.uuid().nullish(),
     /** Acto libre (sin servicio ni tratamiento): descripción obligatoria. */
     description: z.string().trim().min(1).max(2000).nullish(),
@@ -377,6 +386,7 @@ const planCreateInput = z
     odontogramEntryId: z.uuid().nullish(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     phase: z.enum(TREATMENT_PHASES).nullish(),
     plannedSessions: z.number().int().min(1).max(60).nullish(),
     ...planSiteFields,
@@ -398,6 +408,7 @@ const planPatchInput = z
     serviceId: z.uuid().optional(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
     encounterId: z.uuid(),
     status: z
       .enum([
@@ -424,6 +435,7 @@ const planBatchInput = z
     toothNumbers: z.array(z.number().int()).min(1).max(52),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
 const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()

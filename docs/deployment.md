@@ -192,7 +192,7 @@ PostgreSQL, SMTP y las consolas administrativas permanecen internos. S3 necesita
 el endpoint `storage.` para las URLs firmadas del navegador.
 
 El servicio one-shot `seed` inicializa cada preview después de `migrate` y
-`minio-init`: ejecuta `seed:cie10`, `seed:procedures` y `db:seed`, en ese orden.
+`minio-init`: ejecuta `seed:diagnoses`, `seed:procedures` y `db:seed`, en ese orden.
 API y worker esperan su salida correcta. Si falla, no escribe el marcador de
 finalización ni permite arrancar sus dependientes.
 

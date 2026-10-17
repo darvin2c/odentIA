@@ -157,8 +157,8 @@ async function createEncounter(patientId: string, reason: string): Promise<strin
 async function finalizeEncounter(patientId: string, encounterId: string): Promise<void> {
   // El cierre exige diagnóstico CIE-10 con tipo y evolución (ADR 0003).
   const dx = await post(app, `/patients/${patientId}/encounters/${encounterId}/diagnoses`, {
-    cie10Code: "K02.1",
-    diagnosisType: "definitivo",
+    diagnosisCode: "K02.1",
+    diagnosisType: "confirmed",
   })
   expect(dx.status).toBe(201)
   const proc = await post(app, `/patients/${patientId}/encounters/${encounterId}/procedures`, {
@@ -266,7 +266,14 @@ beforeAll(async () => {
     sql`insert into "professional_profile" ("organization_id", "user_id", "professional_title", "registration_body", "registration_number") values ('org_a', 'u-1', 'Cirujano dentista', 'COP', '12345') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values ('K02.1', 'Caries de la dentina') on conflict do nothing`,
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values ('K02.1', 'Caries de la dentina')) as v(code, title)
+    on conflict do nothing`,
   )
   await ownerDb.execute(
     sql`insert into "service_catalog" ("id", "organization_id", "source", "code", "name", "scope", "price_cents", "currency", "duration_min", "is_active") values

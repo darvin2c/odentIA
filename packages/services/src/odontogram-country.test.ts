@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs"
 import { LEAVES_BY_PROCEDURE, validateLeavesFinding } from "@odentia/clinical"
 import { user } from "@odentia/db/schema/auth"
 import {
-  cie10Code,
   encounter,
   encounterDiagnosis,
   odontogramEntry,
@@ -21,7 +20,7 @@ import {
   getOdontogram,
   listOdontogramAssessments,
 } from "./clinical.js"
-import { makeSigner, readyToClose } from "./clinical-test-fixture.js"
+import { makeSigner, readyToClose, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   addEncounterProcedure,
   finalizeEncounter,
@@ -58,13 +57,10 @@ async function attending(orgId: string) {
   const actor = randomUUID()
   await ownerDb.insert(user).values({ id: actor, name: "Ana Torres", email: `${actor}@example.test` })
   await makeSigner(orgId, actor)
-  await ownerDb
-    .insert(cie10Code)
-    .values([
-      { code: "K02", description: "Caries dental" },
-      { code: "K02.1", description: "Caries de la dentina" },
+  await seedDiagnosisCodes([
+      { code: "K02", title: "Caries dental" },
+      { code: "K02.1", title: "Caries de la dentina" },
     ])
-    .onConflictDoNothing()
   const [person] = await ownerDb
     .insert(patient)
     .values({
@@ -355,7 +351,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
       condition: "caries",
       surfaces: ["occlusal"],
       details: { variant: "dentin" },
-      diagnosis: { cie10Code: "K02.1", diagnosisType: "presuntivo" },
+      diagnosis: { diagnosisCode: "K02.1", diagnosisType: "provisional" },
       treatment: { serviceId: resin!.id },
     }),
   )
@@ -364,7 +360,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
     .select()
     .from(encounterDiagnosis)
     .where(eq(encounterDiagnosis.encounterId, draft))
-  expect(diagnosis).toMatchObject({ cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16, surfaces: ["occlusal"] })
+  expect(diagnosis).toMatchObject({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16, surfaces: ["occlusal"] })
   expect(result.planItems[0]).toMatchObject({
     toothNumber: 16,
     surfaces: ["occlusal"],
@@ -385,7 +381,7 @@ it("el panel de la pieza deja hallazgo, diagnóstico y tratamiento juntos, o nad
         condition: "caries",
         surfaces: ["occlusal"],
         details: { variant: "enamel" },
-        diagnosis: { cie10Code: "K02", diagnosisType: "presuntivo" },
+        diagnosis: { diagnosisCode: "K02", diagnosisType: "provisional" },
         treatment: { serviceId: resin!.id },
       }),
     ),

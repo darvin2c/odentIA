@@ -31,6 +31,97 @@ import { organization, user } from "./auth.js"
 import { contact, conversation, orgFk, timestamps } from "./crm.js"
 import { branch } from "./org.js"
 
+/**
+ * Listas de diagnósticos (ADR 0041): CIE-10 y CIE-11 de la OMS y, preparadas
+ * sin cargar, las nacionales. Globales, SIN org_id, SIN RLS y de solo lectura
+ * para la aplicación; las carga `seed:diagnoses` con el rol owner.
+ */
+export const diagnosisCodeSystem = pgTable("diagnosis_code_system", {
+  key: text("key").primaryKey(),
+  title: text("title").notNull(),
+  publisher: text("publisher").notNull(),
+  country: char("country", { length: 2 }),
+  uri: text("uri").notNull(),
+})
+
+/**
+ * Cada archivo cargado de una lista: su edición, de dónde salió, su SHA-256 y
+ * su licencia. `official` es falso en las semillas de desarrollo, que no son
+ * la lista oficial.
+ */
+export const diagnosisCodeRelease = pgTable(
+  "diagnosis_code_release",
+  {
+    systemKey: text("system_key")
+      .notNull()
+      .references(() => diagnosisCodeSystem.key),
+    edition: text("edition").notNull(),
+    official: boolean("official").notNull(),
+    license: text("license").notNull(),
+    sourceUrl: text("source_url"),
+    sourceSha256: text("source_sha256"),
+    codeCount: integer("code_count").notNull(),
+    loadedAt: timestamp("loaded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.systemKey, table.edition] }),
+    check("diagnosis_code_release_sha_check", sql`${table.sourceSha256} IS NULL OR ${table.sourceSha256} ~ '^[0-9a-f]{64}$'`),
+  ],
+)
+
+/**
+ * Un código de una lista: (lista, código), con la edición de la que viene,
+ * su título y, en la CIE-11, su URI. `searchText` es el código y el título sin
+ * tildes ni mayúsculas (índice de trigramas); `isDental` pone primero lo
+ * odontológico y `isCategory` marca las categorías con subcódigos, que no se
+ * registran como diagnóstico. Nunca se borra un código: los diagnósticos lo
+ * referencian.
+ */
+export const diagnosisCatalog = pgTable(
+  "diagnosis_code",
+  {
+    systemKey: text("system_key")
+      .notNull()
+      .references(() => diagnosisCodeSystem.key),
+    code: text("code").notNull(),
+    edition: text("edition").notNull(),
+    title: text("title").notNull(),
+    uri: text("uri"),
+    isCategory: boolean("is_category").notNull().default(false),
+    isDental: boolean("is_dental").notNull().default(false),
+    searchText: text("search_text").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.systemKey, table.code] }),
+    foreignKey({
+      columns: [table.systemKey, table.edition],
+      foreignColumns: [diagnosisCodeRelease.systemKey, diagnosisCodeRelease.edition],
+      name: "diagnosis_code_release_fk",
+    }),
+  ],
+)
+
+/**
+ * Lista y código de un diagnóstico guardado: la FK compuesta al catálogo y
+ * que los dos vayan juntos.
+ */
+export function diagnosisCodeRef(
+  name: string,
+  table: { diagnosisSystem: AnyPgColumn; diagnosisCode: AnyPgColumn },
+) {
+  return [
+    foreignKey({
+      columns: [table.diagnosisSystem, table.diagnosisCode],
+      foreignColumns: [diagnosisCatalog.systemKey, diagnosisCatalog.code],
+      name: `${name}_diagnosis_fk`,
+    }),
+    check(
+      `${name}_diagnosis_pair_check`,
+      sql`(${table.diagnosisSystem} IS NULL) = (${table.diagnosisCode} IS NULL)`,
+    ),
+  ]
+}
+
 /** Ficha clínica independiente de sus interlocutores y responsables CRM. */
 export const patient = pgTable(
   "patient",
@@ -128,11 +219,13 @@ export const patient = pgTable(
     check("patient_sex_check", sql`${table.sex} IS NULL OR ${table.sex} IN ('M','F','I','D')`),
     check(
       "patient_marital_status_check",
-      sql`${table.maritalStatus} IS NULL OR ${table.maritalStatus} IN ('soltero','casado','conviviente','viudo','divorciado','separado')`,
+      // HL7 v3 MaritalStatus o la palabra de un país con su prefijo ISO («PE:conviviente»).
+      sql`${table.maritalStatus} IS NULL OR ${table.maritalStatus} IN ('S','M','T','L','D','W') OR ${table.maritalStatus} ~ '^[A-Z]{2}:[a-z_]{1,40}$'`,
     ),
     check(
       "patient_education_level_check",
-      sql`${table.educationLevel} IS NULL OR ${table.educationLevel} IN ('sin_nivel','inicial','primaria_incompleta','primaria_completa','secundaria_incompleta','secundaria_completa','superior_no_universitaria_incompleta','superior_no_universitaria_completa','superior_universitaria_incompleta','superior_universitaria_completa','posgrado')`,
+      // CINE (ISCED) 2011, niveles 0 a 8.
+      sql`${table.educationLevel} IS NULL OR ${table.educationLevel} IN ('0','1','2','3','4','5','6','7','8')`,
     ),
     check(
       "patient_asa_class_check",
@@ -155,6 +248,8 @@ export const patientContact = pgTable(
     contactId: uuid("contact_id").notNull(),
     relationship: text("relationship").$type<ContactRelationship>().notNull(),
     relationshipDetail: text("relationship_detail"),
+    /** Parentesco con HL7 v3 RoleCode (`KINSHIP`), si se conoce. */
+    kinship: text("kinship"),
     isPreferred: boolean("is_preferred").notNull().default(false),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
@@ -187,6 +282,10 @@ export const patientContact = pgTable(
       sql`${table.relationship} IN ('self','guardian','family','other')`,
     ),
     check("patient_contact_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
+    check(
+      "patient_contact_kinship_check",
+      sql`${table.kinship} IS NULL OR ${table.kinship} IN ('MTH','FTH','CHILD','SPS','DOMPART','SIB','MGRPRN','PGRPRN','GRNDCHILD','AUNT','UNCLE','COUSN','FAMMEMB','FRND','NBOR')`,
+    ),
   ],
 )
 
@@ -336,8 +435,9 @@ export const patientCondition = pgTable(
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    /** Código CIE-10 cuando el clínico lo precisa; el nombre declarado se conserva. */
-    cie10Code: text("cie10_code").references(() => cie10Code.code),
+    /** Código de la lista de diagnósticos cuando el clínico lo precisa; el nombre declarado se conserva. */
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     status: text("status").notNull().default("activa"),
     startDate: date("start_date"),
     endDate: date("end_date"),
@@ -347,6 +447,7 @@ export const patientCondition = pgTable(
   },
   (table) => [
     index("patient_condition_org_patient_idx").on(table.organizationId, table.patientId),
+    ...diagnosisCodeRef("patient_condition", table),
     check(
       "patient_condition_status_check",
       sql`${table.status} IN ('activa','resuelta','inactiva')`,
@@ -411,8 +512,9 @@ export const clinicalNote = pgTable(
       .notNull()
       .references(() => user.id),
     note: text("note").notNull(),
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
-    /** Certeza del diagnóstico codificado: presuntivo, definitivo o repetido. */
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
+    /** Certeza del diagnóstico codificado (FHIR verificationStatus): provisional o confirmed. */
     diagnosisType: text("diagnosis_type"),
     /** Pieza FDI a la que se refiere el diagnóstico, si aplica. */
     toothNumber: smallint("tooth_number"),
@@ -429,8 +531,9 @@ export const clinicalNote = pgTable(
     check("clinical_note_kind_check", sql`${table.kind} IN ('evolucion','adenda')`),
     check(
       "clinical_note_diagnosis_type_check",
-      sql`${table.diagnosisType} IS NULL OR (${table.diagnosisCode} IS NOT NULL AND ${table.diagnosisType} IN ('presuntivo','definitivo','repetido'))`,
+      sql`${table.diagnosisType} IS NULL OR (${table.diagnosisCode} IS NOT NULL AND ${table.diagnosisType} IN ('provisional','confirmed'))`,
     ),
+    ...diagnosisCodeRef("clinical_note", table),
   ],
 )
 
@@ -531,7 +634,7 @@ export const clinicalAccessLog = pgTable(
   ],
 )
 
-/** Odontograma FDI NTS 188-MINSA/DGIESP-2022 por pieza/superficie (append-only).
+/** Odontograma FDI (ISO 3950) por pieza/superficie (append-only); la NTS 188 rige solo en Perú (ADR 0036).
  * Los hallazgos nuevos usan status='recorded'; la anulación es una corrección
  * auditable (voidedAt/voidedBy/voidReason + proyección status='voided') que
  * NUNCA muta condition/surface/note. needsReview=true marca filas migradas
@@ -549,7 +652,8 @@ export const odontogramEntry = pgTable(
     surface: text("surface"),
     condition: text("condition").notNull(),
     status: text("status").notNull().default("recorded"),
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     note: text("note"),
     details: jsonb("details").notNull().default({}),
     needsReview: boolean("needs_review").notNull().default(false),
@@ -580,6 +684,7 @@ export const odontogramEntry = pgTable(
     ...timestamps,
   },
   (table) => [
+    ...diagnosisCodeRef("odontogram_entry", table),
     index("odontogram_entry_org_patient_tooth_idx").on(
       table.organizationId,
       table.patientId,
@@ -717,8 +822,8 @@ export const encounter = pgTable(
 )
 
 /**
- * Diagnóstico registrado en una atención: CIE-10 con tipo HIS (presuntivo,
- * definitivo o repetido) y sitio dental. Se anula en borrador con motivo; el
+ * Diagnóstico registrado en una atención: lista y código (CIE-10 o CIE-11),
+ * su certeza y sitio dental. Se anula en borrador con motivo; el
  * estado activo/resuelto alimenta la lista de problemas del paciente.
  */
 export const encounterDiagnosis = pgTable(
@@ -729,11 +834,18 @@ export const encounterDiagnosis = pgTable(
     patientId: uuid("patient_id").notNull(),
     /** Nulo solo en diagnósticos históricos registrados fuera de una atención. */
     encounterId: uuid("encounter_id").references(() => encounter.id),
-    cie10Code: text("cie10_code")
-      .notNull()
-      .references(() => cie10Code.code),
-    /** Nulo solo en históricos migrados sin clasificar. */
+    diagnosisSystem: text("diagnosis_system").notNull(),
+    diagnosisCode: text("diagnosis_code").notNull(),
+    /**
+     * HL7 FHIR Condition.verificationStatus: provisional («Presuntivo») o
+     * confirmed («Definitivo»). Nulo solo en históricos migrados sin clasificar.
+     */
     diagnosisType: text("diagnosis_type"),
+    /**
+     * «Ya diagnosticado antes» (decisión 11): la persona ya tenía este código,
+     * en la misma lista, en otra atención. Lo marca el sistema al registrarlo.
+     */
+    previouslyDiagnosed: boolean("previously_diagnosed").notNull().default(false),
     toothNumber: smallint("tooth_number"),
     surfaces: text("surfaces").array().notNull().default([]),
     note: text("note"),
@@ -760,7 +872,13 @@ export const encounterDiagnosis = pgTable(
       .where(sql`legacy_note_id IS NOT NULL`),
     check(
       "encounter_diagnosis_type_check",
-      sql`(${table.diagnosisType} IS NULL AND ${table.legacyNoteId} IS NOT NULL) OR ${table.diagnosisType} IN ('presuntivo','definitivo','repetido')`,
+      sql`(${table.diagnosisType} IS NULL AND ${table.legacyNoteId} IS NOT NULL) OR ${table.diagnosisType} IN ('provisional','confirmed')`,
+    ),
+    ...diagnosisCodeRef("encounter_diagnosis", table),
+    index("encounter_diagnosis_org_code_idx").on(
+      table.organizationId,
+      table.diagnosisSystem,
+      table.diagnosisCode,
     ),
     check("encounter_diagnosis_status_check", sql`${table.status} IN ('activo','resuelto')`),
     check(
@@ -803,7 +921,7 @@ export const procedureCodeSystem = pgTable("procedure_code_system", {
 
 /**
  * Códigos de procedimiento por sistema y versión (global, SIN org_id, SIN RLS,
- * solo lectura en runtime como cie10_code). La versión es la del publicador
+ * solo lectura en runtime como diagnosis_code). La versión es la del publicador
  * (p. ej. RM-550-2023-MINSA para CPMS), nunca un correlativo interno.
  */
 export const procedureCode = pgTable(
@@ -825,7 +943,7 @@ export const procedureCode = pgTable(
 )
 /**
  * Ediciones importadas del catálogo oficial (una fila por sistema y versión).
- * Global, SIN org_id, SIN RLS, solo lectura en runtime como cie10_code. La
+ * Global, SIN org_id, SIN RLS, solo lectura en runtime como diagnosis_code. La
  * versión es la del publicador (p. ej. RM-550-2023-MINSA para CPMS), nunca un
  * correlativo interno. `isCurrent` marca la edición vigente por sistema
  * (índice parcial único): el seed solo activa la edición importada y jamás
@@ -854,7 +972,7 @@ export const procedureCatalogRelease = pgTable(
   ],
 )
 
-/** Biblioteca global de prestaciones (solo lectura para el rol app, como cie10_code). */
+/** Biblioteca global de prestaciones (solo lectura para el rol app, como diagnosis_code). */
 export const treatmentTemplate = pgTable(
   "treatment_template",
   {
@@ -1016,7 +1134,8 @@ export const encounterProcedure = pgTable(
     description: text("description").notNull(),
     /** Unidades del acto (p. ej. 3 sellantes); el cargo es precio × cantidad. */
     quantity: smallint("quantity").notNull().default(1),
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     planItemId: uuid("plan_item_id").references(() => treatmentPlanItem.id),
     // Snapshot del costo al registrar el acto (tarifario o ítem del plan);
     // el acto libre (sin servicio) no tiene precio y nunca genera cargo.
@@ -1031,6 +1150,7 @@ export const encounterProcedure = pgTable(
     voidReason: text("void_reason"),
   },
   (table) => [
+    ...diagnosisCodeRef("encounter_procedure", table),
     check("encounter_procedure_quantity_check", sql`${table.quantity} BETWEEN 1 AND 99`),
     check(
       "encounter_procedure_void_check",
@@ -1211,7 +1331,8 @@ export const treatmentPlanItem = pgTable(
     arch: text("arch"),
     title: text("title").notNull(),
     detail: text("detail"),
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     codings: jsonb("codings").$type<ProcedureCodingSnapshot[]>().notNull().default([]),
     priceCents: integer("price_cents"),
     currency: char("currency", { length: 3 }).notNull(),
@@ -1227,6 +1348,7 @@ export const treatmentPlanItem = pgTable(
     ...timestamps,
   },
   (table) => [
+    ...diagnosisCodeRef("treatment_plan_item", table),
     index("treatment_plan_item_org_patient_idx").on(table.organizationId, table.patientId),
     check(
       "treatment_plan_item_phase_check",
@@ -1433,14 +1555,8 @@ export const patientDocumentContext = pgTable(
   ],
 )
 
-/** Catálogo CIE-10 global (SIN org_id, SIN RLS, read-only en runtime). */
-export const cie10Code = pgTable("cie10_code", {
-  code: text("code").primaryKey(),
-  description: text("description").notNull(),
-})
-
 /**
- * Consentimiento para el tratamiento de datos personales (Ley 29733): por
+ * Consentimiento para el tratamiento de datos personales (la ley de cada país; en Perú, la Ley 29733): por
  * versión del aviso, con sus finalidades, quién lo otorga y su revocación.
  */
 export const patientDataConsent = pgTable(
@@ -1478,7 +1594,10 @@ export const patientDataConsent = pgTable(
   ],
 )
 
-/** Antecedentes familiares por parentesco y condición (CIE-10 opcional). */
+/**
+ * Antecedentes familiares por parentesco (HL7 v3 RoleCode, solo familiares) y
+ * condición, con su código de diagnóstico opcional.
+ */
 export const patientFamilyHistory = pgTable(
   "patient_family_history",
   {
@@ -1489,7 +1608,8 @@ export const patientFamilyHistory = pgTable(
       .references(() => patient.id, { onDelete: "cascade" }),
     relationship: text("relationship").notNull(),
     condition: text("condition").notNull(),
-    cie10Code: text("cie10_code").references(() => cie10Code.code),
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     notes: text("notes"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
@@ -1498,8 +1618,9 @@ export const patientFamilyHistory = pgTable(
     index("patient_family_history_org_patient_idx").on(table.organizationId, table.patientId),
     check(
       "patient_family_history_relationship_check",
-      sql`${table.relationship} IN ('madre','padre','hijo','conyuge','hermano','abuelo','tio','otro_familiar')`,
+      sql`${table.relationship} IN ('MTH','FTH','CHILD','SPS','DOMPART','SIB','MGRPRN','PGRPRN','GRNDCHILD','AUNT','UNCLE','COUSN','FAMMEMB')`,
     ),
+    ...diagnosisCodeRef("patient_family_history", table),
   ],
 )
 
@@ -1618,7 +1739,8 @@ export const prescription = pgTable(
     status: text("status").notNull().default("emitida"),
     notes: text("notes"),
     /** Diagnóstico que justifica la receta y fecha hasta la que es válida. */
-    diagnosisCode: text("diagnosis_code").references(() => cie10Code.code),
+    diagnosisSystem: text("diagnosis_system"),
+    diagnosisCode: text("diagnosis_code"),
     validUntil: date("valid_until"),
     /** Instantánea de quien prescribe (perfil profesional al emitir). */
     prescriberName: text("prescriber_name"),
@@ -1632,6 +1754,7 @@ export const prescription = pgTable(
     ...timestamps,
   },
   (table) => [
+    ...diagnosisCodeRef("prescription", table),
     uniqueIndex("prescription_org_number_uidx").on(table.organizationId, table.prescriptionNumber),
     index("prescription_org_patient_idx").on(table.organizationId, table.patientId),
     index("prescription_encounter_idx").on(table.organizationId, table.encounterId),

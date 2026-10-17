@@ -847,7 +847,7 @@ export async function registerPatient(
     })
   }
 
-  // 7. Consentimiento de datos (Ley 29733) con la versión del aviso aceptada y
+  // 7. Consentimiento de datos (la ley de cada país; en Perú, la Ley 29733) con la versión del aviso aceptada y
   // quién lo otorga; se atribuye en servidor (operador interno o null público).
   if (answers.privacyAccepted) {
     // Los permisos de mensajes son finalidades de este mismo consentimiento:

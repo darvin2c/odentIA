@@ -1,6 +1,7 @@
 /** Tipos espejo de la API de pacientes + helpers puros para la UI. */
 import {
   activeFindingsAsOf,
+  DIAGNOSIS_VERIFICATION_LABELS,
   type FindingDetails,
   type MissingPersonDatum,
   type SignedOdontogramPurpose,
@@ -77,7 +78,8 @@ export interface Allergy {
 export interface Condition {
   id: string
   name: string
-  cie10Code?: string | null
+  diagnosisCode?: string | null
+  diagnosisSystem?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -127,16 +129,19 @@ export interface HealthAllergyInput {
 
 /** Antecedente familiar por parentesco y condición. */
 export interface FamilyHistoryItem {
+  /** Parentesco con HL7 v3 RoleCode (solo familiares). */
   relationship: string
   condition: string
-  cie10Code?: string | null
+  diagnosisCode?: string | null
+  diagnosisSystem?: string | null
   notes?: string | null
 }
 
 export interface HealthConditionInput {
   id?: string
   name: string
-  cie10Code?: string | null
+  diagnosisCode?: string | null
+  diagnosisSystem?: string | null
   status: string
   startDate?: string | null
   endDate?: string | null
@@ -197,12 +202,8 @@ export const ALLERGY_CATEGORY_LABELS: Record<string, string> = {
   otro: "Otro",
 }
 
-/** Certeza de un diagnóstico codificado. */
-export const DIAGNOSIS_TYPE_LABELS: Record<string, string> = {
-  presuntivo: "Presuntivo",
-  definitivo: "Definitivo",
-  repetido: "Repetido",
-}
+/** Certeza de un diagnóstico codificado (FHIR verificationStatus). */
+export const DIAGNOSIS_TYPE_LABELS: Record<string, string> = DIAGNOSIS_VERIFICATION_LABELS
 
 export const ALLERGY_SEVERITY_LABELS: Record<string, string> = {
   leve: "Leve",
@@ -259,6 +260,8 @@ export interface ClinicalNote {
   id: string
   note: string
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   diagnosisType?: string | null
   toothNumber?: number | null
   authorUserId?: string
@@ -319,6 +322,8 @@ export interface OdontogramEntry {
   condition: string
   status: string
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   note?: string | null
   encounterId?: string | null
   createdAt?: string
@@ -427,6 +432,8 @@ export interface ProcedureItem {
   arch: string | null
   description: string
   diagnosisCode: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   planItemId: string | null
   /** Snapshot del costo al registrar el acto; null en actos libres (sin cargo). */
   priceCents: number | null
@@ -474,6 +481,8 @@ export interface PlanItem {
   title: string
   detail: string | null
   diagnosisCode: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   priceCents: number | null
   currency: string
   status: string
@@ -546,6 +555,8 @@ export interface TimelineItem {
   authorId?: string | null
   refId: string
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   category?: string
   version?: number
   condition?: string
@@ -730,6 +741,8 @@ export interface PatientContactLink {
   isActive: boolean
   relationship: PatientContactRelationship
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship?: string | null
   isPreferred: boolean
 }
 

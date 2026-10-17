@@ -76,7 +76,7 @@ export function routeOutcome(route: AgentRoute): Record<string, unknown> {
  * turno, y con WIDEN_TOOL recupera el resto si el camino se eligió mal. Los
  * caminos que no figuran aquí reciben todas.
  */
-const ALWAYS = ["send_reply", "send_template", "request_human_handoff"] as const
+const ALWAYS = ["send_reply", "request_human_handoff"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   derivar: ["request_human_handoff"],
@@ -84,22 +84,25 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // pregunta de precios: el presupuesto de la persona va en este camino.
   informacion: [
     ...ALWAYS, "consultar_conocimiento", "ver_sedes_y_servicios", "buscar_en_la_clinica",
-    "ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto",
+    "ver_presupuesto", "reenviar_presupuesto", "anotar_respuesta_presupuesto", "enviar_comprobante",
     // «Cambié de teléfono y no puedo entrar al portal»: se pide como información.
     "pedir_volver_al_portal",
+    // «Ya no me manden promociones» se pide como información: elegir_mensajes (ADR 0040).
+    "elegir_mensajes",
   ],
   // Un agradecimiento o una despedida pueden cerrar la conversación (ADR 0024).
   // «Sí, ahí estaré» a un recordatorio puede llegar como saludo: confirmar_cita la confirma.
   // «Sí» a la pregunta del permiso general tras reservar también: responder_permiso_mensajes.
-  saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes"],
+  // «Ya no me manden recordatorios» como respuesta a uno: elegir_mensajes.
+  saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes", "elegir_mensajes"],
   clinico: [...ALWAYS],
   cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
-    "responder_permiso_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
+    "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
   ],
   cambio_cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "reprogramar_cita", "cancelar_cita", "confirmar_propuesta", "confirmar_cita",
-    "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso",
+    "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso",
   ],
 }
 /**

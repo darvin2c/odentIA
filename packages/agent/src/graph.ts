@@ -121,7 +121,7 @@ const POLICY_LINE = `Política de autonomía: ${Object.entries(DEFAULT_AUTONOMY_
   .join(", ")}.`
 
 /** Herramientas que comunican algo al interlocutor. */
-const SEND_TOOLS = new Set(["send_reply", "send_template", "despedirse_y_cerrar"])
+const SEND_TOOLS = new Set(["send_reply", "despedirse_y_cerrar"])
 
 const NOT_SENT =
   "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
@@ -272,13 +272,16 @@ function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: PromptFacts):
     has("responder_permiso_mensajes")
       ? `Si el último mensaje de la clínica en el hilo es la pregunta «${GENERAL_PERMISSION_QUESTION}» y la persona responde sí o no, anótalo con responder_permiso_mensajes y contéstale con la frase que te devuelve; no lo confundas con confirmar una cita.`
       : null,
+    has("elegir_mensajes")
+      ? "Si la persona pide no recibir más un tipo de mensaje, volver a recibirlo o elegir qué mensajes recibe, anótalo con elegir_mensajes y contéstale con la frase que te devuelve. Si no queda claro qué tipo quiere dejar (los recordatorios de sus citas, los de controles y seguimiento, las novedades y promociones o ningún mensaje), pregúntale antes. «Cancelar» o «quiero cancelar» es cancelar una cita, nunca una baja."
+      : null,
     on("presupuestos")
       ? "Si la persona pide su presupuesto, míralo con ver_presupuesto y reenvíaselo con reenviar_presupuesto: solo lo que la clínica ya entregó; si no está listo, la herramienta deja la tarea a recepción y te da la frase. Si responde qué acepta, qué deja para después o qué opción prefiere, usa anotar_respuesta_presupuesto con los ids de ver_presupuesto: te devuelve la pregunta para confirmar la lista; se anota solo con su sí, con confirmar_propuesta, y si corrige algo vuelves a llamarla con la lista corregida. Nunca cambias un precio ni armas un presupuesto."
       : whenOff("presupuestos"),
     "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste en este turno o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
-    "El interlocutor solo recibe lo que envías con send_reply (o send_template, si la tienes disponible; tus mensajes anteriores del historial se enviaron así). Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error u outside_window, sigue sus indicaciones. Un texto fuera de esas herramientas no llega a nadie.",
+    "El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, el turno termina; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y el turno termina: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.",
   ]
     .filter(Boolean)
     .join("\n")

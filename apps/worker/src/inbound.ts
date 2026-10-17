@@ -81,10 +81,11 @@ export async function processInbound(
         ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
       if (!result.created) return
-      // Un botón de un mensaje automático («Confirmar», «No enviar más») lo
-      // resuelve el sistema: no llega al modelo ni gasta una corrida. Va en su
-      // propio punto de guardado: si su respuesta no puede salir, el mensaje
-      // ya ingresado no se pierde y la conversación sigue su curso normal.
+      // Un botón de un mensaje automático («Confirmar», «No más recordatorios»)
+      // y «BAJA» o «STOP» los resuelve el sistema: no llegan al modelo ni gastan
+      // una corrida. Va en su propio punto de guardado: si su respuesta no puede
+      // salir, el mensaje ya ingresado no se pierde y la conversación sigue su
+      // curso normal.
       const content = msg.message.event.content
       if (content.type === "text") {
         const handled = await tx
@@ -92,8 +93,8 @@ export async function processInbound(
             handleAutomationReply(
               inner,
               orgId,
-              { conversationId: result.conversationId, replyId: content.replyId },
-              { storage: deps.storage },
+              { conversationId: result.conversationId, replyId: content.replyId, text: content.text },
+              { storage: deps.storage, secretsKey: deps.secretsKey },
             ),
           )
           .catch((error: unknown) => {

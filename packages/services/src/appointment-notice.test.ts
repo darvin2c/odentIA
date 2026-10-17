@@ -110,9 +110,9 @@ async function person(
   c: Clinic,
   name: string,
   options: {
-    consent?: Array<"recordatorio" | "seguimiento">
+    consent?: Array<"recordatorio" | "seguimiento" | "novedades">
     /** Pidió no recibir ese tipo de mensaje (baja). */
-    refused?: Array<"recordatorio" | "seguimiento">
+    refused?: Array<"recordatorio" | "seguimiento" | "avisos">
     openWindow?: boolean
     phone?: string
   } = {},
@@ -187,7 +187,8 @@ describe("al cambiar la cita, el agente le avisa", () => {
   it("al reservar desde la Agenda le avisa por la conversación abierta, y eso cuenta como su mensaje del día", async () => {
     const c = await clinic()
     await lineOn(c)
-    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio", "seguimiento"], openWindow: true })
+    // Con el sí de novedades: retomar el presupuesto (más abajo) es promoción para WhatsApp (ADR 0040).
+    const rosa = await person(c, "Rosa Quispe", { consent: ["recordatorio", "seguimiento", "novedades"], openWindow: true })
     const booked = await book(c, rosa.patientId, later(3 * DAY))
     expect(booked.notice).toEqual({ queued: true })
     expect((await jobsOf(c)).map((job) => [job.kind, job.status])).toEqual([["aviso_cita_reservada", "pendiente"]])
@@ -345,16 +346,20 @@ describe("al cambiar la cita, el agente le avisa", () => {
     expect((await run(c, (tx) => syncCancelledAppointments(tx, c.orgId, new Date(Date.now() + 2 * HOUR)))).programados).toBe(0)
   })
 
-  it("lo de su cita es parte del servicio: sale sin permiso previo, y si pidió no recibirlo no se le escribe ni queda tarea", async () => {
+  it("el aviso de su cita sale sin permiso previo y aunque no quiera recordatorios; con «ningún mensaje» no sale ni queda tarea", async () => {
     const c = await clinic()
     await lineOn(c)
     // Nunca se le preguntó: el aviso de su reserva sale igual (ADR 0030).
     const rosa = await person(c, "Rosa Quispe", { openWindow: true })
     await book(c, rosa.patientId, later(3 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
-    // Se dio de baja de los recordatorios: la baja se respeta siempre.
-    const ana = await person(c, "Ana Torres", { openWindow: true, refused: ["recordatorio"] })
-    await book(c, ana.patientId, later(4 * DAY))
+    // No quiere recordatorios: el aviso de que su cita quedó reservada le llega igual (ADR 0040).
+    const lucia = await person(c, "Lucía Paredes", { openWindow: true, refused: ["recordatorio"] })
+    await book(c, lucia.patientId, later(4 * DAY))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    // Pidió no recibir ningún mensaje de la clínica: ahí sí se respeta también el aviso.
+    const ana = await person(c, "Ana Torres", { openWindow: true, refused: ["avisos"] })
+    await book(c, ana.patientId, later(5 * DAY))
     expect((await deliver(c)).map((result) => result.outcome)).toEqual(["omitido"])
     const theirs = (await jobsOf(c)).find((job) => job.contactId === ana.contactId)
     expect(theirs).toMatchObject({ status: "omitido", cause: "sin_permiso", taskId: null })
@@ -604,7 +609,7 @@ describe("«Contexto» de la conversación", () => {
     const caps = { conversations: true, tasks: true, agent: false }
     const seen = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: { ...caps, appointments: true } }))
     expect(seen.nextAppointment).toMatchObject({ id: next.id, patientName: "Rosa Quispe", branchName: "Centro", dentistName: "Dra. Ana Torres", timeZone: "America/Lima" })
-    expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null, novedades: null })
+    expect(seen.messages).toEqual({ recordatorio: true, seguimiento: null, novedades: null, avisos: null })
     const blind = await run(c, (tx) => getContactWorkspace(tx, c.orgId, rosa.contactId, { capabilities: caps }))
     expect(blind.nextAppointment).toBeNull()
   })

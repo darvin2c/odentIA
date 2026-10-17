@@ -13,13 +13,14 @@ import {
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import { patientResponsibility } from "@odentia/db/schema/clinical"
+import { paymentTicket, patientResponsibility, prescription } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm"
 import { createHash } from "node:crypto"
 import {
+  NOTICE_PURPOSE,
   PERSONAL_LINK_MESSAGE_KEY,
   PERSONAL_LINK_SUBJECT,
   renderMessage,
@@ -27,7 +28,7 @@ import {
   withLinkLine,
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName, previewMessageRoute, routeMessage } from "./automation-routing.js"
-import { mayWriteFirst } from "./automation.js"
+import { getMessagePermissions, mayWriteFirst, setMessageChoice } from "./automation.js"
 import {
   appointmentView,
   type BookingLinkAppointment,
@@ -50,6 +51,8 @@ import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendOutbound, sendTemplateOutbound } from "./conversations.js"
 import { createContactNote } from "./crm-workspace.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.js"
+import { renderHealthDocumentPdf } from "./health-documents.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { patientOrganizationToday, patientPersonId, requirePatient, updatePatient } from "./patients.js"
@@ -71,6 +74,32 @@ export interface PersonalLinkConsent {
   id: string
   title: string
 }
+
+/**
+ * «Tus mensajes» (ADR 0040): los tres interruptores de quien abre su enlace y
+ * si pidió no recibir ningún mensaje. Los avisos de su cita y sus papeles no
+ * son un interruptor: siempre llegan, salvo con «ningún mensaje».
+ */
+export interface PersonalLinkMessages {
+  recordatorio: boolean
+  seguimiento: boolean
+  novedades: boolean
+  /** Pidió «No quiero ningún mensaje de la clínica»: los interruptores se ven apagados. */
+  nothing: boolean
+}
+
+/** Un papel en «Tus papeles» (decisión 8): la receta o el comprobante, para descargar 30 días. */
+export interface PersonalLinkPaper {
+  kind: "receta" | "comprobante"
+  id: string
+  title: string
+  issuedAt: string
+  /** Hasta cuándo se descarga desde aquí; después se le pide a la clínica. */
+  availableUntil: string
+}
+
+/** Cuánto queda un papel en «Tus papeles»: después se le pide a la clínica. */
+export const PAPER_DAYS = 30
 
 export interface PersonalLinkView {
   /** `vencido`: revocado, o ya no le queda nada pendiente. */
@@ -103,6 +132,10 @@ export interface PersonalLinkView {
   consents: PersonalLinkConsent[]
   /** «Antes de tu cita», si hay uno por responder. */
   questionnaire: { title: string } | null
+  /** «Tus mensajes»: solo para quien recibe los mensajes de este paciente (quien decide por él). */
+  messages: PersonalLinkMessages | null
+  /** «Tus papeles»: la receta y el comprobante de los últimos 30 días, solo para quien decide. */
+  papers: PersonalLinkPaper[]
 }
 
 /*
@@ -145,6 +178,81 @@ async function consentsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Pr
   return rows
 }
 
+/**
+ * Quien elige sus mensajes en su enlace: la persona que lo recibe, si decide
+ * por el paciente (la propia persona mayor de edad o su representante legal;
+ * en un menor, quien recibe sus mensajes, ADR 0040) o si aún no es paciente.
+ * Un familiar o un autorizado ve solo su cita.
+ */
+function choosesMessages(link: ResolvedPersonalLink): boolean {
+  return link.live && !link.expired && (link.patientId === null || link.decides)
+}
+
+async function messagesOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkMessages | null> {
+  if (!choosesMessages(link)) return null
+  const permissions = await getMessagePermissions(tx, orgId, link.row.contactId)
+  const of = (purpose: string) => permissions.find((item) => item.purpose === purpose)?.granted ?? null
+  const nothing = of("avisos") === false
+  return {
+    // Recordatorios y seguimiento llegan salvo que los haya apagado; novedades, solo con su sí.
+    recordatorio: !nothing && of("recordatorio") !== false,
+    seguimiento: !nothing && of("seguimiento") !== false,
+    novedades: !nothing && of("novedades") === true,
+    nothing,
+  }
+}
+
+/**
+ * «Tus papeles» (decisión 8): la receta emitida y el comprobante (el ticket del
+ * cobro, sin anular) de los últimos 30 días, del paciente de quien decide por
+ * él (la regla de `requireDecisionContact`). Después se le piden a la clínica.
+ */
+async function papersOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkPaper[]> {
+  if (!link.patientId || !link.decides || link.expired) return []
+  const since = new Date(Date.now() - PAPER_DAYS * 86_400_000)
+  const until = (at: Date) => new Date(at.getTime() + PAPER_DAYS * 86_400_000).toISOString()
+  const recipes = await tx
+    .select({ id: prescription.id, number: prescription.prescriptionNumber, at: prescription.issuedAt })
+    .from(prescription)
+    .where(
+      and(
+        eq(prescription.organizationId, orgId),
+        eq(prescription.patientId, link.patientId),
+        eq(prescription.status, "emitida"),
+        gte(prescription.issuedAt, since),
+      ),
+    )
+    .orderBy(desc(prescription.issuedAt))
+  const tickets = await tx
+    .select({ id: paymentTicket.id, number: paymentTicket.ticketNumber, at: paymentTicket.createdAt })
+    .from(paymentTicket)
+    .where(
+      and(
+        eq(paymentTicket.organizationId, orgId),
+        eq(paymentTicket.patientId, link.patientId),
+        isNull(paymentTicket.voidedAt),
+        gte(paymentTicket.createdAt, since),
+      ),
+    )
+    .orderBy(desc(paymentTicket.createdAt))
+  return [
+    ...recipes.map((row) => ({
+      kind: "receta" as const,
+      id: row.id,
+      title: `Receta N.º ${row.number}`,
+      issuedAt: row.at.toISOString(),
+      availableUntil: until(row.at),
+    })),
+    ...tickets.map((row) => ({
+      kind: "comprobante" as const,
+      id: row.id,
+      title: `Comprobante N.º ${String(row.number).padStart(6, "0")}`,
+      issuedAt: row.at.toISOString(),
+      availableUntil: until(row.at),
+    })),
+  ].sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))
+}
+
 /** El cuestionario sale antes de una cita: con una por venir y mientras no lo haya enviado. */
 async function questionnaireOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<{ title: string } | null> {
   if (!link.patientId || !link.decides || link.expired || !link.appointment || link.appointment.status === "cancelada") return null
@@ -173,6 +281,8 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
     budgets: [],
     consents: [],
     questionnaire: null,
+    messages: null,
+    papers: [],
   }
   if (!link.live) return empty
   const appointment = link.appointment ? await appointmentView(tx, orgId, link.appointment.id) : null
@@ -180,8 +290,12 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
   const budgets = await budgetsOf(tx, orgId, link)
   const consents = await consentsOf(tx, orgId, link)
   const questionnaire = await questionnaireOf(tx, orgId, link)
+  const messages = await messagesOf(tx, orgId, link)
+  const papers = await papersOf(tx, orgId, link)
   const context = link.canBook || budgets.length > 0 ? await bookingContext(tx, orgId, link.row) : null
-  const nothing = !link.canBook && !appointment && !missing && budgets.length === 0 && consents.length === 0 && !questionnaire
+  // «Tus mensajes» siempre sirve a quien los recibe: el enlace no vence por no tener otra cosa pendiente.
+  const nothing =
+    !link.canBook && !appointment && !missing && budgets.length === 0 && consents.length === 0 && !questionnaire && !messages && papers.length === 0
   if (nothing) return empty
   const self = link.patientId ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId : true
   return {
@@ -199,7 +313,77 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
     budgets,
     consents,
     questionnaire,
+    messages,
+    papers,
   }
+}
+
+// --------------------------------------------------------- tus mensajes ---
+
+/**
+ * La persona cambia un interruptor de «Tus mensajes», o pide no recibir
+ * ningún mensaje (`ninguno`). Es la misma operación que el botón «No más
+ * recordatorios», recepción y el agente (`setMessageChoice`), con origen
+ * «enlace» y a nombre de la persona.
+ */
+export async function setPersonalLinkMessages(
+  tx: Db,
+  orgId: string,
+  token: string,
+  input: { tipo: string; recibir: boolean },
+): Promise<PersonalLinkMessages> {
+  const link = await requireLiveLink(tx, orgId, token, true)
+  if (!choosesMessages(link)) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este enlace no puede elegir los mensajes de esta persona")
+  const { purposes } = await setMessageChoice(tx, orgId, null, link.row.contactId, {
+    choice: input.tipo,
+    receive: input.recibir,
+    source: "enlace",
+  })
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: `contact:${link.row.contactId}`,
+    action: "personal_link.messages_chosen",
+    entity: "contact",
+    entityId: link.row.contactId,
+    metadata: { choice: input.tipo, receive: input.recibir, purposes, origin: "paciente" },
+  })
+  const messages = await messagesOf(tx, orgId, link)
+  if (!messages) throw linkExpired()
+  return messages
+}
+
+// ----------------------------------------------------------- tus papeles ---
+
+/**
+ * Descarga un papel de «Tus papeles»: solo uno de la lista de quien decide
+ * por el paciente y de los últimos 30 días. Es el mismo PDF que se imprime.
+ */
+export async function getPersonalLinkPaper(
+  tx: Db,
+  orgId: string,
+  token: string,
+  input: { kind: string; id: string },
+): Promise<{ bytes: Uint8Array; filename: string }> {
+  const link = await requireLiveLink(tx, orgId, token)
+  const patientId = requireLinkDecider(link)
+  const paper = (await papersOf(tx, orgId, link)).find((item) => item.kind === input.kind && item.id === input.id)
+  if (!paper) {
+    throw new ServiceError("PAPER_UNAVAILABLE", 409, `Este papel ya no está aquí: pasados ${PAPER_DAYS} días, pídeselo a la clínica.`)
+  }
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId: `contact:${link.row.contactId}`,
+    action: "personal_link.paper_downloaded",
+    entity: paper.kind === "receta" ? "prescription" : "payment_ticket",
+    entityId: paper.id,
+    metadata: { patientId, origin: "paciente" },
+  })
+  if (paper.kind === "receta") {
+    const rendered = await renderHealthDocumentPdf(tx, orgId, patientId, "prescription", paper.id)
+    return { bytes: rendered.bytes, filename: rendered.filename }
+  }
+  const snap = await buildTicketSnapshot(tx, orgId, patientId, paper.id)
+  return { bytes: await renderTicketPdf(snap, null), filename: `Comprobante-${snap.numberLabel}.pdf` }
 }
 
 // ------------------------------------------------------------- tus datos ---
@@ -597,7 +781,7 @@ export async function submitPersonalLinkQuestionnaire(
 
 // ------------------------------------------------- enviarle su enlace ---
 
-const OPTED_OUT = "Pidió no recibir recordatorios: díselo en persona o por teléfono, o envíaselo si te escribe por WhatsApp."
+const OPTED_OUT = "Pidió no recibir ningún mensaje de la clínica: díselo en persona o por teléfono, o envíaselo si te escribe por WhatsApp."
 const NO_ADDRESS = "Falta la dirección pública de la clínica: no hay enlace que enviar."
 
 export interface PersonalLinkSendPreview {
@@ -652,7 +836,7 @@ export async function previewPersonalLinkSend(tx: Db, orgId: string, patientId: 
   }
   const route = await previewMessageRoute(tx, orgId, recipient.contactId, spec)
   if ("cause" in route) return { ...base, channel: null, via: null, label: null, blocked: route.detail }
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, "recordatorio"))) {
+  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
     return { ...base, channel: null, via: null, label: null, blocked: OPTED_OUT }
   }
   return {
@@ -676,8 +860,8 @@ export interface PersonalLinkSent {
 /**
  * «Enviarle su enlace» (recepción, decisión 8): le llega a la persona, o a su
  * representante legal si es menor, por la regla de siempre (WhatsApp primero
- * y, si no, correo). Es parte del servicio, como el aviso de su cita: no pide
- * permiso y deja de salir solo si se dio de baja de los recordatorios. Una
+ * y, si no, correo). Es un aviso, como el de su cita (ADR 0040): no pide
+ * permiso y solo deja de salir con «No quiero ningún mensaje». Una
  * misma `requestId` no lo envía dos veces.
  */
 export async function sendPersonalLink(
@@ -717,7 +901,7 @@ export async function sendPersonalLink(
   const { spec, params, text } = await personalLinkMessage(tx, orgId, recipient.displayName)
   const route = await routeMessage(tx, orgId, recipient.contactId, spec)
   if ("cause" in route) throw new ServiceError("LINK_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}`)
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, "recordatorio"))) {
+  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
     throw new ServiceError("LINK_OPTED_OUT", 409, OPTED_OUT)
   }
   const link = await issuePersonalLink(
@@ -738,6 +922,7 @@ export async function sendPersonalLink(
       name: route.template.name,
       language: route.template.language,
       params,
+      category: spec.category,
       buttons: spec.buttons.map((button) => ({ id: replyId(button.action, link.linkId), title: button.title })),
       link: personalLinkRef(link.linkId),
       preview: text,

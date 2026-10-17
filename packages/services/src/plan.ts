@@ -8,7 +8,6 @@ import {
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
-  cie10Code,
   encounter,
   encounterPlanItem,
   encounterProcedure,
@@ -23,6 +22,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
@@ -111,6 +111,8 @@ export interface AddPlanItemInput {
   arch?: string | null
   detail?: string | null
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
   /** Hallazgo del odontograma que motiva la indicación (mismo paciente, no anulado). */
   odontogramEntryId?: string | null
   /** Fase del plan; por defecto, la que propone la especialidad del servicio. */
@@ -128,6 +130,8 @@ export interface UpdatePlanItemPatch {
   arch?: string | null
   detail?: string | null
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica (el ya guardado viaja con la suya). */
+  diagnosisSystem?: string | null
   /** Atención borrador actual como contexto de mutación (obligatorio, nunca reescribe el origen). */
   encounterId: string
 }
@@ -155,15 +159,6 @@ async function audit(
   })
 }
 
-async function assertDiagnosisCode(tx: Db, code: string): Promise<void> {
-  const [row] = await tx
-    .select({ code: cie10Code.code })
-    .from(cie10Code)
-    .where(eq(cie10Code.code, code))
-    .limit(1)
-  if (!row) throw validation(`Código CIE-10 inexistente: ${code}`)
-}
-
 function assertDetail(detail: string | null | undefined): string | null {
   if (detail === null || detail === undefined) return null
   if (detail.length > 4000) throw validation("detail debe tener hasta 4000 caracteres")
@@ -175,11 +170,6 @@ function assertTitle(title: string): string {
   const value = title?.trim() ?? ""
   if (!value || value.length > 200) throw validation("title debe tener 1–200 caracteres")
   return value
-}
-
-function normalizeDiagnosisCode(code: string | null | undefined): string | null {
-  const trimmed = code?.trim() ?? ""
-  return trimmed ? trimmed : null
 }
 
 function assertScopeValue(scope: string | null | undefined): TreatmentScope {
@@ -712,8 +702,7 @@ export async function addPlanItem(
     await surfaceLimits(tx, service),
   )
   const detail = assertDetail(input.detail)
-  const diagnosisCode = normalizeDiagnosisCode(input.diagnosisCode)
-  if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
+  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   const codings = await resolveServiceCodings(tx, service)
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
   const phase =
@@ -739,7 +728,7 @@ export async function addPlanItem(
       arch: site.arch,
       title: service.name,
       detail,
-      diagnosisCode,
+      ...diagnosis,
       codings,
       priceCents: service.priceCents,
       currency: service.currency,
@@ -771,6 +760,7 @@ export interface AddPlanItemsBatchInput {
   toothNumbers: number[]
   detail?: string | null
   diagnosisCode?: string | null
+  diagnosisSystem?: string | null
 }
 
 /**
@@ -807,8 +797,7 @@ export async function addPlanItemsBatch(
     assertSite("tooth", { toothNumber: tooth })
   }
   const detail = assertDetail(input.detail)
-  const diagnosisCode = normalizeDiagnosisCode(input.diagnosisCode)
-  if (diagnosisCode) await assertDiagnosisCode(tx, diagnosisCode)
+  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   if (service.priceCents === null)
     throw new ServiceError("SERVICE_UNPRICED", 409, "La prestación aún no tiene precio configurado")
   const codings = await resolveServiceCodings(tx, service)
@@ -833,7 +822,7 @@ export async function addPlanItemsBatch(
         arch: null,
         title: service.name,
         detail,
-        diagnosisCode,
+        ...diagnosis,
         codings,
         priceCents: service.priceCents,
         currency: service.currency,
@@ -996,9 +985,9 @@ export async function updatePlanItem(
     fields.push("detail")
   }
   if (patch.diagnosisCode !== undefined) {
-    const code = normalizeDiagnosisCode(patch.diagnosisCode)
-    if (code) await assertDiagnosisCode(tx, code)
-    set.diagnosisCode = code
+    const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: patch.diagnosisCode, system: patch.diagnosisSystem })
+    set.diagnosisCode = diagnosis.diagnosisCode
+    set.diagnosisSystem = diagnosis.diagnosisSystem
     fields.push("diagnosisCode")
   }
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
@@ -1169,6 +1158,7 @@ export async function revisePlanItem(
     serviceId: string
     detail?: string | null
     diagnosisCode?: string | null
+    diagnosisSystem?: string | null
   },
 ): Promise<PlanItemWithDecision> {
   const reason = input.reason?.trim()

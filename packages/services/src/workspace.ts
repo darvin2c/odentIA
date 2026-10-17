@@ -10,6 +10,7 @@ import { checkEncounterClosing } from "./encounters.js"
 import { AUDIT_AREA_LABELS, AUDIT_AREAS, type AuditArea, auditSubjectsOf, describeAuditEvent } from "./audit-words.js"
 import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
 import { handoffOpenExistsSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
 import { notFound, validation } from "./errors.js"
@@ -484,18 +485,45 @@ async function waitingStillOpen(tx: Db, orgId: string, userId: string, access: W
   return { total: first.total, conversationId: one ? first.id : null, contactName: one ? first.contactName : null, quietSince: first.quietSince }
 }
 
-/** Citas que siguen sin confirmar después del primer recordatorio del agente, de la más próxima a la más lejana. */
+/**
+ * Citas que hay que confirmar llamando, de la más próxima a la más lejana: las
+ * que siguen sin confirmar después del primer recordatorio del agente y las de
+ * mañana de quien no recibe recordatorios (ADR 0040), con «Recordar la cita»
+ * prendida: sin ella nadie los recibe y no hay a quién llamar de más.
+ */
 async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
   const appt = sql.raw("a")
   const rows = await tx.execute<{ [K in keyof WaitingUnconfirmed]: WaitingUnconfirmed[K] } & { total: number }>(sql`
     select a.id, a.patient_id as "patientId", p.display_name as "patientName", p.phone,
       ${iso(sql`a.starts_at`)} as "startsAt", b.name as "branchName", a.service_name as "serviceName",
+      case when ${remindedUnconfirmedSql(appt)} then 'sin_confirmar' else 'sin_recordatorios' end as why,
       count(*) over ()::int as total
     from appointment a join patient p on p.id = a.patient_id and p.organization_id = ${orgId}
     join branch b on b.id = a.branch_id and b.organization_id = ${orgId}
-    where a.organization_id = ${orgId} and ${remindedUnconfirmedSql(appt)}
+    where a.organization_id = ${orgId}
+      and (${remindedUnconfirmedSql(appt)} or ${noRemindersTomorrowSql(orgId)})
     order by a.starts_at, a.id limit ${WAITING_LIMITS.unconfirmed}`)
   return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+}
+
+/**
+ * Una cita de mañana (en la zona de su sede), en pie y sin confirmar, cuyo
+ * paciente no recibe recordatorios: quien recibe sus mensajes (el mismo
+ * contacto que «Recordar la cita», `preferredContact`) los apagó o pidió no
+ * recibir ningún mensaje. Solo con «Recordar la cita» prendida. `a` y `b` son
+ * la cita y su sede.
+ */
+function noRemindersTomorrowSql(orgId: string): SQL {
+  return sql`(a.status = 'programada'
+    and (a.starts_at at time zone coalesce(b.timezone, 'UTC'))::date = ((now() at time zone coalesce(b.timezone, 'UTC'))::date + 1)
+    and exists (select 1 from automation_rule r where r.organization_id = ${orgId}
+      and r.kind = 'recordatorio_cita' and r.enabled and r.agent_part)
+    and exists (select 1 from automation_consent s
+      where s.organization_id = ${orgId} and s.status = 'revoked' and s.purpose in ('recordatorio', 'avisos')
+        and s.contact_id = (select pc.contact_id from patient_contact pc
+          join contact c on c.id = pc.contact_id and c.organization_id = pc.organization_id and c.is_active
+          where pc.organization_id = ${orgId} and pc.patient_id = a.patient_id
+          order by pc.is_preferred desc, (pc.relationship = 'self') desc, pc.created_at, pc.id limit 1)))`
 }
 
 async function waitingTasks(tx: Db, orgId: string, userId: string, access: WorkspaceAccess, dayEnd: SQL) {
@@ -679,6 +707,8 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     unreached: unreached && unreached.total > 0 ? { total: unreached.total, byCause: unreached.byCause.map(({ total, reason }) => ({ total, reason })) } : null,
     // Con el administrador encendido, los presupuestos sin respuesta son una de sus líneas: no se repiten aquí.
     budgets: (access.finance || access.clinical) && !admin.enabled ? await waitingBudgets(tx, orgId, userId, access.ownAppointments) : null,
+    // Quien administra los mensajes cambia el texto del aviso que WhatsApp pasó a promoción (ADR 0040).
+    promotions: options.can?.("settings.write") ? await listRecategorizedMessages(tx, orgId) : [],
     // Quien configura publica el consentimiento que una atención pidió (paso 2B).
     consentsToPublish: access.configure
       ? (await listConsentsToPublish(tx, orgId)).map(({ templateKey, title, requestedByName, requestedAt }) => ({

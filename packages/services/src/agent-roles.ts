@@ -156,7 +156,6 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "send_reply",
       // Ninguna conversación queda abierta: al terminar se despide y la cierra (ADR 0024).
       "despedirse_y_cerrar",
-      "send_template",
       // «Su enlace» no depende de Agendar: con Agendar apagado es la vía para sacar una cita.
       "enviar_enlace_cita",
       // Volver a entrar al portal lo atiende una persona: el agente solo deja el pedido (decisión 9).
@@ -165,6 +164,10 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       "confirmar_cita",
       // La respuesta escrita a la pregunta del permiso general tras reservar (ADR 0030).
       "responder_permiso_mensajes",
+      // «Ya no me manden recordatorios» se respeta (ADR 0040): la misma operación que el botón.
+      "elegir_mensajes",
+      // El comprobante de su pago, si lo pide en el chat (decisión 20 v2): al cobrar ya salió por correo.
+      "enviar_comprobante",
       "confirmar_propuesta",
       "ver_contexto_paciente",
       "ver_resumen_paciente",

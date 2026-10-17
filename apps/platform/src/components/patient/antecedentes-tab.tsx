@@ -1,3 +1,4 @@
+import { FAMILY_KINSHIP_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -160,19 +161,12 @@ interface FamilyDraft {
   key: string
   relationship: string
   condition: string
-  cie10Code: string
+  diagnosisCode: string
+  diagnosisSystem: string | null
 }
 
-const FAMILY_RELATIONSHIP_OPTIONS: Array<[string, string]> = [
-  ["madre", "Madre"],
-  ["padre", "Padre"],
-  ["hijo", "Hijo(a)"],
-  ["conyuge", "Cónyuge o pareja"],
-  ["hermano", "Hermano(a)"],
-  ["abuelo", "Abuelo(a)"],
-  ["tio", "Tío(a)"],
-  ["otro_familiar", "Otro familiar"],
-]
+/** Parentesco con HL7 v3 RoleCode, con las palabras de siempre (decisión 28). */
+const FAMILY_RELATIONSHIP_OPTIONS = Object.entries(FAMILY_KINSHIP_LABELS)
 
 /** Clasificación ASA del estado físico. */
 const ASA_OPTIONS: Array<[string, string]> = [
@@ -200,7 +194,8 @@ function buildDrafts(health: PatientHealth): {
       key: row.id,
       relationship: row.relationship,
       condition: row.condition,
-      cie10Code: row.cie10Code ?? "",
+      diagnosisCode: row.diagnosisCode ?? "",
+      diagnosisSystem: row.diagnosisSystem ?? null,
     })),
     allergies: health.allergies.map((a: Allergy) => ({
       key: a.id,
@@ -219,7 +214,8 @@ function buildDrafts(health: PatientHealth): {
       key: c.id,
       id: c.id,
       name: c.name,
-      cie10Code: c.cie10Code ?? "",
+      diagnosisCode: c.diagnosisCode ?? "",
+      diagnosisSystem: c.diagnosisSystem ?? null,
       status: c.status,
       startDate: c.startDate ?? "",
       endDate: c.endDate ?? "",
@@ -340,13 +336,15 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           .map((row) => ({
             relationship: row.relationship,
             condition: row.condition.trim(),
-            cie10Code: row.cie10Code || null,
+            diagnosisCode: row.diagnosisCode || null,
+            diagnosisSystem: row.diagnosisCode ? row.diagnosisSystem : null,
           })),
         asaClass: asaClass || null,
         conditions: conditions.map((c) => ({
           ...(c.id ? { id: c.id } : {}),
           name: c.name.trim(),
-          cie10Code: c.cie10Code ? c.cie10Code : null,
+          diagnosisCode: c.diagnosisCode ? c.diagnosisCode : null,
+          diagnosisSystem: c.diagnosisCode ? (c.diagnosisSystem ?? null) : null,
           status: c.status,
           startDate: c.startDate === "" ? null : c.startDate,
           endDate: c.endDate === "" ? null : c.endDate,
@@ -988,9 +986,10 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                               ...prev,
                               {
                                 key: `fam-${Date.now()}`,
-                                relationship: "madre",
+                                relationship: "MTH",
                                 condition: "",
-                                cie10Code: "",
+                                diagnosisCode: "",
+                                diagnosisSystem: null,
                               },
                             ])
                             markDirty()

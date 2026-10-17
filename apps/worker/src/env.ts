@@ -8,6 +8,11 @@ const envSchema = z.object({
   /** Origen público de la plataforma para confirmaciones y bajas. */
   WEB_URL: z.string().url(),
   COOKIE_DOMAIN: z.string().min(1),
+  /** Versión del Graph API de Meta, la misma de la API: WhatsApp, Messenger e Instagram. */
+  META_GRAPH_VERSION: z
+    .string()
+    .regex(/^v\d+\.\d+$/, "Se espera la forma v25.0")
+    .default("v25.0"),
   /** Origen del back-office: el botón «Abrir en Soporte» de los avisos de soporte. */
   ADMIN_URL: z.string().url(),
   /**

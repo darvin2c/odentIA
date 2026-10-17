@@ -24,6 +24,7 @@ import {
   BUDGET_READY_MESSAGE_KEY,
   BUDGET_READY_SUBJECT,
   type MessageSpec,
+  NOTICE_PURPOSE,
   renderMessage,
   replyId,
   withLinkLine,
@@ -156,7 +157,7 @@ export async function previewBudgetSend(
   }
   const route = await previewMessageRoute(tx, orgId, recipient.contactId, spec)
   if ("cause" in route) return { ...base, channel: null, via: null, label: null, blocked: route.detail }
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, "seguimiento"))) {
+  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
     return { ...base, channel: null, via: null, label: null, blocked: OPTED_OUT }
   }
   return {
@@ -169,7 +170,7 @@ export async function previewBudgetSend(
 }
 
 const OPTED_OUT =
-  "Pidió no recibir mensajes de seguimiento: entrégaselo impreso, o envíaselo si te escribe por WhatsApp."
+  "Pidió no recibir ningún mensaje de la clínica: entrégaselo impreso, o envíaselo si te escribe por WhatsApp."
 
 async function patientFirstName(tx: Db, orgId: string, patientId: string): Promise<string> {
   const [row] = await tx
@@ -278,9 +279,9 @@ export async function sendBudget(
   const { spec, params, text } = await readyMessage(tx, orgId, budget, recipient, patientName)
   const route = await routeMessage(tx, orgId, recipient.contactId, spec)
   if ("cause" in route) throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
-  // Es parte del servicio (ADR 0030): solo deja de salir si se dio de baja del
-  // seguimiento. Responder a quien acaba de escribir siempre se puede.
-  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, "seguimiento"))) {
+  // Es un aviso (ADR 0040): solo deja de salir con «No quiero ningún mensaje».
+  // Responder a quien acaba de escribir siempre se puede.
+  if (route.via !== "respuesta" && !(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) {
     throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
   }
   const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId)
@@ -309,6 +310,7 @@ export async function sendBudget(
       name: route.template.name,
       language: route.template.language,
       params,
+      category: spec.category,
       buttons: spec.buttons.map((button) => ({ id: replyId(button.action, input.budgetId), title: button.title })),
       ...(link ? { link: personalLinkRef(link.linkId) } : {}),
       preview: text,

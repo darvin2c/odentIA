@@ -472,6 +472,8 @@ export function BookingDataForm({
         ) : phoneFromConversation ? (
           <FieldDescription id={`${phoneId}-hint`}>Es el número desde el que nos escribes. Cámbialo si prefieres otro.</FieldDescription>
         ) : null}
+        {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
+        <FieldDescription>Te avisaremos por WhatsApp sobre tus citas.</FieldDescription>
       </Field>
 
       <FieldSet className="gap-2">

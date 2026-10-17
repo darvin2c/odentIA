@@ -1,6 +1,6 @@
 import { Button, cn, FieldLabel, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { ConfirmDialog, ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -8,7 +8,9 @@ import { useCan } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
 
-type Purpose = "recordatorio" | "seguimiento" | "novedades"
+type Purpose = "recordatorio" | "seguimiento" | "novedades" | "avisos"
+/** Un interruptor, o «ningún mensaje». */
+type Choice = "recordatorio" | "seguimiento" | "novedades" | "ninguno"
 type How = "presencial" | "telefono" | "conversacion"
 
 interface MessagePermission {
@@ -19,13 +21,14 @@ interface MessagePermission {
 }
 
 /**
- * Lo que es parte del servicio que pidió (su cita, sus controles, sus
- * presupuestos y seguimientos) no pide permiso: solo deja de salir si se dio de
- * baja de ese tipo. Solo novedades y promociones pide su permiso (ADR 0030).
+ * Los tres tipos que la persona puede apagar, con los mismos nombres que ve en
+ * «Tus mensajes» (ADR 0040). Recordatorios y seguimiento llegan sin pedir
+ * permiso hasta que los apaga; las novedades, solo con su sí.
  */
-const SERVICE: { purpose: Purpose; what: string }[] = [
-  { purpose: "recordatorio", what: "los recordatorios de sus citas y controles" },
-  { purpose: "seguimiento", what: "los mensajes de sus presupuestos y seguimientos" },
+const SWITCHES: { purpose: Exclude<Choice, "ninguno">; title: string; detail: string }[] = [
+  { purpose: "recordatorio", title: "Recordatorios de sus citas", detail: "Un día antes y unas horas antes." },
+  { purpose: "seguimiento", title: "Controles y seguimiento", detail: "Cuándo le toca su control, o si faltó a una cita." },
+  { purpose: "novedades", title: "Novedades y promociones", detail: "Campañas y ofertas de la clínica: solo si lo aceptó." },
 ]
 
 const HOW: { id: How; label: string }[] = [
@@ -35,33 +38,27 @@ const HOW: { id: How; label: string }[] = [
 ]
 
 /** Cómo quedó registrado, con las palabras de la pantalla. */
-const ACCEPTED: Record<string, string> = {
-  registro: "aceptó al registrarse",
-  presencial: "aceptó en persona",
-  telefono: "aceptó por teléfono",
-  conversacion: "aceptó por la conversación",
-  portal: "aceptó en el portal",
-}
-const DECLINED: Record<string, string> = {
-  registro: "no lo aceptó al registrarse",
-  presencial: "dijo en persona que no",
-  telefono: "dijo por teléfono que no",
-  conversacion: "dijo por la conversación que no",
-  portal: "no lo aceptó en el portal",
-  baja: "se dio de baja desde un mensaje",
-  revocacion_datos: "se retiró al revocar su consentimiento de datos",
+const SAID: Record<string, string> = {
+  registro: "al registrarse",
+  presencial: "en persona",
+  telefono: "por teléfono",
+  conversacion: "por la conversación",
+  portal: "en el portal",
+  enlace: "en su enlace",
+  baja: "desde un mensaje",
+  revocacion_datos: "al revocar su consentimiento de datos",
 }
 
 function dayOf(at: string | null): string | null {
   return at ? new Date(at).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short" }) : null
 }
 
-/** «Sí · aceptó por teléfono · 15 oct». */
-function describeNews(row: MessagePermission): string {
+/** «Encendido» o «Apagado · lo pidió por teléfono · 15 oct». */
+function stateOf(row: MessagePermission, on: boolean): string {
   const when = dayOf(row.at)
-  if (row.granted === null || !when) return "No se le ha preguntado."
-  const words = (row.granted ? ACCEPTED : DECLINED)[row.source ?? ""] ?? (row.granted ? "lo aceptó" : "no lo aceptó")
-  return `${row.granted ? "Sí" : "No"} · ${words} · ${when}`
+  const how = row.source ? SAID[row.source] : null
+  if (row.granted === null || !when) return on ? "Encendido" : "Apagado: aún no lo aceptó"
+  return [on ? "Encendido" : "Apagado", how ? `lo dijo ${how}` : null, when].filter(Boolean).join(" · ")
 }
 
 /** A quién se le escribe lo de este paciente: su persona preferida o él mismo. */
@@ -71,11 +68,11 @@ export function messageRecipientOf(detail: PatientFull) {
 }
 
 /**
- * Lo que la persona recibe sin haber escrito primero. Lo de su atención es
- * parte del servicio y solo deja de salir si se dio de baja (se ve aquí y se
- * puede deshacer); novedades y promociones es la finalidad de mensajes del
- * consentimiento de datos, y aquí se ve y se corrige cuando lo dice en persona,
- * por teléfono o por la conversación (ADR 0030).
+ * «Tus mensajes» desde la página de la persona (ADR 0040): los mismos tres
+ * interruptores que ella ve en su enlace, la fila fija de los avisos de sus
+ * citas y papeles, y «No quiere ningún mensaje de la clínica», que también
+ * apaga los avisos. Recepción anota aquí lo que la persona pide por teléfono,
+ * en persona o por la conversación: cada cambio pide antes cómo lo dijo.
  */
 export function MessagePermissionsSection({
   contactId,
@@ -95,17 +92,19 @@ export function MessagePermissionsSection({
     enabled: !!contactId,
     queryFn: () => apiFetch<{ data: MessagePermission[] }>(`/api/agent/admin/people/${contactId}/permissions`),
   })
-  // Fila que se está cambiando: el interruptor pide antes cómo lo dijo la persona.
-  const [editing, setEditing] = useState<{ purpose: Purpose; granted: boolean; how: How } | null>(null)
+  // El cambio a medias: antes de guardar se pide cómo lo dijo la persona.
+  const [editing, setEditing] = useState<{ choice: Choice; receive: boolean; how: How } | null>(null)
+  const [confirmNothing, setConfirmNothing] = useState(false)
   const save = useMutation({
-    mutationFn: (input: { purpose: Purpose; granted: boolean; how: How }) =>
+    mutationFn: (input: { choice: Choice; receive: boolean; how: How }) =>
       apiFetch<{ data: MessagePermission[] }>(`/api/agent/admin/people/${contactId}/permissions`, {
         method: "POST",
-        body: JSON.stringify({ purpose: input.purpose, granted: input.granted, source: input.how }),
+        body: JSON.stringify({ tipo: input.choice, recibir: input.receive, source: input.how }),
       }),
     onSuccess: (result) => {
       queryClient.setQueryData(key, result)
       setEditing(null)
+      setConfirmNothing(false)
     },
   })
   if (!contactId) return null
@@ -114,117 +113,175 @@ export function MessagePermissionsSection({
 
   const rowOf = (purpose: Purpose): MessagePermission =>
     rows.find((candidate) => candidate.purpose === purpose) ?? { purpose, granted: null, source: null, at: null }
-  const news = rowOf("novedades")
-  const optedOut = SERVICE.map((item) => ({ ...item, row: rowOf(item.purpose) })).filter((item) => item.row.granted === false)
-  const newsLabelId = `${uid}-novedades`
+  const nothing = rowOf("avisos").granted === false
+  /** Lo que llega hoy: recordatorios y seguimiento hasta que los apaga; novedades solo con su sí. */
+  const isOn = (purpose: Exclude<Choice, "ninguno">) => {
+    if (nothing) return false
+    const granted = rowOf(purpose).granted
+    return purpose === "novedades" ? granted === true : granted !== false
+  }
   const howId = `${uid}-como`
+  const who = recipientName ?? "la persona"
 
   /** Cómo lo dijo, antes de guardar un cambio. */
-  const howChooser = editing ? (
-    <div className="flex flex-col gap-2">
-      <span id={howId} className="font-medium">
-        {editing.granted ? "¿Cómo lo aceptó?" : "¿Cómo lo dijo?"}
-      </span>
-      <RadioGroup
-        aria-labelledby={howId}
-        className="flex flex-wrap gap-2"
-        value={editing.how}
-        onValueChange={(how) => setEditing({ ...editing, how: how as How })}
-      >
-        {HOW.map((option) => (
-          <FieldLabel
-            key={option.id}
-            className={cn(
-              "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
-              editing.how === option.id && "border-primary bg-primary-soft",
-            )}
+  const howChooser = (choice: Choice) =>
+    editing && editing.choice === choice ? (
+      <div className="flex flex-col gap-2">
+        <span id={howId} className="font-medium">
+          {editing.receive ? "¿Cómo lo pidió?" : "¿Cómo pidió dejar de recibirlos?"}
+        </span>
+        <RadioGroup
+          aria-labelledby={howId}
+          className="flex flex-wrap gap-2"
+          value={editing.how}
+          onValueChange={(how) => setEditing({ ...editing, how: how as How })}
+        >
+          {HOW.map((option) => (
+            <FieldLabel
+              key={option.id}
+              className={cn(
+                "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+                editing.how === option.id && "border-primary bg-primary-soft",
+              )}
+            >
+              <RadioGroupItem value={option.id} />
+              {option.label}
+            </FieldLabel>
+          ))}
+        </RadioGroup>
+        {error ? (
+          <p role="alert" className="text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            disabled={save.isPending}
+            onClick={() => (editing.choice === "ninguno" && !editing.receive ? setConfirmNothing(true) : save.mutate(editing))}
           >
-            <RadioGroupItem value={option.id} />
-            {option.label}
-          </FieldLabel>
-        ))}
-      </RadioGroup>
-      {error ? (
-        <p role="alert" className="text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(editing)}>
-          {save.isPending ? "Guardando…" : "Guardar"}
-        </Button>
-        <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => setEditing(null)}>
-          Cancelar
-        </Button>
+            {save.isPending ? "Guardando…" : "Guardar"}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => setEditing(null)}>
+            Cancelar
+          </Button>
+        </div>
       </div>
-    </div>
-  ) : null
+    ) : null
 
   return (
     <div className="flex flex-col gap-2 border-t pt-3 text-sm">
       <p className="text-xs font-medium text-muted-foreground">Mensajes de la clínica</p>
       <p className="text-muted-foreground">
-        Lo que {recipientName ? `${recipientName} recibe` : "recibe"} sin haber escrito primero: lo de su atención es parte
-        del servicio; las novedades y promociones, solo si lo aceptó.
+        Lo que {recipientName ? `${recipientName} recibe` : "recibe"} sin haber escrito primero. Son los mismos interruptores
+        que ve en su enlace, en «Tus mensajes».
       </p>
       {query.isPending ? (
-        <LoadingState message="Cargando lo que aceptó recibir…" />
+        <LoadingState message="Cargando sus mensajes…" />
       ) : query.isError ? (
-        <ErrorState title="No se pudo cargar lo que aceptó recibir" onRetry={() => void query.refetch()} />
+        <ErrorState title="No se pudo cargar lo que recibe" onRetry={() => void query.refetch()} />
       ) : (
         <ul className="flex flex-col divide-y rounded-lg border">
-          <li className="flex flex-col gap-2 p-3">
-            <div className="font-medium">Atención (citas, controles, presupuestos)</div>
-            <div className="text-muted-foreground">Parte del servicio: no pide permiso.</div>
-            {optedOut.map((item) => (
-              <div key={item.purpose} className="flex flex-wrap items-center gap-2">
-                <span className="min-w-0 flex-1 text-muted-foreground">
-                  Pidió no recibir {item.what} · {DECLINED[item.row.source ?? ""] ?? "lo pidió"}
-                  {dayOf(item.row.at) ? ` · ${dayOf(item.row.at)}` : ""}
-                </span>
-                {canWrite && editing?.purpose !== item.purpose ? (
+          {nothing ? (
+            <li className="flex flex-col gap-2 p-3">
+              <div className="font-medium">No recibe ningún mensaje de la clínica</div>
+              <div className="text-muted-foreground">
+                Tampoco los avisos de sus citas y papeles
+                {rowOf("avisos").source ? ` · lo dijo ${SAID[rowOf("avisos").source ?? ""] ?? ""}` : ""}
+                {dayOf(rowOf("avisos").at) ? ` · ${dayOf(rowOf("avisos").at)}` : ""}. Si hay que avisarle algo, llámala.
+              </div>
+              {canWrite && editing?.choice !== "ninguno" ? (
+                <div>
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={save.isPending}
                     onClick={() => {
                       save.reset()
-                      setEditing({ purpose: item.purpose, granted: true, how: "presencial" })
+                      setEditing({ choice: "ninguno", receive: true, how: "presencial" })
                     }}
                   >
-                    Volver a enviárselos
+                    Volver a enviarle mensajes
                   </Button>
-                ) : null}
-              </div>
-            ))}
-            {editing && editing.purpose !== "novedades" ? howChooser : null}
-          </li>
-          <li className="flex flex-col gap-3 p-3">
-            <div className="flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <div id={newsLabelId} className="font-medium">
-                  Novedades y promociones
                 </div>
-                <div className="text-muted-foreground">{describeNews(news)}</div>
+              ) : null}
+              {howChooser("ninguno")}
+            </li>
+          ) : null}
+          {SWITCHES.map((item) => {
+            const labelId = `${uid}-${item.purpose}`
+            const on = isOn(item.purpose)
+            return (
+              <li key={item.purpose} className="flex flex-col gap-3 p-3">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div id={labelId} className="font-medium">
+                      {item.title}
+                    </div>
+                    <div className="text-muted-foreground">{item.detail}</div>
+                    <div className="text-muted-foreground">{stateOf(rowOf(item.purpose), on)}</div>
+                  </div>
+                  <Switch
+                    aria-labelledby={labelId}
+                    checked={editing?.choice === item.purpose ? editing.receive : on}
+                    disabled={!canWrite || save.isPending}
+                    onCheckedChange={(receive: boolean) => {
+                      save.reset()
+                      // Volver al estado guardado cancela el cambio que estaba a medias.
+                      setEditing(receive === on ? null : { choice: item.purpose, receive, how: "telefono" })
+                    }}
+                  />
+                </div>
+                {howChooser(item.purpose)}
+              </li>
+            )
+          })}
+          <li className="flex items-start gap-3 p-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Avisos de sus citas y papeles</div>
+              <div className="text-muted-foreground">
+                Si su cita se reserva, cambia o se cancela, y cuando su presupuesto o su receta están listos. Son parte de su
+                atención.
               </div>
-              <Switch
-                aria-labelledby={newsLabelId}
-                checked={editing?.purpose === "novedades" ? editing.granted : news.granted === true}
-                disabled={!canWrite || save.isPending}
-                onCheckedChange={(granted: boolean) => {
-                  save.reset()
-                  // Volver al estado guardado cancela el cambio que estaba a medias.
-                  setEditing(granted === (news.granted === true) ? null : { purpose: "novedades", granted, how: "presencial" })
-                }}
-              />
             </div>
-            {editing?.purpose === "novedades" ? howChooser : null}
+            <span className="shrink-0 font-medium">{nothing ? "No" : "Siempre"}</span>
           </li>
         </ul>
       )}
+      {!nothing && canWrite && !query.isPending && !query.isError ? (
+        <div className="flex flex-col gap-2">
+          {editing?.choice === "ninguno" ? (
+            howChooser("ninguno")
+          ) : (
+            <Button
+              variant="link"
+              className="h-auto self-start p-0 text-destructive"
+              disabled={save.isPending}
+              onClick={() => {
+                save.reset()
+                setEditing({ choice: "ninguno", receive: false, how: "telefono" })
+              }}
+            >
+              No quiere ningún mensaje de la clínica
+            </Button>
+          )}
+        </div>
+      ) : null}
       <p className="text-muted-foreground">
-        Se le escribe por WhatsApp o, si no tiene, por correo. Puede darse de baja con un toque desde cualquier mensaje.
+        Se le escribe por WhatsApp o, si no tiene, por correo. Puede elegirlos ella misma desde su enlace o desde cualquier
+        mensaje.
       </p>
+      <ConfirmDialog
+        open={confirmNothing}
+        onClose={() => setConfirmNothing(false)}
+        title={`¿${who} no quiere ningún mensaje de la clínica?`}
+        description="Dejarán de llegarle también los avisos de sus citas y papeles: si su cita cambia, habrá que llamarla. Lo verás en su página."
+        confirmLabel="Sí, no enviarle nada"
+        pending={save.isPending}
+        onConfirm={() => {
+          if (editing) save.mutate(editing)
+        }}
+      />
     </div>
   )
 }

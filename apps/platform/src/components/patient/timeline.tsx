@@ -158,7 +158,7 @@ function NoteCard({
       <div className="flex flex-col gap-2">
         <CardHeaderRow
           badge={timelineTypeLabel(item.type)}
-          context={item.diagnosisCode ? `CIE-10: ${item.diagnosisCode}` : null}
+          context={item.diagnosisCode ? `Diagnóstico: ${item.diagnosisCode}` : null}
           createdAt={item.createdAt}
           timezone={timezone}
           locale={locale}
@@ -193,7 +193,7 @@ function OdontogramCard({
           context={
             [
               tooth != null ? `Pieza ${tooth}` : null,
-              item.diagnosisCode ? `CIE-10: ${item.diagnosisCode}` : null,
+              item.diagnosisCode ? `Diagnóstico: ${item.diagnosisCode}` : null,
             ]
               .filter(Boolean)
               .join(" · ") || null

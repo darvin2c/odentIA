@@ -956,7 +956,7 @@ export function EncounterEditor({
     {
       key: "hallazgos",
       title: "Diagnóstico",
-      description: "Diagnósticos CIE-10 con su tipo y pieza. Al menos uno para cerrar.",
+      description: "Diagnósticos de la lista de la clínica con su tipo y pieza. Al menos uno para cerrar.",
       summary:
         activeDiagnoses === 0
           ? "Sin diagnósticos registrados"

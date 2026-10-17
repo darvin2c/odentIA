@@ -1,5 +1,6 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type AgentRuntime, consumeAgentRun, createAlreadyTold, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db, setupAgentMemory } from "@odentia/db"
 import { createMailer } from "@odentia/mail"
@@ -21,6 +22,8 @@ const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
 // «Su enlace» va en el aviso de la cita y en las plantillas de WhatsApp: con la dirección pública de cada clínica.
 configurePublicLinks({ webURL: env.WEB_URL, cookieDomain: env.COOKIE_DOMAIN })
+// La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
+configureMetaGraphVersion(env.META_GRAPH_VERSION)
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,

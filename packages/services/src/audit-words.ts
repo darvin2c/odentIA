@@ -386,6 +386,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "automation_consent.set": say("Cambió un permiso de mensajes de una persona"),
   "automation_consent.unsubscribed": say("Pidió no recibir más un tipo de mensaje", "paciente"),
   "automation_consent.asked": say("Le preguntó si le puede enviar novedades y promociones", "agente"),
+  "automation_consent.stop_word": say("Escribió «BAJA» y dejó de recibir un tipo de mensaje", "paciente"),
   "clinic_message.created": say("Creó un mensaje de WhatsApp de la clínica"),
   "clinic_message.text_changed": say("Cambió el texto de un mensaje de WhatsApp de la clínica"),
   "clinic_message.reverted": say("Volvió al texto anterior de un mensaje de WhatsApp de la clínica"),
@@ -427,6 +428,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "personal_link.revoked": say("Quitó su enlace"),
   "personal_link.data_sent": say("Completó sus datos desde su enlace", "paciente"),
   "personal_link.budget_decided": say("Respondió un presupuesto desde su enlace", "paciente"),
+  "personal_link.messages_chosen": say("Eligió sus mensajes desde su enlace", "paciente"),
+  "personal_link.paper_downloaded": say("Descargó un papel desde su enlace", "paciente"),
   // Inventario
   "stock.ajuste": say("Ajustó las existencias de un producto"),
   "stock.traslado": say("Trasladó existencias entre almacenes"),
@@ -437,6 +440,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   // Configuración
   "org_profile.upsert": say("Cambió los datos de la clínica"),
   "settings.region_updated": say("Cambió el país, la moneda o el formato de la clínica"),
+  "settings.diagnosis_system_changed": say("Cambió la lista de diagnósticos de la clínica"),
   "settings.payment_method_created": say("Agregó un medio de pago"),
   "settings.payment_method_updated": say("Cambió un medio de pago"),
   "branch.create": say("Creó una sede"),

@@ -3,6 +3,7 @@ import {
   channelAdapters,
   type NormalizedStatus,
   type ReplyButton,
+  type TemplateCategory,
 } from "@odentia/channels"
 import { normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
@@ -488,7 +489,11 @@ export async function applyStatus(
 }
 
 export type OutboundContent =
-  | { type: "text"; text: string; buttons?: ReplyButton[] }
+  /**
+   * `listUnsubscribe`: en un correo automático, el enlace de baja que el
+   * adaptador envía como cabecera `List-Unsubscribe` (RFC 2369).
+   */
+  | { type: "text"; text: string; buttons?: ReplyButton[]; listUnsubscribe?: string }
   // `preview` es el texto ya armado: lo que la persona lee, para mostrarlo en el hilo.
   | {
       type: "template"
@@ -681,6 +686,7 @@ export async function sendOutbound(
       templateParams: content.type === "template" ? content.params : null,
       templateLink: content.type === "template" ? (content.link ?? null) : null,
       replyButtons: content.type !== "media" && content.buttons?.length ? content.buttons : null,
+      listUnsubscribe: content.type === "text" ? (content.listUnsubscribe ?? null) : null,
       attachments: content.type === "media" ? [content.attachment] : [],
       status: "queued",
     })
@@ -706,8 +712,10 @@ export async function sendOutbound(
 
 /**
  * Envío de plantilla. La valida contra el catálogo de la conexión: tiene que
- * estar aprobada por el proveedor y llevar tantos datos como variables tiene.
- * Es la misma regla para una persona, una automatización y el agente.
+ * estar aprobada por el proveedor, llevar tantos datos como variables tiene y
+ * respetar su categoría (`category`, la que se pidió: lo que WhatsApp cuenta
+ * como promoción solo sale a quien aceptó novedades). Es la misma regla para
+ * una persona, una automatización y el sistema (ADR 0040).
  */
 export async function sendTemplateOutbound(
   tx: Db,
@@ -720,6 +728,8 @@ export async function sendTemplateOutbound(
     name: string
     language: string
     params: string[]
+    /** La categoría con la que se pidió el mensaje. */
+    category: TemplateCategory
     buttons?: ReplyButton[]
     /** Token de «Su enlace» para el botón de la plantilla que lo abre. */
     link?: string
@@ -728,7 +738,7 @@ export async function sendTemplateOutbound(
 ): Promise<MessageItem> {
   // Abierta o cerrada: el envío (sendOutbound) la reabre si hace falta.
   const [row] = await tx
-    .select({ connection: channelConnection })
+    .select({ connection: channelConnection, contactId: conversation.contactId })
     .from(conversation)
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
@@ -738,6 +748,8 @@ export async function sendTemplateOutbound(
     name: input.name,
     language: input.language,
     params: input.params.length,
+    category: input.category,
+    contactId: row.contactId,
   })
   // Sin texto armado por quien envía, se arma con el cuerpo del catálogo.
   const preview =

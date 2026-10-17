@@ -1,4 +1,5 @@
 import {
+  diagnosisCodeLabel,
   activeFindingsAsOf,
   FDI_ADULT,
   FDI_ADULT_ROWS,
@@ -563,7 +564,7 @@ function StudioBody({
                             {(entry.surface || entry.diagnosisCode) && (
                               <p className="mt-3 text-sm text-muted-foreground">
                                 {entry.surface ? surfaceLabel(entry.surface) : "Pieza completa"}
-                                {entry.diagnosisCode ? ` · CIE-10 ${entry.diagnosisCode}` : ""}
+                                {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
                               </p>
                             )}
                             {entry.note && (

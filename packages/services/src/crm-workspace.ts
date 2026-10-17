@@ -94,7 +94,7 @@ export interface CrmContactWorkspace {
    * `seguimiento` son parte del servicio: solo cuenta si se dio de baja (false);
    * `novedades` es el único que pide su permiso (ADR 0030).
    */
-  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades: boolean | null }
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades: boolean | null; avisos: boolean | null }
 }
 
 /**
@@ -972,7 +972,13 @@ export async function getContactWorkspace(
     agent,
     activity,
     nextAppointment,
-    messages: { recordatorio: granted("recordatorio"), seguimiento: granted("seguimiento"), novedades: granted("novedades") },
+    messages: {
+      recordatorio: granted("recordatorio"),
+      seguimiento: granted("seguimiento"),
+      novedades: granted("novedades"),
+      // `false`: pidió no recibir ningún mensaje de la clínica (ADR 0040).
+      avisos: granted("avisos"),
+    },
   }
 }
 

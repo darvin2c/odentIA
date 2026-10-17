@@ -53,11 +53,13 @@ export interface CrmContactWorkspace {
   activity: { items: CrmActivityItem[]; nextCursor: string | null }
   nextAppointment: CrmNextAppointment | null
   /** Lo que aceptó recibir sin haber escrito primero; null: nunca se le preguntó. */
-  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades?: boolean | null }
+  messages: { recordatorio: boolean | null; seguimiento: boolean | null; novedades?: boolean | null; avisos?: boolean | null }
 }
 
 /** «Aceptó recordatorios», «No aceptó mensajes de la clínica»…, para «Contexto». */
 export function messagePermissionsSaid(messages: CrmContactWorkspace["messages"]): string {
+  // «Ningún mensaje» apaga también los avisos de su cita (ADR 0040): es lo primero que hay que saber.
+  if (messages.avisos === false) return "No quiere ningún mensaje de la clínica"
   // Lo de su atención es parte del servicio (ADR 0030): solo se dice si se dio de baja.
   const news =
     messages.novedades === true

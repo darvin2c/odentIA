@@ -106,10 +106,10 @@ export async function buildClinicalBase(owner: OwnerFixture): Promise<ClinicalId
   await call(page, "PATCH", `${apiPath}/encounters/${encounter.id}`, slug, {
     evolution: "Se evalúa pieza 36 con caries oclusal; se indica endodoncia.",
   })
-  // El cierre exige diagnóstico CIE-10 con tipo y la colegiatura de quien firma (ADR 0003).
+  // El cierre exige un diagnóstico de la lista con tipo y la colegiatura de quien firma (ADR 0003).
   await call(page, "POST", `${apiPath}/encounters/${encounter.id}/diagnoses`, slug, {
-    cie10Code: "K02.1",
-    diagnosisType: "definitivo",
+    diagnosisCode: "K02.1",
+    diagnosisType: "confirmed",
     toothNumber: 36,
     surfaces: ["occlusal"],
   }, 201)

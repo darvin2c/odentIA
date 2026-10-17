@@ -1,4 +1,4 @@
-import { surfaceLabel } from "@odentia/clinical"
+import { diagnosisCodeLabel, surfaceLabel } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -28,7 +28,7 @@ import {
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
 import { type ServiceCatalogItem } from "../../lib/services"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 import { ServicePicker } from "./service-picker"
 import { type ToothSite, ToothSiteSelector } from "./tooth-site-selector"
 import { activeOrgLocale } from "../../lib/locale"
@@ -80,7 +80,7 @@ function planOptionLabel(item: PlanItem, locale: string | undefined): string {
  * Procedimientos de la atención: resumen de lectura con los procedimientos
  * reales del detalle y los tratamientos vinculados al abrir (pendientes de
  * realizar), más registro en un FormDrawer hermano (tratamiento aceptado del
- * presupuesto o servicio directo del catálogo, con pieza y CIE-10 opcionales).
+ * presupuesto o servicio directo del catálogo, con pieza y diagnóstico opcionales).
  * Toda escritura respeta el protocolo de barrera: avisa pending al padre,
  * espera `beforeWrite` (flush del borrador), escribe, espera `onChanged`
  * (refresh del encounter) y recién ahí libera y cierra.
@@ -118,6 +118,7 @@ export function EncounterProcedures({
   const [quantity, setQuantity] = useState("1")
   const [arch, setArch] = useState("")
   const [cie, setCie] = useState("")
+  const [cieSystem, setCieSystem] = useState<string | null>(null)
   const [planSel, setPlanSel] = useState<string>("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -187,6 +188,7 @@ export function EncounterProcedures({
     setPlanSel(next)
     setService(null)
     setCie(linked.diagnosisCode ?? "")
+    setCieSystem(linked.diagnosisSystem ?? null)
     setSite({ toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
   }
 
@@ -214,6 +216,7 @@ export function EncounterProcedures({
     setArch("")
     setQuantity("1")
     setCie("")
+    setCieSystem(null)
     setPlanSel("")
     setFreeMode(false)
     setFreeDescription("")
@@ -225,9 +228,10 @@ export function EncounterProcedures({
     if (!canSubmit) return
     const trimmedCie = cie.trim()
     const diagnosisCode = trimmedCie === "" ? null : trimmedCie
+    const diagnosisSystem = diagnosisCode ? cieSystem : null
     // El tratamiento del plan conserva su sitio: el servidor lo toma de él.
     const body = selectedPlan
-      ? { planItemId: selectedPlan.id, diagnosisCode }
+      ? { planItemId: selectedPlan.id, diagnosisCode, diagnosisSystem }
       : freeMode
         ? {
             description: freeDescription.trim(),
@@ -235,6 +239,7 @@ export function EncounterProcedures({
             surfaces: site.surfaces,
             quantity: quantityNumber,
             diagnosisCode,
+            diagnosisSystem,
           }
         : {
             serviceId,
@@ -244,6 +249,7 @@ export function EncounterProcedures({
             ...(scope === "arch" ? { arch } : {}),
             quantity: quantityNumber,
             diagnosisCode,
+            diagnosisSystem,
           }
     onPendingChange(true)
     setSaving(true)
@@ -363,7 +369,7 @@ export function EncounterProcedures({
                       <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span>{procedureSiteLabel(proc)}</span>
                         {(proc.quantity ?? 1) > 1 ? <span>× {proc.quantity}</span> : null}
-                        {proc.diagnosisCode ? <Badge>CIE-10 {proc.diagnosisCode}</Badge> : null}
+                        {proc.diagnosisCode ? <Badge>{diagnosisCodeLabel(proc.diagnosisSystem, proc.diagnosisCode)}</Badge> : null}
                         {proc.planItemId ? (
                           linked ? (
                             <span className="font-medium">Plan: {linked.title}</span>
@@ -557,10 +563,14 @@ export function EncounterProcedures({
                 </Field>
               ) : null}
 
-              <Cie10Search
+              <DiagnosisSearch
                 value={cie}
-                onChange={(code) => setCie(code)}
-                label="Diagnóstico CIE-10 (opcional)"
+                system={cieSystem}
+                onChange={(code, _description, system) => {
+                  setCie(code)
+                  setCieSystem(system)
+                }}
+                label="Diagnóstico (opcional)"
                 disabled={busy}
               />
 

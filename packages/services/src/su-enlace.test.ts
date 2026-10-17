@@ -92,8 +92,11 @@ it("uno por persona; «Tus datos» pide solo lo que falta, se envía una vez y n
   await expect(
     f.run((tx) => submitPersonalLinkData(tx, ORG, first.token, { data: { birthDate: "1990-01-01" } })),
   ).rejects.toMatchObject({ code: "DATA_ALREADY_SENT" })
-  // Sin nada pendiente, el enlace entero ya no sirve.
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, first.token))).status).toBe("vencido")
+  // Sin nada pendiente solo le queda «Tus mensajes» (ADR 0040): ni sus datos ni nada de lo guardado.
+  expect(await f.run((tx) => getPersonalLinkView(tx, ORG, first.token))).toMatchObject({
+    status: "abierto", data: null, budgets: [], consents: [], questionnaire: null, papers: [],
+    messages: { recordatorio: true, seguimiento: true, novedades: false, nothing: false },
+  })
   // Su persona guarda una nota con lo que completó.
   const notes = await ownerDb.select({ body: crmNote.body }).from(crmNote).where(eq(crmNote.contactId, pedro.personId))
   expect(notes.map((note) => note.body).join(" ")).toContain("Completó desde su enlace")
@@ -273,8 +276,8 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
   const template = await f.run((tx) => publishConsentTemplate(tx, ORG, f.actor, draft.id))
   const consent = await f.run((tx) => createConsentDocument(tx, ORG, f.actor, { templateId: template.id, patientId: lucia.id, procedureRef: "Exodoncia de la pieza 38" }))
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: lucia.id }, { secretsKey: KEY }))
-  // Sin enviarlo a firmar, no aparece en su enlace.
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).status).toBe("vencido")
+  // Sin enviarlo a firmar, no aparece en su enlace (solo «Tus mensajes», ADR 0040).
+  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([])
   await f.run((tx) => markConsentSentByLink(tx, ORG, f.actor, consent.id))
   expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).consents).toEqual([{ id: consent.id, title: "Exodoncia" }])
 

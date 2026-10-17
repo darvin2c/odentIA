@@ -36,7 +36,7 @@ export interface ClosingOdontogram {
 /** Texto de cada requisito pendiente, en el orden de la historia clínica. */
 export const CLOSING_REQUIREMENT_LABELS: Record<ClosingRequirement, string> = {
   reason: "Motivo de consulta",
-  diagnosis: "Al menos un diagnóstico CIE-10 con su tipo",
+  diagnosis: "Al menos un diagnóstico con su tipo (presuntivo basta)",
   evolution: "Evolución",
   signature: "Tu colegiatura en el perfil profesional",
 }
@@ -45,8 +45,13 @@ export interface EncounterDiagnosis {
   id: string
   patientId: string
   encounterId: string | null
-  cie10Code: string
-  diagnosisType: "presuntivo" | "definitivo" | "repetido" | null
+  /** Lista del código: «ICD-10» o «ICD-11». */
+  diagnosisSystem: string
+  diagnosisCode: string
+  /** HL7 FHIR verificationStatus: provisional («Presuntivo») o confirmed («Definitivo»). */
+  diagnosisType: "provisional" | "confirmed" | null
+  /** «Ya diagnosticado antes»: lo marca el sistema (decisión 11). */
+  previouslyDiagnosed: boolean
   toothNumber: number | null
   surfaces: string[]
   note: string | null
@@ -130,7 +135,8 @@ export function addDiagnosisApi(
   patientId: string,
   encounterId: string,
   body: {
-    cie10Code: string
+    diagnosisCode: string
+    diagnosisSystem?: string | null
     diagnosisType: string
     toothNumber?: number | null
     surfaces?: string[]

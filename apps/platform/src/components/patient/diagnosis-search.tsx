@@ -1,3 +1,4 @@
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -13,38 +14,53 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { useDiagnosisSystem } from "../../lib/org"
 
-interface Cie10Result {
+/** Un código de la lista de la clínica, como lo devuelve el buscador. */
+export interface DiagnosisOption {
+  system: string
   code: string
   description: string
-  /** Categoría de tres caracteres con subcódigos: se codifica con el subcódigo. */
+  /** Categoría con subcódigos: se codifica con el subcódigo. */
   isCategory?: boolean
 }
 
-export function Cie10Search({
+/**
+ * Buscador de toda la lista de diagnósticos de la clínica (CIE-10 o CIE-11,
+ * ADR 0041): ignora tildes y mayúsculas y pone primero lo odontológico; el
+ * orden lo decide el servidor. `value` es el código y `system` su lista (un
+ * código ya guardado conserva la suya); un código nuevo es de la lista de la
+ * clínica.
+ */
+export function DiagnosisSearch({
   value,
+  system = null,
   onChange,
-  label = "Diagnóstico CIE-10",
+  label = "Diagnóstico",
   disabled = false,
 }: {
   value: string
-  onChange: (code: string, description: string) => void
+  system?: string | null
+  onChange: (code: string, description: string, system: string | null) => void
   label?: string
   disabled?: boolean
 }) {
   const id = useId()
+  const list = useDiagnosisSystem()
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [debounced, setDebounced] = useState("")
-  const [selected, setSelected] = useState<Cie10Result | null>(null)
+  const [selected, setSelected] = useState<DiagnosisOption | null>(null)
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(query.trim()), 300)
     return () => clearTimeout(timer)
   }, [query])
   const results = useQuery({
-    queryKey: ["cie10", debounced],
+    queryKey: ["diagnosis-codes", debounced],
     queryFn: () =>
-      apiFetch<{ data: Cie10Result[] }>(`/api/cie10?q=${encodeURIComponent(debounced)}`),
+      apiFetch<{ data: DiagnosisOption[] }>(
+        `/api/diagnosis-codes?q=${encodeURIComponent(debounced)}`,
+      ),
     enabled: !disabled && debounced.length > 0,
     staleTime: 60_000,
   })
@@ -52,11 +68,11 @@ export function Cie10Search({
   const items = results.data?.data ?? []
   const searching = results.isFetching || query.trim() !== debounced
   // El combobox trabaja con el objeto resultado; `value` público sigue siendo
-  // solo el código. Se sintetiza el item cuando viene de fuera (modo edición).
+  // el código. Se sintetiza el item cuando viene de fuera (modo edición).
   const selectedItem = value
     ? selected?.code === value
       ? selected
-      : { code: value, description: "" }
+      : { system: system ?? list.key, code: value, description: "" }
     : null
 
   return (
@@ -69,7 +85,7 @@ export function Cie10Search({
         open={open && !disabled && query.trim().length > 0}
         onOpenChange={setOpen}
         value={selectedItem}
-        isItemEqualToValue={(a, b) => a.code === b.code}
+        isItemEqualToValue={(a, b) => a.code === b.code && a.system === b.system}
         itemToStringValue={(item) => item.code}
         inputValue={query}
         onInputValueChange={(next, details) => {
@@ -89,10 +105,10 @@ export function Cie10Search({
         onValueChange={(item) => {
           if (item) {
             setSelected(item)
-            onChange(item.code, item.description)
+            onChange(item.code, item.description, item.system)
           } else {
             setSelected(null)
-            onChange("", "")
+            onChange("", "", null)
           }
           setQuery("")
           setOpen(false)
@@ -101,7 +117,7 @@ export function Cie10Search({
         <ComboboxInput
           id={id}
           disabled={disabled}
-          placeholder="Buscar código o descripción…"
+          placeholder={`Buscar en la ${list.short} por código o nombre…`}
           showTrigger={false}
         />
         <ComboboxContent>
@@ -113,10 +129,10 @@ export function Cie10Search({
             </p>
           ) : (
             <>
-              <ComboboxList aria-label="Diagnósticos disponibles">
+              <ComboboxList aria-label={`Diagnósticos de la ${list.short}`}>
                 {items.map((item) => (
                   <ComboboxItem
-                    key={item.code}
+                    key={`${item.system}:${item.code}`}
                     value={item}
                     disabled={item.isCategory}
                     className="flex-col items-start gap-0 py-2"
@@ -131,21 +147,21 @@ export function Cie10Search({
                   </ComboboxItem>
                 ))}
               </ComboboxList>
-              <ComboboxEmpty>Sin resultados.</ComboboxEmpty>
+              <ComboboxEmpty>{`Sin resultados en la ${list.title}.`}</ComboboxEmpty>
             </>
           )}
         </ComboboxContent>
       </Combobox>
       {value && (
         <div className="flex items-center gap-2">
-          <Badge>{value}</Badge>
+          <Badge>{diagnosisCodeLabel(system ?? list.key, value)}</Badge>
           {!disabled && (
             <Button
               type="button"
               size="sm"
               variant="ghost"
               onClick={() => {
-                onChange("", "")
+                onChange("", "", null)
                 setSelected(null)
                 setQuery("")
               }}

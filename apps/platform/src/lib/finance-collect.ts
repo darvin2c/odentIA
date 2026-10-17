@@ -209,6 +209,14 @@ export interface CollectTicketRow {
   voidReason: string | null
 }
 
+/**
+ * El comprobante que sale solo por correo al cobrar (decisión 20 v2). Nulo en
+ * un reintento del mismo cobro. Sin correo, el texto es lo que dice Caja.
+ */
+export type CollectReceipt =
+  | { sent: "correo"; email: string }
+  | { sent: null; reason: string; text: string }
+
 export interface CollectResultBody {
   ticket: CollectTicketRow
   payments: Array<{ id: string }>
@@ -216,6 +224,7 @@ export interface CollectResultBody {
   remainingCents: number
   duplicate: boolean
   account: AccountSummary
+  receipt?: CollectReceipt | null
 }
 
 export interface CollectInput {

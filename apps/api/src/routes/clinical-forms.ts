@@ -230,6 +230,7 @@ const consentCreate = z
     planItemId: uuid.nullish(),
     procedureRef: z.string().trim().max(500).nullish(),
     diagnosisCode: z.string().trim().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
 
@@ -295,6 +296,7 @@ const orderCreate = z
     title: z.string().trim().min(1).max(200),
     detail: z.string().trim().max(5000).nullish(),
     diagnosisCode: z.string().trim().max(10).nullish(),
+    diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
   .refine((d) => Boolean(d.recipient?.trim() || d.recipientUserId), {

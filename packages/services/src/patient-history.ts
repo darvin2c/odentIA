@@ -1,4 +1,4 @@
-import { isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { diagnosisCodeLabel, isValidTooth, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
@@ -40,6 +40,8 @@ export interface AcceptedPendingItem {
   title: string
   toothNumber: number | null
   diagnosisCode: string | null
+  /** «CIE-10 · K02.1»: el código con su lista, para leerlo. */
+  diagnosisLabel: string | null
   priceCents: number | null
   currency: string
   status: string
@@ -108,7 +110,7 @@ interface LastVisit {
   finalizedAt: Date | null
   teeth: number[]
   procedures: Array<
-    Pick<typeof encounterProcedure.$inferSelect, "description" | "toothNumber" | "diagnosisCode">
+    Pick<typeof encounterProcedure.$inferSelect, "description" | "toothNumber" | "diagnosisCode" | "diagnosisSystem">
   >
   diagnoses: string[]
   plannedItems: PlannedLink[]
@@ -279,6 +281,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       title: treatmentPlanItem.title,
       toothNumber: treatmentPlanItem.toothNumber,
       diagnosisCode: treatmentPlanItem.diagnosisCode,
+      diagnosisSystem: treatmentPlanItem.diagnosisSystem,
       priceCents: treatmentPlanItem.priceCents,
       currency: treatmentPlanItem.currency,
       status: treatmentPlanItem.status,
@@ -349,6 +352,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
           description: encounterProcedure.description,
           toothNumber: encounterProcedure.toothNumber,
           diagnosisCode: encounterProcedure.diagnosisCode,
+          diagnosisSystem: encounterProcedure.diagnosisSystem,
         })
         .from(encounterProcedure)
         .where(
@@ -360,7 +364,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
         )
         .orderBy(asc(encounterProcedure.createdAt), asc(encounterProcedure.id)),
       tx
-        .select({ diagnosisCode: encounterDiagnosis.cie10Code })
+        .select({ diagnosisCode: encounterDiagnosis.diagnosisCode, diagnosisSystem: encounterDiagnosis.diagnosisSystem })
         .from(encounterDiagnosis)
         .where(
           and(
@@ -377,8 +381,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     const diagnoses = [
       ...new Set(
         [
-          ...procedures.map((p) => p.diagnosisCode),
-          ...encounterNotes.map((n) => n.diagnosisCode),
+          ...procedures.map((p) => (p.diagnosisCode ? diagnosisCodeLabel(p.diagnosisSystem, p.diagnosisCode) : null)),
+          ...encounterNotes.map((n) => diagnosisCodeLabel(n.diagnosisSystem, n.diagnosisCode)),
         ].filter((code): code is string => !!code),
       ),
     ].sort()
@@ -401,6 +405,7 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     title: row.title,
     toothNumber: row.toothNumber,
     diagnosisCode: row.diagnosisCode,
+    diagnosisLabel: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
     priceCents: row.priceCents,
     currency: row.currency,
     status: row.status,
@@ -636,6 +641,7 @@ export interface TimelineItem {
   toothNumbers: number[]
   authorId?: string | null
   refId: string
+  /** «CIE-10 · K02.1»: el código con su lista, para leerlo. */
   diagnosisCode?: string | null
   category?: string
   version?: number
@@ -811,7 +817,8 @@ export async function getTimeline(
       tx
         .select({
           encounterId: encounterDiagnosis.encounterId,
-          diagnosisCode: encounterDiagnosis.cie10Code,
+          diagnosisCode: encounterDiagnosis.diagnosisCode,
+          diagnosisSystem: encounterDiagnosis.diagnosisSystem,
         })
         .from(encounterDiagnosis)
         .where(
@@ -833,8 +840,8 @@ export async function getTimeline(
       const diagnoses = [
         ...new Set(
           [
-            ...rowProcedures.map((p) => p.diagnosisCode),
-            ...rowNotes.map((n) => n.diagnosisCode),
+            ...rowProcedures.map((p) => (p.diagnosisCode ? diagnosisCodeLabel(p.diagnosisSystem, p.diagnosisCode) : null)),
+            ...rowNotes.map((n) => diagnosisCodeLabel(n.diagnosisSystem, n.diagnosisCode)),
           ].filter((code): code is string => !!code),
         ),
       ].sort()
@@ -875,7 +882,7 @@ export async function getTimeline(
         createdAt: row.createdAt,
         title: "Nota clínica",
         detail: row.note,
-        diagnosisCode: row.diagnosisCode,
+        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: [],
         authorId: row.authorUserId,
         encounterId: null,
@@ -947,7 +954,7 @@ export async function getTimeline(
         condition: row.condition,
         surface: row.surface,
         status: row.status,
-        diagnosisCode: row.diagnosisCode,
+        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: teeth,
         authorId: row.createdBy,
         // El hallazgo se registra dentro de una atención: la historia lo agrupa con ella.
@@ -1158,7 +1165,7 @@ export async function getTimeline(
         title: `Se pidió: ${row.title}`,
         detail: `${ORDER_KIND_WORDS[row.kind] ?? "Orden"} · ${state}`,
         status: row.status,
-        diagnosisCode: row.diagnosisCode,
+        diagnosisCode: row.diagnosisCode ? diagnosisCodeLabel(row.diagnosisSystem, row.diagnosisCode) : null,
         toothNumbers: [],
         authorId: row.fromUserId,
         encounterId: row.encounterId,

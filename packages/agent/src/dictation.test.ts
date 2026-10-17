@@ -15,7 +15,7 @@ describe("dictado en modo de demostración", () => {
     expect(drafts.map((draft) => draft.kind)).toEqual(["nota", "diagnostico", "plan", "plan", "control"])
     expect(drafts[0]).toMatchObject({ payload: { reason: "Viene por dolor al masticar del lado derecho." } })
     expect(drafts[1]).toMatchObject({
-      payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 },
+      payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 },
       sourceText: "En la dieciséis hay caries en dentina.",
     })
     expect(drafts[2]?.payload).toEqual({ service: "Resina compuesta", toothNumber: 16, surfaces: ["oclusal"] })

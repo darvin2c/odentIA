@@ -25,6 +25,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { z } from "zod"
+import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
 import { ApiError } from "../../lib/api"
@@ -224,12 +225,20 @@ function OrgProfilePage() {
           <ProfileSkeleton />
         )
       ) : (
-        <ProfileForm
-          key={org.id}
-          values={profile ? toValues(profile) : emptyValues}
-          pending={saveMutation.isPending}
-          onSubmit={(values) => saveMutation.mutateAsync(values)}
-        />
+        <>
+          <ProfileForm
+            key={org.id}
+            values={profile ? toValues(profile) : emptyValues}
+            pending={saveMutation.isPending}
+            onSubmit={(values) => saveMutation.mutateAsync(values)}
+          />
+          {/* Se guarda sola, con su confirmación: no es parte del «Guardar» de arriba. */}
+          {profile ? (
+            <div className="max-w-3xl">
+              <DiagnosisListSettings profile={profile} />
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   )

@@ -259,6 +259,7 @@ function CashOfToday({ cash, locale, choice, onChanged }: { cash: WorkspaceCash;
         <TicketView
           ticket={ticket.result.ticket}
           remainingCents={ticket.result.remainingCents}
+          receipt={ticket.result.receipt ?? null}
           patientName={ticket.result.ticket.snapshot.patient.displayName}
           branchName={ticket.result.ticket.snapshot.branch.name}
           locale={profile.locale}

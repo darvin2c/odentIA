@@ -3,7 +3,7 @@ import { contact } from "@odentia/db/schema/crm"
 import { patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { getMessagePermissions, hasConsent, setConsent } from "./automation.js"
+import { getMessagePermissions, hasConsent, mayWriteFirst, setConsent } from "./automation.js"
 import { getPatientHealth, savePatientHealth } from "./clinical.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { updateContact } from "./contacts.js"
@@ -33,7 +33,7 @@ it("el nombre separado deriva el visible, el teléfono queda en E.164 y la perso
       docType: "PASAPORTE",
       docNumber: "AB123456",
       docCountry: "ve",
-      maritalStatus: "casado",
+      maritalStatus: "M",
       identityConfirmed: true,
     }),
   )
@@ -127,6 +127,7 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
     { purpose: "recordatorio", granted: true },
     { purpose: "seguimiento", granted: null },
     { purpose: "novedades", granted: true, source: "presencial" },
+    { purpose: "avisos", granted: null },
   ])
   await f.run((tx) =>
     revokeDataConsent(tx, "org_a", f.actor, f.patient.id, granted.id, { reason: "Lo pidió" }),
@@ -134,12 +135,15 @@ it("el consentimiento de datos guarda la versión del aviso y revocarlo da de ba
   const [row] = await f.run((tx) => listDataConsents(tx, "org_a", f.patient.id))
   expect(row?.revokeReason).toBe("Lo pidió")
   expect(await f.run((tx) => hasConsent(tx, "org_a", personId, "recordatorio"))).toBe(false)
-  // Revocar el consentimiento de datos retira también lo que había aceptado recibir.
+  // Revocar el consentimiento de datos apaga todos sus mensajes, también los
+  // de su atención y los avisos, que no tenían fila (ADR 0040).
   expect(await f.run((tx) => getMessagePermissions(tx, "org_a", personId))).toMatchObject([
     { purpose: "recordatorio", granted: false, source: "revocacion_datos" },
-    { purpose: "seguimiento", granted: null },
+    { purpose: "seguimiento", granted: false, source: "revocacion_datos" },
     { purpose: "novedades", granted: false, source: "revocacion_datos" },
+    { purpose: "avisos", granted: false, source: "revocacion_datos" },
   ])
+  expect(await f.run((tx) => mayWriteFirst(tx, "org_a", personId, "avisos"))).toBe(false)
   // Revocar no borra la historia: el consentimiento sigue, con quién lo revocó.
   expect(await f.run((tx) => listDataConsents(tx, "org_a", f.patient.id))).toEqual([
     expect.objectContaining({ id: granted.id, revokedAt: expect.any(Date), revokedBy: f.actor }),
@@ -155,7 +159,7 @@ it("antecedentes: gravedad ausente es desconocida, familiares por parentesco y A
       allergies: [{ substance: "Látex", kind: "alergia", criticality: "alta" }],
       conditions: [],
       medications: [],
-      familyHistory: [{ relationship: "madre", condition: "Diabetes" }],
+      familyHistory: [{ relationship: "MTH", condition: "Diabetes" }],
       asaClass: "II",
     }),
   )
@@ -165,7 +169,7 @@ it("antecedentes: gravedad ausente es desconocida, familiares por parentesco y A
     verification: "no_confirmada",
   })
   const read = await f.run((tx) => getPatientHealth(tx, "org_a", f.patient.id))
-  expect(read).toMatchObject({ asaClass: "II", familyHistory: [{ relationship: "madre" }] })
+  expect(read).toMatchObject({ asaClass: "II", familyHistory: [{ relationship: "MTH" }] })
   await expect(
     f.run((tx) =>
       savePatientHealth(tx, "org_a", f.actor, f.patient.id, {

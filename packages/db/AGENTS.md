@@ -4,7 +4,7 @@ Objetivo: integridad e aislamiento de organización reforzados en PostgreSQL, co
 
 - Drizzle + migraciones versionadas. No aplicar cambios manuales al esquema.
 - `DATABASE_URL`: owner para migraciones/semillas, bypass RLS. `APP_DATABASE_URL`: app runtime, sujeto a RLS.
-- Tablas de dominio con `organization_id`; `cie10_code` e `inbound_event` son globales sin RLS. Vínculos compuestos deben impedir referencias entre tenants.
+- Tablas de dominio con `organization_id`; las listas de diagnósticos (`diagnosis_code_system`, `diagnosis_code_release`, `diagnosis_code`) e `inbound_event` son globales sin RLS. Vínculos compuestos deben impedir referencias entre tenants.
 - Las tablas internas `admin_*` no conceden acceso al rol app; solo operaciones de backoffice autorizadas usan owner. `two_factor` pertenece al adaptador de identidad. Los casos personales de soporte sin organización se consultan por su autor mediante rutas de cuenta; sus hijas verifican también la igualdad de organización nula. Auditoría y mensajes conservan su historial.
 - Proteger en DB concurrencia, inmutabilidad y restricciones que no pueden depender solo de una comprobación previa del servicio.
 - El rol de la aplicación recibe por defecto lectura y escritura completas sobre cada tabla nueva: lo que la aplicación no debe borrar o reescribir se le retira en la migración con `REVOKE`; un `GRANT` parcial no restringe nada.
@@ -12,7 +12,9 @@ Objetivo: integridad e aislamiento de organización reforzados en PostgreSQL, co
 - La atención finalizada es inmutable en su contenido clínico (trigger) y `clinical_access_log` es de solo anexado: la aplicación no borra ni reescribe quién consultó.
 - Una función o bloque `$$` en una migración va entero entre dos `--> statement-breakpoint`.
 - `service_catalog.specialty_id` apunta a `org_specialty` con la clave compuesta `(organization_id, id)`: un servicio nunca usa la especialidad de otra clínica. `treatment_template.specialty` es la clave de la biblioteca, no una lista de la clínica (ADR 0039).
-- Catálogos clínicos oficiales, no formatos inventados. `seed:cie10` es prerrequisito de la semilla dev.
+- Catálogos clínicos oficiales, no formatos inventados. `seed:diagnoses` es prerrequisito de la semilla dev.
+- Diagnósticos (ADR 0041): cada columna que guarda un diagnóstico guarda lista y código (`diagnosis_system`, `diagnosis_code`) con la FK compuesta de `diagnosisCodeRef`. Un archivo oficial entra con `seed:diagnoses`, su SHA-256, edición y licencia; nunca se convierte un código de una lista a otra. Las semillas de desarrollo no son oficiales.
+- Demografía con códigos internacionales en los checks: estado civil HL7 MaritalStatus (la palabra de un país va con su prefijo ISO, `PE:conviviente`), nivel educativo CINE 2011 (0–8) y parentesco HL7 RoleCode.
 - Lo que cambia con el país de la clínica (tipos de documento, regímenes de seguro, regiones, norma del odontograma) no va en checks de la base: lo decide `clinicalProfileFor` y lo valida el servicio (ADR 0036). La base guarda lo internacional (tipo general del seguro, dirección FHIR, documento único con su país emisor, `NULLS NOT DISTINCT`) y lo firmado guarda su norma, sin valor por defecto: `odontogram_assessment` no tiene trazo y su `encounter_id` es único. `odontogram_entry.left_by_plan_item_id` se escribe al insertar (la app no lo actualiza) y la forma de `service_catalog.leaves_finding` la valida el servicio.
 - CPMS: `import:cpms` regenera CSV desde XLSX oficial y verifica SHA-256. Edición `RM-550-2023-MINSA`, secciones 1.3 y 2.7 completas (505 procedimientos); no afirmar equivalencia CDT/ICHI ni vigencia posterior.
 - `seed:procedures` concilia códigos, plantillas y procedencia en una transacción, conserva versiones retiradas y rechaza reactivar una edición retirada sobre otra vigente. No cambiar precios ni snapshots clínicos al actualizar catálogos.

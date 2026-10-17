@@ -1,9 +1,10 @@
 import { Badge, Button, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { Switch } from "@odentia/ui/components/switch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { CalendarCheck, ChevronLeft } from "lucide-react"
-import { useState } from "react"
+import { CalendarCheck, ChevronLeft, FileDown } from "lucide-react"
+import { useId, useState } from "react"
 import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../components/booking-data-form"
 import { AppointmentBlock } from "../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../components/public/budget-responder"
@@ -17,14 +18,18 @@ import {
   type BookingLinkBranch,
   cancelBooking,
   changeBooking,
+  chooseLinkMessages,
   confirmBooking,
   fetchBookingLink,
   fetchBookingSlots,
+  linkPaperUrl,
+  type MessageChoice,
+  type PersonalLinkMessages,
   type PersonalLinkView,
   reserveBooking,
 } from "../lib/booking-link"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { setOrgLocale } from "../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone, setOrgLocale } from "../lib/locale"
 import { formatPortalMoney } from "../lib/portal"
 
 /**
@@ -61,6 +66,8 @@ type Screen =
   | { kind: "agendar"; items: Array<{ planItemId: string; title: string }> }
   | { kind: "consentimiento"; consentId: string }
   | { kind: "cuestionario" }
+  /** «Tus mensajes» (ADR 0040): llega directo con `#mensajes` («Elegir mis mensajes», el pie del correo). */
+  | { kind: "mensajes" }
 
 const EXPIRED_TEXT = "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo."
 
@@ -94,7 +101,9 @@ function PersonalLinkPage() {
   // Página pública, sin layout de organización: el formato regional y el país
   // de la clínica llegan con el enlace y se fijan antes de pintar fechas y horas.
   if (view) setOrgLocale(view.locale, undefined, view.countryCode)
-  const [screen, setScreen] = useState<Screen>({ kind: "pendiente" })
+  const [screen, setScreen] = useState<Screen>(() =>
+    typeof window !== "undefined" && window.location.hash === "#mensajes" ? { kind: "mensajes" } : { kind: "pendiente" },
+  )
   // La cita recién reservada o cambiada, mientras la vista se actualiza.
   const [booked, setBooked] = useState<BookingAppointment | null>(null)
   // Ya hizo algo aquí: si eso era lo último, se le dice «listo» en vez de «ya no sirve».
@@ -235,6 +244,20 @@ function PersonalLinkPage() {
   if (screen.kind === "cuestionario") {
     return one("Antes de tu cita", <LinkQuestionnaireStep slug={slug} token={token} onBack={back} />)
   }
+  if (screen.kind === "mensajes") {
+    if (!view.messages) {
+      return one(
+        "Tus mensajes",
+        <EmptyState
+          title="Desde este enlace no se eligen los mensajes"
+          description="Los elige quien los recibe. Si eres tú, escríbenos por el chat."
+          actionLabel="Volver a lo pendiente"
+          onAction={back}
+        />,
+      )
+    }
+    return one(`Tus mensajes · ${view.clinicName}`, <MessagesStep slug={slug} token={token} messages={view.messages} onChanged={refresh} />)
+  }
   if (screen.kind === "presupuesto") {
     const budget = view.budgets.find((item) => item.id === screen.budgetId)
     if (!budget) return one("Tu presupuesto", <EmptyState title="Este presupuesto ya está respondido" description="Gracias. Lo demás sigue en lo pendiente." actionLabel="Volver a lo pendiente" onAction={back} />)
@@ -324,6 +347,20 @@ function PersonalLinkPage() {
             onAction={() => setScreen({ kind: "cuestionario" })}
           />
         ) : null}
+        {view.papers.length > 0 ? <Papers slug={slug} token={token} papers={view.papers} /> : null}
+        {view.messages ? (
+          <section aria-label="Tus mensajes" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+            <h2 className="font-semibold">Tus mensajes</h2>
+            <p className="text-sm">
+              {view.messages.nothing
+                ? "Pediste no recibir ningún mensaje de la clínica."
+                : "Elige qué mensajes quieres recibir de la clínica."}
+            </p>
+            <Button type="button" variant="outline" className="min-h-11 self-start" onClick={() => setScreen({ kind: "mensajes" })}>
+              Elegir mis mensajes
+            </Button>
+          </section>
+        ) : null}
         <p className="text-sm text-muted-foreground">No mostramos nada de lo que ya tenemos guardado. Si te enviamos algo nuevo, aparece aquí mismo.</p>
       </div>
     </PageShell>
@@ -342,6 +379,157 @@ function Block({ title, badge, text, action, onAction }: { title: string; badge:
         {action}
       </Button>
     </section>
+  )
+}
+
+/** «16 de octubre», en el formato y la zona de la clínica. */
+function paperDay(iso: string): string {
+  return new Intl.DateTimeFormat(activeOrgLocale(), { timeZone: activeOrgTimeZone(), day: "numeric", month: "long" }).format(new Date(iso))
+}
+
+/**
+ * «Tus papeles» (decisión 8): la receta y el comprobante de los últimos 30
+ * días, para descargar. Pasados los 30 días se le piden a la clínica.
+ */
+function Papers({ slug, token, papers }: { slug: string; token: string; papers: PersonalLinkView["papers"] }) {
+  return (
+    <section aria-label="Tus papeles" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+      <h2 className="font-semibold">Tus papeles</h2>
+      <ul className="flex flex-col divide-y">
+        {papers.map((paper) => (
+          <li key={`${paper.kind}:${paper.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span className="flex min-w-0 flex-col">
+              <span className="font-medium">{paper.title}</span>
+              <span className="text-sm text-muted-foreground">
+                {capital(paperDay(paper.issuedAt))} · disponible hasta el {paperDay(paper.availableUntil)}
+              </span>
+            </span>
+            <a
+              href={linkPaperUrl(slug, token, paper)}
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium"
+            >
+              <FileDown className="size-4" aria-hidden />
+              Descargar
+            </a>
+          </li>
+        ))}
+      </ul>
+      <p className="text-sm text-muted-foreground">Cada papel queda aquí 30 días. Después, pídeselo a la clínica.</p>
+    </section>
+  )
+}
+
+/** Los tres interruptores de «Tus mensajes» y la fila fija de los avisos (ADR 0040). */
+const MESSAGE_SWITCHES: { purpose: Exclude<MessageChoice, "ninguno">; title: string; detail: string }[] = [
+  { purpose: "recordatorio", title: "Recordatorios de tus citas", detail: "Te avisamos un día antes y unas horas antes." },
+  { purpose: "seguimiento", title: "Controles y seguimiento", detail: "Cuándo te toca tu control, o si faltaste a una cita." },
+  { purpose: "novedades", title: "Novedades y promociones", detail: "Campañas y ofertas de la clínica." },
+]
+
+function MessagesStep({
+  slug,
+  token,
+  messages,
+  onChanged,
+}: {
+  slug: string
+  token: string
+  messages: PersonalLinkMessages
+  onChanged: () => void
+}) {
+  const uid = useId()
+  const [current, setCurrent] = useState(messages)
+  const [confirmNothing, setConfirmNothing] = useState(false)
+  const save = useMutation({
+    retry: false,
+    mutationFn: (input: { tipo: MessageChoice; recibir: boolean }) => chooseLinkMessages(slug, token, input),
+    onSuccess: (result) => {
+      setCurrent(result.data)
+      setConfirmNothing(false)
+      onChanged()
+    },
+  })
+  const error = problemOf(save.error, "No pudimos guardar lo que elegiste.")
+  return (
+    <div className="flex flex-col gap-4">
+      {current.nothing ? (
+        <div role="status" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+          <p className="font-medium">No te enviaremos ningún mensaje de la clínica.</p>
+          <p className="text-sm text-muted-foreground">Tampoco los avisos de tus citas: si algo cambia, te llamaremos.</p>
+          <Button
+            type="button"
+            className="min-h-11 self-start"
+            disabled={save.isPending}
+            onClick={() => save.mutate({ tipo: "ninguno", recibir: true })}
+          >
+            {save.isPending ? "Guardando…" : "Volver a recibir mensajes"}
+          </Button>
+        </div>
+      ) : null}
+      <ul className="flex flex-col divide-y rounded-2xl border bg-card">
+        {MESSAGE_SWITCHES.map((item) => {
+          const labelId = `${uid}-${item.purpose}`
+          const on = current[item.purpose]
+          return (
+            <li key={item.purpose} className="flex items-start gap-3 p-4">
+              <div className="min-w-0 flex-1">
+                <p id={labelId} className="font-medium">
+                  {item.title}
+                </p>
+                <p className="text-sm text-muted-foreground">{item.detail}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-sm text-muted-foreground" aria-hidden>
+                  {on ? "Encendido" : "Apagado"}
+                </span>
+                <Switch
+                  aria-labelledby={labelId}
+                  checked={on}
+                  disabled={save.isPending}
+                  onCheckedChange={(recibir: boolean) => save.mutate({ tipo: item.purpose, recibir })}
+                />
+              </div>
+            </li>
+          )
+        })}
+        <li className="flex items-start gap-3 p-4">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Avisos de tus citas y papeles</p>
+            <p className="text-sm text-muted-foreground">
+              Si tu cita se reserva, cambia o se cancela, y cuando tu presupuesto o tu receta están listos. Siempre te llegan, porque
+              son parte de tu atención.
+            </p>
+          </div>
+          <span className="shrink-0 text-sm font-medium">{current.nothing ? "No" : "Siempre"}</span>
+        </li>
+      </ul>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {!current.nothing ? (
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto min-h-11 self-start p-0 text-destructive"
+          disabled={save.isPending}
+          onClick={() => setConfirmNothing(true)}
+        >
+          No quiero ningún mensaje de la clínica
+        </Button>
+      ) : null}
+      <ConfirmDialog
+        open={confirmNothing}
+        onClose={() => setConfirmNothing(false)}
+        title="¿No quieres ningún mensaje de la clínica?"
+        description="Tampoco te llegarán los avisos de tus citas y papeles. Si tu cita cambia, la clínica te llamará."
+        confirmLabel="Sí, no quiero ninguno"
+        pending={save.isPending}
+        onConfirm={() => save.mutate({ tipo: "ninguno", recibir: false })}
+      />
+    </div>
   )
 }
 
@@ -375,7 +563,9 @@ function BookedOnly({ view, appointment, slug, token }: { view: PersonalLinkView
           onCancel={() => {}}
           onConfirm={() => {}}
         />
-        <p className="text-sm text-muted-foreground">Te lo confirmamos también por el chat. Ya puedes volver a la conversación.</p>
+        <p className="text-sm text-muted-foreground">
+          Te lo confirmamos también por el chat. Te avisaremos por WhatsApp sobre tus citas. Ya puedes volver a la conversación.
+        </p>
       </div>
     </PageShell>
   )

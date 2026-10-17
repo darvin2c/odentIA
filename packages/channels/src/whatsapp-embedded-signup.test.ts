@@ -235,7 +235,7 @@ describe("repartir un aviso que llega a la dirección de la app", () => {
     expect(account).toEqual({
       kind: "account",
       accountId: "WABA-A",
-      templateStatuses: [{ externalId: "77", name: "odentia_recordatorio_cita_v1", language: "es", status: "aprobada", reason: null }],
+      templateStatuses: [{ externalId: "77", name: "odentia_recordatorio_cita_v1", language: "es", status: "aprobada", reason: null }], templateCategories: [],
     })
   })
 

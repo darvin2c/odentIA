@@ -122,8 +122,14 @@ export interface WaitingPortalReentry {
   createdAt: string
 }
 
-/** Una cita que sigue sin confirmar después del primer recordatorio del agente: hay que llamar. */
+/**
+ * Una cita que hay que confirmar llamando: sigue sin confirmar después del
+ * primer recordatorio del agente (`sin_confirmar`), o es de mañana y quien
+ * recibe sus mensajes no recibe recordatorios (`sin_recordatorios`, ADR 0040):
+ * «Lucía no recibe recordatorios: llámala para confirmar su cita de mañana 10:00».
+ */
 export interface WaitingUnconfirmed {
+  why: "sin_confirmar" | "sin_recordatorios"
   id: string
   patientId: string
   patientName: string
@@ -170,9 +176,22 @@ export interface WaitingConsentToPublish {
   requestedAt: string
 }
 
+/**
+ * Un aviso de servicio que WhatsApp pasó a promoción (ADR 0040): solo sale a
+ * quien aceptó novedades. Para quien administra los mensajes, con «Cambiar el
+ * texto». Sale del estado de la plantilla y se va sola cuando el texto nuevo se
+ * aprueba como servicio.
+ */
+export interface WaitingPromotion {
+  /** El mensaje (clave del catálogo o id del propio). */
+  messageId: string
+  title: string
+}
+
 export type WaitingRow =
   | ({ kind: "case" } & WaitingCase)
   | ({ kind: "consentToPublish" } & WaitingConsentToPublish)
+  | ({ kind: "promotion" } & WaitingPromotion)
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
@@ -214,6 +233,8 @@ export interface WaitingParts {
   unreached?: WaitingUnreached | null
   /** Consentimientos pedidos por una atención y sin publicar (solo para quien configura). */
   consentsToPublish?: WaitingConsentToPublish[]
+  /** Avisos que WhatsApp cuenta como promoción (solo para quien administra los mensajes). */
+  promotions?: WaitingPromotion[]
 }
 
 export function composeWaiting(parts: WaitingParts): WaitingRow[] {
@@ -268,6 +289,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   // Lo que una atención no pudo hacer porque falta publicar su consentimiento.
   for (const item of (parts.consentsToPublish ?? []).slice(0, WAITING_LIMITS.otherCases))
     rows.push({ kind: "consentToPublish", ...item })
+
+  // Un aviso que WhatsApp pasó a promoción: hay que cambiarle el texto (ADR 0040).
+  for (const item of (parts.promotions ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "promotion", ...item })
 
   for (const item of parts.advice) rows.push({ kind: "advice", ...item })
   if (parts.budgets && parts.budgets.total > 0) rows.push({ kind: "budgets", ...parts.budgets })

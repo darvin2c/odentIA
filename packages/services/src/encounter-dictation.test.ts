@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { user } from "@odentia/db/schema/auth"
-import { cie10Code, clinicalFollowUp, encounter, encounterDiagnosis, encounterDictationSuggestion, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
+import { clinicalFollowUp, encounter, encounterDiagnosis, encounterDictationSuggestion, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
-import { clinicalFixture, makeSigner } from "./clinical-test-fixture.js"
+import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import {
   confirmDictationSuggestion,
   discardDictationSuggestion,
@@ -29,7 +29,7 @@ const ORG = "org_a"
 const inSixMonths = () => new Date(Date.now() + 180 * 86_400_000).toISOString()
 
 beforeAll(async () => {
-  await ownerDb.insert(cie10Code).values({ code: "K02.1", description: "Caries de la dentina" }).onConflictDoNothing()
+  await seedDiagnosisCodes([{ code: "K02.1", title: "Caries de la dentina" }])
 })
 
 const enable = (on: boolean) => withOrgContext(appDb, ORG, (tx) => upsertAgentConfig(tx, ORG, { clinicalAssistantEnabled: on }))
@@ -62,13 +62,13 @@ describe("dictado en la atención", () => {
     const saved = await fx.run((tx) =>
       saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
         { kind: "nota", payload: { reason: "Dolor al masticar del lado derecho", evolution: "", illnessDuration: "una semana" }, sourceText: "Viene por dolor al masticar." },
-        { kind: "diagnostico", payload: { cie10Code: "k02.1", diagnosisType: "presuntivo", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina." },
-        { kind: "diagnostico", payload: { cie10Code: "Z99.9", diagnosisType: "presuntivo" } },
+        { kind: "diagnostico", payload: { diagnosisCode: "k02.1", diagnosisType: "provisional", toothNumber: 16 }, sourceText: "En la dieciséis hay caries en dentina." },
+        { kind: "diagnostico", payload: { diagnosisCode: "Z99.9", diagnosisType: "provisional" } },
         { kind: "plan", payload: { service: "resina compuesta", toothNumber: 16, surfaces: ["oclusal"] }, sourceText: "Le ponemos el tratamiento en la cara oclusal." },
         { kind: "plan", payload: { service: "Corona de zirconio", toothNumber: 36 } },
         { kind: "control", payload: { title: "Control en 6 meses", dueAt: inSixMonths() } },
         // Lo que no encaja en su operación no se pierde: queda por revisar.
-        { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "seguro" } },
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "seguro" } },
         // Una nota vacía no es una sugerencia.
         { kind: "nota", payload: { reason: "  " } },
       ]),
@@ -80,8 +80,8 @@ describe("dictado en la atención", () => {
     const [note, diagnosis, unknownCode, plan, unknownService] = saved
     expect(note?.payload).toEqual({ reason: "Dolor al masticar del lado derecho", illnessDuration: "una semana" })
     expect(note?.sourceText).toBe("Viene por dolor al masticar.")
-    expect(diagnosis).toMatchObject({ payload: { cie10Code: "K02.1", description: "Caries de la dentina", toothNumber: 16 }, summary: "K02.1 · Caries de la dentina\nPieza 16 · presuntivo" })
-    expect(unknownCode?.note).toContain("no está en el catálogo CIE-10")
+    expect(diagnosis).toMatchObject({ payload: { diagnosisCode: "K02.1", description: "Caries de la dentina", toothNumber: 16 }, summary: "K02.1 · Caries de la dentina\nPieza 16 · Presuntivo" })
+    expect(unknownCode?.note).toContain("no está en la lista CIE-10 (OMS) de la clínica")
     // La prestación se reconoce por su nombre y trae la tarifa del tarifario, que no se dicta.
     expect(plan?.payload).toMatchObject({ serviceId: fx.service.id, serviceName: "Resina compuesta", priceCents: 120000, currency: "PEN" })
     expect(plan?.summary).toMatch(/^Resina compuesta · S\/\s1,200\.00\nPieza 16 · cara oclusal$/)
@@ -105,11 +105,11 @@ describe("dictado en la atención", () => {
     const [note, diagnosis, plan, pending, control, extra] = await fx.run((tx) =>
       saveDictationSuggestions(tx, ...fx.args, fx.encounter.id, [
         { kind: "nota", payload: { reason: "Dolor al masticar", evolution: "Se realizó la limpieza de la cavidad." } },
-        { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 } },
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 } },
         { kind: "plan", payload: { service: "Endodoncia multirradicular", toothNumber: 16 } },
         { kind: "plan", payload: { service: "Corona de zirconio", toothNumber: 36 } },
         { kind: "control", payload: { title: "Control en 6 meses", dueAt: due } },
-        { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "definitivo", toothNumber: 26 } },
+        { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 26 } },
       ]),
     )
     const confirm = (id: string) => fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, id))
@@ -120,7 +120,7 @@ describe("dictado en la atención", () => {
 
     await confirm(diagnosis!.id)
     expect(await ownerDb.select().from(encounterDiagnosis).where(eq(encounterDiagnosis.encounterId, fx.encounter.id))).toEqual([
-      expect.objectContaining({ cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 }),
+      expect.objectContaining({ diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 }),
     ])
 
     await confirm(plan!.id)
@@ -176,7 +176,7 @@ describe("dictado en la atención", () => {
     const before = (await ownerDb.select({ id: encounterDictationSuggestion.id }).from(encounterDictationSuggestion)).length
     const preview = await fx.run((tx) => previewDictationSuggestions(tx, ORG, [
       { kind: "plan", payload: { service: "profilaxis dental" } },
-      { kind: "diagnostico", payload: { cie10Code: "K02.1", diagnosisType: "presuntivo" } },
+      { kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional" } },
     ]))
     expect(preview.map((item) => item.status)).toEqual(["lista", "lista"])
     expect((await ownerDb.select({ id: encounterDictationSuggestion.id }).from(encounterDictationSuggestion)).length).toBe(before)
@@ -191,7 +191,7 @@ describe("dictado en la atención", () => {
     const first = randomUUID()
     const drafts = [
       { kind: "plan" as const, payload: { service: "Pulpotomía de urgencia", toothNumber: 25 }, sourceText: "En la veinticinco hacemos pulpotomía." },
-      { kind: "diagnostico" as const, payload: { cie10Code: "K02.1", diagnosisType: "presuntivo", toothNumber: 16 } },
+      { kind: "diagnostico" as const, payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 } },
     ]
     const saved = await segment({ drafts, segmentId: first })
     expect(saved).toMatchObject({ repeated: false, corrected: [], removed: [] })
@@ -225,7 +225,7 @@ describe("dictado en la atención", () => {
     const corrected = now.find((item) => item.id === plan!.id)
     const untouched = now.find((item) => item.id === diagnosis!.id)
     expect(corrected).toMatchObject({ status: "lista", payload: { toothNumber: 26, serviceId: fx.service.id }, voice: { before: "pieza 25" } })
-    expect(untouched).toMatchObject({ payload: { diagnosisType: "presuntivo", toothNumber: 16 }, voice: null })
+    expect(untouched).toMatchObject({ payload: { diagnosisType: "provisional", toothNumber: 16 }, voice: null })
 
     // Deshacer vuelve a la pieza dictada primero; no hay nada más que deshacer.
     const undone = await fx.run((tx) => undoDictationVoiceCorrection(tx, ...fx.args, fx.encounter.id, plan!.id))

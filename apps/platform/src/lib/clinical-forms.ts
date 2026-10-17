@@ -144,6 +144,8 @@ export interface ConsentDocument {
   revokeReason: string | null
   sectionsSnapshot: ConsentSections | null
   diagnosisCode: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   informedAt: string | null
   informerName: string | null
   informerTitle: string | null
@@ -200,6 +202,8 @@ export interface ClinicalOrder {
   resultAt: string | null
   /** CIE-10 de la atención que la motiva. */
   diagnosisCode: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
   /** Resultado subido a la propia orden. */
   resultDocumentId: string | null
   /** Derivación a un colega de la clínica. */
@@ -446,6 +450,8 @@ export function createConsent(body: {
   planItemId?: string | null
   procedureRef?: string | null
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
 }) {
   return post<ConsentDocument>(`${BASE}/consents`, body)
 }
@@ -538,6 +544,8 @@ export function createOrder(body: {
   title: string
   detail?: string | null
   diagnosisCode?: string | null
+  /** Lista del código («ICD-10», «ICD-11»). */
+  diagnosisSystem?: string | null
 }) {
   return post<ClinicalOrder>(`${BASE}/orders`, body)
 }

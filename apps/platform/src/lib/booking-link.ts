@@ -59,6 +59,28 @@ export interface PersonalLinkView {
   budgets: PortalBudget[]
   consents: Array<{ id: string; title: string }>
   questionnaire: { title: string } | null
+  /** «Tus mensajes» (ADR 0040): solo para quien recibe los mensajes. */
+  messages: PersonalLinkMessages | null
+  /** «Tus papeles»: la receta y el comprobante de los últimos 30 días. */
+  papers: PersonalLinkPaper[]
+}
+
+export interface PersonalLinkMessages {
+  recordatorio: boolean
+  seguimiento: boolean
+  novedades: boolean
+  /** Pidió no recibir ningún mensaje de la clínica. */
+  nothing: boolean
+}
+
+export type MessageChoice = "recordatorio" | "seguimiento" | "novedades" | "ninguno"
+
+export interface PersonalLinkPaper {
+  kind: "receta" | "comprobante"
+  id: string
+  title: string
+  issuedAt: string
+  availableUntil: string
 }
 
 export interface BookingSlot {
@@ -94,6 +116,21 @@ const post = <T>(url: string, body: unknown) => publicFetch<T>(url, { method: "P
 
 export function fetchBookingLink(slug: string, token: string): Promise<{ data: PersonalLinkView }> {
   return publicFetch(`${base(slug)}?token=${encodeURIComponent(token)}`)
+}
+
+/** Cambia un interruptor de «Tus mensajes», o «ningún mensaje». */
+export function chooseLinkMessages(
+  slug: string,
+  token: string,
+  input: { tipo: MessageChoice; recibir: boolean },
+): Promise<{ data: PersonalLinkMessages }> {
+  return post(`${base(slug)}/messages`, { token, ...input })
+}
+
+/** La dirección que descarga un papel de «Tus papeles» (PDF). */
+export function linkPaperUrl(slug: string, token: string, paper: Pick<PersonalLinkPaper, "kind" | "id">): string {
+  const query = new URLSearchParams({ token, kind: paper.kind })
+  return `${base(slug)}/papers/${encodeURIComponent(paper.id)}?${query.toString()}`
 }
 
 export function fetchBookingSlots(

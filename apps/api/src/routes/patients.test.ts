@@ -16,7 +16,7 @@ import type { Context } from "hono"
 import { Hono, type Next } from "hono"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
-import { createCie10Route } from "./cie10.js"
+import { createDiagnosisCodesRoute } from "./diagnosis-codes.js"
 import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
 
@@ -96,7 +96,7 @@ function buildApp(role: string): Hono {
   const app = new Hono()
   app.use("*", stubOrg(role))
   app.route("/patients", createPatientsRoute(deps))
-  app.route("/cie10", createCie10Route(deps))
+  app.route("/diagnosis-codes", createDiagnosisCodesRoute(deps))
   return app
 }
 
@@ -139,11 +139,17 @@ beforeAll(async () => {
     sql`insert into "user" ("id", "name", "email") values ('u-1', 'Doctora', 'doc@test.dev') on conflict do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values
         ('K02.1', 'Caries de la dentina'),
         ('K04.0', 'Pulpitis'),
-        ('Z01.2', 'Examen dental')
-        on conflict ("code") do nothing`,
+        ('Z01.2', 'Examen dental')) as v(code, title)
+    on conflict do nothing`,
   )
 }, 180_000)
 
@@ -388,15 +394,15 @@ it("POST /:id/notes como admin responde 201; como member 403 FORBIDDEN", async (
   expect(((await denied.json()) as { error: { code: string } }).error.code).toBe("FORBIDDEN")
 })
 
-it("GET /cie10?q=caries devuelve resultados con rol clínico; member 403", async () => {
+it("GET /diagnosis-codes?q=caries busca en la lista de la clínica con rol clínico; member 403", async () => {
   const dentist = buildApp("dentist")
-  const res = await dentist.request("/cie10?q=caries", { method: "GET" })
+  const res = await dentist.request("/diagnosis-codes?q=caries", { method: "GET" })
   expect(res.status).toBe(200)
   const body = (await res.json()) as { data: { code: string }[] }
   expect(body.data.length).toBeGreaterThan(0)
   expect(body.data[0]!.code).toBe("K02.1")
   const member = buildApp("member")
-  const denied = await member.request("/cie10?q=caries", { method: "GET" })
+  const denied = await member.request("/diagnosis-codes?q=caries", { method: "GET" })
   expect(denied.status).toBe(403)
 })
 

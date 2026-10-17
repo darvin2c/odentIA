@@ -47,14 +47,23 @@ describe("textos de «Te espera»", () => {
 
   it("una cita que no confirmó tras el recordatorio pide llamar, con el teléfono a la vista", () => {
     expect(waitingText({
-      kind: "unconfirmed", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
+      kind: "unconfirmed", why: "sin_confirmar", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
       startsAt: "2026-10-13T15:30:00.000Z", branchName: "Centro", serviceName: "Evaluación",
     }, context)).toMatchObject({ title: "Rosa Quispe no confirmó · llamar", action: "Ver la cita" })
     // La hora sale con el formato de la clínica; el día, en su zona.
     expect(waitingText({
-      kind: "unconfirmed", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
+      kind: "unconfirmed", why: "sin_confirmar", id: "a1", patientId: "p1", patientName: "Rosa Quispe", phone: "+51 987 654 100",
       startsAt: "2026-10-13T15:30:00.000Z", branchName: "Centro", serviceName: "Evaluación",
     }, context).detail).toMatch(/^\+51 987 654 100 · Cita mañana 10:30.* · Evaluación · Centro$/)
+  })
+
+  it("quien no recibe recordatorios sale el día antes para llamarla (ADR 0040)", () => {
+    const row = waitingText({
+      kind: "unconfirmed", why: "sin_recordatorios", id: "a1", patientId: "p1", patientName: "Lucía", phone: "+51 987 654 100",
+      startsAt: "2026-10-13T15:00:00.000Z", branchName: "Centro", serviceName: null,
+    }, context)
+    expect(row.title).toMatch(/^Lucía no recibe recordatorios: llámala para confirmar su cita de mañana 10:00/)
+    expect(row.action).toBe("Ver la cita")
   })
 
   it("una atención de otro día sin cerrar dice de quién es, cuándo empezó y qué le falta", () => {

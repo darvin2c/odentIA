@@ -61,9 +61,14 @@ export type WaitingRow =
       /** Nadie lo tomó todavía: la fila ofrece «Tomar». */
       unclaimed: boolean
     }
-  /** Una cita sin confirmar después del primer recordatorio del agente: hay que llamar. */
+  /**
+   * Una cita que hay que confirmar llamando: sigue sin confirmar tras el primer
+   * recordatorio (`sin_confirmar`) o es de mañana y no recibe recordatorios
+   * (`sin_recordatorios`, ADR 0040).
+   */
   | {
       kind: "unconfirmed"
+      why: "sin_confirmar" | "sin_recordatorios"
       id: string
       patientId: string
       patientName: string
@@ -104,6 +109,8 @@ export type WaitingRow =
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }
   /** Un consentimiento que una atención pidió y la clínica aún no publicó: lo publica quien configura. */
   | { kind: "consentToPublish"; templateKey: string; title: string; requestedByName: string | null; requestedAt: string }
+  /** Un aviso que WhatsApp pasó a promoción: solo sale a quien aceptó novedades; hay que cambiarle el texto (ADR 0040). */
+  | { kind: "promotion"; messageId: string; title: string }
   | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }
 export interface WorkspaceAppointment {
   id: string

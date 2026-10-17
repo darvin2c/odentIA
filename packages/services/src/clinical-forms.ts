@@ -8,7 +8,7 @@ import {
   SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import {
-  cie10Code,
+  diagnosisCatalog,
   encounter,
   encounterDiagnosis,
   encounterProcedure,
@@ -33,6 +33,7 @@ import { canAccess } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm"
+import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
@@ -1697,8 +1698,10 @@ export interface CreateConsentDocumentInput {
   encounterId?: string | null
   planItemId?: string | null
   procedureRef?: string | null
-  /** CIE-10 que motiva el procedimiento; por defecto, el del tratamiento. */
+  /** Diagnóstico que motiva el procedimiento; por defecto, el del tratamiento. */
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
 }
 
 export async function createConsentDocument(
@@ -1725,13 +1728,14 @@ export async function createConsentDocument(
     encounterId = input.encounterId
   }
   let planItemId: string | null = null
-  let planDiagnosis: string | null = null
+  let planDiagnosis: { code: string; system: string | null } | null = null
   if (input.planItemId) {
     const [item] = await tx
       .select({
         id: treatmentPlanItem.id,
         patientId: treatmentPlanItem.patientId,
         diagnosisCode: treatmentPlanItem.diagnosisCode,
+        diagnosisSystem: treatmentPlanItem.diagnosisSystem,
       })
       .from(treatmentPlanItem)
       .where(
@@ -1745,20 +1749,19 @@ export async function createConsentDocument(
       throw validation("El tratamiento no pertenece al paciente")
     }
     planItemId = item.id
-    planDiagnosis = item.diagnosisCode
+    planDiagnosis = item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null
   }
   if (!encounterId && !planItemId && !input.procedureRef?.trim()) {
     throw validation("Indica la atención, el tratamiento o el procedimiento al que aplica")
   }
   const procedureRef = assertOptionalText(input.procedureRef, "Procedimiento", 500)
-  const diagnosisCode = input.diagnosisCode?.trim() || planDiagnosis
-  if (diagnosisCode) {
-    const [known] = await tx
-      .select({ code: cie10Code.code })
-      .from(cie10Code)
-      .where(eq(cie10Code.code, diagnosisCode))
-    if (!known) throw validation(`Código CIE-10 inexistente: ${diagnosisCode}`)
-  }
+  const diagnosis = await resolveOptionalDiagnosisCode(
+    tx,
+    orgId,
+    input.diagnosisCode?.trim()
+      ? { code: input.diagnosisCode, system: input.diagnosisSystem }
+      : { code: planDiagnosis?.code ?? null, system: planDiagnosis?.system ?? null },
+  )
   const [row] = await tx
     .insert(consentDocument)
     .values({
@@ -1768,7 +1771,7 @@ export async function createConsentDocument(
       bodySnapshot: template.body,
       titleSnapshot: template.title,
       sectionsSnapshot: template.sections,
-      diagnosisCode: diagnosisCode ?? null,
+      ...diagnosis,
       patientId: input.patientId,
       encounterId,
       planItemId,
@@ -2409,12 +2412,13 @@ export async function getConsentPrint(tx: Db, orgId: string, documentId: string)
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
-  const [dx] = doc.diagnosisCode
-    ? await tx
-        .select({ description: cie10Code.description })
-        .from(cie10Code)
-        .where(eq(cie10Code.code, doc.diagnosisCode))
-    : []
+  const [dx] =
+    doc.diagnosisCode && doc.diagnosisSystem
+      ? await tx
+          .select({ description: diagnosisCatalog.title })
+          .from(diagnosisCatalog)
+          .where(and(eq(diagnosisCatalog.systemKey, doc.diagnosisSystem), eq(diagnosisCatalog.code, doc.diagnosisCode)))
+      : []
   const minor = person.birthDate ? ageOn(person.birthDate, new Date()) < 18 : false
   return {
     document: doc,
@@ -2597,6 +2601,7 @@ export interface ConsentNeed {
   procedureRef: string | null
   planItemId: string | null
   diagnosisCode: string | null
+  diagnosisSystem: string | null
   /** Nombres de los servicios de la atención que lo piden; vacío en uno preparado a mano. */
   services: string[]
 }
@@ -2607,7 +2612,7 @@ interface NeedSource {
   label: string
   toothNumber: number | null
   planItemId: string | null
-  diagnosisCode: string | null
+  diagnosis: { code: string; system: string | null } | null
 }
 
 const NEED_RANK: Record<ConsentNeedStatus, number> = {
@@ -2639,6 +2644,7 @@ export async function getEncounterConsentNeeds(
       toothNumber: encounterProcedure.toothNumber,
       planItemId: encounterProcedure.planItemId,
       diagnosisCode: encounterProcedure.diagnosisCode,
+      diagnosisSystem: encounterProcedure.diagnosisSystem,
     })
     .from(encounterProcedure)
     .innerJoin(serviceCatalog, eq(serviceCatalog.id, encounterProcedure.serviceId))
@@ -2658,6 +2664,7 @@ export async function getEncounterConsentNeeds(
       title: treatmentPlanItem.title,
       toothNumber: treatmentPlanItem.toothNumber,
       diagnosisCode: treatmentPlanItem.diagnosisCode,
+      diagnosisSystem: treatmentPlanItem.diagnosisSystem,
     })
     .from(treatmentPlanItem)
     .innerJoin(serviceCatalog, eq(serviceCatalog.id, treatmentPlanItem.serviceId))
@@ -2679,7 +2686,7 @@ export async function getEncounterConsentNeeds(
       label: proc.description,
       toothNumber: proc.toothNumber,
       planItemId: proc.planItemId,
-      diagnosisCode: proc.diagnosisCode,
+      diagnosis: proc.diagnosisCode ? { code: proc.diagnosisCode, system: proc.diagnosisSystem } : null,
     })
   }
   for (const item of indicated) {
@@ -2692,7 +2699,7 @@ export async function getEncounterConsentNeeds(
       label: item.title,
       toothNumber: item.toothNumber,
       planItemId: item.id,
-      diagnosisCode: item.diagnosisCode,
+      diagnosis: item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null,
     })
   }
   const serviceIds = [...new Set(sources.map((source) => source.serviceId))]
@@ -2733,6 +2740,7 @@ export async function getEncounterConsentNeeds(
       planItemId: consentDocument.planItemId,
       procedureRef: consentDocument.procedureRef,
       diagnosisCode: consentDocument.diagnosisCode,
+      diagnosisSystem: consentDocument.diagnosisSystem,
       templateId: consentDocument.templateId,
     })
     .from(consentDocument)
@@ -2749,7 +2757,11 @@ export async function getEncounterConsentNeeds(
     )
     .orderBy(asc(consentDocument.createdAt))
   const diagnoses = await tx
-    .select({ code: encounterDiagnosis.cie10Code, toothNumber: encounterDiagnosis.toothNumber })
+    .select({
+      code: encounterDiagnosis.diagnosisCode,
+      system: encounterDiagnosis.diagnosisSystem,
+      toothNumber: encounterDiagnosis.toothNumber,
+    })
     .from(encounterDiagnosis)
     .where(
       and(
@@ -2759,10 +2771,10 @@ export async function getEncounterConsentNeeds(
       ),
     )
     .orderBy(asc(encounterDiagnosis.createdAt))
-  const diagnosisFor = (source: NeedSource | undefined): string | null =>
-    source?.diagnosisCode ??
-    diagnoses.find((dx) => source?.toothNumber != null && dx.toothNumber === source.toothNumber)?.code ??
-    diagnoses[0]?.code ??
+  const diagnosisFor = (source: NeedSource | undefined): { code: string; system: string | null } | null =>
+    source?.diagnosis ??
+    diagnoses.find((dx) => source?.toothNumber != null && dx.toothNumber === source.toothNumber) ??
+    diagnoses[0] ??
     null
 
   const needs: ConsentNeed[] = []
@@ -2805,7 +2817,12 @@ export async function getEncounterConsentNeeds(
       documentId: doc?.id ?? null,
       procedureRef,
       planItemId: doc?.planItemId ?? (mine.length === 1 ? (first?.planItemId ?? null) : null),
-      diagnosisCode: doc?.diagnosisCode ?? diagnosisFor(first),
+      ...(doc?.diagnosisCode
+        ? { diagnosisCode: doc.diagnosisCode, diagnosisSystem: doc.diagnosisSystem }
+        : {
+            diagnosisCode: diagnosisFor(first)?.code ?? null,
+            diagnosisSystem: diagnosisFor(first)?.system ?? null,
+          }),
       services: [...new Set(mine.map((source) => source.serviceName))],
     })
   }
@@ -2822,6 +2839,7 @@ export async function getEncounterConsentNeeds(
       procedureRef: doc.procedureRef,
       planItemId: doc.planItemId,
       diagnosisCode: doc.diagnosisCode,
+      diagnosisSystem: doc.diagnosisSystem,
       services: [],
     })
   }
@@ -2981,8 +2999,10 @@ export interface CreateOrderInput {
   recipientUserId?: string | null
   title: string
   detail?: string | null
-  /** CIE-10 que la motiva; desde la atención, por defecto su primer diagnóstico. */
+  /** Diagnóstico que la motiva; desde la atención, por defecto su primer diagnóstico. */
   diagnosisCode?: string | null
+  /** Lista del código; sin ella, la de la clínica. */
+  diagnosisSystem?: string | null
 }
 
 function assertOrderKind(kind: unknown): OrderKind {
@@ -3030,10 +3050,13 @@ export async function createClinicalOrder(
   const recipient = assertName(input.recipient?.trim() || recipientName, "Destinatario", 200)
   const title = assertName(input.title, "Título de la orden", 200)
   const detail = assertOptionalText(input.detail, "Detalle", 5000)
-  let diagnosisCode = input.diagnosisCode?.trim().toUpperCase() || null
-  if (!diagnosisCode && encounterId) {
+  let requested: { code: string | null; system: string | null } = {
+    code: input.diagnosisCode?.trim() || null,
+    system: input.diagnosisSystem ?? null,
+  }
+  if (!requested.code && encounterId) {
     const [first] = await tx
-      .select({ code: encounterDiagnosis.cie10Code })
+      .select({ code: encounterDiagnosis.diagnosisCode, system: encounterDiagnosis.diagnosisSystem })
       .from(encounterDiagnosis)
       .where(
         and(
@@ -3044,12 +3067,9 @@ export async function createClinicalOrder(
       )
       .orderBy(asc(encounterDiagnosis.createdAt))
       .limit(1)
-    diagnosisCode = first?.code ?? null
+    if (first) requested = first
   }
-  if (diagnosisCode) {
-    const [known] = await tx.select({ code: cie10Code.code }).from(cie10Code).where(eq(cie10Code.code, diagnosisCode))
-    if (!known) throw validation(`Código CIE-10 inexistente: ${diagnosisCode}`)
-  }
+  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, requested)
   const [row] = await tx
     .insert(clinicalOrder)
     .values({
@@ -3063,7 +3083,7 @@ export async function createClinicalOrder(
       recipientUserId,
       title,
       detail,
-      diagnosisCode,
+      ...diagnosis,
       status: "solicitado",
     })
     .returning()
@@ -3267,12 +3287,13 @@ export async function getOrderPrint(tx: Db, orgId: string, orderId: string) {
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
-  const [dx] = order.diagnosisCode
-    ? await tx
-        .select({ description: cie10Code.description })
-        .from(cie10Code)
-        .where(eq(cie10Code.code, order.diagnosisCode))
-    : []
+  const [dx] =
+    order.diagnosisCode && order.diagnosisSystem
+      ? await tx
+          .select({ description: diagnosisCatalog.title })
+          .from(diagnosisCatalog)
+          .where(and(eq(diagnosisCatalog.systemKey, order.diagnosisSystem), eq(diagnosisCatalog.code, order.diagnosisCode)))
+      : []
   let requestedBy: { name: string; title: string | null; registration: string | null } | null = null
   if (order.fromUserId) {
     try {

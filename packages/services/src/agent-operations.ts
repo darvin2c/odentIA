@@ -41,7 +41,6 @@ import {
 import {
   listMessages,
   sendOutbound,
-  sendTemplateOutbound,
   setAgentStatus,
 } from "./conversations.js"
 import { type AiUsageEntry, knownCostMicros, recordAiUsage } from "./ai-usage.js"
@@ -2483,22 +2482,10 @@ export async function executeProposal(
       result = { patientId, budgetId, status: decided.status, stateText: decided.stateText, acceptedCents: decided.acceptedCents }
     } else if (action === "enviar_mensaje") {
       const conversationId = locked.conversationId
+      // El agente no elige plantillas (ADR 0040): fuera de las 24 horas el
+      // sistema envía «Retomar la conversación» (`resumeConversationBySystem`).
       if (payload.kind === "template") {
-        if (!opts.secretsKey) throw validation("Falta la clave de secretos para ejecutar la plantilla")
-        const sent = await sendTemplateOutbound(tx, orgId, opts.secretsKey, {
-          conversationId,
-          senderKind: "agent",
-          senderUserId: teamUserId,
-          name: payload.name as string,
-          language: payload.language as string,
-          params: Array.isArray(payload.params) ? (payload.params as string[]) : [],
-        })
-        result = {
-          messageId: sent.id,
-          kind: "template",
-          name: payload.name,
-          language: payload.language,
-        }
+        throw validation("El agente no envía plantillas: fuera de las 24 horas el sistema retoma la conversación")
       } else {
         // «Sí» / «No» bajo la pregunta que pide confirmar una lista: tocarlos es
         // escribirlo, y el sí llega al agente como cualquier otro.

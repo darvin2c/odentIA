@@ -287,15 +287,15 @@ it("el prompt pone primero lo que comparte toda la clínica y acota el conocimie
   console.log(`USO ${JSON.stringify({ promptCaracteres: promptA.length, prefijoComun: shared, herramientas: one.tools.length, herramientasCaracteres: one.toolsJson().length })}`)
 })
 
-it("la herramienta de plantillas solo viaja si algún canal activo de la clínica las admite", async () => {
-  // Solo Telegram: no hay plantillas que enviar.
+it("el agente nunca recibe una herramienta de plantillas, haya o no WhatsApp (ADR 0040)", async () => {
+  // Solo Telegram.
   const telegramOnly = new RecordingModel()
   const first = await ingest("tg:uso-t", "uso-t-1", "Hola")
   expect(await run(telegramOnly, first.conversationId, first.messageId)).toBe("done")
   expect(toolNames(telegramOnly)).toContain("send_reply")
   expect(toolNames(telegramOnly)).toContain("ver_otros_canales")
   expect(toolNames(telegramOnly)).not.toContain("send_template")
-  // Con WhatsApp activo vuelve para toda la clínica: la lista no varía por hilo.
+  // Con WhatsApp activo tampoco: fuera de las 24 horas retoma el sistema.
   const whatsapp = await withOrgContext(appDb, ORG, (tx) =>
     createConnection(tx, ORG, KEY, {
       channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA",
@@ -305,7 +305,8 @@ it("la herramienta de plantillas solo viaja si algún canal activo de la clínic
     const withTemplates = new RecordingModel()
     const second = await ingest("tg:uso-t2", "uso-t2-1", "Hola")
     expect(await run(withTemplates, second.conversationId, second.messageId)).toBe("done")
-    expect(toolNames(withTemplates)).toContain("send_template")
+    expect(toolNames(withTemplates)).not.toContain("send_template")
+    expect(toolNames(withTemplates)).toEqual(toolNames(telegramOnly))
   } finally {
     await withOrgContext(appDb, ORG, (tx) => setConnectionStatus(tx, ORG, whatsapp.id, "disabled"))
   }

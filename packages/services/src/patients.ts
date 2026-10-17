@@ -465,7 +465,7 @@ export async function listPatients(
 
 export interface PatientFull {
   patient: PatientRow
-  contacts: { contactId: string; displayName: string; phone: string | null; email: string | null; isActive: boolean; relationship: RegistrationContactInput["relationship"]; relationshipDetail: string | null; isPreferred: boolean }[]
+  contacts: { contactId: string; displayName: string; phone: string | null; email: string | null; isActive: boolean; relationship: RegistrationContactInput["relationship"]; relationshipDetail: string | null; kinship: string | null; isPreferred: boolean }[]
   registration: (Pick<typeof patientRegistration.$inferSelect, "entryPoint" | "respondent" | "createdAt" | "contextContactId" | "conversationId" | "formVersion" | "answers" | "privacyNotice"> & { actor: { id: string; name: string } | null }) | null
   activeAllergies: (typeof patientAllergy.$inferSelect)[]
   activeConditions: (typeof patientCondition.$inferSelect)[]
@@ -476,7 +476,7 @@ export async function getPatient(tx: Db, orgId: string, id: string): Promise<Pat
   const row = await requirePatient(tx, orgId, id)
   const contacts = await tx.select({
     contactId: contact.id, displayName: contact.displayName, phone: contact.phone, email: contact.email, isActive: contact.isActive,
-    relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, isPreferred: patientContact.isPreferred,
+    relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, kinship: patientContact.kinship, isPreferred: patientContact.isPreferred,
   }).from(patientContact).innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, orgId)))
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, id)))
     .orderBy(desc(patientContact.isPreferred), asc(contact.displayName), asc(contact.id))
@@ -533,7 +533,7 @@ export async function listPatientsByContact(tx: Db, orgId: string, contactId: st
   await requireContact(tx, orgId, contactId)
   return tx.select({
     id: patient.id, patientNumber: patient.patientNumber, displayName: patient.displayName, isActive: patient.isActive,
-    relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, isPreferred: patientContact.isPreferred,
+    relationship: patientContact.relationship, relationshipDetail: patientContact.relationshipDetail, kinship: patientContact.kinship, isPreferred: patientContact.isPreferred,
   }).from(patientContact).innerJoin(patient, and(eq(patient.id, patientContact.patientId), eq(patient.organizationId, orgId)))
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.contactId, contactId)))
     .orderBy(asc(patient.displayName), asc(patient.id))
@@ -568,7 +568,7 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     await tx.insert(patientContact).values({ ...link, organizationId: orgId, patientId, createdBy: actorUserId })
       .onConflictDoUpdate({
         target: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
-        set: { relationship: link.relationship, relationshipDetail: link.relationshipDetail ?? null, isPreferred: link.isPreferred, updatedAt: new Date() },
+        set: { relationship: link.relationship, relationshipDetail: link.relationshipDetail ?? null, kinship: link.kinship ?? null, isPreferred: link.isPreferred, updatedAt: new Date() },
       })
     await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.contact_set", entity: "patient", entityId: patientId, metadata: { contactId: link.contactId, relationship: link.relationship, isPreferred: link.isPreferred } })
   } catch (error) {

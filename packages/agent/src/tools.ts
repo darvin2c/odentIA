@@ -20,6 +20,7 @@ import {
   resendBudgetByContact,
   confirmProposalByContact,
   answerGeneralPermission,
+  chooseMessagesInConversation,
   confirmAppointmentByContact,
   type ContactAppointmentOption,
   PERSONAL_LINK_TTL_DAYS,
@@ -63,6 +64,8 @@ import {
   recordKnowledgeGap,
   requireContact,
   resolveAgentPatientContext,
+  resumeConversationBySystem,
+  sendReceiptInConversation,
   rankByMeaning,
   searchClinic,
   searchPublishedKnowledge,
@@ -160,6 +163,8 @@ export const TOOL_ACTION_LABEL: Record<string, string> = {
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
   confirmar_cita: "Confirmó la cita que la persona dijo que no se perderá.",
   responder_permiso_mensajes: "Anotó si acepta que le escriban novedades y promociones.",
+  elegir_mensajes: "Anotó qué mensajes quiere recibir la persona, o le dio su página para elegirlos.",
+  enviar_comprobante: "Envió en la conversación el comprobante de su último pago.",
   ver_presupuesto: "Consultó los presupuestos que la persona recibió.",
   reenviar_presupuesto: "Reenvió el presupuesto a la persona (o, si no estaba listo, dejó la tarea a recepción).",
   anotar_respuesta_presupuesto: "Propuso anotar la respuesta al presupuesto; se anota con el sí de la persona.",
@@ -256,6 +261,11 @@ export interface AgentToolCtx {
   replySettled: boolean
   /** Texto que la simulación habría enviado (no se persiste). */
   simulatedReply?: string
+  /**
+   * Pasaron 24 horas y el sistema no pudo retomar la conversación: el caso ya
+   * está con una persona y no hay por dónde avisar (`noticeAfterHandoff` no lo intenta).
+   */
+  windowClosed?: boolean
   /** Nombres de herramientas usadas en la corrida (supervisión). */
   toolsUsed: string[]
   /**
@@ -347,7 +357,7 @@ export async function performHandoff(
  * dicho en la derivación para quien la tome.
  */
 export async function noticeAfterHandoff(ctx: AgentToolCtx): Promise<void> {
-  if (!ctx.handedOff || ctx.replySettled || ctx.dryRun) return
+  if (!ctx.handedOff || ctx.replySettled || ctx.dryRun || ctx.windowClosed) return
   const treatment =
     ctx.treatment !== undefined
       ? ctx.treatment
@@ -449,13 +459,26 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const orgZone = (): Promise<OrgLocale> => (zonePromise ??= inOrg((tx) => getOrgLocale(tx, ctx.orgId)))
 
   /**
-   * Ventana de WhatsApp cerrada: el modelo cambia a plantilla autorizada o
-   * deriva. Llega persistida como `fallida` con `error` prefijado por el
-   * código estable `WINDOW_CLOSED` y `result.errorCode` igual (pacto con
-   * ProposalLifecycle, que ya no la lanza); se traduce a este texto.
+   * Ventana de WhatsApp cerrada (llega como `fallida` con `WINDOW_CLOSED`, el
+   * pacto con ProposalLifecycle). El agente no elige plantillas (ADR 0040): el
+   * sistema envía «Retomar la conversación» con los datos que ya conoce y el
+   * turno termina. Si «Retomar» no está aprobada (o no se puede enviar), no
+   * sale nada y el caso queda para una persona en «Te espera» con qué hacer.
    */
-  const OUTSIDE_WINDOW =
-    "outside_window: fuera de la ventana de 24h del canal. Si dispones de send_template, úsala con una plantilla autorizada; si no, deriva a humano."
+  const outsideWindow = async (): Promise<string> => {
+    if (ctx.dryRun) {
+      ctx.replySettled = true
+      return "[SIMULACIÓN] Pasaron 24 horas: el sistema enviaría «Retomar la conversación» y el turno terminaría."
+    }
+    const outcome = await inOrg((tx) => resumeConversationBySystem(tx, ctx.orgId, ctx.secretsKey, ctx.conversationId))
+    if (outcome.sent) {
+      ctx.replySettled = true
+      return "Pasaron 24 horas desde su último mensaje: el sistema le envió «Retomar la conversación». Cuando responda, sigues. No envíes más mensajes."
+    }
+    await performHandoff(ctx, outcome.waiting, outcome.waiting)
+    ctx.windowClosed = true
+    return `No se le puede escribir: ${outcome.waiting} El caso pasó a una persona; no envíes más mensajes.`
+  }
   /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
    * + payload. En modo directo se ejecuta en el mismo acto; si exige la
@@ -497,7 +520,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       throw e
     }
     // Un mensaje enviado o a la espera de decisión cierra el turno; si falló
-    // o expiró, el modelo aún debe cambiar a plantilla, reproponer o derivar.
+    // o expiró, el modelo aún debe reproponer o derivar (fuera de las 24 horas
+    // retoma el sistema: `outsideWindow`).
     if (action === "enviar_mensaje" && proposal.status !== "fallida" && proposal.status !== "expirada") {
       ctx.replySettled = true
     }
@@ -505,7 +529,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (proposal.status === "fallida") {
       const rawError = proposal.error?.trim() ?? ""
       if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") {
-        return OUTSIDE_WINDOW
+        return outsideWindow()
       }
       const detail = rawError ? `: ${rawError.slice(0, 300)}` : "."
       return `No se pudo ejecutar en modo directo (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
@@ -727,9 +751,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ctx.simulatedReply = text
         return `[SIMULACIÓN] Se enviaría al interlocutor: ${text}`
       }
-      // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose la traduce
-      // a outside_window. Lo que sí lanza (infra 429/5xx incluida) no
-      // reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
+      // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose retoma la
+      // conversación con el sistema. Lo que sí lanza (infra 429/5xx incluida)
+      // no reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
       const sent: ProposalItem[] = []
       // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
       const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
@@ -742,7 +766,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción. Si devuelve outside_window, sigue su indicación.",
+        "Envía la respuesta completa al interlocutor y cierra el turno: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -785,40 +809,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       description:
         "Se despide y cierra la conversación cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo). En text va una sola línea cordial, en el tono de la clínica, que diga que estamos atentos si quiere volver a escribir. Úsala sola en su paso, en lugar de send_reply. Si queda algo pendiente no cierra y te dice qué.",
       schema: z.object({ text: z.string().min(1).max(600) }),
-    },
-  )
-
-  const sendTemplate = tool(
-    async ({ name, language, params }: { name: string; language: string; params: string[] }) => {
-      if (ctx.dryRun) {
-        ctx.replySettled = true
-        ctx.simulatedReply = `[plantilla ${name} · ${language}]`
-        return `[SIMULACIÓN] Se enviaría plantilla ${name} (${language}).`
-      }
-      const sent: ProposalItem[] = []
-      const outcome = await propose(
-        "enviar_mensaje",
-        { kind: "template", name, language, params },
-        "send_template",
-        undefined,
-        (proposal) => {
-          sent.push(proposal)
-        },
-      )
-      for (const proposal of sent) {
-        await traceAnswer(`[plantilla ${name} · ${language}]`, traceOutcome(proposal), [], proposal)
-      }
-      return outcome
-    },
-    {
-      name: "send_template",
-      description:
-        "Envía una plantilla de WhatsApp autorizada y cierra el turno (propuesta si la política no es directa; solo fuera de ventana o primer contacto).",
-      schema: z.object({
-        name: z.string().min(1),
-        language: z.string().min(1),
-        params: z.array(z.string()).default([]),
-      }),
     },
   )
 
@@ -1394,6 +1384,37 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   /**
+   * «Tus mensajes» por el chat (G2; ADR 0040): la persona pide dejar de recibir
+   * un tipo de mensaje, volver a recibirlo o ningún mensaje, o pide su página
+   * para elegir. Es la misma operación que el botón «No más recordatorios» y que
+   * su página (`setMessageChoice`); la frase de respuesta es fija.
+   */
+  const chooseMessages = tool(
+    async ({ tipo, recibir }: { tipo?: string; recibir?: boolean }) => {
+      if (ctx.sandbox || ctx.dryRun) {
+        return tipo
+          ? `[SIMULACIÓN] Se anotaría que ${recibir ? "vuelve a recibir" : "deja de recibir"} ese tipo de mensaje.`
+          : "[SIMULACIÓN] Se le daría su página «Tus mensajes»."
+      }
+      const result = await inOrg((tx) =>
+        chooseMessagesInConversation(
+          tx,
+          ctx.orgId,
+          { conversationId: ctx.conversationId, choice: tipo ?? null, receive: recibir ?? false },
+          { secretsKey: ctx.secretsKey },
+        ),
+      )
+      return `${result.changed.length > 0 ? "Anotado. " : ""}Díselo con send_reply, con estas palabras: «${result.reply}» No prometas nada más.`
+    },
+    {
+      name: "elegir_mensajes",
+      description:
+        "Cuando la persona pide no recibir más un tipo de mensaje («ya no me manden recordatorios», «no quiero promociones», «no me escriban nada») o volver a recibirlo («sí, mándenme el recordatorio»), o pide elegir qué mensajes recibe. Si no queda claro qué tipo quiere dejar, pregúntale antes: los recordatorios de sus citas, los de controles y seguimiento, las novedades y promociones o ningún mensaje. «Cancelar» es cancelar una cita, nunca una baja. Sin tipo, te da su página para que elija. Te devuelve la frase para decírselo.",
+      schema: operationAgentSchema("mensajes.elegir"),
+    },
+  )
+
+  /**
    * Los presupuestos que la persona recibió, tal como los ve ella en su
    * documento (tratamientos, pieza, precios y opciones), de un paciente que
    * el interlocutor está autorizado a ver. Nunca diagnósticos ni notas.
@@ -1425,6 +1446,33 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * y entregó, por la operación de siempre. Si no está listo o no hay por dónde,
    * queda una tarea a recepción y el agente recibe la frase para la persona.
    */
+  /**
+   * El comprobante por WhatsApp solo si la persona lo pide en el chat
+   * (decisión 20 v2): se deja en esta conversación, que está abierta porque
+   * acaba de escribir, sin gastar un mensaje aprobado. Al cobrar ya salió por correo.
+   */
+  const sendReceipt = tool(
+    async ({ patientId }: { patientId: string }) => {
+      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se le enviaría aquí el comprobante de su último pago."
+      if (!ctx.storage) return "No se pudo preparar el comprobante: pasa el caso a una persona."
+      const storage = ctx.storage
+      const sent = await inOrg((tx) =>
+        sendReceiptInConversation(tx, ctx.orgId, { conversationId: ctx.conversationId, patientId }, { storage }),
+      )
+      if (!sent) {
+        return "No hay un comprobante de los últimos 30 días que se le pueda enviar a quien escribe. Díselo y ofrece que recepción se lo entregue."
+      }
+      ctx.replySettled = true
+      return `${sent.label} enviado en esta conversación. No envíes más mensajes.`
+    },
+    {
+      name: "enviar_comprobante",
+      description:
+        "Envía aquí el comprobante (el ticket) del último pago de un paciente, cuando la persona lo pide en el chat. Solo de un paciente que el interlocutor puede ver (de ver_contexto_paciente) y de los últimos 30 días. Al cobrar ya le llegó por correo y está en su enlace, en «Tus papeles».",
+      schema: z.object({ patientId: z.string().uuid() }),
+    },
+  )
+
   const resendBudget = tool(
     async ({ patientId, budgetId }: { patientId: string; budgetId?: string }) => {
       if (ctx.sandbox || ctx.dryRun) {
@@ -1563,7 +1611,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (proposal.status === "fallida") {
         const rawError = proposal.error?.trim() ?? ""
-        if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") return OUTSIDE_WINDOW
+        if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") return outsideWindow()
         const detail = rawError ? `: ${rawError.slice(0, 300)}` : "."
         return `No se pudo ejecutar al confirmar (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
       }
@@ -1866,7 +1914,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const all = [
     sendReply,
     farewellAndClose,
-    sendTemplate,
     createOpportunityTool,
     updateFollowup,
     closeOpportunityTool,
@@ -1890,8 +1937,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     cancelAppointmentProposal,
     confirmAppointment,
     answerPermission,
+    chooseMessages,
     budgetsView,
     resendBudget,
+    sendReceipt,
     answerBudget,
     confirmProposal,
     noteCase,

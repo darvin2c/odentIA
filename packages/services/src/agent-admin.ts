@@ -1263,7 +1263,9 @@ export async function getAdminUnreached(tx: Db, orgId: string, can: (permission:
   const kinds = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.agent && can(line.permission)).map((line) => line.key)
   if (kinds.length === 0 || !(await getAdminSettings(tx, orgId)).enabled) return { total: 0, byCause: [], people: [] }
   const zone = await getOrgLocale(tx, orgId)
-  const where = sql`j.cause is not null and j.updated_at >= now() - interval '24 hours' and j.kind in ${kinds}`
+  // Quien no recibe recordatorios ya sale el día antes como una llamada (ADR 0040): no se cuenta dos veces.
+  const where = sql`j.cause is not null and j.updated_at >= now() - interval '24 hours' and j.kind in ${kinds}
+    and not (j.kind = 'recordatorio_cita' and j.cause = 'sin_permiso')`
   const rows = await tx.execute<JobView>(jobsQuery(orgId, where, ADMIN_LIST_LIMIT))
   const counts = await tx.execute<{ cause: string; n: number }>(sql`
     select j.cause, count(*)::int as n from automation_job j

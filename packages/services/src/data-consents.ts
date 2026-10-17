@@ -1,12 +1,13 @@
 /**
- * Consentimiento para el tratamiento de datos personales (Ley 29733, ADR 0004):
+ * Consentimiento para el tratamiento de datos personales (la ley de cada país, en Perú la Ley 29733; ADR 0004):
  * por versión del aviso, con finalidades separadas, quién lo otorga y su
  * revocación.
  *
- * Dos de sus finalidades son, además, el permiso para que la clínica escriba
- * primero: `recordatorios` (citas y controles) y `comunicaciones` (los demás
- * mensajes). No hay un permiso aparte: lo que se acepta aquí vale de inmediato
- * para los mensajes automáticos, y revocarlo los da de baja.
+ * Dos de sus finalidades son, además, permisos de mensajes: `recordatorios`
+ * (los recordatorios de sus citas) y `comunicaciones` (novedades y
+ * promociones). No hay un permiso aparte: lo que se acepta aquí vale de
+ * inmediato para los mensajes automáticos, y revocarlo apaga todos los
+ * mensajes de la persona, también los de su atención (ADR 0040).
  */
 import type { Db } from "@odentia/db"
 import { automationConsent } from "@odentia/db/schema/automation"
@@ -14,7 +15,7 @@ import { patientContact, patientDataConsent } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
-import { type MessagePermissionKey, setConsent } from "./automation.js"
+import { MESSAGE_PERMISSIONS, type MessagePermissionKey, setConsent } from "./automation.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireDecisionContact } from "./responsibilities.js"
@@ -184,9 +185,10 @@ export async function revokeDataConsent(
     .set({ revokedAt: new Date(), revokedBy: actorUserId, revokeReason: reason })
     .where(eq(patientDataConsent.id, consentId))
     .returning()
-  // Revocar retira también los permisos de mensajes de la persona del paciente
-  // y de quien otorgó el consentimiento, y cancela lo pendiente. Para volver a
-  // recibirlos hace falta un consentimiento nuevo.
+  // Revocar apaga todos los mensajes de la persona del paciente y de quien
+  // otorgó el consentimiento (también los del servicio y los avisos, que no
+  // tienen fila hasta que se apagan: ADR 0040) y cancela lo pendiente. Para
+  // volver a recibirlos hace falta un consentimiento nuevo o que lo pida.
   const [own] = await tx
     .select({ contactId: patientContact.contactId })
     .from(patientContact)
@@ -204,17 +206,18 @@ export async function revokeDataConsent(
     .limit(1)
   const affected = [...new Set([own?.contactId, current.grantedByContactId].filter((id): id is string => !!id))]
   for (const contactId of affected) {
-    const granted = await tx
+    const revoked = await tx
       .select({ purpose: automationConsent.purpose })
       .from(automationConsent)
       .where(
         and(
           eq(automationConsent.organizationId, orgId),
           eq(automationConsent.contactId, contactId),
-          eq(automationConsent.status, "granted"),
+          eq(automationConsent.status, "revoked"),
         ),
       )
-    for (const { purpose } of granted) {
+    // Lo que ya estaba apagado conserva cómo se apagó.
+    for (const purpose of MESSAGE_PERMISSIONS.filter((item) => !revoked.some((row) => row.purpose === item))) {
       await setConsent(tx, orgId, actorUserId, contactId, {
         purpose,
         granted: false,

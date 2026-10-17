@@ -1,6 +1,7 @@
 import {
   type ChannelProvider,
   channelAdapters,
+  type NormalizedTemplateCategory,
   type NormalizedTemplateStatus,
   type ProviderTemplate,
   type TemplateCategory,
@@ -11,6 +12,7 @@ import { channelConnection, channelTemplate, clinicMessage, clinicMessageVersion
 import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm"
 import { AUTOMATION_MESSAGE_LANGUAGE, CATALOG_MESSAGE_KEYS, catalogMessageOf } from "./automation-messages.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { acceptsPromotions } from "./message-permission.js"
 import { decryptConfig } from "./secrets.js"
 
 /**
@@ -37,6 +39,11 @@ export interface TemplateItem {
   buttons: string[]
   /** Mensaje del catálogo de odentIA al que sirve; nulo si es propio de la clínica o ya estaba en la cuenta. */
   messageKey: string | null
+  /**
+   * Por qué odentIA no sabe enviarla (`encabezado`, `datos_por_nombre`): se
+   * muestra y no se ofrece. Nulo: se puede enviar.
+   */
+  unsupported: string | null
   requestedAt: string | null
   /** Desde cuándo está en ese estado; nulo si ya estaba así en la cuenta. */
   statusSince: string | null
@@ -61,6 +68,7 @@ function toItem(row: ChannelTemplateRow): TemplateItem {
     variables: row.variables,
     buttons: Array.isArray(row.buttons) ? row.buttons : [],
     messageKey: row.messageKey,
+    unsupported: row.unsupported,
     requestedAt: row.requestedAt?.toISOString() ?? null,
     statusSince: row.statusSince?.toISOString() ?? null,
     syncedAt: row.syncedAt?.toISOString() ?? null,
@@ -125,15 +133,32 @@ const STATUS_WORDS: Record<TemplateStatus, string> = {
 }
 
 /**
+ * ¿WhatsApp cuenta como promoción un mensaje que se pidió como otra cosa? La
+ * categoría la decide el proveedor: un aviso de servicio que pasó a marketing
+ * solo sale a quien aceptó novedades (ADR 0040, «la categoría manda»).
+ */
+export function isPromotionFor(template: Pick<TemplateItem, "category">, expected: TemplateCategory): boolean {
+  return template.category === "marketing" && expected !== "marketing"
+}
+
+/** Lo que dice la página de cada plantilla que odentIA no sabe enviar. */
+export const UNSUPPORTED_WORDS: Record<string, string> = {
+  encabezado: "lleva un encabezado con datos o con un archivo",
+  datos_por_nombre: "sus datos van por nombre",
+}
+
+/**
  * Regla única antes de enviar una plantilla, la use una persona, una
- * automatización o el agente: existe en la conexión, está aprobada y lleva
- * tantos datos como variables tiene.
+ * automatización o el sistema: existe en la conexión, odentIA la sabe enviar,
+ * está aprobada, lleva tantos datos como variables tiene y la categoría manda
+ * (ADR 0040): lo que WhatsApp cuenta como promoción, si se pidió como otra
+ * cosa, solo sale a quien aceptó novedades (`contactId`, la persona del hilo).
  */
 export async function assertTemplateSendable(
   tx: Db,
   orgId: string,
   connectionId: string,
-  input: { name: string; language: string; params: number },
+  input: { name: string; language: string; params: number; category: TemplateCategory; contactId: string | null },
 ): Promise<TemplateItem> {
   const [row] = await tx
     .select()
@@ -148,6 +173,11 @@ export async function assertTemplateSendable(
     )
     .limit(1)
   if (!row) throw validation("Plantilla no autorizada en esta conexión")
+  if (row.unsupported) {
+    throw validation(
+      `La plantilla «${row.name}» ${UNSUPPORTED_WORDS[row.unsupported] ?? "tiene partes"} que odentIA no sabe enviar`,
+    )
+  }
   if (row.status !== "aprobada") {
     const status = STATUS_WORDS[row.status as TemplateStatus] ?? row.status
     throw validation(
@@ -158,6 +188,16 @@ export async function assertTemplateSendable(
   if (row.body && row.variables !== input.params) {
     throw validation(
       `La plantilla «${row.name}» lleva ${row.variables} ${row.variables === 1 ? "dato" : "datos"} y se ${input.params === 1 ? "envió" : "enviaron"} ${input.params}`,
+    )
+  }
+  if (
+    isPromotionFor({ category: row.category }, input.category) &&
+    !(input.contactId && (await acceptsPromotions(tx, orgId, input.contactId)))
+  ) {
+    throw new ServiceError(
+      "TEMPLATE_IS_PROMOTION",
+      409,
+      `WhatsApp considera «${row.name}» como promoción: solo se envía a quien aceptó novedades`,
     )
   }
   return toItem(row)
@@ -179,6 +219,7 @@ async function upsertFromProvider(
     variables: template.variables,
     buttons: template.buttons,
     externalId: template.externalId,
+    unsupported: template.unsupported ?? null,
     syncedAt: now,
     updatedAt: now,
   }
@@ -235,6 +276,11 @@ export async function syncConnectionTemplates(
   const now = new Date()
   const keyOf = await catalogKeysByTemplate(tx, orgId)
   for (const template of fetched) await upsertFromProvider(tx, orgId, connectionId, template, now, keyOf)
+  // La revisión diaria (`reviewConnectionTemplates`) se guía por esta fecha.
+  await tx
+    .update(channelConnection)
+    .set({ templatesSyncedAt: now })
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
   const known = new Set(fetched.map((template) => `${template.name}\n${template.language}`))
   const current = await tx
     .select()
@@ -258,6 +304,42 @@ export async function syncConnectionTemplates(
       )
   }
   return listChannelTemplates(tx, orgId, connectionId)
+}
+
+/** Cada cuánto se vuelve a leer la cuenta de una conexión, por si se perdió un aviso del proveedor. */
+export const TEMPLATE_REVIEW_MS = 24 * 3_600_000
+
+/**
+ * La revisión diaria de una conexión (ADR 0040): si su cuenta no se leyó en
+ * las últimas 24 horas, se lee ahora y quedan al día estados y categorías. Si
+ * el proveedor no responde no pasa nada: se intenta en el ciclo siguiente.
+ * Devuelve si leyó la cuenta.
+ */
+export async function reviewConnectionTemplates(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  secretsKey: Buffer,
+  now: Date,
+  deps: TemplateDeps,
+): Promise<boolean> {
+  if (deps.validateExternal === false) return false
+  const [row] = await tx
+    .select({ syncedAt: channelConnection.templatesSyncedAt })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+    .limit(1)
+  // Sin lectura previa (conexión sin proveedor, en pruebas y desarrollo) no hay cuenta que revisar:
+  // la primera lectura la hace conectar o «Actualizar».
+  if (!row?.syncedAt || now.getTime() - row.syncedAt.getTime() < TEMPLATE_REVIEW_MS) return false
+  try {
+    await tx.transaction((inner) => syncConnectionTemplates(inner, orgId, connectionId, secretsKey, deps))
+    return true
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    console.warn(`[plantillas] no se pudo revisar la conexión ${connectionId}: ${error.message}`)
+    return false
+  }
 }
 
 /**
@@ -455,6 +537,50 @@ export async function applyTemplateStatuses(
       .where(eq(channelTemplate.id, current.id))
       .returning()
     if (row) changes.push({ template: toItem(row), previous: current.status as TemplateStatus })
+  }
+  return changes
+}
+
+export interface TemplateCategoryChange {
+  template: TemplateItem
+  previous: string
+}
+
+/**
+ * Aplica los avisos de cambio de categoría del proveedor (en WhatsApp,
+ * `template_category_update`). Devuelve solo lo que cambió. Lo que dice a quien
+ * administra lo calcula «Te espera» con el estado (`listRecategorizedMessages`).
+ */
+export async function applyTemplateCategories(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  updates: NormalizedTemplateCategory[],
+): Promise<TemplateCategoryChange[]> {
+  const changes: TemplateCategoryChange[] = []
+  const now = new Date()
+  for (const update of updates) {
+    const [current] = await tx
+      .select()
+      .from(channelTemplate)
+      .where(
+        and(
+          eq(channelTemplate.organizationId, orgId),
+          eq(channelTemplate.connectionId, connectionId),
+          eq(channelTemplate.name, update.name),
+          eq(channelTemplate.language, update.language),
+        ),
+      )
+      .for("update")
+      .limit(1)
+    // Una plantilla que el catálogo aún no conoce llega con la próxima lectura de la cuenta.
+    if (!current || current.category === update.category) continue
+    const [row] = await tx
+      .update(channelTemplate)
+      .set({ category: update.category, syncedAt: now, updatedAt: now })
+      .where(eq(channelTemplate.id, current.id))
+      .returning()
+    if (row) changes.push({ template: toItem(row), previous: current.category })
   }
   return changes
 }

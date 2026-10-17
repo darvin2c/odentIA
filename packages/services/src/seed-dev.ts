@@ -3,7 +3,7 @@
  *
  * Solo manual (`pnpm db:seed`); NUNCA en CI ni importado por tests
  * (cada test crea sus fixtures mínimas). Idempotente: borra solo las
- * orgs/usuarios semilla y los recrea. Prerrequisito: `seed:cie10` antes
+ * orgs/usuarios semilla y los recrea. Prerrequisito: `seed:diagnoses` antes
  * (los códigos K02.1/K04.0/Z01.2 deben existir; si falta alguno el script
  * falla rápido nombrándolo, sin skips silenciosos).
  *
@@ -123,7 +123,7 @@ import { createPatient, patientPersonId, updatePatient } from "./patients.js"
 import { collectCharge, createCharge, refundCredit } from "./payments.js"
 import { ensureDefaultPaymentMethods, listPaymentMethods } from "./payment-methods.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
-import { setConsent } from "./automation.js"
+import { setConsent, setMessageChoice } from "./automation.js"
 import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "./plan.js"
 import { cancelPrescription, createPrescription } from "./prescriptions.js"
 import { setProfessionalProfile } from "./professional-profiles.js"
@@ -791,6 +791,8 @@ await db.insert(orgProfile).values([
     currency: "PEN",
     locale: "es-PE",
     timezone: "America/Lima",
+    // La lista de diagnósticos que recomienda Perú (decisión 26).
+    diagnosisSystem: "ICD-10",
   },
   {
     organizationId: ORG_B,
@@ -800,6 +802,8 @@ await db.insert(orgProfile).values([
     currency: "PEN",
     locale: "es-PE",
     timezone: "America/Lima",
+    // La lista de diagnósticos que recomienda Perú (decisión 26).
+    diagnosisSystem: "ICD-10",
   },
 ])
 await db.transaction(async (tx) => {
@@ -1375,8 +1379,9 @@ for (const p of PATIENTS_A) {
     // Filiación completa de la paciente de demostración.
     ...(rosa
       ? {
-          maritalStatus: "casado",
-          educationLevel: "superior_universitaria_completa",
+          // HL7 MaritalStatus y CINE 2011 (decisión 28): casada, universitaria.
+          maritalStatus: "M",
+          educationLevel: "6",
           occupation: "Docente",
           birthCountry: "PE",
           birthPlace: "Cusco",
@@ -1388,7 +1393,7 @@ for (const p of PATIENTS_A) {
           addressRegion: "PE-LMA",
           addressReference: "Frente al parque Kennedy",
           emergencyContactName: "Carlos Paredes",
-          emergencyContactRelationship: "conyuge",
+          emergencyContactRelationship: "SPS",
           emergencyContactPhone: "+51912345678",
           // EPS: régimen con nombre propio en Perú, de tipo general «Privado».
           insuranceType: "PRIVADO",
@@ -1422,7 +1427,7 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
       verification: "confirmada",
     },
   ],
-  familyHistory: [{ relationship: "madre", condition: "Hipertensión arterial" }],
+  familyHistory: [{ relationship: "MTH", condition: "Hipertensión arterial" }],
   asaClass: "II",
   conditions: [
     { name: "Hipertensión arterial", status: "activa", notes: "Controlada con medicación" },
@@ -1860,23 +1865,23 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
   note: "Paciente con dolor a la percusión en pieza 36; se planifica obturación y endodoncia en 46.",
   encounterId: draft.id,
 })
-// Diagnósticos CIE-10 de la atención (ADR 0003): con tipo y sitio dental.
+// Diagnósticos de la atención (ADR 0003 y 0041): en la lista de la clínica (CIE-10), con tipo y sitio dental.
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  cie10Code: "K02.1",
-  diagnosisType: "definitivo",
+  diagnosisCode: "K02.1",
+  diagnosisType: "confirmed",
   toothNumber: 36,
   surfaces: ["occlusal"],
   note: "Dolor a la percusión; caries en dentina.",
 })
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  cie10Code: "K04.0",
-  diagnosisType: "presuntivo",
+  diagnosisCode: "K04.0",
+  diagnosisType: "provisional",
   toothNumber: 46,
 })
 // Un diagnóstico mal registrado se anula con motivo; queda en la traza.
 const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  cie10Code: "K02.1",
-  diagnosisType: "presuntivo",
+  diagnosisCode: "K02.1",
+  diagnosisType: "provisional",
   toothNumber: 37,
 })
 await voidEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, dxErrado.id, {
@@ -2211,8 +2216,8 @@ const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, {
   reason: "Control de rutina",
 })
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, elenaPatientId, elenaEval.id, {
-  cie10Code: "Z01.2",
-  diagnosisType: "definitivo",
+  diagnosisCode: "Z01.2",
+  diagnosisType: "confirmed",
 })
 const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
   title: "Plan profilaxis",
@@ -2265,7 +2270,7 @@ for (const tooth of [16, 26, 36]) {
     condition: "caries",
     surfaces: ["occlusal"],
     details: { variant: "dentin" },
-    diagnosis: { cie10Code: "K02.1", diagnosisType: "definitivo" },
+    diagnosis: { diagnosisCode: "K02.1", diagnosisType: "confirmed" },
     treatment: { serviceId: resinaCpmsA.id },
   })
   luciaResinas[tooth] = panel.planItems[0]!.id
@@ -2512,6 +2517,7 @@ const pedro = await db.transaction((tx) =>
           contactId: rosaContactId,
           relationship: "guardian",
           relationshipDetail: "Madre",
+          kinship: "MTH",
           isPreferred: true,
         },
       ],
@@ -2554,7 +2560,7 @@ await db.transaction((tx) =>
         privacyAccepted: false,
       },
       contacts: [
-        { contactId: martin.id, relationship: "guardian", relationshipDetail: "Padre", isPreferred: true },
+        { contactId: martin.id, relationship: "guardian", relationshipDetail: "Padre", kinship: "FTH", isPreferred: true },
       ],
     },
   ),
@@ -2890,6 +2896,21 @@ for (const seed of [
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
+// «Tus mensajes» (ADR 0040): Carmen pidió por teléfono no recibir recordatorios
+// (en su página se ve apagado y, con «Recordar la cita» prendida, «Te espera»
+// pide llamarla el día antes de su cita); Diego no quiere ningún mensaje.
+await db.transaction(async (tx) => {
+  await setMessageChoice(tx, ORG_A, ANA_ID, contactIdByName.get("Carmen Rojas")!, {
+    choice: "recordatorio",
+    receive: false,
+    source: "telefono",
+  })
+  await setMessageChoice(tx, ORG_A, ANA_ID, contactIdByName.get("Diego Salazar")!, {
+    choice: "ninguno",
+    receive: false,
+    source: "presencial",
+  })
+})
 // Quién atiende qué (ADR 0039): la Dra. Rojas, Endodoncia; Ana, Cirugía oral
 // (la de la biblioteca, renombrada) y lo general; Luis, lo general.
 // Implantología queda sin nadie: la agenda ofrece a cualquiera y

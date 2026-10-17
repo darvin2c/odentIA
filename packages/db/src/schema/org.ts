@@ -33,6 +33,10 @@ export const orgProfile = pgTable("org_profile", {
   currency: char("currency", { length: 3 }).notNull(),
   timezone: text("timezone").notNull(),
   locale: text("locale").notNull(),
+  // Lista de diagnósticos de la clínica (decisión 26 de la fase 4): CIE-10 o
+  // CIE-11. Nula en perfiles creados sin ella: vale la que recomienda su país
+  // (`clinicalProfileFor(...).diagnosis.recommended`); el alta la guarda.
+  diagnosisSystem: text("diagnosis_system"),
   // Impresión del ticket y hoja de cierre: térmica de 58 o 80 mm.
   receiptWidth: text("receipt_width").notNull().default("80"),
   // Tamaño de hoja para el presupuesto: A4 (ISO 216) o Carta.
@@ -44,6 +48,10 @@ export const orgProfile = pgTable("org_profile", {
 }, (table) => [
   check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
   check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
+  check(
+    "org_profile_diagnosis_system_check",
+    sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11')`,
+  ),
   check("org_profile_ticket_footer_check", sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`),
 ])
 

@@ -708,6 +708,20 @@
       "when": 1792113996291,
       "tag": "0100_avisos_de_soporte",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1792113996292,
+      "tag": "0101_tus_mensajes_y_plantillas",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792113996293,
+      "tag": "0102_diagnosticos_por_lista",
+      "breakpoints": true
     }
   ]
 }

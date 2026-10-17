@@ -644,6 +644,8 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
   // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
   await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()
+  // El aviso previo que pide WhatsApp para los mensajes de su cita (ADR 0040).
+  await expect(page.getByText("Díselo: «Te avisaremos por WhatsApp sobre tus citas.»")).toBeVisible()
   // Lo único que pide permiso, opcional: lo que dijo por teléfono.
   await expect(page.getByText("¿Acepta recibir novedades y promociones de la clínica?")).toBeVisible()
   await page.getByRole("button", { name: "Sí, aceptó por teléfono" }).click()

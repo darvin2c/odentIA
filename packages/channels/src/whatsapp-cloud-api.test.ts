@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import whatsappFixtures from "./__fixtures__/whatsapp.json"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
-import { buildBody, whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"
+import { buildBody, splitWhatsAppWebhook, whatsappCloudApiAdapter } from "./whatsapp-cloud-api.js"
 
 // Golden JSON con forma oficial de Cloud API; el contrato lo valida en runtime.
 const fx: ContractFixtures = whatsappFixtures as unknown as ContractFixtures
@@ -61,7 +61,7 @@ it("fetchMedia resuelve url firmada y descarga con Bearer", async () => {
   expect(got?.filename).toBe("media-1.ogg")
   expect(got?.mimeType).toBe("audio/ogg")
   expect(seen).toEqual([
-    { url: "https://graph.facebook.com/v21.0/media-1", auth: "Bearer TOKEN" },
+    { url: "https://graph.facebook.com/v25.0/media-1", auth: "Bearer TOKEN" },
     { url: "https://cdn.example.com/m", auth: "Bearer TOKEN" },
   ])
 })
@@ -204,9 +204,9 @@ it("lee las plantillas de la cuenta con estado, categoría, variables y botones,
   )
   const templates = await whatsappCloudApiAdapter.listTemplates!(fx.config, { fetch })
   expect(templates).toEqual([
-    { externalId: "900", name: "odentia_recordatorio_cita_v1", language: "es", category: "utility", status: "aprobada", reason: null, body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}.", variables: 3, buttons: ["Confirmar", "No podré ir"], link: { title: "Ver", url: "https://x" } },
-    { externalId: "901", name: "promo", language: "es", category: "marketing", status: "rechazada", reason: "INVALID_FORMAT", body: "Oferta", variables: 0, buttons: [], link: null },
-    { externalId: "902", name: "pausada", language: "es_MX", category: "utility", status: "pausada", reason: null, body: "", variables: 0, buttons: [], link: null },
+    { externalId: "900", name: "odentia_recordatorio_cita_v1", language: "es", category: "utility", status: "aprobada", reason: null, body: "Hola, {{1}}. Te recordamos la cita en {{2}}: {{3}}.", variables: 3, buttons: ["Confirmar", "No podré ir"], link: { title: "Ver", url: "https://x" }, unsupported: null },
+    { externalId: "901", name: "promo", language: "es", category: "marketing", status: "rechazada", reason: "INVALID_FORMAT", body: "Oferta", variables: 0, buttons: [], link: null, unsupported: null },
+    { externalId: "902", name: "pausada", language: "es_MX", category: "utility", status: "pausada", reason: null, body: "", variables: 0, buttons: [], link: null, unsupported: null },
   ])
   expect(calls).toHaveLength(2)
   expect(calls[0]?.url).toContain("/message_templates?fields=")
@@ -334,6 +334,41 @@ it("un aviso de cambio de estado de plantilla no se confunde con un mensaje", ()
   ])
 })
 
+it("marca lo que odentIA no sabe enviar: encabezado con datos o archivo, o datos por nombre (ADR 0040)", async () => {
+  const { fetch } = fakeFetch({
+    json: {
+      data: [
+        { id: "1", name: "con_logo", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "IMAGE" }, { type: "BODY", text: "Hola, {{1}}." }] },
+        { id: "2", name: "con_titulo", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "TEXT", text: "Tu cita, {{1}}" }, { type: "BODY", text: "Hola." }] },
+        { id: "3", name: "titulo_fijo", language: "es", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "TEXT", text: "Clínica" }, { type: "BODY", text: "Hola, {{1}}." }] },
+        { id: "4", name: "por_nombre", language: "es", status: "APPROVED", category: "UTILITY", parameter_format: "NAMED", components: [{ type: "BODY", text: "Hola, {{nombre}}." }] },
+      ],
+    },
+  })
+  const templates = await whatsappCloudApiAdapter.listTemplates!(fx.config, { fetch })
+  expect(templates.map((item) => [item.name, item.unsupported])).toEqual([
+    ["con_logo", "encabezado"],
+    ["con_titulo", "encabezado"],
+    // Un encabezado fijo no pide datos: se puede enviar.
+    ["titulo_fijo", null],
+    ["por_nombre", "datos_por_nombre"],
+  ])
+})
+
+it("el aviso de cambio de categoría llega aparte de los estados, y la dirección de la app lo reparte a su cuenta", () => {
+  const value = { message_template_id: 952, message_template_name: "odentia_seguimiento_inasistencia_v1", message_template_language: "es", previous_category: "UTILITY", new_category: "MARKETING" }
+  const result = parse(value, "template_category_update")
+  expect(result.messages).toEqual([])
+  expect(result.templateStatuses).toBeUndefined()
+  expect(result.templateCategories).toEqual([
+    { externalId: "952", name: "odentia_seguimiento_inasistencia_v1", language: "es", category: "marketing", previous: "utility" },
+  ])
+  const deliveries = splitWhatsAppWebhook(JSON.stringify({ entry: [{ id: "WABA9", changes: [{ field: "template_category_update", value }] }] }))
+  expect(deliveries).toEqual([
+    { kind: "account", accountId: "WABA9", templateStatuses: [], templateCategories: [expect.objectContaining({ category: "marketing" })] },
+  ])
+})
+
 it("un aviso que no dice el estado de la plantilla no cambia nada, y «reinstated» la vuelve a dejar aprobada", () => {
   const update = (event: string) =>
     parse(
@@ -361,7 +396,7 @@ it("lee la calidad y el tope diario con el campo vigente, y deja sin dato lo que
   const read = () => whatsappCloudApiAdapter.readHealth!(fx.config, { fetch: meta.fetch })
   expect(await read()).toEqual({ quality: "alta", dailyLimit: 2000, unlimited: false })
   expect(meta.calls[0]?.url).toBe(
-    "https://graph.facebook.com/v21.0/PNID?fields=quality_rating,whatsapp_business_manager_messaging_limit",
+    "https://graph.facebook.com/v25.0/PNID?fields=quality_rating,whatsapp_business_manager_messaging_limit",
   )
   expect(await read()).toEqual({ quality: "media", dailyLimit: null, unlimited: true })
   expect(await read()).toEqual({ quality: null, dailyLimit: null, unlimited: false })
@@ -374,7 +409,7 @@ it("elimina una plantilla por su nombre y dice el motivo si Meta no la elimina",
   await whatsappCloudApiAdapter.deleteTemplate!(fx.config, { name: "clinica_tu_trabajo_ab12cd34" }, { fetch: meta.fetch })
   expect(meta.calls[0]).toMatchObject({
     method: "DELETE",
-    url: "https://graph.facebook.com/v21.0/WABA1/message_templates?name=clinica_tu_trabajo_ab12cd34",
+    url: "https://graph.facebook.com/v25.0/WABA1/message_templates?name=clinica_tu_trabajo_ab12cd34",
   })
   await expect(
     whatsappCloudApiAdapter.deleteTemplate!(fx.config, { name: "x" }, { fetch: meta.fetch }),

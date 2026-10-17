@@ -43,6 +43,8 @@ export interface PersonResponsibleFor {
   birthDate: string | null
   relationship: string
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship: string | null
   archived: boolean
 }
 
@@ -55,6 +57,8 @@ export interface PersonSpokenForBy {
   isPatient: boolean
   relationship: string
   relationshipDetail: string | null
+  /** Parentesco con HL7 v3 RoleCode, si se conoce. */
+  kinship: string | null
   isPreferred: boolean
   /** Su conversación más reciente; solo para quien lee conversaciones. */
   conversationId: string | null
@@ -182,6 +186,7 @@ export async function getPersonPage(
       patientActive: patient.isActive,
       relationship: patientContact.relationship,
       relationshipDetail: patientContact.relationshipDetail,
+      kinship: patientContact.kinship,
       personId: sql<
         string | null
       >`(select s.contact_id from patient_contact s where s.organization_id = ${orgId} and s.patient_id = ${patient.id} and s.relationship = 'self' limit 1)`,
@@ -212,6 +217,7 @@ export async function getPersonPage(
           isPatient: sql<boolean>`exists (select 1 from patient_contact s where s.organization_id = ${orgId} and s.contact_id = ${contact.id} and s.relationship = 'self')`,
           relationship: patientContact.relationship,
           relationshipDetail: patientContact.relationshipDetail,
+          kinship: patientContact.kinship,
           isPreferred: patientContact.isPreferred,
           conversationId: sql<
             string | null
@@ -258,6 +264,7 @@ export async function getPersonPage(
     birthDate: r.birthDate,
     relationship: r.relationship,
     relationshipDetail: r.relationshipDetail,
+    kinship: r.kinship,
     archived: !r.patientActive || r.personActive === false,
   }))
   const archived = !row.isActive || (own ? !own.patient.isActive : false)
@@ -297,6 +304,7 @@ export async function getPersonPage(
       isPatient: Boolean(r.isPatient),
       relationship: r.relationship,
       relationshipDetail: r.relationshipDetail,
+      kinship: r.kinship,
       isPreferred: r.isPreferred,
       conversationId: readsConversations ? r.conversationId : null,
     })),

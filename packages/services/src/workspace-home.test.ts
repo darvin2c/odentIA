@@ -9,7 +9,7 @@ const taskOf = (id: string, due: WaitingTask["due"]): WaitingTask => ({
   id, title: `Tarea ${id}`, dueAt: null, due, href: `/tasks?task=${id}`, mine: true, assigneeName: null, opportunityTitle: null,
 })
 const unconfirmedOf = (id: string): WaitingUnconfirmed => ({
-  id, patientId: `p-${id}`, patientName: "Rosa Quispe", phone: "+51987654100", startsAt: "2026-10-17T15:30:00.000Z",
+  why: "sin_confirmar", id, patientId: `p-${id}`, patientName: "Rosa Quispe", phone: "+51987654100", startsAt: "2026-10-17T15:30:00.000Z",
   branchName: "Centro", serviceName: "Evaluación",
 })
 const nothing: WaitingParts = {

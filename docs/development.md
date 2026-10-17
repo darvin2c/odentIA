@@ -9,12 +9,12 @@ cp infra/dev/.env.example infra/dev/.env
 # Generar SECRETS_KEY: openssl rand -hex 32
 pnpm install
 pnpm --filter @odentia/db migrate
-pnpm --filter @odentia/db seed:cie10
+pnpm --filter @odentia/db seed:diagnoses
 pnpm --filter @odentia/db seed:procedures
 pnpm db:seed
 ```
 
-`seed:cie10` carga por defecto el capítulo de cavidad bucal (K00–K14). El catálogo oficial completo se carga con `CIE10_FILE=<csv> CIE10_SHA256=<hash publicado>`: el archivo se rechaza si su hash no coincide.
+`seed:diagnoses` carga por defecto dos semillas mínimas de desarrollo, que no son listas oficiales: la CIE-10 de la cavidad bucal (K00–K14 y Z01.2, sin fuente verificada) y unos pocos códigos dentales de la CIE-11, por verificar contra la OMS. Una lista oficial se carga con su archivo (CSV, TSV o ClaML), su SHA-256, su edición y su licencia (`DIAGNOSIS_SYSTEM`, `DIAGNOSIS_FILE`, `DIAGNOSIS_SHA256`, `DIAGNOSIS_EDITION`, `DIAGNOSIS_LICENSE`, `DIAGNOSIS_SOURCE_URL`); la CIE-11 de la OMS, con `CIE11_FILE`, `CIE11_SHA256` y `CIE11_EDITION`. El archivo se rechaza si su hash no coincide. La CIE-10 en español tiene derechos de la OPS: no se carga completa sin su permiso escrito. Formatos y ejemplos en `packages/db/src/seed-diagnoses.ts`.
 
 `.env` con finales LF: CRLF rompe su carga en sh. Los scripts tsx de db/services cargan `infra/dev/.env` con `--env-file-if-exists`; variables existentes tienen prioridad. Semilla manual determinista/idempotente, no para tests/CI.
 
@@ -128,7 +128,7 @@ Variables, solo en la API (`infra/dev/.env` o los secretos del despliegue):
 | `META_APP_SECRET` | Clave secreta de la app: canjea el código y firma los avisos | Configuración de la app › Básica |
 | `META_LOGIN_CONFIG_ID` | Configuración de «Facebook Login for Business» | Facebook Login for Business › Configuraciones |
 | `META_WEBHOOK_VERIFY_TOKEN` | Texto que elige odentIA para que Meta verifique la dirección de avisos | Se inventa (`openssl rand -hex 24`) y se pega igual en Meta |
-| `META_GRAPH_VERSION` | Versión del Graph API (`v25.0` si falta) | La vigente al crear la app |
+| `META_GRAPH_VERSION` | Versión del Graph API (`v25.0` si falta). La leen la API y el worker: es la única para WhatsApp, Messenger, Instagram y el botón | La vigente al crear la app |
 
 Sin las cuatro primeras el botón no existe y nada más cambia; con solo algunas,
 la API lo dice al arrancar y sigue sin botón. Tampoco existe con
@@ -158,7 +158,7 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
 6. En el producto Webhooks de la app (objeto «WhatsApp Business Account»), poner
    como dirección `https://<API>/api/webhooks/meta/whatsapp` y como clave de
    verificación el valor de `META_WEBHOOK_VERIFY_TOKEN`; suscribir los campos
-   `messages` y `message_template_status_update`, que son los que odentIA usa, y
+   `messages`, `message_template_status_update` y `template_category_update`, que son los que odentIA usa, y
    `account_update`, que la guía de Meta exige (odentIA lo recibe y no hace nada
    con él). Es una sola dirección para todas las clínicas. La API debe estar
    arriba con las variables puestas para responder la verificación.

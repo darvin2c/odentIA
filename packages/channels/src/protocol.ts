@@ -111,7 +111,17 @@ export interface ProviderTemplate {
    * «Su enlace» de cada persona. Nulo si la plantilla no lo tiene.
    */
   link?: { title: string; url: string } | null
+  /**
+   * Por qué odentIA no sabe enviarla: lleva un encabezado con datos o con un
+   * archivo (`encabezado`), o sus datos van por nombre (`datos_por_nombre`).
+   * Nulo o ausente: se puede enviar.
+   */
+  unsupported?: TemplateUnsupported | null
 }
+
+/** Lo que odentIA no sabe enviar de una plantilla que ya estaba en la cuenta. */
+export const TEMPLATE_UNSUPPORTED = ["encabezado", "datos_por_nombre"] as const
+export type TemplateUnsupported = (typeof TEMPLATE_UNSUPPORTED)[number]
 
 /** Lo que se pide aprobar: texto, un ejemplo por variable y botones. */
 export interface TemplateRequest {
@@ -137,14 +147,34 @@ export interface NormalizedTemplateStatus {
   reason: string | null
 }
 
+/**
+ * Aviso del proveedor: cambió la categoría de una plantilla (en WhatsApp,
+ * `template_category_update`). Un aviso de servicio que pasa a promoción solo
+ * sale a quien aceptó novedades (ADR 0040).
+ */
+export interface NormalizedTemplateCategory {
+  externalId: string | null
+  name: string
+  language: string
+  category: TemplateCategory
+  previous: TemplateCategory | null
+}
+
 export interface WebhookParseResult {
   messages: NormalizedInbound[]
   statuses: NormalizedStatus[]
   templateStatuses?: NormalizedTemplateStatus[]
+  templateCategories?: NormalizedTemplateCategory[]
 }
 
 export interface OutboundMessage {
   to: string
+  /**
+   * Correo automático: el enlace de baja que va en la cabecera
+   * `List-Unsubscribe` (RFC 2369). Los adaptadores que no pueden poner
+   * cabeceras propias lo ignoran; el pie del correo lleva el enlace igual.
+   */
+  listUnsubscribe?: string
   kind:
     | { type: "text"; text: string; buttons?: ReplyButton[] }
     // `buttons`: lo que devuelve cada botón de respuesta rápida, por posición.

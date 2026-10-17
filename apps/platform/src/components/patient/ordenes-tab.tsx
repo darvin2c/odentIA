@@ -1,3 +1,4 @@
+import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -30,7 +31,7 @@ import {
 } from "../../lib/clinical-forms"
 import { useMyUserId, useOrgMembers } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
-import { Cie10Search } from "./cie10-search"
+import { DiagnosisSearch } from "./diagnosis-search"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 
 const errorMessage = (e: unknown, fallback = "No se pudo completar la acción") =>
@@ -79,7 +80,7 @@ export function OrderRow({
         </p>
         <p className="text-sm text-muted-foreground">
           {ORDER_STATUS_LABELS[order.status]}
-          {order.diagnosisCode ? ` · ${order.diagnosisCode}` : ""} · para {order.recipient}
+          {order.diagnosisCode ? ` · ${diagnosisCodeLabel(order.diagnosisSystem, order.diagnosisCode)}` : ""} · para {order.recipient}
           {order.detail ? ` · ${order.detail}` : ""}
         </p>
         {order.status === "completado" && order.resultText ? (
@@ -284,6 +285,7 @@ export function NewOrderDrawer({
   patientId,
   encounterId,
   defaultDiagnosisCode,
+  defaultDiagnosisSystem,
   defaultKind = "imagen",
   onClose,
   onCreated,
@@ -293,6 +295,7 @@ export function NewOrderDrawer({
   encounterId?: string
   /** Desde la atención: su diagnóstico. Si no se elige, el servidor toma el primero. */
   defaultDiagnosisCode?: string
+  defaultDiagnosisSystem?: string
   defaultKind?: ClinicalOrderKind
   onClose: () => void
   onCreated: (order: ClinicalOrder) => void
@@ -307,6 +310,7 @@ export function NewOrderDrawer({
   const [title, setTitle] = useState("")
   const [detail, setDetail] = useState("")
   const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
+  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState<ClinicalOrder | null>(null)
   const [sending, setSending] = useState(false)
@@ -333,6 +337,7 @@ export function NewOrderDrawer({
         title: title.trim(),
         detail: detail.trim() || null,
         diagnosisCode: diagnosisCode || null,
+        diagnosisSystem: diagnosisCode ? diagnosisSystem : null,
       }),
     onSuccess: (result) => {
       toast.success(
@@ -485,9 +490,13 @@ export function NewOrderDrawer({
             />
           </Field>
         ) : null}
-        <Cie10Search
+        <DiagnosisSearch
           value={diagnosisCode}
-          onChange={(code) => setDiagnosisCode(code)}
+          system={diagnosisSystem}
+          onChange={(code, _description, system) => {
+            setDiagnosisCode(code)
+            setDiagnosisSystem(system)
+          }}
           label="Diagnóstico que la motiva"
         />
         {kind === "interconsulta" ? (

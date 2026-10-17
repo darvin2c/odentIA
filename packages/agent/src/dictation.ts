@@ -4,7 +4,9 @@ import { type Db, withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
   DICTATION_CHARS,
+  type DiagnosisSystemKey,
   type DictationDraft,
+  findingDiagnosisCode,
   getAgentConfig,
   getDictationCatalog,
   getOrgLocale,
@@ -67,7 +69,7 @@ type Extraction = z.infer<typeof extraction>
 
 const TOOL_NAME = "registrar_dictado"
 
-function systemPrompt(input: { services: string[]; today: string; timezone: string }): string {
+function systemPrompt(input: { services: string[]; today: string; timezone: string; diagnosisList: string }): string {
   return [
     "Eres el asistente clínico de una clínica dental. El odontólogo dicta mientras atiende y tú ordenas lo dictado en registros para que él los revise.",
     `Principios que no cambian: ${AGENT_BASE_PRINCIPLES.join(" ")}`,
@@ -75,6 +77,7 @@ function systemPrompt(input: { services: string[]; today: string; timezone: stri
     "Si se corrige («en la veinticinco… no, es la veintiséis»), vale lo último que dijo. Si pide quitar algo («quita la endodoncia»), no lo registres.",
     "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo.",
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
+    `Los diagnósticos van con su código de la lista de la clínica, la ${input.diagnosisList}. No uses códigos de otra lista ni los conviertas de una a otra.`,
     "En las indicaciones, pon en `service` la prestación con las palabras del odontólogo: el sistema la busca en los servicios de la clínica. No inventes precios.",
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
@@ -148,7 +151,12 @@ function toothIn(sentence: string): number | null {
  * para ver el recorrido completo sin proveedor; no acredita cómo entiende un
  * dictado un modelo real.
  */
-export function demoExtraction(transcript: string, services: string[], now: Date): DictationDraft[] {
+export function demoExtraction(
+  transcript: string,
+  services: string[],
+  now: Date,
+  diagnosisSystem: DiagnosisSystemKey = "ICD-10",
+): DictationDraft[] {
   const sentences = transcript.split(/(?<=[.;!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean)
   const drafts: DictationDraft[] = []
   const nota: Record<string, string> = {}
@@ -166,7 +174,11 @@ export function demoExtraction(transcript: string, services: string[], now: Date
       const tooth = toothIn(sentence)
       drafts.push({
         kind: "diagnostico",
-        payload: { cie10Code: /dentina/.test(text) ? "K02.1" : "K02.9", diagnosisType: "presuntivo", ...(tooth ? { toothNumber: tooth } : {}) },
+        payload: {
+          diagnosisCode: findingDiagnosisCode(diagnosisSystem, "caries", /dentina/.test(text) ? "dentin" : null) ?? "",
+          diagnosisType: "provisional",
+          ...(tooth ? { toothNumber: tooth } : {}),
+        },
         sourceText: sentence,
       })
     }
@@ -217,10 +229,16 @@ export interface DictationExtraction {
  * reconoce «no, es la veintiséis» (cambia la pieza de la última sugerencia) y
  * «quita la endodoncia» (descarta la pendiente que lleva esa palabra).
  */
-export function demoSegment(transcript: string, services: string[], now: Date, pending: DictationPending[]): Omit<DictationExtraction, "model"> {
+export function demoSegment(
+  transcript: string,
+  services: string[],
+  now: Date,
+  pending: DictationPending[],
+  diagnosisSystem: DiagnosisSystemKey = "ICD-10",
+): Omit<DictationExtraction, "model"> {
   // Una frase que corrige o quita algo no es, además, un registro nuevo («quita la endodoncia»).
   const order = (sentence: string) => /^(no,? es |quita)/.test(plain(sentence))
-  const drafts = demoExtraction(transcript, services, now).filter((draft) => !order(draft.sourceText ?? ""))
+  const drafts = demoExtraction(transcript, services, now, diagnosisSystem).filter((draft) => !order(draft.sourceText ?? ""))
   const corrections: DictationExtraction["corrections"] = []
   const removals: DictationExtraction["removals"] = []
   for (const sentence of transcript.split(/(?<=[.;!?])\s+|\n+/).map((item) => item.trim()).filter(Boolean)) {
@@ -265,17 +283,19 @@ export async function extractDictation(
   if (transcript.length > DICTATION_CHARS) {
     throw new ServiceError("VALIDATION", 400, `El dictado admite hasta ${DICTATION_CHARS} caracteres por vez; termina y sigue con otro`)
   }
-  const { spec, services, zone } = await withOrgContext(db, input.orgId, async (tx) => {
+  const { spec, services, diagnosisSystem, zone } = await withOrgContext(db, input.orgId, async (tx) => {
     const cfg = await getAgentConfig(tx, input.orgId)
+    const catalog = await getDictationCatalog(tx, input.orgId)
     return {
       spec: resolveLlmSpec(cfg, deps.platform),
-      services: (await getDictationCatalog(tx, input.orgId)).services.map((service) => service.name),
+      services: catalog.services.map((service) => service.name),
+      diagnosisSystem: catalog.diagnosisSystem,
       zone: await getOrgLocale(tx, input.orgId),
     }
   })
   const now = new Date()
   const pending = (input.pending ?? []).slice(0, 40)
-  if (spec.provider === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending), model: spec.modelName }
+  if (spec.provider === "fake" && !deps.createModel) return { ...demoSegment(transcript, services, now, pending, diagnosisSystem.key), model: spec.modelName }
   // Con dictado en curso, lo nuevo va al final y separado de lo que solo da contexto.
   const context = (input.context ?? "").trim().slice(-600)
   const human =
@@ -300,7 +320,7 @@ export async function extractDictation(
     : model
   const today = new Intl.DateTimeFormat(zone.locale, { timeZone: zone.timezone, dateStyle: "full" }).format(now)
   const reply = await bound.invoke([
-    new SystemMessage({ content: systemPrompt({ services, today: `${today}, ${now.toISOString()}`, timezone: zone.timezone }) }),
+    new SystemMessage({ content: systemPrompt({ services, today: `${today}, ${now.toISOString()}`, timezone: zone.timezone, diagnosisList: diagnosisSystem.title }) }),
     new HumanMessage({ content: human }),
   ])
   reportReplyUse(spec.provider, spec.modelName, reply)

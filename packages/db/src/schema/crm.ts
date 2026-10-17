@@ -90,6 +90,12 @@ export const channelConnection = pgTable(
     accountExternalId: text("account_external_id"),
     /** Los pasos de «Conectar con Facebook» y cómo quedaron. Nulo: conexión hecha a mano. */
     signup: jsonb("signup").$type<ConnectionSignup>(),
+    /**
+     * Cuándo se leyeron por última vez sus plantillas en la cuenta del
+     * proveedor: la revisión diaria pone al día estados y categorías por si se
+     * perdió un aviso. Nulo: aún no se leyeron.
+     */
+    templatesSyncedAt: timestamp("templates_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -142,6 +148,12 @@ export const channelTemplate = pgTable(
     /** Cuándo la pidió odentIA; nulo si ya existía en la cuenta. */
     requestedAt: timestamp("requested_at", { withTimezone: true }),
     syncedAt: timestamp("synced_at", { withTimezone: true }),
+    /**
+     * Por qué odentIA no sabe enviarla: `encabezado` (lleva encabezado) o
+     * `datos_por_nombre` (sus datos van por nombre). Se muestra y no se ofrece.
+     * Nulo: se puede enviar.
+     */
+    unsupported: text("unsupported"),
     ...timestamps,
   },
   (table) => [
@@ -432,6 +444,9 @@ export const message = pgTable(
     // Botones de respuesta que acompañan al mensaje: `id` es lo que vuelve
     // cuando la persona toca uno. Nulo si no lleva.
     replyButtons: jsonb("reply_buttons").$type<{ id: string; title: string }[]>(),
+    // Enlace de baja de un correo automático (RFC 2369): el adaptador de correo
+    // lo envía como cabecera `List-Unsubscribe`. Nulo en lo demás.
+    listUnsubscribe: text("list_unsubscribe"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

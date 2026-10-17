@@ -514,6 +514,7 @@ export function AccountTab({
             key={collect.ticket.id}
             ticket={collect.ticket}
             remainingCents={collect.remainingCents}
+            receipt={collect.receipt ?? null}
             patientName={patientName}
             branchName={branchName}
             locale={locale}

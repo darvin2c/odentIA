@@ -45,8 +45,15 @@ beforeAll(async () => {
         on conflict ("id") do nothing`,
   )
   await ownerDb.execute(
-    sql`insert into "cie10_code" ("code", "description") values
-        ('I10', 'Hipertensión esencial'), ('K04.0', 'Pulpitis') on conflict ("code") do nothing`,
+    sql`with "release" as (
+      insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
+      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+    )
+    insert into "diagnosis_code" ("system_key", "code", "edition", "title", "is_dental", "search_text")
+    select 'ICD-10', v.code, 'prueba', v.title, v.code like 'K%', lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    from (values
+        ('I10', 'Hipertensión esencial'), ('K04.0', 'Pulpitis')) as v(code, title)
+    on conflict do nothing`,
   )
 })
 
@@ -56,7 +63,7 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
     expectedRevision: 0,
     reviewStatus: { allergies: "recorded", conditions: "recorded", medications: "recorded" },
     allergies: [{ substance: "Lidocaína", category: "anestesico", severity: "severa" }],
-    conditions: [{ name: "Hipertensión arterial", cie10Code: "i10", status: "activa" }],
+    conditions: [{ name: "Hipertensión arterial", diagnosisCode: "i10", status: "activa" }],
     medications: [{ name: "Cozaar 50 mg", genericName: "Losartán" }],
   }
   await run((tx) => savePatientHealth(tx, "org_a", ACTOR, patient.id, base))
@@ -64,7 +71,7 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
   expect(health.allergies).toEqual([
     expect.objectContaining({ substance: "Lidocaína", category: "anestesico", severity: "severa" }),
   ])
-  expect(health.conditions).toEqual([expect.objectContaining({ cie10Code: "I10" })])
+  expect(health.conditions).toEqual([expect.objectContaining({ diagnosisCode: "I10" })])
   expect(health.medications).toEqual([expect.objectContaining({ genericName: "Losartán" })])
 
   // Fuera de catálogo o código inexistente: se rechaza sin escribir nada.
@@ -82,7 +89,7 @@ it("antecedentes: categoría de alergia, CIE-10 de la condición y principio act
       savePatientHealth(tx, "org_a", ACTOR, patient.id, {
         ...base,
         expectedRevision: health.revision,
-        conditions: [{ name: "Otra", cie10Code: "ZZ99", status: "activa" }],
+        conditions: [{ name: "Otra", diagnosisCode: "ZZ99", status: "activa" }],
       }),
     ),
   ).rejects.toMatchObject({ status: 400 })
@@ -98,25 +105,25 @@ it("diagnóstico: entidad de la atención con tipo, pieza y catálogo; la nota n
   )
   const dx = await run((tx) =>
     addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, {
-      cie10Code: "K04.0",
-      diagnosisType: "presuntivo",
+      diagnosisCode: "K04.0",
+      diagnosisType: "provisional",
       toothNumber: 46,
       surfaces: ["occlusal"],
     }),
   )
   expect(dx).toMatchObject({
-    cie10Code: "K04.0",
-    diagnosisType: "presuntivo",
+    diagnosisCode: "K04.0",
+    diagnosisType: "provisional",
     toothNumber: 46,
     surfaces: ["occlusal"],
     status: "activo",
   })
   for (const bad of [
-    { cie10Code: "K04.0", diagnosisType: "probable" },
-    { cie10Code: "K04.0", diagnosisType: "definitivo", toothNumber: 99 },
-    { cie10Code: "Z99.9", diagnosisType: "definitivo" },
-    { cie10Code: "K04.0", diagnosisType: "definitivo", surfaces: ["occlusal"] },
-    { cie10Code: "K04.0", diagnosisType: "definitivo", toothNumber: 11, surfaces: ["occlusal"] },
+    { diagnosisCode: "K04.0", diagnosisType: "probable" },
+    { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 99 },
+    { diagnosisCode: "Z99.9", diagnosisType: "confirmed" },
+    { diagnosisCode: "K04.0", diagnosisType: "confirmed", surfaces: ["occlusal"] },
+    { diagnosisCode: "K04.0", diagnosisType: "confirmed", toothNumber: 11, surfaces: ["occlusal"] },
   ]) {
     await expect(
       run((tx) => addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, bad)),
@@ -143,8 +150,8 @@ it("diagnóstico: entidad de la atención con tipo, pieza y catálogo; la nota n
   )
   const kept = await run((tx) =>
     addEncounterDiagnosis(tx, "org_a", ACTOR, patient.id, draft.id, {
-      cie10Code: "K04.0",
-      diagnosisType: "definitivo",
+      diagnosisCode: "K04.0",
+      diagnosisType: "confirmed",
       toothNumber: 47,
     }),
   )
