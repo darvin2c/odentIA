@@ -29,12 +29,13 @@ interface ModelPrice {
  *   factura de OpenAI.
  * - text-embedding-3-small, whisper-1 y gpt-4o-mini-transcribe: precios de
  *   lista de OpenAI.
- * Jev no tiene fila mientras no se conozca su precio: sus llamadas quedan
- * sin costo.
+ * - jev-1.13.0 (modelo de decisión de toda clínica, ADR 0047): el de
+ *   docs.typesafe.ai/models, leído el 2026-10-17; la salida no se cobra.
  */
 export const AI_PRICES: Record<string, ModelPrice> = {
   "claude-haiku-5-5": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
   "gpt-6-luna": { input: 0.1, cachedInput: 0.01, output: 0.5 },
+  "jev-1.13.0": { input: 0.042, output: 0 },
   "text-embedding-3-small": { input: 0.02 },
   "whisper-1": { perMinute: 0.006 },
   "gpt-4o-mini-transcribe": { perMinute: 0.003 },

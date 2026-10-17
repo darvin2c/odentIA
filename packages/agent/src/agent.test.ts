@@ -44,6 +44,7 @@ import {
   listOpportunities,
   moveContactIdentity,
   nextPatientNumber,
+  noteSandboxTurn,
   secretsKeyFromEnv,
   setPatientContact,
   setProfessionalSchedule,
@@ -56,7 +57,8 @@ import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
-import { createFakeDecisionModel, type DecisionModel } from "./decision/index.js"
+import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
+import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
 import { type AgentRuntime, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
 import { compileAgentGraph } from "./graph.js"
@@ -669,6 +671,62 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
     expect(missing).toEqual([{ provider: "jev", error: expect.stringContaining("CONFIG") }])
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
+  }
+})
+
+it("toda clínica nace con Jev; sin su clave, o con la clave rechazada, la corrida sigue y odentIA recibe el caso de Soporte", async () => {
+  // Una clínica sin fila toma el valor del código; una fila que crea otra operación, el de la base.
+  await ownerDb.execute(sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_jev', 'Clínica Jev', 'jev', now())`)
+  expect((await withOrgContext(appDb, "org_jev", (tx) => getAgentConfig(tx, "org_jev"))).decisionProvider).toBe("jev")
+  await withOrgContext(appDb, "org_jev", (tx) => noteSandboxTurn(tx, "org_jev"))
+  expect((await withOrgContext(appDb, "org_jev", (tx) => getAgentConfig(tx, "org_jev"))).decisionProvider).toBe("jev")
+
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "jev" }))
+  // Un modelo que escribe de verdad (cuenta sintética) y el rol owner: así corre en producción.
+  const live = { ...runtime, ownerDb, platform: { openai: { apiKey: "clave-sintetica" } } }
+  const casesOf = (code: string) =>
+    ownerDb
+      .select({ id: supportCase.id, question: supportCase.question, organizationId: supportCase.organizationId })
+      .from(supportCase)
+      .where(eq(supportCase.dedupeKey, `modelo-sin-responder:jev:${code}`))
+  try {
+    // Sin JEV_API_KEY: responde el modelo que escribe, como sin modelo de decisión.
+    for (const n of [1, 2]) {
+      const { conversationId, messageId } = await ingestText(`tg:ag-jev-sin-clave-${n}`, `evt-ag-jev-sin-clave-${n}`, "¿Venden zapatillas?")
+      const model = new ScriptedModel(() => toolCall("send_reply", { text: "Solo atendemos temas de la clínica." }, "call-1"))
+      expect(await processAgentRun(appDb, { ...live, createModel: async () => model }, {
+        msg_id: n,
+        read_ct: 0,
+        message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+      })).toBe("done")
+      expect(await ledgerRows(conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
+    }
+    // Un solo caso, sin clínica (ninguna lo ve), y la clínica anotada una sola vez aunque corrió dos veces.
+    const missing = await casesOf("DECISION_KEY_MISSING")
+    expect(missing).toEqual([{ id: expect.any(String), question: "Modelo sin responder · Clínica", organizationId: null }])
+    const lines = await ownerDb.select({ body: supportMessage.body }).from(supportMessage).where(eq(supportMessage.caseId, missing[0]!.id))
+    expect(lines).toEqual([{ body: expect.stringContaining("Jev (modelo de decisión) no responde desde") }])
+    expect(lines[0]!.body).toContain("JEV_API_KEY")
+
+    // Clave rechazada al llamar: el turno sigue por el camino abierto y el caso tiene su propio motivo.
+    const rejected: DecisionModel = {
+      provider: "jev",
+      reportsProbabilities: true,
+      decide: async () => {
+        throw new DecisionError("CONFIG", "Jev respondió HTTP 401", 401)
+      },
+    }
+    const { conversationId, messageId } = await ingestText("tg:ag-jev-rechazada", "evt-ag-jev-rechazada", "Hola")
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, ¿en qué te ayudo?" }, "call-1"))
+    expect(await processAgentRun(appDb, { ...live, createModel: async () => model, createDecisionModel: () => rejected }, {
+      msg_id: 3,
+      read_ct: 0,
+      message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
+    })).toBe("done")
+    expect(await agentMessages(conversationId)).toEqual(["Hola, ¿en qué te ayudo?"])
+    expect(await casesOf("DECISION_REJECTED")).toEqual([expect.objectContaining({ organizationId: null })])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
 })
 

@@ -11,7 +11,7 @@ export interface AgentConfig {
   /** Modelo que escribe, uno de `AGENT_LLMS`; la cuenta del proveedor es de odentIA. */
   llm: AgentLlm
   dailyRunLimit: number
-  /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
+  /** Modelo de decisión: none | baseline | jev | openai_decisions. Toda clínica nace con Jev (ADR 0047). */
   decisionProvider: DecisionProvider
   handoffKeywords: string[]
   maxTurns: number
@@ -77,7 +77,9 @@ const DEFAULTS = {
   enabled: false,
   llm: DEFAULT_AGENT_LLM,
   dailyRunLimit: 500,
-  decisionProvider: "none" as DecisionProvider,
+  // Jev elige el camino de cada mensaje: lo ajeno sale con el texto fijo y no se cobra (ADR 0047).
+  // La columna de la base nace con el mismo valor: cambian juntos.
+  decisionProvider: "jev" as DecisionProvider,
   handoffKeywords: [] as string[],
   maxTurns: 10,
   replyCheckEnabled: true,
@@ -308,7 +310,7 @@ export async function upsertAgentConfig(
   if (patch.dailyRunLimit !== undefined && patch.dailyRunLimit !== (current?.dailyRunLimit ?? DEFAULTS.dailyRunLimit)) {
     changed.push("dailyRunLimit")
   }
-  if (patch.decisionProvider !== undefined && patch.decisionProvider !== (current?.decisionProvider ?? "none")) {
+  if (patch.decisionProvider !== undefined && patch.decisionProvider !== (current?.decisionProvider ?? DEFAULTS.decisionProvider)) {
     changed.push("decisionProvider")
   }
   if (

@@ -79,7 +79,7 @@ const envSchema = z.object({
   OPENAI_DECISIONS_API_KEY: z.string().optional().default(""),
   OPENAI_DECISIONS_BASE_URL: z.string().url().optional(),
   OPENAI_DECISIONS_MODEL: z.string().optional().default("gpt-6-luna"),
-  DECISIONS_TIMEOUT_MS: z.coerce.number().int().min(500).max(20_000).default(5_000),
+  DECISIONS_TIMEOUT_MS: z.coerce.number().int().min(500).max(20_000).default(2_000),
   /**
    * Búsqueda por significado del agente (ADR 0021): proveedor de vectores de la
    * plataforma, compatible con OpenAI. `fake`: vectores por letras, sin red.

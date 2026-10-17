@@ -182,27 +182,31 @@ it("el plazo cubre también la lectura del cuerpo: un proveedor que no termina l
   }
 })
 
-/** LLM guionizado que devuelve JSON fijo. */
+/** LLM guionizado que devuelve JSON fijo y guarda lo que recibió. */
 class JsonModel extends BaseChatModel {
+  readonly seen: BaseMessage[][] = []
   constructor(private readonly json: string) {
     super({})
   }
   _llmType(): string {
     return "json-chat"
   }
-  async _generate(_messages: BaseMessage[]): Promise<ChatResult> {
+  async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+    this.seen.push(messages)
     const message = new AIMessage({ content: this.json })
     return { generations: [{ text: this.json, message }] }
   }
 }
 
 it("la línea base responde sin probabilidades y descarta valores fuera de las opciones", async () => {
-  const baseline = createBaselineDecisionModel(
-    new JsonModel('{"requires_reply": true, "handoff": false, "urgency": 1, "intent": "price_or_service_info", "unsubscribe": "no"}'),
-    "modelo-prueba",
-  )
+  const chat = new JsonModel('{"requires_reply": true, "handoff": false, "urgency": 1, "intent": "price_or_service_info", "unsubscribe": "no"}')
+  const baseline = createBaselineDecisionModel(chat, "modelo-prueba")
   expect(baseline.reportsProbabilities).toBe(false)
   const result = await baseline.decide("Contact (latest): ¿cuánto cuesta una limpieza?", TRIAGE_QUESTIONS)
+  // Recibe los mismos criterios de sí o no que Jev: cuando la respalda, decide con la misma regla.
+  const system = String(chat.seen[0]?.[0]?.content ?? "")
+  expect(system).toContain("True: The contact asks something, requests something or expects an answer.")
+  expect(system).toContain("False: A closing, thanks or acknowledgement that needs no reply.")
   expect(answerOf(result, "requires_reply", "yesno")?.probability).toBe(1)
   expect(answerOf(result, "intent", "choice")).toMatchObject({ choice: "price_or_service_info", probabilities: null, confidence: null })
   expect(answerOf(result, "urgency", "score")?.score).toBe(1)

@@ -71,7 +71,7 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await fixtureDb.insert(aiUsage).values([
     { organizationId: org.id, origin: "recepcion", provider: "anthropic", model: "claude-haiku-5-5", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
     { organizationId: org.id, origin: "dictado", provider: "openai", model: "gpt-6-luna", calls: 3, inputTokens: 6_000, outputTokens: 900, costMicros: 1_050 },
-    { organizationId: org.id, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: null },
+    { organizationId: org.id, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: 50 },
   ])
 
   // Plan y pagos: lo que hicieron los agentes con el precio base y el propio.

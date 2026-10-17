@@ -18,8 +18,11 @@ import { DecisionError, type DecisionModel, type DecisionQuestion } from "./deci
  * 2. El modelo de decisión de la clínica, si tiene uno, responde una sola
  *    pregunta de sí o no sobre ese servicio. No se le pide elegir entre todos
  *    los servicios: los modelos de decisión tienden a la primera opción y se
- *    confunden con listas largas. Sin modelo de decisión vale una regla
- *    simple: preguntó el precio o la disponibilidad.
+ *    confunden con listas largas. Si no se pudo preparar o falla, la misma
+ *    pregunta va una vez al modelo que escribe (línea base): una regla por
+ *    palabras solo entiende español y deja pasar «quiero ponerme brackets».
+ *    Sin modelo de decisión vale una regla simple: preguntó el precio o la
+ *    disponibilidad.
  * 3. El sistema crea o actualiza la oportunidad (`noteServiceInterest`).
  */
 export const INTEREST_VERSION = "interest.v1"
@@ -53,12 +56,18 @@ export interface AskedInterestInput {
   triggerMessageId: string | null
   /** Lo que escribió la persona en esta ráfaga, junto. */
   said: string
+  /** Null si la clínica no tiene modelo de decisión o si no se pudo preparar. */
   decision: DecisionModel | null
+  /**
+   * El modelo que escribe respondiendo la misma pregunta. Solo con un modelo
+   * de decisión elegido, y se arma solo si este no respondió.
+   */
+  fallback?: () => Promise<DecisionModel | null>
 }
 
 /**
  * Anota el interés de quien preguntó por un servicio concreto. Nunca corta la
- * corrida: un fallo del modelo de decisión equivale a no anotar nada.
+ * corrida: si ningún modelo responde, no se anota nada.
  */
 export async function noteAskedInterest(
   db: Db,
@@ -76,52 +85,64 @@ export async function noteAskedInterest(
   )
   if (!service) return { outcome: "sin_servicio", serviceId: null }
   let interested: boolean
-  if (input.decision) {
+  if (input.decision || input.fallback) {
     const state = interestState(said, service.name)
-    const record = (fields: {
-      answers: unknown[]
-      error?: string
-      outcome?: Record<string, unknown>
-      model?: string
-      latencyMs?: number
-      inputTokens?: number | null
-      outputTokens?: number | null
-    }) =>
-      withOrgContext(db, orgId, (tx) =>
-        recordAgentDecision(tx, orgId, {
-          conversationId: input.conversationId,
-          triggerMessageId: input.triggerMessageId,
-          point: INTEREST_VERSION,
-          // Decide algo de la corrida (anotar o no): no es una sombra.
-          mode: "route",
-          provider: input.decision?.provider ?? "desconocido",
-          state,
-          ...fields,
-        }),
-      ).catch(() => undefined)
-    try {
-      const result = await input.decision.decide(state, [INTEREST_QUESTION])
-      const answer = result.answers.find((item) => item.id === INTEREST_QUESTION.id)
-      const probability = answer?.kind === "yesno" ? answer.probability : null
-      interested = probability !== null && probability >= INTEREST_MIN
-      await record({
-        answers: result.answers,
-        outcome: { serviceId: service.id, probability, noted: interested },
-        model: result.model,
-        latencyMs: result.latencyMs,
-        inputTokens: result.usage?.inputTokens ?? null,
-        outputTokens: result.usage?.outputTokens ?? null,
-      })
-    } catch (error) {
-      await record({
-        answers: [],
-        error:
-          error instanceof DecisionError
-            ? `${error.code}: ${error.message}`
-            : "fallo inesperado del modelo de decisión",
-      })
-      return { outcome: "sin_interes", serviceId: service.id }
+    // Cada modelo que responde, o falla, deja su fila en el libro con su proveedor.
+    const ask = async (model: DecisionModel): Promise<boolean | null> => {
+      const record = (fields: {
+        answers: unknown[]
+        error?: string
+        outcome?: Record<string, unknown>
+        model?: string
+        latencyMs?: number
+        inputTokens?: number | null
+        outputTokens?: number | null
+      }) =>
+        withOrgContext(db, orgId, (tx) =>
+          recordAgentDecision(tx, orgId, {
+            conversationId: input.conversationId,
+            triggerMessageId: input.triggerMessageId,
+            point: INTEREST_VERSION,
+            // Decide algo de la corrida (anotar o no): no es una sombra.
+            mode: "route",
+            provider: model.provider,
+            state,
+            ...fields,
+          }),
+        ).catch(() => undefined)
+      try {
+        const result = await model.decide(state, [INTEREST_QUESTION])
+        const answer = result.answers.find((item) => item.id === INTEREST_QUESTION.id)
+        const probability = answer?.kind === "yesno" ? answer.probability : null
+        const yes = probability !== null && probability >= INTEREST_MIN
+        await record({
+          answers: result.answers,
+          outcome: { serviceId: service.id, probability, noted: yes },
+          model: result.model,
+          latencyMs: result.latencyMs,
+          inputTokens: result.usage?.inputTokens ?? null,
+          outputTokens: result.usage?.outputTokens ?? null,
+        })
+        return yes
+      } catch (error) {
+        await record({
+          answers: [],
+          error:
+            error instanceof DecisionError
+              ? `${error.code}: ${error.message}`
+              : "fallo inesperado del modelo de decisión",
+        })
+        return null
+      }
     }
+    // Una vez cada uno: nunca se reintenta el mismo modelo.
+    let answer = input.decision ? await ask(input.decision) : null
+    if (answer === null && input.fallback) {
+      const backup = await input.fallback().catch(() => null)
+      if (backup) answer = await ask(backup)
+    }
+    if (answer === null) return { outcome: "sin_interes", serviceId: service.id }
+    interested = answer
   } else {
     interested = asksPriceOrAvailability(said)
   }

@@ -607,8 +607,12 @@ export const agentConfig = pgTable(
     llm: text("llm").notNull().default("chatgpt_6"),
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
-    /** Modelo de decisión (none | baseline | jev | openai_decisions). */
-    decisionProvider: text("decision_provider").notNull().default("none"),
+    /**
+     * Modelo de decisión (none | baseline | jev | openai_decisions). Toda
+     * clínica nace con Jev (ADR 0047), también la fila que crea otra
+     * operación sin decir el proveedor (Administrador, horario para escribir).
+     */
+    decisionProvider: text("decision_provider").notNull().default("jev"),
     /**
      * Con modelo de decisión: elige el camino del turno antes de llamar al
      * modelo que escribe. Apagado, el modelo de decisión solo elige

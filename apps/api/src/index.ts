@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server"
-import { embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
+import { decisionKeyStartProblem, embedderFromEnv, platformLlmFromEnv } from "@odentia/agent"
 import { createAuth } from "@odentia/auth"
 import { configureMetaGraphVersion } from "@odentia/channels"
 import { createAppDb, createOwnerDb } from "@odentia/db"
@@ -14,6 +14,9 @@ configureMetaGraphVersion(env.META_GRAPH_VERSION)
 const db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
 const secretsKey = secretsKeyFromEnv(env.SECRETS_KEY)
+// Sin la clave de Jev el agente sigue, pero lo ajeno se cobra: que se vea en el registro (ADR 0047).
+const decisionKeyProblem = decisionKeyStartProblem(env)
+if (decisionKeyProblem) console.error(`api: ${decisionKeyProblem}`)
 const mailer = createMailer({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,

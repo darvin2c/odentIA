@@ -34,6 +34,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { createFakeDecisionModel } from "./decision/fake.js"
+import { DecisionError, type DecisionModel } from "./decision/port.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
 import { type AgentToolCtx, makeAgentTools } from "./tools.js"
 
@@ -138,7 +139,7 @@ async function turn(
   thread: string,
   eventId: string,
   text: string,
-  withDecision = false,
+  decisions: boolean | AgentRuntime["createDecisionModel"] = false,
 ) {
   const { conversationId, messageId } = await ingest(thread, eventId, text)
   const verdict = await processAgentRun(
@@ -146,7 +147,9 @@ async function turn(
     {
       ...runtime,
       createModel: async () => model,
-      ...(withDecision ? { createDecisionModel: () => createFakeDecisionModel() } : {}),
+      ...(decisions
+        ? { createDecisionModel: typeof decisions === "function" ? decisions : () => createFakeDecisionModel() }
+        : {}),
     },
     {
       msg_id: 1,
@@ -350,6 +353,7 @@ describe("la oportunidad la anota el sistema (decisión 15)", () => {
   }
 
   it("sin modelo de decisión: preguntar el precio de un servicio identificado la crea una vez, sin duplicar", async () => {
+    await config({ decisionProvider: "none" })
     const model = () => new ScriptedModel(() => say("El blanqueamiento dental cuesta S/ 600.00."))
     const conversationId = await turn(
       model(),
@@ -418,6 +422,70 @@ describe("la oportunidad la anota el sistema (decisión 15)", () => {
         true,
       )
       expect(await openOf(collector)).toEqual([])
+    } finally {
+      await config({ decisionProvider: "none" })
+    }
+  })
+
+  it("si Jev no se pudo preparar o falla, la misma pregunta la responde el modelo que escribe", async () => {
+    await config({ decisionProvider: "jev" })
+    const interestRows = (conversationId: string) =>
+      ownerDb
+        .select({
+          provider: agentDecisionLog.provider,
+          error: agentDecisionLog.error,
+          outcome: agentDecisionLog.outcome,
+        })
+        .from(agentDecisionLog)
+        .where(
+          and(
+            eq(agentDecisionLog.conversationId, conversationId),
+            eq(agentDecisionLog.point, "interest.v1"),
+          ),
+        )
+    // «Quiero hacerme…» no tiene ninguna palabra de la regla por precio o disponibilidad.
+    const said = "Quiero hacerme una limpieza dental"
+    try {
+      // Sin clave: Jev no se arma y responde solo el modelo que escribe.
+      const missing = await turn(
+        new ScriptedModel(() => say("Con gusto te ayudo con la limpieza dental.")),
+        "tg:interes-sin-jev",
+        "interes-r1",
+        said,
+        (provider) => {
+          if (provider === "baseline") return createFakeDecisionModel()
+          throw new DecisionError("CONFIG", "La plataforma no tiene credenciales de Jev (JEV_API_KEY)")
+        },
+      )
+      expect((await openOf(missing)).map((row) => row.title)).toEqual(["Limpieza dental"])
+      expect(await interestRows(missing)).toEqual([
+        expect.objectContaining({ provider: "fake", error: null, outcome: expect.objectContaining({ noted: true }) }),
+      ])
+
+      // Jev falla en la llamada: queda su error y la respuesta del modelo que escribe.
+      const failing: DecisionModel = {
+        provider: "jev",
+        reportsProbabilities: true,
+        decide: async () => {
+          throw new DecisionError("PROVIDER", "Jev no respondió a tiempo")
+        },
+      }
+      const failed = await turn(
+        new ScriptedModel(() => say("Con gusto te ayudo con la limpieza dental.")),
+        "tg:interes-jev-falla",
+        "interes-r2",
+        said,
+        (provider) => (provider === "baseline" ? createFakeDecisionModel() : failing),
+      )
+      expect((await openOf(failed)).map((row) => row.title)).toEqual(["Limpieza dental"])
+      const rows = await interestRows(failed)
+      expect(rows).toHaveLength(2)
+      expect(rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ provider: "jev", error: "PROVIDER: Jev no respondió a tiempo" }),
+          expect.objectContaining({ provider: "fake", error: null, outcome: expect.objectContaining({ noted: true }) }),
+        ]),
+      )
     } finally {
       await config({ decisionProvider: "none" })
     }
