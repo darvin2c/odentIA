@@ -24,6 +24,7 @@ import { useEffect, useId, useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { formatDate, formatDateTime } from "../../lib/clinical-journey"
 import { timeAgo, usePermission } from "../../lib/crm"
+import { isImageCategory } from "../../lib/document-list"
 import type {
   Encounter,
   PatientDocument,
@@ -255,8 +256,10 @@ export function DocumentViewerHost({
             encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
             canEdit={canWrite && !doc.retiredAt}
             onEditContext={() => setEditing(true)}
+            // Se compara con radiografías y fotos, no con la hoja escaneada de un consentimiento.
             compareCandidates={allDocs.filter(
-              (d) => d.id !== doc.id && !d.retiredAt && isImageDoc(d),
+              (d) =>
+                d.id !== doc.id && !d.retiredAt && isImageDoc(d) && isImageCategory(d.category),
             )}
             onChanged={onChanged}
             onRetired={async () => {
