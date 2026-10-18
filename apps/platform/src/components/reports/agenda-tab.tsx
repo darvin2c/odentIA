@@ -25,11 +25,10 @@ import {
 import { MonthBars } from "./month-bars"
 import { type BarRow, BarRows, type Better, ChangeLine, ReportCard, StackDot, StackedBar, type StackPart, WHOLE_CLINIC } from "./report-parts"
 
-/** Quién creó la cita. `agent` y `agente` son el mismo origen escrito de dos formas. */
+/** Quién creó la cita. */
 const SOURCE_LABELS: Record<string, string> = {
   recepcion: "Recepción",
   manual: "Recepción",
-  agente: "El agente",
   agent: "El agente",
   enlace: "Enlace de reserva",
   portal: "Portal del paciente",

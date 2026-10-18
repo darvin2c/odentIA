@@ -287,11 +287,15 @@ async function budgetTotals(tx: Db, orgId: string, span: ReportSpan): Promise<Bu
   return [...byCurrency.values()]
 }
 
-/** Tratamientos de atenciones cerradas en el tramo, a su precio, sin los anulados. */
+/**
+ * Tratamientos de atenciones cerradas en el tramo, a su precio, sin los
+ * anulados. Un acto con cantidad (3 sellantes) cuenta sus unidades y vale
+ * precio × cantidad, como su cargo.
+ */
 async function procedureTotals(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan) {
   const rows = await tx.execute<{ name: string; currency: string | null; count: number; cents: string }>(sql`
-    select coalesce(s.name, p.description) as name, p.currency, count(*)::int as count,
-      coalesce(sum(p.price_cents), 0)::text as cents
+    select coalesce(s.name, p.description) as name, p.currency, sum(p.quantity)::int as count,
+      coalesce(sum(p.price_cents::bigint * p.quantity), 0)::text as cents
     from encounter_procedure p
     join encounter e on e.id=p.encounter_id and e.organization_id=${orgId}
     left join service_catalog s on s.id=p.service_id and s.organization_id=${orgId}

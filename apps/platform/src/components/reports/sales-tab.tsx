@@ -188,15 +188,16 @@ export function SalesTab({ query, onOpenList, advice }: { query: ReportQuery; on
                     <TableBody>
                       {visible.map((row) => (
                         <TableRow key={row.name}>
-                          <TableCell>{row.name}</TableCell>
+                          {/* El nombre se parte en líneas: un tratamiento largo no saca la tabla de su tarjeta. */}
+                          <TableCell className="whitespace-normal break-words">{row.name}</TableCell>
                           <TableCell className="text-right tabular-nums">{row.count}</TableCell>
                           <TableCell className="text-right font-semibold tabular-nums">{amount(row.cents)}</TableCell>
                         </TableRow>
                       ))}
                       {!allProcedures && rest.length > 0 ? (
                         <TableRow>
-                          <TableCell>
-                            <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-8" onClick={() => setAllProcedures(true)}>
+                          <TableCell className="whitespace-normal">
+                            <Button type="button" variant="link" className="h-auto min-h-11 p-0 whitespace-normal sm:min-h-8" onClick={() => setAllProcedures(true)}>
                               {rest.length === 1 ? "Otro tratamiento" : `Otros ${rest.length} tratamientos`}
                             </Button>
                           </TableCell>

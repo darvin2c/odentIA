@@ -21,6 +21,15 @@
     --color-chart-3: var(--chart-3);
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
+    --color-series-1: var(--series-1);
+    --color-series-2: var(--series-2);
+    --color-series-3: var(--series-3);
+    --color-series-muted: var(--series-muted);
+    --color-scale-0: var(--scale-0);
+    --color-scale-1: var(--scale-1);
+    --color-scale-2: var(--scale-2);
+    --color-scale-3: var(--scale-3);
+    --color-scale-4: var(--scale-4);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
@@ -138,6 +147,23 @@
     --warning-soft: #fdf3df;
     --info: var(--primary-soft-foreground);
     --info-soft: var(--primary-soft);
+
+    /* Datos: fijos en cualquier tema de color, como la notación clínica.
+     * Tres series que se distinguen con daltonismo (simulación de Machado 2009:
+     * ΔE2000 ≥ 13 entre pares en protanopía, deuteranopía y tritanopía; 3:1
+     * contra la tarjeta) y una escala de cuatro pasos con su vacío, de
+     * luminosidad creciente (ΔL* ≥ 9 entre pasos, también simulada). Más de
+     * tres categorías no se colorean: van en filas con su nombre. */
+    --series-1: #0891b2;
+    --series-2: #eb6834;
+    --series-3: #6250d6;
+    /* La comparación (un año antes, el periodo anterior) va en gris. */
+    --series-muted: #94a3b8;
+    --scale-0: #e6f4f8;
+    --scale-1: #acdbe9;
+    --scale-2: #74c4dc;
+    --scale-3: #3aa9c6;
+    --scale-4: #0e7490;
 }
 
 .dark {
@@ -189,6 +215,17 @@
     --success-soft: #0f3323;
     --warning: #fbbf24;
     --warning-soft: #3a2a0b;
+
+    /* Datos en oscuro: las mismas reglas contra la tarjeta oscura; en la escala, más es más claro. */
+    --series-1: #5fd3ea;
+    --series-2: #f08a5d;
+    --series-3: #8b78f2;
+    --series-muted: #64748b;
+    --scale-0: #1c2c38;
+    --scale-1: #174e5c;
+    --scale-2: #1d7a8f;
+    --scale-3: #3aa9c6;
+    --scale-4: #8ad8e6;
 }
 
 @layer base {
@@ -253,15 +290,16 @@
 }
 
 /* Puente de paleta para `@tanstack/charts`: el tema por defecto de la
- * librería pinta con `var(--ts-chart-1..6)`; aquí derivan de `--chart-1..5`
- * del tema, así el modo oscuro funciona sin lógica extra. */
+ * librería pinta con `var(--ts-chart-1..6)`; aquí derivan de las series de
+ * datos, así el modo oscuro funciona sin lógica extra. De la cuarta en
+ * adelante, gris: más de tres colores no se distinguen con daltonismo. */
 .ts-chart-host {
-  --ts-chart-1: var(--chart-1);
-  --ts-chart-2: var(--chart-2);
-  --ts-chart-3: var(--chart-3);
-  --ts-chart-4: var(--chart-4);
-  --ts-chart-5: var(--chart-5);
-  --ts-chart-6: var(--chart-3);
+  --ts-chart-1: var(--series-1);
+  --ts-chart-2: var(--series-2);
+  --ts-chart-3: var(--series-3);
+  --ts-chart-4: var(--series-muted);
+  --ts-chart-5: var(--series-muted);
+  --ts-chart-6: var(--series-muted);
 }
 
 /* Loading B: el isotipo no gira; solo se iluminan sus trazados. */
