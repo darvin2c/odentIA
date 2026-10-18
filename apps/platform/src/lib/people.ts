@@ -1,3 +1,4 @@
+import type { ContactScreenView } from "./crm"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
 import type { PhoneWhatsApp } from "./phone-whatsapp"
@@ -63,6 +64,8 @@ export interface PersonPage {
   phoneWhatsApp: PhoneWhatsApp
   email: string | null
   archived: boolean
+  /** Spam o bloqueada (ADR 0054); nulo si no la ve quien mira. Ausente en respuestas antiguas en caché. */
+  screen?: ContactScreenView | null
   createdAt: string
   kind: PersonKind
   patient: {
@@ -83,6 +86,8 @@ export interface PersonListItem {
   displayName: string
   kind: PersonKind
   archived: boolean
+  /** En Spam o bloqueada (ADR 0054); solo llega a quien lee conversaciones. */
+  screen?: "spam" | "blocked" | null
   patient: { id: string; patientNumber: number } | null
   docType: string | null
   docNumber: string | null

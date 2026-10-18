@@ -1081,7 +1081,7 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
   expect((await app.request("/conversations?status=archivada")).status).toBe(400)
   expect((await app.request("/conversations?view=awaiting_patient")).status).toBe(200)
   const summary = (await (await app.request("/conversations/summary")).json()) as { data: Record<string, number> }
-  expect(Object.keys(summary.data).sort()).toEqual(["agent", "attend", "awaitingPatient", "closed", "open"])
+  expect(Object.keys(summary.data).sort()).toEqual(["agent", "attend", "awaitingPatient", "closed", "open", "spam"])
 
   const ingested = await withOrgContext(appDb, "org_a", (tx) =>
     ingestInbound(
@@ -1166,4 +1166,58 @@ it("«Horario para escribir», «Esperan su sí» y «Lo que el agente debe sabe
   expect(added.status).toBe(201)
   const listed = (await (await owner.request("/agent/learning/guidance?source=escrita")).json()) as { data: { items: Array<{ body: string; source: string }> } }
   expect(listed.data.items).toEqual([expect.objectContaining({ body: "No ofrezcas descuentos.", source: "escrita" })])
+})
+
+it("Spam y Bloquear: «Es spam» lo usa quien escribe en conversaciones; bloquear, solo quien maneja contactos, y nunca a un paciente (ADR 0054)", async () => {
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u-1', 'Dueña', 'u-1@crm.test', true) on conflict do nothing`)
+  const deps: IngestDeps = { storage: storageStub, fetch, secretsKey: KEY }
+  const ingested = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: waConnId,
+        event: {
+          externalEventId: "wamid.spam-api",
+          externalMessageId: "wamid.spam-api",
+          externalThreadId: "wa:51900",
+          senderExternalId: "wa:51900",
+          senderDisplayName: "Kevin",
+          content: { type: "text", text: "Esto no se queda así" },
+          sentAt: new Date().toISOString(),
+        },
+      },
+      telegramBotApiAdapter,
+      deps,
+    ),
+  )
+  const id = ingested.conversationId
+  const json = { "content-type": "application/json" }
+  const block = (role: string, body: unknown) =>
+    buildApp(role).request(`/conversations/${id}/block`, { method: "POST", headers: json, body: JSON.stringify(body) })
+
+  // Odontología escribe en conversaciones pero no maneja contactos: no bloquea. Caja ni eso.
+  expect((await block("dentist", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(403)
+  expect((await block("cashier", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(403)
+  expect((await block("reception", { reason: "amenazas", note: "" })).status).toBe(400)
+  expect((await block("reception", { reason: "amenazas", note: "Amenazó a recepción" })).status).toBe(200)
+  const detail = (await (await buildApp("reception").request(`/conversations/${id}`)).json()) as {
+    data: { screen: { screen: string; reason: string; byName: string; note: string } }
+  }
+  expect(detail.data.screen).toMatchObject({ screen: "blocked", reason: "amenazas", byName: "Dueña", note: "Amenazó a recepción" })
+  // A un bloqueado nadie le escribe.
+  const write = await buildApp("reception").request(`/conversations/${id}/messages`, { method: "POST", headers: json, body: JSON.stringify({ text: "Hola" }) })
+  expect(write.status).toBe(409)
+  expect((await buildApp("dentist").request(`/conversations/${id}/unblock`, { method: "POST" })).status).toBe(403)
+  expect((await buildApp("reception").request(`/conversations/${id}/unblock`, { method: "POST" })).status).toBe(200)
+
+  // «Es spam»: quien escribe en conversaciones; «No es spam» la devuelve.
+  expect((await buildApp("cashier").request(`/conversations/${id}/spam`, { method: "POST" })).status).toBe(403)
+  expect((await buildApp("dentist").request(`/conversations/${id}/spam`, { method: "POST" })).status).toBe(200)
+  const listed = (await (await buildApp("reception").request("/conversations?view=spam")).json()) as { data: Array<{ id: string }> }
+  expect(listed.data.map((item) => item.id)).toContain(id)
+  const back = (await (await buildApp("reception").request(`/conversations/${id}/not-spam`, { method: "POST" })).json()) as {
+    data: { agentReplies: boolean; topic: boolean }
+  }
+  expect(back.data).toEqual({ agentReplies: false, topic: false })
 })

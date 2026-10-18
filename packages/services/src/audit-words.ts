@@ -328,6 +328,13 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "contact.reactivated": say("Reactivó un contacto"),
   "contact.identity_added": say("Añadió un canal a un contacto"),
   "contact.identity_moved": say("Pasó un canal de un contacto a otro"),
+  // Spam y bloqueados (ADR 0054): sin persona del equipo lo decidió el agente.
+  "contact.spam_marked": say("Mandó a una persona a Spam", "agente"),
+  "contact.not_spam": say("Sacó a una persona de Spam"),
+  "contact.spam_left": say("Una persona salió de Spam al escribir algo para la clínica", "agente"),
+  "contact.spam_left_patient": say("Sacó a una persona de Spam al registrarla como paciente"),
+  "contact.blocked": say("Bloqueó a una persona"),
+  "contact.unblocked": say("Desbloqueó a una persona"),
   "opportunity.created": say("Creó una oportunidad"),
   "opportunity.updated": say("Cambió una oportunidad"),
   "opportunity.moved": say("Movió una oportunidad de etapa"),

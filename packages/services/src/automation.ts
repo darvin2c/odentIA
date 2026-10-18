@@ -3030,7 +3030,7 @@ async function stopByWord(
   tx: Db,
   orgId: string,
   input: { conversationId: string; contactId: string },
-  deps: { secretsKey?: Buffer },
+  deps: { secretsKey?: Buffer; silent?: boolean },
 ): Promise<void> {
   const [last] = await tx
     .select({ kind: automationJob.kind, patientId: automationJob.patientId })
@@ -3055,6 +3055,8 @@ async function stopByWord(
     purposes,
     conversationId: input.conversationId,
   })
+  // A quien está en Spam o bloqueado no se le responde (ADR 0054): la baja queda igual.
+  if (deps.silent) return
   await sendOutbound(tx, orgId, {
     conversationId: input.conversationId,
     senderKind: "agent",
@@ -3083,8 +3085,12 @@ export async function handleAutomationReply(
   tx: Db,
   orgId: string,
   input: { conversationId: string; replyId: string | null | undefined; text?: string | null },
-  /** `storage`, para «Ver y responder» de «Presupuesto listo»; `secretsKey`, para el enlace de «Tus mensajes». */
-  deps?: { storage: Storage; secretsKey?: Buffer },
+  /**
+   * `storage`, para «Ver y responder» de «Presupuesto listo»; `secretsKey`, para
+   * el enlace de «Tus mensajes»; `silent`, anota la baja sin responder (Spam y
+   * bloqueados, ADR 0054).
+   */
+  deps?: { storage: Storage; secretsKey?: Buffer; silent?: boolean },
 ): Promise<boolean> {
   const reply = parseReplyId(input.replyId)
   if (!reply && isStopWord(input.text)) {
@@ -3098,7 +3104,7 @@ export async function handleAutomationReply(
       tx,
       orgId,
       { conversationId: input.conversationId, contactId: writer.contactId },
-      deps?.secretsKey ? { secretsKey: deps.secretsKey } : {},
+      { ...(deps?.secretsKey ? { secretsKey: deps.secretsKey } : {}), ...(deps?.silent ? { silent: true } : {}) },
     )
     return true
   }

@@ -286,21 +286,25 @@ export interface InboxSummary {
   awaitingPatient: number
   /** Cerradas. */
   closed: number
+  /** En Spam, de los últimos 30 días: el número junto a «Spam» (ADR 0054). Bloqueados no lleva número. */
+  spam: number
 }
 
 /**
  * Totales de las pestañas de la Bandeja con los mismos filtros que la lista,
  * salvo el estado: cada pestaña ya dice si cuenta abiertas o cerradas. Las
- * vistas no se superponen: `attend + agent + awaitingPatient = open`.
+ * vistas no se superponen: `attend + agent + awaitingPatient = open`; Spam y
+ * bloqueados no entran en ninguna.
  */
 export async function summarizeInbox(tx: Db, orgId: string, input: ConversationFilters): Promise<InboxSummary> {
   const { status: _status, ...filters } = input
-  const totals = await countConversationViews(tx, orgId, filters, ["attend", "agent", "awaiting_patient", "closed"])
+  const totals = await countConversationViews(tx, orgId, filters, ["attend", "agent", "awaiting_patient", "closed", "spam"])
   return {
-    open: totals.all - totals.closed,
+    open: totals.attend + totals.agent + totals.awaiting_patient,
     attend: totals.attend,
     agent: totals.agent,
     awaitingPatient: totals.awaiting_patient,
     closed: totals.closed,
+    spam: totals.spam,
   }
 }

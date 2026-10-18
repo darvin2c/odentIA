@@ -11,6 +11,8 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   handleAutomationReply,
   ingestInbound,
+  isStopWord,
+  screenInbound,
   ServiceError,
   type Storage,
   type TranscribeFn,
@@ -81,12 +83,37 @@ export async function processInbound(
         ...(deps.transcribe ? { transcribe: deps.transcribe } : {}),
       })
       if (!result.created) return
+      // Spam y bloqueados (ADR 0054): lo que escriben queda guardado, pero el
+      // agente no lo atiende y el sistema no les responde. A quien está en
+      // Spam se lo vuelve a mirar solo si escribió algo nuevo (decisión 9a);
+      // el mismo texto muchas veces manda a Spam a quien puede ir solo.
+      const screen = await screenInbound(tx, orgId, {
+        conversationId: result.conversationId,
+        messageId: result.messageId,
+      })
+      const content = msg.message.event.content
+      // «BAJA» o «STOP» de quien está en Spam o bloqueado se anota sin responderle.
+      if (screen.screen !== null && content.type === "text" && !content.replyId && isStopWord(content.text)) {
+        await tx
+          .transaction((inner) =>
+            handleAutomationReply(inner, orgId, { conversationId: result.conversationId, replyId: null, text: content.text }, {
+              storage: deps.storage,
+              silent: true,
+            }),
+          )
+          .catch((error: unknown) => {
+            if (error instanceof ServiceError) return false
+            throw error
+          })
+        return
+      }
+      if (screen.screen === "blocked") return
+      if (screen.screen === "spam" && !screen.recheck) return
       // Un botón de un mensaje automático («Confirmar», «No más recordatorios»)
       // y «BAJA» o «STOP» los resuelve el sistema: no llegan al modelo ni gastan
       // una corrida. Va en su propio punto de guardado: si su respuesta no puede
       // salir, el mensaje ya ingresado no se pierde y la conversación sigue su
       // curso normal.
-      const content = msg.message.event.content
       if (content.type === "text") {
         const handled = await tx
           .transaction((inner) =>

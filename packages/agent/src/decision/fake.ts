@@ -41,6 +41,18 @@ export function createFakeDecisionModel(): DecisionModel {
           )
           return { id: q.id, kind: "choice", choice: best.value, probabilities, confidence: 0.8 }
         }
+        if (q.kind === "choice" && q.id === "spam") {
+          // Demostración: lo que suena a publicidad, estafa o cadena; todo lo demás es una persona.
+          const pick = has("bit.ly", "gana s/", "gana dinero", "préstamo", "prestamo", "paquete está retenido", "paquete esta retenido")
+            ? has("paquete") ? "scam" : "advertising"
+            : has("reenvía esto", "reenvia esto")
+              ? "chain"
+              : has("hacemos páginas web", "hacemos paginas web", "somos una agencia")
+                ? "selling_to_clinic"
+                : "not_spam"
+          const probabilities = Object.fromEntries(q.options.map((o) => [o.value, o.value === pick ? 0.95 : 0.05 / Math.max(1, q.options.length - 1)]))
+          return { id: q.id, kind: "choice", choice: pick, probabilities, confidence: 0.9 }
+        }
         if (q.kind === "choice") {
           const pick =
             has("reprogramar", "cambiar mi cita", "mover mi cita", "cancelar mi cita") && q.options.some((o) => o.value === "reschedule_or_cancel")

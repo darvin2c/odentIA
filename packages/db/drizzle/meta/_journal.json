@@ -138,29 +138,43 @@
     {
       "idx": 19,
       "version": "7",
-      "when": 1792350979343,
-      "tag": "0019_la_tomografia_va_directo_al_almacenamiento",
+      "when": 1792353383611,
+      "tag": "0019_spam_y_revision_de_cobros",
       "breakpoints": true
     },
     {
       "idx": 20,
       "version": "7",
-      "when": 1792350981343,
-      "tag": "0020_la_tomografia_va_directo_al_almacenamiento_reglas",
+      "when": 1792353397074,
+      "tag": "0020_revision_de_cobros_reglas",
       "breakpoints": true
     },
     {
       "idx": 21,
       "version": "7",
-      "when": 1792350983343,
-      "tag": "0021_las_medidas_de_la_tomografia",
+      "when": 1792354979615,
+      "tag": "0021_la_tomografia_va_directo_al_almacenamiento",
       "breakpoints": true
     },
     {
       "idx": 22,
       "version": "7",
-      "when": 1792350985343,
-      "tag": "0022_las_medidas_de_la_tomografia_reglas",
+      "when": 1792354981615,
+      "tag": "0022_la_tomografia_va_directo_al_almacenamiento_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792354983615,
+      "tag": "0023_las_medidas_de_la_tomografia",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792354985615,
+      "tag": "0024_las_medidas_de_la_tomografia_reglas",
       "breakpoints": true
     }
   ]

@@ -21,6 +21,7 @@ import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
+import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
@@ -106,6 +107,8 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { blockContact, markSpam } from "./contact-screen.js"
+import { decideActionReview, requestActionReview } from "./saas-action-review.js"
 import {
   markImagingFilesUploaded,
   pendingImagingFiles,
@@ -170,7 +173,7 @@ import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
-import { SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
+import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-complaints.js"
@@ -369,6 +372,8 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
+    // La revisión de un cobro apunta a su acción y a su caso de Soporte.
+    "saas_action_review",
     "support_access_audit",
     "support_access_grant",
     "support_attachment",
@@ -1293,6 +1298,61 @@ for (const [index, item] of CLOSED_SEED.entries()) {
     status: "read",
     createdAt: new Date(at.getTime() + 600_000),
   })
+}
+
+// --- Spam y bloqueados (issue 77, ADR 0054): una persona por cada forma de
+// llegar a Spam (el mismo texto muchas veces, una venta a la clínica y una
+// estafa) y una bloqueada por recepción. Ninguna es paciente; no se envía nada.
+const SEED_SCREENED = [
+  { name: "+1 202 555 0142", phone: "+12025550142", reason: "repeticion", texts: Array.from({ length: 6 }, () => "GANA S/ 500 DIARIOS desde casa 💸 Escribe YA 👉 bit.ly/gana-ya") },
+  { name: "MarketDent", phone: "+51944100200", reason: "venta", texts: ["Hola, somos MarketDent 👋 Hacemos páginas web y campañas para clínicas dentales. ¿Con quién puedo hablar para enviarle nuestra propuesta?"] },
+  { name: "+51 913 004 221", phone: "+51913004221", reason: "estafa", texts: ["Su paquete está retenido en aduanas. Pague S/ 8,90 aquí para liberarlo: correos-pe.info/pago"] },
+  { name: "Kevin Ramos", phone: "+51951220418", reason: "amenazas", texts: ["¿Por qué me cobraron la consulta si no me atendieron?", "Esto no se queda así. Voy a ir a la clínica y van a ver."] },
+] as const
+for (const [index, item] of SEED_SCREENED.entries()) {
+  const person = await createContact(db, ORG_A, { displayName: item.name, phone: item.phone }, { userId: ANA_ID })
+  await db.insert(contactIdentity).values({
+    organizationId: ORG_A,
+    contactId: person.id,
+    channel: "whatsapp",
+    externalUserId: `wa:${item.phone.replace(/\D/g, "")}`,
+    displayName: item.name,
+    isPrimary: true,
+  })
+  const last = hoursAgo(5 + index * 7)
+  const conv = await seedConversation({
+    orgId: ORG_A,
+    contactId: person.id,
+    connectionId: connA.id,
+    thread: `seed-thread-screened-${index}`,
+    unreadCount: 0,
+    lastInboundAt: last,
+    lastMessageAt: last,
+  })
+  let firstMessageId = ""
+  for (const [n, text] of item.texts.entries()) {
+    const msg = await seedMessage({
+      orgId: ORG_A,
+      conversationId: conv.id,
+      direction: "in",
+      senderKind: "contact",
+      body: text,
+      externalId: `seed-msg-screened-${index}-${n}`,
+      status: "received",
+      createdAt: new Date(last.getTime() - (item.texts.length - 1 - n) * 6 * 60_000),
+    })
+    firstMessageId ||= msg.id
+  }
+  if (item.reason === "amenazas") {
+    await blockContact(db, ORG_A, {
+      contactId: person.id,
+      userId: ANA_ID,
+      reason: "amenazas",
+      note: "Amenazó a recepción después de que le cobramos la consulta.",
+    })
+  } else {
+    await markSpam(db, ORG_A, { contactId: person.id, reason: item.reason, userId: null, messageId: firstMessageId })
+  }
 }
 
 // --- Tareas A ---
@@ -3523,6 +3583,44 @@ await db.transaction(async (tx) => {
       dedupeKey: "semilla:cita:0",
     },
   ]).onConflictDoNothing()
+  // «Pedir revisión» (issue 77, ADR 0054): Ana, la dueña, pidió revisar dos
+  // conversaciones; odentIA mantuvo una con su respuesta y la otra espera en
+  // Soporte. Sus avisos a soporte quedan como enviados: la semilla no envía nada.
+  const reviewed = await db
+    .select({ id: saasAction.id, key: saasAction.dedupeKey })
+    .from(saasAction)
+    .where(and(eq(saasAction.organizationId, ORG_A), inArray(saasAction.dedupeKey, ["semilla:conversacion:2", "semilla:conversacion:4"])))
+  const actionOf = (key: string) => reviewed.find((row) => row.key === key)?.id
+  const ana = { userId: ANA_ID, roleLabel: "Dueño" }
+  const caseIds: string[] = []
+  const kept = actionOf("semilla:conversacion:2")
+  if (kept) {
+    const asked = await requestActionReview(db, ORG_A, ana, {
+      actionId: kept,
+      reason: "doble",
+      note: "Ejemplo de la semilla: creo que esta conversación ya se contó el día anterior.",
+    })
+    if (asked.caseId) {
+      caseIds.push(asked.caseId)
+      await decideActionReview(db, { userId: SEED_STAFF_ADMIN_ID, role: "admin" }, {
+        caseId: asked.caseId,
+        accept: false,
+        answer: "Ejemplo de la semilla: es una sola conversación ese día; la del día anterior fue con otra persona.",
+      })
+    }
+  }
+  const pending = actionOf("semilla:conversacion:4")
+  if (pending) {
+    const asked = await requestActionReview(db, ORG_A, ana, {
+      actionId: pending,
+      reason: "agente",
+      note: "Ejemplo de la semilla: le dio un horario del sábado que no tenemos.",
+    })
+    if (asked.caseId) caseIds.push(asked.caseId)
+  }
+  if (caseIds.length) {
+    await db.update(supportNotice).set({ emailState: "enviado", emailedAt: new Date() }).where(inArray(supportNotice.caseId, caseIds))
+  }
 }
 // Uso de IA del mes para la ficha de la clínica en la administración (ADR 0031).
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no

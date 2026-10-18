@@ -1,3 +1,4 @@
+import { ContactScreenBanner } from "../../components/inbox-contact-screen"
 import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
 import {
   Button,
@@ -438,6 +439,15 @@ function PersonPageRoute() {
         detail={patientDetail}
         summary={summary.data?.data}
         onSection={openTab}
+      />
+      {/* En Spam o bloqueada: el mismo aviso de la Bandeja, con «No es spam» o «Desbloquear» (ADR 0054). */}
+      <ContactScreenBanner
+        target={{ base: `/api/people/${person.id}`, contactName: person.displayName }}
+        view={person.screen}
+        canWrite={can("conversations.write")}
+        canBlock={can("crm.write")}
+        canMarkSpam={false}
+        className="rounded-xl border"
       />
       <Tabs
         className="min-w-0 w-full"

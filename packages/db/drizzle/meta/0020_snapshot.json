@@ -1,6 +1,6 @@
 {
-  "id": "1853bfee-07c5-4fca-acf8-1b580bb2e394",
-  "prevId": "f0042326-1b31-49bc-8d7f-36c6528aa57c",
+  "id": "54bcda84-9714-4624-928d-673ee921bbee",
+  "prevId": "0a17c329-f4f8-4c27-aa69-d4835bf07ea3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1708,7 +1708,7 @@
       "checkConstraints": {
         "support_case_kind_check": {
           "name": "support_case_kind_check",
-          "value": "\"support_case\".\"kind\" in ('pregunta','problema','acceso')"
+          "value": "\"support_case\".\"kind\" in ('pregunta','problema','acceso','cobro')"
         },
         "support_case_opener_check": {
           "name": "support_case_opener_check",
@@ -22017,6 +22017,48 @@
           "notNull": true,
           "default": true
         },
+        "screen": {
+          "name": "screen",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "screened_at": {
+          "name": "screened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "screened_by_user_id": {
+          "name": "screened_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "screen_reason": {
+          "name": "screen_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "screen_note": {
+          "name": "screen_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "not_spam_at": {
+          "name": "not_spam_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "not_spam_by_user_id": {
+          "name": "not_spam_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "tags": {
           "name": "tags",
           "type": "text[]",
@@ -22107,6 +22149,28 @@
           "method": "btree",
           "where": "\"doc_number\" IS NOT NULL",
           "concurrently": false
+        },
+        "contact_org_screen_idx": {
+          "name": "contact_org_screen_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "screen",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"screen\" IS NOT NULL",
+          "concurrently": false
         }
       },
       "foreignKeys": {
@@ -22117,6 +22181,32 @@
             "organization_id"
           ],
           "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "contact_screened_by_user_id_user_id_fk": {
+          "name": "contact_screened_by_user_id_user_id_fk",
+          "tableFrom": "contact",
+          "columnsFrom": [
+            "screened_by_user_id"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "contact_not_spam_by_user_id_user_id_fk": {
+          "name": "contact_not_spam_by_user_id_user_id_fk",
+          "tableFrom": "contact",
+          "columnsFrom": [
+            "not_spam_by_user_id"
+          ],
+          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
@@ -22135,6 +22225,14 @@
         "contact_sex_check": {
           "name": "contact_sex_check",
           "value": "\"contact\".\"sex\" IS NULL OR \"contact\".\"sex\" IN ('M','F','I','D')"
+        },
+        "contact_screen_check": {
+          "name": "contact_screen_check",
+          "value": "(\"contact\".\"screen\" IS NULL AND \"contact\".\"screened_at\" IS NULL AND \"contact\".\"screened_by_user_id\" IS NULL\n        AND \"contact\".\"screen_reason\" IS NULL AND \"contact\".\"screen_note\" IS NULL)\n      OR (\"contact\".\"screen\" = 'spam' AND \"contact\".\"screened_at\" IS NOT NULL\n        AND \"contact\".\"screen_reason\" IN ('repeticion','publicidad','estafa','cadena','respuesta_automatica','venta','equipo'))\n      OR (\"contact\".\"screen\" = 'blocked' AND \"contact\".\"screened_at\" IS NOT NULL AND \"contact\".\"screened_by_user_id\" IS NOT NULL\n        AND \"contact\".\"screen_reason\" IN ('acoso','amenazas','estafa','otro') AND length(trim(\"contact\".\"screen_note\")) > 0)"
+        },
+        "contact_not_spam_check": {
+          "name": "contact_not_spam_check",
+          "value": "(\"contact\".\"not_spam_at\" IS NULL) = (\"contact\".\"not_spam_by_user_id\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -22189,6 +22287,12 @@
         },
         "no_whatsapp_at": {
           "name": "no_whatsapp_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_blocked_at": {
+          "name": "provider_blocked_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -23249,6 +23353,12 @@
         "reply_to_message_id": {
           "name": "reply_to_message_id",
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "redacted_at": {
+          "name": "redacted_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -30775,6 +30885,270 @@
       },
       "isRLSEnabled": false
     },
+    "public.saas_action_review": {
+      "name": "saas_action_review",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action_id": {
+          "name": "action_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requested_by_user_id": {
+          "name": "requested_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "read_until": {
+          "name": "read_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendiente'"
+        },
+        "automatic": {
+          "name": "automatic",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_by_staff_id": {
+          "name": "decided_by_staff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "answer": {
+          "name": "answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "support_case_id": {
+          "name": "support_case_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credit_charge_id": {
+          "name": "credit_charge_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "saas_action_review_action_uidx": {
+          "name": "saas_action_review_action_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "action_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "saas_action_review_status_idx": {
+          "name": "saas_action_review_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "requested_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "saas_action_review_organization_id_organization_id_fk": {
+          "name": "saas_action_review_organization_id_organization_id_fk",
+          "tableFrom": "saas_action_review",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "saas_action_review_action_id_saas_action_id_fk": {
+          "name": "saas_action_review_action_id_saas_action_id_fk",
+          "tableFrom": "saas_action_review",
+          "columnsFrom": [
+            "action_id"
+          ],
+          "tableTo": "saas_action",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "saas_action_review_requested_by_user_id_user_id_fk": {
+          "name": "saas_action_review_requested_by_user_id_user_id_fk",
+          "tableFrom": "saas_action_review",
+          "columnsFrom": [
+            "requested_by_user_id"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "saas_action_review_decided_by_staff_id_user_id_fk": {
+          "name": "saas_action_review_decided_by_staff_id_user_id_fk",
+          "tableFrom": "saas_action_review",
+          "columnsFrom": [
+            "decided_by_staff_id"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "saas_action_review_case_fk": {
+          "name": "saas_action_review_case_fk",
+          "tableFrom": "saas_action_review",
+          "columnsFrom": [
+            "support_case_id",
+            "organization_id"
+          ],
+          "tableTo": "support_case",
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "saas_action_review_credit_charge_fk": {
+          "name": "saas_action_review_credit_charge_fk",
+          "tableFrom": "saas_action_review",
+          "columnsFrom": [
+            "organization_id",
+            "credit_charge_id"
+          ],
+          "tableTo": "saas_charge",
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "saas_action_review_reason_check": {
+          "name": "saas_action_review_reason_check",
+          "value": "\"saas_action_review\".\"reason\" IN ('spam','agente','doble','otro')"
+        },
+        "saas_action_review_note_check": {
+          "name": "saas_action_review_note_check",
+          "value": "\"saas_action_review\".\"note\" IS NULL OR length(\"saas_action_review\".\"note\") <= 1000"
+        },
+        "saas_action_review_decision_check": {
+          "name": "saas_action_review_decision_check",
+          "value": "(\"saas_action_review\".\"status\" = 'pendiente' AND \"saas_action_review\".\"decided_at\" IS NULL AND \"saas_action_review\".\"decided_by_staff_id\" IS NULL AND \"saas_action_review\".\"answer\" IS NULL AND NOT \"saas_action_review\".\"automatic\")\n        OR (\"saas_action_review\".\"status\" = 'devuelta' AND \"saas_action_review\".\"automatic\" AND \"saas_action_review\".\"decided_at\" IS NOT NULL AND \"saas_action_review\".\"decided_by_staff_id\" IS NULL)\n        OR (\"saas_action_review\".\"status\" IN ('devuelta','mantenida') AND NOT \"saas_action_review\".\"automatic\" AND \"saas_action_review\".\"decided_at\" IS NOT NULL\n          AND \"saas_action_review\".\"decided_by_staff_id\" IS NOT NULL AND length(trim(\"saas_action_review\".\"answer\")) > 0)"
+        },
+        "saas_action_review_credit_check": {
+          "name": "saas_action_review_credit_check",
+          "value": "\"saas_action_review\".\"credit_charge_id\" IS NULL OR \"saas_action_review\".\"status\" = 'devuelta'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.saas_charge": {
       "name": "saas_charge",
       "schema": "",
@@ -31205,11 +31579,11 @@
       "checkConstraints": {
         "saas_charge_line_kind_check": {
           "name": "saas_charge_line_kind_check",
-          "value": "\"saas_charge_line\".\"kind\" IN ('cuota','conversacion','consulta','cita','devolucion','credito','impuesto')"
+          "value": "\"saas_charge_line\".\"kind\" IN ('cuota','conversacion','consulta','cita','devolucion','revision','credito','impuesto')"
         },
         "saas_charge_line_amount_check": {
           "name": "saas_charge_line_amount_check",
-          "value": "\"saas_charge_line\".\"quantity\" >= 0 AND CASE WHEN \"saas_charge_line\".\"kind\" = 'devolucion' THEN \"saas_charge_line\".\"amount_cents\" <= 0 ELSE \"saas_charge_line\".\"amount_cents\" >= 0 END"
+          "value": "\"saas_charge_line\".\"quantity\" >= 0 AND CASE WHEN \"saas_charge_line\".\"kind\" IN ('devolucion','revision') THEN \"saas_charge_line\".\"amount_cents\" <= 0 ELSE \"saas_charge_line\".\"amount_cents\" >= 0 END"
         }
       },
       "isRLSEnabled": false
@@ -33261,331 +33635,6 @@
         "saas_whatsapp_rate_price_check": {
           "name": "saas_whatsapp_rate_price_check",
           "value": "\"saas_whatsapp_rate\".\"price_micros\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.imaging_study": {
-      "name": "imaging_study",
-      "schema": "",
-      "columns": {
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "study_instance_uid": {
-          "name": "study_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dicom_patient_name": {
-          "name": "dicom_patient_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "modality": {
-          "name": "modality",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "file_count": {
-          "name": "file_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_bytes": {
-          "name": "total_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slice_count": {
-          "name": "slice_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "voxel_mm": {
-          "name": "voxel_mm",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "thumbnail_key": {
-          "name": "thumbnail_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "imaging_study_org_document_uidx": {
-          "name": "imaging_study_org_document_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "imaging_study_org_patient_study_idx": {
-          "name": "imaging_study_org_patient_study_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "study_instance_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "imaging_study_organization_id_organization_id_fk": {
-          "name": "imaging_study_organization_id_organization_id_fk",
-          "tableFrom": "imaging_study",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "tableTo": "organization",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "imaging_study_patient_id_patient_id_fk": {
-          "name": "imaging_study_patient_id_patient_id_fk",
-          "tableFrom": "imaging_study",
-          "columnsFrom": [
-            "patient_id"
-          ],
-          "tableTo": "patient",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "imaging_study_document_fk": {
-          "name": "imaging_study_document_fk",
-          "tableFrom": "imaging_study",
-          "columnsFrom": [
-            "organization_id",
-            "document_id"
-          ],
-          "tableTo": "patient_document",
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "imaging_study_file_count_check": {
-          "name": "imaging_study_file_count_check",
-          "value": "\"imaging_study\".\"file_count\" BETWEEN 1 AND 5000"
-        },
-        "imaging_study_total_bytes_check": {
-          "name": "imaging_study_total_bytes_check",
-          "value": "\"imaging_study\".\"total_bytes\" BETWEEN 1 AND 1073741824"
-        },
-        "imaging_study_slice_count_check": {
-          "name": "imaging_study_slice_count_check",
-          "value": "\"imaging_study\".\"slice_count\" BETWEEN 1 AND 20000"
-        },
-        "imaging_study_uid_check": {
-          "name": "imaging_study_uid_check",
-          "value": "char_length(\"imaging_study\".\"study_instance_uid\") BETWEEN 1 AND 64"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.imaging_study_file": {
-      "name": "imaging_study_file",
-      "schema": "",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "file_index": {
-          "name": "file_index",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sop_instance_uid": {
-          "name": "sop_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "series_instance_uid": {
-          "name": "series_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_at": {
-          "name": "uploaded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "imaging_study_file_sop_uidx": {
-          "name": "imaging_study_file_sop_uidx",
-          "columns": [
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sop_instance_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "imaging_study_file_organization_id_organization_id_fk": {
-          "name": "imaging_study_file_organization_id_organization_id_fk",
-          "tableFrom": "imaging_study_file",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "tableTo": "organization",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "imaging_study_file_study_fk": {
-          "name": "imaging_study_file_study_fk",
-          "tableFrom": "imaging_study_file",
-          "columnsFrom": [
-            "organization_id",
-            "document_id"
-          ],
-          "tableTo": "imaging_study",
-          "columnsTo": [
-            "organization_id",
-            "document_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "imaging_study_file_document_id_file_index_pk": {
-          "name": "imaging_study_file_document_id_file_index_pk",
-          "columns": [
-            "document_id",
-            "file_index"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "imaging_study_file_size_check": {
-          "name": "imaging_study_file_size_check",
-          "value": "\"imaging_study_file\".\"size_bytes\" BETWEEN 1 AND 1073741824"
         }
       },
       "isRLSEnabled": false
