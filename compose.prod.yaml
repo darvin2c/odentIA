@@ -44,7 +44,9 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:?}
         VITE_BASE_DOMAIN: ${VITE_BASE_DOMAIN:?}
-    command: ["pnpm", "--filter", "@odentia/db", "migrate"]
+    # Después de migrar carga las listas de diagnósticos oficiales del repositorio
+    # (la CIE-11 de la OMS); sin cambios, no escribe nada.
+    command: ["sh", "-c", "pnpm --filter @odentia/db migrate && pnpm --filter @odentia/db seed:diagnoses"]
     env_file: *runtime-env-file
     depends_on:
       postgres:

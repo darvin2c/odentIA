@@ -148,8 +148,13 @@ export function isDiagnosisCodeFormat(system: DiagnosisSystemKey, code: string):
  * S03.0, S03.2), heridas del labio y la boca (S01.5), fisuras labiopalatinas
  * (Q35–Q37), herpes y candidiasis de la boca (B00.2, B37.0), tumores del labio
  * y la boca (C00–C06, D10.0–D10.3) y los Z de examen y prótesis dental (Z01.2,
- * Z46.3, Z97.2). En la CIE-11: las afecciones de la boca y los dientes (DA0x)
- * y las lesiones de los dientes (NA0D).
+ * Z46.3, Z97.2). En la CIE-11, lo mismo con sus códigos: las afecciones del
+ * complejo bucofacial (DA00–DA0F), las anomalías del desarrollo de los dientes
+ * y la boca (LA30, LA31), las fisuras labiopalatinas (LA40–LA42), las lesiones
+ * de los dientes (NA0D), la fractura de la mandíbula (NA02.7), la
+ * gingivoestomatitis herpética (1F00.02), la candidiasis bucal (1F23.0), los
+ * tumores malignos del labio y la boca (2B60–2B66) y el examen, la prótesis y
+ * la ortodoncia (QA00.8, QB31.2, QB31.3, QB51.A, QB93).
  */
 const DENTAL_ICD10: readonly RegExp[] = [
   /^K(0\d|1[0-4])(\.|$)/,
@@ -165,7 +170,20 @@ const DENTAL_ICD10: readonly RegExp[] = [
   /^Z46\.3/,
   /^Z97\.2/,
 ]
-const DENTAL_ICD11: readonly RegExp[] = [/^DA0/, /^NA0D/]
+const DENTAL_ICD11: readonly RegExp[] = [
+  /^DA0/,
+  /^LA3[01](\.|$)/,
+  /^LA4[0-2](\.|$)/,
+  /^NA0D/,
+  /^NA02\.7/,
+  /^1F00\.02/,
+  /^1F23\.0/,
+  /^2B6[0-6](\.|$)/,
+  /^QA00\.8/,
+  /^QB31\.[23]/,
+  /^QB51\.A/,
+  /^QB93(\.|$)/,
+]
 
 export function isDentalDiagnosis(system: DiagnosisSystemKey, code: string): boolean {
   const rules = system === "ICD-11" ? DENTAL_ICD11 : DENTAL_ICD10
@@ -202,7 +220,13 @@ export function diagnosisSearchText(code: string, title: string): string {
  * propone si la edición cargada la trae), fractura S02.5, raíz retenida K08.3,
  * supernumerario K00.1, tamaño o forma K00.2, fluorosis K00.3, impactación
  * K01.1, posición K07.3 y ausencia por extracción K08.1.
- * CIE-11: solo la caries (DA08.0), hasta verificar los demás contra la OMS.
+ * CIE-11, con los títulos de la edición oficial en español (2026-01): caries
+ * DA08.0 (la CIE-11 no la divide por profundidad), fractura NA0D.0Z
+ * («traumatismo de los tejidos dentales duros y la pulpa, sin
+ * especificación», como S02.5 en la CIE-10), raíz retenida DA0A.3, hiperdoncia
+ * LA30.3, tamaño o forma LA30.4, fluorosis DA07.0, impactación DA07.8,
+ * posición DA0E.3 y pérdida por extracción DA0A.1. Una prueba comprueba que
+ * cada uno existe en el archivo oficial incluido en `@odentia/db`.
  */
 const FINDING_DIAGNOSIS: Partial<
   Record<DiagnosisSystemKey, Record<string, string | Record<string, string>>>
@@ -234,7 +258,31 @@ const FINDING_DIAGNOSIS: Partial<
   },
   "ICD-11": {
     caries: "DA08.0",
+    fracture: "NA0D.0Z",
+    root_remnant: "DA0A.3",
+    supernumerary_tooth: "LA30.3",
+    macrodontia: "LA30.4",
+    microdontia: "LA30.4",
+    peg_tooth: "LA30.4",
+    fusion: "LA30.4",
+    gemination: "LA30.4",
+    enamel_development_defect: { fluorosis: "DA07.0" },
+    impaction: "DA07.8",
+    diastema: "DA0E.3",
+    rotation: "DA0E.3",
+    transposition: "DA0E.3",
+    abnormal_position: "DA0E.3",
+    ectopic_tooth: "DA0E.3",
+    missing_tooth: { caries_extraction: "DA0A.1" },
   },
+}
+
+/** Todos los códigos que el odontograma puede proponer en una lista (para comprobarlos contra la oficial). */
+export function findingDiagnosisCodes(system: DiagnosisSystemKey): string[] {
+  const entries = Object.values(FINDING_DIAGNOSIS[system] ?? {})
+  return [
+    ...new Set(entries.flatMap((entry) => (typeof entry === "string" ? [entry] : Object.values(entry)))),
+  ]
 }
 
 export function findingDiagnosisCode(
