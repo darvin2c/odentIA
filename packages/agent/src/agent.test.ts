@@ -409,7 +409,8 @@ it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pa
   expect(model.seen).toHaveLength(2)
   // La segunda vez con el mismo mensaje pasa a recepción como tema, con el aviso fijo.
   expect((await ledgerRows(conversationId)).map((row) => row.status)).toEqual(["sin_respuesta", "handoff"])
-  expect(await agentMessages(conversationId)).toEqual([
+  // Sin orden en la consulta: se comparan los dos mensajes, no su posición.
+  expect((await agentMessages(conversationId)).sort()).toEqual([
     "Dame un momento, te respondo enseguida.",
     "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí.",
   ])
