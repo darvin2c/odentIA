@@ -53,6 +53,15 @@ describe("permiso operativo agent.decide", () => {
     expect(ALL_PERMISSIONS).toContain("clinical.alerts")
   })
 
+  it("recepción recibe la tomografía sin abrirla (ADR 0054)", () => {
+    expect(canAccess("reception", "clinical.receive")).toBe(true)
+    expect(canAccess("reception", "clinical.read")).toBe(false)
+    expect(canAccess("cashier", "clinical.receive")).toBe(false)
+    expect(canAccess("dentist", "clinical.receive")).toBe(false)
+    expect(canAccess("admin", "clinical.receive")).toBe(true)
+    expect(ALL_PERMISSIONS).toContain("clinical.receive")
+  })
+
   it("otros roles operativos no deciden ni administran el agente", () => {
     for (const role of ["dentist", "cashier", "member"]) {
       expect(canAccess(role, "agent.decide")).toBe(false)

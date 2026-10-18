@@ -67,6 +67,7 @@ import {
   ImageCompare,
 } from "./image-viewer"
 import { TagsInput } from "./tags-input"
+import { imagingFacts, TomographyDetail, useImagingState } from "./tomography-detail"
 import { ToothSelector } from "./tooth-selector"
 import { activeOrgLocale } from "../../lib/locale"
 
@@ -105,7 +106,12 @@ function monthHeading(iso: string): string {
 }
 
 /** URL firmada del archivo; `thumb` pide la miniatura (o el original si no la hay). */
-function useSignedUrl(patientId: string, documentId: string, variant: "original" | "thumb" = "original") {
+function useSignedUrl(
+  patientId: string,
+  documentId: string,
+  variant: "original" | "thumb" = "original",
+  enabled = true,
+) {
   const canRead = usePermission("clinical.read")
   return useQuery({
     queryKey: ["patient-document-url", patientId, documentId, variant],
@@ -114,7 +120,7 @@ function useSignedUrl(patientId: string, documentId: string, variant: "original"
         `/api/patients/${patientId}/documents/${documentId}/url${variant === "thumb" ? "?variant=thumb" : ""}`,
       ),
     staleTime: SIGNED_URL_STALE_MS,
-    enabled: canRead,
+    enabled: canRead && enabled,
   })
 }
 
@@ -553,6 +559,7 @@ export function ImagenesTab({
         beforeWrite={beforeWrite}
         onPendingChange={onPendingChange}
         disabled={disabled}
+        onOpenDocument={(documentId) => setViewingId(documentId)}
       />
 
       {contextDoc && (
@@ -600,10 +607,13 @@ function DocCard({
   encounter?: Encounter
   onOpen: () => void
 }) {
-  const urlQuery = useSignedUrl(patientId, doc.id, "thumb")
+  const imaging = doc.imaging ?? null
+  // Una tomografía solo tiene miniatura cuando el navegador ya la armó.
+  const urlQuery = useSignedUrl(patientId, doc.id, "thumb", !imaging || Boolean(imaging.thumbnailKey))
   const url = urlQuery.data?.data.url ?? null
   const teeth = doc.toothNumbers
   const tags = doc.tags
+  const uploadState = useImagingState(patientId, doc)
 
   return (
     <li>
@@ -614,11 +624,11 @@ function DocCard({
         className="flex w-full min-w-0 flex-col gap-2 rounded-lg border p-2 text-left transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-primary"
       >
         <span className="relative block aspect-square w-full overflow-hidden rounded-md bg-muted">
-          {url && isImageDoc(doc) ? (
+          {url && (isImageDoc(doc) || imaging) ? (
             // URL firmada directa: sin object URLs, sin fugas de recursos multimedia.
             // object-contain: la radiografía se ve completa, sin recortes.
             <img src={url} alt="" loading="lazy" className="h-full w-full object-contain" />
-          ) : urlQuery.isPending ? (
+          ) : urlQuery.isPending && urlQuery.fetchStatus !== "idle" ? (
             <span className="flex h-full items-center justify-center text-xs text-muted-foreground">
               Cargando…
             </span>
@@ -638,6 +648,10 @@ function DocCard({
             <Badge variant="destructive" className="absolute right-1.5 bottom-1.5">
               Retirado
             </Badge>
+          ) : uploadState ? (
+            <Badge variant="outline" className="absolute right-1.5 bottom-1.5 bg-background">
+              {uploadState.text}
+            </Badge>
           ) : doc.reportStatus === "pendiente" ? (
             <Badge variant="outline" className="absolute right-1.5 bottom-1.5 bg-background">
               Sin informar
@@ -646,6 +660,19 @@ function DocCard({
         </span>
         <span className="flex min-w-0 flex-col gap-1 px-0.5 pb-0.5">
           <span className="truncate text-sm font-medium">{doc.label}</span>
+          {uploadState && (
+            <span
+              role="progressbar"
+              aria-label="Avance de la subida"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={uploadState.percent}
+              className="block h-1.5 overflow-hidden rounded-full bg-muted"
+            >
+              <span className="block h-full rounded-full bg-primary" style={{ width: `${uploadState.percent}%` }} />
+            </span>
+          )}
+          {imaging && <span className="text-xs text-muted-foreground">{imagingFacts(imaging)}</span>}
           <span className="text-xs text-muted-foreground">
             {formatTakenAt(doc)}
             {teeth.length > 0 &&
@@ -705,7 +732,8 @@ function DocumentViewer({
   onRetired: () => Promise<void>
 }) {
   const canRead = usePermission("clinical.read")
-  const urlQuery = useSignedUrl(patientId, doc.id)
+  // La tomografía no tiene un solo archivo: se abre en su detalle, no por URL.
+  const urlQuery = useSignedUrl(patientId, doc.id, "original", !doc.imaging)
   const url = urlQuery.data?.data.url ?? null
   const [adjustments, setAdjustments] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS)
   const [compareId, setCompareId] = useState<string>("")
@@ -786,7 +814,9 @@ function DocumentViewer({
     : { tab: "plan" as const }
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      {urlQuery.isPending ? (
+      {doc.imaging ? (
+        <TomographyDetail patientId={patientId} doc={doc} canUpload={canEdit} onChanged={onChanged} />
+      ) : urlQuery.isPending ? (
         <LoadingState message="Cargando…" />
       ) : error || !url ? (
         <div className="flex flex-col gap-2">

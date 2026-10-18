@@ -146,6 +146,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@prisma/client@5.22.0)(@types/pg@8.23.1)(better-sqlite3@12.11.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
       hono:
         specifier: 4.13.7
         version: 4.13.7
@@ -316,6 +319,9 @@ importers:
       dicom-parser:
         specifier: 1.8.21
         version: 1.8.21
+      fflate:
+        specifier: 0.8.2
+        version: 0.8.2
       jpeg-lossless-decoder-js:
         specifier: 2.1.2
         version: 2.1.2
@@ -5368,6 +5374,9 @@ packages:
 
   fetchdts@0.1.7:
     resolution: {integrity: sha512-YoZjBdafyLIop9lSxXVI33oLD5kN31q4Td+CasofLLYeLXRFeOsuOw0Uo+XNRi9PZlbfdlN2GmRtm4tCEQ9/KA==}
+
+  fflate@0.8.2:
+    resolution: {integrity: sha512-cPJU47OaAoCbg0pBvzsgpTPhmhqI5eJjh/JIu8tPj5q+T7iLvW/JAYUqmE7KOB4R1ZyEhzBaIQpQpardBF5z8A==}
 
   figures@6.1.0:
     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
@@ -12385,6 +12394,8 @@ snapshots:
       picomatch: 4.0.7
 
   fetchdts@0.1.7: {}
+
+  fflate@0.8.2: {}
 
   figures@6.1.0:
     dependencies:

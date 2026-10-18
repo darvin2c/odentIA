@@ -120,6 +120,20 @@
       "when": 1792306402641,
       "tag": "0016_el_agente_usa_un_solo_modelo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792333854171,
+      "tag": "0017_la_tomografia_va_directo_al_almacenamiento",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792333856058,
+      "tag": "0018_la_tomografia_va_directo_al_almacenamiento_reglas",
+      "breakpoints": true
     }
   ]
 }

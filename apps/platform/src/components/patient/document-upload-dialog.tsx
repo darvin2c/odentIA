@@ -19,15 +19,15 @@ import {
 } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { FileText, Upload, X } from "lucide-react"
+import { FileText, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { instantFromClinicValue } from "../../lib/clinical-journey"
 import { orgSlugFromHostname } from "../../lib/host"
+import { mayHoldStudy, type SelectedFile } from "../../lib/imaging-scan"
 import type { Encounter, PlanItem } from "../../lib/patients"
 import {
-  ACCEPT_ATTR,
   basenameWithoutExtension,
   categoryLabel,
   encounterLabel,
@@ -40,6 +40,12 @@ import {
 } from "./document-labels"
 import { DocumentLinkSelects } from "./document-link-selects"
 import { TagsInput } from "./tags-input"
+import {
+  TomographyDropZone,
+  TomographyFlowBody,
+  tomographySubmitLabel,
+  useTomographyFlow,
+} from "./tomography-upload"
 import { ToothSelector } from "./tooth-selector"
 
 type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
@@ -84,6 +90,8 @@ export interface DocumentUploadDialogProps {
   beforeWrite?: () => Promise<void>
   onPendingChange?: (pending: boolean) => void
   disabled?: boolean
+  /** Abre un documento que ya está en la ficha (la tomografía repetida). */
+  onOpenDocument?: (documentId: string) => void
 }
 
 /**
@@ -158,17 +166,23 @@ export function DocumentUploadDialog({
   beforeWrite,
   onPendingChange,
   disabled,
+  onOpenDocument,
 }: DocumentUploadDialogProps) {
   const drafts = draftEncounters(encounters)
   const defaultIsDraft =
     defaultEncounterId != null && drafts.some((e) => e.id === defaultEncounterId)
-  const fileRef = useRef<HTMLInputElement | null>(null)
+  // Una carpeta de CD o un ZIP con una tomografía siguen su propio recorrido (ADR 0054).
+  const tomography = useTomographyFlow({
+    patientId,
+    where: "La tarjeta en Imágenes",
+    onChange: () => void onSuccess(),
+  })
+  const [noStudy, setNoStudy] = useState(false)
   const [encounterChoice, setEncounterChoice] = useState<string>(
     defaultIsDraft ? (defaultEncounterId ?? "") : "",
   )
   const [rows, setRows] = useState<QueuedFile[]>([])
   const [rejected, setRejected] = useState<string[]>([])
-  const [dragging, setDragging] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const fileId = useId()
   const encounterChoiceId = useId()
@@ -181,10 +195,10 @@ export function DocumentUploadDialog({
     for (const row of rows) if (row.previewUrl) URL.revokeObjectURL(row.previewUrl)
     setRows([])
     setRejected([])
-    setDragging(false)
     setServerError(null)
     setEncounterChoice(defaultIsDraft ? (defaultEncounterId ?? "") : "")
-    if (fileRef.current) fileRef.current.value = ""
+    tomography.reset()
+    setNoStudy(false)
   }
 
   useEffect(() => {
@@ -219,6 +233,32 @@ export function DocumentUploadDialog({
     }
     if (added.length > 0) setRows((prev) => [...prev, ...added])
     if (bad.length > 0) setRejected((prev) => [...prev, ...bad])
+  }
+
+  const select = async (selection: SelectedFile[]) => {
+    if (!selection.length || disabled) return
+    setNoStudy(false)
+    if (mayHoldStudy(selection, MAX_BYTES)) {
+      const found = await tomography.scan(selection)
+      if (found.studies.some((study) => study.isVolume)) return
+      tomography.reset()
+      // Una carpeta o un ZIP sin tomografía: solo entran sus imágenes y documentos sueltos.
+      const fromFolder = selection.some((item) => item.name.includes("/") || /[.]zip$/i.test(item.name))
+      if (fromFolder) {
+        setNoStudy(true)
+        addFiles(
+          selection
+            .map((item) =>
+              item.file instanceof File
+                ? item.file
+                : new File([item.file], item.name.split("/").at(-1) ?? item.name),
+            )
+            .filter((file) => isAcceptedFile(file)),
+        )
+        return
+      }
+    }
+    addFiles(selection.map((item) => item.file as File))
   }
 
   const removeRow = (key: string) => {
@@ -346,13 +386,63 @@ export function DocumentUploadDialog({
     onOpenChange(false)
   }
 
+  const studyMode = Boolean(
+    tomography.scanning || tomography.candidate || tomography.job || tomography.existing,
+  )
+  const reviewingStudy = Boolean(tomography.candidate) && !tomography.job && !tomography.existing
+
+  if (studyMode)
+    return (
+      <FormDrawer
+        className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(40rem,calc(100vw-2rem))]"
+        open={open}
+        onClose={close}
+        title="Subir a la ficha"
+        description="La tomografía va directo al almacenamiento y queda como un solo documento en Imágenes."
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (reviewingStudy) void tomography.start()
+          else close()
+        }}
+        isSubmitting={tomography.starting}
+        submitDisabled={
+          disabled || Boolean(tomography.scanning) || (reviewingStudy && tomography.tooBig)
+        }
+        submitLabel={tomographySubmitLabel(tomography)}
+        cancelLabel={
+          reviewingStudy ? (tomography.nameCheck === false ? "No, cancelar" : "Cancelar") : "Cerrar"
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <TomographyFlowBody
+            flow={tomography}
+            onOpenExisting={
+              onOpenDocument
+                ? (documentId) => {
+                    close()
+                    onOpenDocument(documentId)
+                  }
+                : undefined
+            }
+          />
+          {tomography.job && tomography.job.status !== "lista" && (
+            <div>
+              <Button type="button" size="sm" variant="ghost" onClick={() => void tomography.cancel()}>
+                Cancelar subida
+              </Button>
+            </div>
+          )}
+        </div>
+      </FormDrawer>
+    )
+
   return (
     <FormDrawer
       className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
       open={open}
       onClose={close}
       title="Subir imágenes o documentos"
-      description="JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo. El formato se verifica por contenido. Sin atención queda como General."
+      description="JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo; la tomografía, hasta 1 GB. El formato se verifica por contenido. Sin atención queda como General."
       onSubmit={(e) => {
         e.preventDefault()
         void uploadRows(pendingRows)
@@ -395,44 +485,18 @@ export function DocumentUploadDialog({
 
         <Field>
           <FieldLabel htmlFor={fileId}>Archivos</FieldLabel>
-          <div
-            onDragOver={(event) => {
-              event.preventDefault()
-              setDragging(true)
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault()
-              setDragging(false)
-              addFiles(event.dataTransfer.files)
-            }}
-            className={`flex flex-col gap-2 rounded-lg border border-dashed p-4 transition-colors ${dragging ? "border-primary bg-primary/5" : ""}`}
-          >
-            <input
-              ref={fileRef}
-              id={fileId}
-              type="file"
-              name="file"
-              aria-label="Archivos"
-              accept={ACCEPT_ATTR}
-              multiple
-              className="sr-only"
-              onChange={(e) => {
-                addFiles(e.currentTarget.files)
-                e.currentTarget.value = ""
-              }}
+          <div id={fileId}>
+            <TomographyDropZone
+              disabled={disabled}
+              onSelect={(selection) => void select(selection)}
+              hint="Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo y 1 GB por tomografía."
             />
-            <label
-              htmlFor={fileId}
-              className="flex cursor-pointer flex-col items-center gap-1 text-center text-sm text-muted-foreground"
-            >
-              <Upload className="size-5" aria-hidden="true" />
-              <span className="font-medium text-foreground">
-                Arrastra archivos o haz clic para elegirlos
-              </span>
-              <span>JPG, PNG, WebP, PDF o DICOM · máx. 10 MB por archivo</span>
-            </label>
           </div>
+          {noStudy && (
+            <p className="text-xs text-muted-foreground">
+              No encontramos una tomografía en lo elegido: se agregan solo sus imágenes y documentos.
+            </p>
+          )}
           {rejected.length > 0 && (
             <ul className="flex flex-col gap-1">
               {rejected.map((message) => (

@@ -12,7 +12,7 @@
  */
 import { LEGAL } from "@odentia/auth/legal"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { encodeDemoDicom } from "@odentia/clinical"
+import { encodeDemoCtSlice, encodeDemoDicom, generateCbctPhantom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
@@ -103,6 +103,12 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import {
+  markImagingFilesUploaded,
+  pendingImagingFiles,
+  setImagingThumbnail,
+  startImagingStudyUpload,
+} from "./imaging-studies.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -2094,6 +2100,78 @@ for (const previa of [
       toothNumbers: [36],
     })
   }
+}
+// Tomografía de demostración (un fantoma sintético, no es de un paciente) para
+// el visor de tomografía: la serie CT entra por el mismo camino que la de un CD
+// (ADR 0054). Lleva el nombre de Rosa para que no salte el aviso de nombre.
+{
+  const phantom = generateCbctPhantom()
+  const root = "2.25.3400000000000000000034"
+  const studyUid = `${root}.1`
+  const seriesUid = `${root}.2`
+  const slices = phantom.data.map((pixels, k) =>
+    encodeDemoCtSlice({
+      width: phantom.size,
+      height: phantom.size,
+      pixels,
+      voxelMm: phantom.voxelMm,
+      position: [phantom.origin[0], phantom.origin[1], phantom.sliceZ[k]!],
+      instanceNumber: k + 1,
+      studyUid,
+      seriesUid,
+      frameOfReferenceUid: `${root}.3`,
+      sopUid: `${root}.4.${k + 1}`,
+      patientName: "QUISPE^ROSA",
+    }),
+  )
+  const started = await startImagingStudyUpload(db, ORG_A, ANA_ID, rosaPatientId, {
+    label: "[DEMO] Tomografía (CBCT) · Centro de imágenes de demostración",
+    studyInstanceUid: studyUid,
+    dicomPatientName: "QUISPE^ROSA",
+    modality: "CT",
+    capturedAt: new Date(Date.now() - 20 * 86_400_000),
+    source: "Centro de imágenes de demostración",
+    toothNumbers: [36, 37],
+    sliceCount: slices.length,
+    voxelMm: phantom.voxelMm,
+    files: slices.map((bytes, k) => ({
+      sopInstanceUid: `${root}.4.${k + 1}`,
+      seriesInstanceUid: seriesUid,
+      sizeBytes: bytes.byteLength,
+    })),
+  })
+  const documentId = started.document.id
+  const pending = await pendingImagingFiles(db, ORG_A, rosaPatientId, documentId)
+  for (const file of pending) {
+    await storage.putAttachmentAt?.(file.storageKey, slices[file.index]!, "application/dicom")
+  }
+  await markImagingFilesUploaded(
+    db,
+    ORG_A,
+    ANA_ID,
+    rosaPatientId,
+    documentId,
+    pending.map((file) => file.index),
+  )
+  // Miniatura: el corte a la altura de las raíces inferiores, con ventana de hueso.
+  const k = phantom.sliceZ.findIndex((z) => z >= -18)
+  const gray = Buffer.from(
+    Array.from(phantom.data[k]!, (stored) =>
+      Math.max(0, Math.min(255, Math.round(((stored - 1000 - 699.5) / 2999 + 0.5) * 255))),
+    ),
+  )
+  const thumb = await sharp(gray, { raw: { width: phantom.size, height: phantom.size, channels: 1 } })
+    .resize(320)
+    .webp()
+    .toBuffer()
+  const thumbRef = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes: thumb,
+    contentType: "image/webp",
+    ext: "webp",
+  })
+  await setImagingThumbnail(db, ORG_A, rosaPatientId, documentId, thumbRef.objectKey)
 }
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
 const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)
