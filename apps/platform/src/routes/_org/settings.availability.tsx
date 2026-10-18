@@ -417,7 +417,7 @@ function AvailabilityPage() {
                                   who: professional.id,
                                   branch: resources.branchId,
                                 }}
-                                className="text-sm font-bold text-warning-foreground underline-offset-4 hover:underline"
+                                className="text-sm font-bold text-warning underline-offset-4 hover:underline"
                               >
                                 {inside.length === 1
                                   ? "1 cita por mover"
@@ -520,7 +520,7 @@ function AvailabilityPage() {
                     ))}
                   </ul>
                   {activeChairs.length === 0 ? (
-                    <p className="text-sm font-medium text-warning-foreground">
+                    <p className="text-sm font-medium text-warning">
                       Ninguna unidad dental está activa: sin al menos una no se puede reservar.
                     </p>
                   ) : null}
