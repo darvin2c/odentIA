@@ -429,16 +429,20 @@ function StudioBody({
               </Button>
             </div>
           )}
-          <OdontogramArch
-            teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
-            inner={
-              innerRows ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } : undefined
-            }
-            entriesOf={entriesOf}
-            selected={selection}
-            disabled={disabled || editorPending}
-            onToggle={toggle}
-          />
+          {/* En el celular el arco llega casi al borde de la tarjeta: así las piezas
+              quedan a 24 px una de otra, lo mínimo para tocarlas con el dedo. */}
+          <div className="-mx-3 sm:mx-0">
+            <OdontogramArch
+              teeth={{ upper: outerRows[0] ?? [], lower: outerRows[1] ?? [] }}
+              inner={
+                innerRows ? { upper: innerRows[0] ?? [], lower: innerRows[1] ?? [] } : undefined
+              }
+              entriesOf={entriesOf}
+              selected={selection}
+              disabled={disabled || editorPending}
+              onToggle={toggle}
+            />
+          </div>
           <p className="text-xs text-muted-foreground">
             {multiple
               ? "Marca las piezas y abre la selección para editarlas juntas."
