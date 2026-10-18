@@ -1887,6 +1887,8 @@ it("apagar una función le quita sus herramientas y deja dicho qué hacer cuando
   const before = await all("tg:funciones-0", "evt-fn-0")
   expect(before.tools).toEqual(expect.arrayContaining(["buscar_huecos", "proponer_cita", "consultar_conocimiento", "create_opportunity"]))
   expect(before.system).toContain("Reserva con proponer_cita")
+  // Decisión 10 del visor de tomografía: la tomografía se trae en CD, USB o ZIP, no por el chat.
+  expect(before.system).toContain("dile que la traiga a su cita en CD, USB o ZIP")
   await withOrgContext(appDb, "org_a", (tx) =>
     upsertAgentConfig(tx, "org_a", {
       disabledFunctions: ["agendar", "seguimiento"],

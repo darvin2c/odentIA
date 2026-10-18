@@ -293,6 +293,21 @@ export interface PatientDocument {
   tags: string[]
   contextVersion: number
   createdAt: string
+  /** Tomografía de muchos archivos (ADR 0055); null en el resto. */
+  imaging?: ImagingSummary | null
+}
+
+/** Lo que la ficha dice de una tomografía: su avance y su forma. */
+export interface ImagingSummary {
+  studyInstanceUid: string
+  fileCount: number
+  uploadedCount: number
+  sliceCount: number
+  voxelMm: number | null
+  totalBytes: number
+  completedAt: string | null
+  thumbnailKey: string | null
+  dicomPatientName: string | null
 }
 
 export interface PatientDocumentContext {

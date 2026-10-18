@@ -59,6 +59,7 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
   "patient-registration": "pacientes",
   health: "pacientes",
   document: "pacientes",
+  imaging_study: "pacientes",
   appointment: "agenda",
   encounter: "atencion",
   odontogram: "atencion",
@@ -120,6 +121,7 @@ const AREA_OF_SUBJECT: Record<string, AuditArea> = {
 const SUBJECT_WORDS: Record<string, string> = {
   patient: "un paciente",
   document: "un archivo de un paciente",
+  imaging_study: "una tomografía de un paciente",
   appointment: "una cita",
   encounter: "una atención",
   odontogram: "un odontograma",
@@ -219,6 +221,9 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "document.retired": say("Retiró un archivo de la ficha de un paciente"),
   "document.context_corrected": say("Corrigió a qué pertenece un archivo de un paciente"),
   "document.report_status": say("Cambió el estado del informe de una imagen"),
+  "imaging_study.started": say("Empezó a subir una tomografía a la ficha de un paciente"),
+  "imaging_study.completed": say("Terminó de subir una tomografía a la ficha de un paciente"),
+  "imaging_study.measured": say("Guardó una medida en la tomografía de un paciente"),
   // Agenda
   "appointment.created": say("Reservó una cita"),
   "appointment.moved": say("Movió una cita"),

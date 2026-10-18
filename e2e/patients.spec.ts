@@ -1,7 +1,7 @@
 import { member } from "@odentia/db/schema/auth"
 import type { Locator, Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
-import { tenant, tenantPattern } from "./env"
+import { API, tenant, tenantPattern } from "./env"
 import { api, call, chooseOption, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import {
@@ -617,25 +617,102 @@ test("documentos: una sola lista para buscar un papel, con sus filtros y cada fi
   const ids = await buildClinicalBase(owner)
   await setupAggregation(owner, ids)
   const { page } = owner
-  await gotoHydrated(page, tenant(owner.org.slug, `/patients/${ids.patientId}`))
+  const slug = owner.org.slug
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}`))
   await openSection(page, "Clínica", "Documentos")
   await expect(page).toHaveURL(/tab=documentos/)
   await expect(page.getByText("Receta N.º 1")).toBeVisible()
   await expect(page.getByText("Anulada", { exact: true }).first()).toBeVisible()
-  // Nada pendiente de firma, resultado o cierre: «Requieren acción» lo dice con su número.
-  await expect(page.getByRole("button", { name: "Requieren acción · 0" })).toBeVisible()
+  // Los filtros son los de lo que hay (issue 149): la base trae la receta y, con el perfil
+  // de Perú, el odontograma firmado. Sin imágenes no hay «Imágenes»; sin pendientes, no
+  // hay «Requieren acción».
+  await expect(page.getByRole("button", { name: "Todo", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "Imágenes", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Requieren acción/ })).toHaveCount(0)
+
+  // Una periapical de la 36, tomada antes de subirla.
+  const uploaded = await page.evaluate(
+    async ({ apiBase, slug, patientId }) => {
+      const png = Uint8Array.from(
+        atob(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        ),
+        (c) => c.charCodeAt(0),
+      )
+      const form = new FormData()
+      form.append("file", new Blob([png], { type: "image/png" }), "periapical.png")
+      form.append("label", "Periapical de control")
+      form.append("category", "radiografia")
+      form.append("imageType", "periapical")
+      form.append("toothNumbers", JSON.stringify([36]))
+      form.append("capturedAt", "2025-09-13T15:00:00.000Z")
+      const response = await fetch(`${apiBase}/api/patients/${patientId}/documents`, {
+        method: "POST",
+        headers: { "x-odentia-org": slug },
+        credentials: "include",
+        body: form,
+      })
+      return response.status
+    },
+    { apiBase: API, slug, patientId: ids.patientId },
+  )
+  expect(uploaded).toBe(201)
+  await page.reload()
+
+  // Con la imagen aparece «Imágenes»; «Todo» sigue primero y marcado, y sin pendientes
+  // no hay «Requieren acción».
+  const todo = page.getByRole("button", { name: "Todo", exact: true })
+  await expect(todo).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "Imágenes", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Requieren acción/ })).toHaveCount(0)
+  // La fila de la imagen dice su tipo y su fecha de toma, no la de subida.
+  const imageRow = page.getByRole("listitem").filter({ hasText: "Periapical de control" })
+  await expect(imageRow).toContainText("Radiografía periapical")
+  await expect(imageRow).toContainText(/Tomada .*2025/)
+  await expect(imageRow).toContainText("Pieza 36")
   await page.screenshot({ path: test.info().outputPath("documentos.png"), fullPage: true })
+
+  // «Imágenes» acorta la misma lista: no hay otra pantalla ni otro buscador.
+  await page.getByRole("button", { name: "Imágenes", exact: true }).click()
+  await expect(page).toHaveURL(/tipo=imagenes/)
+  await expect(page.getByText("Receta N.º 1")).toHaveCount(0)
+  await expect(imageRow).toBeVisible()
+  await expect(page.getByText(/Imágenes y archivos/)).toHaveCount(0)
+  await expect(page.getByRole("searchbox")).toHaveCount(1)
+  await todo.click()
+  await expect(page.getByText("Receta N.º 1")).toBeVisible()
+
+  // Un buscador para todos los papeles.
+  await page.getByRole("searchbox", { name: "Buscar un papel" }).fill("periapical")
+  await expect(page).toHaveURL(/q=periapical/)
+  await expect(page.getByText("Receta N.º 1")).toHaveCount(0)
+  await expect(page.getByText("1 papel", { exact: true })).toBeVisible()
+
+  // La fila abre la imagen de una vez y, al cerrar, el foco vuelve a la fila.
+  const view = page.getByRole("button", { name: "Ver Periapical de control" })
+  await view.click()
+  await expect(page).toHaveURL(/documentId=/)
+  const viewer = page.getByRole("dialog", { name: "Periapical de control" })
+  await expect(viewer.getByText("Detalles del archivo")).toBeVisible()
+  // El visor dice solo lo que tiene: nada de «Sin … vinculado».
+  await expect(viewer.getByText(/Sin .* vinculad/)).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/documentId=/)
+  await expect(view).toBeFocused()
+  await page.getByRole("button", { name: "Quitar filtros" }).click()
+  await expect(page).not.toHaveURL(/q=/)
+
   // Un filtro por tipo, en la URL; la fila se abre al lado.
   await page.getByRole("button", { name: "Recetas", exact: true }).click()
   await expect(page).toHaveURL(/tipo=recetas/)
   await page.getByRole("button", { name: /Receta N.º 1/ }).first().click()
   await expect(surface(page, { name: "Receta N.º 1" })).toBeVisible()
   // Un enlace guardado a la pestaña anterior abre Documentos con ese filtro.
-  await gotoHydrated(page, tenant(owner.org.slug, `/patients/${ids.patientId}?tab=recetas`))
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=recetas`))
   await expect(page).toHaveURL(/tab=documentos/)
   await expect(page).toHaveURL(/tipo=recetas/)
   // «Atenciones» vive ahora en Historia.
-  await gotoHydrated(page, tenant(owner.org.slug, `/patients/${ids.patientId}?tab=atenciones`))
+  await gotoHydrated(page, tenant(slug, `/patients/${ids.patientId}?tab=atenciones`))
   await expect(page).toHaveURL(/tab=historia/)
 })
 test("una persona, una página: la misma dirección, sus datos con las reglas de la ficha y sus vínculos", async ({ owner }) => {
