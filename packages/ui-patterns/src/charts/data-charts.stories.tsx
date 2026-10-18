@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react"
 import { PageShell } from "../page-shell.js"
-import { type ChartCategory, ColumnChart, HeatmapGrid, ShareBar, Sparkline } from "./index.js"
+import { type ChartCategory, ColumnChart, HeatmapGrid, ShareBar, Sparkline, WaterfallChart, type WaterfallStep } from "./index.js"
 
 /**
  * Gráficos de datos de Reportes. Cada marca es un control: se recorre con el
@@ -75,7 +75,11 @@ export const CobradoPorMes: Story = {
   ),
 }
 
-/** Citas por mes y cómo terminaron: columnas apiladas con tres series. */
+const ATTENDED = [312, 330, 270, 255, 298, 341, 335, 352, 344, 371, 365, 210]
+const NO_SHOW = [31, 29, 33, 30, 26, 27, 25, 24, 26, 23, 25, 14]
+const CANCELLED = [22, 25, 31, 28, 20, 19, 22, 18, 21, 17, 19, 9]
+
+/** Citas por mes y cómo terminaron: columnas apiladas con tres series y su total en la tabla. */
 export const CitasApiladas: Story = {
   render: () => (
     <PageShell>
@@ -85,10 +89,11 @@ export const CitasApiladas: Story = {
           title="Citas por mes: atendidas, no vinieron y canceladas"
           categories={MONTHS}
           stacked
+          total={{ label: "Citas que ya pasaron", values: ATTENDED.map((value, index) => value + (NO_SHOW[index] ?? 0) + (CANCELLED[index] ?? 0)) }}
           bars={[
-            { key: "atendidas", label: "Atendidas", tone: "series-1", values: [312, 330, 270, 255, 298, 341, 335, 352, 344, 371, 365, 210] },
-            { key: "no-vino", label: "No vinieron", tone: "series-2", values: [31, 29, 33, 30, 26, 27, 25, 24, 26, 23, 25, 14] },
-            { key: "canceladas", label: "Canceladas", tone: "series-3", values: [22, 25, 31, 28, 20, 19, 22, 18, 21, 17, 19, 9] },
+            { key: "atendidas", label: "Atendidas", tone: "series-1", values: ATTENDED },
+            { key: "no-vino", label: "No vinieron", tone: "series-2", values: NO_SHOW },
+            { key: "canceladas", label: "Canceladas", tone: "series-3", values: CANCELLED },
           ]}
           format={(value) => `${value} citas`}
           axis={String}
@@ -150,6 +155,63 @@ export const BarraRepartida: Story = {
             { key: "google", label: "Google o mapas", value: 6, tone: "series-3" },
             { key: "otro", label: "Otro", value: 4, tone: "muted" },
           ]}
+        />
+      </section>
+    </PageShell>
+  ),
+}
+
+const SEPTEMBER: WaterfallStep[] = [
+  { key: "cobrado", label: "Cobrado", value: 4_820_000, kind: "total" },
+  { key: "comisiones", label: "Comisiones", value: 1_711_500, kind: "less", tone: "series-2" },
+  { key: "personal", label: "Personal", value: 620_000, kind: "less" },
+  { key: "laboratorio", label: "Laboratorio", value: 495_000, kind: "less" },
+  { key: "alquiler", label: "Alquiler", value: 350_000, kind: "less" },
+  { key: "materiales", label: "Materiales", value: 290_000, kind: "less" },
+  { key: "servicios", label: "Servicios", value: 110_000, kind: "less" },
+  { key: "otros", label: "Otros", value: 40_000, kind: "less" },
+  { key: "deja", label: "Lo que deja", value: 1_203_500, kind: "result" },
+]
+
+/** De lo cobrado a lo que deja el mes: la comisión en su propia barra y cada tipo de gasto que tuvo algo. */
+export const Cascada: Story = {
+  render: () => (
+    <PageShell className="flex flex-col gap-6">
+      <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-5">
+        <h3 className="font-semibold">De lo cobrado a lo que deja el mes</h3>
+        <WaterfallChart
+          title="De lo cobrado a lo que deja septiembre"
+          steps={SEPTEMBER}
+          format={soles}
+          short={(cents) => Math.round(cents / 100).toLocaleString("en-US").split(",").join(" ")}
+          share={{ heading: "De cada 100 cobrados", value: (index) => String(Math.round(((SEPTEMBER[index]?.value ?? 0) * 100) / 4_820_000)) }}
+          detail={(index) => {
+            const step = SEPTEMBER[index]
+            if (!step) return null
+            return (
+              <>
+                <strong className="text-[15px]">{step.label}</strong>
+                <span className="text-2xl font-extrabold tabular-nums">{soles(step.value)}</span>
+                <span className="text-sm text-muted-foreground">{Math.round((step.value * 100) / 4_820_000)} de cada 100 soles cobrados</span>
+              </>
+            )
+          }}
+        />
+      </section>
+      <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-5">
+        <h3 className="font-semibold">Un mes que no alcanzó: se gastó más de lo cobrado</h3>
+        <WaterfallChart
+          title="Un mes con pérdida"
+          steps={[
+            { key: "cobrado", label: "Cobrado", value: 1_200_000, kind: "total" },
+            { key: "comisiones", label: "Comisiones", value: 420_000, kind: "less", tone: "series-2" },
+            { key: "personal", label: "Personal", value: 650_000, kind: "less" },
+            { key: "alquiler", label: "Alquiler", value: 350_000, kind: "less" },
+            { key: "deja", label: "Lo que deja", value: -220_000, kind: "result" },
+          ]}
+          format={(cents) => (cents < 0 ? `−${soles(-cents)}` : soles(cents))}
+          short={(cents) => (cents < 0 ? "−" : "") + Math.round(Math.abs(cents) / 100).toLocaleString("en-US").split(",").join(" ")}
+          height={220}
         />
       </section>
     </PageShell>

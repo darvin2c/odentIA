@@ -94,6 +94,35 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     where: { to: "/inbox", label: "Abrir la Bandeja" },
     showNext: false,
   },
+  ...agingLists(),
+  upcoming_unbooked: {
+    title: "Aceptaron y no tienen cita",
+    noun: { one: "persona", many: "personas" },
+    how: () =>
+      "A hoy: personas con tratamientos aceptados en un presupuesto que aún no se hicieron y sin ninguna cita por venir. El importe es lo aceptado por hacer, a su precio acordado.",
+    where: { to: "/agenda", label: "Abrir la Agenda" },
+    patientTab: "plan",
+    showNext: false,
+  },
+}
+
+/** «Te deben» por antigüedad: la misma regla del saldo vencido, cada persona en el tramo de su concepto más antiguo. */
+function agingLists(): Record<"debts_age_0_30" | "debts_age_31_60" | "debts_age_61_90" | "debts_age_90_plus", ListCopy> {
+  const copy = (title: string, range: string): ListCopy => ({
+    title: `Te deben: ${title}`,
+    noun: { one: "persona", many: "personas" },
+    how: (period) =>
+      `Quién debía al cerrar ${period} y cuyo concepto sin pagar más antiguo se anotó ${range}. Lo que debe es lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, como en «Saldo vencido».`,
+    where: { to: "/finance", label: "Ir a Finanzas" },
+    patientTab: "cobros",
+    showNext: false,
+  })
+  return {
+    debts_age_0_30: copy("hasta 30 días", "hace 30 días o menos"),
+    debts_age_31_60: copy("de 31 a 60 días", "hace 31 a 60 días"),
+    debts_age_61_90: copy("de 61 a 90 días", "hace 61 a 90 días"),
+    debts_age_90_plus: copy("más de 90 días", "hace más de 90 días"),
+  }
 }
 
 function when(row: ReportListRow, list: ReportListKey, locale: string, timeZone: string): { day: string; hour: string | null } {

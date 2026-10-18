@@ -108,18 +108,21 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("heading", { name: "Cobrado por medio de pago" })).toBeVisible()
       await observe(page, info, "finanzas")
 
-      // Agenda: los grupos suman el total.
+      // Agenda: tres atendidas de cinco que ya pasaron; sin horario no hay agenda ocupada que medir.
       await tabs.getByRole("link", { name: "Agenda" }).click()
       await expect(page).toHaveURL(/tab=agenda/)
-      await expect(page.getByRole("heading", { name: /^De 5 citas de / })).toBeVisible()
-      await expect(page.getByRole("heading", { name: "Cómo se reservaron" })).toBeVisible()
+      const agendaFigures = page.getByRole("region", { name: "Cifras de agenda" })
+      await expect(agendaFigures.getByRole("region", { name: "Citas atendidas" })).toContainText("De 5 citas que ya pasaron")
+      await expect(agendaFigures.getByRole("region", { name: "Agenda ocupada" })).toContainText("Sin horario")
+      await expect(page.getByRole("region", { name: "Cuándo queda libre la agenda" }).getByRole("link", { name: "Ir a los horarios" })).toBeVisible()
       await observe(page, info, "agenda")
 
       // La cifra abre su lista, con tantas filas como dice, y al cerrar devuelve el foco.
-      const seeWho = page.getByRole("button", { name: "Ver quiénes" })
+      const seeWho = agendaFigures.getByRole("region", { name: "No vinieron" }).getByRole("button", { name: "Ver quiénes" })
       await seeWho.click()
       await expect(page).toHaveURL(/lista=no_show/)
-      const list = page.getByRole(width === 390 ? "dialog" : "region", { name: "No vinieron" }).or(page.getByRole("dialog", { name: "No vinieron" })).first()
+      // La tarjeta «No vinieron» también es una región: la lista es la que dice cómo se calcula.
+      const list = page.getByRole(width === 390 ? "dialog" : "region", { name: "No vinieron" }).or(page.getByRole("dialog", { name: "No vinieron" })).filter({ hasText: "Cómo se calcula" }).first()
       await expect(list.getByRole("link", { name: "Diego Ruiz" })).toBeVisible()
       await expect(list.getByText("Ya tiene otra cita")).toBeVisible()
       await expect(list.getByText("Cómo se calcula")).toBeVisible()
@@ -160,9 +163,9 @@ for (const width of [1440, 390]) {
       await page.getByRole("button", { name: /^Últimos 3 meses/ }).click()
       await expect(page).toHaveURL(/period=ultimos_3_meses/)
       await tabs.getByRole("link", { name: "Finanzas" }).click()
-      await expect(page.getByRole("heading", { name: "Cobrado y gastado por mes" })).toBeVisible()
-      await page.getByRole("button", { name: "Ver como tabla" }).click()
-      await expect(page.getByRole("columnheader", { name: "Cobrado" })).toBeVisible()
+      const monthly = page.getByRole("region", { name: "En qué se fue lo cobrado, por mes" })
+      await monthly.getByRole("button", { name: "Ver como tabla" }).click()
+      await expect(monthly.getByRole("columnheader", { name: "Cobrado" })).toBeVisible()
       await observe(page, info, "varios-meses")
     })
 
@@ -184,7 +187,7 @@ for (const width of [1440, 390]) {
       const month = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit" }).format(startsAt)
       await gotoHydrated(page, tenant(owner.org.slug, `/reports?tab=agenda&period=${month}`))
       // Con el administrador apagado no hay aviso.
-      await expect(page.getByRole("heading", { name: /^De 1 cita de / })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Cifras de agenda" }).getByRole("region", { name: "No vinieron" })).toContainText("100 %")
       await expect(page.getByRole("region", { name: "Aviso del administrador" })).toHaveCount(0)
 
       await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
@@ -232,7 +235,7 @@ test("reportes es de quien dirige: recepción no entra y el servidor lo rechaza"
   const page = owner.page
   await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
   await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
-  for (const section of ["summary", "professionals", "money", "agenda", "sales", "service", "list/no_show", "list/debts_overdue"]) {
+  for (const section of ["summary", "professionals", "money", "agenda", "finance", "finance/commissions", "finance/outlook", "finance/promotions", "sales", "service", "list/no_show", "list/debts_overdue", "list/debts_age_31_60"]) {
     const response = await api(page, "GET", `/api/reports/${section}?period=este_mes`, owner.org.slug)
     expect(response.status, section).toBe(403)
   }

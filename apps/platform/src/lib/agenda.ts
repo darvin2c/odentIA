@@ -202,6 +202,8 @@ export interface ProfessionalSchedule {
   dentistUserId: string
   timeZone: string
   rules: ScheduleRule[]
+  /** Desde qué día vale el horario de hoy (ADR 0060); nulo sin horario. */
+  validFrom: string | null
 }
 
 export interface ScheduleBlock {

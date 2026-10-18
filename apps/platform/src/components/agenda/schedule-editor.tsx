@@ -68,6 +68,8 @@ export interface WeeklySchedule {
   change: (key: number, field: "from" | "to", value: string) => void
   remove: (key: number) => void
   save: () => void
+  /** Desde qué día vale el horario guardado; solo el de un profesional lo tiene. */
+  validFrom?: string | null
 }
 
 /** Un turno guardado: día de la semana (0 = domingo) y minutos desde la medianoche. */
@@ -181,7 +183,7 @@ export function useWeeklySchedule(input: {
         `/api/agenda/schedules?branchId=${branchId}&dentistUserId=${dentistUserId}`,
       ),
   })
-  return useWeeklyTurns({
+  const turns = useWeeklyTurns({
     key: `${branchId}:${dentistUserId}`,
     rules: query.data?.data.rules,
     failed: query.isError,
@@ -200,6 +202,7 @@ export function useWeeklySchedule(input: {
       await onSaved?.()
     },
   })
+  return { ...turns, validFrom: query.data?.data.validFrom ?? null }
 }
 
 /** Los días de la semana con sus turnos. En el panel van uno bajo otro; en la página, en fila. */

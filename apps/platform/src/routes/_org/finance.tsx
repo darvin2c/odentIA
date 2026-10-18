@@ -11,24 +11,16 @@
  * el enlace del aviso que recibe administración. Dinero con
  * `@odentia/clinical`; moneda, formato y zona de la clínica o la sede.
  */
-import { formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { formatMoney } from "@odentia/clinical"
 import {
   Alert,
   AlertDescription,
   AlertTitle,
   Badge,
   Button,
-  buttonVariants,
-  Checkbox,
   cn,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
   Field,
-  FieldContent,
-  FieldDescription,
   FieldLabel,
-  Input,
   Skeleton,
   Tabs,
   TabsContent,
@@ -40,7 +32,6 @@ import {
 } from "@odentia/ui"
 import {
   DataTableSkeleton,
-  DatePickerButton,
   DetailDrawer,
   EmptyState,
   ErrorState,
@@ -51,17 +42,17 @@ import {
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { ArrowLeft, ChevronDown } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { WriteToPersonDialog } from "../../components/write-to-person"
 import {
   CashCloseDrawer,
   CashMoveDrawer,
-  ChoiceChips,
   ClosureSheetDrawer,
 } from "../../components/finance/cash-close-drawer"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
+import { ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
 import {
   CommissionsAdminPanel,
   MonthPicker,
@@ -72,6 +63,7 @@ import { ChoiceSelect } from "../../components/ui/choice-select"
 import { useActiveBranch } from "../../lib/active-branch"
 import { compareMonths, FIRST_YEAR, plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
+import { purchaseOrderLabel } from "../../lib/reports"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   attendedTodayAt,
@@ -79,26 +71,24 @@ import {
   CASH_TERMS,
   type CashBreakdown,
   cashErrorMessage,
-  createExpenseApi,
   currentMonthIn,
   type DayEntry,
+  daysBetween,
   dayKeyOf,
   debtAgeDays,
   debtConcepts,
   debtDue,
   type DebtRow,
   differenceLabel,
-  EXPENSE_CATEGORIES,
-  type ExpenseCategory,
   type ExpenseRow,
   fetchClosures,
   fetchDayMovements,
   fetchDebts,
   fetchMonthExpenses,
+  fetchPurchasesToPay,
   financeKeys,
   formatClock,
   formatDateTimeLong,
-  formatDayKey,
   formatDayMonth,
   formatDayShort,
   formatMonth,
@@ -114,9 +104,7 @@ import {
   monthsBack,
   monthValue,
   NO_RECEIPT,
-  noonOf,
   otherMethods,
-  parseAmount,
   parseMonthValue,
   spokenMoment,
   todayIn,
@@ -270,6 +258,7 @@ function FinanceWorkspace() {
   const canCommissions = usePermission("commissions.read")
   const canCommissionsWrite = usePermission("commissions.write")
   const canSettings = usePermission("settings.write")
+  const canReports = usePermission("reports.read")
   const [panel, setPanel] = useState<Panel | null>(null)
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
@@ -457,6 +446,15 @@ function FinanceWorkspace() {
               {canCommissions ? <TabsTrigger value="comisiones">Comisiones</TabsTrigger> : null}
             </TabsList>
             {isMobile && monthPicker ? <div className="ml-auto">{monthPicker}</div> : null}
+            {canReports ? (
+              <Link
+                to="/reports"
+                search={{ tab: "finanzas", ...(view === "gastos" || view === "caja" ? { branch: ws.branchId } : {}) }}
+                className="ml-auto inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
+              >
+                Ver el reporte
+              </Link>
+            ) : null}
           </div>
           <TabsContent value={strip}>
             {view === "caja" ? (
@@ -554,7 +552,7 @@ function FinanceWorkspace() {
             }}
           />
           <ExpenseFormDrawer
-            ws={ws}
+            place={ws}
             open={panel?.kind === "gasto"}
             onClose={() => setPanel(null)}
           />
@@ -1696,6 +1694,13 @@ function ExpensesTab({
     onError: (err) => setVoidError(cashErrorMessage(err)),
   })
 
+  const canInventory = usePermission("inventory.read")
+  const purchases = useQuery({
+    queryKey: financeKeys.purchases(branchId),
+    queryFn: () => fetchPurchasesToPay(branchId),
+  })
+  const unpaid = purchases.data?.data.unpaid ?? null
+
   const data = expenses.data?.data ?? null
   const zone = data?.timezone ?? orgTimeZone
   const days = useMemo(() => {
@@ -1767,6 +1772,27 @@ function ExpensesTab({
         ) : null}
       </section>
 
+      {unpaid && unpaid.orders > 0 ? (
+        <Alert className="border-warning/40 bg-warning-soft">
+          <AlertTitle>
+            {plural(unpaid.orders, "compra recibida", "compras recibidas")} sin pagar: {formatMoney(unpaid.cents, ws.currency, locale)}
+          </AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <span>
+              {unpaid.oldest?.firstReceivedAt
+                ? `La más antigua llegó hace ${plural(Math.max(0, daysBetween(dayKeyOf(unpaid.oldest.firstReceivedAt, zone), todayIn(zone))), "día", "días")} (${purchaseOrderLabel(unpaid.oldest.orderNumber)}, ${unpaid.oldest.supplierName}).`
+                : null}{" "}
+              Una compra se paga desde Inventario o desde «Registrar gasto» con el tipo Materiales: es el mismo pago.
+            </span>
+            {canInventory ? (
+              <Link to="/inventory" search={{ tab: "compras", pago: "por_pagar" }} className="font-semibold underline">
+                Ver compras
+              </Link>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {expenses.isPending ? (
         <DataTableSkeleton view="list" rowCount={5} label="Consultando los gastos del mes" />
       ) : expenses.isError || !data ? (
@@ -1808,7 +1834,23 @@ function ExpensesTab({
                         >
                           {row.concept}
                         </p>
-                        <p className="text-sm text-muted-foreground">{facts.join(" · ")}</p>
+                        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
+                          {facts.join(" · ")}
+                          {row.purchaseOrderId && row.purchaseOrderNumber !== null ? (
+                            canInventory ? (
+                              <Link
+                                to="/inventory"
+                                search={{ tab: "compras", orden: row.purchaseOrderId }}
+                                className="rounded-full bg-primary-soft px-2 py-0.5 text-xs font-bold text-primary-soft-foreground no-underline"
+                              >
+                                Compra {purchaseOrderLabel(row.purchaseOrderNumber)}
+                              </Link>
+                            ) : (
+                              <Badge variant="secondary">Compra {purchaseOrderLabel(row.purchaseOrderNumber)}</Badge>
+                            )
+                          ) : null}
+                          {row.commission ? <Badge variant="secondary">Comisión</Badge> : null}
+                        </p>
                         {voided ? (
                           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                             <Badge variant="destructive">Anulado</Badge>
@@ -1873,206 +1915,5 @@ function ExpensesTab({
         }}
       />
     </div>
-  )
-}
-
-const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.map((value) => ({ value, label: value }))
-
-function ExpenseFormDrawer({
-  ws,
-  open,
-  onClose,
-}: {
-  ws: Workspace
-  open: boolean
-  onClose: () => void
-}) {
-  const { branchId, locale, orgTimeZone } = ws
-  const queryClient = useQueryClient()
-  const canWrite = usePermission("finance.write")
-  const cash = useCashState(branchId, open)
-  const today = todayIn(orgTimeZone)
-  const [concept, setConcept] = useState("")
-  const [amount, setAmount] = useState("")
-  const [category, setCategory] = useState<ExpenseCategory | "">("")
-  const [fromCash, setFromCash] = useState(true)
-  const [moreOpen, setMoreOpen] = useState(false)
-  const [receiptKind, setReceiptKind] = useState("")
-  const [receiptNumber, setReceiptNumber] = useState("")
-  const [spentDay, setSpentDay] = useState(today)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setConcept("")
-    setAmount("")
-    setCategory("")
-    setFromCash(true)
-    setMoreOpen(false)
-    setReceiptKind("")
-    setReceiptNumber("")
-    setSpentDay(todayIn(orgTimeZone))
-    setError(null)
-  }, [open, branchId, orgTimeZone])
-
-  const state = cash.data?.data ?? null
-  const unit = state?.currency ?? ws.currency
-  const money = (cents: number) => formatMoney(cents, unit, locale)
-  const cents = amount.trim() === "" ? null : parseAmount(amount, unit, locale)
-  // Con la caja a la vista se avisa antes de guardar si el efectivo no alcanza.
-  const after = fromCash && state && cents !== null ? state.cashOnHandCents - cents : null
-
-  const createMutation = useMutation({
-    mutationFn: createExpenseApi,
-    onSuccess: () => {
-      invalidateFinance(queryClient)
-      toast.success("Gasto registrado")
-      onClose()
-    },
-    onError: (err) => setError(cashErrorMessage(err)),
-  })
-
-  return (
-    <FormDrawer
-      open={open}
-      title="Registrar gasto"
-      description={ws.branchName ? `Gasto de ${ws.branchName}.` : undefined}
-      error={error}
-      isSubmitting={createMutation.isPending}
-      isDirty={concept !== "" || amount !== "" || category !== "" || receiptKind !== "" || receiptNumber !== ""}
-      submitLabel="Registrar gasto"
-      submitDisabled={!canWrite}
-      onClose={() => {
-        if (!createMutation.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!concept.trim()) {
-          setError("Escribe en qué se gastó.")
-          return
-        }
-        if (cents === null || cents <= 0) {
-          setError("Escribe un importe mayor que cero.")
-          return
-        }
-        if (category === "") {
-          setError("Elige el tipo de gasto.")
-          return
-        }
-        if (after !== null && after < 0 && state) {
-          setError(
-            `En la caja solo hay ${money(state.cashOnHandCents)}: no alcanza para pagar este gasto con el efectivo.`,
-          )
-          return
-        }
-        if (spentDay > today) {
-          setError("La fecha del gasto no puede ser futura.")
-          return
-        }
-        setError(null)
-        createMutation.mutate({
-          branchId,
-          concept: concept.trim(),
-          amountCents: cents,
-          category,
-          fromCash,
-          ...(receiptKind.trim() ? { receiptKind: receiptKind.trim() } : {}),
-          ...(receiptNumber.trim() ? { receiptNumber: receiptNumber.trim() } : {}),
-          // Hoy lleva la hora real; otro día, su mediodía en la zona de la clínica.
-          ...(spentDay === today ? {} : { spentAt: noonOf(spentDay, orgTimeZone) }),
-        })
-      }}
-    >
-      <div className="flex flex-col gap-5">
-        <Field>
-          <FieldLabel htmlFor="gasto-concepto">En qué se gastó</FieldLabel>
-          <Input
-            id="gasto-concepto"
-            maxLength={500}
-            value={concept}
-            onChange={(event) => setConcept(event.target.value)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="gasto-importe">Importe</FieldLabel>
-          <Input
-            id="gasto-importe"
-            inputMode="decimal"
-            autoComplete="off"
-            placeholder={formatMoneyInput(0, unit, locale)}
-            aria-invalid={amount.trim() !== "" && cents === null}
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-          />
-        </Field>
-        <ChoiceChips label="Tipo" value={category} options={CATEGORY_OPTIONS} onChange={setCategory} />
-        <Field orientation="horizontal">
-          <Checkbox
-            id="gasto-caja"
-            aria-describedby="gasto-caja-ayuda"
-            checked={fromCash}
-            onCheckedChange={(checked) => setFromCash(checked === true)}
-          />
-          <FieldContent>
-            <FieldLabel htmlFor="gasto-caja">Se pagó con el efectivo de la caja</FieldLabel>
-            <FieldDescription id="gasto-caja-ayuda">
-              {after === null ? (
-                "Se descuenta del efectivo que debe haber al cerrar."
-              ) : after < 0 && state ? (
-                <span className="text-destructive">
-                  En la caja solo hay {money(state.cashOnHandCents)}: no alcanza para este gasto.
-                </span>
-              ) : (
-                `Se descuenta del efectivo que debe haber al cerrar: la caja queda en ${money(after)}.`
-              )}
-            </FieldDescription>
-          </FieldContent>
-        </Field>
-        <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
-          <CollapsibleTrigger render={<Button type="button" variant="link" className="h-auto p-0" />}>
-            Más detalles: comprobante recibido y fecha
-            <ChevronDown aria-hidden className={cn("transition-transform", moreOpen && "rotate-180")} />
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="flex flex-col gap-4 pt-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="gasto-comprobante">Comprobante recibido</FieldLabel>
-                  <Input
-                    id="gasto-comprobante"
-                    maxLength={60}
-                    placeholder="Factura, recibo…"
-                    value={receiptKind}
-                    onChange={(event) => setReceiptKind(event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="gasto-numero">Número</FieldLabel>
-                  <Input
-                    id="gasto-numero"
-                    maxLength={60}
-                    autoComplete="off"
-                    value={receiptNumber}
-                    onChange={(event) => setReceiptNumber(event.target.value)}
-                  />
-                </Field>
-              </div>
-              <Field>
-                <FieldLabel htmlFor="gasto-fecha">Fecha del gasto</FieldLabel>
-                <DatePickerButton
-                  id="gasto-fecha"
-                  className="justify-start font-normal"
-                  value={spentDay}
-                  max={today}
-                  onChange={setSpentDay}
-                >
-                  {formatDayKey(spentDay, locale, today)}
-                </DatePickerButton>
-              </Field>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
-    </FormDrawer>
   )
 }

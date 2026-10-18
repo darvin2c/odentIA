@@ -22,11 +22,16 @@ import {
   getClosureSheet,
   getDayMovements,
   getDebts,
+  dismissExpenseGap,
+  EXPENSE_CATEGORIES,
   getMonthExpenses,
+  getPurchasesToPay,
   listClosures,
   listExpenses,
+  payPurchaseOrder,
   voidExpense,
   voidMovement,
+  voidSupplierCreditUse,
 } from "@odentia/services"
 
 function forbid(c: Context) {
@@ -223,6 +228,67 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => createExpense(tx, orgId, userId, parsed.data)),
     )
+  })
+
+  // --- Compras de Inventario (ADR 0061): pagarlas es un gasto de Materiales enlazado ---------
+  // Lo que hay que pagar: recibidas sin pagar, lo que aún no llega y lo que se tiene a favor.
+  app.get("/purchases", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z.object({ branchId: z.uuid().optional() }).safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getPurchasesToPay(tx, orgId, parsed.data)))
+  })
+
+  // Registrar el pago de una compra: en partes, por adelantado o con lo que se tiene a favor.
+  app.post("/purchases/:orderId/payments", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        amountCents: z.number().int().min(0).max(2147483647),
+        creditCents: z.number().int().min(0).max(2147483647).optional(),
+        spentAt: isoDateTime.nullish(),
+        fromCash: z.boolean().optional(),
+        receiptKind: z.string().trim().min(1).max(60).optional(),
+        receiptNumber: z.string().max(60).nullish(),
+        notes: z.string().max(2000).nullish(),
+        expectedDueCents: z.number().int().min(0).optional(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const orderId = z.uuid().safeParse(c.req.param("orderId"))
+    if (!orderId.success) return validationError(c, orderId.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) => payPurchaseOrder(tx, orgId, userId, { ...parsed.data, orderId: orderId.data })),
+    )
+  })
+
+  // Deshacer el uso de lo que se tenía a favor con un proveedor.
+  app.post("/supplier-credit-uses/:id/void", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => voidSupplierCreditUse(tx, orgId, userId, c.req.param("id"), parsed.data)),
+    )
+  })
+
+  // «No hubo ese gasto» (Reportes › Finanzas › Puede faltar un gasto).
+  app.post("/expense-gaps", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "finance.write")) return forbid(c)
+    const parsed = z
+      .object({
+        category: z.enum(EXPENSE_CATEGORIES),
+        month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+        branchId: z.uuid().nullish(),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () => withOrgContext(deps.db, orgId, (tx) => dismissExpenseGap(tx, orgId, userId, parsed.data)))
   })
 
   app.post("/expenses/:id/void", async (c) => {

@@ -7,9 +7,13 @@
  */
 import { withOrgContext, type Db } from "@odentia/db"
 import {
+  getAgendaReport,
   getReportAdvice,
   getReportAgent,
-  getReportAgenda,
+  getReportCommissions,
+  getReportFinance,
+  getReportOutlook,
+  getReportPromotions,
   getReportList,
   getReportMoney,
   getReportSales,
@@ -51,7 +55,11 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
   read("/summary", getReportSummary)
   read("/professionals", getReportProfessionals)
   read("/money", getReportMoney)
-  read("/agenda", getReportAgenda)
+  read("/agenda", getAgendaReport)
+  read("/finance", getReportFinance)
+  read("/finance/commissions", getReportCommissions)
+  read("/finance/outlook", getReportOutlook)
+  read("/finance/promotions", getReportPromotions)
   read("/sales", getReportSales)
   read("/service", getReportService)
 

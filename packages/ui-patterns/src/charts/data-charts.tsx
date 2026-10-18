@@ -1,6 +1,6 @@
 /**
- * Gráficos de datos de Reportes: línea pequeña, columnas, mapa de calor y
- * barra repartida. Son HTML y SVG propios, sin librería, para que cada marca
+ * Gráficos de datos de Reportes: línea pequeña, columnas, cascada, mapa de
+ * calor y barra repartida. Son HTML y SVG propios, sin librería, para que cada marca
  * sea un control con su nombre: se recorren con el teclado, dicen su detalle
  * al pasar el mouse o al tocarlas y todos ofrecen «Ver como tabla».
  *
@@ -10,8 +10,8 @@
  * dicen lo mismo con palabras.
  */
 import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
-import { type CSSProperties, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react"
-import { moveInGrid, niceTicks, scaleLevel, sparkPoints } from "./chart-math.js"
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { moveInGrid, niceTicks, scaleLevel, sparkPoints, type WaterfallKind, waterfallBars } from "./chart-math.js"
 
 export type SeriesTone = "series-1" | "series-2" | "series-3" | "muted"
 
@@ -150,6 +150,8 @@ export interface ColumnChartProps {
   initial?: number
   /** Encabezado de la primera columna de la tabla. */
   tableHeading?: string
+  /** Lo que suman las series (lo cobrado que se reparte): la tabla lo escribe como última columna. Se da aparte porque una serie puede ser negativa (un mes con pérdida) y el dibujo no la apila. */
+  total?: { label: string; values: Array<number | null> }
   height?: number
   className?: string
 }
@@ -176,6 +178,7 @@ export function ColumnChart({
   detail,
   initial,
   tableHeading = "Mes",
+  total,
   height = 200,
   className,
 }: ColumnChartProps) {
@@ -205,6 +208,8 @@ export function ColumnChart({
       const value = series.values[index]
       return `${series.label} ${value === null || value === undefined ? "sin datos" : format(value)}`
     })
+    const sum = total?.values[index]
+    if (total && sum !== null && sum !== undefined) parts.unshift(`${total.label} ${format(sum)}`)
     const previous = line?.values[index]
     if (line && previous !== null && previous !== undefined) parts.push(`${line.label} ${format(previous)}`)
     return `${category.label}${category.partial ? ", hasta hoy" : ""}: ${parts.join(", ")}`
@@ -261,6 +266,11 @@ export function ColumnChart({
                     {line.label}
                   </TableHead>
                 ) : null}
+                {total ? (
+                  <TableHead scope="col" className="text-right">
+                    {total.label}
+                  </TableHead>
+                ) : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -281,6 +291,11 @@ export function ColumnChart({
                   {line ? (
                     <TableCell className="text-right tabular-nums">
                       {line.values[index] === null || line.values[index] === undefined ? "Sin datos" : format(line.values[index] ?? 0)}
+                    </TableCell>
+                  ) : null}
+                  {total ? (
+                    <TableCell className="text-right font-semibold tabular-nums">
+                      {total.values[index] === null || total.values[index] === undefined ? "Sin datos" : format(total.values[index] ?? 0)}
                     </TableCell>
                   ) : null}
                 </TableRow>
@@ -444,6 +459,208 @@ export function ColumnChart({
   )
 }
 
+// --- Cascada -------------------------------------------------------------------------------
+
+export interface WaterfallStep {
+  key: string
+  /** Rótulo bajo la barra: «Comisiones». */
+  label: string
+  /** Importe positivo; el resultado puede ser negativo. */
+  value: number
+  /** `total` sube desde cero, `less` resta de lo que quedaba y `result` es lo que queda. */
+  kind: WaterfallKind
+  /** Color de la barra; por defecto el total y el resultado van en la serie 1 y las restas en gris. */
+  tone?: SeriesTone
+}
+
+export interface WaterfallChartProps {
+  /** Nombre del gráfico para quien no lo ve; el título visible lo pone la tarjeta. */
+  title: string
+  steps: WaterfallStep[]
+  /** El importe entero (tabla, detalle y nombre de cada barra). */
+  format: (value: number) => string
+  /** El importe corto sobre la barra y en el eje: «48 200», «20 mil». */
+  short?: (value: number) => string
+  /** Lo que dice el panel de la barra elegida. */
+  detail?: (index: number) => ReactNode
+  /** Una columna más en la tabla, como «De cada 100 cobrados». */
+  share?: { heading: string; value: (index: number) => string }
+  /** Barra elegida al abrir; por defecto, la segunda (lo primero que resta). */
+  initial?: number
+  height?: number
+  className?: string
+}
+
+function stepTone(step: WaterfallStep): SeriesTone {
+  return step.tone ?? (step.kind === "less" ? "muted" : "series-1")
+}
+
+/**
+ * De un total a lo que queda, paso a paso: el total sube desde cero, cada
+ * resta baja desde donde quedó la anterior y el resultado vuelve a salir de
+ * cero. Pasar el mouse, tocar o enfocar una barra la elige y su detalle se lee
+ * al lado (región viva); las flechas recorren las barras. «Ver como tabla» da
+ * los mismos importes escritos.
+ */
+export function WaterfallChart({ title, steps, format, short = format, detail, share, initial, height = 260, className }: WaterfallChartProps) {
+  const id = useId()
+  const count = steps.length
+  const [active, setActive] = useState(() => Math.max(0, Math.min(count - 1, initial ?? Math.min(1, count - 1))))
+  const [asTable, setAsTable] = useState(false)
+  const marks = useRef<Array<HTMLButtonElement | null>>([])
+  const at = Math.max(0, Math.min(count - 1, active))
+  const { bars, low, high } = waterfallBars(steps)
+  const ticks = niceTicks(Math.max(high, -low))
+  const top = high > 0 ? (ticks.find((tick) => tick >= high) ?? high) : 0
+  const bottom = low < 0 ? -(ticks.find((tick) => tick >= -low) ?? -low) : 0
+  const range = top - bottom || 1
+  const percent = (value: number): number => ((value - bottom) / range) * 100
+  const axisTicks = [...ticks.filter((tick) => tick <= top), ...ticks.filter((tick) => tick > 0 && -tick >= bottom).map((tick) => -tick)]
+  // Lo que resta lleva su signo; si es cero, no hay nada que restar.
+  const signed = (step: WaterfallStep): string => (step.kind === "less" && step.value !== 0 ? `−${short(step.value)}` : short(step.value))
+  const describe = (index: number): string => {
+    const step = steps[index]
+    if (!step) return ""
+    return `${step.label}: ${step.kind === "less" ? "menos " : ""}${format(step.value)}`
+  }
+  const choose = (index: number, focus = false): void => {
+    setActive(index)
+    if (focus) marks.current[index]?.focus()
+  }
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    const next = moveInGrid({ row: 0, column: index }, event.key, 1, count)
+    if (!next || next.column === index) return
+    event.preventDefault()
+    choose(next.column, true)
+  }
+  const gridColumns = `repeat(${count}, minmax(0, 1fr))`
+
+  return (
+    <figure className={cn("flex min-w-0 flex-col gap-2", className)} aria-labelledby={`${id}-title`}>
+      <figcaption id={`${id}-title`} className="sr-only">
+        {title}
+      </figcaption>
+      {asTable ? (
+        <div className="min-w-0 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Paso</TableHead>
+                <TableHead scope="col" className="text-right">
+                  Importe
+                </TableHead>
+                {share ? (
+                  <TableHead scope="col" className="text-right">
+                    {share.heading}
+                  </TableHead>
+                ) : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {steps.map((step, index) => (
+                <TableRow key={step.key}>
+                  <TableHead scope="row" className={cn(step.kind !== "less" && "font-bold")}>
+                    {step.label}
+                  </TableHead>
+                  <TableCell className="text-right tabular-nums">
+                    {step.kind === "less" && step.value !== 0 ? "−" : ""}
+                    {format(step.value)}
+                  </TableCell>
+                  {share ? <TableCell className="text-right tabular-nums">{share.value(index)}</TableCell> : null}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-start gap-4">
+          {/* Cada barra necesita su ancho para su importe y su nombre: en una pantalla angosta el gráfico se desplaza solo. */}
+          <div className="flex min-w-0 flex-[1_1_480px] gap-2 overflow-x-auto pt-2 pb-1">
+            <div aria-hidden className="relative w-12 shrink-0 text-right text-xs text-muted-foreground" style={{ height }}>
+              {axisTicks.map((tick) => (
+                <span key={tick} className="absolute right-0 translate-y-1/2 tabular-nums" style={{ bottom: `${percent(tick)}%` }}>
+                  {short(tick)}
+                </span>
+              ))}
+            </div>
+            <div className="flex flex-1 flex-col gap-1.5" style={{ minWidth: `${count * 4.75}rem` }}>
+              <div className="relative" style={{ height }}>
+                {axisTicks.map((tick) => (
+                  <div
+                    key={tick}
+                    aria-hidden
+                    className={cn("absolute inset-x-0 border-t", tick === 0 ? "border-input" : "border-border")}
+                    style={{ bottom: `${percent(tick)}%` }}
+                  />
+                ))}
+                <div className="absolute inset-0 grid" style={{ gridTemplateColumns: gridColumns }}>
+                  {steps.map((step, index) => {
+                    const bar = bars[index] as { from: number; to: number }
+                    const lower = Math.min(bar.from, bar.to)
+                    const upper = Math.max(bar.from, bar.to)
+                    const chosen = index === at
+                    const tone = stepTone(step)
+                    return (
+                      <button
+                        key={step.key}
+                        ref={(element) => {
+                          marks.current[index] = element
+                        }}
+                        type="button"
+                        tabIndex={chosen ? 0 : -1}
+                        aria-label={describe(index)}
+                        aria-pressed={chosen}
+                        onMouseEnter={() => choose(index)}
+                        onFocus={() => choose(index)}
+                        onClick={() => choose(index)}
+                        onKeyDown={(event) => onKeyDown(event, index)}
+                        className={cn("relative h-full min-w-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring", chosen && "bg-primary/5")}
+                      >
+                        <span
+                          aria-hidden
+                          className={cn("absolute inset-x-[16%] rounded-[4px]", chosen && "ring-2 ring-foreground ring-offset-2 ring-offset-card")}
+                          style={{
+                            bottom: `${percent(lower)}%`,
+                            height: `max(3px, ${percent(upper) - percent(lower)}%)`,
+                            background: chosen ? TONE_VAR[tone] : faded(tone),
+                          }}
+                        />
+                        <span
+                          aria-hidden
+                          className="absolute inset-x-0 text-center text-[11px] font-extrabold whitespace-nowrap tabular-nums text-foreground sm:text-xs"
+                          style={{ bottom: `calc(${percent(upper)}% + 4px)` }}
+                        >
+                          {signed(step)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <div aria-hidden className="grid text-center text-[11px] leading-tight text-muted-foreground sm:text-xs" style={{ gridTemplateColumns: gridColumns }}>
+                {steps.map((step, index) => (
+                  <span key={step.key} className={cn("px-0.5 break-words hyphens-auto", index === at && "font-bold text-foreground")}>
+                    {step.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+          {detail ? (
+            <div aria-live="polite" className="flex min-w-60 flex-[0_1_300px] flex-col gap-1.5 rounded-xl border bg-muted/50 p-4">
+              {detail(at)}
+            </div>
+          ) : null}
+        </div>
+      )}
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <span className="text-[13px] text-muted-foreground">{asTable ? "" : "Pasa el mouse o toca cada barra; con el teclado, las flechas se mueven entre barras."}</span>
+        <TableToggle asTable={asTable} onToggle={() => setAsTable((value) => !value)} />
+      </div>
+    </figure>
+  )
+}
+
 // --- Mapa de calor -------------------------------------------------------------------------
 
 export interface HeatmapAxis {
@@ -504,6 +721,7 @@ export function HeatmapGrid({
   const [active, setActive] = useState(() => initial ?? { row: 0, column: Math.max(0, columns.length - 1) })
   const [asTable, setAsTable] = useState(false)
   const cells = useRef(new Map<string, HTMLButtonElement | null>())
+  const scroller = useRef<HTMLDivElement | null>(null)
   const top = max ?? Math.max(0, ...values.flat().map((value) => value ?? 0))
   const at = { row: Math.min(active.row, rows.length - 1), column: Math.min(active.column, columns.length - 1) }
   const activeValue = values[at.row]?.[at.column] ?? null
@@ -512,6 +730,16 @@ export function HeatmapGrid({
     setActive({ row, column })
     if (focus) cells.current.get(`${row}:${column}`)?.focus()
   }
+  // En una pantalla angosta el mapa se desplaza: al abrir, deja a la vista la casilla elegida (suele ser lo último).
+  const opened = useRef(false)
+  useEffect(() => {
+    if (opened.current) return
+    opened.current = true
+    const box = scroller.current
+    const cell = cells.current.get(`${at.row}:${at.column}`)
+    if (!box || !cell || box.scrollWidth <= box.clientWidth) return
+    box.scrollLeft = Math.max(0, cell.offsetLeft - box.clientWidth + cell.offsetWidth * 4)
+  })
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     const next = moveInGrid(at, event.key, rows.length, columns.length)
     if (!next || (next.row === at.row && next.column === at.column)) return
@@ -571,7 +799,7 @@ export function HeatmapGrid({
         </div>
       ) : (
         <div className="flex min-w-0 flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-[1_1_480px] overflow-x-auto">
+          <div ref={scroller} className="relative min-w-0 flex-[1_1_480px] overflow-x-auto">
             <div className="grid min-w-fit gap-[3px]" style={{ gridTemplateColumns: `${labelWidth}px repeat(${columns.length}, minmax(10px, 1fr))` }}>
               <span aria-hidden />
               {columns.map((column, columnIndex) => (
