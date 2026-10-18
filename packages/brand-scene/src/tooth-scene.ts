@@ -130,6 +130,8 @@ export class ToothScene {
   private raf: number | null = null
   private io: IntersectionObserver | null = null
   private dead = false
+  private pr: WebGLProgram | null = null
+  private onLost: (() => void) | null = null
 
   constructor(host: SceneHost) {
     this.host = host
@@ -142,7 +144,18 @@ export class ToothScene {
     } catch {
       gl = null
     }
-    if (!gl) return false
+    // Un contexto perdido (otro montaje que lo soltó, la GPU que se reinició)
+    // no dibuja: el lienzo se pinta en blanco con un ícono roto. Se oculta y
+    // queda el fondo de quien contiene la escena.
+    if (!gl || gl.isContextLost()) {
+      cv.style.visibility = "hidden"
+      return false
+    }
+    this.onLost = () => {
+      cv.style.visibility = "hidden"
+      this.stop()
+    }
+    cv.addEventListener("webglcontextlost", this.onLost)
     this.cv = cv
     this.gl = gl
     const sh = (t: number, src: string) => {
@@ -152,6 +165,7 @@ export class ToothScene {
       return o
     }
     const pr = gl.createProgram()!
+    this.pr = pr
     gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS))
     gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS))
     gl.linkProgram(pr)
@@ -258,7 +272,22 @@ export class ToothScene {
     if (this.raf) cancelAnimationFrame(this.raf)
     this.raf = null
     this.io?.disconnect()
-    this.gl?.getExtension("WEBGL_lose_context")?.loseContext()
+    if (this.onLost) this.cv?.removeEventListener("webglcontextlost", this.onLost)
+    this.onLost = null
+    // Se libera lo propio sin perder el contexto: `getContext` devuelve el mismo
+    // contexto del lienzo, y React vuelve a montar la escena sobre él (StrictMode
+    // en desarrollo); perderlo dejaba la escena en blanco.
+    const gl = this.gl
+    if (gl && !gl.isContextLost()) {
+      for (const g of Object.values(this.G)) {
+        gl.deleteBuffer(g.pb)
+        gl.deleteBuffer(g.nb)
+        gl.deleteBuffer(g.ib)
+      }
+      if (this.pr) gl.deleteProgram(this.pr)
+    }
+    this.G = {}
+    this.pr = null
     this.gl = null
   }
 
