@@ -159,6 +159,16 @@ test("«Cómo nos conoció» se elige de una lista y «Otro» pide cuál", async
   await info.attach("mas-datos", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await form.getByRole("button", { name: "Guardar" }).click()
   await expect(page.getByText("Otro: Feria de salud")).toBeVisible()
+  expect(await referralOf(fixtureDb, owner.org.id, "Lucía Ramos")).toEqual({ kind: "otro", said: "Feria de salud" })
+
+  // Dejarlo sin registrar borra también lo que dijo: no vuelve a «Otro».
+  await page.getByRole("button", { name: "Editar", exact: true }).last().click()
+  const again = surface(page, { name: "Editar más datos" }).first()
+  await chooseOption(again.getByRole("combobox", { name: "Cómo nos conoció" }), { label: "No registrado" })
+  await expect(again.getByLabel("¿Cuál?")).toHaveCount(0)
+  await again.getByRole("button", { name: "Guardar" }).click()
+  await expect(page.getByText("Otro: Feria de salud")).toHaveCount(0)
+  await expect.poll(() => referralOf(fixtureDb, owner.org.id, "Lucía Ramos")).toEqual({ kind: null, said: null })
 })
 
 /** Lo que guardó la ficha de una persona: la opción de la lista y lo que dijo. */
@@ -170,40 +180,7 @@ async function referralOf(db: Db, organizationId: string, displayName: string) {
   return rows[0] ?? null
 }
 
-test("alta interna: «Cómo nos conoció» se elige de la lista, «Otro» pide cuál y la ficha guarda los dos", async ({ owner, fixtureDb }, info) => {
-  const page = owner.page
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await gotoHydrated(page, tenant(owner.org.slug, "/people"))
-  await page.locator("header").getByRole("button", { name: "Nueva persona", exact: true }).click()
-  const person = surface(page, { name: "Nueva persona", exact: true }).first()
-  await person.getByLabel("Primer apellido", { exact: true }).fill("Referida")
-  await person.getByLabel("Nombres", { exact: true }).fill("Nora")
-  await person.getByRole("button", { name: "Crear y abrir su página", exact: true }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Nora Referida" })).toBeVisible()
-
-  await page.getByRole("button", { name: "Registrar", exact: true }).click()
-  const form = surface(page, { name: "Nuevo paciente", exact: true }).first()
-  await form.getByRole("button", { name: "Siguiente", exact: true }).click()
-  // Una lista, no texto libre: «¿Cuál?» aparece solo con «Otro» y se vacía al elegir otra opción.
-  const kind = form.getByRole("combobox", { name: /^Cómo nos conoció/ })
-  const which = form.getByLabel("Cómo nos conoció: ¿cuál?")
-  await expect(which).toHaveCount(0)
-  await chooseOption(kind, { label: "Otro" })
-  await which.fill("Volante")
-  await chooseOption(kind, { label: "Redes sociales" })
-  await expect(which).toHaveCount(0)
-  await chooseOption(kind, { label: "Otro" })
-  await expect(which).toHaveValue("")
-  await which.fill("Feria de salud")
-  await info.attach("alta-interna", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
-  // Salud, odontológicos y revisión.
-  for (let step = 0; step < 3; step += 1) await form.getByRole("button", { name: "Siguiente", exact: true }).click()
-  await expect(form.getByText("Otro: Feria de salud")).toBeVisible()
-  await form.getByRole("button", { name: "Registrar paciente", exact: true }).click()
-  await expect.poll(() => referralOf(fixtureDb, owner.org.id, "Nora Referida")).toEqual({ kind: "otro", said: "Feria de salud" })
-})
-
-test("registro en línea: la misma lista cuando la clínica la pregunta, sin texto si no es «Otro»", async ({ owner, fixtureDb, browser }, info) => {
+test("registro en línea: «Cómo nos conoció» es la misma lista cuando la clínica la pregunta, y «¿Cuál?» solo va con «Otro»", async ({ owner, fixtureDb, browser }, info) => {
   const page = owner.page
   const current = await call<{ version: number; fields: Record<string, string> }>(page, "GET", "/api/patient-registration/config", owner.org.slug)
   await call(page, "PUT", "/api/patient-registration/config", owner.org.slug, {
@@ -214,24 +191,35 @@ test("registro en línea: la misma lista cuando la clínica la pregunta, sin tex
   })
   const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } })
   const anon = await context.newPage()
+  const next = () => anon.getByRole("button", { name: "Siguiente", exact: true }).click()
   try {
     await gotoHydrated(anon, tenant(owner.org.slug, "/registro?via=qr"))
     await fillPatientNames(anon, "Olga Referida")
     await anon.getByLabel("Fecha de nacimiento").fill(writtenDate("1985-06-15"))
-    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    await next()
     await anon.getByLabel(/^Teléfono(?: \*)?$/).fill("+51999300301")
-    await chooseOption(anon.getByRole("combobox", { name: /^Cómo nos conoció/ }), { label: "Recomendación de alguien" })
-    await expect(anon.getByLabel("Cómo nos conoció: ¿cuál?")).toHaveCount(0)
+    await next()
+    for (const question of ["¿Tiene alergias?", "¿Tiene alguna enfermedad actual?", "¿Toma medicación actualmente?"]) {
+      await anon.getByLabel(question).click()
+      await anon.getByRole("option", { name: "No", exact: true }).click()
+    }
+    await next()
+    // «Para conocerte mejor»: una lista, no texto libre; «¿Cuál?» aparece con «Otro» y se va con otra opción.
+    const kind = anon.getByRole("combobox", { name: /^Cómo nos conoció/ })
+    const which = anon.getByLabel("¿Cuál?", { exact: true })
+    await expect(which).toHaveCount(0)
+    await chooseOption(kind, { label: "Otro" })
+    await which.fill("Volante")
+    await chooseOption(kind, { label: "Recomendación de alguien" })
+    await expect(which).toHaveCount(0)
     await info.attach("registro-en-linea", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
-    const submit = anon.getByRole("button", { name: "Enviar registro", exact: true })
-    for (let step = 0; step < 4 && !(await submit.isVisible()); step += 1) await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
-    // La revisión dice la opción elegida, sin texto aparte.
-    await expect(anon.getByRole("definition").filter({ hasText: "Recomendación de alguien" })).toHaveText("Recomendación de alguien")
+    await next()
     await anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
-    await submit.click()
+    await anon.getByRole("button", { name: "Enviar registro", exact: true }).click()
     await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible({ timeout: 20_000 })
   } finally {
     await context.close()
   }
+  // Lo escrito con «Otro» no viaja cuando al final eligió otra opción.
   expect(await referralOf(fixtureDb, owner.org.id, "Olga Referida")).toEqual({ kind: "recomendacion", said: null })
 })

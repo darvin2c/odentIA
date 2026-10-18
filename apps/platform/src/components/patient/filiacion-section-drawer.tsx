@@ -293,6 +293,9 @@ export function FiliacionSectionDrawer({
         if (f.type.kind === "insurance") Object.assign(patch, insuranceFromChoice(profile, value ?? ""))
         else patch[f.key] = value
       }
+      // Salir de «Otro» borra también lo que dijo: con el texto guardado, el
+      // servidor volvería a ponerlo como «Otro».
+      if (patch.referralKind !== undefined && patch.referralKind !== "otro") patch.referralSource = null
       // Si cambia el tipo a uno que fija su país, el país lo pone el servidor.
       if (patch.docType !== undefined && !documentCountryChosen(profile, values.docType || null)) delete patch.docCountry
       // El documento nacional sin país elegido es del país de la clínica (el
