@@ -623,8 +623,11 @@ test("documentos: una sola lista para buscar un papel, con sus filtros y cada fi
   await expect(page).toHaveURL(/tab=documentos/)
   await expect(page.getByText("Receta N.º 1")).toBeVisible()
   await expect(page.getByText("Anulada", { exact: true }).first()).toBeVisible()
-  // Con un solo tipo de papel y nada pendiente, filtrar no cambia nada: no hay filtros (issue 149).
-  await expect(page.getByRole("button", { name: "Todo", exact: true })).toHaveCount(0)
+  // Los filtros son los de lo que hay (issue 149): la base trae la receta y, con el perfil
+  // de Perú, el odontograma firmado. Sin imágenes no hay «Imágenes»; sin pendientes, no
+  // hay «Requieren acción».
+  await expect(page.getByRole("button", { name: "Todo", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "Imágenes", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Requieren acción/ })).toHaveCount(0)
 
   // Una periapical de la 36, tomada antes de subirla.
@@ -656,9 +659,11 @@ test("documentos: una sola lista para buscar un papel, con sus filtros y cada fi
   expect(uploaded).toBe(201)
   await page.reload()
 
-  // Ahora hay dos tipos: «Todo» primero y marcado; sin pendientes, no hay «Requieren acción».
+  // Con la imagen aparece «Imágenes»; «Todo» sigue primero y marcado, y sin pendientes
+  // no hay «Requieren acción».
   const todo = page.getByRole("button", { name: "Todo", exact: true })
   await expect(todo).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByRole("button", { name: "Imágenes", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: /^Requieren acción/ })).toHaveCount(0)
   // La fila de la imagen dice su tipo y su fecha de toma, no la de subida.
   const imageRow = page.getByRole("listitem").filter({ hasText: "Periapical de control" })
