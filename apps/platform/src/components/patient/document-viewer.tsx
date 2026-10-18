@@ -21,8 +21,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
+import { formatDate, formatDateTime } from "../../lib/clinical-journey"
 import { timeAgo, usePermission } from "../../lib/crm"
-import { activeOrgLocale } from "../../lib/locale"
 import type {
   Encounter,
   PatientDocument,
@@ -478,6 +478,8 @@ function DocumentViewer({
             </Select>
           </Field>
         )}
+        {/* Solo lo que la imagen tiene (decisión 10): lo vacío no ocupa lugar y
+            se agrega con «Piezas y vínculos». */}
         <details open className="rounded-md border px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium">Detalles del archivo</summary>
           <dl className="grid grid-cols-1 gap-x-4 gap-y-2 pt-2 text-sm">
@@ -486,22 +488,17 @@ function DocumentViewer({
               <dd>{imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Fecha de toma</dt>
+              <dt className="text-xs text-muted-foreground">
+                {doc.capturedAt ? "Tomada" : "Subida"}
+              </dt>
               <dd>
-                {doc.capturedAt
-                  ? new Date(doc.capturedAt).toLocaleString(activeOrgLocale(), {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })
-                  : "No registrada"}{" "}
-                <span className="text-muted-foreground">
-                  (subida{" "}
-                  {new Date(doc.createdAt).toLocaleString(activeOrgLocale(), {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
-                  )
-                </span>
+                {formatDateTime(doc.capturedAt ?? doc.createdAt)}
+                {doc.capturedAt ? (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    (subida {formatDateTime(doc.createdAt)})
+                  </span>
+                ) : null}
               </dd>
             </div>
             {doc.source && (
@@ -543,48 +540,46 @@ function DocumentViewer({
                 )}
               </div>
             )}
-            <div>
-              <dt className="text-xs text-muted-foreground">Piezas</dt>
-              <dd>{teeth.length > 0 ? teeth.join(", ") : "Sin piezas vinculadas"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Etiquetas</dt>
-              <dd>
-                {tags.length > 0 ? (
-                  <span className="flex flex-wrap gap-1">
-                    {tags.map((t) => (
-                      <Badge key={t} variant="secondary">
-                        {t}
-                      </Badge>
-                    ))}
-                  </span>
-                ) : (
-                  "Sin etiquetas"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Atención</dt>
-              <dd>
-                {doc.encounterId ? (
+            {teeth.length > 0 && (
+              <div>
+                <dt className="text-xs text-muted-foreground">
+                  {teeth.length === 1 ? "Pieza" : "Piezas"}
+                </dt>
+                <dd>{teeth.join(", ")}</dd>
+              </div>
+            )}
+            {tags.length > 0 && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Etiquetas</dt>
+                <dd className="flex flex-wrap gap-1">
+                  {tags.map((t) => (
+                    <Badge key={t} variant="secondary">
+                      {t}
+                    </Badge>
+                  ))}
+                </dd>
+              </div>
+            )}
+            {doc.encounterId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Atención</dt>
+                <dd>
                   <Link
                     to="/patients/$patientId/encounters/$encounterId"
                     params={{ patientId, encounterId: doc.encounterId }}
                     className={linkButton}
                   >
                     {encounter
-                      ? `Abrir atención (${timeAgo(encounter.createdAt)})`
-                      : "Abrir atención"}
+                      ? `Abrir la atención del ${formatDate(encounter.createdAt)}`
+                      : "Abrir la atención"}
                   </Link>
-                ) : (
-                  "Archivo general (sin atención)"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Tratamiento</dt>
-              <dd>
-                {doc.planItemId ? (
+                </dd>
+              </div>
+            )}
+            {doc.planItemId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Tratamiento</dt>
+                <dd>
                   <Link
                     to="/patients/$patientId"
                     params={{ patientId }}
@@ -593,26 +588,13 @@ function DocumentViewer({
                   >
                     {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
                   </Link>
-                ) : (
-                  "Sin tratamiento vinculado"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Revisión de contexto</dt>
-              <dd className="flex items-center gap-2">
-                v{doc.contextVersion}
-                {canEdit && (
-                  <Button size="sm" variant="outline" onClick={onEditContext}>
-                    Editar contexto
-                  </Button>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Presupuesto</dt>
-              <dd>
-                {doc.budgetId ? (
+                </dd>
+              </div>
+            )}
+            {doc.budgetId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Presupuesto</dt>
+                <dd>
                   <Link
                     to="/patients/$patientId"
                     params={{ patientId }}
@@ -621,23 +603,19 @@ function DocumentViewer({
                   >
                     Ver la propuesta
                   </Link>
-                ) : (
-                  "Sin presupuesto vinculado"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Procedimiento</dt>
-              <dd>
-                {doc.encounterProcedureId
-                  ? "Vinculado a un procedimiento"
-                  : "Sin procedimiento vinculado"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Control</dt>
-              <dd>
-                {doc.followUpId ? (
+                </dd>
+              </div>
+            )}
+            {doc.encounterProcedureId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Procedimiento</dt>
+                <dd>Unido a un procedimiento de la atención</dd>
+              </div>
+            )}
+            {doc.followUpId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Control</dt>
+                <dd>
                   <Link
                     to="/patients/$patientId"
                     params={{ patientId }}
@@ -646,15 +624,13 @@ function DocumentViewer({
                   >
                     Ver controles
                   </Link>
-                ) : (
-                  "Sin control vinculado"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Receta</dt>
-              <dd>
-                {doc.prescriptionId ? (
+                </dd>
+              </div>
+            )}
+            {doc.prescriptionId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Receta</dt>
+                <dd>
                   <Link
                     to="/patients/$patientId"
                     params={{ patientId }}
@@ -663,15 +639,13 @@ function DocumentViewer({
                   >
                     Ver recetas
                   </Link>
-                ) : (
-                  "Sin receta vinculada"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Pago</dt>
-              <dd>
-                {doc.paymentId ? (
+                </dd>
+              </div>
+            )}
+            {doc.paymentId && (
+              <div>
+                <dt className="text-xs text-muted-foreground">Pago</dt>
+                <dd>
                   <Link
                     to="/patients/$patientId"
                     params={{ patientId }}
@@ -680,17 +654,15 @@ function DocumentViewer({
                   >
                     Ver cuenta
                   </Link>
-                ) : (
-                  "Sin pago vinculado"
-                )}
-              </dd>
-            </div>
+                </dd>
+              </div>
+            )}
           </dl>
         </details>
         {historyQuery.data && historyQuery.data.length > 1 && (
           <details className="rounded-md border px-3 py-2">
             <summary className="cursor-pointer text-sm font-medium">
-              Historial de contexto ({historyQuery.data.length} revisiones)
+              Cambios de piezas y vínculos ({historyQuery.data.length} versiones)
             </summary>
             <ul className="flex flex-col gap-2 pt-2">
               {[...historyQuery.data]
@@ -715,6 +687,11 @@ function DocumentViewer({
         )}
 
         <div className="flex flex-wrap gap-2">
+          {canEdit && (
+            <Button size="sm" variant="outline" onClick={onEditContext}>
+              Piezas y vínculos
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -963,12 +940,12 @@ function ContextDrawer({
       onClose={() => {
         if (!pending) onOpenChange(false)
       }}
-      title={`Editar contexto · ${doc.label}`}
-      description={`Crea una nueva revisión (actual v${expectedVersion}). El archivo original no se modifica.`}
+      title={`Piezas y vínculos · ${doc.label}`}
+      description={`Se guarda como una versión nueva (ahora v${expectedVersion}); el archivo no cambia.`}
       onSubmit={(e) => void onSubmit(e)}
       isSubmitting={pending}
       submitDisabled={disabled}
-      submitLabel="Guardar revisión"
+      submitLabel="Guardar"
       error={serverError}
     >
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
