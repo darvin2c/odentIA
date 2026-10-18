@@ -9,6 +9,7 @@ import {
   saasAction,
   saasActionReview,
   saasCharge,
+  saasPlan,
 } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
@@ -16,7 +17,7 @@ import { openSupportCaseFromHelp, replyToSupportCase, setSupportCaseStatus } fro
 import { contactScreenFacts } from "./contact-screen.js"
 import { sendToSpam } from "./contact-screen-actions.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { currentSaasPeriod, microsToCents } from "./saas-actions.js"
+import { currentSaasPeriod, listPeriodActions, microsToCents } from "./saas-actions.js"
 
 /**
  * «Pedir revisión» de una fila de «Cada acción de tus agentes» (issue 77,
@@ -314,6 +315,8 @@ export interface StaffReviewView {
     priceMicros: number | null
     currency: string | null
     charged: boolean
+    /** Ya cobrada, pero la cubrió el crédito: darle la razón no devuelve dinero. */
+    coveredByCredit: boolean
     hasConversation: boolean
   }
 }
@@ -349,6 +352,7 @@ export async function getReviewOfCase(db: Db, caseId: string): Promise<StaffRevi
       priceMicros: row.action.priceMicros,
       currency: row.action.currency,
       charged: row.action.chargeId !== null,
+      coveredByCredit: row.action.chargeId !== null && !(await billedAboveCredit(db, row.review.organizationId, row.action.id, row.action.chargeId)),
       hasConversation: row.action.conversationId !== null,
     },
   }
@@ -435,13 +439,35 @@ export async function readReviewConversation(
   return messages
 }
 
-/** Las revisiones devueltas de acciones ya cobradas que aún no salieron en un cargo (con owner). */
+/**
+ * ¿Se pagó aparte esta acción ya cobrada? Solo lo que pasó del crédito de su
+ * mes: lo que cubrió el crédito (o la prueba) no costó nada más que la cuota,
+ * y devolverlo sería pagar lo que nunca se pagó. Se calcula con la misma
+ * regla del cargo (`listPeriodActions` sobre el tramo y el plan de ese cargo).
+ */
+export async function billedAboveCredit(tx: Db, orgId: string, actionId: string, chargeId: string): Promise<boolean> {
+  const [charge] = await tx
+    .select({ start: saasCharge.periodStart, end: saasCharge.periodEnd, creditCents: saasPlan.creditCents })
+    .from(saasCharge)
+    .leftJoin(saasPlan, eq(saasPlan.id, saasCharge.planId))
+    .where(and(eq(saasCharge.organizationId, orgId), eq(saasCharge.id, chargeId)))
+    .limit(1)
+  if (!charge) return false
+  const rows = await listPeriodActions(tx, orgId, { start: charge.start, end: charge.end, credit: "mes", creditCents: charge.creditCents ?? 0 })
+  return rows.find((row) => row.id === actionId)?.state === "sobre_credito"
+}
+
+/**
+ * Las revisiones devueltas de acciones ya cobradas por encima del crédito
+ * que aún no salieron en un cargo (con owner). Las que cubrió el crédito no
+ * se devuelven en dinero (`billedAboveCredit`).
+ */
 export async function pendingReviewCredits(
   tx: Db,
   orgId: string,
 ): Promise<Array<{ reviewId: string; actionId: string; priceMicros: number; kind: string }>> {
   const rows = await tx
-    .select({ reviewId: saasActionReview.id, actionId: saasAction.id, priceMicros: saasAction.priceMicros, kind: saasAction.kind })
+    .select({ reviewId: saasActionReview.id, actionId: saasAction.id, chargeId: saasAction.chargeId, priceMicros: saasAction.priceMicros, kind: saasAction.kind })
     .from(saasActionReview)
     .innerJoin(saasAction, eq(saasAction.id, saasActionReview.actionId))
     .where(
@@ -454,7 +480,12 @@ export async function pendingReviewCredits(
       ),
     )
     .orderBy(asc(saasActionReview.decidedAt))
-  return rows.map((row) => ({ reviewId: row.reviewId, actionId: row.actionId, priceMicros: Number(row.priceMicros), kind: row.kind }))
+  const paid: Array<{ reviewId: string; actionId: string; priceMicros: number; kind: string }> = []
+  for (const row of rows) {
+    if (!row.chargeId || !(await billedAboveCredit(tx, orgId, row.actionId, row.chargeId))) continue
+    paid.push({ reviewId: row.reviewId, actionId: row.actionId, priceMicros: Number(row.priceMicros), kind: row.kind })
+  }
+  return paid
 }
 
 /** Anota en qué cargo se devolvieron (con owner). */

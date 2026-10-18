@@ -70,9 +70,10 @@ export function useContactScreenActions() {
     retry: false,
     mutationFn: (target: Target) => apiFetch(`${target.base}/spam`, { method: "POST" }),
     onSuccess: (_result, target) => {
-      // Actúa al instante y se puede deshacer: no pide confirmación (tablero 4).
+      // Actúa al instante: no pide confirmación (tablero 4). «Sacar de Spam» y no
+      // «Deshacer»: lo devuelto y el caso de Soporte que abrió no se revierten.
       toast(`${target.contactName} pasó a Spam. El agente ya no le responde.`, {
-        action: { label: "Deshacer", onClick: () => notSpam.mutate(target) },
+        action: { label: "Sacar de Spam", onClick: () => notSpam.mutate(target) },
       })
       refresh()
     },

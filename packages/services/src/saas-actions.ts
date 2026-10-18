@@ -280,6 +280,11 @@ export interface SaasReviewView {
   byName: string | null
   /** El caso de Soporte donde la sigue la clínica; nulo si se devolvió sola. */
   caseId: string | null
+  /**
+   * Devuelta después de cobrarse, pero la cubrió el crédito (o la prueba):
+   * la clínica no pagó nada aparte por ella, así que no hay importe que devolver.
+   */
+  coveredByCredit: boolean
 }
 
 export interface SaasActionRow {
@@ -443,7 +448,10 @@ export async function listPeriodActions(
       discountBps: row.discountBps,
       state,
       chargeId: row.chargeId,
-      review,
+      review:
+        review && review.status === "devuelta" && row.chargeId !== null
+          ? { ...review, coveredByCredit: state === "credito" || state === "prueba" }
+          : review,
     }
   })
 }
@@ -469,6 +477,7 @@ export async function reviewsOf(tx: Db, orgId: string, actionIds: string[]): Pro
       credited: row.creditChargeId !== null,
       byName,
       caseId: row.supportCaseId,
+      coveredByCredit: false,
     })
   }
   return result

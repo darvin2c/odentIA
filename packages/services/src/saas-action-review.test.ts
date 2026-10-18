@@ -165,17 +165,24 @@ it("solo este mes y el anterior", async () => {
   })
 })
 
-it("lo ya cobrado y devuelto sale como «Devolución por revisión» en el cargo siguiente, una sola vez", async () => {
+it("lo ya cobrado por encima del crédito vuelve como «Devolución por revisión», una sola vez; lo que cubrió el crédito no se devuelve en dinero", async () => {
   const end = new Date(Date.now() - 3_600_000)
   const start = new Date(end.getTime() - 30 * 86_400_000)
   const { orgId, actor } = await clinic({ activatedAt: start, currentPeriodStart: start, currentPeriodEnd: end })
+  // La primera gasta justo los USD 29 del crédito; la segunda ya pasó del crédito y se pagó aparte.
+  const covered = await conversationAction(orgId, new Date(start.getTime() + 3_600_000), 29_000_000)
   const charged = await conversationAction(orgId, new Date(start.getTime() + 86_400_000), 450_000)
   await closeSaasPeriods(ownerDb, new Date())
   const [firstCharge] = await ownerDb.select().from(saasCharge).where(eq(saasCharge.organizationId, orgId))
   expect(firstCharge).toBeDefined()
 
-  const asked = await run(orgId, (tx) => requestActionReview(tx, orgId, actor, { actionId: charged.id, reason: "agente" }))
-  await ownerDb.transaction((tx) => decideActionReview(tx as Db, STAFF, { caseId: asked.caseId!, accept: true, answer: "Devolvemos la conversación." }))
+  for (const action of [covered, charged]) {
+    const asked = await run(orgId, (tx) => requestActionReview(tx, orgId, actor, { actionId: action.id, reason: "agente" }))
+    await ownerDb.transaction((tx) => decideActionReview(tx as Db, STAFF, { caseId: asked.caseId!, accept: true, answer: "Devolvemos la conversación." }))
+  }
+  const previous = await run(orgId, async (tx) => listPeriodActions(tx, orgId, { start, end, credit: "mes", creditCents: 2900 }))
+  expect(previous.find((row) => row.id === covered.id)?.review).toMatchObject({ status: "devuelta", coveredByCredit: true })
+  expect(previous.find((row) => row.id === charged.id)?.review).toMatchObject({ status: "devuelta", coveredByCredit: false })
 
   const next = addMonth(end)
   await closeSaasPeriods(ownerDb, new Date(next.getTime() + 3_600_000))
@@ -186,4 +193,6 @@ it("lo ya cobrado y devuelto sale como «Devolución por revisión» en el cargo
   expect(lines.filter((line) => line.kind === "revision").map((line) => [line.quantity, line.amountCents])).toEqual([[1, -45]])
   const [review] = await ownerDb.select().from(saasActionReview).where(eq(saasActionReview.actionId, charged.id))
   expect(review?.creditChargeId).toBe(charges[1]!.id)
+  const [coveredReview] = await ownerDb.select().from(saasActionReview).where(eq(saasActionReview.actionId, covered.id))
+  expect(coveredReview?.creditChargeId).toBeNull()
 })

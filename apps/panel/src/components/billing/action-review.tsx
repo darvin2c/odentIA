@@ -27,6 +27,8 @@ export interface ActionReview {
   credited: boolean
   byName: string | null
   caseId: string | null
+  /** Ya cobrada, pero la cubrió el crédito: no hay importe que devolver. */
+  coveredByCredit: boolean
 }
 
 /** Lo que el cajón necesita de la fila. */
@@ -73,6 +75,7 @@ export function reviewStateWords(review: ActionReview, priceMicros: number | nul
   const money = priceMicros === null ? "" : formatMicros(priceMicros, "USD")
   if (review.status === "pendiente") return `En revisión · la pediste el ${day(review.requestedAt)}`
   if (review.status === "mantenida") return "Se mantiene"
+  if (charged && review.coveredByCredit) return "Te dimos la razón · no se te cobró aparte: la cubrió el crédito del mes"
   if (charged) return review.credited ? `Devuelta: ${money}, descontada en el cargo siguiente` : `Devuelta: ${money} en tu próximo cargo`
   if (review.automatic) return `No se cobra: era spam${review.byName ? ` · lo marcó ${review.byName.split(" ")[0]}` : ""}`
   return "No se cobra: odentIA la devolvió"

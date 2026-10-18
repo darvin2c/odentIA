@@ -31,6 +31,7 @@ export const caseReview = z.object({
     priceMicros: z.number().nullable(),
     currency: z.string().nullable(),
     charged: z.boolean(),
+    coveredByCredit: z.boolean(),
     hasConversation: z.boolean(),
   }),
 })
@@ -147,7 +148,11 @@ export function SupportCaseReview({
         <dd>
           {KIND_WORDS[action.kind] ?? action.kind} del {dayTime(action.occurredAt)}
           {channel ? ` · ${channel}` : ""} · {price}
-          {action.charged ? " · ya facturada: si se devuelve, sale en el cargo siguiente" : " · aún sin facturar"}
+          {action.charged
+            ? action.coveredByCredit
+              ? " · ya facturada, la cubrió el crédito del mes: darle la razón no devuelve dinero"
+              : " · ya facturada: si se devuelve, sale en el cargo siguiente"
+            : " · aún sin facturar"}
           <span className="block text-muted-foreground">{action.detail}</span>
         </dd>
         <dt className="text-muted-foreground">Motivo</dt>
@@ -232,7 +237,7 @@ export function SupportCaseReview({
                 disabled={answer.trim().length === 0 || decide.isPending}
                 onClick={() => decide.mutate(true)}
               >
-                Devolver {price}
+                {action.charged && action.coveredByCredit ? "Darle la razón" : `Devolver ${price}`}
               </Button>
               <Button
                 type="button"

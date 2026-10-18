@@ -54,7 +54,7 @@ Hay dos estados de la persona, en una sola columna (`contact.screen`). Ninguno s
 - La Bandeja, Inicio y Reportes muestran solo lo que alguien tiene que atender.
 - Un error de Jev tiene dos salidas: la persona escribe algo real o el equipo dice «No es spam».
 - Revisar si suben los «No es spam» de una clínica: el umbral se mide con `eval:spam`.
-- La devolución de un cobro ya facturado acredita el precio entero de la fila, aunque el crédito del mes la hubiera cubierto. Es a favor de la clínica y no se corrige mientras no haya casos.
+- Lo ya facturado se devuelve en dinero solo si pasó del crédito de su mes: lo que cubrió el crédito no costó nada aparte, y la fila lo dice (`billedAboveCredit`).
 
 ## Referencias
 
