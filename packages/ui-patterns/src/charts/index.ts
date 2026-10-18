@@ -21,4 +21,5 @@ export {
   type WaterfallChartProps,
   type WaterfallStep,
 } from "./data-charts.js";
+export { BarList, type BarListProps, type BarListRow } from "./bar-list.js";
 export { niceTicks, scaleLevel } from "./chart-math.js";

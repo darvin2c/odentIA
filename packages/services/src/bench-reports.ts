@@ -12,6 +12,7 @@ import { getReportProfessionals, getReportSummary } from "./report-summary.js"
 import { getAgentReportList, getReportAgent } from "./report-agent.js"
 import { getAgendaReport } from "./report-agenda.js"
 import { getReportCommissions, getReportFinance, getReportOutlook, getReportPromotions } from "./report-finance.js"
+import { getPatientReportList, getReportFunnel, getReportPatients } from "./report-patients.js"
 
 const ORG = process.env.BENCH_ORG ?? "seed-org-dental-smile"
 const url = process.env.APP_DATABASE_URL
@@ -36,6 +37,10 @@ const READS: Record<string, Read> = {
   commissions: getReportCommissions,
   outlook: getReportOutlook,
   promotions: getReportPromotions,
+  patients: getReportPatients,
+  funnel: getReportFunnel,
+  "list:funnel_lost_booked": (tx, org, query) => getPatientReportList(tx, org, { ...query, list: "funnel_lost_booked" }),
+  "list:lapsed": (tx, org, query) => getPatientReportList(tx, org, { ...query, list: "lapsed" }),
 }
 // `BENCH_ONLY=agenda,money` mide solo esas consultas.
 const only = process.env.BENCH_ONLY?.split(",").map((name) => name.trim()).filter(Boolean)

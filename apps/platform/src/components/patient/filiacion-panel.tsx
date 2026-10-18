@@ -23,7 +23,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { useClinicalProfile } from "../../lib/org"
 import { sexLabel } from "../../lib/patient-overview"
 import { filiationGapsText, hcLabel, type PatientFull } from "../../lib/patients"
-import { addressLine, countryText, documentLine, insuranceText } from "../../lib/person-data"
+import { addressLine, countryText, documentLine, insuranceText, referralText } from "../../lib/person-data"
 import { DataConsentSection } from "./data-consent-section"
 import { FiliacionSectionDrawer, type FiliacionSectionKey, useBranches } from "./filiacion-section-drawer"
 import { MessagePermissionsSection, messageRecipientOf } from "./message-permissions-section"
@@ -217,7 +217,7 @@ export function FiliacionPanel({
                 : null}
             </Item>
             <Item label="Ocupación">{p.occupation}</Item>
-            <Item label="Cómo nos conoció">{p.referralSource}</Item>
+            <Item label="Cómo nos conoció">{referralText(p.referralKind, p.referralSource)}</Item>
             {profile.origin ? <Item label="Procedencia">{p.origin}</Item> : null}
           </dl>
         </CollapsibleContent>

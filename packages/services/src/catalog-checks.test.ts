@@ -13,6 +13,7 @@ import {
   INSURANCE_TYPES,
   KINSHIP,
   PATIENT_DOCUMENT_CATEGORIES,
+  REFERRAL_KINDS,
   RESPONSIBILITY_KINDS,
   SEX_CODES,
 } from "@odentia/clinical"
@@ -34,6 +35,7 @@ const LISTS: Array<[constraint: string, values: readonly string[]]> = [
   ["patient_marital_status_check", HL7_MARITAL_STATUSES],
   ["patient_education_level_check", EDUCATION_LEVELS],
   ["patient_insurance_type_check", INSURANCE_TYPES],
+  ["patient_referral_kind_check", REFERRAL_KINDS],
   ["patient_family_history_relationship_check", FAMILY_RELATIONSHIPS],
   ["patient_condition_status_check", CONDITION_STATUSES],
   ["patient_responsibility_kind_check", RESPONSIBILITY_KINDS],

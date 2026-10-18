@@ -172,6 +172,7 @@ import { seedPortal } from "./seed-portal.js"
 import { seedReports } from "./seed-reports.js"
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsFinance } from "./seed-reports-finance.js"
+import { seedReportsPatients } from "./seed-reports-patients.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
@@ -3557,6 +3558,8 @@ const reportsHistory = await db.transaction((tx) => {
 await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
 // Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
 const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, dentistIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
+// Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
+const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }))
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3743,6 +3746,7 @@ console.log(
 )
 console.log(
   `Reportes › Finanzas y Agenda (dental-smile): ${reportsFinance.settlements} pagos de comisiones, ${reportsFinance.orders} compras, ${reportsFinance.budgets} presupuestos con promoción`,
+  `historia de Pacientes (dental-smile): ${patientsHistory.moved} primeras visitas tras su mensaje, ${patientsHistory.channels} conversaciones por canal, ${patientsHistory.referrals} «cómo nos conoció», ${patientsHistory.controls} controles`,
 )
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)

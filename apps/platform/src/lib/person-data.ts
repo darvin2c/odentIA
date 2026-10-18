@@ -14,6 +14,8 @@ import {
   MARITAL_STATUS_LABELS,
   type MaritalStatus,
   insuranceScheme,
+  REFERRAL_KIND_LABELS,
+  type ReferralKind,
   regionOption,
 } from "@odentia/clinical"
 import { countryOptions, normalizeCountry, regionCountry } from "@odentia/ui-patterns"
@@ -149,6 +151,14 @@ export function insuranceText(
     return general ? `${label} (${general.toLowerCase()})` : label
   }
   return general
+}
+
+/** «Redes sociales», «Otro: por mi prima». Nulo si no lo dijo. */
+export function referralText(kind: string | null | undefined, source: string | null | undefined): string | null {
+  const said = source?.trim() || null
+  if (!kind) return said
+  const label = REFERRAL_KIND_LABELS[kind as ReferralKind] ?? kind
+  return kind === "otro" && said ? `${label}: ${said}` : label
 }
 
 /** La región: de la lista del país si la tiene, o como se escribió. */

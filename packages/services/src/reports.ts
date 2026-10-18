@@ -90,7 +90,7 @@ export type ControlTotals = {
  * Controles que tocaban en el tramo, según su estado a hoy (como los
  * presupuestos): así «siguen pendientes» coincide con su lista. De toda la clínica.
  */
-async function controlTotals(tx: Db, orgId: string, span: ReportSpan): Promise<ControlTotals> {
+export async function controlTotals(tx: Db, orgId: string, span: ReportSpan): Promise<ControlTotals> {
   const [row] = await tx.execute<Omit<ControlTotals, "unknown">>(sql`
     select count(*)::int as due,
       count(*) filter (where f.status='realizado' and f.completed_encounter_id is not null
@@ -177,14 +177,19 @@ export async function getReportAgenda(tx: Db, orgId: string, query: ReportQuery,
 
 // --- Pacientes y ventas ---------------------------------------------------------------------
 
+/** La primera cita atendida de cada persona: `first_visit(id, patient_id, starts_at, branch_id, service_name, dentist_user_id)`. */
+export function firstVisitSql(orgId: string): SQL {
+  return sql`first_visit as (
+      select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, dentist_user_id
+      from appointment where organization_id=${orgId} and status='atendida'
+      order by patient_id, starts_at, id
+    )`
+}
+
 /** Personas atendidas por primera vez en cada tramo (su primera cita atendida cae dentro). */
 export async function newPatientsMany(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, spans: Span[]): Promise<number[]> {
   const rows = await tx.execute<{ idx: number; count: number }>(sql`
-    with first_visit as (
-      select distinct on (patient_id) patient_id, starts_at, branch_id
-      from appointment where organization_id=${orgId} and status='atendida'
-      order by patient_id, starts_at, id
-    ) select b.idx, count(*)::int as count from ${spansSql(spans)}
+    with ${firstVisitSql(orgId)} select b.idx, count(*)::int as count from ${spansSql(spans)}
     join first_visit f on f.starts_at >= b.start_at and f.starts_at < b.end_at
       ${scope.branch ? sql`and f.branch_id=${scope.branch.id}` : sql``}
     group by b.idx`)
@@ -657,11 +662,7 @@ export async function getReportList(
   } else {
     rows = [
       ...(await tx.execute<Row>(sql`
-        with first_visit as (
-          select distinct on (patient_id) id, patient_id, starts_at, branch_id, service_name, dentist_user_id
-          from appointment where organization_id=${orgId} and status='atendida'
-          order by patient_id, starts_at, id
-        ) select v.id, v.starts_at as at, v.patient_id as "patientId", pp.display_name as "personName",
+        with ${firstVisitSql(orgId)} select v.id, v.starts_at as at, v.patient_id as "patientId", pp.display_name as "personName",
           v.service_name as title, u.name as "professionalName", b.name as "branchName",
           ${nextAppointment(sql`v.patient_id`)} as "hasNextAppointment",
           null::text as cents, null::text as currency, count(*) over()::int as total

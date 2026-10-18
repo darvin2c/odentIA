@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { QueryErrorState } from "../../lib/query-error"
-import { fetchReportList, reportKey, type ReportListKey, type ReportListRow, type ReportQuery, spanLabel } from "../../lib/reports"
+import { fetchReportList, firstContactChannel, reportKey, type ReportListKey, type ReportListRow, type ReportQuery, spanLabel } from "../../lib/reports"
 
 /** Filas a la vista antes de «Mostrar las otras». */
 const PREVIEW = 8
@@ -67,6 +67,111 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Pacientes nuevos",
     noun: { one: "persona", many: "personas" },
     how: (period) => `Personas cuya primera cita atendida fue en ${period}.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    showNext: false,
+  },
+  funnel_sought: {
+    title: "Nos buscaron por primera vez",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `Personas cuya primera conversación, por cualquier canal, o su registro como paciente fue en ${period}.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    showNext: false,
+  },
+  funnel_booked: {
+    title: "Agendaron",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que agendaron una cita desde entonces, hasta hoy. Es «Evaluación agendada» en Oportunidades.`,
+    where: { to: "/agenda", label: "Abrir la Agenda" },
+    showNext: true,
+  },
+  funnel_came: {
+    title: "Vinieron",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que agendaron y vinieron: una de esas citas quedó atendida.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    showNext: false,
+  },
+  funnel_budget: {
+    title: "Recibieron presupuesto",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que vinieron y recibieron un presupuesto. Es «Presupuesto enviado» en Oportunidades.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    patientTab: "plan",
+    showNext: false,
+  },
+  funnel_accepted: {
+    title: "Aceptaron su presupuesto",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto, del todo o en parte. Es «Ganada» en Oportunidades.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    patientTab: "plan",
+    showNext: false,
+  },
+  funnel_paid: {
+    title: "Pagaron algo",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y pagaron algo.`,
+    where: { to: "/finance", label: "Ir a Finanzas" },
+    patientTab: "cobros",
+    showNext: false,
+  },
+  funnel_lost_booked: {
+    title: "No agendaron",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que todavía no agendaron una cita.`,
+    where: { to: "/inbox", label: "Abrir la Bandeja" },
+    showNext: false,
+  },
+  funnel_lost_came: {
+    title: "Agendaron y no vinieron",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que agendaron y todavía no tienen una cita atendida: no vinieron, cancelaron o su cita aún no llega.`,
+    where: { to: "/agenda", label: "Abrir la Agenda" },
+    showNext: true,
+  },
+  funnel_lost_budget: {
+    title: "Vinieron y no recibieron presupuesto",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que vinieron y todavía no recibieron un presupuesto.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    patientTab: "plan",
+    showNext: false,
+  },
+  funnel_lost_accepted: {
+    title: "Aún no responden o lo rechazaron",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que recibieron su presupuesto y no lo aceptaron: lo están pensando, no respondieron o lo rechazaron.`,
+    where: { to: "/people", label: "Ir a Pacientes" },
+    patientTab: "plan",
+    showNext: false,
+  },
+  funnel_lost_paid: {
+    title: "Aceptaron y aún no pagan",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y todavía no pagaron nada.`,
+    where: { to: "/finance", label: "Ir a Finanzas" },
+    patientTab: "cobros",
+    showNext: false,
+  },
+  funnel_stopped: {
+    title: "Dejaron de escribir",
+    noun: { one: "persona", many: "personas" },
+    how: (period) => `De quienes nos buscaron por primera vez en ${period} y no agendaron, los que preguntaron algo y no escriben hace más de 3 días; ninguna de sus conversaciones sigue abierta.`,
+    where: { to: "/inbox", label: "Abrir la Bandeja" },
+    showNext: false,
+  },
+  controls_missed: {
+    title: "No vinieron a su control",
+    noun: { one: "control", many: "controles" },
+    how: (period) => `Controles que tocaban en ${period} y no se hicieron: siguen pendientes, se cancelaron o se marcaron hechos sin una atención cerrada.`,
+    where: { to: "/agenda", label: "Abrir la Agenda" },
+    showNext: true,
+  },
+  lapsed: {
+    title: "Sin venir hace más de 6 meses",
+    noun: { one: "persona", many: "personas" },
+    how: () =>
+      "A hoy: su última cita atendida fue hace más de 6 meses y no tienen cita por venir, presupuesto que espere respuesta ni control pendiente. La fecha es la de su última cita.",
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
@@ -185,7 +290,14 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
               <ul className="flex min-w-0 flex-col divide-y">
                 {rows.map((row) => {
                   const at = when(row, list, data.locale, data.timezone)
-                  const detail = [row.title, row.professionalName, data.branch ? null : row.branchName].filter(Boolean).join(" · ")
+                  const detail = [
+                    row.channel !== undefined ? firstContactChannel(row.channel) : null,
+                    row.title,
+                    row.professionalName,
+                    data.branch ? null : row.branchName,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
                   return (
                     <li key={row.id} className="flex min-h-[60px] min-w-0 items-center gap-3 py-2">
                       <span className="w-[84px] shrink-0 text-[13px] leading-tight text-muted-foreground">
