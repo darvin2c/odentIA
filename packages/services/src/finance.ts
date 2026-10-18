@@ -34,7 +34,9 @@ import {
   commissionSettlement,
   commissionSettlementLine,
   expense,
+  expenseGapDismissal,
 } from "@odentia/db/schema/finance"
+import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { promotionServicePrice } from "@odentia/db/schema/promotions"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
@@ -46,6 +48,7 @@ import {
   validation,
 } from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
+import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { monthStart } from "./report-periods.js"
 import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
 import { createWorkspaceNotification } from "./workspace.js"
@@ -898,12 +901,16 @@ export async function createExpense(
   orgId: string,
   actorUserId: string,
   input: CreateExpenseInput,
+  /** Solo `payPurchaseOrder`: el gasto es el pago de esa compra. */
+  link: { purchaseOrderId?: string } = {},
 ) {
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
     throw validation("Tipo de gasto inválido")
+  if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
+    throw validation("El pago de una compra es un gasto de Materiales")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
   const shift = input.fromCash
@@ -923,6 +930,7 @@ export async function createExpense(
       receiptKind,
       receiptNumber: input.receiptNumber?.trim() || null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
+      purchaseOrderId: link.purchaseOrderId ?? null,
       createdBy: actorUserId,
     })
     .returning()
@@ -1067,9 +1075,234 @@ export async function voidExpense(
       }
     }
   }
+  // El pago de una compra cerrada puede ser lo que se tiene a favor con el
+  // proveedor: si ya se usó para pagar otra compra, anularlo dejaría usado lo
+  // que ya no existe.
+  if (current.purchaseOrderId) await assertSupplierCreditCovered(tx, orgId, current.purchaseOrderId)
   await audit(tx, orgId, actorUserId, "expense", expenseId, "finance.expense_voided")
   await notifyCash(tx, orgId)
   return row
+}
+
+// --- Pago de compras de Inventario (ADR 0061) -----------------------------------------
+//
+// Pagar una compra es registrar un gasto de Materiales enlazado a su orden, en
+// la sede de su almacén: en partes, por adelantado o con lo que se tiene a favor
+// con el proveedor. La misma operación desde Inventario y desde Finanzas › Gastos.
+
+/** Tipo de gasto del pago de una compra. */
+export const PURCHASE_EXPENSE_CATEGORY = "Materiales"
+
+/** «OC-0012»: el número de la orden como lo dicen la pantalla y el gasto. */
+export function purchaseOrderLabel(orderNumber: number): string {
+  return `OC-${String(orderNumber).padStart(4, "0")}`
+}
+
+async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) {
+  const [row] = await tx
+    .select()
+    .from(purchaseOrder)
+    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
+    .for("update")
+  if (!row) throw notFound("Orden de compra")
+  return row
+}
+
+/** Lo que se tiene a favor con un proveedor cambia de a uno: se bloquea el proveedor. */
+async function lockSupplier(tx: Db, orgId: string, supplierId: string): Promise<void> {
+  await tx
+    .select({ id: supplier.id })
+    .from(supplier)
+    .where(and(eq(supplier.organizationId, orgId), eq(supplier.id, supplierId)))
+    .for("update")
+}
+
+/** Lo que se tiene a favor con el proveedor, en una moneda. */
+async function creditWith(tx: Db, orgId: string, supplierId: string, unit: string): Promise<number> {
+  const credits = await supplierCredits(tx, orgId, { supplierId })
+  return credits.find((credit) => credit.currency === unit)?.cents ?? 0
+}
+
+/**
+ * Nunca queda usado más de lo que se tenía a favor con el proveedor de la
+ * orden. Se llama después del cambio, dentro de la misma transacción: si no
+ * alcanza, el error deshace todo.
+ */
+export async function assertSupplierCreditCovered(tx: Db, orgId: string, orderId: string): Promise<void> {
+  const [order] = await tx
+    .select({ supplierId: purchaseOrder.supplierId, currency: purchaseOrder.currency })
+    .from(purchaseOrder)
+    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
+  if (!order) return
+  await lockSupplier(tx, orgId, order.supplierId)
+  if ((await creditWith(tx, orgId, order.supplierId, order.currency)) < 0)
+    throw conflict(
+      "SUPPLIER_CREDIT_USED",
+      "Lo pagado de más en esta compra ya se usó para pagar otra: anula antes ese uso del saldo a favor",
+    )
+}
+
+export interface PayPurchaseOrderInput {
+  orderId: string
+  /** Lo que se paga con dinero (gasto de Materiales). Cero si todo va con lo que se tenía a favor. */
+  amountCents: number
+  /** Lo que se usa de lo que se tiene a favor con el proveedor. */
+  creditCents?: number
+  spentAt?: string | null
+  fromCash?: boolean
+  receiptKind?: string
+  receiptNumber?: string | null
+  notes?: string | null
+  /** Lo que la pantalla mostró por pagar: si cambió mientras tanto, no se paga sobre otra cifra. */
+  expectedDueCents?: number
+}
+
+/**
+ * Registra el pago de una compra (o una parte, o un adelanto): un gasto de
+ * Materiales en la sede de su almacén, enlazado a la orden, y si se pide, lo
+ * que se usa de lo que se tiene a favor con el proveedor. Pagar de más deja
+ * saldo a favor cuando la compra cierra. No se paga una orden en borrador ni
+ * una cancelada.
+ */
+export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: string, input: PayPurchaseOrderInput) {
+  const order = await lockPurchaseOrder(tx, orgId, input.orderId)
+  if (order.status === "borrador") throw conflict("PURCHASE_NOT_CONFIRMED", "Confirma la orden antes de pagarla")
+  if (order.status === "cancelada") throw conflict("PURCHASE_CANCELLED", "La orden está cancelada: ya no se paga")
+  await lockSupplier(tx, orgId, order.supplierId)
+  const amountCents = input.amountCents ?? 0
+  const creditCents = input.creditCents ?? 0
+  if (!Number.isSafeInteger(amountCents) || amountCents < 0 || amountCents > 2147483647)
+    throw validation("El pago debe ser un importe entero")
+  if (!Number.isSafeInteger(creditCents) || creditCents < 0 || creditCents > 2147483647)
+    throw validation("Lo que se usa a favor debe ser un importe entero")
+  if (amountCents + creditCents <= 0) throw validation("El pago debe ser mayor que cero")
+  const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+  if (!before) throw notFound("Orden de compra")
+  if (input.expectedDueCents !== undefined && input.expectedDueCents !== before.dueCents)
+    throw conflict("PURCHASE_DUE_CHANGED", "Lo que falta pagar de esta compra cambió mientras lo revisabas: vuelve a mirarlo")
+  if (creditCents > 0) {
+    if (creditCents > (await creditWith(tx, orgId, order.supplierId, order.currency)))
+      throw conflict("SUPPLIER_CREDIT_SHORT", "No tienes tanto a favor con este proveedor")
+    if (creditCents > Math.max(0, before.orderedCents - before.paidCents))
+      throw conflict("SUPPLIER_CREDIT_TOO_MUCH", "Lo que usas a favor no puede pasar de lo que falta pagar de la orden")
+  }
+  const label = purchaseOrderLabel(before.orderNumber)
+  const kind = before.receivedCents === 0 ? "Adelanto de compra" : "Pago de compra"
+  const part = before.dueCents > 0 && amountCents + creditCents < before.dueCents ? " (una parte)" : ""
+  let paid: typeof expense.$inferSelect | null = null
+  if (amountCents > 0) {
+    paid = await createExpense(
+      tx,
+      orgId,
+      actorUserId,
+      {
+        branchId: before.branchId,
+        category: PURCHASE_EXPENSE_CATEGORY,
+        concept: `${kind} ${label} · ${before.supplierName}${part}`,
+        amountCents,
+        currency: order.currency,
+        spentAt: input.spentAt ?? null,
+        receiptKind: input.receiptKind,
+        receiptNumber: input.receiptNumber,
+        notes: input.notes,
+        fromCash: input.fromCash ?? false,
+      },
+      { purchaseOrderId: order.id },
+    )
+  }
+  let used: typeof supplierCreditUse.$inferSelect | null = null
+  if (creditCents > 0) {
+    const [row] = await tx
+      .insert(supplierCreditUse)
+      .values({
+        organizationId: orgId,
+        supplierId: order.supplierId,
+        orderId: order.id,
+        amountCents: creditCents,
+        currency: order.currency,
+        createdBy: actorUserId,
+      })
+      .returning()
+    used = row ?? null
+    if (used) await audit(tx, orgId, actorUserId, "supplier_credit_use", used.id, "purchase_order.credit_used")
+  }
+  await audit(tx, orgId, actorUserId, "purchase_order", order.id, "purchase_order.paid")
+  const [after] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
+  return { expense: paid, creditUse: used, balance: after as PurchaseBalance }
+}
+
+/** Deshace un uso de lo que se tenía a favor: vuelve a estar a favor y la compra vuelve a deberlo. */
+export async function voidSupplierCreditUse(tx: Db, orgId: string, actorUserId: string, id: string, input: { reason: string }) {
+  const [current] = await tx
+    .select()
+    .from(supplierCreditUse)
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+    .for("update")
+  if (!current) throw notFound("Uso del saldo a favor")
+  if (current.voidedAt) throw conflict("CREDIT_USE_VOIDED", "Ese uso del saldo a favor ya está anulado")
+  const [row] = await tx
+    .update(supplierCreditUse)
+    .set({ voidedAt: new Date(), voidedBy: actorUserId, voidReason: reason(input.reason) })
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+    .returning()
+  await audit(tx, orgId, actorUserId, "supplier_credit_use", id, "purchase_order.credit_use_voided")
+  return row
+}
+
+/**
+ * Lo que hay que pagar de las compras: las recibidas sin pagar (el aviso de
+ * Finanzas › Gastos) y las que aún no llegan (se pueden adelantar), con lo que
+ * se tiene a favor con cada proveedor. De la clínica o de una sede.
+ */
+export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId?: string } = {}) {
+  const { currency: unit } = await getOrgLocale(tx, orgId)
+  const open = (await purchaseBalances(tx, orgId, { openOnly: true })).filter(
+    (order) => (!query.branchId || order.branchId === query.branchId) && (order.dueCents > 0 || order.receivedCents === 0),
+  )
+  const unpaid = open.filter((order) => order.dueCents > 0)
+  const oldest = unpaid.reduce<PurchaseBalance | null>(
+    (first, order) =>
+      order.firstReceivedAt && (!first?.firstReceivedAt || order.firstReceivedAt < first.firstReceivedAt) ? order : first,
+    null,
+  )
+  return {
+    currency: unit,
+    /** «3 compras recibidas sin pagar: S/ 2 300. La más antigua llegó hace 34 días.» */
+    unpaid: {
+      orders: unpaid.length,
+      cents: unpaid.filter((order) => order.currency === unit).reduce((total, order) => total + order.dueCents, 0),
+      oldest,
+    },
+    /** Lo que se puede pagar ahora: primero lo que más tiempo lleva recibido sin pagar, después lo que aún no llega. */
+    orders: [...open].sort(
+      (a, b) =>
+        Number(b.dueCents > 0) - Number(a.dueCents > 0) ||
+        (a.firstReceivedAt?.getTime() ?? a.createdAt.getTime()) - (b.firstReceivedAt?.getTime() ?? b.createdAt.getTime()),
+    ),
+    credits: (await supplierCredits(tx, orgId)).filter((credit) => credit.cents > 0),
+  }
+}
+
+/**
+ * «No hubo ese gasto»: la clínica dice que ese mes no tuvo gastos de ese tipo y
+ * Reportes deja de avisarlo. Repetirlo no hace nada.
+ */
+export async function dismissExpenseGap(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  input: { category: string; month: string; branchId?: string | null },
+) {
+  if (!(EXPENSE_CATEGORIES as readonly string[]).includes(input.category)) throw validation("Tipo de gasto inválido")
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month)) throw validation("El mes debe tener formato AAAA-MM")
+  const branchId = input.branchId ? (await requireBranch(tx, orgId, input.branchId)).id : null
+  const [row] = await tx
+    .insert(expenseGapDismissal)
+    .values({ organizationId: orgId, category: input.category, month: input.month, branchId, createdBy: actorUserId })
+    .onConflictDoNothing()
+    .returning()
+  if (row) await audit(tx, orgId, actorUserId, "expense_gap_dismissal", row.id, "finance.expense_gap_dismissed")
+  return { category: input.category, month: input.month, branchId, dismissed: true }
 }
 
 // --- Cuentas por cobrar ------------------------------------------------------------

@@ -116,7 +116,7 @@ export type WaitInRoom = {
   byProfessional: Array<{ userId: string; name: string; medianMinutes: number; measured: number }>
 }
 
-async function waitInRoom(tx: Db, orgId: string, scope: ReportScope, span: ReportSpan): Promise<WaitInRoom> {
+export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope, "branch">, span: Span): Promise<WaitInRoom> {
   const rows = await tx.execute<{ userId: string | null; name: string | null; median: number | string | null; measured: number }>(sql`
     select e.dentist_user_id as "userId", u.name,
       percentile_cont(0.5) within group (order by extract(epoch from (e.started_at - a.arrived_at)) / 60) as median,
