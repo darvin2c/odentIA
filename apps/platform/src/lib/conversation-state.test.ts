@@ -39,27 +39,26 @@ afterEach(() => {
 })
 
 describe("en qué está una conversación abierta", () => {
-  it("un caso que te pasó el agente lleva su único nombre y dice quién la atiende o, sin nadie, su urgencia", () => {
+  it("un tema dice de quién es: de nadie con su urgencia, tuyo u de otra persona (ADR 0049)", () => {
+    const topic = {
+      id: "t1", reason: "Descuento", priority: "media" as const, urgent: false, assigneeUserId: null, assigneeName: null,
+      createdBy: "agent" as const, createdAt: NOW.toISOString(), dueAt: null, taskId: null,
+      source: { id: "m1", body: "¿Me hacen descuento?", createdAt: NOW.toISOString() }, askedMessageIds: [], askedAgainAt: null,
+    }
+    expect(conversationWords(open({ topics: [{ ...topic, urgent: true }] }))).toEqual({ text: "Te lo pasó el agente · Ahora", tone: "urgent" })
+    expect(conversationWords(open({ topics: [topic] }))).toEqual({ text: "Te lo pasó el agente · Hoy", tone: "team" })
+    expect(conversationWords({ ...open({ topics: [{ ...topic, assigneeUserId: "yo", assigneeName: "Ana" }] }), myUserId: "yo" })?.text).toBe("Lo tienes tú")
+    expect(conversationWords(open({ topics: [{ ...topic, assigneeUserId: "luis", assigneeName: "Luis", askedAgainAt: NOW.toISOString() }] }))?.text)
+      .toBe("Lo tiene Luis · volvió a preguntar")
+    // Sin temas en una respuesta antigua, la urgencia del caso.
     expect(conversationWords(open({ handoffPriority: "alta" }))).toEqual({ text: "Te lo pasó el agente · Ahora", tone: "urgent" })
-    expect(conversationWords(open({ handoffPriority: "baja" }))?.text).toBe("Te lo pasó el agente · Sin apuro")
-    expect(conversationWords(open({ handoffPriority: "alta", assignedName: "Rosa Díaz" }))).toEqual({
-      text: "Te lo pasó el agente · la atiende Rosa Díaz",
-      tone: "team",
-    })
   })
 
-  it("lo que espera respuesta lo dice, y si escribió fuera de horario también", () => {
-    expect(conversationWords(open({ unanswered: true, agentAttending: true }))).toEqual({ text: "Espera respuesta", tone: "waiting" })
-    expect(conversationWords(open({ unanswered: true, outOfHours: true }))?.text).toBe("Espera respuesta · escribió fuera de horario")
-    // Sin el dato del servidor no se supone que espera respuesta.
-    expect(conversationWords(open({ agentAttending: true }))?.text).toBe("La atiende el agente")
-  })
-
-  it("una persona a cargo con el agente apagado es «Con el equipo», aunque espere respuesta", () => {
-    expect(conversationWords(open({ assignedName: "Luis", unanswered: true }))?.text).toBe("Con el equipo · la atiende Luis")
-    expect(conversationWords(open({ assignedName: "Luis", awaitingPatientSince: "2026-10-15T14:00:00.000Z" }))?.text).toBe(
-      "Con el equipo · la atiende Luis",
-    )
+  it("sin responder y sin el agente pide a una persona; con el agente, lo atiende él", () => {
+    expect(conversationWords(open({ unanswered: true }))).toEqual({ text: "Por responder · el agente no la atiende", tone: "team" })
+    expect(conversationWords(open({ unanswered: true, agentAttending: true }))).toEqual({ text: "La atiende el agente", tone: "agent" })
+    expect(conversationWords(open({ unanswered: true, agentAttending: true, outOfHours: true }))?.text).toBe("La atiende el agente · responde al abrir")
+    expect(conversationWords(open({ agentAttending: true, teamLive: true }))?.text).toBe("Conversa alguien del equipo · el agente espera")
   })
 
   it("lo que espera al paciente dice si hay una cita propuesta o cuándo se le recordó", () => {

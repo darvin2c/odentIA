@@ -65,7 +65,7 @@ async function conversationWith(page: Page, slug: string, text: string): Promise
 
 const detailOf = (page: Page, slug: string, id: string) => call<Detail>(page, "GET", `/api/conversations/${id}`, slug)
 
-test("bandeja: tomar, devolver, resolver con su confirmación, cerrar sin resolver y un entrante que la reabre", async ({
+test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apagar al agente; cerrar sin resolver y un entrante que la reabre", async ({
   owner,
   fixtureDb,
 }, info) => {
@@ -81,80 +81,56 @@ test("bandeja: tomar, devolver, resolver con su confirmación, cerrar sin resolv
   await fixtureDb.update(conversation).set({ lastInboundAt: longAgo, lastMessageAt: longAgo }).where(eq(conversation.id, old.id))
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  const chip = (name: string) => page.getByRole("button", { name, exact: true })
+  const tab = (name: RegExp) => page.getByRole("button", { name })
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
-  await expect(chip("Abiertas · 2")).toHaveAttribute("aria-pressed", "true")
-  await expect(chip("Cerradas · 0")).toBeVisible()
+  // Cuatro pestañas que no se superponen; sin vista abre «Por atender» (ADR 0049).
+  await expect(tab(/^Por atender 2$/)).toHaveAttribute("aria-pressed", "true")
+  await expect(tab(/^Cerradas 0$/)).toBeVisible()
+  await expect(page.getByRole("button", { name: /^(Abiertas|Esperan respuesta|Con el equipo)/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Solo las mías" })).toHaveAttribute("aria-pressed", "false")
+  await info.attach("pestanas", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // --- Tomar: un solo verbo; la conversación queda a nombre de quien la toma y el agente deja de responder ---
+  // --- El agente pasa un tema: la fila dice la pregunta y el hilo pone arriba lo que hay que contestar ---
+  await call(page, "POST", "/api/agent/handoffs", org.slug, {
+    conversationId: fresh.id, reason: "Quiere saber el precio de la limpieza", summary: "Pregunta por la limpieza.", priority: "media",
+  }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${fresh.id}`))
-  // Las acciones viven solo en la cabecera del hilo: «Contexto» no las repite.
-  const header = page.getByTestId("hilo")
-  await expect(
-    page.getByRole("region", { name: "Contexto del contacto" }).getByRole("button", { name: /^(Tomar|Devolver al agente|Resolver)$/ }),
-  ).toHaveCount(0)
-  const take = header.getByRole("button", { name: "Tomar", exact: true })
-  const release = header.getByRole("button", { name: "Devolver al agente", exact: true })
-  const resolve = header.getByRole("button", { name: "Resolver", exact: true })
-  await expect(page.getByRole("button", { name: /Tomar atención|Reactivar agente|^Reabrir$|^Cerrar$/ })).toHaveCount(0)
-  await take.click()
-  await expect(release).toBeVisible()
-  await expect(take).toHaveCount(0)
-  await expect(page.getByText(`Con el equipo · la atiende ${owner.user.name}`).first()).toBeVisible()
-  expect((await detailOf(page, org.slug, fresh.id)).conversation).toMatchObject({ assignedUserId: owner.user.id, agentStatus: "off" })
+  await expect(page.getByRole("button").filter({ hasText: `Te toca: «${FRESH_TEXT}»` })).toBeVisible()
+  // No hay «Tomar», «Devolver al agente» ni «Resolver» de la conversación.
+  await expect(page.getByRole("button", { name: /^(Tomar|Devolver al agente|Resolver)$/ })).toHaveCount(0)
+  const band = page.getByRole("region", { name: "Lo que te toca contestar" })
+  await expect(band).toContainText("Te toca contestar")
+  await expect(band).toContainText(`«${FRESH_TEXT}»`)
+  await band.getByRole("button", { name: "Responder" }).click()
+  const box = page.getByRole("textbox", { name: "Mensaje" })
+  await expect(box).toBeFocused()
+  await expect(page.getByText(`«${FRESH_TEXT}»`).last()).toBeVisible()
+  await expect(page.getByText("Respondiendo a:")).toBeVisible()
+  await info.attach("tema-por-contestar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // --- Devolver al agente: sin persona a cargo y con el agente encendido ---
-  await release.click()
-  await expect(take).toBeVisible()
-  expect((await detailOf(page, org.slug, fresh.id)).conversation).toMatchObject({ assignedUserId: null, agentStatus: "on" })
+  // --- «Enviar, sigue pendiente»: si promete responder después, se sugiere; el tema queda a su nombre ---
+  await box.fill("Te confirmo el precio en un rato")
+  await expect(page.getByText("Prometes responder después")).toBeVisible()
+  await page.getByRole("button", { name: "Enviar, sigue pendiente" }).click()
+  await expect(box).toHaveValue("")
+  await expect.poll(async () => {
+    const detail = await call<{ attention: { topics: Array<{ assigneeUserId: string | null }> }; conversation: { agentStatus: string } }>(
+      page, "GET", `/api/conversations/${fresh.id}`, org.slug)
+    return { topics: detail.attention.topics.map((topic) => topic.assigneeUserId), agent: detail.conversation.agentStatus }
+  }).toEqual({ topics: [owner.user.id], agent: "on" })
+  await expect(band).toContainText("lo tienes tú")
+  // La respuesta salió citando su mensaje.
+  await expect(page.getByText("Te confirmo el precio en un rato").first()).toBeVisible()
 
-  // --- Resolver: confirma con lo que dice el servidor (con despedida) ---
-  await resolve.click()
-  const confirmResolve = page.getByRole("alertdialog", { name: "¿Resolver la conversación?" })
-  await expect(confirmResolve).toContainText(
-    "se le enviará la despedida de la clínica y el agente volverá a atenderla si escribe de nuevo.",
-  )
-  await info.attach("resolver-con-despedida", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  // Cancelar no cierra nada y devuelve el foco al botón.
-  await confirmResolve.getByRole("button", { name: "Cancelar" }).click()
-  await expect(confirmResolve).toBeHidden()
-  await expect(resolve).toBeFocused()
-  expect((await detailOf(page, org.slug, fresh.id)).conversation.status).toBe("open")
-  await resolve.click()
-  await confirmResolve.getByRole("button", { name: "Resolver", exact: true }).click()
-  await expect(confirmResolve).toBeHidden()
-
-  // --- Hilo cerrado: la franja dice cómo y cuándo; escribir la reabre ---
-  const band = page.getByText(new RegExp(`^Resuelta por ${owner.user.name} · hoy`))
-  await expect(band).toBeVisible()
-  const resolved = await detailOf(page, org.slug, fresh.id)
-  expect(resolved.conversation.status).toBe("closed")
-  expect(closureOf(resolved)).toMatchObject({ reason: "equipo", byName: owner.user.name })
-  await expect(page.getByText("Reábrela para responder")).toHaveCount(0)
-  await expect(page.getByText("Está cerrada: si le escribes, se vuelve a abrir.")).toBeVisible()
-  await expect(page.getByRole("textbox", { name: "Mensaje" })).toBeEditable()
-  await expect(resolve).toHaveCount(0)
-  await expect(chip("Cerradas · 1")).toBeVisible()
-  await info.attach("hilo-resuelto", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-
-  // --- Un mensaje del paciente reabre la conversación ---
-  await inbound(page, wa.id, "51911100001", "Una pregunta más")
-  await expect.poll(async () => (await detailOf(page, org.slug, fresh.id)).conversation.status, { timeout: 30_000 }).toBe("open")
-  expect(closureOf(await detailOf(page, org.slug, fresh.id))).toBeNull()
-  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${fresh.id}`))
-  await expect(band).toHaveCount(0)
-  await expect(resolve).toBeVisible()
-  await expect(chip("Cerradas · 0")).toBeVisible()
-
-  // --- Resolver sin despedida: pasaron más de 23 horas desde su último mensaje ---
-  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${old.id}`))
-  await resolve.click()
-  await expect(confirmResolve).toContainText(
-    "no se le puede escribir: pasaron más de 23 horas desde su último mensaje. Se cerrará sin enviarle nada.",
-  )
-  await info.attach("resolver-sin-despedida", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await confirmResolve.getByRole("button", { name: "Cancelar" }).click()
-  await expect(confirmResolve).toBeHidden()
+  // --- Enter es «Enviar y resolver»: el tema se resuelve y la conversación sigue abierta con el agente ---
+  await band.getByRole("button", { name: "Responder" }).click()
+  await box.fill("La limpieza cuesta S/ 120")
+  await box.press("Enter")
+  await expect(page.getByText("Tema resuelto. El agente sigue con lo demás.")).toBeVisible()
+  await expect(band).toBeHidden()
+  const after = await detailOf(page, org.slug, fresh.id)
+  expect(after.conversation).toMatchObject({ status: "open", agentStatus: "on" })
+  await info.attach("tema-resuelto", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- Cerrar sin resolver: en el menú de acciones, diciendo qué se cierra ---
   await call(page, "POST", "/api/agent/handoffs", org.slug, {
@@ -170,26 +146,30 @@ test("bandeja: tomar, devolver, resolver con su confirmación, cerrar sin resolv
   await expect(confirmClose).toBeHidden()
   await expect(page.getByText(new RegExp(`^Cerrada por ${owner.user.name} · hoy`))).toBeVisible()
   expect(closureOf(await detailOf(page, org.slug, old.id))).toMatchObject({ reason: "manual", byName: owner.user.name })
-  const handoffs = await call<Array<{ conversationId: string | null; status: string }>>(
-    page, "GET", `/api/agent/handoffs?conversationId=${old.id}`, org.slug,
-  )
-  expect(handoffs.filter((handoff) => handoff.status !== "resuelta")).toEqual([])
+  // Cerrada, escribir la reabre.
+  await expect(page.getByText("Está cerrada: si le escribes, se vuelve a abrir.")).toBeVisible()
+
+  // --- Un mensaje del paciente reabre la conversación ---
+  await inbound(page, wa.id, "51911100002", "Una pregunta más")
+  await expect.poll(async () => (await detailOf(page, org.slug, old.id)).conversation.status, { timeout: 30_000 }).toBe("open")
+  expect(closureOf(await detailOf(page, org.slug, old.id))).toBeNull()
 
   // --- Cerradas: cada fila dice cómo se cerró ---
+  await call(page, "POST", `/api/conversations/${fresh.id}/close`, org.slug)
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
-  await chip("Cerradas · 1").click()
+  await tab(/^Cerradas 1$/).click()
   await expect(page).toHaveURL(/view=closed/)
-  await expect(page.getByRole("button").filter({ hasText: OLD_TEXT })).toContainText(`Cerrada por ${owner.user.name}`)
-  await expect(page.getByRole("button").filter({ hasText: "Una pregunta más" })).toHaveCount(0)
+  await expect(page.getByText(`Cerrada por ${owner.user.name}`).first()).toBeVisible()
 
-  // --- Teléfono: las acciones del hilo se tocan con el dedo y nada desborda ---
+  // --- Teléfono: lo del tema se toca con el dedo y nada desborda ---
+  await call(page, "POST", "/api/agent/handoffs", org.slug, {
+    conversationId: old.id, reason: "Pregunta por los sábados", summary: "Quiere venir el sábado.", priority: "alta",
+  }, 201)
   await page.setViewportSize({ width: 390, height: 844 })
-  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${fresh.id}`))
-  // En teléfono el hilo ocupa la pantalla y su cabecera es la única con estas acciones.
-  const phoneTake = page.getByRole("button", { name: "Tomar", exact: true })
-  const phoneResolve = page.getByRole("button", { name: "Resolver", exact: true })
-  await expect(phoneTake).toHaveCount(1)
-  for (const control of [phoneTake, phoneResolve, page.getByRole("button", { name: "Más acciones de la conversación" })]) {
+  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${old.id}`))
+  const phoneBand = page.getByRole("region", { name: "Lo que te toca contestar" })
+  await expect(phoneBand).toContainText("Ahora")
+  for (const control of [phoneBand.getByRole("button", { name: "Responder" }), page.getByRole("button", { name: "Más acciones de la conversación" })]) {
     expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   }
   expect(await overflow(page)).toBeLessThanOrEqual(0)

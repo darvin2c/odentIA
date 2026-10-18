@@ -15,6 +15,7 @@ import {
   fieldErrorMessages,
   normalizeCountry,
   PageHeader,
+  PhoneInput,
   regionCountry,
   SubmitButton,
   TimeZoneSelect,
@@ -89,6 +90,8 @@ const profileSchema = z.object({
   fiscalDocType: z.string(),
   fiscalDocNumber: z.string(),
   fiscalAddress: z.string(),
+  // Teléfono para urgencias (ADR 0049): E.164 del campo de teléfono o vacío.
+  emergencyPhone: z.string(),
   countryCode: z.string().length(2, "Elige el país"),
   currency: z.string().length(3, "Elige la moneda"),
   timezone: z.string().min(1, "Elige la zona horaria"),
@@ -107,6 +110,7 @@ const emptyValues: ProfileValues = {
   fiscalDocType: "",
   fiscalDocNumber: "",
   fiscalAddress: "",
+  emergencyPhone: "",
   countryCode: "",
   currency: "",
   timezone: "",
@@ -120,6 +124,7 @@ function toValues(profile: OrgProfile): ProfileValues {
     fiscalDocType: profile.fiscalDocType ?? "",
     fiscalDocNumber: profile.fiscalDocNumber ?? "",
     fiscalAddress: profile.fiscalAddress ?? "",
+    emergencyPhone: profile.emergencyPhone ?? "",
     // El país guardado se conserva tal cual: nunca se cambia por otro al cargar.
     countryCode: profile.countryCode.trim().toUpperCase(),
     currency: profile.currency,
@@ -159,6 +164,7 @@ function toInput(values: ProfileValues): OrgProfileInput {
     fiscalDocType: values.fiscalDocType.trim() || null,
     fiscalDocNumber: values.fiscalDocNumber.trim() || null,
     fiscalAddress: values.fiscalAddress.trim() || null,
+    emergencyPhone: values.emergencyPhone.trim() || null,
     countryCode: values.countryCode,
     currency: values.currency,
     timezone: values.timezone,
@@ -459,6 +465,24 @@ function ProfileForm({
                 value={field.state.value}
                 onChange={(event) => field.handleChange(event.target.value)}
               />
+            </Field>
+          )}
+        </form.Field>
+        <form.Field name="emergencyPhone">
+          {(field) => (
+            <Field>
+              <FieldLabel htmlFor="org-emergency-phone">Teléfono para urgencias</FieldLabel>
+              <PhoneInput
+                id="org-emergency-phone"
+                className="[&_[data-slot=input-group]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11 sm:[&_[data-slot=input-group]]:min-h-9"
+                value={field.state.value || null}
+                defaultCountry={normalizeCountry(form.state.values.countryCode) ?? undefined}
+                aria-describedby="org-emergency-phone-hint"
+                onChange={(next) => field.handleChange(next ?? "")}
+              />
+              <FieldDescription id="org-emergency-phone-hint">
+                El agente lo da ante una urgencia, también fuera de horario. Si lo dejas vacío, dice que acuda al servicio de emergencias más cercano.
+              </FieldDescription>
             </Field>
           )}
         </form.Field>

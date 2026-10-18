@@ -15,6 +15,10 @@ export interface ConversationPreview {
 
 /** Lo que una conversación espera del equipo o del agente (lo calcula el servidor). */
 export interface ConversationAttention {
+  /** Temas sin resolver, el más urgente primero (ADR 0049). Ausente en respuestas antiguas en caché. */
+  topics?: InboxTopic[]
+  /** Una persona del equipo conversa en vivo: el agente espera. */
+  teamLive?: boolean
   /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
   agentAttending: boolean
   /** Propuestas pendientes que esperan al interlocutor: las únicas que quedan pendientes. */
@@ -78,18 +82,43 @@ export interface ConversationListItem {
 }
 
 /** Totales de los chips de la Bandeja para los filtros vigentes (sin `status`). */
+/** Totales de las cuatro pestañas de la Bandeja, que no se superponen (ADR 0049). */
 export interface InboxSummary {
   open: number
-  unanswered: number
-  team: number
+  /** «Por atender»: piden a una persona. */
+  attend: number
+  /** Las atiende el agente. */
+  agent: number
   awaitingPatient: number
   closed: number
+}
+
+/** Un tema que tiene que contestar una persona del equipo (ADR 0049). */
+export interface InboxTopic {
+  id: string
+  reason: string
+  priority: "alta" | "media" | "baja"
+  /** «Ahora»: prioridad alta o más de dos horas sin resolverse. */
+  urgent: boolean
+  assigneeUserId: string | null
+  assigneeName: string | null
+  createdBy: "agent" | "user"
+  createdAt: string
+  dueAt: string | null
+  taskId: string | null
+  /** El mensaje de la persona que se responde, citado. */
+  source: { id: string; body: string | null; createdAt: string } | null
+  /** Mensajes en que volvió a preguntar por el tema. */
+  askedMessageIds: string[]
+  askedAgainAt: string | null
 }
 
 export interface ChatMessage {
   id: string
   direction: string
   senderKind: string
+  /** Quién del equipo lo escribió; nulo si no fue una persona del equipo. */
+  senderUserId?: string | null
   contentType: string
   body: string | null
   attachments: { objectKey: string; mimeType: string; filename: string; size: number }[]
@@ -101,6 +130,8 @@ export interface ChatMessage {
   templateParams: string[] | null
   /** Lo envió una línea del Administrador: cuál. Nulo en los demás mensajes. */
   automatic?: { key: string; name: string } | null
+  /** Mensaje de la misma conversación al que responde, citado. */
+  replyToMessageId?: string | null
   createdAt: string
 }
 

@@ -39,6 +39,7 @@ import {
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, usePermission } from "../../lib/crm"
+import { useOrgProfile } from "../../lib/org"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/recepcion")({
@@ -240,6 +241,8 @@ function FunctionRow({
 }
 
 function ReceptionPage() {
+  const orgProfile = useOrgProfile()
+  const canEditClinic = usePermission("settings.write")
   const queryClient = useQueryClient()
   const { org } = orgRouteApi.useRouteContext()
   const canRead = usePermission("agent.read")
@@ -434,6 +437,19 @@ function ReceptionPage() {
       {overview.enabled && overview.provider.problem ? (
         <p role="alert" className={`rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm font-semibold ${besideTest}`}>
           {AGENT_MODEL_DOWN.line}
+        </p>
+      ) : null}
+
+      {/* Sin teléfono para urgencias el agente remite a emergencias: se dice con su acción (ADR 0049). */}
+      {orgProfile.data && !orgProfile.data.emergencyPhone ? (
+        <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm ${besideTest}`}>
+          <span className="font-semibold">Sin teléfono para urgencias.</span>
+          <span className="min-w-0 flex-1">Ante una urgencia, el agente dice que acuda al servicio de emergencias más cercano.</span>
+          {canEditClinic ? (
+            <Link to="/settings" className="inline-flex min-h-11 items-center font-semibold text-primary underline-offset-2 hover:underline sm:min-h-0">
+              Agregarlo en Datos de la clínica
+            </Link>
+          ) : null}
         </p>
       ) : null}
 
