@@ -453,7 +453,7 @@ it("menor sin responsable: 400 sin escrituras", async () => {
   expect(await countPatients(ORG_A)).toBe(patientsBefore)
 })
 
-it("documento duplicado público: 409 neutro sin filtrar la ficha", async () => {
+it("documento duplicado público: se responde como un registro recibido, sin filtrar la ficha, y queda para recepción", async () => {
   const app = buildApp("dup-doc")
   const patientsBefore = await countPatients(ORG_A)
   const demographics = {
@@ -476,23 +476,27 @@ it("documento duplicado público: 409 neutro sin filtrar la ficha", async () => 
     SLUG_A,
     qrBody({ ...adultQrAnswers("Otra Persona"), demographics }),
   )
-  expect(second.status).toBe(409)
-  const body = (await second.json()) as { error: { code: string; message: string } }
-  expect(body.error.code).toBe("REGISTRATION_NOT_COMPLETED")
-  expect(body.error.message).toBe(
-    "No pudimos completar el registro. Comunícate con recepción.",
-  )
+  // La misma respuesta que un registro recibido: quien se registra no sabe que ese documento ya estaba.
+  expect(second.status).toBe(201)
+  const body = await second.json()
+  expect(body).toEqual({ data: { registered: true } })
   const raw = JSON.stringify(body)
   expect(raw).not.toContain("Paciente Duplicada")
   expect(raw).not.toContain("87654321")
   expect(raw).not.toContain(qrPatientSubmission)
   expect(await countPatients(ORG_A)).toBe(patientsBefore + 1)
-  // Lo que no se completó queda para recepción, aunque el alta se revirtió entera.
-  const held = await ownerDb.execute<{ reason: string; area: string }>(sql`
-    select t.reason, t.area from task t join contact c on c.id = t.contact_id and c.organization_id = t.organization_id
+  // Lo que no se completó queda para recepción con todo lo que escribió, aunque el alta se revirtió entera.
+  const held = await ownerDb.execute<{ title: string; reason: string; area: string; answers: { demographics: { displayName: string } } | null }>(sql`
+    select t.title, t.reason, t.area, h.answers from task t join contact c on c.id = t.contact_id and c.organization_id = t.organization_id
+    left join registration_hold h on h.organization_id = t.organization_id and h.task_id = t.id
     where t.organization_id = ${ORG_A} and c.doc_number = '87654321' and t.kind = 'registro_con_documento' and t.status = 'open'`)
   expect([...held]).toEqual([
-    expect.objectContaining({ area: "recepcion", reason: expect.stringContaining("Alguien se registró con el documento de Paciente Duplicada: revisa si es ella") }),
+    expect.objectContaining({
+      area: "recepcion",
+      title: "Se registró por el código QR: ¿es Paciente Duplicada?",
+      reason: expect.stringContaining("No se creó a nadie: elige si es la misma persona."),
+      answers: expect.objectContaining({ demographics: expect.objectContaining({ displayName: "Paciente Duplicada" }) }),
+    }),
   ])
 })
 

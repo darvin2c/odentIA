@@ -32,9 +32,9 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await dialog.getByPlaceholder("Buscar por nombre o teléfono").fill("987 654 321")
   await expect(dialog).toContainText("Nadie coincide con «987 654 321».")
   await dialog.getByRole("button", { name: /Crear persona con 987 654 321/ }).click()
-  // Como «Nueva persona» (`createPerson`): nombres y apellidos separados.
+  // Como «Nuevo contacto» (`createPerson`): nombres y apellidos, dos campos.
   await dialog.getByLabel("Nombres", { exact: true }).fill("Rosa")
-  await dialog.getByLabel("Primer apellido", { exact: true }).fill("Quispe")
+  await dialog.getByLabel("Apellidos", { exact: true }).fill("Quispe")
   await info.attach("nueva-conversacion-crear", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await dialog.getByRole("button", { name: "Crear y escribirle", exact: true }).click()
   await expect(dialog).toBeHidden()

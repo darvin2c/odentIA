@@ -26,6 +26,22 @@
 /** Tope de filas por tipo: lo demás se resume en una fila «y N más». */
 export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3, unsentBudgets: 3 } as const
 
+/**
+ * Terminó de completar sus datos por su enlace hoy y tiene cita hoy, aún sin
+ * llegar: recepción sabe que ya puede atenderla y marca «Llegó» cuando entra.
+ * Se va al marcar la llegada.
+ */
+export interface WaitingRegistrationDone {
+  /** Su cita de hoy. */
+  appointmentId: string
+  patientId: string
+  patientName: string
+  /** Cuándo envió sus datos. */
+  sentAt: string
+  startsAt: string
+  dentistName: string | null
+}
+
 export interface WaitingCase {
   id: string
   /** `alta` es «Ahora», `media` «Hoy» y `baja` «Sin apuro». */
@@ -117,6 +133,11 @@ export interface WaitingPossibleDuplicate {
   /** Qué pasó y lo que escribió, en palabras. */
   detail: string
   createdAt: string
+  /**
+   * `registro`: guardó lo que escribió quien se registró por el código QR;
+   * «Revisar» abre «¿Es la misma persona?» para decidir con ello.
+   */
+  held?: boolean
 }
 
 /**
@@ -205,6 +226,7 @@ export type WaitingRow =
   | ({ kind: "consentToPublish" } & WaitingConsentToPublish)
   | ({ kind: "promotion" } & WaitingPromotion)
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
+  | ({ kind: "registrationDone" } & WaitingRegistrationDone)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
   | ({ kind: "possibleDuplicate" } & WaitingPossibleDuplicate)
@@ -226,6 +248,8 @@ export interface WaitingParts {
   casesTotal?: number
   /** Atenciones de días anteriores sin cerrar que lleva quien mira, de la más antigua a la más reciente. */
   staleEncounters?: WaitingStaleEncounter[]
+  /** Quien terminó su registro hoy y tiene cita hoy sin llegar, del más reciente al más antiguo. */
+  registrationsDone?: WaitingRegistrationDone[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
   /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
@@ -259,6 +283,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
 
   // La ficha de esa persona sigue trabada por un borrador de otro día: va antes que lo del día.
   for (const item of parts.staleEncounters ?? []) rows.push({ kind: "staleEncounter", ...item })
+
+  // Terminó su registro y su cita es hoy: ya se le puede atender al llegar.
+  for (const item of (parts.registrationsDone ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "registrationDone", ...item })
 
   if (parts.unconfirmed && parts.unconfirmed.total > 0) {
     const shown = parts.unconfirmed.items.slice(0, WAITING_LIMITS.unconfirmed)

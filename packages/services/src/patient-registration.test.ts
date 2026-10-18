@@ -23,9 +23,11 @@ import {
   createPatientRegistrationLink,
   discardRegistrationTask,
   getPatientRegistrationConfig,
+  getRegistrationHold,
   getPublicPatientRegistration,
   leaveRegistrationHold,
   registerPatient,
+  resolveRegistrationHold,
   savePatientRegistrationConfig,
   type RegistrationInput,
 } from "./patient-registration.js"
@@ -195,7 +197,8 @@ it("QR adulto con penicilina y O+: ficha sin revisión, sin vínculo automático
   await publish("org_a")
   const qrVersion = await publishedVersion("org_a")
   const existing = await withOrgContext(appDb, "org_a", (tx) =>
-    createContact(tx, "org_a", { displayName: "Vecino QR", phone: "+51977111222" }),
+    // Otro celular: el mismo celular queda para recepción («¿Es la misma persona?», prueba aparte).
+    createContact(tx, "org_a", { displayName: "Vecino QR", phone: "+51977111999" }),
   )
   const answers: RegistrationAnswers = {
     demographics: { displayName: "Paciente QR Penicilina", birthDate: ADULT_BIRTH, phone: "+51977111222" },
@@ -219,8 +222,7 @@ it("QR adulto con penicilina y O+: ficha sin revisión, sin vínculo automático
   expect(created.isActive).toBe(true)
 
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  // Todo paciente es una persona, pero el teléfono coincidente no reclama al
-  // contacto existente: su persona es nueva.
+  // Todo paciente es una persona: la suya es nueva, no la de otro contacto.
   expect(detail.contacts).toEqual([
     expect.objectContaining({ relationship: "self", displayName: "Paciente QR Penicilina" }),
   ])
@@ -457,7 +459,8 @@ it("un anónimo se registra con el DNI de una madre existente: no cambia su corr
     tx.select().from(crmTask).where(and(eq(crmTask.contactId, motherId!), eq(crmTask.kind, "registro_con_documento"))),
   )
   expect(holds).toHaveLength(1)
-  expect(holds[0]!.reason).toContain("Alguien se registró con el documento de Madre Real Ochoa: revisa si es ella")
+  expect(holds[0]!.title).toBe("Se registró por el código QR: ¿es Madre Real Ochoa?")
+  expect(holds[0]!.reason).toBe("Tiene el mismo documento que Madre Real Ochoa. No se creó a nadie: elige si es la misma persona.")
   expect(holds[0]!.area).toBe("recepcion")
   expect(await waitingRow(holds[0]!.id)).toMatchObject({ source: "registro", patientId: null, personId: motherId, patientName: "Madre Real Ochoa" })
   const unchanged = await withOrgContext(appDb, "org_a", (tx) => tx.select({ email: contact.email }).from(contact).where(eq(contact.id, motherId!)))
@@ -1028,7 +1031,7 @@ it("al reservar, el equipo registra con lo mínimo a la persona de la conversaci
   await publish("org_a")
   const { person, threadId } = await makeContactWithConversation("org_a", "Carmen Huamán")
   const minimal: RegistrationAnswers = {
-    demographics: { displayName: "Carmen Huamán", givenNames: "Carmen", paternalSurname: "Huamán", phone: "+51977000100" },
+    demographics: { displayName: "Carmen Huamán", givenNames: "Carmen", familyName: "Huamán", phone: "+51977000100" },
     respondent: "staff",
     privacyAccepted: false,
   }
@@ -1052,11 +1055,7 @@ it("al reservar, el equipo registra con lo mínimo a la persona de la conversaci
     status: 400,
     message: "Fecha de nacimiento: obligatorio según la configuración del registro",
   })
-  // Lo mínimo solo vale para la persona de una conversación, como su propia ficha, y solo con lo esencial.
-  await expect(register({ scope: "essentials" })).rejects.toMatchObject({ status: 400 })
-  await expect(
-    register({ conversationId: threadId, scope: "essentials" }, minimal, [{ ...self[0]!, relationship: "family" }]),
-  ).rejects.toMatchObject({ status: 400 })
+  // Lo mínimo es solo lo esencial: ni otros datos, ni salud, ni sin apellidos.
   await expect(
     register({ conversationId: threadId, scope: "essentials" }, { ...minimal, demographics: { ...minimal.demographics, occupation: "Abogada" } }),
   ).rejects.toMatchObject({ status: 400 })
@@ -1070,19 +1069,65 @@ it("al reservar, el equipo registra con lo mínimo a la persona de la conversaci
 
   const created = await register({ conversationId: threadId, scope: "essentials" })
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  expect(detail.patient).toMatchObject({ displayName: "Carmen Huamán", birthDate: null, identityNeedsReview: true })
+  expect(detail.patient).toMatchObject({ displayName: "Carmen Huamán", birthDate: null, identityNeedsReview: false })
   expect(detail.contacts).toEqual([expect.objectContaining({ contactId: person.id, relationship: "self" })])
   expect(detail.registration).toMatchObject({ entryPoint: "conversation", respondent: "staff", contextContactId: person.id, conversationId: threadId })
   // Lo que la clínica pide y falta queda en el caso, con las mismas palabras que el enlace de reserva.
   const notes = (await withOrgContext(appDb, "org_a", (tx) => getCaseBrief(tx, "org_a", threadId))).known.map((item) => item.text)
-  expect(notes).toContain("El equipo creó su ficha con lo mínimo al reservar. Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento.")
+  expect(notes).toContain("El equipo la registró con lo mínimo. Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento.")
+})
+
+it("desde su página, sin conversación, el equipo registra con lo mínimo a una persona que ya existe y a alguien a su cargo", async () => {
+  await seedActor()
+  await publish("org_a")
+  const { person } = await makeContactWithConversation("org_a", "Rosa Quispe")
+  const register = (answers: RegistrationAnswers, contacts: RegistrationInput["contacts"]) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(
+        tx,
+        "org_a",
+        { kind: "internal", userId: ACTOR, contactId: person.id, scope: "essentials" },
+        { submissionId: randomUUID(), answers, contacts },
+      ),
+    )
+  // Ella misma, sin conversación: lo que la clínica pide y falta no bloquea.
+  const own = await register(
+    {
+      demographics: { displayName: "Rosa Quispe", givenNames: "Rosa", familyName: "Quispe", phone: "+51977000200" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+    [{ contactId: person.id, relationship: "self", isPreferred: true }],
+  )
+  const ownDetail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", own.id))
+  expect(ownDetail.patient).toMatchObject({ displayName: "Rosa Quispe", birthDate: null })
+  expect(ownDetail.registration).toMatchObject({ entryPoint: "platform", contextContactId: person.id, conversationId: null })
+  // Alguien a su cargo: un adulto de la familia, con el teléfono de ella como representante.
+  const relative = await register(
+    {
+      demographics: { displayName: "Lucio Quispe", givenNames: "Lucio", familyName: "Quispe" },
+      respondent: "staff",
+      representative: { displayName: "Rosa Quispe", relationship: "family", relationshipDetail: "Madre", phone: "+51977000200" },
+      privacyAccepted: false,
+    },
+    [{ contactId: person.id, relationship: "family", isPreferred: true }],
+  )
+  const relativeDetail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", relative.id))
+  expect(relativeDetail.contacts).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: person.id, relationship: "family" })]))
+  // Sin el vínculo con la persona de la página no es «alguien a su cargo».
+  await expect(
+    register(
+      { demographics: { displayName: "Ana Quispe", givenNames: "Ana", familyName: "Quispe" }, respondent: "staff", privacyAccepted: false },
+      [],
+    ),
+  ).rejects.toMatchObject({ status: 400 })
 })
 
 it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con lo mínimo y lo que falta queda en sus notas", async () => {
   await seedActor()
   await publish("org_a")
   const answers = (phone?: string): RegistrationAnswers => ({
-    demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", paternalSurname: "Ríos", ...(phone ? { phone } : {}) },
+    demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", familyName: "Ríos", ...(phone ? { phone } : {}) },
     respondent: "staff",
     privacyAccepted: false,
   })
@@ -1099,13 +1144,13 @@ it("desde la Agenda, sin conversación, el equipo registra a alguien nuevo con l
 
   const created = await register({ answers: answers("+51987111222") })
   const detail = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", created.id))
-  expect(detail.patient).toMatchObject({ displayName: "Pedro Ríos", birthDate: null, identityNeedsReview: true })
+  expect(detail.patient).toMatchObject({ displayName: "Pedro Ríos", birthDate: null, identityNeedsReview: false })
   expect(detail.registration).toMatchObject({ entryPoint: "platform", respondent: "staff", conversationId: null })
   const self = detail.contacts.find((link) => link.relationship === "self")
   expect(self).toBeTruthy()
   const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", self!.contactId))
   expect(notes.map((note) => note.body)).toContain(
-    "El equipo creó su ficha con lo mínimo al reservar. Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento.",
+    "El equipo la registró con lo mínimo. Faltan datos para atenderla: confirmar apellidos y nombres, fecha de nacimiento.",
   )
 })
 
@@ -1113,11 +1158,11 @@ it("desde la Agenda, su teléfono pasa a ser su WhatsApp a nombre de quien la re
   await seedActor()
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `wa-${orgId.slice(0, 8)}`)
-  const register = (givenNames: string, paternalSurname: string, phone: string) =>
+  const register = (givenNames: string, familyName: string, phone: string) =>
     withOrgContext(appDb, orgId, (tx) =>
       registerPatient(tx, orgId, { kind: "internal", userId: ACTOR, scope: "essentials" }, {
         submissionId: randomUUID(),
-        answers: { demographics: { displayName: `${givenNames} ${paternalSurname}`, givenNames, paternalSurname, phone }, respondent: "staff", privacyAccepted: false },
+        answers: { demographics: { displayName: `${givenNames} ${familyName}`, givenNames, familyName, phone }, respondent: "staff", privacyAccepted: false },
       }),
     )
   const ownPerson = async (patientId: string) =>
@@ -1176,4 +1221,88 @@ it("enlace inválido o vacío no cae al formulario genérico", async () => {
   const { person, threadId } = await makeContactWithConversation("org_a", "Contacto Expira")
   const created = await makeLink("org_a", person.id, threadId)
   expect(created.expiresAt).toBeInstanceOf(Date)
+})
+
+it("QR general con el celular de alguien que ya está: no se crea a nadie y recepción decide si es la misma persona", async () => {
+  await seedActor()
+  await publish("org_a")
+  const version = await publishedVersion("org_a")
+  const diego = await withOrgContext(appDb, "org_a", (tx) =>
+    createContact(tx, "org_a", { displayName: "Diego Salazar", givenNames: "Diego", familyName: "Salazar", phone: "+51987654308" }),
+  )
+  const register = (answers: RegistrationAnswers) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      registerPatient(tx, "org_a", { kind: "public", entryPoint: "qr" }, { submissionId: randomUUID(), formVersion: version, answers }),
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    )
+  const answers: RegistrationAnswers = {
+    demographics: { displayName: "Diego Salazar Romero", givenNames: "Diego", familyName: "Salazar Romero", birthDate: "1991-03-12", phone: "+51987654308", docType: "DNI", docNumber: "45129876" },
+    respondent: "patient",
+    health: { ...emptyClinical(), allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    privacyAccepted: true,
+  }
+  const held = await register(answers)
+  expect(held).toBeInstanceOf(RegistrationHeld)
+  expect((held as RegistrationHeld).hold).toMatchObject({ ownerId: diego.id, match: "celular" })
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (held as RegistrationHeld).hold))
+  const [task] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.contactId, diego.id), eq(crmTask.kind, "registro_con_documento"))),
+  )
+  expect(task!.reason).toBe("Tiene el mismo celular que Diego Salazar. No se creó a nadie: elige si es la misma persona.")
+
+  // Lo que escribió hoy al lado de lo que ya estaba; los apellidos no coinciden.
+  const view = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))
+  expect(view).toMatchObject({ match: "celular", ownerId: diego.id, ownerPatientId: null, familyNameDiffers: true })
+  expect(view.rows.map((row) => [row.label, row.declared, row.saved, row.same])).toEqual([
+    ["Nombres", "Diego", "Diego", true],
+    ["Apellidos", "Salazar Romero", "Salazar", false],
+    ["Celular", "+51987654308", "+51987654308", true],
+    ["Nacimiento", "1991-03-12", null, false],
+    ["Documento", "DNI 45129876", null, false],
+    ["Alergias", "Penicilina", null, false],
+  ])
+
+  // «Es la misma persona» con los apellidos nuevos: queda como paciente en la misma persona, con lo que faltaba.
+  const same = await withOrgContext(appDb, "org_a", (tx) =>
+    resolveRegistrationHold(tx, "org_a", ACTOR, task!.id, { same: true, familyName: "declared" }),
+  )
+  const [person] = await ownerDb.select().from(contact).where(eq(contact.id, diego.id))
+  expect(person).toMatchObject({ familyName: "Salazar Romero", birthDate: "1991-03-12", docNumber: "45129876", phone: "+51987654308" })
+  const patient = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", same.patientId))
+  expect(patient.contacts[0]?.contactId).toBe(diego.id)
+  expect(patient.activeAllergies.map((item) => item.substance)).toContain("Penicilina")
+  const [done] = await ownerDb.select().from(crmTask).where(eq(crmTask.id, task!.id))
+  expect(done).toMatchObject({ status: "done", settledReason: "Era la misma persona: se completó su ficha" })
+  const [{ holds }] = await ownerDb.execute<{ holds: number }>(sql`select count(*)::int as holds from registration_hold where task_id = ${task!.id}`)
+  expect(holds).toBe(0)
+  await expect(withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", task!.id))).rejects.toMatchObject({ status: 404 })
+
+  // Ya con su salud en la ficha, otra alergia declarada por el QR no la pisa: queda en una nota para revisarla.
+  const latex = await register({ ...answers, health: { ...emptyClinical(), allergies: { state: "recorded", items: [{ substance: "Látex", severity: "desconocida" }] } } })
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (latex as RegistrationHeld).hold))
+  const [third] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.contactId, diego.id), eq(crmTask.kind, "registro_con_documento"), eq(crmTask.status, "open"))),
+  )
+  const latexView = await withOrgContext(appDb, "org_a", (tx) => getRegistrationHold(tx, "org_a", third!.id))
+  expect(latexView.rows.find((row) => row.key === "allergies")).toMatchObject({ declared: "Látex", saved: "Su salud ya está en su ficha" })
+  await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, third!.id, { same: true }))
+  const stillPenicillin = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", same.patientId))
+  expect(stillPenicillin.activeAllergies.map((item) => item.substance)).toEqual(["Penicilina"])
+  const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", diego.id))
+  expect(JSON.stringify(notes)).toContain("Declaró por el código QR: alergias: Látex")
+
+  // Otra vez el mismo celular, pero «Es otra persona»: se registra como nueva.
+  const again = await register({ ...answers, demographics: { ...answers.demographics, displayName: "Dana Salazar", givenNames: "Dana", docNumber: "45129877" } })
+  expect(again).toBeInstanceOf(RegistrationHeld)
+  await withOrgContext(appDb, "org_a", (tx) => leaveRegistrationHold(tx, "org_a", (again as RegistrationHeld).hold))
+  const [second] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.contactId, diego.id), eq(crmTask.kind, "registro_con_documento"), eq(crmTask.status, "open"))),
+  )
+  const other = await withOrgContext(appDb, "org_a", (tx) => resolveRegistrationHold(tx, "org_a", ACTOR, second!.id, { same: false }))
+  expect(other.patientId).not.toBe(same.patientId)
+  const dana = await withOrgContext(appDb, "org_a", (tx) => getPatient(tx, "org_a", other.patientId))
+  expect(dana.patient).toMatchObject({ displayName: "Dana Salazar Romero" })
+  expect(dana.contacts[0]?.contactId).not.toBe(diego.id)
 })

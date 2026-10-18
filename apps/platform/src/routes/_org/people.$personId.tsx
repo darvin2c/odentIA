@@ -90,6 +90,8 @@ export type PersonSearch = {
   itemId?: string
   /** Filtro de Documentos: lo que requiere acción o un tipo de papel. */
   tipo?: DocumentFilter
+  /** Viene de registrarlo con «Atender ahora»: abre «Atender sin cita». */
+  atender?: boolean
 } & Partial<Record<(typeof FILTER_KEYS)[number], string>>
 
 /** La búsqueda de la página, también la de los enlaces guardados de la ficha anterior (`?tab=`). */
@@ -112,6 +114,7 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
     budgetId: searchId(search.budgetId),
     documentId: searchId(search.documentId),
     itemId: searchId(search.itemId),
+    ...(search.atender === true || search.atender === "true" ? { atender: true } : {}),
   }
 }
 

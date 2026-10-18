@@ -10,6 +10,8 @@ import { useCompleteTask } from "../../components/crm/resolve-preview"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
 import { AwayLine } from "../../components/home/away-line"
+import { useAppointmentArrival } from "../../components/agenda/arrival"
+import { RegistrationHoldDrawer } from "../../components/home/registration-hold-drawer"
 import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
 import { HomeStart, needsSetup } from "../../components/home-start"
@@ -88,6 +90,9 @@ function HomePage() {
   const completion = useCompleteTask(refresh)
   // «Confirmar» el representante que nombró un registro en línea: vínculo y rol a nombre de quien confirma.
   const canWritePatients = usePermission("patients.write")
+  const canWriteAppointments = usePermission("appointments.write")
+  // «Llegó» desde la fila de quien terminó su registro: la misma operación que la Agenda.
+  const arrival = useAppointmentArrival()
   const confirmRepresentative = useMutation({
     mutationFn: (row: DuplicateRow) =>
       apiFetch(`/api/patients/${row.patientId}/responsibilities/pending/${row.id}/confirm`, { method: "POST", body: JSON.stringify({}) }),
@@ -121,6 +126,8 @@ function HomePage() {
     completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
+  // «¿Es la misma persona?»: la fila del registro por el código QR que se revisa.
+  const [holdTask, setHoldTask] = useState<string | null>(null)
   const [advice, setAdvice] = useState<string | null>(null)
   const [unreached, setUnreached] = useState(false)
   const [budgets, setBudgets] = useState<BudgetsRow | null>(null)
@@ -174,6 +181,10 @@ function HomePage() {
               onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onConfirmRepresentative: canWritePatients && canDoTasks ? (row) => confirmRepresentative.mutate(row) : undefined,
               onDiscard: canDoTasks ? (row) => discardRegistration.mutate(row) : undefined,
+              onReviewRegistration: canWritePatients && canDoTasks ? (row) => setHoldTask(row.id) : undefined,
+              onArrived: canWriteAppointments
+                ? (row) => arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
+                : undefined,
               onVoidEncounter: (row) => {
                 setDiscardReason("")
                 setDiscarding(row)
@@ -226,6 +237,7 @@ function HomePage() {
         />
       </div>
     </ConfirmDialog>
+    <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />

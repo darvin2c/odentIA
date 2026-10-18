@@ -170,6 +170,8 @@ export interface ConversationDetail {
    * aprobado. Nulo en los demás canales; ausente en respuestas antiguas en caché.
    */
   whatsappWindow?: { open: boolean; lastInboundAt: string | null } | null
+  /** Paciente al que le faltan datos: la Bandeja ofrece pegar su enlace. Ausente en respuestas antiguas. */
+  missingData?: { patientId: string; missing: Array<{ key: string; label: string }> } | null
   messages: ChatMessage[]
   messagesCursor: string | null
 }

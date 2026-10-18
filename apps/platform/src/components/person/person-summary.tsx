@@ -32,7 +32,7 @@ import {
 import { QueryErrorState } from "../../lib/query-error"
 import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
 import { TaskDrawer } from "../crm/task-drawer"
-import { CreatePatientDrawer } from "../patient/create-patient-drawer"
+import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { NewEncounterButton } from "../patient/new-encounter-button"
 import { useScheduleAccepted } from "../patient/plan/plan-budgets"
 import { PlanNextCard } from "../patient/plan/plan-next"
@@ -110,6 +110,7 @@ export function PersonSummary({
   const profile = useOrgProfile()
   const locale = profile.data?.locale
   const [registering, setRegistering] = useState(false)
+  const registerTarget: NewPatientTarget = { kind: "person", person }
   const [newTask, setNewTask] = useState(false)
   const canTaskWrite = usePermission("tasks.write")
   const queryClient = useQueryClient()
@@ -454,12 +455,10 @@ export function PersonSummary({
         </div>
       </div>
 
-      <CreatePatientDrawer
+      <NewPatientDrawer
         open={registering}
         onClose={() => setRegistering(false)}
-        contactId={person.id}
-        person={person}
-        stayOnPage
+        target={registerTarget}
       />
       {!patientId ? (
         <TaskDrawer

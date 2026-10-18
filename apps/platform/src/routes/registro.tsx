@@ -1,16 +1,13 @@
-import { EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { CircleCheck } from "lucide-react"
 import { useState } from "react"
-import type { RegistrationAnswers } from "@odentia/clinical"
-import { PatientRegistrationForm } from "../components/patient/patient-registration-form"
+import { RegistrationQuestionnaire } from "../components/patient/registration-questionnaire"
 import { ApiError } from "../lib/api"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
 import { setOrgLocale } from "../lib/locale"
-import {
-  fetchPublicRegistration,
-  submitPublicRegistration,
-} from "../lib/patient-registration"
+import { fetchPublicRegistration, submitPublicRegistration } from "../lib/patient-registration"
 
 export const Route = createFileRoute("/registro")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -31,30 +28,39 @@ function PublicRegistrationPage() {
   const queryClient = useQueryClient()
   const slug = orgSlugFromHostname(requestHostname())
   const [submissionId] = useState(() => crypto.randomUUID())
-  const [succeededOrg, setSucceededOrg] = useState<string | null>(null)
-  const [retainedDraft, setRetainedDraft] = useState<Partial<RegistrationAnswers> | undefined>(
-    undefined,
-  )
-  const [notice, setNotice] = useState<string | null>(null)
-  const [submitError, setSubmitError] = useState<string | null>(null)
+  /** Lo que dice la pantalla final: la clínica y de quién recibió los datos. */
+  const [done, setDone] = useState<{ org: string; name: string; forOther: boolean } | null>(null)
 
   const infoQuery = useQuery({
     queryKey: ["public-registration", slug, token ?? null],
     queryFn: () => fetchPublicRegistration(slug ?? "", token),
-    enabled: typeof window !== "undefined" && slug !== null && succeededOrg === null,
+    enabled: typeof window !== "undefined" && slug !== null && done === null,
     retry: false,
     staleTime: 30_000,
   })
 
   const entryPoint = via === "qr" ? "qr" : "public_link"
 
-  if (succeededOrg !== null) {
+  if (done !== null) {
     return (
-      <PageShell maxWidth="md">
-        <EmptyState
-          title="Paciente registrado"
-          description={`Paciente registrado. Tus datos fueron recibidos por ${succeededOrg}. Este formulario no reserva una cita.`}
-        />
+      <PageShell maxWidth="md" className="py-6 sm:py-10">
+        <div className="flex flex-col items-center gap-4 rounded-2xl border bg-card px-5 py-10 text-center shadow-xs sm:px-8">
+          <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <CircleCheck aria-hidden className="size-6" />
+          </span>
+          <div className="flex flex-col gap-1.5">
+            <h1 className="font-heading text-xl font-semibold">Registro recibido</h1>
+            <p className="text-sm text-pretty text-muted-foreground">
+              {done.forOther
+                ? `${done.org} ya tiene los datos de ${done.name}.`
+                : `Gracias, ${done.name}. ${done.org} ya tiene tus datos.`}{" "}
+              Este registro no reserva una cita.
+            </p>
+          </div>
+          {via === "qr" ? (
+            <p className="text-sm font-medium">Ya puedes avisar en recepción que terminaste.</p>
+          ) : null}
+        </div>
       </PageShell>
     )
   }
@@ -112,14 +118,12 @@ function PublicRegistrationPage() {
     )
   }
 
-
-  const contextKind = info.context.kind === "conversation" ? "conversation" : "generic"
   // Ya tiene su ficha: el enlace solo sirve para registrar a otra persona.
   const ownRecord = info.context.kind === "conversation" && info.context.ownRecord === true
 
   return (
-    <PageShell maxWidth="md">
-      <header className="mb-6 flex items-center gap-3">
+    <PageShell maxWidth="md" className="flex flex-col gap-6 py-6 sm:py-10">
+      <header className="flex items-center gap-3">
         {info.organization.logo ? (
           <img
             src={info.organization.logo}
@@ -128,98 +132,60 @@ function PublicRegistrationPage() {
             referrerPolicy="no-referrer"
           />
         ) : null}
-        <div>
-          <h1 className="text-xl font-semibold">Registro de paciente · {info.organization.name}</h1>
-          {ownRecord ? (
-            <p className="text-sm text-muted-foreground">
-              Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar.
-            </p>
-          ) : contextKind === "conversation" ? (
-            <p className="text-sm text-muted-foreground">
-              Continúa con el registro compartido por la clínica.
-            </p>
-          ) : null}
+        <div className="flex min-w-0 flex-col">
+          <h1 className="font-heading text-base font-semibold">{info.organization.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            {ownRecord
+              ? "Ya tienes tu registro en la clínica. Aquí registras a tu hijo o a un familiar."
+              : "Registro de paciente"}
+          </p>
         </div>
       </header>
-      {notice ? (
-        <p role="status" className="mb-4 rounded-md border border-border bg-muted p-3 text-sm">
-          {notice}
-        </p>
-      ) : null}
-      {submitError ? (
-        <p role="alert" className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-          {submitError}
-        </p>
-      ) : null}
-      <PatientRegistrationForm
-        mode="public"
-        config={info.config}
-        today={info.today}
-        countryCode={info.countryCode ?? null}
-        context={{ kind: contextKind, ownRecord }}
-        initialValues={retainedDraft}
-        onSubmit={async (draft) => {
-          setNotice(null)
-          setSubmitError(null)
-          setRetainedDraft({ ...draft.answers })
-          try {
-            const result = await submitPublicRegistration(slug, {
-              submissionId,
-              formVersion: info.config.version,
-              token,
-              entryPoint,
-              answers: draft.answers,
-            })
-            if (result.data.registered) {
-              setRetainedDraft(undefined)
-              setSucceededOrg(info.organization.name)
-            }
-          } catch (error) {
-            const shape = error instanceof ApiError ? error.shape : null
-            if (shape?.code === "FORM_CHANGED") {
-              await queryClient.invalidateQueries({
-                queryKey: ["public-registration", slug, token ?? null],
+      <div className="rounded-2xl border bg-card p-5 shadow-xs sm:p-8">
+        <RegistrationQuestionnaire
+          config={info.config}
+          today={info.today}
+          countryCode={info.countryCode ?? null}
+          ownRecord={ownRecord}
+          onSubmit={async (answers) => {
+            try {
+              const result = await submitPublicRegistration(slug, {
+                submissionId,
+                formVersion: info.config.version,
+                token,
+                entryPoint,
+                answers,
               })
-              setNotice(
-                "El formulario cambió: recargamos la configuración vigente. Revisa los campos marcados y vuelve a enviar.",
+              if (result.data.registered)
+                setDone({
+                  org: info.organization.name,
+                  name:
+                    answers.demographics.givenNames?.split(" ")[0] ??
+                    answers.demographics.displayName,
+                  forOther: answers.respondent === "representative",
+                })
+            } catch (error) {
+              const shape = error instanceof ApiError ? error.shape : null
+              if (shape?.code === "FORM_CHANGED") {
+                await queryClient.invalidateQueries({
+                  queryKey: ["public-registration", slug, token ?? null],
+                })
+                throw new Error(
+                  "La clínica cambió el registro: revisa tus respuestas y vuelve a enviar.",
+                )
+              }
+              if (shape?.code === "REGISTRATION_NOT_COMPLETED")
+                throw new Error("No pudimos completar el registro. Comunícate con recepción.")
+              throw new Error(
+                shape?.message ?? "No pudimos enviar el registro. Inténtalo de nuevo.",
               )
-              return
             }
-            if (shape?.code === "REGISTRATION_NOT_COMPLETED") {
-              setSubmitError("No pudimos completar el registro. Comunícate con recepción.")
-              return
-            }
-            setSubmitError(
-              shape?.message ?? "No pudimos enviar el registro. Inténtalo de nuevo.",
-            )
-          }
-        }}
-      >
-        {(view) => (
-          <form onSubmit={view.onSubmit} className="space-y-6">
-            {view.progress}
-            {view.body}
-            {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
-            <p className="text-sm text-muted-foreground">Te avisaremos por WhatsApp sobre tus citas.</p>
-            <div className="flex flex-col gap-3">
-              {view.error ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {view.error}
-                </p>
-              ) : null}
-              <SubmitButton
-                type="submit"
-                pending={view.isSubmitting}
-                disabled={view.submitDisabled}
-                className="w-full"
-              >
-                {view.submitLabel}
-              </SubmitButton>
-              {view.previous}
-            </div>
-          </form>
-        )}
-      </PatientRegistrationForm>
+          }}
+        />
+      </div>
+      <p className="text-center text-xs text-muted-foreground">
+        Tus respuestas se envían solo al final.
+      </p>
     </PageShell>
   )
 }

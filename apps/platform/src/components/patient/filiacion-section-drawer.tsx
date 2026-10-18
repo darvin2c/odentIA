@@ -23,10 +23,10 @@ import {
   insuranceFromChoice,
   maritalChoices,
 } from "../../lib/person-data"
-import type { Patient } from "../../lib/patients"
+import { filiationGapsText, type Patient } from "../../lib/patients"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
-import { SendPersonalLinkButton } from "./send-personal-link"
+import { PersonalLinkActions } from "./send-personal-link"
 
 type FieldKind =
   | { kind: "text"; max: number; wide?: boolean }
@@ -101,11 +101,10 @@ function useSectionFields(stored: Partial<Record<string, unknown>>): Record<
     return {
       identidad: {
         title: "Identidad",
-        description: "Nombre separado, documento con su país emisor y nacimiento.",
+        description: "Nombres y apellidos, documento con su país emisor y nacimiento.",
         fields: [
           { key: "givenNames", label: "Nombres", type: { kind: "text", max: 100 } },
-          { key: "paternalSurname", label: "Primer apellido", type: { kind: "text", max: 100 } },
-          { key: "maternalSurname", label: "Segundo apellido", type: { kind: "text", max: 100 } },
+          { key: "familyName", label: "Apellidos", type: { kind: "text", max: 200 } },
           { key: "docType", label: "Tipo de documento", type: { kind: "select", options: documentChoices(profile, docType) } },
           { key: "docNumber", label: "Número de documento", type: { kind: "text", max: 20 } },
           { key: "docCountry", label: "País que lo emitió", type: { kind: "country" } },
@@ -164,12 +163,14 @@ const EMERGENCY_FIELDS: SectionField[] = [
 
 const COMPLETE_FIELDS: Record<MissingPersonDatum["key"], Array<SectionField["key"]>> = {
   givenNames: ["givenNames"],
-  paternalSurname: ["paternalSurname", "maternalSurname"],
+  familyName: ["familyName"],
   birthDate: ["birthDate"],
   phone: ["phone", "email"],
   docType: ["docType", "docNumber", "docCountry"],
   docNumber: ["docType", "docNumber", "docCountry"],
   sex: ["sex"],
+  nationality: ["nationality"],
+  birthPlace: ["birthPlace"],
   email: ["email"],
   address: ["address", "addressCity", "addressDistrict", "addressRegion", "addressPostalCode", "addressCountry", "addressReference"],
   emergencyContactName: ["emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone"],
@@ -182,8 +183,7 @@ const COMPLETE_FIELDS: Record<MissingPersonDatum["key"], Array<SectionField["key
  * identidad y cómo ubicarla. El resto de la filiación es de la ficha.
  */
 const PERSON_FIELD_KEYS = new Set<string>([
-  "paternalSurname",
-  "maternalSurname",
+  "familyName",
   "givenNames",
   "docType",
   "docNumber",
@@ -330,7 +330,7 @@ export function FiliacionSectionDrawer({
     ? "Solo lo que falta para atenderla. Al guardar, los apellidos quedan confirmados."
     : sections[section].description
   // Apellidos a la vista en «Completar», aunque no falten.
-  const namesInView = completing && !wanted?.has("givenNames") && !wanted?.has("paternalSurname")
+  const namesInView = completing && !wanted?.has("givenNames") && !wanted?.has("familyName")
   return (
     <FormDrawer
       open={open}
@@ -357,16 +357,17 @@ export function FiliacionSectionDrawer({
               {missing?.length === 1 ? "Falta 1" : `Faltan ${missing?.length ?? 0}`}
             </Badge>
             {/* O que lo complete ella desde su teléfono, con «Su enlace» (decisión 8). */}
-            {patient && (missing?.length ?? 0) > 0 ? <SendPersonalLinkButton patientId={patient.id} /> : null}
+            {patient && missing && missing.length > 0 ? (
+              <PersonalLinkActions patientId={patient.id} missing={filiationGapsText(missing)} />
+            ) : null}
           </div>
         ) : null}
         {namesInView ? (
-          <dl className="grid grid-cols-3 gap-3 text-sm sm:col-span-2">
+          <dl className="grid grid-cols-2 gap-3 text-sm sm:col-span-2">
             {(
               [
                 ["Nombres", source.givenNames],
-                ["Primer apellido", source.paternalSurname],
-                ["Segundo apellido", source.maternalSurname],
+                ["Apellidos", source.familyName],
               ] as const
             ).map(([label, value]) => (
               <div key={label} className="min-w-0">

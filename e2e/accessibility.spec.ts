@@ -241,7 +241,7 @@ for (const viewport of [
       }
       // Sin nombre no se crea: el botón espera a que esté.
       await expect(dialog.getByRole("button", { name: "Crear y abrir su página", exact: true })).toBeDisabled()
-      await dialog.getByLabel("Primer apellido", { exact: true }).fill("Accesible")
+      await dialog.getByLabel("Apellidos", { exact: true }).fill("Accesible")
       await dialog.getByLabel("Nombres", { exact: true }).fill("Paciente")
       await audit(page, info, "nueva-persona-llena")
       await dialog.getByRole("button", { name: "Crear y abrir su página", exact: true }).click()

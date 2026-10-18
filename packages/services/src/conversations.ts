@@ -5,7 +5,7 @@ import {
   type ReplyButton,
   type TemplateCategory,
 } from "@odentia/channels"
-import { normalizePhone } from "@odentia/clinical"
+import { type MissingPersonDatum, normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
 import {
   agentConfig,
@@ -33,6 +33,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
+import { getPatientMissingData } from "./patient-registration.js"
 import { hidePersonalLinkRefs } from "./personal-link-token.js"
 import { windowOpen } from "./message-window.js"
 import { decryptConfig } from "./secrets.js"
@@ -1216,14 +1217,20 @@ export interface ConversationDetail {
    * los demás canales.
    */
   whatsappWindow: { open: boolean; lastInboundAt: string | null } | null
+  /**
+   * Si la persona es paciente y le faltan datos para atenderla: la Bandeja
+   * ofrece pegar su enlace en el mensaje (lienzo «Su enlace y el código QR»).
+   * Nulo si no es paciente o no le falta nada.
+   */
+  missingData: { patientId: string; missing: MissingPersonDatum[] } | null
   messages: MessageItem[]
   messagesCursor: string | null
 }
 
-/** La persona ya es paciente (tiene su ficha propia). */
-async function isSelfPatient(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+/** La ficha propia de la persona, si ya es paciente. */
+async function selfPatientOf(tx: Db, orgId: string, contactId: string): Promise<string | null> {
   const [own] = await tx
-    .select({ id: patientContact.id })
+    .select({ patientId: patientContact.patientId })
     .from(patientContact)
     .where(
       and(
@@ -1233,7 +1240,7 @@ async function isSelfPatient(tx: Db, orgId: string, contactId: string): Promise<
       ),
     )
     .limit(1)
-  return !!own
+  return own?.patientId ?? null
 }
 
 export async function getConversationDetail(
@@ -1251,6 +1258,8 @@ export async function getConversationDetail(
   if (!row) throw notFound("Conversación")
   const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
   const { items, nextCursor } = await listMessages(tx, orgId, id, {})
+  const patientId = await selfPatientOf(tx, orgId, row.contact.id)
+  const missing = patientId ? await getPatientMissingData(tx, orgId, patientId) : []
   return {
     conversation: {
       id: row.conversation.id,
@@ -1266,7 +1275,7 @@ export async function getConversationDetail(
       id: row.contact.id,
       displayName: row.contact.displayName,
       isActive: row.contact.isActive,
-      isPatient: await isSelfPatient(tx, orgId, row.contact.id),
+      isPatient: patientId !== null,
     },
     connection: {
       id: row.connection.id,
@@ -1282,6 +1291,7 @@ export async function getConversationDetail(
             lastInboundAt: row.conversation.lastInboundAt?.toISOString() ?? null,
           }
         : null,
+    missingData: patientId && missing.length > 0 ? { patientId, missing } : null,
     messages: items,
     messagesCursor: nextCursor,
   }

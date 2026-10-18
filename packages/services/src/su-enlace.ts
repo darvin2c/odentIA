@@ -8,6 +8,7 @@ import {
   isRealDate,
   type MissingPersonDatum,
   normalizePhone,
+  type RegistrationConfig,
   phoneFormatError,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
@@ -45,6 +46,7 @@ import {
   resolvePersonalLink,
   type ResolvedPersonalLink,
 } from "./booking-links.js"
+import { contactDecides } from "./responsibilities.js"
 import { listBudgets } from "./budgets.js"
 import { serviceRecipient } from "./budget-send.js"
 import { signConsentByLink } from "./clinical-forms.js"
@@ -55,7 +57,8 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { buildTicketSnapshot, renderTicketPdf } from "./financial-document-pdf.js"
 import { renderHealthDocumentPdf } from "./health-documents.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
-import { getPatientMissingData } from "./patient-registration.js"
+import { getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
+import { type DeclaredPatientHealthInput, getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import { patientOrganizationToday, patientPersonId, requirePatient, updatePatient } from "./patients.js"
 import { decideBudgetByPerson, type DecidePortalBudgetInput, portalBudgetLocale, type PortalBudgetView, toPortalBudget } from "./portal.js"
 import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
@@ -126,7 +129,7 @@ export interface PersonalLinkView {
   branches: BookingLinkBranch[]
   appointment: BookingLinkAppointment | null
   /** Tus datos: solo qué falta, nunca lo guardado. */
-  data: { missing: MissingPersonDatum[] } | null
+  data: { missing: MissingPersonDatum[]; /** Si también se le pregunta su salud. */ health: boolean } | null
   /** Presupuestos que esperan su respuesta. */
   budgets: PortalBudgetView[]
   /** Consentimientos que la clínica le envió a firmar. */
@@ -310,7 +313,7 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
         : null,
     branches: context?.branches ?? [],
     appointment,
-    data: missing ? { missing } : null,
+    data: missing && link.patientId ? { missing, health: await healthNeverRecorded(tx, orgId, link.patientId) } : missing ? { missing, health: false } : null,
     budgets,
     consents,
     questionnaire,
@@ -392,19 +395,26 @@ export async function getPersonalLinkPaper(
 /** Lo que «Tus datos» puede completar: solo lo que falta, y lo que va con ello. */
 const DATA_FIELDS = [
   "givenNames",
-  "paternalSurname",
-  "maternalSurname",
+  "familyName",
   "birthDate",
   "docType",
   "docNumber",
   "docCountry",
   "sex",
+  "nationality",
+  "birthPlace",
   "phone",
   "email",
   "address",
+  "addressCity",
+  "addressReference",
   "emergencyContactName",
   "emergencyContactPhone",
+  "emergencyContactRelationship",
   "insuranceType",
+  "insuranceScheme",
+  "insurerName",
+  "affiliationNumber",
 ] as const
 type DataField = (typeof DATA_FIELDS)[number]
 
@@ -412,16 +422,26 @@ type DataField = (typeof DATA_FIELDS)[number]
 function fieldsFor(missing: MissingPersonDatum[]): Set<DataField> {
   const allowed = new Set<DataField>()
   for (const item of missing) {
-    if (item.key === "paternalSurname") {
-      allowed.add("paternalSurname")
-      allowed.add("maternalSurname")
-    } else if (item.key === "docType" || item.key === "docNumber") {
+    if (item.key === "docType" || item.key === "docNumber") {
       allowed.add("docType")
       allowed.add("docNumber")
       allowed.add("docCountry")
     } else if (item.key === "phone") {
       allowed.add("phone")
       allowed.add("email")
+    } else if (item.key === "address") {
+      allowed.add("address")
+      allowed.add("addressCity")
+      allowed.add("addressReference")
+    } else if (item.key === "emergencyContactName") {
+      allowed.add("emergencyContactName")
+      allowed.add("emergencyContactPhone")
+      allowed.add("emergencyContactRelationship")
+    } else if (item.key === "insuranceType") {
+      allowed.add("insuranceType")
+      allowed.add("insuranceScheme")
+      allowed.add("insurerName")
+      allowed.add("affiliationNumber")
     } else {
       allowed.add(item.key)
     }
@@ -435,6 +455,15 @@ export interface PersonalLinkDataForm {
   today: string
   /** Si la fecha de nacimiento lo hace menor, pide en la misma pantalla a su representante. */
   hasRepresentative: boolean
+  /** El registro de la clínica: qué pide, qué es obligatorio y las preguntas de salud. */
+  registration: RegistrationConfig
+  /**
+   * Si se le pregunta su salud: solo mientras nadie la registró en su ficha
+   * (lo declarado entra a revisión; lo que ya registró la clínica no se pisa).
+   */
+  asksHealth: boolean
+  /** Su primer nombre, para saludarla; nulo si no se sabe. */
+  firstName: string | null
 }
 
 /** Lo que pide «Tus datos»: solo lo que falta, con el país de la clínica para los documentos. */
@@ -447,7 +476,15 @@ export async function getPersonalLinkDataForm(tx: Db, orgId: string, token: stri
     countryCode: await findOrgCountry(tx, orgId),
     today: await patientOrganizationToday(tx, orgId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
+    registration: await getPatientRegistrationConfig(tx, orgId),
+    asksHealth: await healthNeverRecorded(tx, orgId, link.patientId),
+    firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
   }
+}
+
+/** Nadie registró aún su salud: se le puede preguntar desde su enlace. */
+async function healthNeverRecorded(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  return (await getPatientHealth(tx, orgId, patientId)).revision === 0
 }
 
 async function hasLegalRepresentative(tx: Db, orgId: string, patientId: string): Promise<boolean> {
@@ -480,6 +517,8 @@ export interface PersonalLinkDataInput {
     phone?: string
     relationshipDetail?: string
   } | null
+  /** Su salud, como en el registro; solo se guarda si nadie la registró antes. */
+  health?: DeclaredPatientHealthInput | null
 }
 
 /** De quién es ya ese documento, si es de otra persona. */
@@ -536,9 +575,8 @@ function representativeOf(
  * madre, padre o tutor queda en una nota y a recepción le llega la tarea de
  * registrarlo con su documento. Si el documento ya es de otra persona no se
  * guarda, nunca se unen solas, y a recepción le llega «Posible ficha
- * repetida» en «Te espera»; a la persona no se le dice de quién es. La
- * identidad sigue por revisar hasta que recepción la confirme, y una nota de
- * su persona dice qué completó y qué sigue faltando.
+ * repetida» en «Te espera»; a la persona no se le dice de quién es. Una nota
+ * de su persona dice qué completó y qué sigue faltando.
  */
 export async function submitPersonalLinkData(
   tx: Db,
@@ -560,7 +598,8 @@ export async function submitPersonalLinkData(
     const value = typeof raw === "string" ? raw.trim() : null
     if (value) patch[key] = value
   }
-  if (Object.keys(patch).length === 0) throw validation("Completa al menos un dato")
+  const withHealth = !!input.health && (await healthNeverRecorded(tx, orgId, patientId))
+  if (Object.keys(patch).length === 0 && !withHealth) throw validation("Completa al menos un dato")
   const actor = `contact:${link.row.contactId}`
   const today = await patientOrganizationToday(tx, orgId)
   const countryCode = await findOrgCountry(tx, orgId)
@@ -588,6 +627,8 @@ export async function submitPersonalLinkData(
     }
   }
   if (Object.keys(patch).length > 0) await updatePatient(tx, orgId, actor, patientId, patch)
+  // Su salud entra como declarada por la persona: la revisa quien atiende.
+  if (withHealth && input.health) await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
   // «Tus datos» se envían una sola vez: después dice «Recibido».
   await tx
     .update(appointmentBookingLink)
@@ -599,6 +640,7 @@ export async function submitPersonalLinkData(
     const done = missing.filter((item) => !stillMissing.some((left) => left.key === item.key)).map((item) => item.label)
     const parts = [
       done.length > 0 ? `Completó desde su enlace: ${done.join(", ")}.` : "Envió sus datos desde su enlace.",
+      withHealth ? "Declaró su salud: queda por revisar en sus antecedentes." : null,
       stillMissing.length > 0 ? `Sigue faltando: ${stillMissing.map((item) => item.label).join(", ")}.` : null,
       duplicateOf ? "El documento que escribió ya está en otra ficha: no se guardó." : null,
       pendingRepresentative
@@ -642,9 +684,36 @@ export async function submitPersonalLinkData(
     action: "personal_link.data_sent",
     entity: "patient",
     entityId: patientId,
-    metadata: { fields: Object.keys(patch), duplicate: !!duplicateOf, minorWithoutRepresentative: !!pendingRepresentative, origin: "paciente" },
+    metadata: { fields: Object.keys(patch), health: withHealth, duplicate: !!duplicateOf, minorWithoutRepresentative: !!pendingRepresentative, origin: "paciente" },
   })
   return { received: true }
+}
+
+/**
+ * Al confirmar en la conversación la cita que reservó el agente (fase 3 del
+ * lienzo «Su enlace y el código QR»): si al paciente le faltan datos y quien
+ * escribe decide por él, su enlace con esa cita, con el token escrito (lo
+ * redacta el agente, no pasa por el worker). Nulo si no falta nada, si quien
+ * escribe no decide por el paciente o si la clínica no tiene dirección pública.
+ */
+export async function bookedDataLink(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; patientId: string; appointmentId: string | null },
+  deps: { secretsKey: Buffer },
+): Promise<{ missing: string[]; url: string } | null> {
+  const missing = await getPatientMissingData(tx, orgId, input.patientId)
+  if (missing.length === 0) return null
+  if (!(await contactDecides(tx, orgId, input.patientId, input.contactId))) return null
+  if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) return null
+  const link = await issuePersonalLink(
+    tx,
+    orgId,
+    { contactId: input.contactId, patientId: input.patientId, ...(input.appointmentId ? { appointmentId: input.appointmentId } : {}) },
+    deps,
+  )
+  const url = await personalLinkUrl(tx, orgId, link.token)
+  return url ? { missing: missing.map((item) => item.label.toLowerCase()), url } : null
 }
 
 // ---------------------------------------------------------- presupuesto ---
@@ -793,6 +862,12 @@ export interface PersonalLinkSendPreview {
   label: string | null
   /** Por qué no se puede enviar. */
   blocked: string | null
+  /**
+   * Si se puede copiar o mostrar en un código aunque no se pueda enviar
+   * (fuera de las 24 horas, sin mensaje aprobado o sin permiso para escribirle):
+   * solo falta cuando la clínica no tiene dirección pública.
+   */
+  canShow: boolean
   text: string
   /** Hasta cuándo sirve el enlace que ya tiene, si tiene uno: «Quitar enlace» lo deja sin efecto. */
   liveUntil: string | null
@@ -831,9 +906,10 @@ export async function previewPersonalLinkSend(tx: Db, orgId: string, patientId: 
     recipient: { contactId: recipient.contactId, name: recipient.displayName, relation: recipient.relation },
     text,
     liveUntil: await liveLinkUntil(tx, orgId, patientId),
+    canShow: true,
   }
   if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) {
-    return { ...base, channel: null, via: null, label: null, blocked: NO_ADDRESS }
+    return { ...base, channel: null, via: null, label: null, blocked: NO_ADDRESS, canShow: false }
   }
   // La puerta para escribirle a alguien (ADR 0042): un aviso que manda el equipo.
   const route = await previewRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
@@ -965,6 +1041,45 @@ export async function sendPersonalLink(
     },
   })
   return result
+}
+
+export interface PersonalLinkShown {
+  url: string
+  expiresAt: string
+  recipientName: string
+}
+
+/**
+ * «Su enlace» para mostrarlo en la clínica como código QR: quien decide por el
+ * paciente lo escanea con su celular delante de recepción y completa sus datos
+ * mientras espera. No se envía nada: el enlace es el mismo que se le enviaría
+ * (uno por persona y paciente) y queda la traza de quién lo mostró.
+ */
+export async function showPersonalLink(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  deps: { secretsKey: Buffer },
+): Promise<PersonalLinkShown> {
+  const recipient = await serviceRecipient(tx, orgId, patientId)
+  const link = await issuePersonalLink(
+    tx,
+    orgId,
+    { contactId: recipient.contactId, patientId, createdBy: actorUserId },
+    deps,
+  )
+  const url = await personalLinkUrl(tx, orgId, link.token)
+  if (!url) throw new ServiceError("NO_PUBLIC_URL", 409, NO_ADDRESS)
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    actorUserId,
+    action: "personal_link.shown",
+    entity: "patient",
+    entityId: patientId,
+    metadata: { patientId, recipientContactId: recipient.contactId, recipientName: recipient.displayName },
+  })
+  return { url, expiresAt: link.expiresAt.toISOString(), recipientName: recipient.displayName }
 }
 
 // ------------------------------------------- enlaces de correo: /c/:token ---

@@ -17,10 +17,11 @@ import {
 } from "@odentia/ui"
 import { isValidE164 } from "@odentia/ui-patterns"
 import { type InputHTMLAttributes, useId } from "react"
+import { ChoiceButtons } from "../choice-buttons"
 
 /**
  * Campos y validación demográfica compartidos entre el alta
- * (create-patient-drawer) y la edición (filiacion-drawer): un solo criterio
+ * (new-patient-drawer y el registro público) y la edición (filiacion-drawer): un solo criterio
  * para nombre, documento, nacimiento, sexo y contacto. La edición reutiliza
  * estos mismos límites; la creación añade el flujo de contacto.
  */
@@ -169,6 +170,25 @@ export function SelectRow({
   disabled?: boolean
 }) {
   const id = useId()
+  // Pocas opciones y cortas: botones a la vista, sin abrir una lista. El «—»
+  // de «sin elegir» no es una opción: sin elegir, ningún botón queda marcado.
+  const real = options.filter((option) => option.value !== "")
+  const asButtons = real.length >= 2 && real.length <= 4 && real.every((option) => option.label.length <= 26)
+  if (asButtons) {
+    return (
+      <Field>
+        <FieldLabel id={id}>{label}</FieldLabel>
+        <ChoiceButtons
+          label={label}
+          value={real.some((option) => option.value === value) ? value : null}
+          options={real}
+          onChange={onChange}
+          disabled={disabled}
+        />
+        <FieldError>{error ?? fallbackError?.[0]}</FieldError>
+      </Field>
+    )
+  }
   return (
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -196,11 +216,12 @@ export function SelectRow({
 
 export function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
+    <div className="@container flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
       <div className="flex flex-col gap-1.5 pb-3">
         <div className="font-heading text-base font-medium">{title}</div>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
+      {/* Dos columnas según el ancho de la tarjeta, no de la ventana: en un cajón o en la vista previa del celular, una. */}
+      <div className="grid gap-4 @lg:grid-cols-2">{children}</div>
     </div>
   )
 }

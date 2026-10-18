@@ -55,6 +55,8 @@ export async function seedChannelTemplates(
     // El aviso con «Su enlace» y «Su enlace» mismo, recién pedidos: mientras
     // tanto salen escritos a quien escribió en las últimas 24 horas o por correo.
     aviso_cita_reservada_datos: { status: "en_revision" },
+    // El recordatorio con «Completar mis datos», recién pedido: mientras tanto sale el de siempre.
+    recordatorio_cita_datos: { status: "en_revision" },
     aviso_cita_movida: { status: "aprobada", since: lastWeek },
     aviso_cita_cancelada: { status: "en_revision" },
     retomar_conversacion: { status: "aprobada", since: lastWeek },

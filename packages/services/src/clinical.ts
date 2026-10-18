@@ -529,13 +529,21 @@ export async function initializeDeclaredPatientHealth(
     [declared.allergies, declared.conditions, declared.medications].some(
       (group) => group && group.state !== "unanswered",
     ) ||
-    Object.values(declared.dental ?? {}).some(Boolean)
+    [declared.personal, declared.dental].some((group) =>
+      Object.values(group ?? {}).some((value) => value !== undefined && value !== ""),
+    )
   if (!hasData) return getPatientHealth(tx, orgId, patientId)
   const state = (value: string | undefined) =>
     value === "none" || value === "recorded" ? value : "unknown"
-  const dental = Object.fromEntries(
-    Object.entries(declared.dental ?? {}).filter(([, value]) => value !== ""),
-  )
+  const answered = (group: Record<string, unknown> | undefined) =>
+    Object.fromEntries(Object.entries(group ?? {}).filter(([, value]) => value !== "" && value !== undefined))
+  // Lo que declaró de su salud y de su boca entra a la entrevista de la ficha con sus mismas claves.
+  const dental = answered(declared.dental)
+  const personal = answered(declared.personal)
+  const interview = {
+    ...(Object.keys(personal).length ? { antecedentesPersonales: personal } : {}),
+    ...(Object.keys(dental).length ? { antecedentesOdontologicos: dental } : {}),
+  }
   return persistPatientHealth(tx, orgId, { kind: "declaration", userId: actorUserId }, patientId, {
     expectedRevision: 0,
     bloodGroup: declared.bloodGroup,
@@ -547,9 +555,7 @@ export async function initializeDeclaredPatientHealth(
     allergies: (declared.allergies?.items ?? []).map((item) => ({ ...item, isActive: true })),
     conditions: (declared.conditions?.items ?? []).map((item) => ({ ...item, status: "activa" })),
     medications: declared.medications?.items ?? [],
-    ...(Object.keys(dental).length
-      ? { anamnesis: { expectedVersion: 0, answers: { antecedentesOdontologicos: dental } } }
-      : {}),
+    ...(Object.keys(interview).length ? { anamnesis: { expectedVersion: 0, answers: interview } } : {}),
   })
 }
 

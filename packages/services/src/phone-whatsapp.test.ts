@@ -31,20 +31,20 @@ async function clinic() {
 it("caso 2: el teléfono de la ficha aún no es su WhatsApp hasta que alguien del equipo lo usa como tal", async () => {
   const c = await clinic()
   const carmen = await c.run((tx) =>
-    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Carmen", paternalSurname: "Ruiz", phone: "+51987650101" }),
+    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Carmen", familyName: "Ruiz", phone: "+51987650101" }),
   )
   expect(await c.run((tx) => phoneWhatsAppState(tx, c.orgId, carmen.id))).toMatchObject({ state: "aun_no", canUse: true })
   const used = await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, carmen.id))
   expect(used.state).toBe("es_su_whatsapp")
   // Sin teléfono no hay nada que usar.
-  const sin = await c.run((tx) => createPerson(tx, c.orgId, { userId: null }, { givenNames: "Sin", paternalSurname: "Teléfono" }))
+  const sin = await c.run((tx) => createPerson(tx, c.orgId, { userId: null }, { givenNames: "Sin", familyName: "Teléfono" }))
   expect((await c.run((tx) => phoneWhatsAppState(tx, c.orgId, sin.id))).state).toBe("sin_telefono")
 })
 
 it("caso 1: si WhatsApp rechaza el mensaje porque el número no tiene WhatsApp, la ficha lo dice; volver a marcarlo lo reintenta", async () => {
   const c = await clinic()
   const carmen = await c.run((tx) =>
-    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Carmen", paternalSurname: "Sin WhatsApp", phone: "+51987650202" }),
+    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Carmen", familyName: "Sin WhatsApp", phone: "+51987650202" }),
   )
   await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, carmen.id))
   const [identity] = await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, carmen.id))
@@ -84,7 +84,7 @@ it("caso 1: a un número sin WhatsApp no se le escribe por WhatsApp: sale por co
   const gate = { purpose: "avisos" as const, initiative: "propia" as const }
   const person = async (name: string, phone: string, email: string | null) => {
     const created = await c.run((tx) =>
-      createPerson(tx, c.orgId, { userId: null }, { givenNames: name, paternalSurname: "Sin WhatsApp", phone, ...(email ? { email } : {}) }),
+      createPerson(tx, c.orgId, { userId: null }, { givenNames: name, familyName: "Sin WhatsApp", phone, ...(email ? { email } : {}) }),
     )
     await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, created.id))
     await ownerDb.update(contactIdentity).set({ noWhatsappAt: new Date() }).where(eq(contactIdentity.contactId, created.id))
@@ -103,7 +103,7 @@ it("caso 1: a un número sin WhatsApp no se le escribe por WhatsApp: sale por co
 it("caso 3: un mensaje desde el teléfono de una ficha pregunta «¿Es ella?» y solo se une con «Sí, es Carmen»", async () => {
   const c = await clinic()
   const carmen = await c.run((tx) =>
-    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Carmen", paternalSurname: "Ruiz Tello", phone: "+51987650303" }),
+    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Carmen", familyName: "Ruiz Tello", phone: "+51987650303" }),
   )
   // Escribe desde ese número: la ingesta crea su persona provisional, como siempre.
   const [provisional] = await ownerDb
@@ -137,7 +137,7 @@ it("caso 3: un mensaje desde el teléfono de una ficha pregunta «¿Es ella?» y
 it("caso 3: un teléfono que figura en dos fichas no sugiere a nadie", async () => {
   const c = await clinic()
   for (const name of ["Ana", "Luis"])
-    await c.run((tx) => createPerson(tx, c.orgId, { userId: null }, { givenNames: name, paternalSurname: "Compartido", phone: "+51987650404" }))
+    await c.run((tx) => createPerson(tx, c.orgId, { userId: null }, { givenNames: name, familyName: "Compartido", phone: "+51987650404" }))
   const [provisional] = await ownerDb.insert(contact).values({ organizationId: c.orgId, displayName: "Desconocido" }).returning({ id: contact.id })
   const [identity] = await ownerDb
     .insert(contactIdentity)

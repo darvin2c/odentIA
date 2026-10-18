@@ -59,7 +59,7 @@ describe("una persona, una página", () => {
         tx,
         c.orgId,
         { userId: c.actor },
-        { givenNames: "Rosa", paternalSurname: "Quispe", phone: "987654100" },
+        { givenNames: "Rosa", familyName: "Quispe", phone: "987654100" },
       ),
     )
     const before = await c.run((tx) => getPersonPage(tx, c.orgId, rosa.id, everything))
@@ -73,7 +73,7 @@ describe("una persona, una página", () => {
       createPatient(tx, c.orgId, c.actor, {
         displayName: "Rosa Quispe",
         givenNames: "Rosa",
-        paternalSurname: "Quispe",
+        familyName: "Quispe",
         contacts: [{ contactId: rosa.id, relationship: "self", isPreferred: true }],
       }),
     )
@@ -189,7 +189,7 @@ describe("un solo formulario de datos, con las reglas de la ficha", () => {
         docCountry: "ve",
         sex: "I",
         givenNames: "Luis Alberto",
-        paternalSurname: "Pérez",
+        familyName: "Pérez",
       }),
     )
     // Antes, guardar desde Contactos reenviaba el documento sin país y fallaba siempre.

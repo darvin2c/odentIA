@@ -1428,12 +1428,12 @@ const PATIENTS_A: Array<{
 ]
 const patientIdByName = new Map<string, string>()
 for (const p of PATIENTS_A) {
-  const [given, paternal] = p.name.split(" ")
+  const [given, ...surnames] = p.name.split(" ")
   const rosa = p.name === "Rosa Quispe"
   const row = await createPatient(db, ORG_A, ANA_ID, {
     displayName: p.name,
     givenNames: given,
-    paternalSurname: paternal,
+    familyName: surnames.join(" "),
     contacts: [
       { contactId: contactIdByName.get(p.name)!, relationship: "self", isPreferred: true },
     ],
@@ -2408,7 +2408,7 @@ const hijoVargas = (displayName: string, givenNames: string, birthDate: string, 
       {
         submissionId: randomUUID(),
         answers: {
-          demographics: { displayName, givenNames, paternalSurname: "Vargas", birthDate, docType: "DNI", docNumber },
+          demographics: { displayName, givenNames, familyName: "Vargas", birthDate, docType: "DNI", docNumber },
           respondent: "representative",
           representative: {
             displayName: "Gabriela Vargas Soto",
@@ -2432,7 +2432,7 @@ await hijoVargas("Valeria Vargas", "Valeria", "2019-08-22", "78123402")
 const marco = await createPatient(db, ORG_A, ANA_ID, {
   displayName: "Marco Torres",
   givenNames: "Marco",
-  paternalSurname: "Torres",
+  familyName: "Torres",
   birthDate: "1994-02-11",
   phone: "+51987650600",
   registeredBranchId: miraflores.id,
@@ -2555,21 +2555,18 @@ const registrationConfig = await db.transaction((tx) =>
     enabled: true,
     fields: {
       ...DEFAULT_REGISTRATION_CONFIG.fields,
-      // Como en el lienzo (tablero 5): la clínica pide además el documento; a
-      // quien se registró con lo mínimo le sale «Faltan datos para atenderla».
+      // Lo que pide una clínica típica (registro por el código QR): el
+      // documento y el sexo cuentan para «Faltan datos»; se le pregunta su
+      // salud, si está embarazada y si la han operado; nada censal ni de su
+      // historia dental.
       docType: "required",
       docNumber: "required",
-      insuranceType: "optional",
-      emergencyContactName: "optional",
-      emergencyContactPhone: "optional",
-      maritalStatus: "optional",
-      educationLevel: "optional",
-      occupation: "optional",
-      origin: "optional",
-      referralSource: "optional",
-      "dental.ultimaVisita": "optional",
-      "dental.experienciaPrevia": "optional",
-      "dental.ansiedadDental": "optional",
+      sex: "required",
+      email: "hidden",
+      address: "hidden",
+      bloodGroup: "hidden",
+      "personal.embarazo": "optional",
+      "personal.cirugias": "optional",
     },
     privacyNotice:
       "AVISO DE DEMOSTRACIÓN: autorizo el tratamiento de estos datos ficticios para mostrar el registro de pacientes. No utilizar datos reales en esta demostración.",
@@ -2603,7 +2600,7 @@ const pedroRios = await db.transaction((tx) =>
     {
       submissionId: randomUUID(),
       answers: {
-        demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", paternalSurname: "Ríos", phone: "+51987111222" },
+        demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", familyName: "Ríos", phone: "+51987111222" },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -2662,7 +2659,7 @@ const pedro = await db.transaction((tx) =>
         demographics: {
           displayName: "Pedro Quispe",
           givenNames: "Pedro",
-          paternalSurname: "Quispe",
+          familyName: "Quispe",
           birthDate: "2016-05-20",
           // La clínica pide el documento: el DNI del menor.
           docType: "DNI",
@@ -2697,7 +2694,7 @@ const pedro = await db.transaction((tx) =>
 const martin = await createContact(db, ORG_A, {
   displayName: "Martín Salas",
   givenNames: "Martín",
-  paternalSurname: "Salas",
+  familyName: "Salas",
   phone: "+51987650001",
 })
 await db.transaction((tx) =>
@@ -2711,7 +2708,7 @@ await db.transaction((tx) =>
         demographics: {
           displayName: "Sofía Salas",
           givenNames: "Sofía",
-          paternalSurname: "Salas",
+          familyName: "Salas",
           birthDate: "2017-08-12",
           sex: "F",
           docType: "DNI",
@@ -2809,8 +2806,8 @@ await db.transaction((tx) =>
 // «Te espera» de recepción con lo que deja el registro en línea cuando el
 // documento ya es de alguien: Valeria registra a su hijo por el QR (su vínculo
 // de «Madre» espera «Confirmar» o «No es ella», tarea `confirmar_representante`)
-// y alguien se registra con el DNI de Valeria (no se completa y queda para
-// revisar o «Descartar», tarea `registro_con_documento`).
+// y alguien se registra con el DNI de Valeria (no se crea a nadie: queda con lo
+// que escribió para «¿Es la misma persona?», tarea `registro_con_documento`).
 await db.transaction((tx) =>
   registerPatient(
     tx,
@@ -2823,7 +2820,7 @@ await db.transaction((tx) =>
         demographics: {
           displayName: "Thiago Quispe · QR demo",
           givenNames: "Thiago",
-          paternalSurname: "Quispe",
+          familyName: "Quispe",
           birthDate: "2019-03-02",
           phone: SHARED_PHONE,
           docType: "DNI",
@@ -2858,10 +2855,18 @@ await db
         submissionId: randomUUID(),
         formVersion: registrationConfig.version,
         answers: {
-          demographics: { displayName: "Alguien Distinto", birthDate: "1990-01-01", phone: "+51987000999", docType: "DNI", docNumber: "45678920" },
+          demographics: {
+            displayName: "Valeria Quispe Rojas",
+            givenNames: "Valeria",
+            familyName: "Quispe Rojas",
+            birthDate: "1990-01-01",
+            phone: "+51987000999",
+            docType: "DNI",
+            docNumber: "45678920",
+          },
           respondent: "patient",
           health: {
-            allergies: { state: "unanswered", items: [] },
+            allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] },
             conditions: { state: "unanswered", items: [] },
             medications: { state: "unanswered", items: [] },
           },

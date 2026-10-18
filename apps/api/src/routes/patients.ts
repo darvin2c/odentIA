@@ -647,13 +647,11 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   })
 
   app.post("/", async (c) => {
-    const { orgId, userId, memberRole } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    // Lo mínimo es para reservar: lo pide quien registra y además agenda.
-    if (parsed.data.scope === "essentials" && !canAccess(memberRole, "appointments.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para modificar este recurso"), 403)
-    }
+    // Lo mínimo (nombres, apellidos y cómo ubicarla) es el alta del equipo:
+    // basta `patients.write`, que ya exige la ruta.
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) => {
         const { contextContactId, conversationId, scope, ...input } = parsed.data

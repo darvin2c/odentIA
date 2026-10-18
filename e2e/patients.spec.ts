@@ -709,7 +709,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   const slug = owner.org.slug
   const rosa = await call<{ id: string }>(page, "POST", "/api/people", slug, {
     givenNames: "Rosa",
-    paternalSurname: "Quispe",
+    familyName: "Quispe",
     phone: "+51987654100",
   }, 201)
   await call(page, "PATCH", `/api/people/${rosa.id}/identity`, slug, {
@@ -728,7 +728,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   // El cajón trae lo que ya se sabe de ella.
   await page.getByRole("button", { name: "Registrar", exact: true }).click()
   const form = surface(page, { name: "Nuevo paciente" })
-  await expect(form.getByLabel("Primer apellido")).toHaveValue("Quispe")
+  await expect(form.getByLabel("Apellidos")).toHaveValue("Quispe")
   await expect(form.getByLabel("Nombres")).toHaveValue("Rosa")
   await page.screenshot({ path: test.info().outputPath("registrar-precargado.png"), fullPage: true })
   await form.getByRole("button", { name: "Cancelar" }).click()
@@ -737,7 +737,7 @@ test("quien aún no es paciente tiene su página, y registrarla no la saca de el
   await call(page, "POST", "/api/patients", slug, {
     submissionId: crypto.randomUUID(),
     answers: {
-      demographics: { displayName: "Rosa Quispe", givenNames: "Rosa", paternalSurname: "Quispe" },
+      demographics: { displayName: "Rosa Quispe", givenNames: "Rosa", familyName: "Quispe" },
       respondent: "staff",
       privacyAccepted: false,
     },
@@ -755,11 +755,11 @@ test("una lista y un buscador: Pacientes, Por registrar y Responsables; Contacto
   const ids = await buildClinicalBase(owner)
   const { page } = owner
   const slug = owner.org.slug
-  await call(page, "POST", "/api/people", slug, { givenNames: "Rosa", paternalSurname: "Quispe", phone: "+51987654100" }, 201)
+  await call(page, "POST", "/api/people", slug, { givenNames: "Rosa", familyName: "Quispe", phone: "+51987654100" }, 201)
   await call(page, "POST", "/api/patients", slug, {
     submissionId: crypto.randomUUID(),
     answers: {
-      demographics: { displayName: "Ana Rivas", givenNames: "Ana", paternalSurname: "Rivas", docType: "PASAPORTE", docNumber: "AB1234567", docCountry: "VE" },
+      demographics: { displayName: "Ana Rivas", givenNames: "Ana", familyName: "Rivas", docType: "PASAPORTE", docNumber: "AB1234567", docCountry: "VE" },
       respondent: "staff",
       privacyAccepted: false,
     },
