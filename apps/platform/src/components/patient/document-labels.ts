@@ -7,9 +7,9 @@ import {
   REPORT_STATUS_LABELS,
   type ReportStatus,
 } from "@odentia/clinical"
+import { formatDate } from "../../lib/clinical-journey"
 import { timeAgo } from "../../lib/crm"
 import { type Encounter, encounterStatusLabel, type PlanItem } from "../../lib/patients"
-import { activeOrgLocale } from "../../lib/locale"
 
 /** Lo que se sube: la misma lista que la base (`PATIENT_DOCUMENT_CATEGORIES`), en el orden de la pantalla. */
 export const UPLOAD_CATEGORIES = [
@@ -70,13 +70,9 @@ export function takenAt(doc: { capturedAt?: string | null; createdAt: string }):
   return doc.capturedAt ?? doc.createdAt
 }
 
+/** «Tomada 30/09/2026» o «Subida 18/10/2026»: el mismo formato de fecha que el resto de los papeles. */
 export function formatTakenAt(doc: { capturedAt?: string | null; createdAt: string }): string {
-  const when = new Date(takenAt(doc)).toLocaleDateString(activeOrgLocale(), {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  })
-  return doc.capturedAt ? `Tomada ${when}` : `Subida ${when}`
+  return `${doc.capturedAt ? "Tomada" : "Subida"} ${formatDate(takenAt(doc))}`
 }
 
 export function encounterLabel(e: Encounter): string {

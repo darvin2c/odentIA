@@ -31,6 +31,8 @@ export interface ToothSVGProps {
   onDrawingChange?: (drawing: number[][][]) => void
   draftDrawing?: number[][][]
   drawingEnabled?: boolean
+  /** En el arco solo una pieza es parada de Tab; las demás se alcanzan con las flechas. */
+  tabIndex?: number
 }
 
 const CROWN_BOX = { x0: 5, x1: 19, y0: 2.5, y1: 13.5, cx0: 9.5, cx1: 14.5, cy0: 5.5, cy1: 10.5 }
@@ -861,6 +863,7 @@ export function ToothSVG({
   onDrawingChange,
   draftDrawing,
   drawingEnabled = false,
+  tabIndex,
 }: ToothSVGProps) {
   const clipId = useId()
   const official = useOdontogramNotation()
@@ -912,7 +915,8 @@ export function ToothSVG({
     selected ? "border-violet-700 ring-2 ring-violet-600" : "hover:ring-2 hover:ring-ring"
   } ${disabled ? "cursor-not-allowed opacity-60" : ""}`
 
-  const archClass = `rounded bg-transparent p-0 transition-shadow ${
+  // El foco usa contorno y no anillo: así convive con el anillo violeta de la selección.
+  const archClass = `rounded bg-transparent p-0 transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
     selected ? "ring-2 ring-violet-600" : disabled ? "" : "hover:ring-2 hover:ring-ring"
   } ${disabled ? (isPreview ? "" : "cursor-not-allowed opacity-60") : "cursor-pointer"}`
 
@@ -926,6 +930,7 @@ export function ToothSVG({
         aria-label={pieceLabel}
         aria-pressed={selected}
         title={title}
+        tabIndex={tabIndex}
         className={archClass}
       >
         {canvas}

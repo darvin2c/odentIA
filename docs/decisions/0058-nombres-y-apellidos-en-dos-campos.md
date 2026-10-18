@@ -9,7 +9,7 @@ La 0004 separó el nombre en nombres, apellido paterno y apellido materno para o
 ## Decisión y motivo
 
 - **Dos campos en todos los países: «Nombres» y «Apellidos».** En la base, `contact.given_names` y `contact.family_name`; la base sigue derivando `display_name` de ellos. Es el `family` de HL7 FHIR HumanName y el campo de apellidos del pasaporte (OACI 9303): «Quispe Mamani», «De la Cruz Ríos».
-- La migración `0017_apellidos_en_un_campo` renombra el apellido paterno a `family_name`, le suma el materno detrás y borra la columna materna. El nombre visible no cambia.
+- La migración `0025_apellidos_en_un_campo` renombra el apellido paterno a `family_name`, le suma el materno detrás y borra la columna materna. El nombre visible no cambia.
 - **Nada se reparte ni se adivina:** el registro y la reserva guardan los apellidos tal como se escriben, así que ya no marcan la ficha «identidad por revisar» por ese motivo. La marca sigue para lo que ya la tenía y para el nombre visible editado a mano.
 - «Faltan datos para atenderla» pide «Apellidos» en lugar de «Primer apellido».
 
@@ -27,4 +27,4 @@ La 0004 separó el nombre en nombres, apellido paterno y apellido materno para o
 
 ## Referencias
 
-`packages/db/drizzle/0017_apellidos_en_un_campo.sql`, `packages/db/src/schema/crm.ts` (`contact.familyName`), `packages/clinical/src/identity.ts` (`composeDisplayName`), `packages/clinical/src/patient-registration.ts` (`demographicsSchema`, `missingPersonData`). Lienzo de pacientes, tablero 4b.
+`packages/db/drizzle/0025_apellidos_en_un_campo.sql`, `packages/db/src/schema/crm.ts` (`contact.familyName`), `packages/clinical/src/identity.ts` (`composeDisplayName`), `packages/clinical/src/patient-registration.ts` (`demographicsSchema`, `missingPersonData`). Lienzo de pacientes, tablero 4b.

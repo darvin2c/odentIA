@@ -199,6 +199,8 @@ export const DOCUMENT_FILTERS = [
   { id: "consentimientos", label: "Consentimientos" },
   { id: "formularios", label: "Formularios" },
   { id: "imagenes", label: "Imágenes" },
+  // Un informe suelto, una carta: lo subido que no es imagen ni consentimiento.
+  { id: "otros", label: "Otros archivos" },
   // Solo en clínicas de Perú, donde el odontograma se firma (ADR 0036).
   { id: "odontogramas", label: "Odontogramas" },
 ] as const

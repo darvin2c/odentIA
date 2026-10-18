@@ -46,6 +46,7 @@ import { PatientPendingCard, SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { PersonAgentMemory, PersonNotes } from "./person-notes"
+import { PersonTomographies } from "./person-tomographies"
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -100,6 +101,8 @@ export function PersonSummary({
   const patientId = person.patient?.id ?? null
   const can = useCan()
   const canAlerts = can("clinical.alerts") || can("clinical.read")
+  // Quien recibe el CD sin leer la historia (recepción) sube aquí la tomografía.
+  const receivesTomography = can("clinical.receive") && !can("clinical.read")
   const canAppointments = usePermission("appointments.read")
   const canFinance = usePermission("finance.read")
   const canChats = usePermission("conversations.read")
@@ -236,6 +239,9 @@ export function PersonSummary({
             />
           </div>
         </>
+      ) : null}
+      {patientId && receivesTomography && !person.archived ? (
+        <PersonTomographies patientId={patientId} />
       ) : null}
       {showFacts ? (
       <section aria-label="Resumen" className="elevated rounded-xl border bg-card p-6">

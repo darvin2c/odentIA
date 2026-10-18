@@ -22,6 +22,7 @@ import {
   numeric,
   pgTable,
   primaryKey,
+  real,
   smallint,
   text,
   timestamp,
@@ -1709,6 +1710,140 @@ export const patientDocumentContext = pgTable(
     ),
     index("patient_document_context_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_document_context_document_idx").on(table.documentId),
+  ],
+)
+
+/**
+ * Tomografía (u otro estudio DICOM de muchos archivos) de un documento de la
+ * ficha: el estudio, su tamaño y cuándo terminó la subida (ADR 0055). El
+ * documento sigue siendo uno; sus archivos viven en `imaging_study_file`.
+ */
+export const imagingStudy = pgTable(
+  "imaging_study",
+  {
+    documentId: uuid("document_id").primaryKey(),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    /** StudyInstanceUID (0020,000D): el mismo estudio no se guarda dos veces. */
+    studyInstanceUid: text("study_instance_uid").notNull(),
+    /** Nombre del paciente que trae el archivo (0010,0010): solo avisa, nunca identifica. */
+    dicomPatientName: text("dicom_patient_name"),
+    modality: text("modality"),
+    fileCount: integer("file_count").notNull(),
+    totalBytes: integer("total_bytes").notNull(),
+    /** Cortes de la serie que se reconstruye (la mayor del estudio). */
+    sliceCount: integer("slice_count").notNull(),
+    /** Tamaño del vóxel en mm (Pixel Spacing de la serie), si lo declara. */
+    voxelMm: real("voxel_mm"),
+    /** Miniatura (WebP) que arma el navegador con el corte del medio. */
+    thumbnailKey: text("thumbnail_key"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.documentId],
+      foreignColumns: [patientDocument.organizationId, patientDocument.id],
+      name: "imaging_study_document_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("imaging_study_org_document_uidx").on(table.organizationId, table.documentId),
+    index("imaging_study_org_patient_study_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.studyInstanceUid,
+    ),
+    check("imaging_study_file_count_check", sql`${table.fileCount} BETWEEN 1 AND 5000`),
+    check(
+      "imaging_study_total_bytes_check",
+      sql`${table.totalBytes} BETWEEN 1 AND 1073741824`,
+    ),
+    check(
+      "imaging_study_slice_count_check",
+      sql`${table.sliceCount} BETWEEN 1 AND 20000`,
+    ),
+    check(
+      "imaging_study_uid_check",
+      sql`char_length(${table.studyInstanceUid}) BETWEEN 1 AND 64`,
+    ),
+  ],
+)
+
+/** Un archivo DICOM del estudio: dónde está y si ya se comprobó que llegó. */
+export const imagingStudyFile = pgTable(
+  "imaging_study_file",
+  {
+    organizationId: orgFk("organization_id"),
+    documentId: uuid("document_id").notNull(),
+    fileIndex: integer("file_index").notNull(),
+    storageKey: text("storage_key").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** SOPInstanceUID (0008,0018): reconoce el archivo al retomar la subida. */
+    sopInstanceUid: text("sop_instance_uid").notNull(),
+    seriesInstanceUid: text("series_instance_uid").notNull(),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.documentId, table.fileIndex] }),
+    foreignKey({
+      columns: [table.organizationId, table.documentId],
+      foreignColumns: [imagingStudy.organizationId, imagingStudy.documentId],
+      name: "imaging_study_file_study_fk",
+    }).onDelete("cascade"),
+    uniqueIndex("imaging_study_file_sop_uidx").on(table.documentId, table.sopInstanceUid),
+    check("imaging_study_file_size_check", sql`${table.sizeBytes} BETWEEN 1 AND 1073741824`),
+  ],
+)
+
+/**
+ * Medida guardada en una tomografía (decisión 3 del lienzo, ADR 0056): quién y
+ * cuándo, sin cambiar el archivo. Puntos en mm dentro del volumen; quitarla la
+ * retira con su traza.
+ */
+export const imagingMeasurement = pgTable(
+  "imaging_measurement",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    kind: text("kind").notNull(),
+    /** Vista donde se marcó: panorámica, transversal, axial, coronal o sagital. */
+    view: text("view").notNull(),
+    /** Puntos [[x, y, z], …] en mm dentro del volumen. */
+    points: jsonb("points").$type<[number, number, number][]>().notNull(),
+    /** mm en una distancia, grados en un ángulo. */
+    value: real("value").notNull(),
+    /** Pieza (FDI) a la altura de la medida, si se sabe. */
+    toothNumber: smallint("tooth_number"),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    retiredBy: text("retired_by").references(() => user.id),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.documentId],
+      foreignColumns: [imagingStudy.organizationId, imagingStudy.documentId],
+      name: "imaging_measurement_study_fk",
+    }).onDelete("cascade"),
+    index("imaging_measurement_org_document_idx").on(table.organizationId, table.documentId),
+    check("imaging_measurement_kind_check", sql`${table.kind} IN ('distancia','angulo')`),
+    check(
+      "imaging_measurement_view_check",
+      sql`${table.view} IN ('panoramica','transversal','axial','coronal','sagital')`,
+    ),
+    check(
+      "imaging_measurement_value_check",
+      sql`${table.value} >= 0 AND (${table.kind} <> 'angulo' OR ${table.value} <= 180)`,
+    ),
+    check(
+      "imaging_measurement_retired_check",
+      sql`(${table.retiredAt} IS NULL) = (${table.retiredBy} IS NULL)`,
+    ),
   ],
 )
 

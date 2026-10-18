@@ -1,6 +1,6 @@
 {
-  "id": "3cab54cc-da87-4276-9db4-942f4dd43370",
-  "prevId": "c2ee3aec-744b-404c-9826-c9905e3c1989",
+  "id": "1853bfee-07c5-4fca-acf8-1b580bb2e394",
+  "prevId": "f0042326-1b31-49bc-8d7f-36c6528aa57c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -21943,8 +21943,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "family_name": {
-          "name": "family_name",
+        "paternal_surname": {
+          "name": "paternal_surname",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "maternal_surname": {
+          "name": "maternal_surname",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -33633,16 +33639,15 @@
       },
       "isRLSEnabled": false
     },
-    "public.registration_hold": {
-      "name": "registration_hold",
+    "public.imaging_study": {
+      "name": "imaging_study",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
+        "document_id": {
+          "name": "document_id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
+          "notNull": true
         },
         "organization_id": {
           "name": "organization_id",
@@ -33650,23 +33655,65 @@
           "primaryKey": false,
           "notNull": true
         },
-        "task_id": {
-          "name": "task_id",
+        "patient_id": {
+          "name": "patient_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "match": {
-          "name": "match",
+        "study_instance_uid": {
+          "name": "study_instance_uid",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "answers": {
-          "name": "answers",
-          "type": "jsonb",
+        "dicom_patient_name": {
+          "name": "dicom_patient_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modality": {
+          "name": "modality",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "file_count": {
+          "name": "file_count",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "total_bytes": {
+          "name": "total_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slice_count": {
+          "name": "slice_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "voxel_mm": {
+          "name": "voxel_mm",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "thumbnail_key": {
+          "name": "thumbnail_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -33677,8 +33724,8 @@
         }
       },
       "indexes": {
-        "registration_hold_task_uidx": {
-          "name": "registration_hold_task_uidx",
+        "imaging_study_org_document_uidx": {
+          "name": "imaging_study_org_document_uidx",
           "columns": [
             {
               "expression": "organization_id",
@@ -33687,55 +33734,232 @@
               "nulls": "last"
             },
             {
-              "expression": "task_id",
+              "expression": "document_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
+        },
+        "imaging_study_org_patient_study_idx": {
+          "name": "imaging_study_org_patient_study_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "study_instance_uid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
         }
       },
       "foreignKeys": {
-        "registration_hold_organization_id_organization_id_fk": {
-          "name": "registration_hold_organization_id_organization_id_fk",
-          "tableFrom": "registration_hold",
-          "tableTo": "organization",
+        "imaging_study_organization_id_organization_id_fk": {
+          "name": "imaging_study_organization_id_organization_id_fk",
+          "tableFrom": "imaging_study",
           "columnsFrom": [
             "organization_id"
           ],
+          "tableTo": "organization",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
-        "registration_hold_organization_id_task_id_task_organization_id_id_fk": {
-          "name": "registration_hold_organization_id_task_id_task_organization_id_id_fk",
-          "tableFrom": "registration_hold",
-          "tableTo": "task",
+        "imaging_study_patient_id_patient_id_fk": {
+          "name": "imaging_study_patient_id_patient_id_fk",
+          "tableFrom": "imaging_study",
+          "columnsFrom": [
+            "patient_id"
+          ],
+          "tableTo": "patient",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "imaging_study_document_fk": {
+          "name": "imaging_study_document_fk",
+          "tableFrom": "imaging_study",
           "columnsFrom": [
             "organization_id",
-            "task_id"
+            "document_id"
           ],
+          "tableTo": "patient_document",
           "columnsTo": [
             "organization_id",
             "id"
           ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "cascade"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "registration_hold_match_check": {
-          "name": "registration_hold_match_check",
-          "value": "\"registration_hold\".\"match\" IN ('documento', 'celular')"
+        "imaging_study_file_count_check": {
+          "name": "imaging_study_file_count_check",
+          "value": "\"imaging_study\".\"file_count\" BETWEEN 1 AND 5000"
+        },
+        "imaging_study_total_bytes_check": {
+          "name": "imaging_study_total_bytes_check",
+          "value": "\"imaging_study\".\"total_bytes\" BETWEEN 1 AND 1073741824"
+        },
+        "imaging_study_slice_count_check": {
+          "name": "imaging_study_slice_count_check",
+          "value": "\"imaging_study\".\"slice_count\" BETWEEN 1 AND 20000"
+        },
+        "imaging_study_uid_check": {
+          "name": "imaging_study_uid_check",
+          "value": "char_length(\"imaging_study\".\"study_instance_uid\") BETWEEN 1 AND 64"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.imaging_study_file": {
+      "name": "imaging_study_file",
+      "schema": "",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_index": {
+          "name": "file_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sop_instance_uid": {
+          "name": "sop_instance_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "series_instance_uid": {
+          "name": "series_instance_uid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uploaded_at": {
+          "name": "uploaded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "imaging_study_file_sop_uidx": {
+          "name": "imaging_study_file_sop_uidx",
+          "columns": [
+            {
+              "expression": "document_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sop_instance_uid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "imaging_study_file_organization_id_organization_id_fk": {
+          "name": "imaging_study_file_organization_id_organization_id_fk",
+          "tableFrom": "imaging_study_file",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "imaging_study_file_study_fk": {
+          "name": "imaging_study_file_study_fk",
+          "tableFrom": "imaging_study_file",
+          "columnsFrom": [
+            "organization_id",
+            "document_id"
+          ],
+          "tableTo": "imaging_study",
+          "columnsTo": [
+            "organization_id",
+            "document_id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {
+        "imaging_study_file_document_id_file_index_pk": {
+          "name": "imaging_study_file_document_id_file_index_pk",
+          "columns": [
+            "document_id",
+            "file_index"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "imaging_study_file_size_check": {
+          "name": "imaging_study_file_size_check",
+          "value": "\"imaging_study_file\".\"size_bytes\" BETWEEN 1 AND 1073741824"
         }
       },
       "isRLSEnabled": false

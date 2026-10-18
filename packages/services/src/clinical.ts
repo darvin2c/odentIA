@@ -34,6 +34,8 @@ import {
   encounterPlanItem,
   encounterProcedure,
   encounterTooth,
+  imagingStudy,
+  imagingStudyFile,
   odontogramAssessment,
   odontogramEntry,
   patient,
@@ -1913,6 +1915,72 @@ export interface PatientDocumentWithContext {
   toothNumbers: number[]
   tags: string[]
   contextVersion: number
+  /** Tomografía de muchos archivos (ADR 0055); null en el resto. */
+  imaging?: ImagingSummary | null
+}
+
+/** Lo que la ficha dice de una tomografía: su avance y su forma, nunca sus archivos. */
+export interface ImagingSummary {
+  studyInstanceUid: string
+  fileCount: number
+  uploadedCount: number
+  sliceCount: number
+  voxelMm: number | null
+  totalBytes: number
+  completedAt: Date | null
+  thumbnailKey: string | null
+  /** Nombre que trae el archivo, para avisar si no coincide; nunca identifica. */
+  dicomPatientName: string | null
+}
+
+/** Resumen de las tomografías de estos documentos (las que tienen `imaging_study`). */
+async function imagingSummaries(
+  tx: Db,
+  orgId: string,
+  documentIds: readonly string[],
+): Promise<Map<string, ImagingSummary>> {
+  if (!documentIds.length) return new Map()
+  const rows = await tx
+    .select({
+      documentId: imagingStudy.documentId,
+      studyInstanceUid: imagingStudy.studyInstanceUid,
+      fileCount: imagingStudy.fileCount,
+      sliceCount: imagingStudy.sliceCount,
+      voxelMm: imagingStudy.voxelMm,
+      totalBytes: imagingStudy.totalBytes,
+      completedAt: imagingStudy.completedAt,
+      thumbnailKey: imagingStudy.thumbnailKey,
+      dicomPatientName: imagingStudy.dicomPatientName,
+      uploadedCount: sql<number>`(
+        select count(*)::int from ${imagingStudyFile}
+        where ${imagingStudyFile.documentId} = ${imagingStudy.documentId}
+          and ${imagingStudyFile.organizationId} = ${imagingStudy.organizationId}
+          and ${imagingStudyFile.uploadedAt} is not null
+      )`,
+    })
+    .from(imagingStudy)
+    .where(
+      and(
+        eq(imagingStudy.organizationId, orgId),
+        inArray(imagingStudy.documentId, [...new Set(documentIds)]),
+      ),
+    )
+  return new Map(
+    rows.map(({ documentId, ...summary }) => [
+      documentId,
+      { ...summary, uploadedCount: Number(summary.uploadedCount) },
+    ]),
+  )
+}
+
+async function withImaging(
+  tx: Db,
+  orgId: string,
+  docs: PatientDocumentWithContext[],
+): Promise<PatientDocumentWithContext[]> {
+  const candidates = docs.filter((doc) => doc.imageType === "tomografia").map((doc) => doc.id)
+  const summaries = await imagingSummaries(tx, orgId, candidates)
+  return docs.map((doc) => ({ ...doc, imaging: summaries.get(doc.id) ?? null }))
 }
 
 /** Piezas FDI múltiples: enteras válidas, únicas y ordenadas. Vacío = imagen general. */
@@ -2322,13 +2390,14 @@ export async function listPatientDocuments(
   )
   const byDocument = new Map(latest.map((ctx) => [ctx.documentId, ctx]))
   // Pieza y tratamiento viven en el contexto vigente: se filtran tras fusionar.
-  return docs
+  const merged = docs
     .map((doc) => mergeDocumentContext(doc, byDocument.get(doc.id) ?? null))
     .filter(
       (doc) =>
         (filters.tooth == null || doc.toothNumbers.includes(filters.tooth)) &&
         (!filters.planItemId || doc.planItemId === filters.planItemId),
     )
+  return withImaging(tx, orgId, merged)
 }
 
 /**
@@ -2415,10 +2484,10 @@ export async function getPatientDocument(
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   const row = await requireDocumentRow(tx, orgId, patientId, documentId)
-  return mergeDocumentContext(
-    row,
-    await currentDocumentContext(tx, orgId, patientId, documentId, false),
-  )
+  const [doc] = await withImaging(tx, orgId, [
+    mergeDocumentContext(row, await currentDocumentContext(tx, orgId, patientId, documentId, false)),
+  ])
+  return doc!
 }
 
 /** Historial de contextos del documento (versiones ascendentes, inmutable). */

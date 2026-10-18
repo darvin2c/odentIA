@@ -12,11 +12,14 @@
  */
 import { LEGAL } from "@odentia/auth/legal"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { encodeDemoDicom } from "@odentia/clinical"
+import { encodeDemoCtSlice, encodeDemoDicom, generateCbctPhantom } from "@odentia/clinical"
+import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
@@ -106,6 +109,12 @@ import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
 import { blockContact, markSpam } from "./contact-screen.js"
 import { decideActionReview, requestActionReview } from "./saas-action-review.js"
+import {
+  markImagingFilesUploaded,
+  pendingImagingFiles,
+  setImagingThumbnail,
+  startImagingStudyUpload,
+} from "./imaging-studies.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -2128,6 +2137,109 @@ for (const previa of [
     toothNumbers: [36],
   })
 }
+// La misma periapical en cada compresión que lee el visor DICOM (JPEG, JPEG-LS,
+// JPEG 2000, RLE, Big Endian y varios cuadros); las genera
+// `packages/clinical/samples/dicom/generate.py`. Son muestras, no se informan.
+{
+  const require = createRequire(import.meta.url)
+  for (const sample of DICOM_SAMPLES) {
+    if (sample.transferSyntax === "1.2.840.10008.1.2.1") continue // ya está la del sensor
+    const bytes = new Uint8Array(
+      readFileSync(require.resolve(`@odentia/clinical/samples/dicom/${sample.file}`)),
+    )
+    const ref = await storage.putPatientDocument({
+      orgId: ORG_A,
+      patientId: rosaPatientId,
+      bytes,
+      contentType: "application/dicom",
+      ext: "dcm",
+    })
+    await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+      category: "radiografia",
+      label: `[DEMO] Periapical en ${sample.name} (DICOM)`,
+      storageKey: ref.objectKey,
+      contentType: "application/dicom",
+      sizeBytes: ref.size,
+      imageType: "periapical",
+      capturedAt: new Date(Date.now() - 400 * 86_400_000),
+      source: "Muestra de formatos DICOM",
+      reportStatus: "no_requiere",
+      toothNumbers: [36],
+    })
+  }
+}
+// Tomografía de demostración (un fantoma sintético, no es de un paciente) para
+// el visor de tomografía: la serie CT entra por el mismo camino que la de un CD
+// (ADR 0055). Lleva el nombre de Rosa para que no salte el aviso de nombre.
+{
+  const phantom = generateCbctPhantom()
+  const root = "2.25.3400000000000000000034"
+  const studyUid = `${root}.1`
+  const seriesUid = `${root}.2`
+  const slices = phantom.data.map((pixels, k) =>
+    encodeDemoCtSlice({
+      width: phantom.size,
+      height: phantom.size,
+      pixels,
+      voxelMm: phantom.voxelMm,
+      position: [phantom.origin[0], phantom.origin[1], phantom.sliceZ[k]!],
+      instanceNumber: k + 1,
+      studyUid,
+      seriesUid,
+      frameOfReferenceUid: `${root}.3`,
+      sopUid: `${root}.4.${k + 1}`,
+      patientName: "QUISPE^ROSA",
+    }),
+  )
+  const started = await startImagingStudyUpload(db, ORG_A, ANA_ID, rosaPatientId, {
+    label: "[DEMO] Tomografía (CBCT) · Centro de imágenes de demostración",
+    studyInstanceUid: studyUid,
+    dicomPatientName: "QUISPE^ROSA",
+    modality: "CT",
+    capturedAt: new Date(Date.now() - 20 * 86_400_000),
+    source: "Centro de imágenes de demostración",
+    toothNumbers: [36, 37],
+    sliceCount: slices.length,
+    voxelMm: phantom.voxelMm,
+    files: slices.map((bytes, k) => ({
+      sopInstanceUid: `${root}.4.${k + 1}`,
+      seriesInstanceUid: seriesUid,
+      sizeBytes: bytes.byteLength,
+    })),
+  })
+  const documentId = started.document.id
+  const pending = await pendingImagingFiles(db, ORG_A, rosaPatientId, documentId)
+  for (const file of pending) {
+    await storage.putAttachmentAt?.(file.storageKey, slices[file.index]!, "application/dicom")
+  }
+  await markImagingFilesUploaded(
+    db,
+    ORG_A,
+    ANA_ID,
+    rosaPatientId,
+    documentId,
+    pending.map((file) => file.index),
+  )
+  // Miniatura: el corte a la altura de las raíces inferiores, con ventana de hueso.
+  const k = phantom.sliceZ.findIndex((z) => z >= -18)
+  const gray = Buffer.from(
+    Array.from(phantom.data[k]!, (stored) =>
+      Math.max(0, Math.min(255, Math.round(((stored - 1000 - 699.5) / 2999 + 0.5) * 255))),
+    ),
+  )
+  const thumb = await sharp(gray, { raw: { width: phantom.size, height: phantom.size, channels: 1 } })
+    .resize(320)
+    .webp()
+    .toBuffer()
+  const thumbRef = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes: thumb,
+    contentType: "image/webp",
+    ext: "webp",
+  })
+  await setImagingThumbnail(db, ORG_A, rosaPatientId, documentId, thumbRef.objectKey)
+}
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
 const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)
 const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2142,6 +2254,36 @@ const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
 await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
   reason: "Subida al paciente equivocado",
 })
+// Un informe suelto en PDF: no es imagen ni consentimiento, así que Documentos
+// lo muestra en «Otros archivos» y lo abre en el mismo visor (issue 149).
+{
+  const pdf = await PDFDocument.create()
+  const sheet = pdf.addPage([595, 842])
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  sheet.drawText("Informe de laboratorio (demostración)", { x: 56, y: 770, size: 16, font })
+  sheet.drawText("Hemograma y coagulación previos a la exodoncia: dentro de rangos.", {
+    x: 56,
+    y: 740,
+    size: 11,
+    font,
+  })
+  const bytes = Buffer.from(await pdf.save())
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes,
+    contentType: "application/pdf",
+    ext: "pdf",
+  })
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "informe",
+    label: "[DEMO] Informe de laboratorio previo a la exodoncia",
+    storageKey: ref.objectKey,
+    contentType: ref.mimeType,
+    sizeBytes: bytes.byteLength,
+    source: "Laboratorio de demostración",
+  })
+}
 // Cierre con datos útiles: evolución e indicaciones. Lo que sigue lo dice el plan.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   evolution: "Obturación de pieza 36 sin complicaciones; endodoncia de 46 programada.",
