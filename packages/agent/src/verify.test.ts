@@ -14,6 +14,10 @@ function check(reply: string, evidence = [SERVICES, AGENDA]) {
   return verifyReply(reply, evidence, LIMA, NOW)
 }
 
+function unsupportedOf(reply: string, evidence: { source: string; text: string }[]) {
+  return check(reply, evidence).unsupported.map((item) => item.value)
+}
+
 it("un precio que figura en lo consultado pasa, con su fuente", () => {
   const verdict = check("La limpieza cuesta S/ 150.")
   expect(verdict.ok).toBe(true)
@@ -44,6 +48,64 @@ it("las cifras de la referencia de un profesional no sustentan un precio", () =>
   }
   // Lo que no tiene la forma exacta de una referencia se sigue leyendo.
   expect(check("La limpieza cuesta S/ 99.", [clinic("pro-99")]).ok).toBe(true)
+})
+
+it("las cifras de una dirección web no sustentan un precio; el importe junto a ella, sí", () => {
+  // «Su enlace» vuelve en las respuestas anteriores del agente con su token de 64 cifras hexadecimales.
+  const token = "3fe99b0c4a7d250f1e8b6c39a4d0f7e2b5c18d6a9e3f0b47c2d5e8a1f6b9c304"
+  const sent = { source: "Respuestas anteriores del agente", text: `Su enlace para elegir tu cita: https://sonrisa.odentia32.com/reserva?token=${token}` }
+  const registration = { source: "Lo escribió el equipo en este hilo", text: "Completa tus datos: https://sonrisa.odentia32.com/registro?token=kP3vX85_qLm-ZtRwYcNaBdEfGhJs4uVwXyZaBcDeFgH" }
+  const branch = {
+    source: "Conocimiento publicado de la clínica",
+    text: "- Sede Centro (id 0f6b2a10-5c3d-4e8f-9a1b-2c3d4e5f6a7b) · mapa: https://www.google.com/maps/@-12.0931,-77.0465,17z",
+  }
+  for (const [invented, evidence] of [
+    ["S/ 99", sent], ["S/ 250", sent], ["S/ 304", sent], ["S/ 32", sent],
+    ["S/ 85", registration], ["S/ 17", branch], ["S/ 77", branch],
+  ] as const) {
+    expect(unsupportedOf(`La limpieza cuesta ${invented}.`, [evidence])).toEqual([invented])
+  }
+  // Una respuesta oficial con un enlace sigue sustentando su importe, también en el JSON de una herramienta.
+  const official = { source: "Respuestas oficiales", text: "Limpieza en promoción: S/ 120. Reserva en https://sonrisa.example/promo-99." }
+  const contact = { source: "Ficha del contacto", text: JSON.stringify({ customFields: { web: "https://sonrisa.example/promo-99", convenio: 120 } }) }
+  for (const evidence of [official, contact]) {
+    expect(check("La limpieza cuesta S/ 120.", [evidence]).ok).toBe(true)
+    expect(unsupportedOf("La limpieza cuesta S/ 99.", [evidence])).toEqual(["S/ 99"])
+  }
+})
+
+it("el enlace que envía el agente no se lee como importe en la respuesta", () => {
+  // Con dólares canadienses, «9cad42» de un token se leía como CAD 42.
+  const link = "https://sonrisa.odentia32.com/reserva?token=0b7e19cad42f8a3c6d5e0b1f2a9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c"
+  const tool = { source: "Su enlace", text: `Su enlace, para que Ana elija su cita: ${link}` }
+  const ca = { timezone: "America/Toronto", currency: "CAD", locale: "es" }
+  expect(verifyReply(`Aquí tienes tu enlace: ${link}`, [tool], ca, NOW).checks).toEqual([])
+  expect(verifyReply(`La limpieza cuesta CAD 42: ${link}`, [tool], ca, NOW).unsupported.map((item) => item.value)).toEqual(["CAD 42"])
+})
+
+it("la versión de una cita no sustenta un precio", () => {
+  const summary = {
+    source: "Resumen del paciente",
+    text: "- Cita programada (id 0f6b2a10-5c3d-4e8f-9a1b-2c3d4e5f6a7b, versión 14) el 5/11/2026, 3:30 p. m., Sede Centro con Dra. Ana.\n- Saldo pendiente: S/ 150.00.",
+  }
+  expect(unsupportedOf("Tu cita cuesta S/ 14.", [summary])).toEqual(["S/ 14"])
+  expect(check("Tienes un saldo de S/ 150.", [summary]).ok).toBe(true)
+})
+
+it("las cifras del cursor de una lista no sustentan un precio", () => {
+  // Como lo arman los servicios: base64url de un objeto JSON. Este trae las cifras 0, 2, 5 y 6.
+  const cursor = Buffer.from(
+    JSON.stringify({ ts: "2026-10-09T21:14:05.000Z", id: "7c1e9d02-4b6a-4f3e-8d21-5a9c0e7b3f64" }),
+  ).toString("base64url")
+  const opportunities = { source: "Oportunidades del contacto", text: `- Ortodoncia: S/ 2,500.00\nHay más oportunidades: vuelve a llamar con cursor "${cursor}".` }
+  const contact = { source: "Ficha del contacto", text: JSON.stringify({ name: "Ana", customFields: { convenio: 120 }, nextNotesCursor: cursor }) }
+  for (const evidence of [opportunities, contact]) {
+    for (const invented of ["S/ 2", "S/ 5", "S/ 6"]) {
+      expect(unsupportedOf(`La consulta cuesta ${invented}.`, [evidence])).toEqual([invented])
+    }
+  }
+  expect(check("La ortodoncia cuesta S/ 2,500.", [opportunities]).ok).toBe(true)
+  expect(check("Con tu convenio pagas S/ 120.", [contact]).ok).toBe(true)
 })
 
 it("un precio que no está en ninguna fuente bloquea la respuesta", () => {
