@@ -595,16 +595,6 @@ export function DocumentosSection({
   )
   const viewing = documentId ? allFiles.find((doc) => doc.id === documentId) : undefined
 
-  // En el teléfono la fila de filtros se desliza: el filtro puesto queda a la
-  // vista. Solo se mueve la fila, nunca la página.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: se recoloca al cambiar el filtro.
-  useEffect(() => {
-    const chip = activeChipRef.current
-    const row = chip?.parentElement
-    if (!chip || !row || row.scrollWidth <= row.clientWidth) return
-    row.scrollLeft = chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2
-  }, [filter])
-
   const actionButton = (row: Row) => {
     const { action } = row
     switch (action.type) {
@@ -701,6 +691,15 @@ export function DocumentosSection({
     filter,
   )
   const chipOptions = DOCUMENT_FILTERS.filter((option) => chipIds.includes(option.id))
+  // En el teléfono la fila de filtros se desliza: el filtro puesto queda a la
+  // vista. Solo se mueve la fila, nunca la página.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se recoloca al cambiar el filtro o al llegar los papeles.
+  useEffect(() => {
+    const chip = activeChipRef.current
+    const row = chip?.parentElement
+    if (!chip || !row || row.scrollWidth <= row.clientWidth) return
+    row.scrollLeft = chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2
+  }, [filter, chipOptions.length])
   const filterName = (id: DocumentFilter) =>
     id === "requieren"
       ? "lo que requiere acción"
@@ -718,7 +717,7 @@ export function DocumentosSection({
     chipOptions.length === 0 ? null : (
       <fieldset className="m-0 max-w-full min-w-0 border-0 p-0">
         <legend className="sr-only">Filtrar documentos</legend>
-        <div className="relative flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+        <div className="relative flex gap-2 overflow-x-auto [scrollbar-width:none] sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
           {/* «Todo» va primero y, en el teléfono, queda fijo mientras la fila se desliza. */}
           <Button
             ref={!filter ? activeChipRef : undefined}
