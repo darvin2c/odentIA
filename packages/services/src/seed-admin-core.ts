@@ -5,6 +5,7 @@
  * el segundo factor se enrola en la UI. Solo datos de demo identificables.
  */
 
+import { LEGAL } from "@odentia/auth/legal"
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { adminStaff } from "@odentia/db/schema/admin-core"
@@ -57,6 +58,9 @@ export async function seedAdminCore(
         lastName: demo.lastName,
         email: demo.email,
         emailVerified: true,
+        // Ya aceptaron los documentos vigentes: entrar no pasa por «Un paso antes de seguir».
+        termsVersion: LEGAL.terms.version,
+        termsAcceptedAt: new Date(),
       })
       await tx.insert(account).values({
         id: randomUUID(),

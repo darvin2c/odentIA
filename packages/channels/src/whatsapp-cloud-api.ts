@@ -98,10 +98,13 @@ interface WaMessage {
   image?: WaMedia
   document?: WaMedia
   audio?: WaMedia
+  video?: WaMedia
   /** Respuesta rápida de una plantilla. */
   button?: { payload?: string; text?: string }
   /** Botón de un mensaje interactivo enviado dentro de la ventana. */
   interactive?: { type?: string; button_reply?: { id?: string; title?: string } }
+  /** Mensaje que la persona citó al responder (el `wamid`). */
+  context?: { id?: string; from?: string }
 }
 
 /** Error de un envío, en la respuesta o en el aviso de estado `failed`. */
@@ -143,7 +146,10 @@ function messageToNormalized(
     senderExternalId: `wa:${m.from}`,
     sentAt: new Date(Number(m.timestamp) * 1000).toISOString(),
   }
-  const withName = displayName ? { senderDisplayName: displayName } : {}
+  const withName = {
+    ...(displayName ? { senderDisplayName: displayName } : {}),
+    ...(typeof m.context?.id === "string" && m.context.id ? { replyToExternalId: m.context.id } : {}),
+  }
   if (m.type === "text" && typeof m.text?.body === "string") {
     return { ...base, ...withName, content: { type: "text", text: m.text.body } }
   }
@@ -165,7 +171,9 @@ function messageToNormalized(
         ? m.document
         : m.type === "audio"
           ? m.audio
-          : undefined
+          : m.type === "video"
+            ? m.video
+            : undefined
   if (media) {
     const withCaption = typeof media.caption === "string" ? { caption: media.caption } : {}
     return {
@@ -179,7 +187,7 @@ function messageToNormalized(
       },
     }
   }
-  // Tipos no soportados (reaction, sticker, location…): se ignoran.
+  // Tipos no soportados (reaction, sticker, location, contacts…): se ignoran.
   return null
 }
 
@@ -289,7 +297,13 @@ function mediaInfo(json: unknown): { url: string; mimeType: string } | null {
 const MAX_REPLY_BUTTONS = 3
 const MAX_REPLY_TITLE = 20
 
-export function buildBody(to: string, kind: OutboundMessage["kind"]): Record<string, unknown> {
+/** Cuerpo del envío; con `replyTo`, sale como respuesta citada (`context.message_id`). */
+export function buildBody(to: string, kind: OutboundMessage["kind"], replyTo?: string): Record<string, unknown> {
+  const body = bodyOf(to, kind)
+  return replyTo ? { ...body, context: { message_id: replyTo } } : body
+}
+
+function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unknown> {
   if (kind.type === "text") {
     const buttons = (kind.buttons ?? []).slice(0, MAX_REPLY_BUTTONS)
     if (buttons.length > 0) {
@@ -722,7 +736,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const cfg = getConfig(config)
     // `to` es el externalThreadId del parse (`wa:<phone>`).
     const to = msg.to.startsWith("wa:") ? msg.to.slice("wa:".length) : msg.to
-    const body = buildBody(to, msg.kind)
+    const body = buildBody(to, msg.kind, msg.replyToExternalId)
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.phoneNumberId}/messages`,

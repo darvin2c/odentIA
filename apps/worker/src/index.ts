@@ -11,6 +11,7 @@ import { consumeInbound } from "./inbound.js"
 import { consumeOutbound } from "./outbound.js"
 import { createTranscriber } from "./transcribe.js"
 import { runAutomationTick } from "./automation.js"
+import { runLegalNoticesTick } from "./legal-notices.js"
 import { tickMailboxes } from "./mailboxes.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
@@ -186,6 +187,7 @@ queues.push({
 let nextSaasPoll = 0
 let nextAccountPoll = 0
 let nextSupportPoll = 0
+let nextLegalPoll = 0
 queues.push({
   name: "saas_billing",
   poll: async () => {
@@ -207,6 +209,15 @@ queues.push({
       adminUrl: env.ADMIN_URL,
       webUrl: env.WEB_URL,
     })
+    return result.mailed > 0
+  },
+}, {
+  // Aviso por correo de términos nuevos, antes de que rijan.
+  name: "legal_notices",
+  poll: async () => {
+    if (Date.now() < nextLegalPoll) return false
+    nextLegalPoll = Date.now() + 3_600_000
+    const result = await runLegalNoticesTick({ ownerDb, mailer, webUrl: env.WEB_URL })
     return result.mailed > 0
   },
 }, {

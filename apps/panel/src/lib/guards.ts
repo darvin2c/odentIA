@@ -45,3 +45,16 @@ export async function requireVerifiedSession(): Promise<SessionInfo> {
   }
   return session
 }
+
+/**
+ * Quien nunca aceptó los términos (entró con Google, o su cuenta es anterior)
+ * pasa por «Un paso antes de seguir» y vuelve adonde iba. Una versión nueva no
+ * redirige: la pide la ventana (`LegalGate`).
+ */
+export async function requireTermsAccepted(location: { href: string }): Promise<void> {
+  const { data } = await authClient.$fetch<{ terms: { state: "ok" | "first" | "updated" } }>("/legal/status", {
+    method: "GET",
+    ...ssrFetchOptions(),
+  })
+  if (data?.terms.state === "first") throw redirect({ to: "/terminos", search: { next: location.href } })
+}

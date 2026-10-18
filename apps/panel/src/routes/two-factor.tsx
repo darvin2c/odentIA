@@ -1,14 +1,16 @@
-import { Field, FieldError, FieldGroup, FieldLabel, Input, Separator, toast } from "@odentia/ui"
+import { Checkbox, Field, FieldError, FieldGroup, FieldLabel, Input, Separator, toast } from "@odentia/ui"
 import { AuthSplit, fieldErrorMessages, SubmitButton } from "@odentia/ui-patterns"
 import { useForm } from "@tanstack/react-form"
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { z } from "zod"
 import { authClient } from "../lib/auth-client"
+import { AuthLegal, RecoverAside, WelcomeAside } from "../lib/auth-screens"
 import { BASE_DOMAIN } from "../lib/host"
 
 export const Route = createFileRoute("/two-factor")({
   validateSearch: (search: Record<string, unknown>) => ({
     ...(typeof search.next === "string" ? { next: search.next } : {}),
+    ...(String(search.enlace) === "1" ? { enlace: 1 as const } : {}),
   }),
   component: TwoFactorPage,
 })
@@ -41,7 +43,7 @@ const challenge = z.object({
  */
 function TwoFactorPage() {
   const navigate = useNavigate()
-  const { next } = useSearch({ from: "/two-factor" })
+  const { next, enlace } = useSearch({ from: "/two-factor" })
   const form = useForm({
     defaultValues: { code: "", recovery: false },
     validators: {
@@ -72,11 +74,17 @@ function TwoFactorPage() {
 
   return (
     <AuthSplit
-      title="Verifica tu identidad"
-      description="Ingresa el código de tu app de autenticación"
+      title={enlace ? "Un paso más" : "Verifica tu identidad"}
+      description={
+        enlace
+          ? "El enlace confirmó tu correo. Tu cuenta pide además el código de tu app de autenticación."
+          : "Escribe el código de tu app de autenticación."
+      }
+      aside={enlace ? <RecoverAside /> : <WelcomeAside />}
+      legal={<AuthLegal />}
       footer={
         <Link to="/login" className="underline">
-          Volver al inicio de sesión
+          Volver a entrar
         </Link>
       }
     >
@@ -109,27 +117,27 @@ function TwoFactorPage() {
           </form.Field>
           <form.Field name="recovery">
             {(field) => (
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox
+                  id="recovery"
                   checked={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.checked)}
+                  onCheckedChange={(checked) => field.handleChange(checked === true)}
                 />
-                Es un código de respaldo (de un solo uso)
-              </label>
+                <label htmlFor="recovery">Es un código de respaldo (de un solo uso)</label>
+              </div>
             )}
           </form.Field>
           <form.Subscribe selector={(state) => state.isSubmitting}>
             {(isSubmitting) => (
-              <SubmitButton type="submit" pending={isSubmitting}>
-                Verificar
+              <SubmitButton type="submit" pending={isSubmitting} className="w-full">
+                Entrar
               </SubmitButton>
             )}
           </form.Subscribe>
         </FieldGroup>
       </form>
-      <div className="flex items-center gap-3" role="separator">
-        <Separator className="flex-1" />
+      <div className="flex items-center gap-3">
+        <Separator className="flex-1" aria-hidden />
       </div>
       <p className="text-xs text-muted-foreground">
         Perdiste tu app y tus códigos: pide a otro admin un reseteo de factor con tu identidad verificada.

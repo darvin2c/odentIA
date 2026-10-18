@@ -57,3 +57,18 @@ export async function requireVerifiedSession(location: { href: string }): Promis
   }
   return session
 }
+
+/**
+ * Quien nunca aceptó los términos (entró con Google, o su cuenta es anterior)
+ * los acepta en el panel antes de seguir y vuelve aquí. Una versión nueva no
+ * redirige: la pide la ventana de la clínica (`LegalGate`).
+ */
+export async function requireTermsAccepted(location: { href: string }): Promise<void> {
+  const { data } = await authClient.$fetch<{ terms: { state: "ok" | "first" | "updated" } }>("/legal/status", {
+    method: "GET",
+    ...ssrFetchOptions(),
+  })
+  if (data?.terms.state === "first") {
+    throw redirect({ href: panelUrl(`/terminos?next=${encodeURIComponent(currentAbsoluteUrl(location.href))}`) })
+  }
+}

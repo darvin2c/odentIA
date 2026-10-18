@@ -469,6 +469,24 @@ export async function listSaasPlans(
   return rows.map(toPlanRow)
 }
 
+/**
+ * Lo que recibe una clínica nueva al registrarse: el crédito y los días de
+ * prueba del plan por defecto. Es lo único del catálogo que ve alguien sin
+ * cuenta (el botón «Obtén USD 100 de crédito» del registro); sin plan por
+ * defecto no hay oferta y la pantalla no promete un monto.
+ */
+export async function getPublicTrialOffer(
+  tx: Db,
+): Promise<{ currency: string; creditCents: number; days: number } | null> {
+  const [plan] = await tx
+    .select({ currency: saasPlan.currency, creditCents: saasPlan.trialCreditCents, days: saasPlan.trialDays })
+    .from(saasPlan)
+    .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
+    .limit(1)
+  if (!plan) return null
+  return { currency: plan.currency, creditCents: plan.creditCents, days: plan.days }
+}
+
 export async function createSaasPlan(
   tx: Db,
   actorUserId: string,

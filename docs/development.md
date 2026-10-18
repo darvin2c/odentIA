@@ -262,6 +262,7 @@ Las stories consumen los componentes reales; únicamente sus demoras, almacén s
 ## Problemas operativos conocidos
 
 - `CHANNEL_VALIDATE_EXTERNAL=false` en dev/e2e evita contactar Meta/Telegram al crear conexiones.
+- `PASSWORD_BREACH_CHECK=false` (solo e2e) deja de consultar Have I Been Pwned al crear o cambiar una contraseña; en dev y producción queda en `true` y, si el servicio no responde, la contraseña se acepta.
 - Portless `already registered by PID 0`: comprobar entradas muertas de `~/.portless/routes.json` antes de retirarlas. Colisiones de puertos API/panel: reiniciar el stack para reasignar.
 - Portless 0.15.6 está fijado y parcheado en `patches/portless@0.15.6.patch`: `PORTLESS_HTTP_REDIRECT=0` evita puerto 80 en E2E; configuración OpenSSL mínima evita `basicConstraints` duplicado en la CA; sus procesos OpenSSL se crean ocultos para que la generación dinámica de certificados no abra ventanas de Terminal en Windows.
 - En Windows, el supervisor E2E lanza todo proceso y sus descendientes dentro de una consola propia oculta (`e2e/windows-child-runner.cjs`) y vigila el recorrido completo con `e2e/windows-terminal-monitor.ps1`; cualquier ventana nueva de Windows Terminal hace fallar la ejecución. `patches/testcontainers@12.1.0.patch` aplica la misma restricción al helper `docker-credential-desktop`.

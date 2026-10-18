@@ -110,11 +110,11 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       // El mensaje abierto, listo para cambiarle el texto.
       return <Link to="/settings/integrations/whatsapp" search={{ mensaje: row.messageId }} {...props} />
     case "conversations":
-      return <Link to="/inbox" search={{ conversation: undefined, view: "unanswered" }} {...props} />
+      return <Link to="/inbox" search={{ conversation: undefined, view: undefined }} {...props} />
     case "stillOpen":
       return row.conversationId
         ? <Link to="/inbox" search={{ conversation: row.conversationId }} {...props} />
-        : <Link to="/inbox" search={{ conversation: undefined, view: "team" }} {...props} />
+        : <Link to="/inbox" search={{ conversation: undefined, view: undefined }} {...props} />
     case "task":
       return row.more > 0 ? <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} /> : <Link to={row.href} {...props} />
     case "more":

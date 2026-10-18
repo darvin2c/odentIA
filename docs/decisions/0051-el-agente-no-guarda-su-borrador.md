@@ -1,4 +1,4 @@
-# 0048 · El agente no guarda su borrador
+# 0051 · El agente no guarda su borrador
 
 Fecha: 2026-10-17 · Estado: aceptada · Precisa [0006](0006-memoria-del-caso-y-comprobacion-de-respuestas.md) y [0024](0024-ninguna-conversacion-queda-abierta.md)
 
@@ -30,7 +30,7 @@ Eran copias de datos personales que no usaba nadie, entre ellas mensajes, el res
   - lo propuesto y lo hecho, en `agent_proposal` y en la auditoría;
   - tokens, costo y herramientas, en `agent_run_ledger`;
   - las notas, en `agent_case_memory`.
-- **La migración `0009` borra las cuatro tablas** de LangGraph. Las creaba el worker al arrancar, fuera de la historia de migraciones, y sus políticas de RLS se van con ellas. No hay clínicas reales: no se conserva nada.
+- **La migración `0015` borra las cuatro tablas** de LangGraph. Las creaba el worker al arrancar, fuera de la historia de migraciones, y sus políticas de RLS se van con ellas. No hay clínicas reales: no se conserva nada.
 - Salen `@langchain/langgraph-checkpoint-postgres` y `setupAgentMemory`.
 
 ## Alternativas descartadas
@@ -49,5 +49,5 @@ Eran copias de datos personales que no usaba nadie, entre ellas mensajes, el res
 ## Referencias
 
 - `packages/agent/src/graph.ts` (`compileAgentGraph`, `loadContext`), `run.ts`, `apps/worker/src/index.ts`.
-- `packages/db/drizzle/0009_el_agente_no_guarda_su_borrador.sql`.
+- `packages/db/drizzle/0015_el_agente_no_guarda_su_borrador.sql`.
 - Prueba «el agente no guarda su borrador…» de `agent.test.ts`.

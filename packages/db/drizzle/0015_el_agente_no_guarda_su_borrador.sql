@@ -1,4 +1,4 @@
--- El agente no guarda su borrador (ADR 0048). Las tablas de LangGraph las
+-- El agente no guarda su borrador (ADR 0051). Las tablas de LangGraph las
 -- creaba el worker al arrancar (`PostgresSaver.setup()`), fuera de esta
 -- historia; nadie volvía a leerlas: cada turno arma el contexto desde la
 -- base. Sus políticas de RLS se van con ellas. Solo se borran las que existen:

@@ -10,6 +10,20 @@ export const user = pgTable("user", {
   /** Bandera del plugin twoFactor de Better Auth (la gestiona Auth). */
   twoFactorEnabled: boolean("two_factor_enabled").default(false).notNull(),
   image: text("image"),
+  /**
+   * Versión (fecha ISO) de los términos, el aviso de privacidad y el contrato de
+   * encargo que aceptó al crear la cuenta con correo, y cuándo. Nulos si entró
+   * con Google o antes de que se pidieran.
+   */
+  termsVersion: text("terms_version"),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
+  /**
+   * Versión del Contrato de encargo de tratamiento que aceptó al abrir una
+   * clínica, y cuándo. La clínica que crea la copia a
+   * `processing_agreement_acceptance`; quien entra invitado no lo acepta.
+   */
+  processingAgreementVersion: text("processing_agreement_version"),
+  processingAgreementAcceptedAt: timestamp("processing_agreement_accepted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()

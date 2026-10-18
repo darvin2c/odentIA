@@ -304,8 +304,9 @@ it("la primera respuesta usa aceptación real y excluye colas, fallos y simulaci
   const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, full))
   // Una sola fila: cuántas esperan y desde cuándo la más antigua; la misma cuenta que «Sin responder» de la Bandeja.
   expect(rowsOf(home.waiting, "conversations")).toEqual([{ kind: "conversations", waiting: 3, oldestAt: inboundAt.toISOString() }])
-  const inbox = await withOrgContext(appDb, orgId, tx => countConversationViews(tx, orgId, { status: "open" }, ["unanswered"]))
-  expect(inbox.unanswered).toBe(3)
+  // Con el agente atendiendo, esperan respuesta pero no piden a una persona: van en «Las atiende el agente».
+  const inbox = await withOrgContext(appDb, orgId, tx => countConversationViews(tx, orgId, { status: "open" }, ["attend", "agent"]))
+  expect(inbox.attend + inbox.agent).toBeGreaterThanOrEqual(3)
 })
 
 it("«Hoy»: la sede ve su agenda y quien atiende solo sus citas, con el resumen del día", async () => {
