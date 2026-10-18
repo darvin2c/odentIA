@@ -816,7 +816,7 @@ function DocumentViewer({
       ) : isPdfDoc(doc) ? (
         <embed src={url} type="application/pdf" className="h-[70vh] w-full rounded-md border" />
       ) : isDicomDoc(doc) ? (
-        <DicomViewer patientId={patientId} documentId={doc.id} label={doc.label} />
+        <DicomViewer key={doc.id} patientId={patientId} documentId={doc.id} label={doc.label} />
       ) : (
         <p className="text-sm text-muted-foreground">
           Vista previa no disponible para este tipo de archivo.

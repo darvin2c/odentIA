@@ -15,8 +15,10 @@ import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG, TREATMENT_SPECIALTIES } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
@@ -2061,6 +2063,37 @@ for (const previa of [
     source: "Sensor intraoral · sala 2",
     toothNumbers: [36],
   })
+}
+// La misma periapical en cada compresión que lee el visor DICOM (JPEG, JPEG-LS,
+// JPEG 2000, RLE, Big Endian y varios cuadros); las genera
+// `packages/clinical/samples/dicom/generate.py`. Son muestras, no se informan.
+{
+  const require = createRequire(import.meta.url)
+  for (const sample of DICOM_SAMPLES) {
+    if (sample.transferSyntax === "1.2.840.10008.1.2.1") continue // ya está la del sensor
+    const bytes = new Uint8Array(
+      readFileSync(require.resolve(`@odentia/clinical/samples/dicom/${sample.file}`)),
+    )
+    const ref = await storage.putPatientDocument({
+      orgId: ORG_A,
+      patientId: rosaPatientId,
+      bytes,
+      contentType: "application/dicom",
+      ext: "dcm",
+    })
+    await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+      category: "radiografia",
+      label: `[DEMO] Periapical en ${sample.name} (DICOM)`,
+      storageKey: ref.objectKey,
+      contentType: "application/dicom",
+      sizeBytes: ref.size,
+      imageType: "periapical",
+      capturedAt: new Date(Date.now() - 400 * 86_400_000),
+      source: "Muestra de formatos DICOM",
+      reportStatus: "no_requiere",
+      toothNumbers: [36],
+    })
+  }
 }
 // Una imagen subida al paciente equivocado se retira con motivo; no se borra.
 const erradaRef = await putDemoImage(rosaPatientId, "rx", 3)

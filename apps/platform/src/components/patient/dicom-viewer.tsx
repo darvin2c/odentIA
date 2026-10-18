@@ -1,9 +1,16 @@
 import { Button, Field, FieldLabel, Slider } from "@odentia/ui"
 import { LoadingState } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetchBytes } from "../../lib/api"
-import { DicomUnsupportedError, decodeDicom, distanceMm, renderDicom } from "../../lib/dicom"
+import {
+  type DicomImage,
+  DicomUnsupportedError,
+  decodeDicom,
+  distanceMm,
+  renderDicom,
+} from "../../lib/dicom"
 import { activeOrgLocale } from "../../lib/locale"
 
 type Point = { x: number; y: number }
@@ -21,9 +28,10 @@ function formatDicomDate(value: string | null): string | null {
 
 /**
  * Visor DICOM 2D básico: ventana (nivel y ancho, que en radiografía hacen de
- * brillo y contraste), zoom, inversión y medición de distancias en mm con el
- * espaciado del detector. Los ajustes son de pantalla: el archivo no cambia.
- * La tomografía volumétrica no se reconstruye aquí.
+ * brillo y contraste), zoom, inversión, medición de distancias en mm con el
+ * espaciado del detector y paso entre cuadros. Los ajustes son de pantalla: el
+ * archivo no cambia y se conservan al cambiar de cuadro. La tomografía
+ * volumétrica no se reconstruye aquí.
  */
 export function DicomViewer({
   patientId,
@@ -36,27 +44,46 @@ export function DicomViewer({
 }) {
   const id = useId()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const query = useQuery({
+  const [frame, setFrame] = useState(0)
+  const bytes = useQuery({
     queryKey: ["patient-document-dicom", patientId, documentId],
-    queryFn: async () =>
-      decodeDicom(
-        await apiFetchBytes(`/api/patients/${patientId}/documents/${documentId}/content`),
-      ),
+    queryFn: () => apiFetchBytes(`/api/patients/${patientId}/documents/${documentId}/content`),
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })
-  const image = query.data
+  // Cada cuadro se decodifica al pedirlo; el anterior sigue a la vista mientras tanto.
+  const query = useQuery({
+    queryKey: ["patient-document-dicom-frame", patientId, documentId, frame],
+    queryFn: () => {
+      if (!bytes.data) throw new Error("El archivo aún no llega")
+      return decodeDicom(bytes.data, frame)
+    },
+    enabled: bytes.isSuccess,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+    placeholderData: keepPreviousData,
+  })
+  // Si un cuadro falla, sigue a la vista el último que se pudo mostrar.
+  const lastImage = useRef<DicomImage | undefined>(undefined)
+  if (query.data) lastImage.current = query.data
+  const image = query.data ?? lastImage.current
   const [center, setCenter] = useState<number | null>(null)
   const [width, setWidth] = useState<number | null>(null)
   const [invert, setInvert] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [measuring, setMeasuring] = useState(false)
   const [points, setPoints] = useState<Point[]>([])
+  // La ventana sugerida se toma del primer cuadro y no cambia al pasar de cuadro.
   useEffect(() => {
-    if (!image) return
+    if (!image || center !== null) return
     setCenter(image.window.center)
     setWidth(image.window.width)
-  }, [image])
+  }, [image, center])
+  const goTo = (next: number) => {
+    if (!image) return
+    setFrame(Math.min(image.frames - 1, Math.max(0, next)))
+    setPoints([])
+  }
 
   const span = image ? Math.max(1, image.range.max - image.range.min) : 1
   useEffect(() => {
@@ -95,9 +122,9 @@ export function DicomViewer({
       : `${mm.toFixed(2)} mm`
   }, [image, points])
 
-  if (query.isPending) return <LoadingState message="Abriendo el DICOM…" />
-  if (query.isError) {
-    const error = query.error
+  const failure = bytes.error ?? query.error
+  if (failure && (!image || image.frames === 1)) {
+    const error = failure
     return (
       <div role="alert" className="flex flex-col gap-2 rounded-md border p-4 text-sm">
         <p className="font-medium">No se puede mostrar este DICOM</p>
@@ -111,7 +138,9 @@ export function DicomViewer({
       </div>
     )
   }
-  if (!image || center === null || width === null) return null
+  if (!image) return <LoadingState message="Abriendo el DICOM…" />
+  if (center === null || width === null) return null
+  const frameFailed = query.isError && image.frame !== frame
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -138,6 +167,51 @@ export function DicomViewer({
           }}
         />
       </div>
+      {image.frames > 1 && (
+        <fieldset className="flex flex-wrap items-center gap-2">
+          <legend className="sr-only">Cuadros</legend>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => goTo(frame - 1)}
+            disabled={frame === 0}
+          >
+            <ChevronLeft aria-hidden />
+            Anterior
+          </Button>
+          <Slider
+            aria-label="Cuadro"
+            className="min-w-32 flex-1"
+            value={[frame + 1]}
+            min={1}
+            max={image.frames}
+            step={1}
+            onValueChange={(v) => goTo(sliderValue(v) - 1)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => goTo(frame + 1)}
+            disabled={frame === image.frames - 1}
+          >
+            Siguiente
+            <ChevronRight aria-hidden />
+          </Button>
+          <p aria-live="polite" className="w-full text-xs text-muted-foreground sm:w-auto">
+            {query.isFetching
+              ? `Abriendo el cuadro ${frame + 1}…`
+              : `Cuadro ${image.frame + 1} de ${image.frames}`}
+          </p>
+          {frameFailed && (
+            <p role="alert" className="w-full text-xs text-destructive">
+              No se pudo mostrar el cuadro {frame + 1}; sigue a la vista el cuadro {image.frame + 1}.
+              {query.error instanceof DicomUnsupportedError ? ` ${query.error.message}` : ""}
+            </p>
+          )}
+        </fieldset>
+      )}
       <fieldset className="grid grid-cols-1 gap-3 rounded-md border px-3 py-2 sm:grid-cols-3">
         <legend className="px-1 text-xs font-medium text-muted-foreground">
           Ventana y vista (no modifican el archivo)
@@ -241,7 +315,7 @@ export function DicomViewer({
           <dd className="text-foreground">
             {image.width} × {image.height} px
             {image.pixelSpacing ? ` · ${image.pixelSpacing[1]} mm/px` : ""}
-            {image.frames > 1 ? ` · cuadro 1 de ${image.frames}` : ""}
+            {image.frames > 1 ? ` · ${image.frames} cuadros` : ""}
           </dd>
         </div>
       </dl>

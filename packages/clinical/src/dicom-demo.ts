@@ -54,8 +54,10 @@ function concat(parts: Uint8Array[]): Uint8Array {
 export interface DemoDicomInput {
   width: number
   height: number
-  /** Valores de 0 a 4095 (12 bits almacenados), fila por fila. */
+  /** Valores de 0 a 4095 (12 bits almacenados), fila por fila y cuadro tras cuadro. */
   pixels: Uint16Array
+  /** Cuadros que contiene `pixels`; por omisión, 1. */
+  frames?: number
   /** Espaciado del detector en mm (fila, columna). */
   pixelSpacingMm?: [number, number]
   studyDate?: string
@@ -85,6 +87,7 @@ export function encodeDemoDicom(input: DemoDicomInput): Uint8Array {
     element(0x0018, 0x1164, text("DS", `${rowMm}\\${colMm}`)),
     element(0x0028, 0x0002, us(1)),
     element(0x0028, 0x0004, text("CS", "MONOCHROME2")),
+    ...((input.frames ?? 1) > 1 ? [element(0x0028, 0x0008, text("IS", String(input.frames)))] : []),
     element(0x0028, 0x0010, us(input.height)),
     element(0x0028, 0x0011, us(input.width)),
     element(0x0028, 0x0100, us(16)),
