@@ -44,13 +44,14 @@ const STEP_MOMENT: Partial<Record<FunnelStep, "evaluacion_agendada" | "presupues
 }
 const DEFAULT_STAGE_NAMES = { evaluacion_agendada: "Evaluación agendada", presupuesto_enviado: "Presupuesto enviado" }
 
+/** Lo que cuenta cada paso; a los que son un paso de Oportunidades `funnelRows` les añade el nombre que le dio la clínica. */
 const STEP_COPY: Record<FunnelStep, { label: string; short: string; hint: string }> = {
   sought: { label: "Nos buscaron", short: "Nos buscaron", hint: "Primera conversación o registro" },
-  booked: { label: "Agendaron", short: "Agendaron", hint: "" },
-  came: { label: "Vinieron", short: "Vinieron", hint: "Su primera cita, atendida" },
-  budget: { label: "Recibieron presupuesto", short: "Presupuesto", hint: "" },
-  accepted: { label: "Aceptaron", short: "Aceptaron", hint: "= «Ganada» en Oportunidades" },
-  paid: { label: "Pagaron algo", short: "Pagaron algo", hint: "Al menos un pago" },
+  booked: { label: "Agendaron", short: "Agendaron", hint: "Una cita sin cancelar" },
+  came: { label: "Vinieron", short: "Vinieron", hint: "Una cita atendida o una atención firmada" },
+  budget: { label: "Recibieron presupuesto", short: "Presupuesto", hint: "Presentado" },
+  accepted: { label: "Aceptaron", short: "Aceptaron", hint: "Del todo o en parte · como «Ganada» en Oportunidades" },
+  paid: { label: "Pagaron algo", short: "Pagaron algo", hint: "Aceptaron y pagaron algo" },
 }
 
 /** La lista de quienes llegaron a cada paso y la de quienes se cayeron antes de él. */
@@ -70,13 +71,19 @@ const LOST_LIST: Partial<Record<FunnelStep, ReportListKey>> = {
   paid: "funnel_lost_paid",
 }
 
+/** «3 días», con el plazo que entrega el servidor. */
+function days(count: number): string {
+  return count === 1 ? "1 día" : `${count} días`
+}
+
 /** Quiénes se cayeron antes de un paso, dicho con palabras. */
 function lostWords(step: FunnelStep, count: number, open: boolean): string {
   const one = count === 1
   if (step === "booked") return one ? "1 no agendó" : `${count} no agendaron`
+  // Quien canceló sin agendar otra ya no agendó: aquí quedan quienes faltaron o aún esperan su cita.
   if (step === "came") {
-    if (open) return one ? "1 aún no viene o canceló" : `${count} aún no vienen o cancelaron`
-    return one ? "1 no vino o canceló" : `${count} no vinieron o cancelaron`
+    if (open) return one ? "1 aún no viene o faltó" : `${count} aún no vienen o faltaron`
+    return one ? "1 no vino" : `${count} no vinieron`
   }
   if (step === "budget") return one ? "1 vino y no recibió presupuesto" : `${count} vinieron y no recibieron presupuesto`
   if (step === "accepted") return one ? "1 aún no responde o lo rechazó" : `${count} aún no responden o lo rechazaron`
@@ -147,7 +154,7 @@ function funnelRows(
     return {
       key: step,
       label: compact ? copy.short : copy.label,
-      hint: compact ? undefined : moment ? `= «${stageNames[moment]}» en Oportunidades` : copy.hint,
+      hint: compact ? undefined : moment ? `${copy.hint} · como «${stageNames[moment]}» en Oportunidades` : copy.hint,
       value: funnel.current[step],
       valueText: String(funnel.current[step]),
       note,
@@ -181,7 +188,7 @@ function DropCallout({
       <AlertTriangle aria-hidden className="size-4 shrink-0" strokeWidth={2.25} />
       <span className="min-w-0 flex-1">
         <strong>Aquí se caen más:</strong>{" "}
-        {compact ? `${lost} de cada ${funnel.current.sought} ${lostWords(step, Math.max(lost, 2), funnel.open).replace(/^\d+ /, "")}` : lostWords(step, lost, funnel.open)}
+        {compact ? `${lost} de cada ${funnel.current.sought} ${lostWords(step, lost, funnel.open).replace(/^\d+ /, "")}` : lostWords(step, lost, funnel.open)}
         {!compact && previousRate !== null ? ` · en ${previousWord(head, locale)} pasaba el ${previousRate} %` : ""}
       </span>
       {list ? (
@@ -332,7 +339,7 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
         <div className="-mt-1.5 flex min-w-0 flex-wrap items-start justify-between gap-3">
           <p className="min-w-0 flex-1 basis-80 text-sm text-muted-foreground">
             {funnel.current.sought === 1 ? "La persona que nos buscó" : `Las ${funnel.current.sought} personas que nos buscaron`} por primera vez en {period}, y hasta
-            dónde llegaron hasta hoy. Cada paso cuenta a quienes dieron también los anteriores.
+            dónde llegaron hasta hoy. Cada paso cuenta a quienes llegaron a él o a uno posterior.
           </p>
           {funnel.open && funnel.current.sought > 0 ? (
             <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[13px] font-semibold text-foreground/80">{openWords(data, locale)}: aún pueden agendar</span>
@@ -359,34 +366,42 @@ export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery;
               if (!next) return null
               const lost = funnel.current[FUNNEL_STEPS[index] as FunnelStep] - funnel.current[next]
               if (lost <= 0) return null
+              const list = LOST_LIST[next]
+              // Quiénes dejaron de escribir son parte de los que no agendaron: su lista se abre ahí, sea o no la caída mayor.
+              const stopped =
+                next === "booked" && funnel.stopped > 0 ? (
+                  <p className="flex flex-wrap items-baseline gap-x-2 pb-1 pl-3 text-[13px] text-muted-foreground sm:ml-[14.25rem] sm:pl-1">
+                    <span>
+                      {funnel.stopped === 1
+                        ? `1 de ellos preguntó algo y no escribe hace más de ${days(funnel.stoppedDays)}.`
+                        : `${funnel.stopped} de ellos preguntaron algo y no escriben hace más de ${days(funnel.stoppedDays)}.`}
+                    </span>
+                    <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-semibold sm:min-h-6" onClick={() => onOpenList("funnel_stopped")}>
+                      Ver quiénes
+                    </Button>
+                  </p>
+                ) : null
               if (next === drop)
                 return (
                   <>
                     <DropCallout step={next} funnel={funnel} head={data} locale={locale} compact={false} onOpenList={onOpenList} />
-                    {next === "booked" && funnel.stopped > 0 ? (
-                      <p className="flex flex-wrap items-baseline gap-x-2 pb-1 text-[13px] text-muted-foreground sm:ml-[14.25rem]">
-                        <span>
-                          {funnel.stopped} de ellos preguntaron algo y no escriben hace más de {funnel.stoppedDays} días.
-                        </span>
-                        <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-semibold sm:min-h-6" onClick={() => onOpenList("funnel_stopped")}>
-                          Ver quiénes
-                        </Button>
-                      </p>
-                    ) : null}
+                    {stopped}
                   </>
                 )
-              const list = LOST_LIST[next]
               return (
-                <p className="flex flex-wrap items-baseline gap-x-2 py-0.5 pl-3 text-[13px] text-muted-foreground sm:ml-[14.25rem] sm:pl-1">
-                  <span aria-hidden>↓</span>
-                  {list ? (
-                    <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-normal text-muted-foreground underline sm:min-h-6" onClick={() => onOpenList(list)}>
-                      {lostWords(next, lost, funnel.open)}
-                    </Button>
-                  ) : (
-                    <span>{lostWords(next, lost, funnel.open)}</span>
-                  )}
-                </p>
+                <>
+                  <p className="flex flex-wrap items-baseline gap-x-2 py-0.5 pl-3 text-[13px] text-muted-foreground sm:ml-[14.25rem] sm:pl-1">
+                    <span aria-hidden>↓</span>
+                    {list ? (
+                      <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-normal text-muted-foreground underline sm:min-h-6" onClick={() => onOpenList(list)}>
+                        {lostWords(next, lost, funnel.open)}
+                      </Button>
+                    ) : (
+                      <span>{lostWords(next, lost, funnel.open)}</span>
+                    )}
+                  </p>
+                  {stopped}
+                </>
               )
             }}
             table={{ label: "Paso", value: "Personas", note: "Del paso anterior" }}
@@ -452,7 +467,8 @@ function Referral({ data }: { data: ReportPatients }) {
   const unanswered = count(null)
   const rows: BarListRow[] = REFERRAL_KINDS.map((kind) => ({
     key: kind,
-    label: kind === "recomendacion" ? "Recomendación" : REFERRAL_KIND_LABELS[kind],
+    // La misma etiqueta que en el registro y en la ficha.
+    label: REFERRAL_KIND_LABELS[kind],
     value: count(kind),
     valueText: String(count(kind)),
     muted: kind === "otro",

@@ -14,13 +14,37 @@ import { branch } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { createExpense, dismissExpenseGap, listMonthCommissions, payMonthCommission, payPurchaseOrder, setCommissionRate, voidExpense } from "./finance.js"
-import { cancelPurchaseOrder, confirmPurchaseOrder, createProduct, createPurchaseOrder, createSupplier, createWarehouse, getPurchaseOrder, receivePurchaseOrder } from "./inventory.js"
+import {
+  createExpense,
+  dismissExpenseGap,
+  getPurchasesToPay,
+  listMonthCommissions,
+  payMonthCommission,
+  payPurchaseOrder,
+  setCommissionRate,
+  voidExpense,
+  voidSupplierCreditUse,
+} from "./finance.js"
+import {
+  cancelPurchaseOrder,
+  confirmPurchaseOrder,
+  createProduct,
+  createPurchaseOrder,
+  createSupplier,
+  createWarehouse,
+  getPurchaseOrder,
+  listPurchaseOrders,
+  receivePurchaseOrder,
+} from "./inventory.js"
+import { addPlanItem } from "./plan.js"
+import { adjustBudgetLines, createBudget, decideBudget, deliverBudget } from "./budgets.js"
+import { createPromotion } from "./promotions.js"
 import { collectCharge, createCharge, voidTicket } from "./payments.js"
 import { createPaymentMethod } from "./payment-methods.js"
 import { purchaseBalances, supplierCredits, unpaidPurchasesMany } from "./purchase-balance.js"
 import { overdueDebtMany } from "./report-summary.js"
-import { commissionsMany, debtAgingMany, getReportCommissions, getReportFinance } from "./report-finance.js"
+import { commissionsMany, debtAgingMany, financeListRows, getReportCommissions, getReportFinance, getReportPromotions } from "./report-finance.js"
+import { reportScope } from "./report-scope.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -89,6 +113,84 @@ it("comisiones: las del reporte son las de Finanzas › Comisiones y su pago no 
   expect(finance.totals.current.cashLeftCents).toBe(finance.totals.current.cobradoCents - 12_000)
 })
 
+it("comisiones por pagar: lo que se le descuenta a un profesional no baja lo que se le debe a otro", async () => {
+  const ana = await clinicalFixture()
+  const beto = await clinicalFixture()
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede comisiones ${randomUUID()}` }).returning()
+  const branchId = site!.id
+  const cash = await ana.run((tx) => createPaymentMethod(tx, "org_a", ana.actor, { name: `Efectivo ${randomUUID()}`, typeCode: "10" }))
+  const attended = async (f: typeof ana, priceCents: number) => {
+    const [row] = await ownerDb
+      .insert(encounterProcedure)
+      .values({ organizationId: "org_a", encounterId: f.encounter.id, serviceId: f.service.id, description: "Tratamiento", priceCents, currency: "PEN", createdBy: f.actor })
+      .returning()
+    await ownerDb
+      .update(encounter)
+      .set({ status: "finalizada", finalizedAt: new Date(), signerName: "Clínico", signerRegistration: "12345" })
+      .where(eq(encounter.id, f.encounter.id))
+    const charge = await f.run((tx) => createCharge(tx, ...f.args, { encounterProcedureId: row!.id }))
+    return f.run((tx) =>
+      collectCharge(tx, ...f.args, { branchId, chargeIds: [charge.id], payments: [{ paymentMethodId: cash.id, amountCents: priceCents }], requestId: randomUUID() }),
+    )
+  }
+  for (const f of [ana, beto]) await ana.run((tx) => setCommissionRate(tx, "org_a", ana.actor, { professionalUserId: f.actor, rateBps: 5000 }))
+  const month = currentMonth()
+  // Al Dr. Beto se le pagaron 800 y después se anuló ese cobro: hay que descontarle 800 del próximo pago.
+  const betoPaid = await attended(beto, 1_600)
+  await beto.run((tx) => payMonthCommission(tx, "org_a", beto.actor, { professionalUserId: beto.actor, year: month.year, month: month.month, branchId }))
+  await beto.run((tx) => voidTicket(tx, "org_a", beto.actor, beto.patient.id, betoPaid.ticket.id, { reason: "Se cobró a otra persona", allowPostClose: false }))
+  // A la Dra. Ana se le deben 1 000 nuevos.
+  await attended(ana, 2_000)
+
+  const query = { period: "este_mes", branchId }
+  const table = (await ana.run((tx) => getReportCommissions(tx, "org_a", query))).rows
+  expect(table.find((row) => row.userId === ana.actor)).toMatchObject({ commissionCents: 1_000, pendingCents: 1_000 })
+  expect(table.find((row) => row.userId === beto.actor)).toMatchObject({ pendingCents: 0, discountCents: 800 })
+  // La tarjeta suma lo de cada uno: 1 000, no 1 000 − 800; y solo la Dra. Ana espera pago.
+  const finance = await ana.run((tx) => getReportFinance(tx, "org_a", query))
+  expect(finance.commissions).toMatchObject({ pendingCents: 1_000, professionals: 1 })
+  expect(finance.commissions.pendingCents).toBe(table.reduce((total, row) => total + row.pendingCents, 0))
+})
+
+it("qué dejó cada promoción: el descuento sale de lo aceptado y lo cobrado cuenta a cada persona una vez", async () => {
+  const f = await clinicalFixture()
+  const DAY = 86_400_000
+  const promotion = (name: string, priceCents: number) =>
+    f.run((tx) =>
+      createPromotion(tx, "org_a", f.actor, {
+        name,
+        startsAt: new Date(Date.now() - DAY).toISOString(),
+        endsAt: new Date(Date.now() + 30 * DAY).toISOString(),
+        conditions: null,
+        items: [{ serviceId: f.service.id, mode: "fixed", priceCents }],
+      }),
+    )
+  // La tarifa del servicio es 1 200: una promoción a 1 000 y otra a 900.
+  const october = await promotion(`Octubre ${randomUUID().slice(0, 6)}`, 100_000)
+  const smile = await promotion(`Sonrisa ${randomUUID().slice(0, 6)}`, 90_000)
+  const quote = async (promotionId: string, decision: "aceptado" | "rechazado") => {
+    const item = await f.run((tx) => addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }))
+    const budget = await f.run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+    await f.run((tx) => adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, promotionId }] }))
+    await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
+    await f.run((tx) => decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision }] }))
+  }
+  // La misma persona: rechazó el presupuesto con una y aceptó el de la otra; después pagó 500.
+  await quote(october.id, "rechazado")
+  await quote(smile.id, "aceptado")
+  const [site] = await ownerDb.insert(branch).values({ organizationId: "org_a", name: `Sede promociones ${randomUUID()}` }).returning()
+  await ownerDb
+    .insert(patientPayment)
+    .values({ organizationId: "org_a", patientId: f.patient.id, branchId: site!.id, amountCents: 50_000, currency: "PEN", paidAt: new Date(), methodName: "Efectivo" })
+
+  const report = await f.run((tx) => getReportPromotions(tx, "org_a", { period: "este_mes" }))
+  // Lo rechazado no se dejó de cobrar: no se iba a cobrar.
+  expect(report.promotions.find((row) => row.promotionId === october.id)).toMatchObject({ people: 1, accepted: 0, discountCents: 0, collectedCents: 50_000 })
+  expect(report.promotions.find((row) => row.promotionId === smile.id)).toMatchObject({ people: 1, accepted: 1, discountCents: 30_000, collectedCents: 50_000 })
+  // Quien usó las dos cuenta una vez: una persona y sus 500, no 1 000.
+  expect(report).toMatchObject({ people: 1, discountCents: 30_000, collectedCents: 50_000 })
+})
+
 async function purchasesClinic() {
   const orgId = randomUUID()
   await insertOrg(ownerDb, orgId, `compras-${orgId}`)
@@ -108,7 +210,7 @@ async function purchasesClinic() {
   }
   const receive = (orderId: string, quantity: number) =>
     run((tx) => receivePurchaseOrder(tx, orgId, actor, orderId, [{ productId: item.id, quantity }], randomUUID()))
-  const pay = (orderId: string, amountCents: number, extra: { creditCents?: number; expectedDueCents?: number } = {}) =>
+  const pay = (orderId: string, amountCents: number, extra: { creditCents?: number; expectedDueCents?: number; expectedPaidCents?: number } = {}) =>
     run((tx) => payPurchaseOrder(tx, orgId, actor, { orderId, amountCents, ...extra }))
   const balance = async (orderId: string) => (await run((tx) => purchaseBalances(tx, orgId, { orderIds: [orderId] })))[0]!
   const credit = async () => (await run((tx) => supplierCredits(tx, orgId)))[0]?.cents ?? 0
@@ -149,7 +251,49 @@ it("pagar una compra: en partes, por adelantado, de más queda a favor y lo a fa
   expect(await c.credit()).toBe(0)
   // Anular el pago que dejó lo a favor ya usado no se puede: antes hay que anular ese uso.
   const overpay = (await c.run((tx) => getPurchaseOrder(tx, c.orgId, first.id))).payments.find((row) => row.amountCents === 77_000)!
-  await expect(c.run((tx) => voidExpense(tx, c.orgId, c.actor, overpay.id, { reason: "Error" }))).rejects.toMatchObject({ code: "SUPPLIER_CREDIT_USED" })
+  await expect(c.run((tx) => voidExpense(tx, c.orgId, c.actor, overpay.id, { reason: "Error" }))).rejects.toMatchObject({
+    code: "SUPPLIER_CREDIT_USED",
+    message: expect.stringContaining("OC-0002"),
+  })
+  // El aviso dice qué compra lo usó; anulado ese uso (el «Anular» del detalle de la compra), el pago se anula.
+  await c.run((tx) => voidSupplierCreditUse(tx, c.orgId, c.actor, used.creditUse!.id, { reason: "Se usó por error" }))
+  expect(await c.balance(next.id)).toMatchObject({ creditCents: 0, paidCents: 0 })
+  await c.run((tx) => voidExpense(tx, c.orgId, c.actor, overpay.id, { reason: "Error" }))
+  expect(await c.credit()).toBe(0)
+})
+
+it("pagar una compra: un envío repetido no paga dos veces, lo recibido en parte y al día se adelanta y «Por pagar» no pierde compras", async () => {
+  const c = await purchasesClinic()
+  const order = await c.order(10, 10_000)
+  await c.receive(order.id, 4)
+  await c.pay(order.id, 40_000, { expectedDueCents: 40_000, expectedPaidCents: 0 })
+  // El mismo envío otra vez (la respuesta no llegó y se repitió): lo pagado ya cambió y no se registra de nuevo.
+  await expect(c.pay(order.id, 40_000, { expectedDueCents: 40_000, expectedPaidCents: 0 })).rejects.toMatchObject({ code: "PURCHASE_PAID_CHANGED" })
+  expect(await c.balance(order.id)).toMatchObject({ paidCents: 40_000, dueCents: 0 })
+  // Recibida en parte y al día: Finanzas › Gastos la ofrece para adelantar lo que falta, y ese pago es un adelanto.
+  const toPay = await c.run((tx) => getPurchasesToPay(tx, c.orgId))
+  expect(toPay.orders.map((row) => row.orderId)).toEqual([order.id])
+  expect(toPay.unpaid).toMatchObject({ orders: 0, cents: 0, otherCurrencies: [] })
+  const ahead = await c.pay(order.id, 10_000, { expectedPaidCents: 40_000 })
+  expect(ahead.expense?.concept).toBe("Adelanto de compra OC-0001 · Dental Perú")
+
+  // Una compra en otra moneda se dice aparte: ni se cuenta ni se suma con la de la clínica.
+  const store = (await c.run((tx) => getPurchaseOrder(tx, c.orgId, order.id))).warehouseId
+  const seller = (await c.run((tx) => getPurchaseOrder(tx, c.orgId, order.id))).supplierId
+  const productId = (await c.run((tx) => getPurchaseOrder(tx, c.orgId, order.id))).lines[0]!.productId
+  const foreign = await c.run((tx) =>
+    createPurchaseOrder(tx, c.orgId, c.actor, { supplierId: seller, warehouseId: store, currency: "USD", lines: [{ productId, quantity: 2, unitCostCents: 1_500 }] }),
+  )
+  await c.run((tx) => confirmPurchaseOrder(tx, c.orgId, c.actor, foreign.id))
+  await c.receive(foreign.id, 2)
+  const local = await c.order(1, 5_000)
+  await c.receive(local.id, 1)
+  const mixed = await c.run((tx) => getPurchasesToPay(tx, c.orgId))
+  expect(mixed.unpaid).toMatchObject({ orders: 1, cents: 5_000, otherCurrencies: [{ currency: "USD", orders: 1, cents: 3_000 }] })
+
+  // «Por pagar» de Inventario filtra en la consulta, antes del tope: salen las dos que deben algo.
+  const due = await c.run((tx) => listPurchaseOrders(tx, c.orgId, { payment: "por_pagar" }))
+  expect(due.map((row) => row.id).sort()).toEqual([foreign.id, local.id].sort())
 })
 
 it("cancelar una compra pagada pide qué hacer con sus pagos: anularlos o dejarlos a favor", async () => {
@@ -209,6 +353,32 @@ it("te deben por antigüedad: lo de más de 30 días es exactamente el saldo ven
   ])
   const [overdue] = await run((tx) => overdueDebtMany(tx, orgId, undefined, [at]))
   expect(overdue).toEqual([{ currency: "PEN", cents: 30_000, people: 2 }])
+})
+
+it("te deben por antigüedad: un cargo de hace 30 días y 9 horas ya está vencido, en la cifra, en su lista y en el Resumen", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `deuda-horas-${orgId}`)
+  const [site] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro" }).returning()
+  const [person] = await insertTestPatients(ownerDb, [{ organizationId: orgId, displayName: "Persona con horas", patientNumber: 1 }])
+  const at = new Date("2026-09-30T05:00:00Z")
+  // 30 días enteros más 9 horas: contando días enteros parecía «0 a 30».
+  await ownerDb.insert(patientCharge).values({
+    organizationId: orgId, patientId: person!.id, branchId: site!.id, description: "Tratamiento", amountCents: 7_000, currency: "PEN",
+    createdAt: new Date(at.getTime() - 30 * 86_400_000 - 9 * 3_600_000),
+  })
+  const run = <T>(fn: (tx: typeof appDb) => Promise<T>) => withOrgContext(appDb, orgId, fn)
+  const [aging] = await run((tx) => debtAgingMany(tx, orgId, [at], { currency: "PEN" }))
+  expect(aging?.ages.find((age) => age.key === "0_30")).toEqual({ key: "0_30", cents: 0, people: 0 })
+  expect(aging?.ages.find((age) => age.key === "31_60")).toEqual({ key: "31_60", cents: 7_000, people: 1 })
+  // El Resumen lo cuenta vencido: lo mismo que suman los tramos de más de 30 días.
+  const [overdue] = await run((tx) => overdueDebtMany(tx, orgId, undefined, [at]))
+  expect(overdue).toEqual([{ currency: "PEN", cents: 7_000, people: 1 }])
+  // Su lista es la misma cuenta: está en «31 a 60» y no en «0 a 30».
+  const scope = await run((tx) => reportScope(tx, orgId, { period: "este_mes" }, at))
+  expect(scope.window.end).toEqual(at)
+  const list = (key: "debts_age_0_30" | "debts_age_31_60") => run((tx) => financeListRows(tx, orgId, scope, key, 50, at))
+  expect(await list("debts_age_0_30")).toEqual([])
+  expect((await list("debts_age_31_60")).map((row) => row.patientId)).toEqual([person!.id])
 })
 
 it("puede faltar un gasto: se avisa el tipo que tuvo los dos meses anteriores y se calla con «No hubo ese gasto»", async () => {

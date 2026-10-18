@@ -3,7 +3,9 @@
  * y lo cobrado en las citas que agendó, y cómo se respondió a quien escribió.
  * Lo pagado va en la moneda del plan de odentIA y lo cobrado en la de la
  * clínica, lado a lado y sin convertir; nunca se dice que el agente «ganó»
- * (decisión 5). Mejor o peor se dice con palabras y flecha, nunca solo con color.
+ * (decisión 5). Donde el cobro no factura (demo, prueba o sin plan) no se dice
+ * «pagaste»: se dice lo mismo que Facturación. Mejor o peor se dice con
+ * palabras y flecha, nunca solo con color.
  */
 import { formatMoney } from "@odentia/clinical"
 import { Button } from "@odentia/ui"
@@ -34,20 +36,38 @@ import {
   spanLabel,
 } from "../../lib/reports"
 import { ReceptionOffNotice } from "../agent/reception-off-notice"
-import { ChangeLine, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
-import { FooterButton, SummaryFigure, travel } from "./summary-tab"
+import { ChangeLine, during, EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
 
 const orgRoute = getRouteApi("/_org")
 
-const LINE_LABEL: Record<AgentBilling["lines"][number]["kind"], string> = {
-  conversacion: "Conversaciones atendidas",
-  consulta: "Consultas dictadas",
-  cita: "Citas recuperadas",
+/**
+ * Cada línea de lo pagado con las palabras de Facturación: quién lo hizo y cuándo cuenta una. La
+ * conversación que se cobra (una por persona cada 24 horas) no es la de «Conversaciones que atendió».
+ */
+const LINE: Record<AgentBilling["lines"][number]["kind"], { agent: string; what: (count: number) => string; rule: string }> = {
+  conversacion: {
+    agent: "Recepción",
+    what: (n) => `${n} ${n === 1 ? "conversación atendida" : "conversaciones atendidas"}`,
+    rule: "Una por persona cada 24 horas, aunque escriba diez mensajes o cambie de canal",
+  },
+  consulta: {
+    agent: "Asistente clínico",
+    what: (n) => `${n} ${n === 1 ? "consulta dictada y confirmada" : "consultas dictadas y confirmadas"}`,
+    rule: "Una por atención, sin importar cuántos minutos se dicten",
+  },
+  cita: {
+    agent: "Administrador",
+    what: (n) => `${n} ${n === 1 ? "cita recuperada" : "citas recuperadas"}`,
+    rule: "Cuando un paciente vuelve tras un seguimiento y asiste",
+  },
 }
 
-/** «en setiembre de 2026» o «del 10 al 25 de setiembre de 2026»: un rango ya trae su preposición. */
-function during(period: string): string {
-  return /^(del|el) /.test(period) ? period : `en ${period}`
+/** Por qué no se cobra, con las palabras de Facturación. */
+function notChargedText(paid: AgentBilling, period: string): string | null {
+  if (paid.charging !== "no") return null
+  if (paid.notCharged === "demo") return "Cuenta demo: se cuenta lo que hacen los agentes, pero no se cobra."
+  if (paid.notCharged === "prueba") return "Se descuenta del saldo de regalo de la prueba: no se cobra."
+  return `${upperFirst(during(period))} no se cobra: así sería tu factura.`
 }
 
 function upperFirst(text: string): string {
@@ -88,7 +108,7 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
       <EmptyState
         icon={Bot}
         title={`El agente no hizo nada ${during(period)}`}
-        description="Cuando Recepción atienda conversaciones o agende citas, o un odontólogo confirme una consulta dictada, aquí verás lo que hizo y lo que te trajo."
+        description="Cuando Recepción atienda conversaciones o agende citas, o un odontólogo confirme una consulta dictada, aquí verás lo que hizo y lo cobrado en sus citas."
         actionLabel={canAgent ? "Ver el agente" : undefined}
         onAction={() => void navigate({ to: "/agent" })}
       />
@@ -155,11 +175,14 @@ export function AgentTab({ query, onOpenList }: { query: ReportQuery; onOpenList
   )
 }
 
-/** Una línea de cuenta: el concepto a la izquierda y el importe a la derecha. */
-function AccountLine({ label, amount, muted }: { label: string; amount: string; muted?: boolean }) {
+/** Una línea de cuenta: el concepto a la izquierda, con su pista debajo si la tiene, y el importe a la derecha. */
+function AccountLine({ label, hint, amount, muted }: { label: string; hint?: string; amount: string; muted?: boolean }) {
   return (
     <div className={muted ? "contents text-muted-foreground" : "contents"}>
-      <dt className="min-w-0">{label}</dt>
+      <dt className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {hint ? <span className="text-[13px] text-muted-foreground">{hint}</span> : null}
+      </dt>
       <dd className="text-right font-semibold tabular-nums">{amount}</dd>
     </div>
   )
@@ -169,63 +192,100 @@ function AccountLine({ label, amount, muted }: { label: string; amount: string; 
 function PaidAndCollected({ data, period }: { data: ReportAgent; period: string }) {
   const id = useId()
   const { locale, paid, collected } = data
+  const title = !paid
+    ? "Lo cobrado en las citas del agente"
+    : paid.charging === "no"
+      ? "Lo que se contó por el agente y lo cobrado en sus citas"
+      : "Lo que pagaste por el agente y lo cobrado en sus citas"
   return (
     <section aria-labelledby={id} className="elevated flex min-w-0 flex-col gap-4 rounded-xl border bg-card p-[18px] sm:p-[22px]">
       <div className="flex min-w-0 flex-col gap-0.5">
         <h3 id={id} className="text-[17px] font-extrabold tracking-tight">
-          {paid ? "Lo que pagaste por el agente y lo que te trajo" : "Lo que te trajo el agente"}
+          {title}
         </h3>
         {paid ? <p className="text-sm text-muted-foreground">Con las mismas cuentas de tu factura de odentIA. Cada lado en su moneda: no convertimos.</p> : null}
       </div>
       <div className="grid min-w-0 gap-4 @3xl:grid-cols-2">
-        {paid ? <Paid paid={paid} period={period} locale={locale} timezone={data.timezone} wholeClinic={data.wholeClinic.includes("paid")} /> : null}
+        {paid ? (
+          <Paid paid={paid} period={period} running={data.period.partial} locale={locale} timezone={data.timezone} wholeClinic={data.wholeClinic.includes("paid")} />
+        ) : null}
         <Collected collected={collected} period={period} locale={locale} />
       </div>
     </section>
   )
 }
 
-function Paid({ paid, period, locale, timezone, wholeClinic }: { paid: AgentBilling; period: string; locale: string; timezone: string; wholeClinic: boolean }) {
+function Paid({
+  paid,
+  period,
+  running,
+  locale,
+  timezone,
+  wholeClinic,
+}: {
+  paid: AgentBilling
+  period: string
+  /** El periodo llega hasta hoy: lo del mes que corre aún no se cobra. */
+  running: boolean
+  locale: string
+  timezone: string
+  wholeClinic: boolean
+}) {
   const { org } = orgRoute.useRouteContext()
-  const currency = paid.currency ?? "USD"
-  const money = (cents: number): string => formatMoney(cents, currency, locale)
-  const unit = (micros: number): string => new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
+  const charged = paid.charging !== "no"
+  // Sin la moneda del plan no hay importe: nunca se supone una.
+  const currency = paid.currency
+  const money = (cents: number): string => (currency ? formatMoney(cents, currency, locale) : "—")
+  const unit = (micros: number): string =>
+    currency
+      ? new Intl.NumberFormat(locale, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(micros / 1_000_000)
+      : ""
   const lines = paid.lines.filter((line) => line.count > 0)
-  const credit = money(paid.planCreditCents)
   const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
+  const notice = notChargedText(paid, period)
   const notes: string[] = []
-  if (paid.totalCents > 0 && paid.overCents === 0) notes.push("Todo lo cubrió el crédito del plan: no pagaste nada aparte por el agente.")
-  else if (paid.overCents > 0)
-    notes.push(
-      paid.coveredCents > 0
-        ? `El crédito del plan cubrió ${money(paid.coveredCents)}; ${money(paid.overCents)} se cobraron aparte.`
-        : `${money(paid.overCents)} se cobraron aparte del crédito del plan.`,
-    )
-  // El crédito se renueva el día en que empezó el plan: un periodo que toca dos meses del plan trae dos créditos,
-  // y uno que empieza a mitad de un mes del plan puede encontrarlo ya usado. Se dice, para que lo cubierto se entienda.
-  const day = paid.planStart ? new Intl.DateTimeFormat(locale, { day: "numeric", timeZone: timezone }).format(new Date(paid.planStart)) : null
-  if (paid.totalCents > 0)
-    notes.push(
-      paid.planMonths > 1
-        ? `${upperFirst(during(period))} corren ${paid.planMonths} meses de tu plan${day ? ` (empiezan el día ${day})` : ""}, cada uno con su crédito de ${credit}.`
-        : `Tu plan trae ${credit} de crédito por mes${day ? `, contado desde el día ${day}` : ""}.`,
-    )
+  if (!currency) notes.push("Tu plan aún no tiene precios por acción: no hay importe que mostrar.")
+  if (charged && currency) {
+    const closedOver = paid.overCents - paid.pendingCents
+    const apart = [
+      closedOver > 0 ? `${money(closedOver)} se cobraron aparte` : null,
+      paid.pendingCents > 0 ? `${money(paid.pendingCents)} se cobrarán al cerrar el mes` : null,
+    ]
+      .filter(Boolean)
+      .join(" y ")
+    if (paid.totalCents > 0 && paid.overCents === 0)
+      notes.push(running ? "Hasta hoy todo lo cubre el crédito del plan: nada aparte por el agente." : "Todo lo cubrió el crédito del plan: no pagaste nada aparte por el agente.")
+    else if (paid.overCents > 0)
+      notes.push(paid.coveredCents > 0 ? `El crédito del plan ${running ? "cubre" : "cubrió"} ${money(paid.coveredCents)}; ${apart}.` : `${upperFirst(apart)}, aparte del crédito del plan.`)
+    // El crédito se renueva el día en que empezó el plan: un periodo que toca dos meses del plan trae dos créditos,
+    // y uno que empieza a mitad de un mes del plan puede encontrarlo ya usado. Se dice, para que lo cubierto se entienda.
+    const credit = paid.planCreditCents === null ? null : money(paid.planCreditCents)
+    const day = paid.planStart ? new Intl.DateTimeFormat(locale, { day: "numeric", timeZone: timezone }).format(new Date(paid.planStart)) : null
+    if (paid.totalCents > 0 && paid.planMonths > 1)
+      notes.push(`${upperFirst(during(period))} corren ${paid.planMonths} meses de tu plan${day ? ` (empiezan el día ${day})` : ""}, cada uno con su crédito${credit ? ` de ${credit}` : ""}.`)
+    else if (paid.totalCents > 0 && paid.planMonths === 1)
+      notes.push(`Tu plan trae ${credit ? `${credit} de crédito` : "su crédito"} por mes${day ? `, contado desde el día ${day}` : ""}.`)
+    if (paid.uncharged.count > 0)
+      notes.push(`Además, ${plural(paid.uncharged.count, "acción", "acciones")} por ${money(paid.uncharged.amountCents)} se ${paid.uncharged.count === 1 ? "contó" : "contaron"} en un tramo que no se cobra.`)
+  }
   if (paid.trial.count > 0) notes.push(`${plural(paid.trial.count, "acción salió", "acciones salieron")} del saldo de prueba, de regalo: ${money(paid.trial.amountCents)}.`)
   if (paid.unpriced > 0) notes.push(`${plural(paid.unpriced, "acción se contó", "acciones se contaron")} sin precio: tu plan aún no lo tenía.`)
-  if (paid.tax && paid.totalCents > 0) notes.push(`Sin el ${paid.tax.label}, que tu factura suma aparte.`)
+  if (charged && paid.tax && paid.totalCents > 0) notes.push(`Sin el ${paid.tax.label}, que tu factura suma aparte.`)
   return (
     <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border bg-muted/40 px-4 py-4 sm:px-5 sm:py-[18px]">
       <span className="text-[13px] font-bold text-muted-foreground">
-        Lo que pagaste por el agente {during(period)}
+        {charged ? "Lo que pagaste por el agente" : "Lo que se contó por el agente"} {during(period)}
         {wholeClinic ? <span className="font-medium"> · {WHOLE_CLINIC}</span> : null}
       </span>
       <span className="text-[30px] leading-9 font-extrabold tracking-tight tabular-nums">{money(paid.totalCents)}</span>
+      {notice ? <p className="rounded-lg bg-muted px-3 py-2 text-sm">{notice}</p> : null}
       {lines.length > 0 ? (
         <dl className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 text-sm">
           {lines.map((line) => (
             <AccountLine
               key={line.kind}
-              label={`${LINE_LABEL[line.kind]} · ${line.count}${line.unitMicros === null ? "" : ` × ${unit(line.unitMicros)}`}`}
+              label={`${LINE[line.kind].agent}: ${LINE[line.kind].what(line.count)}`}
+              hint={`${LINE[line.kind].rule}${line.unitMicros === null || !currency ? "" : ` · ${unit(line.unitMicros)} cada una`}`}
               amount={money(line.amountCents)}
             />
           ))}
@@ -293,11 +353,12 @@ function BookedChart({ data }: { data: ReportAgent }) {
   const title = `Citas que agendó el agente, ${GRAIN_WORD[grain]}`
   if (data.chart.length < 2) return null
   const last = data.chart[data.chart.length - 1]
+  // Antes de su primera respuesta, cita o acción contada el agente no trabajaba: esos tramos van vacíos.
   const firstOn = data.chart.findIndex((bucket) => bucket.booked !== null)
   const share = last && last.booked !== null ? rateOf(last.booked, last.all) : null
   const lastName = last ? bucketLabel(last, grain, locale) : ""
   const insight = [
-    firstOn > 0 ? `Empezó a agendar en ${bucketLabel(data.chart[firstOn] as (typeof data.chart)[number], grain, locale).toLocaleLowerCase(locale)}.` : null,
+    firstOn > 0 ? `Empezó a trabajar en ${bucketLabel(data.chart[firstOn] as (typeof data.chart)[number], grain, locale).toLocaleLowerCase(locale)}.` : null,
     share !== null ? `${lastName}${last?.partial ? ", hasta hoy" : ""}: el ${share} % de todas las citas que se reservaron.` : null,
   ]
     .filter(Boolean)
@@ -321,7 +382,7 @@ function BookedChart({ data }: { data: ReportAgent }) {
                 {bucketLabel(bucket, grain, locale)}
                 {bucket.partial ? ", hasta hoy" : ""}
               </strong>
-              <span>{bucket.booked === null ? "El agente todavía no agendaba" : `Agendó ${bucket.booked} de ${bucket.all} citas`}</span>
+              <span>{bucket.booked === null ? "El agente todavía no trabajaba" : `Agendó ${bucket.booked} de ${bucket.all} citas`}</span>
               {part !== null ? <span className="opacity-80">{part} % de todas</span> : null}
             </>
           )
@@ -371,6 +432,7 @@ function Responses({ data, period, phrase, onOpenList }: { data: ReportAgent; pe
             {speeds.length > 0 ? <p className="text-[13px] text-muted-foreground">La mitad recibió la primera respuesta {speeds.join("; ")}.</p> : null}
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-3">
+            {/* De esas mismas personas: nunca más que las que escribieron. */}
             <div className="flex min-w-0 flex-col gap-0.5 rounded-xl bg-muted/50 px-3.5 py-3">
               <span className="text-[13px] font-bold text-muted-foreground">Pasaron al equipo</span>
               <strong className="text-[22px] tabular-nums">{handedOff}</strong>

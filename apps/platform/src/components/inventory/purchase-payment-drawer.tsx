@@ -9,7 +9,7 @@ import { formatMoney, formatMoneyInput } from "@odentia/clinical"
 import { Checkbox, Field, FieldContent, FieldDescription, FieldLabel, Input, toast } from "@odentia/ui"
 import { DatePickerButton, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { cashErrorMessage, formatDayKey, invalidateFinance, noonOf, parseAmount, payPurchaseApi, todayIn, useCashState } from "../../lib/finance-cash"
 import type { PurchaseOrderDetail } from "../../lib/inventory"
 import { purchaseOrderLabel } from "../../lib/reports"
@@ -35,6 +35,9 @@ export function PurchasePaymentDrawer({
   const today = todayIn(timeZone)
   const due = balance?.dueCents ?? 0
   const ahead = balance && balance.receivedCents === 0
+  // Sin nada recibido por pagar y con algo aún por llegar, lo que se paga es un adelanto
+  // (la misma regla del servidor); en una compra ya recibida y al día queda a favor.
+  const advance = due === 0 && balance?.status !== "recibida"
   // Lo que falta adelantar del total pedido, cuando lo recibido ya está pagado.
   const rest = balance ? Math.max(0, balance.orderedCents - balance.paidCents) : 0
   const suggested = due > 0 ? due : rest
@@ -47,8 +50,21 @@ export function PurchasePaymentDrawer({
   const [receiptNumber, setReceiptNumber] = useState("")
   const [error, setError] = useState<string | null>(null)
 
+  // Se llena al abrir y solo entonces: si la compra se vuelve a consultar (otro `suggested`),
+  // lo que ya se escribió se queda.
+  const filled = useRef(false)
+  // Lo que se vio al abrir: si la compra cambia mientras tanto (otro pago, o este mismo
+  // enviado dos veces), el servidor lo dice en vez de pagar sobre otra cifra.
+  const paid = balance?.paidCents ?? 0
+  const seen = useRef({ due, paid })
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      filled.current = false
+      return
+    }
+    if (filled.current) return
+    filled.current = true
+    seen.current = { due, paid }
     setAmount(suggested > 0 ? formatMoneyInput(suggested, order.currency, locale) : "")
     setUseCredit(false)
     setFromCash(false)
@@ -56,14 +72,14 @@ export function PurchasePaymentDrawer({
     setReceiptKind("")
     setReceiptNumber("")
     setError(null)
-  }, [open, suggested, order.currency, locale, timeZone])
+  }, [open, suggested, due, paid, order.currency, locale, timeZone])
 
   const money = (cents: number) => formatMoney(cents, order.currency, locale)
   const cents = amount.trim() === "" ? 0 : parseAmount(amount, order.currency, locale)
   const creditCents = useCredit ? Math.min(credit, Math.max(0, suggested)) : 0
   const total = (cents ?? 0) + creditCents
   const state = cash.data?.data ?? null
-  const label = ahead || due === 0 ? `Registrar adelanto de ${money(total)}` : `Registrar pago de ${money(total)}`
+  const label = advance ? `Registrar adelanto de ${money(total)}` : `Registrar pago de ${money(total)}`
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -74,7 +90,8 @@ export function PurchasePaymentDrawer({
         ...(day === today ? {} : { spentAt: noonOf(day, timeZone) }),
         ...(receiptKind.trim() ? { receiptKind: receiptKind.trim() } : {}),
         ...(receiptNumber.trim() ? { receiptNumber: receiptNumber.trim() } : {}),
-        expectedDueCents: due,
+        expectedDueCents: seen.current.due,
+        expectedPaidCents: seen.current.paid,
       }),
     onSuccess: (result) => {
       invalidateFinance(queryClient)
@@ -82,11 +99,13 @@ export function PurchasePaymentDrawer({
       const label = purchaseOrderLabel(order.orderNumber)
       // En Finanzas queda como gasto de Materiales; aquí se dice cómo quedó la compra.
       toast.success(
-        ahead
-          ? `Adelanto registrado: ${label} lo descuenta cuando llegue`
+        advance
+          ? `Adelanto registrado: ${label} lo descuenta cuando llegue${ahead ? "" : " lo que falta"}`
           : left > 0
             ? `Pago registrado: a ${label} le falta ${money(left)}`
-            : `Pago registrado: ${label} queda al día`,
+            : result.data.balance.paidCents > result.data.balance.orderedCents
+              ? `Pago registrado: lo que pasa de ${label} queda a favor con ${order.supplierName ?? "el proveedor"}`
+              : `Pago registrado: ${label} queda al día`,
       )
       onClose()
     },

@@ -12,7 +12,7 @@ import { ColumnChart, EmptyState, LoadingState, ShareBar, WaterfallChart, type W
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AlertTriangle, ArrowDown, Bot } from "lucide-react"
-import { type ReactNode, useId, useState } from "react"
+import { type ReactNode, useId, useMemo, useState } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { cashErrorMessage, dismissExpenseGapApi, type ExpenseCategory } from "../../lib/finance-cash"
@@ -318,9 +318,11 @@ function Cascade({ data }: { data: ReportFinance }) {
       value: item.cents,
       kind: "less" as const,
       note:
-        item.category === "Materiales"
-          ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
-          : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
+        item.cents < 0
+          ? `En el periodo se anularon más gastos de ${item.category} de periodos anteriores de los que se registraron: suma a lo que deja.`
+          : item.category === "Materiales"
+            ? `Gastos de materiales${cascade.purchasePaidCents > 0 ? `, incluidos ${money(cascade.purchasePaidCents)} de pagos de compras de Inventario` : ""}. Lo recibido y aún no pagado está en «Lo que debes».`
+            : (CATEGORY_NOTE[item.category] ?? `Gastos de ${item.category} registrados en Finanzas › Gastos.`),
       link: canFinance ? (
         <Link to="/finance" search={gastosSearch} className="font-bold text-primary-soft-foreground underline-offset-2 hover:underline">
           Ver los gastos
@@ -371,7 +373,10 @@ function Cascade({ data }: { data: ReportFinance }) {
           return (
             <>
               <strong className="text-[15px]">{step.label}</strong>
-              <span className="text-2xl font-extrabold tabular-nums">{step.value < 0 ? `−${money(-step.value)}` : money(step.value)}</span>
+              <span className="text-2xl font-extrabold tabular-nums">
+                {/* Un gasto que resta con neto negativo devuelve: se dice con «+», no con dos signos. */}
+                {step.value < 0 ? `${step.kind === "less" ? "+" : "−"}${money(-step.value)}` : money(step.value)}
+              </span>
               <span className="text-sm text-foreground/80">
                 {step.kind === "total" ? "Todo lo que entró en el periodo." : `${percentOf(Math.abs(step.value), cascade.cobradoCents)} de lo cobrado`}
               </span>
@@ -410,8 +415,15 @@ function MissingExpense({ data, gap }: { data: ReportFinance; gap: ReportFinance
   // El mismo día del mes, sin pasar del último día ni de hoy.
   const lastDay = new Date(Date.UTC(data.period.from.year, data.period.from.month, 0)).getUTCDate()
   const draftDay = `${periodMonth}-${String(Math.min(gap.copy.day, lastDay)).padStart(2, "0")}`
-  const place: ExpensePlace = { branchId: gap.branch.id, branchName: gap.branch.name, currency, locale, orgTimeZone: timezone }
-  const draft: ExpenseDraft = { category: gap.category as ExpenseCategory, concept: gap.copy.concept, amountCents: gap.copy.amountCents, day: draftDay }
+  // Los mismos objetos mientras no cambie lo que copian: volver a pintar no es abrir otro formulario.
+  const place: ExpensePlace = useMemo(
+    () => ({ branchId: gap.branch.id, branchName: gap.branch.name, currency, locale, orgTimeZone: timezone }),
+    [gap.branch.id, gap.branch.name, currency, locale, timezone],
+  )
+  const draft: ExpenseDraft = useMemo(
+    () => ({ category: gap.category as ExpenseCategory, concept: gap.copy.concept, amountCents: gap.copy.amountCents, day: draftDay }),
+    [gap.category, gap.copy.concept, gap.copy.amountCents, draftDay],
+  )
   return (
     <div role="status" className="flex min-w-0 flex-wrap items-center gap-2.5 rounded-xl bg-warning-soft px-3.5 py-3 text-warning">
       <AlertTriangle aria-hidden className="size-4 shrink-0 text-warning" />
@@ -772,7 +784,8 @@ function DebtsCard({ data, onOpenList, advice }: { data: ReportFinance; onOpenLi
 function PayablesCard({ data }: { data: ReportFinance }) {
   const { locale, currency } = data
   const money: Money = (cents) => formatMoney(cents, currency, locale)
-  const canPay = usePermission("commissions.read")
+  // «Pagar comisiones» se ofrece a quien puede pagarlas, no solo verlas.
+  const canPay = usePermission("commissions.write")
   const canInventory = usePermission("inventory.read")
   const { commissions, purchases } = data.payables
   const total = commissions.cents + purchases.cents

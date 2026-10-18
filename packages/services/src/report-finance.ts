@@ -149,6 +149,16 @@ async function pendingCommissionAdjustments(tx: Db, orgId: string, currency: str
 }
 
 /**
+ * Lo que falta pagarle a un profesional del tramo: lo nuevo menos lo que hay
+ * que descontarle, nunca menos de cero. Se cuenta por profesional: lo que se le
+ * descuenta a uno no baja lo que se le debe a otro. La tarjeta y la tabla de
+ * Comisiones usan esta misma cuenta.
+ */
+function pendingOf(row: CommissionTotals, adjustments: Map<string, number>): number {
+  return Math.max(0, row.freshCents - (adjustments.get(row.userId) ?? 0))
+}
+
+/**
  * Comisiones por pagar en cada momento: lo generado hasta ahí menos lo pagado
  * hasta ahí, por profesional y nunca menos de cero (lo que hay que descontar
  * no se debe). El pago cuenta en la sede de su gasto.
@@ -256,8 +266,18 @@ export const DEBT_AGES = [
 ] as const
 export type DebtAge = (typeof DEBT_AGES)[number]["key"]
 
-function ageOf(days: number): DebtAge {
-  return (DEBT_AGES.find((age) => age.upTo !== null && days <= age.upTo) ?? DEBT_AGES[3]).key
+/**
+ * El tramo de lo que se anotó en `since`, visto en `moment`, con la misma
+ * cuenta que «Saldo vencido» del Resumen (`overdueDebtSql`): pasa al tramo
+ * siguiente cuando se anotó antes de hace 30, 60 o 90 días exactos, no de días
+ * enteros. Así «más de 30 días» suma lo mismo que esa cifra, y la tarjeta y su
+ * lista usan esta sola expresión.
+ */
+function debtAgeSql(since: SQL, moment: SQL): SQL {
+  const steps = DEBT_AGES.filter((age) => age.upTo !== null).map(
+    (age) => sql`when ${since} >= ${moment} - make_interval(days => ${age.upTo}) then ${age.key}::text`,
+  )
+  return sql`case ${sql.join(steps, sql` `)} else ${DEBT_AGES[DEBT_AGES.length - 1]!.key}::text end`
 }
 
 /**
@@ -267,15 +287,15 @@ function ageOf(days: number): DebtAge {
  * saldo vencido de Resumen.
  */
 export async function debtAgingMany(tx: Db, orgId: string, moments: Date[], options: { currency: string; branchId?: string }) {
-  const rows = await tx.execute<{ idx: number; patientId: string; currency: string; owed: string; since: Date | string }>(sql`
+  const rows = await tx.execute<{ idx: number; owed: string; age: DebtAge }>(sql`
     ${overdueDebtSql(orgId, moments, 0, options.branchId)}
-    select idx, patient_id as "patientId", currency, owed::text as owed, since from overdue where currency = ${options.currency}`)
-  return moments.map((moment, index) => {
+    select o.idx, o.owed::text as owed, ${debtAgeSql(sql`o.since`, sql`m.at_moment`)} as age
+    from overdue o join m on m.idx = o.idx where o.currency = ${options.currency}`)
+  return moments.map((_, index) => {
     const ages = DEBT_AGES.map((age) => ({ key: age.key, cents: 0, people: 0 }))
     for (const row of rows) {
       if (Number(row.idx) !== index) continue
-      const days = Math.floor((moment.getTime() - new Date(row.since).getTime()) / 86_400_000)
-      const slot = ages.find((age) => age.key === ageOf(days))
+      const slot = ages.find((age) => age.key === row.age)
       if (!slot) continue
       slot.cents += safeCents(row.owed)
       slot.people += 1
@@ -420,7 +440,8 @@ async function collectedByTreatment(tx: Db, orgId: string, span: Span, options: 
  * Un tipo de gasto que la sede tuvo en cada uno de los dos meses anteriores y
  * en este no (salvo que la clínica haya dicho «No hubo ese gasto»). En el mes
  * en curso solo se avisa pasado el día en que se anotó el mes anterior. Solo
- * con un mes elegido; el pago de comisiones no cuenta (va en su propia línea).
+ * con un mes elegido; el pago de comisiones (va en su propia línea) y el de una
+ * compra de Inventario no cuentan.
  */
 async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
   const { window, timezone } = scope
@@ -441,6 +462,8 @@ async function missingExpenses(tx: Db, orgId: string, scope: ReportScope) {
     where e.organization_id = ${orgId} and e.voided_at is null and e.currency = ${scope.currency}
       and e.spent_at >= ${at(start)} and e.spent_at < ${at(end)} ${branch}
       and not exists (select 1 from commission_settlement s where s.organization_id = e.organization_id and s.expense_id = e.id)
+      -- El pago de una compra tampoco: depende de lo que se compró, y «Copiar el de…» no debe copiarlo.
+      and e.purchase_order_id is null
     group by 1, 2, 3, 4`)
   const dismissed = await tx.execute<{ category: string; branchId: string | null }>(sql`
     select category, branch_id as "branchId" from expense_gap_dismissal
@@ -523,8 +546,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   const owedOverdue = (index: number): number =>
     (debts[index]?.ages ?? []).filter((age) => age.key !== "0_30").reduce((total, age) => total + age.cents, 0)
   const purchasesDue = inCurrency(unpaid, currency)
-  const freshPending = (commissions[0] ?? []).reduce((total, item) => total + item.freshCents, 0)
-  const pendingAdjust = [...adjustments.values()].reduce((total, cents) => total + cents, 0)
+  // Por profesional y solo de quienes siguen en la clínica (`commissionsMany`), como la tabla de Comisiones.
+  const pending = (commissions[0] ?? []).map((item) => pendingOf(item, adjustments))
 
   return {
     ...reportHead(scope),
@@ -538,9 +561,9 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
     commissions: {
       generatedCents: generated(0),
       paidCents: sumOf(commissions[0], (item) => item.paidCents),
-      /** Lo del periodo que aún no se paga, menos lo que hay que descontar. */
-      pendingCents: Math.max(0, freshPending - pendingAdjust),
-      professionals: (commissions[0] ?? []).filter((item) => item.freshCents > 0).length,
+      /** Lo del periodo que aún no se paga, menos lo que hay que descontarle a cada uno. */
+      pendingCents: pending.reduce((total, cents) => total + cents, 0),
+      professionals: pending.filter((cents) => cents > 0).length,
     },
     /** La cascada: lo cobrado, las comisiones generadas y cada tipo de gasto que tuvo algo (sin el pago de comisiones). */
     cascade: {
@@ -588,15 +611,20 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
   const attended = await tx.execute<{ userId: string; name: string; cents: string; unpaid: string }>(sql`
     select e.dentist_user_id as "userId", u.name,
       sum(ep.price_cents::bigint * ep.quantity)::text as cents,
-      sum(greatest(coalesce(c.amount_cents, ep.price_cents::bigint * ep.quantity) - coalesce(ap.applied, 0), 0))::text as unpaid
+      sum(case when ch.charges > 0 then ch.unpaid else ep.price_cents::bigint * ep.quantity end)::text as unpaid
     from encounter_procedure ep
     join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
     join "user" u on u.id = e.dentist_user_id
-    left join patient_charge c on c.organization_id = ep.organization_id and c.encounter_procedure_id = ep.id and c.voided_at is null
     left join lateral (
-      select sum(a.amount_cents) as applied from patient_payment_application a
-      where a.organization_id = c.organization_id and a.charge_id = c.id and a.voided_at is null
-    ) ap on true
+      -- Los cargos vigentes del procedimiento, juntos: con más de uno, lo atendido no se suma dos veces.
+      select count(*) as charges, sum(greatest(c.amount_cents - coalesce(ap.applied, 0), 0)) as unpaid
+      from patient_charge c
+      left join lateral (
+        select sum(a.amount_cents) as applied from patient_payment_application a
+        where a.organization_id = c.organization_id and a.charge_id = c.id and a.voided_at is null
+      ) ap on true
+      where c.organization_id = ep.organization_id and c.encounter_procedure_id = ep.id and c.voided_at is null
+    ) ch on true
     where ep.organization_id = ${orgId} and ep.voided_at is null and ep.price_cents is not null and ep.currency = ${currency}
       and e.status = 'finalizada' and e.voided_at is null
       and e.finalized_at >= ${at(window.start)} and e.finalized_at < ${at(window.end)}
@@ -618,7 +646,6 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
     .map((userId) => {
       const own = current?.find((row) => row.userId === userId)
       const work = attended.find((row) => row.userId === userId)
-      const fresh = own?.freshCents ?? 0
       return {
         userId,
         name: names.get(userId) ?? "",
@@ -628,12 +655,13 @@ export async function getReportCommissions(tx: Db, orgId: string, query: ReportQ
         rateBps: rates.find((row) => row.userId === userId)?.rateBps ?? 0,
         commissionCents: own?.commissionCents ?? 0,
         paidCents: own?.paidCents ?? 0,
-        pendingCents: Math.max(0, fresh - (adjustments.get(userId) ?? 0)),
+        pendingCents: own ? pendingOf(own, adjustments) : 0,
         /** Lo pagado de más que se descontará del próximo pago. */
         discountCents: adjustments.get(userId) ?? 0,
       }
     })
-    .filter((row) => row.attendedCents + row.collectedCents + row.commissionCents > 0)
+    // También quien solo cobró un pago del periodo (su cobro se anuló después): explica «Ya pagadas».
+    .filter((row) => row.attendedCents + row.collectedCents + row.commissionCents + row.paidCents > 0)
     .sort((a, b) => b.attendedCents - a.attendedCents || b.collectedCents - a.collectedCents || a.name.localeCompare(b.name))
   return { ...reportHead(scope), rows }
 }
@@ -662,15 +690,27 @@ export type PromotionVerdict = "solo_bajo_precio" | "trajo_nuevos" | "volvieron"
  * Qué dejó cada promoción en el periodo (2b): quiénes la usaron (un
  * presupuesto presentado o un cobro del periodo la lleva), cuántos eran nuevos
  * (sin una cita atendida antes de usarla), lo que pagaron desde entonces hasta
- * hoy, el descuento frente a la tarifa, cuántos aceptaron, pagaron algo y
- * volvieron por otro tratamiento sin ella. Más los descuentos sueltos (una
- * línea bajo tarifa sin promoción). De la persona: no se filtra por sede.
+ * hoy, el descuento frente a la tarifa de lo aceptado o cobrado, cuántos
+ * aceptaron, pagaron algo y volvieron por otro tratamiento sin ella. Más los
+ * descuentos sueltos (una línea aceptada bajo tarifa sin promoción). De la
+ * persona: no se filtra por sede.
  */
 export async function getReportPromotions(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
   const { window, currency } = scope
   const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
   const units = budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })
+  // Lo que se dejó de cobrar sale solo de lo aceptado (y de los cobros): un presupuesto
+  // rechazado, pospuesto, reemplazado o cancelado no se cobra, y uno reemplazado no se
+  // suma con su reemplazo.
+  const acceptedLine = sql`b.status in ('aceptado','parcial') and i.decision = 'aceptado'`
+  /** Lo que pagó la persona desde `from` hasta hoy, menos lo devuelto de esos mismos pagos: la misma cuenta por promoción y en el total. */
+  const collectedSince = (patient: SQL, from: SQL): SQL => sql`
+    coalesce((select sum(x.amount_cents) from patient_payment x where x.organization_id = ${orgId} and x.patient_id = ${patient}
+      and x.currency = ${currency} and x.voided_at is null and x.paid_at >= ${from} and x.paid_at < ${at(now)}), 0)
+    - coalesce((select sum(r.amount_cents) from patient_payment_refund r join patient_payment x on x.organization_id = r.organization_id and x.id = r.payment_id
+      where r.organization_id = ${orgId} and r.patient_id = ${patient} and x.currency = ${currency} and x.voided_at is null
+        and x.paid_at >= ${from} and r.refunded_at < ${at(now)}), 0)`
   const rows = await tx.execute<{
     promotionId: string
     name: string
@@ -686,8 +726,8 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
   }>(sql`
     with uses as (
       select i.promotion_id, b.patient_id, b.presented_at as at,
-        greatest(coalesce(i.tariff_price_cents, i.price_cents) - i.price_cents, 0)::bigint * ${units} as discount,
-        (b.status in ('aceptado','parcial') and i.decision = 'aceptado') as accepted
+        case when ${acceptedLine} then greatest(coalesce(i.tariff_price_cents, i.price_cents) - i.price_cents, 0)::bigint * ${units} else 0 end as discount,
+        (${acceptedLine}) as accepted
       from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
         and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null and i.price_cents is not null
@@ -710,10 +750,7 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
       select p.*,
         not exists (select 1 from appointment a where a.organization_id = ${orgId} and a.patient_id = p.patient_id
           and a.status = 'atendida' and a.starts_at < p.first_at) as fresh,
-        coalesce((select sum(x.amount_cents) from patient_payment x where x.organization_id = ${orgId} and x.patient_id = p.patient_id
-          and x.currency = ${currency} and x.voided_at is null and x.paid_at >= p.first_at and x.paid_at < ${at(now)}), 0)
-        - coalesce((select sum(r.amount_cents) from patient_payment_refund r join patient_payment x on x.organization_id = r.organization_id and x.id = r.payment_id
-          where r.organization_id = ${orgId} and r.patient_id = p.patient_id and x.currency = ${currency} and r.refunded_at >= p.first_at), 0) as collected,
+        ${collectedSince(sql`p.patient_id`, sql`p.first_at`)} as collected,
         exists (select 1 from patient_charge c where c.organization_id = ${orgId} and c.patient_id = p.patient_id and c.voided_at is null
           and c.created_at > p.first_at + interval '1 day' and c.promotion_id is distinct from p.promotion_id::text) as returned
       from person p
@@ -725,21 +762,23 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
       sum(j.discount)::text as discount, sum(j.collected)::text as collected
     from judged j join promotion pr on pr.organization_id = ${orgId} and pr.id = j.promotion_id
     group by j.promotion_id, pr.name, pr.starts_at, pr.ends_at`)
-  // Quiénes usaron alguna, sin contar dos veces a quien usó dos.
-  const [unique] = await tx.execute<{ people: number; fresh: number }>(sql`
+  // Quiénes usaron alguna y lo que pagaron, sin contar dos veces a quien usó dos: lo
+  // cobrado de cada persona corre desde la primera que usó.
+  const [unique] = await tx.execute<{ people: number; fresh: number; collected: string }>(sql`
     with uses as (
       select b.patient_id, b.presented_at as at from treatment_budget b
       join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
-        and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null
+        and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is not null and i.price_cents is not null
       where b.organization_id = ${orgId} and b.currency = ${currency} and b.status <> 'borrador'
         and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}
       union all
       select c.patient_id, c.created_at from patient_charge c
       where c.organization_id = ${orgId} and c.currency = ${currency} and c.voided_at is null and c.budget_item_id is null
-        and c.promotion_id is not null and c.created_at >= ${at(window.start)} and c.created_at < ${at(window.end)}
+        and c.promotion_id ~ '^[0-9a-f]{8}-[0-9a-f-]{27}$' and c.created_at >= ${at(window.start)} and c.created_at < ${at(window.end)}
     ), person as (select patient_id, min(at) as first_at from uses group by patient_id)
     select count(*)::int as people, count(*) filter (where not exists (
-      select 1 from appointment a where a.organization_id = ${orgId} and a.patient_id = person.patient_id and a.status = 'atendida' and a.starts_at < person.first_at))::int as fresh
+      select 1 from appointment a where a.organization_id = ${orgId} and a.patient_id = person.patient_id and a.status = 'atendida' and a.starts_at < person.first_at))::int as fresh,
+      coalesce(sum(${collectedSince(sql`person.patient_id`, sql`person.first_at`)}), 0)::text as collected
     from person`)
   const [loose] = await tx.execute<{ count: number; cents: string }>(sql`
     select count(*)::int as count, coalesce(sum((i.tariff_price_cents - i.price_cents)::bigint * ${units}), 0)::text as cents
@@ -747,7 +786,7 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
     join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
       and i.option_id = ${budgetValueOptionSql(budget)} and i.promotion_id is null
       and i.tariff_price_cents is not null and i.price_cents is not null and i.tariff_price_cents > i.price_cents
-    where b.organization_id = ${orgId} and b.currency = ${currency} and b.status <> 'borrador'
+    where b.organization_id = ${orgId} and b.currency = ${currency} and ${acceptedLine}
       and b.presented_at >= ${at(window.start)} and b.presented_at < ${at(window.end)}`)
   const promotions = rows
     .map((row) => {
@@ -775,7 +814,8 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
     people: unique?.people ?? 0,
     fresh: unique?.fresh ?? 0,
     discountCents: promotions.reduce((total, row) => total + row.discountCents, 0),
-    collectedCents: promotions.reduce((total, row) => total + row.collectedCents, 0),
+    /** Cada persona una vez, aunque haya usado dos promociones. */
+    collectedCents: safeCents(unique?.collected),
     loose: { count: loose?.count ?? 0, cents: safeCents(loose?.cents) },
     /** Presupuestos y cobros son de la persona: no se filtra por sede. */
     wholeClinic: scope.branch ? (["promotions"] as const) : ([] as const),
@@ -791,12 +831,12 @@ export function isFinanceList(list: string): list is FinanceListKey {
   return (FINANCE_LISTS as readonly string[]).includes(list)
 }
 
-/** Cuántos días antes del cierre se anotó el concepto más antiguo, por tramo: `[desde, hasta)` en días. */
-const AGE_DAYS: Record<Exclude<FinanceListKey, "upcoming_unbooked">, [number, number | null]> = {
-  debts_age_0_30: [0, 31],
-  debts_age_31_60: [31, 61],
-  debts_age_61_90: [61, 91],
-  debts_age_90_plus: [91, null],
+/** El tramo de antigüedad de cada lista: la misma cuenta de la cifra (`debtAgeSql`). */
+const AGE_OF_LIST: Record<Exclude<FinanceListKey, "upcoming_unbooked">, DebtAge> = {
+  debts_age_0_30: "0_30",
+  debts_age_31_60: "31_60",
+  debts_age_61_90: "61_90",
+  debts_age_90_plus: "90_plus",
 }
 
 type FinanceListRow = {
@@ -847,7 +887,6 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
         order by x.cents desc, x.patient_id limit ${limit}`)),
     ]
   }
-  const [from, to] = AGE_DAYS[list]
   const end = scope.window.end
   return [
     ...(await tx.execute<FinanceListRow>(sql`
@@ -858,8 +897,7 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
         o.owed::text as cents, o.currency::text as currency, count(*) over()::int as total
       from overdue o
       join patient p on p.id = o.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
-      where o.currency = ${scope.currency} and o.since <= ${at(end)} - make_interval(days => ${from})
-        ${to === null ? sql`` : sql`and o.since > ${at(end)} - make_interval(days => ${to})`}
+      where o.currency = ${scope.currency} and ${debtAgeSql(sql`o.since`, at(end))} = ${AGE_OF_LIST[list]}
       order by o.since, o.patient_id limit ${limit}`)),
   ]
 }

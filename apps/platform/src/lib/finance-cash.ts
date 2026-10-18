@@ -558,6 +558,8 @@ export function payPurchaseApi(
     receiptKind?: string
     receiptNumber?: string
     expectedDueCents?: number
+    /** Lo pagado que mostró la pantalla: un envío repetido no paga dos veces. */
+    expectedPaidCents?: number
   },
 ): Promise<{ data: { balance: PurchaseBalance } }> {
   return apiFetch(`/api/finance/purchases/${orderId}/payments`, { method: "POST", body: JSON.stringify(body) })

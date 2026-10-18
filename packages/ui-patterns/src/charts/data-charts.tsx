@@ -516,12 +516,15 @@ export function WaterfallChart({ title, steps, format, short = format, detail, s
   const range = top - bottom || 1
   const percent = (value: number): number => ((value - bottom) / range) * 100
   const axisTicks = [...ticks.filter((tick) => tick <= top), ...ticks.filter((tick) => tick > 0 && -tick >= bottom).map((tick) => -tick)]
-  // Lo que resta lleva su signo; si es cero, no hay nada que restar.
-  const signed = (step: WaterfallStep): string => (step.kind === "less" && step.value !== 0 ? `−${short(step.value)}` : short(step.value))
+  // Lo que resta lleva su signo; si es cero, no hay nada que restar. Un paso
+  // que resta en negativo suma (una categoría que devolvió más de lo que gastó).
+  const lessSign = (step: WaterfallStep): string => (step.kind !== "less" || step.value === 0 ? "" : step.value < 0 ? "+" : "−")
+  const signed = (step: WaterfallStep): string => `${lessSign(step)}${short(step.kind === "less" ? Math.abs(step.value) : step.value)}`
   const describe = (index: number): string => {
     const step = steps[index]
     if (!step) return ""
-    return `${step.label}: ${step.kind === "less" ? "menos " : ""}${format(step.value)}`
+    if (step.kind !== "less" || step.value === 0) return `${step.label}: ${format(step.value)}`
+    return `${step.label}: ${step.value < 0 ? "más" : "menos"} ${format(Math.abs(step.value))}`
   }
   const choose = (index: number, focus = false): void => {
     setActive(index)
@@ -563,8 +566,8 @@ export function WaterfallChart({ title, steps, format, short = format, detail, s
                     {step.label}
                   </TableHead>
                   <TableCell className="text-right tabular-nums">
-                    {step.kind === "less" && step.value !== 0 ? "−" : ""}
-                    {format(step.value)}
+                    {lessSign(step)}
+                    {format(step.kind === "less" ? Math.abs(step.value) : step.value)}
                   </TableCell>
                   {share ? <TableCell className="text-right tabular-nums">{share.value(index)}</TableCell> : null}
                 </TableRow>

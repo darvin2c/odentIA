@@ -27,7 +27,7 @@ import {
 import { DatePickerButton, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { usePermission } from "../../lib/crm"
 import {
   cashErrorMessage,
@@ -91,6 +91,8 @@ export function ExpenseFormDrawer({
   const [amount, setAmount] = useState("")
   const [category, setCategory] = useState<ExpenseCategory | "">("")
   const [purchase, setPurchase] = useState<string>(OTHER)
+  // Lo que se vio de la compra al elegirla: si cambia mientras tanto, el servidor lo dice.
+  const [seen, setSeen] = useState<{ due: number; paid: number } | null>(null)
   const [fromCash, setFromCash] = useState(true)
   const [moreOpen, setMoreOpen] = useState(false)
   const [receiptKind, setReceiptKind] = useState("")
@@ -102,12 +104,21 @@ export function ExpenseFormDrawer({
   const unit = state?.currency ?? place.currency
   const money = (cents: number) => formatMoney(cents, unit, locale)
 
+  // Se llena al abrir y solo entonces: si quien lo abre vuelve a pintar (otro `initial`
+  // tras una consulta), lo que ya se escribió se queda.
+  const filled = useRef(false)
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      filled.current = false
+      return
+    }
+    if (filled.current) return
+    filled.current = true
     setConcept(initial?.concept ?? "")
     setAmount(initial ? formatMoneyInput(initial.amountCents, place.currency, locale) : "")
     setCategory(initial?.category ?? "")
     setPurchase(OTHER)
+    setSeen(null)
     setFromCash(!initial)
     setMoreOpen(Boolean(initial?.day && initial.day !== todayIn(orgTimeZone)))
     setReceiptKind("")
@@ -123,7 +134,10 @@ export function ExpenseFormDrawer({
     enabled: open && category === "Materiales",
   })
   const orders = (purchases.data?.data.orders ?? []).filter((order) => order.currency === unit)
-  const chosen = orders.find((order) => order.orderId === purchase) ?? null
+  // Solo un gasto de Materiales paga una compra: si se cambia el tipo, ya no es ese pago.
+  const chosen = category === "Materiales" ? (orders.find((order) => order.orderId === purchase) ?? null) : null
+  // Sin nada recibido por pagar, lo que se paga es un adelanto de lo que falta que llegue.
+  const advance = chosen !== null && chosen.dueCents === 0
   const asksPurchase = category === "Materiales" && orders.length > 0
 
   const cents = amount.trim() === "" ? null : parseAmount(amount, unit, locale)
@@ -146,7 +160,8 @@ export function ExpenseFormDrawer({
       const order = orders.find((item) => item.orderId === input.orderId)
       const left = result.data.balance.dueCents
       if (!order) done("Pago registrado")
-      else if (order.receivedCents === 0) done(`Adelanto registrado: ${purchaseOrderLabel(order.orderNumber)} lo descuenta cuando llegue`)
+      else if (order.dueCents === 0)
+        done(`Adelanto registrado: ${purchaseOrderLabel(order.orderNumber)} lo descuenta cuando llegue${order.receivedCents > 0 ? " lo que falta" : ""}`)
       else if (left > 0) done(`Pago registrado: a ${purchaseOrderLabel(order.orderNumber)} le falta ${money(left)}`)
       else done(`Pago registrado: ${purchaseOrderLabel(order.orderNumber)} queda al día en Inventario`)
     },
@@ -157,6 +172,7 @@ export function ExpenseFormDrawer({
   const choosePurchase = (value: string) => {
     setPurchase(value)
     const order = orders.find((item) => item.orderId === value)
+    setSeen(order ? { due: order.dueCents, paid: order.paidCents } : null)
     if (order) {
       const suggested = order.dueCents > 0 ? order.dueCents : Math.max(0, order.orderedCents - order.paidCents)
       setAmount(suggested > 0 ? formatMoneyInput(suggested, unit, locale) : "")
@@ -173,7 +189,7 @@ export function ExpenseFormDrawer({
       error={error}
       isSubmitting={submitting}
       isDirty={concept !== "" || amount !== "" || category !== "" || receiptKind !== "" || receiptNumber !== ""}
-      submitLabel={chosen ? (chosen.receivedCents === 0 ? "Registrar adelanto" : "Registrar pago") : "Registrar gasto"}
+      submitLabel={chosen ? (advance ? "Registrar adelanto" : "Registrar pago") : "Registrar gasto"}
       submitDisabled={!canWrite}
       onClose={() => {
         if (!submitting) onClose()
@@ -208,8 +224,18 @@ export function ExpenseFormDrawer({
           ...(receiptNumber.trim() ? { receiptNumber: receiptNumber.trim() } : {}),
         }
         if (chosen) {
-          // Lo que falta pagar que vio la persona: si alguien pagó mientras tanto, el servidor lo dice en vez de pagar de más.
-          payMutation.mutate({ orderId: chosen.orderId, body: { amountCents: cents, fromCash, expectedDueCents: chosen.dueCents, ...receipt, ...spentAt } })
+          // Lo que vio la persona al elegirla: si alguien pagó mientras tanto, o este envío ya entró, el servidor lo dice en vez de pagar de más.
+          payMutation.mutate({
+            orderId: chosen.orderId,
+            body: {
+              amountCents: cents,
+              fromCash,
+              expectedDueCents: seen?.due ?? chosen.dueCents,
+              expectedPaidCents: seen?.paid ?? chosen.paidCents,
+              ...receipt,
+              ...spentAt,
+            },
+          })
           return
         }
         createMutation.mutate({ branchId, concept: concept.trim(), amountCents: cents, category, fromCash, ...receipt, ...spentAt })
@@ -248,7 +274,7 @@ export function ExpenseFormDrawer({
         {chosen ? (
           <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
             Queda como gasto de <strong>Materiales</strong> de {chosen.branchName}:{" "}
-            {chosen.receivedCents === 0 ? "Adelanto" : "Pago"} de compra {purchaseOrderLabel(chosen.orderNumber)} · {chosen.supplierName}.
+            {advance ? "Adelanto" : "Pago"} de compra {purchaseOrderLabel(chosen.orderNumber)} · {chosen.supplierName}.
           </p>
         ) : (
           <Field>
@@ -272,7 +298,9 @@ export function ExpenseFormDrawer({
             <FieldDescription id="gasto-importe-ayuda">
               {chosen.dueCents > 0
                 ? `Por pagar: ${money(chosen.dueCents)}. Puedes pagar una parte.`
-                : "Aún no llega nada: queda como adelanto y se descuenta cuando llegue."}
+                : chosen.receivedCents === 0
+                  ? "Aún no llega nada: queda como adelanto y se descuenta cuando llegue."
+                  : "Lo que llegó ya está pagado: queda como adelanto de lo que falta y se descuenta cuando llegue."}
             </FieldDescription>
           ) : null}
         </Field>

@@ -7,6 +7,7 @@
  */
 import { formatMoney } from "@odentia/clinical"
 import { Button, cn } from "@odentia/ui"
+import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, ArrowLeft, Check } from "lucide-react"
@@ -93,7 +94,7 @@ export function PromotionsCard({ query, onOpen }: { query: ReportQuery; onOpen: 
           <div className="flex flex-col gap-0.5">
             <span className="text-[13px] font-bold text-muted-foreground">Dejaste de cobrar</span>
             <span className="text-[26px] font-extrabold tracking-tight tabular-nums">{money(total)}</span>
-            <span className="text-[13px] text-muted-foreground">Frente a tus precios de tarifa.</span>
+            <span className="text-[13px] text-muted-foreground">Frente a tus precios de tarifa, en lo que se aceptó o se cobró.</span>
           </div>
           <ul className="flex min-w-0 flex-col gap-1.5 text-sm">
             {data.promotions.map((promotion) => (
@@ -200,7 +201,7 @@ export function PromotionsView({ query, onBack }: { query: ReportQuery; onBack: 
           { title: "Personas que usaron una", value: String(data.people), note: `En ${plural(data.promotions.length, "promoción", "promociones")}` },
           { title: "Eran nuevas", value: `${data.fresh}${rateOf(data.fresh, data.people) !== null ? ` · ${rateOf(data.fresh, data.people)} %` : ""}`, note: "Sin una cita atendida antes de usarla" },
           { title: "Cobrado a quienes las usaron", value: money(data.collectedCents), note: "Con la promoción y lo que vino después, hasta hoy" },
-          { title: "Descuento dado", value: money(data.discountCents), note: "Frente a tus precios de tarifa" },
+          { title: "Descuento dado", value: money(data.discountCents), note: "Frente a tus precios de tarifa, en lo aceptado" },
         ].map((card) => (
           <div key={card.title} className="elevated flex min-w-0 flex-col gap-0.5 rounded-xl border bg-card px-4 py-3.5">
             <span className="text-[13px] font-bold text-muted-foreground">{card.title}</span>
@@ -218,21 +219,24 @@ export function PromotionsView({ query, onBack }: { query: ReportQuery; onBack: 
             <span className="px-3.5 py-2.5 text-right">Descuento</span>
             <span className="px-3.5 py-2.5">¿Funcionó?</span>
           </div>
-          <fieldset className="flex min-w-0 flex-col divide-y">
-            <legend className="sr-only">Elige una promoción para ver su recorrido</legend>
+          {/* Una sola elegida a la vez: las flechas recorren la lista y tocar la elegida no la quita. */}
+          <ToggleGroup
+            aria-label="Elige una promoción para ver su recorrido"
+            orientation="vertical"
+            value={chosen ? [chosen.promotionId] : []}
+            onValueChange={(next: unknown[]) => {
+              const picked = next[0]
+              if (typeof picked === "string") setSelected(picked)
+            }}
+            className="w-full min-w-0 gap-0 divide-y rounded-none"
+          >
             {data.promotions.map((promotion) => {
-              const on = promotion.promotionId === chosen?.promotionId
               const width = (promotion.people / most) * 100
               return (
-                <button
+                <ToggleGroupItem
                   key={promotion.promotionId}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setSelected(promotion.promotionId)}
-                  className={cn(
-                    "grid min-w-0 grid-cols-1 gap-1.5 px-3.5 py-3 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[minmax(0,1.5fr)_minmax(150px,1.2fr)_96px_96px_minmax(0,1.3fr)] md:items-center md:gap-0 md:px-0 md:py-0",
-                    on ? "bg-primary-soft" : "hover:bg-muted/40",
-                  )}
+                  value={promotion.promotionId}
+                  className="grid h-auto w-full min-w-0 grid-cols-1 items-stretch justify-start gap-1.5 rounded-none px-3.5 py-3 text-left text-sm font-normal whitespace-normal hover:bg-muted/40 aria-pressed:bg-primary-soft md:grid-cols-[minmax(0,1.5fr)_minmax(150px,1.2fr)_96px_96px_minmax(0,1.3fr)] md:items-center md:gap-0 md:px-0 md:py-0"
                 >
                   <span className="flex min-w-0 flex-col md:px-3.5 md:py-3">
                     <strong>{promotion.name}</strong>
@@ -258,10 +262,10 @@ export function PromotionsView({ query, onBack }: { query: ReportQuery; onBack: 
                   <span className="md:px-3.5 md:py-3">
                     <Verdict promotion={promotion} />
                   </span>
-                </button>
+                </ToggleGroupItem>
               )
             })}
-          </fieldset>
+          </ToggleGroup>
           <div className="flex flex-wrap items-center gap-4 border-t px-3.5 py-3 text-xs text-foreground/80">
             <span className="flex items-center gap-1.5">
               <span aria-hidden className="size-2.5 rounded-[3px] bg-series-1" />
@@ -303,7 +307,7 @@ export function PromotionsView({ query, onBack }: { query: ReportQuery; onBack: 
           ["Usó la promoción:", "un presupuesto presentado o un cobro suyo del periodo la lleva. Si nadie la marcó al presupuestar o cobrar, no aparece."],
           ["Nueva:", "no tenía ninguna cita atendida antes de usarla."],
           ["Volvió por más:", "tuvo otro cargo, sin esa promoción, después de usarla."],
-          ["Descuento:", "precio de tarifa menos precio acordado. En una «desde», contra el precio de tarifa, no contra el «desde»."],
+          ["Descuento:", "precio de tarifa menos precio acordado, solo en lo aceptado o cobrado. En una «desde», contra el precio de tarifa, no contra el «desde»."],
         ].map(([title, text]) => (
           <p key={title} className="rounded-xl border bg-card px-3.5 py-3 text-[13px]">
             <strong>{title}</strong> {text}

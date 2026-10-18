@@ -5,6 +5,7 @@
  * Todo es lectura y todo pide `reports.read`: ni caja ni el profesional lo ven.
  * El periodo es una opción cerrada (meses completos) o un rango de días; la sede es opcional.
  */
+import { seesBilling } from "@odentia/auth/permissions"
 import { withOrgContext, type Db } from "@odentia/db"
 import {
   getAgendaReport,
@@ -17,10 +18,7 @@ import {
   getReportOutlook,
   getReportPromotions,
   getReportList,
-  getReportMoney,
   getReportPatients,
-  getReportSales,
-  getReportService,
   getReportProfessionals,
   getReportSummary,
   isPatientReportList,
@@ -59,23 +57,20 @@ export function createReportsRoute(deps: Pick<CrmDeps, "db">) {
 
   read("/summary", getReportSummary)
   read("/professionals", getReportProfessionals)
-  read("/money", getReportMoney)
   read("/agenda", getAgendaReport)
   read("/finance", getReportFinance)
   read("/finance/commissions", getReportCommissions)
   read("/finance/outlook", getReportOutlook)
   read("/finance/promotions", getReportPromotions)
-  read("/sales", getReportSales)
-  read("/service", getReportService)
   read("/patients", getReportPatients)
   read("/funnel", getReportFunnel)
 
-  // Agente: lo pagado a odentIA va solo a quien ve Facturación (propietario o administrador, como su pantalla).
+  // Agente: lo pagado a odentIA va solo a quien ve Facturación (`seesBilling`, la misma regla de su ruta).
   app.get("/agent", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     const parsed = reportQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const billing = memberRole === "owner" || memberRole === "admin"
+    const billing = seesBilling(memberRole)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getReportAgent(tx, orgId, parsed.data, new Date(), { billing })))
   })
 

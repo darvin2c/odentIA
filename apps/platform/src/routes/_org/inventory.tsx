@@ -1,4 +1,4 @@
-import { Badge, Button, cn, FieldLabel, Input, Label, RadioGroup, RadioGroupItem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
+import { Badge, Button, cn, Field, FieldLabel, Input, Label, RadioGroup, RadioGroupItem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea, toast } from "@odentia/ui"
 import { ConfirmDialog, DataTable, DatePickerButton, EmptyState, ErrorState, FilterBar, type FilterDef, FormDrawer, LoadingState, PageHeader, PageShell, RowActions, type RowActionItem, useListSearch } from "@odentia/ui-patterns"
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -8,9 +8,9 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import * as React from "react"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { MOVEMENT_KIND_LABELS, ORDER_STATUS_LABELS, type InventoryAlerts, type InventoryProduct, type PurchaseOrderDetail, type PurchaseOrderItem, type PurchasePaymentTone, purchasePaymentState, type StockMovementItem, type SupplierItem, type WarehouseItem } from "../../lib/inventory"
+import { MOVEMENT_KIND_LABELS, ORDER_STATUS_LABELS, type InventoryAlerts, type InventoryProduct, type PurchaseOrderDetail, type PurchaseOrderItem, type PurchasePayment, type PurchasePaymentTone, purchasePaymentState, type StockMovementItem, type SupplierItem, type WarehouseItem } from "../../lib/inventory"
 import { PurchasePaymentDrawer } from "../../components/inventory/purchase-payment-drawer"
-import { invalidateFinance } from "../../lib/finance-cash"
+import { cashErrorMessage, invalidateFinance, voidSupplierCreditUseApi } from "../../lib/finance-cash"
 import { purchaseOrderLabel } from "../../lib/reports"
 import { useOrgProfile } from "../../lib/org"
 import { isAmbiguousMutationError, mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
@@ -502,7 +502,8 @@ function CancelPaidDialog({ order, pending, canPay, onClose, onConfirm }: {
     if (order) setChoice("")
   }, [order])
   const paid = order?.balance?.paidCents ?? 0
-  const money = (cents: number) => formatMoney(cents, order?.currency ?? "PEN", profile?.locale ?? "es")
+  // Nunca se supone una moneda: la de la orden, y sin orden no hay importe que decir.
+  const money = (cents: number) => (order ? formatMoney(cents, order.currency, profile?.locale ?? "es") : "")
   return (
     <ConfirmDialog
       open={order !== null}
@@ -534,6 +535,55 @@ function CancelPaidDialog({ order, pending, canPay, onClose, onConfirm }: {
         </RadioGroup>
       ) : null}
     </ConfirmDialog>
+  )
+}
+
+/** Anular lo usado a favor: la misma confirmación que los otros anulados, en cajón y con motivo. */
+function VoidCreditUseDrawer({ open, description, isSubmitting, error, onClose, onConfirm }: {
+  open: boolean
+  description: string
+  isSubmitting: boolean
+  error: string | null
+  onClose: () => void
+  onConfirm: (reason: string) => void
+}) {
+  const fieldId = React.useId()
+  const [reason, setReason] = React.useState("")
+  const [missing, setMissing] = React.useState(false)
+  React.useEffect(() => {
+    if (!open) return
+    setReason("")
+    setMissing(false)
+  }, [open])
+  return (
+    <FormDrawer
+      dock={false}
+      open={open}
+      title="Anular lo usado a favor"
+      description={description}
+      error={missing ? "Escribe el motivo de la anulación." : error}
+      isSubmitting={isSubmitting}
+      isDirty={reason !== ""}
+      submitLabel="Anular"
+      cancelLabel="No anular"
+      onClose={() => {
+        if (!isSubmitting) onClose()
+      }}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (!reason.trim()) {
+          setMissing(true)
+          return
+        }
+        setMissing(false)
+        onConfirm(reason.trim())
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor={fieldId}>Motivo</FieldLabel>
+        <Textarea id={fieldId} maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} />
+      </Field>
+    </FormDrawer>
   )
 }
 
@@ -583,6 +633,18 @@ function OrderDetail({ orderId, canWrite, canPay, onDirtyChange }: {
     },
     onError: (error) => setReceiveError(errorMessage(error)),
   })
+  // El uso de lo que se tenía a favor se anula aquí, con motivo; un pago con dinero, en Finanzas › Gastos.
+  const canFinance = usePermission("finance.read")
+  const [voidingCredit, setVoidingCredit] = React.useState<PurchasePayment | null>(null)
+  const voidCredit = useMutation({
+    retry: false,
+    mutationFn: (input: { id: string; reason: string }) => voidSupplierCreditUseApi(input.id, input.reason),
+    onSuccess: () => {
+      toast.success("Uso anulado: vuelve a estar a favor con el proveedor y esta compra lo vuelve a deber")
+      setVoidingCredit(null)
+      invalidateFinance(queryClient)
+    },
+  })
   const detail = detailQuery.data?.data
   if (detailQuery.isPending) return <LoadingState message="Cargando detalle…" />
   if (detailQuery.isError || !detail) return <QueryErrorState error={detailQuery.error} onRetry={() => { void detailQuery.refetch() }} notFound="La orden de compra ya no está disponible." />
@@ -592,6 +654,14 @@ function OrderDetail({ orderId, canWrite, canPay, onDirtyChange }: {
   const balance = detail.balance
   const payable = canPay && balance !== null && detail.status !== "borrador" && detail.status !== "cancelada"
   const restToAdvance = balance ? Math.max(0, balance.orderedCents - balance.paidCents) : 0
+  /** El mes del pago en la zona de la clínica: «Ver gasto» abre ese mes de Gastos. */
+  const monthOf = (iso: string): { year: number; month: number } => {
+    const [year, month] = new Intl.DateTimeFormat("en-CA", { timeZone: profile?.timezone ?? "UTC", year: "numeric", month: "2-digit" })
+      .format(new Date(iso))
+      .split("-")
+      .map(Number)
+    return { year: year ?? 0, month: month ?? 0 }
+  }
   function handleReceive(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (receive.isPending || isAmbiguousMutationError(receive.error)) return
@@ -682,9 +752,28 @@ function OrderDetail({ orderId, canWrite, canPay, onDirtyChange }: {
                       </span>
                     </span>
                     {item.kind === "pago" ? (
-                      <Link to="/finance" search={{ tab: "gastos" }} className="text-sm font-semibold text-primary-soft-foreground">
-                        Ver gasto
-                      </Link>
+                      canFinance ? (
+                        <Link
+                          to="/finance"
+                          search={{ tab: "gastos", branch: balance.branchId, ...monthOf(item.paidAt) }}
+                          className="text-sm font-semibold text-primary-soft-foreground"
+                        >
+                          Ver gasto
+                        </Link>
+                      ) : null
+                    ) : canPay && !item.voidedAt ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Anular el uso de ${money(item.amountCents)} a favor`}
+                        onClick={() => {
+                          voidCredit.reset()
+                          setVoidingCredit(item)
+                        }}
+                      >
+                        Anular
+                      </Button>
                     ) : null}
                   </li>
                 ))}
@@ -696,6 +785,20 @@ function OrderDetail({ orderId, canWrite, canPay, onDirtyChange }: {
       {paying && profile ? (
         <PurchasePaymentDrawer order={detail} locale={locale} timeZone={profile.timezone ?? "UTC"} open={paying} onClose={() => setPaying(false)} />
       ) : null}
+      <VoidCreditUseDrawer
+        open={voidingCredit !== null}
+        description={
+          voidingCredit
+            ? `${money(voidingCredit.amountCents)} vuelven a estar a favor con ${detail.supplierName ?? "el proveedor"} y esta compra los vuelve a deber. Queda en el historial con su motivo.`
+            : ""
+        }
+        isSubmitting={voidCredit.isPending}
+        error={voidCredit.error ? cashErrorMessage(voidCredit.error) : null}
+        onClose={() => setVoidingCredit(null)}
+        onConfirm={(reason) => {
+          if (voidingCredit) voidCredit.mutate({ id: voidingCredit.id, reason })
+        }}
+      />
       <ul className="flex flex-col gap-1 text-sm">
         {detail.lines.map((line) => (
           <li key={line.id} className="flex flex-wrap justify-between gap-2">

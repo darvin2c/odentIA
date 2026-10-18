@@ -123,6 +123,21 @@ test("cancelar una compra pagada pide qué pasa con lo pagado; el servidor no la
   // Lo pagado queda a favor con el proveedor, para su próxima compra.
   const purchases = await call<{ credits: Array<{ supplierName: string; cents: number }> }>(page, "GET", "/api/finance/purchases", org.slug)
   expect(purchases.credits).toEqual([expect.objectContaining({ supplierName: "Insumos de prueba", cents: 20000 })])
+
+  // Lo a favor paga la siguiente compra; ese uso se anula en el detalle de la compra, con motivo, y vuelve a estar a favor.
+  const next = await base.order(2, 5000)
+  const nextLabel = `OC-${String(next.orderNumber).padStart(4, "0")}`
+  await call(page, "POST", `/api/finance/purchases/${next.id}/payments`, org.slug, { amountCents: 0, creditCents: 10000, fromCash: false }, 201)
+  await gotoHydrated(page, tenant(org.slug, "/inventory?tab=compras"))
+  await page.getByRole("button", { name: nextLabel, exact: true }).click()
+  await page.getByRole("button", { name: "Anular el uso de S/ 100.00 a favor" }).click()
+  const voiding = surface(page, { name: "Anular lo usado a favor", exact: true })
+  await voiding.getByLabel("Motivo", { exact: true }).fill("Se usó en la compra equivocada")
+  await observe(page, info, "anular-a-favor")
+  await voiding.getByRole("button", { name: "Anular", exact: true }).click()
+  await expect(page.getByText("Uso anulado: vuelve a estar a favor con el proveedor y esta compra lo vuelve a deber")).toBeVisible()
+  const restored = await call<{ credits: Array<{ supplierName: string; cents: number }> }>(page, "GET", "/api/finance/purchases", org.slug)
+  expect(restored.credits).toEqual([expect.objectContaining({ supplierName: "Insumos de prueba", cents: 20000 })])
 })
 
 for (const width of [1440, 390]) {

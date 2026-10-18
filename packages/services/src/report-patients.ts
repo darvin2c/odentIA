@@ -5,12 +5,17 @@
  *
  * - El embudo sigue a las mismas personas (decisión 2): las que nos buscaron
  *   por primera vez en el tramo, hasta hoy, aunque el paso ocurra después del
- *   tramo. Cada paso cuenta a quien dio también los anteriores: ninguna tasa
- *   pasa de 100 %. Sus pasos son los momentos de Oportunidades
- *   (`SALE_MOMENTS`): agendar una cita es «Evaluación agendada»
- *   (`advanceForAppointment`), presentar el presupuesto es «Presupuesto
- *   enviado» (`linkPresentedBudget`) y aceptarlo, del todo o en parte, es
- *   «Ganada» (`decideBudgetOpportunity`). Por eso las cifras coinciden.
+ *   tramo. Cada paso cuenta a quien llegó a él o a uno posterior: las cifras
+ *   nunca suben de un paso al siguiente y ninguna tasa pasa de 100 %. Sus
+ *   pasos son los momentos de Oportunidades (`SALE_MOMENTS`): agendar una cita
+ *   es «Evaluación agendada» (`advanceForAppointment`; cancelarla sin otra la
+ *   devuelve, `returnForCancelledAppointment`, y «No vino» no), presentar el
+ *   presupuesto es «Presupuesto enviado» (`linkPresentedBudget`) y aceptarlo,
+ *   del todo o en parte, es «Ganada» (`decideBudgetOpportunity`).
+ * - Paciente ≠ interlocutor: quien escribe por un paciente (su madre, quien lo
+ *   registró desde su conversación o con su enlace) no es otra persona que
+ *   nos buscó. Su mensaje es el primer contacto del paciente, con su canal, y
+ *   nadie se cuenta dos veces. Spam y bloqueados no cuentan (`screenedSql`).
  * - La aceptación es la del Resumen (`budgetAcceptanceMany`) y los pacientes
  *   nuevos, la de siempre (`newPatientsMany`): no hay dos definiciones.
  * - Las personas, sus conversaciones, presupuestos y controles no son de una
@@ -23,6 +28,7 @@
 import type { Db } from "@odentia/db"
 import { sql, type SQL } from "drizzle-orm"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
+import { screenedSql } from "./conversation-state.js"
 import { budgetAcceptanceMany } from "./report-summary.js"
 import { lastMonths } from "./report-periods.js"
 import {
@@ -39,7 +45,7 @@ import {
 } from "./report-scope.js"
 import { controlTotals, firstVisitSql, newPatientsMany, type ReportListRow } from "./reports.js"
 
-/** Los pasos del embudo, en orden: cada uno exige los anteriores. */
+/** Los pasos del embudo, en orden: cada uno cuenta a quien llegó a él o a uno posterior. */
 export const FUNNEL_STEPS = ["sought", "booked", "came", "budget", "accepted", "paid"] as const
 export type FunnelStep = (typeof FUNNEL_STEPS)[number]
 export type FunnelCounts = Record<FunnelStep, number>
@@ -64,13 +70,28 @@ function monthsBefore(column: SQL, months: number, timezone: string): SQL {
 }
 
 /**
- * El primer contacto de cada persona: su primer mensaje entrante (en
- * cualquier conversación y canal) o, si fue antes, su registro como paciente
- * (lo registró recepción o se registró en línea). Da `first_contact(person_id,
- * patient_id, first_at, channel, wrote)`: `channel` es el de esa primera
- * conversación (nulo si ese canal ya no existe), `recepcion` o
- * `registro_en_linea`; `wrote` dice si lo primero fue un mensaje.
+ * El primer contacto de cada persona, una fila por persona:
+ * `first_contact(person_id, patient_id, first_at, channel, writer_id)`.
+ * - Un paciente: lo primero entre su propio primer mensaje entrante (en
+ *   cualquier conversación y canal), el de quien escribió por él y lo
+ *   registró (`writer_id`: `patient_registration.context_contact_id` o la
+ *   persona de su `conversation_id`, si no es él) y su registro. De quien
+ *   escribió por él cuenta solo lo que escribió en la conversación de ese
+ *   registro en los `WRITER_LOOKBACK_DAYS` anteriores, no su primer mensaje de
+ *   siempre: una madre que es paciente desde hace un año y hoy registra a su
+ *   hijo trae al hijo hoy. `channel` es
+ *   el de esa conversación (nulo si ese canal ya no existe) o, si lo primero
+ *   fue el registro, `registro_en_linea` (lo llenó la persona: código QR,
+ *   enlace público o el enlace de una conversación) o `recepcion` (lo registró
+ *   el equipo).
+ * - Quien aún no es paciente: su primer mensaje entrante, salvo que escriba
+ *   por un paciente (vinculado sin ser `self`, o quien lo registró): esa
+ *   búsqueda es la del paciente y no se cuenta otra vez.
+ * Las conversaciones de quien está en Spam o bloqueado no cuentan.
  */
+/** Cuánto antes de un registro cuenta lo que escribió quien registró al paciente: la búsqueda que lo trajo. */
+export const WRITER_LOOKBACK_DAYS = 30
+
 export function firstContactSql(orgId: string): SQL {
   return sql`first_inbound as (
       select distinct on (c.contact_id) c.contact_id, fi.created_at as at, cc.channel
@@ -81,95 +102,107 @@ export function firstContactSql(orgId: string): SQL {
         order by m.created_at, m.id limit 1
       ) fi on true
       left join channel_connection cc on cc.organization_id = c.organization_id and cc.id = c.channel_connection_id
-      where c.organization_id = ${orgId}
+      where c.organization_id = ${orgId} and not ${screenedSql(sql.raw("c"))}
       order by c.contact_id, fi.created_at, c.id
     ), registered as (
-      select p.id as patient_id, p.person_id, p.created_at, r.entry_point
+      select p.id as patient_id, p.person_id, p.created_at, r.conversation_id,
+        nullif(coalesce(r.context_contact_id, rc.contact_id), p.person_id) as writer_id,
+        case when r.entry_point in ('public_link', 'qr') or (r.entry_point = 'conversation' and r.actor_user_id is null)
+          then 'registro_en_linea' else 'recepcion' end as registered_via
       from patient p
       left join patient_registration r on r.organization_id = p.organization_id and r.patient_id = p.id
+      left join conversation rc on rc.organization_id = r.organization_id and rc.id = r.conversation_id
       where p.organization_id = ${orgId}
     ), first_contact as (
-      select coalesce(r.person_id, i.contact_id) as person_id, r.patient_id,
-        least(i.at, r.created_at) as first_at,
-        (i.at is not null and (r.created_at is null or i.at <= r.created_at)) as wrote,
-        case
-          when i.at is not null and (r.created_at is null or i.at <= r.created_at) then i.channel
-          when r.entry_point in ('public_link', 'qr') then 'registro_en_linea'
-          else 'recepcion'
-        end as channel
-      from first_inbound i full join registered r on r.person_id = i.contact_id
+      select g.person_id, g.patient_id, k.at as first_at, k.channel, g.writer_id
+      from registered g
+      left join first_inbound own on own.contact_id = g.person_id
+      left join lateral (
+        select m.created_at as at, wcc.channel from message m
+        join conversation wc on wc.organization_id = m.organization_id and wc.id = m.conversation_id
+        left join channel_connection wcc on wcc.organization_id = wc.organization_id and wcc.id = wc.channel_connection_id
+        where g.writer_id is not null and m.organization_id = ${orgId} and m.conversation_id = g.conversation_id
+          and m.direction = 'in' and m.created_at <= g.created_at
+          and m.created_at > g.created_at - make_interval(days => ${WRITER_LOOKBACK_DAYS})
+          and not ${screenedSql(sql.raw("wc"))}
+        order by m.created_at, m.id limit 1
+      ) w on true
+      cross join lateral (
+        select x.at, x.channel from (values (own.at, own.channel, 0), (w.at, w.channel, 1), (g.created_at, g.registered_via, 2)) as x(at, channel, rank)
+        where x.at is not null order by x.at, x.rank limit 1
+      ) k
+      union all
+      select i.contact_id, null::uuid, i.at, i.channel, null::uuid
+      from first_inbound i
+      where not exists (select 1 from patient p where p.organization_id = ${orgId} and p.person_id = i.contact_id)
+        and not exists (select 1 from patient_contact v where v.organization_id = ${orgId} and v.contact_id = i.contact_id and v.relationship <> 'self')
+        and not exists (select 1 from registered g where g.writer_id = i.contact_id)
     )`
 }
 
 /**
  * Las personas cuyo primer contacto cae en `hull` y hasta dónde llegaron hasta
- * hoy: `funnel(person_id, patient_id, first_at, channel, wrote, booked, came,
- * budget, accepted, paid)`. Cada paso ocurre desde su primer contacto y exige
- * los anteriores: agendó (una cita creada desde entonces), vino (una de esas
- * citas, atendida), recibió presupuesto (presentado), lo aceptó (del todo o en
- * parte, según su estado a hoy) y pagó algo (un pago sin anular).
+ * hoy: `funnel(person_id, patient_id, first_at, channel, booked, came, budget,
+ * accepted, paid, stopped, conversation_id)`. Cada paso ocurre desde su primer
+ * contacto y cuenta a quien llegó a él o a uno posterior:
+ * - agendó: una cita sin cancelar («No vino» cuenta; cancelar sin otra no);
+ * - vino: una cita atendida o una atención firmada;
+ * - recibió presupuesto (presentado) y lo aceptó (del todo o en parte, según
+ *   su estado a hoy), sin exigir la cita atendida: la cita queda atendida al
+ *   firmar la atención, que puede seguir en borrador;
+ * - pagó algo: lo aceptó y tiene un pago sin anular.
+ * `stopped`: no agendó, preguntó algo y dejó de escribir (ninguna conversación
+ * suya ni de quien escribió por ella sigue abierta y nada llegó en los
+ * últimos `STOPPED_WRITING_DAYS` días). `conversation_id`: de quien aún no es
+ * paciente, su conversación más reciente.
  */
-export function funnelSql(orgId: string, hull: Span): SQL {
-  return sql`with ${firstContactSql(orgId)}, reached as (
+export function funnelSql(orgId: string, hull: Span, now: Date): SQL {
+  const quietSince = at(new Date(now.getTime() - STOPPED_WRITING_DAYS * DAY_MS))
+  return sql`with ${firstContactSql(orgId)}, cohort as (
+      select * from first_contact k where k.first_at >= ${at(hull.start)} and k.first_at < ${at(hull.end)}
+    ), reached as (
       select k.*,
         exists (select 1 from appointment a where a.organization_id = ${orgId} and a.patient_id = k.patient_id
-          and a.created_at >= k.first_at) as booked,
+          and a.created_at >= k.first_at and a.status <> 'cancelada') as booked,
         exists (select 1 from appointment a where a.organization_id = ${orgId} and a.patient_id = k.patient_id
-          and a.created_at >= k.first_at and a.status = 'atendida') as came,
+          and a.created_at >= k.first_at and a.status = 'atendida')
+          or exists (select 1 from encounter e where e.organization_id = ${orgId} and e.patient_id = k.patient_id
+            and e.status = 'finalizada' and e.finalized_at >= k.first_at) as came,
         exists (select 1 from treatment_budget b where b.organization_id = ${orgId} and b.patient_id = k.patient_id
           and ${PRESENTED_BUDGET} and b.presented_at >= k.first_at) as budget,
         exists (select 1 from treatment_budget b where b.organization_id = ${orgId} and b.patient_id = k.patient_id
           and b.status in ('aceptado','parcial') and b.presented_at >= k.first_at) as accepted,
         exists (select 1 from patient_payment y where y.organization_id = ${orgId} and y.patient_id = k.patient_id
           and y.voided_at is null and y.paid_at >= k.first_at) as paid
-      from first_contact k
-      where k.first_at >= ${at(hull.start)} and k.first_at < ${at(hull.end)}
+      from cohort k
+    ), talk as (
+      -- Una fila por persona del tramo y por quien escribió por ella: si algo sigue abierto, lo último que llegó y la conversación más reciente.
+      select c.contact_id, bool_or(c.status = 'open') as open, max(c.last_inbound_at) as last_in,
+        (array_agg(c.id order by c.last_message_at desc nulls last, c.created_at desc, c.id))[1] as latest
+      from conversation c
+      where c.organization_id = ${orgId}
+        and c.contact_id in (select person_id from cohort union all select writer_id from cohort where writer_id is not null)
+      group by c.contact_id
     ), funnel as (
-      select person_id, patient_id, first_at, channel, wrote,
-        booked,
-        booked and came as came,
-        booked and came and budget as budget,
-        booked and came and budget and accepted as accepted,
-        booked and came and budget and accepted and paid as paid
-      from reached
+      select r.person_id, r.patient_id, r.first_at, r.channel,
+        r.booked or r.came or r.budget as booked,
+        r.came or r.budget as came,
+        -- Aceptar exige un presupuesto presentado: ya está dentro de «budget».
+        r.budget,
+        r.accepted,
+        r.accepted and r.paid as paid,
+        not (r.booked or r.came or r.budget)
+          and coalesce(greatest(tp.last_in, tw.last_in) < ${quietSince}, false)
+          and not coalesce(tp.open or tw.open, false) as stopped,
+        case when r.patient_id is null then tp.latest end as conversation_id
+      from reached r
+      left join talk tp on tp.contact_id = r.person_id
+      left join talk tw on tw.contact_id = r.writer_id
     )`
-}
-
-/**
- * Preguntaron algo y dejaron de escribir: tienen una conversación con algo
- * suyo, ninguna sigue abierta y nada suyo llegó en los últimos
- * `STOPPED_WRITING_DAYS` días. Condición sobre una fila de `funnel` (`f`).
- */
-function stoppedWritingSql(orgId: string, now: Date): SQL {
-  return sql`(exists (select 1 from conversation c where c.organization_id = ${orgId} and c.contact_id = f.person_id and c.last_inbound_at is not null)
-    and not exists (select 1 from conversation c where c.organization_id = ${orgId} and c.contact_id = f.person_id
-      and (c.status = 'open' or c.last_inbound_at >= ${at(new Date(now.getTime() - STOPPED_WRITING_DAYS * DAY_MS))})))`
 }
 
 function emptyFunnel(): FunnelCounts {
   return { sought: 0, booked: 0, came: 0, budget: 0, accepted: 0, paid: 0 }
-}
-
-/** El embudo de cada tramo: las personas que nos buscaron en él y hasta dónde llegaron hasta hoy. De toda la clínica. */
-export async function funnelMany(tx: Db, orgId: string, spans: Span[]): Promise<FunnelCounts[]> {
-  const rows = await tx.execute<{ idx: number } & FunnelCounts>(sql`
-    ${funnelSql(orgId, hullOf(spans))}
-    select s.idx, count(*)::int as sought,
-      count(*) filter (where f.booked)::int as booked,
-      count(*) filter (where f.came)::int as came,
-      count(*) filter (where f.budget)::int as budget,
-      count(*) filter (where f.accepted)::int as accepted,
-      count(*) filter (where f.paid)::int as paid
-    from funnel f join ${spansSql(spans, "s")} on f.first_at >= s.start_at and f.first_at < s.end_at
-    group by s.idx`)
-  return bySpan(spans, [...rows], emptyFunnel, (_, row) => ({
-    sought: row.sought,
-    booked: row.booked,
-    came: row.came,
-    budget: row.budget,
-    accepted: row.accepted,
-    paid: row.paid,
-  }))
 }
 
 export type FunnelChannel = {
@@ -179,21 +212,36 @@ export type FunnelChannel = {
   came: number
 }
 
+/** El embudo de un tramo, por dónde nos buscaron (y cuántos vinieron) y cuántos de los que no agendaron dejaron de escribir. */
+export type FunnelOfSpan = { counts: FunnelCounts; channels: FunnelChannel[]; stopped: number }
+
 /**
- * Por dónde nos buscaron las personas del tramo (el canal de su primera
- * conversación, que lo sabe el sistema) y cuántas vinieron; y cuántas de las
- * que no agendaron dejaron de escribir.
+ * El embudo de cada tramo: las personas que nos buscaron en él y hasta dónde
+ * llegaron hasta hoy, por canal. De toda la clínica. Una sola consulta para
+ * los pasos, los canales y quienes dejaron de escribir.
  */
-export async function funnelChannels(tx: Db, orgId: string, span: Span, now: Date): Promise<{ channels: FunnelChannel[]; stopped: number }> {
-  const rows = await tx.execute<FunnelChannel & { stopped: number }>(sql`
-    ${funnelSql(orgId, span)}
-    select f.channel, count(*)::int as sought, count(*) filter (where f.came)::int as came,
-      count(*) filter (where not f.booked and ${stoppedWritingSql(orgId, now)})::int as stopped
-    from funnel f group by f.channel order by sought desc, f.channel`)
-  return {
-    channels: rows.map((row) => ({ channel: row.channel, sought: row.sought, came: row.came })),
-    stopped: rows.reduce((total, row) => total + row.stopped, 0),
-  }
+export async function funnelMany(tx: Db, orgId: string, spans: Span[], now: Date = new Date()): Promise<FunnelOfSpan[]> {
+  const rows = await tx.execute<{ idx: number; channel: string | null; stopped: number } & FunnelCounts>(sql`
+    ${funnelSql(orgId, hullOf(spans), now)}
+    select s.idx, f.channel, count(*)::int as sought,
+      count(*) filter (where f.booked)::int as booked,
+      count(*) filter (where f.came)::int as came,
+      count(*) filter (where f.budget)::int as budget,
+      count(*) filter (where f.accepted)::int as accepted,
+      count(*) filter (where f.paid)::int as paid,
+      count(*) filter (where f.stopped)::int as stopped
+    from funnel f join ${spansSql(spans, "s")} on f.first_at >= s.start_at and f.first_at < s.end_at
+    group by s.idx, f.channel order by s.idx, sought desc, f.channel`)
+  return bySpan(
+    spans,
+    [...rows],
+    (): FunnelOfSpan => ({ counts: emptyFunnel(), channels: [], stopped: 0 }),
+    (span, row) => ({
+      counts: Object.fromEntries(FUNNEL_STEPS.map((step) => [step, span.counts[step] + row[step]])) as FunnelCounts,
+      channels: [...span.channels, { channel: row.channel, sought: row.sought, came: row.came }],
+      stopped: span.stopped + row.stopped,
+    }),
+  )
 }
 
 /** Cómo nos conocieron los pacientes nuevos de cada tramo (su primera cita atendida cae dentro); `kind` nulo: no lo dijeron. */
@@ -308,10 +356,15 @@ function stillOpen(end: Date, now: Date): boolean {
  */
 export async function getReportFunnel(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
   const scope = await reportScope(tx, orgId, query, now)
-  const [current, previous] = await funnelMany(tx, orgId, [scope.window, scope.window.previous])
+  const [current, previous] = await funnelMany(tx, orgId, [scope.window, scope.window.previous], now)
   return {
     ...reportHead(scope),
-    funnel: { current: current ?? emptyFunnel(), previous: previous ?? emptyFunnel(), open: stillOpen(scope.window.end, now), openDays: FUNNEL_OPEN_DAYS },
+    funnel: {
+      current: current?.counts ?? emptyFunnel(),
+      previous: previous?.counts ?? emptyFunnel(),
+      open: stillOpen(scope.window.end, now),
+      openDays: FUNNEL_OPEN_DAYS,
+    },
     /** Las personas no son de una sede. */
     wholeClinic: scope.branch ? (["funnel"] as const) : ([] as const),
   }
@@ -323,9 +376,8 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
   const spans: Span[] = [window, window.previous]
   // «Volvieron en el año» lleva su línea de 12 meses, que terminan en el último mes del periodo.
   const months = lastMonths(scope.timezone, window.to, 12, window.end)
-  const [funnel, detail, fresh, acceptance, active, returned, referral, controls, previousControls, lapsed] = [
-    await funnelMany(tx, orgId, spans),
-    await funnelChannels(tx, orgId, window, now),
+  const [funnel, fresh, acceptance, active, returned, referral, controls, previousControls, lapsed] = [
+    await funnelMany(tx, orgId, spans, now),
     await newPatientsMany(tx, orgId, scope, spans),
     await budgetAcceptanceMany(tx, orgId, spans),
     await activePatientsMany(tx, orgId, scope, [window.end, window.previous.end]),
@@ -336,20 +388,21 @@ export async function getReportPatients(tx: Db, orgId: string, query: ReportQuer
     await lapsedCount(tx, orgId, scope),
   ]
   const nth = <T>(list: T[], index: number): T => list[index] as T
+  const current = nth(funnel, 0)
   return {
     ...reportHead(scope),
     /** Los 12 meses de la línea de «Volvieron en el año». */
     months: months.map(serializeBucket),
     funnel: {
-      current: nth(funnel, 0),
-      previous: nth(funnel, 1),
+      current: current.counts,
+      previous: nth(funnel, 1).counts,
       open: stillOpen(window.end, now),
       openDays: FUNNEL_OPEN_DAYS,
       /** De las que no agendaron, cuántas preguntaron algo y dejaron de escribir. */
-      stopped: detail.stopped,
+      stopped: current.stopped,
       stoppedDays: STOPPED_WRITING_DAYS,
     },
-    channels: detail.channels,
+    channels: current.channels,
     newPatients: { current: nth(fresh, 0), previous: nth(fresh, 1) },
     acceptance: { current: nth(acceptance, 0), previous: nth(acceptance, 1) },
     active: { current: nth(active, 0), previous: nth(active, 1), months: ACTIVE_MONTHS },
@@ -393,8 +446,8 @@ export type PatientReportListRow = Omit<ReportListRow, "patientId"> & {
   /** Null: la persona escribió pero aún no es paciente. */
   patientId: string | null
   personId: string
-  /** Canal por el que nos buscó, en las listas del embudo. */
-  channel: string | null
+  /** Canal por el que nos buscó: solo en las listas del embudo (en las demás no viaja). */
+  channel?: string | null
   /** De quien aún no es paciente, su conversación más reciente: la fila lleva a la Bandeja. */
   conversationId: string | null
 }
@@ -402,7 +455,7 @@ export type PatientReportListRow = Omit<ReportListRow, "patientId"> & {
 const LIST_LIMIT = 200
 
 /** Quiénes están en cada paso del embudo o se cayeron en él. */
-const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "funnel_stopped" | "controls_missed" | "lapsed">, SQL> = {
+const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "controls_missed" | "lapsed">, SQL> = {
   funnel_sought: sql`true`,
   funnel_booked: sql`f.booked`,
   funnel_came: sql`f.came`,
@@ -414,6 +467,7 @@ const FUNNEL_WHERE: Record<Exclude<PatientReportListKey, "funnel_stopped" | "con
   funnel_lost_budget: sql`f.came and not f.budget`,
   funnel_lost_accepted: sql`f.budget and not f.accepted`,
   funnel_lost_paid: sql`f.accepted and not f.paid`,
+  funnel_stopped: sql`f.stopped`,
 }
 
 export async function getPatientReportList(
@@ -437,7 +491,7 @@ export async function getPatientReportList(
         select f.id, f.due_at as at, f.patient_id as "patientId", pp.id as "personId", pp.display_name as "personName",
           f.title, null::text as "professionalName", null::text as "branchName",
           ${nextAppointment(sql`f.patient_id`)} as "hasNextAppointment",
-          null::text as cents, null::text as currency, null::text as channel, null::uuid as "conversationId", count(*) over()::int as total
+          null::text as cents, null::text as currency, null::uuid as "conversationId", count(*) over()::int as total
         from clinical_follow_up f
         left join encounter e on e.id = f.completed_encounter_id and e.organization_id = ${orgId}
         join patient p on p.id = f.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
@@ -451,7 +505,7 @@ export async function getPatientReportList(
         with ${lapsedSql(orgId, scope, now)}
         select v.patient_id::text as id, v.starts_at as at, v.patient_id as "patientId", pp.id as "personId", pp.display_name as "personName",
           v.service_name as title, u.name as "professionalName", br.name as "branchName",
-          false as "hasNextAppointment", null::text as cents, null::text as currency, null::text as channel, null::uuid as "conversationId", count(*) over()::int as total
+          false as "hasNextAppointment", null::text as cents, null::text as currency, null::uuid as "conversationId", count(*) over()::int as total
         from lapsed v
         join patient p on p.id = v.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         left join branch br on br.id = v.branch_id and br.organization_id = ${orgId}
@@ -459,20 +513,16 @@ export async function getPatientReportList(
         order by v.starts_at, v.patient_id limit ${LIST_LIMIT}`)),
     ]
   } else {
-    const where = query.list === "funnel_stopped" ? sql`not f.booked and ${stoppedWritingSql(orgId, now)}` : FUNNEL_WHERE[query.list]
     rows = [
       ...(await tx.execute<Row>(sql`
-        ${funnelSql(orgId, window)}
+        ${funnelSql(orgId, window, now)}
         select f.person_id::text as id, f.first_at as at, f.patient_id as "patientId", f.person_id as "personId", pp.display_name as "personName",
           null::text as title, null::text as "professionalName", null::text as "branchName",
           (f.patient_id is not null and ${nextAppointment(sql`f.patient_id`)}) as "hasNextAppointment",
-          null::text as cents, null::text as currency, f.channel,
-          case when f.patient_id is null then (
-            select c.id from conversation c where c.organization_id = ${orgId} and c.contact_id = f.person_id
-            order by c.last_message_at desc nulls last, c.created_at desc, c.id limit 1) end as "conversationId",
+          null::text as cents, null::text as currency, f.channel, f.conversation_id as "conversationId",
           count(*) over()::int as total
         from funnel f join contact pp on pp.organization_id = ${orgId} and pp.id = f.person_id
-        where ${where}
+        where ${FUNNEL_WHERE[query.list]}
         order by f.first_at desc, f.person_id limit ${LIST_LIMIT}`)),
     ]
   }
@@ -480,6 +530,10 @@ export async function getPatientReportList(
   return {
     ...reportHead(scope),
     list: query.list,
+    /** Las personas del embudo y los controles no son de una sede: con una sede elegida, la lista es de toda la clínica. */
+    wholeClinic: scope.branch !== null && query.list !== "lapsed",
+    /** Los plazos con que se arma la lista, para decirlos en «Cómo se calcula». */
+    rules: { stoppedDays: STOPPED_WRITING_DAYS, lapsedMonths: LAPSED_MONTHS },
     /** Filas que existen; la respuesta trae como mucho `LIST_LIMIT`. */
     total: rows[0]?.total ?? 0,
     rows: rows.map(({ total: _total, cents: _cents, at: when, ...row }) => ({

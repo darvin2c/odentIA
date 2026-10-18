@@ -26,9 +26,11 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addPlanItem } from "./plan.js"
+import { getAgendaReport } from "./report-agenda.js"
+import { reportScope } from "./report-scope.js"
 import {
+  controlTotals,
   getReportAdvice,
-  getReportAgenda,
   getReportList,
   getReportMoney,
   getReportSales,
@@ -114,41 +116,38 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   await c.visit(a, ana, p5, "2026-10-05T15:00:00Z", "atendida")
   await c.visit(a, ana, p2, "2026-10-20T15:00:00Z", "programada")
 
-  const september = await c.run((tx) => getReportAgenda(tx, c.orgId, { period: "2026-09" }, NOW))
-  expect(september.appointments).toEqual({ total: 7, attended: 4, noShow: 1, cancelled: 1, unmarked: 1 })
-  expect(september.previousAppointments).toEqual({ total: 3, attended: 2, noShow: 1, cancelled: 0, unmarked: 0 })
-  expect(september.byProfessional).toEqual([
-    { userId: ana, name: "Ana", total: 4, attended: 2, noShow: 1 },
-    { userId: luis, name: "Luis", total: 3, attended: 2, noShow: 0 },
+  const september = await c.run((tx) => getAgendaReport(tx, c.orgId, { period: "2026-09" }, NOW))
+  expect(september.appointments.current).toEqual({ total: 7, attended: 4, noShow: 1, cancelled: 1, unmarked: 1 })
+  expect(september.appointments.previous).toEqual({ total: 3, attended: 2, noShow: 1, cancelled: 0, unmarked: 0 })
+  expect(
+    september.professionals.map(({ userId, name, attended, noShow, cancelled, unmarked }) => ({ userId, name, attended, noShow, cancelled, unmarked })),
+  ).toEqual([
+    { userId: ana, name: "Ana", attended: 2, noShow: 1, cancelled: 0, unmarked: 1 },
+    { userId: luis, name: "Luis", attended: 2, noShow: 0, cancelled: 1, unmarked: 0 },
   ])
-  expect(september.bySource).toEqual([
-    { source: "recepcion", count: 5 },
-    { source: "agent", count: 1 },
-    { source: "enlace", count: 1 },
-  ])
-  // Un solo mes no trae serie; varios meses, una fila por mes.
-  expect(september.series).toEqual([])
 
-  const onlyA = await c.run((tx) => getReportAgenda(tx, c.orgId, { period: "2026-09", branchId: a.branchId }, NOW))
-  expect(onlyA.appointments).toEqual({ total: 4, attended: 2, noShow: 1, cancelled: 0, unmarked: 1 })
+  const onlyA = await c.run((tx) => getAgendaReport(tx, c.orgId, { period: "2026-09", branchId: a.branchId }, NOW))
+  expect(onlyA.appointments.current).toEqual({ total: 4, attended: 2, noShow: 1, cancelled: 0, unmarked: 1 })
   expect(onlyA.branch).toEqual({ id: a.branchId, name: "Sede A" })
 
   // El mes en curso no cuenta lo que aún no ocurre y se compara con los mismos días de septiembre.
-  const october = await c.run((tx) => getReportAgenda(tx, c.orgId, { period: "este_mes" }, NOW))
-  expect(october.appointments).toEqual({ total: 1, attended: 1, noShow: 0, cancelled: 0, unmarked: 0 })
-  expect(october.previousAppointments.total).toBe(6)
+  const october = await c.run((tx) => getAgendaReport(tx, c.orgId, { period: "este_mes" }, NOW))
+  expect(october.appointments.current).toEqual({ total: 1, attended: 1, noShow: 0, cancelled: 0, unmarked: 0 })
+  expect(october.appointments.previous.total).toBe(6)
   expect(october.period.partial).toBe(true)
 
-  const quarter = await c.run((tx) => getReportAgenda(tx, c.orgId, { period: "ultimos_3_meses" }, NOW))
-  expect(quarter.series.map((row) => [row.month, row.attended])).toEqual([
-    [7, 0],
-    [8, 2],
-    [9, 4],
+  // Varios meses: su línea de 12 meses termina en el último del periodo.
+  const quarter = await c.run((tx) => getAgendaReport(tx, c.orgId, { period: "ultimos_3_meses" }, NOW))
+  const lastThree = quarter.appointments.months.slice(-3)
+  expect(quarter.months.slice(-3).map((month, index) => [month.key, lastThree[index]?.attended])).toEqual([
+    ["2026-07", 0],
+    ["2026-08", 2],
+    ["2026-09", 4],
   ])
 
   // La lista tiene tantas filas como dice la cifra, y avisa de quien ya tiene otra cita.
   const noShow = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "no_show" }, NOW))
-  expect(noShow.total).toBe(september.appointments.noShow)
+  expect(noShow.total).toBe(september.appointments.current.noShow)
   expect(noShow.rows).toEqual([
     expect.objectContaining({ patientId: p4, personName: "Cuatro", title: "Evaluación", professionalName: "Ana", branchName: "Sede A", hasNextAppointment: false }),
   ])
@@ -170,15 +169,15 @@ it("agenda: cada cita cae en un solo grupo, por su fecha en la zona de la clíni
   // El Resumen dice las mismas cifras que su pestaña: son la misma consulta por tramos.
   const summary = await c.run((tx) => getReportSummary(tx, c.orgId, { period: "2026-09" }, NOW))
   expect(summary.newPatients).toMatchObject({ current: 2, previous: 2 })
-  expect(summary.noShow.current).toEqual({ noShow: september.appointments.noShow, total: september.appointments.total })
-  expect(summary.noShow.previous).toEqual({ noShow: september.previousAppointments.noShow, total: september.previousAppointments.total })
+  expect(summary.noShow.current).toEqual({ noShow: september.appointments.current.noShow, total: september.appointments.current.total })
+  expect(summary.noShow.previous).toEqual({ noShow: september.appointments.previous.noShow, total: september.appointments.previous.total })
   // Doce meses que terminan en septiembre: el último es el periodo.
   expect(summary.months.map((month) => month.key).slice(-2)).toEqual(["2026-08", "2026-09"])
   expect(summary.newPatients.months.slice(-2)).toEqual([2, 2])
   expect(summary.collected).toMatchObject({ current: 0, previous: 0 })
   // Un rango usa la misma cifra: del 3 al 9 de septiembre hubo cuatro citas que ya pasaron.
-  const range = await c.run((tx) => getReportAgenda(tx, c.orgId, { period: "2026-09-03..2026-09-09" }, NOW))
-  expect(range.appointments).toEqual({ total: 5, attended: 3, noShow: 1, cancelled: 1, unmarked: 0 })
+  const range = await c.run((tx) => getAgendaReport(tx, c.orgId, { period: "2026-09-03..2026-09-09" }, NOW))
+  expect(range.appointments.current).toEqual({ total: 5, attended: 3, noShow: 1, cancelled: 1, unmarked: 0 })
   expect(range.period).toMatchObject({ kind: "range", grain: "day", days: { from: "2026-09-03", to: "2026-09-09" } })
 })
 
@@ -211,11 +210,12 @@ it("controles: los que tocaban en el periodo, según su estado a hoy", async () 
     { organizationId: c.orgId, patientId: p2, kind: "mantenimiento", title: "Control antiguo", dueAt: new Date("2026-09-17T15:00:00Z"), status: "realizado" },
     { organizationId: c.orgId, patientId: p1, kind: "mantenimiento", title: "Control de octubre", dueAt: new Date("2026-10-20T15:00:00Z") },
   ])
-  const report = await c.run((tx) => getReportAgenda(tx, c.orgId, { period: "2026-09" }, NOW))
-  expect(report.controls).toEqual({ due: 3, came: 0, pending: 1, cancelled: 1, unknown: 1 })
-  expect(report.wholeClinic).toEqual([])
+  // La misma cuenta que usa Reportes › Pacientes.
+  const september = await c.run((tx) => reportScope(tx, c.orgId, { period: "2026-09" }, NOW))
+  const controls = await c.run((tx) => controlTotals(tx, c.orgId, september.window))
+  expect(controls).toEqual({ due: 3, came: 0, pending: 1, cancelled: 1, unknown: 1 })
   const pending = await c.run((tx) => getReportList(tx, c.orgId, { period: "2026-09", list: "controls_pending" }, NOW))
-  expect(pending.total).toBe(report.controls.pending)
+  expect(pending.total).toBe(controls.pending)
   expect(pending.rows).toEqual([expect.objectContaining({ patientId: p1, title: "Control de limpieza" })])
 })
 

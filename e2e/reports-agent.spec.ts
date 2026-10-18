@@ -150,9 +150,12 @@ for (const width of [1440, 390]) {
     await expect(did.getByRole("region", { name: "Consultas dictadas" })).toContainText("2")
 
     // Lo pagado con las cuentas de la factura, en dólares; lo cobrado en sus citas, en soles. Sin convertir ni «ganó».
-    const money = page.getByRole("region", { name: "Lo que pagaste por el agente y lo que te trajo" })
+    const money = page.getByRole("region", { name: "Lo que pagaste por el agente y lo cobrado en sus citas" })
     await expect(money).toContainText("USD 34.80")
-    await expect(money).toContainText("Conversaciones atendidas · 60 × 0.50")
+    // La línea que se cobra dice la regla de Facturación: no es la cifra «Conversaciones que atendió».
+    await expect(money).toContainText("Recepción: 60 conversaciones atendidas")
+    await expect(money).toContainText("Una por persona cada 24 horas")
+    await expect(money).toContainText("USD 0.50 cada una")
     await expect(money).toContainText("El crédito del plan cubrió USD 29.00; USD 5.80 se cobraron aparte.")
     await expect(money).toContainText("Sin el IGV, que tu factura suma aparte.")
     await expect(money.getByRole("link", { name: "Ver en Facturación" })).toHaveAttribute("href", new RegExp(`/billing/${owner.org.id}$`))
@@ -171,6 +174,8 @@ for (const width of [1440, 390]) {
     await expect(list.getByRole("link", { name: "Luis Paredes" })).toBeVisible()
     await expect(list.getByRole("link", { name: "Carla Soto" })).toHaveCount(0)
     await expect(list).toContainText("S/ 250.00")
+    // La fecha de la fila es la de la reserva (la del filtro); la de la cita va en el texto.
+    await expect(list).toContainText("Cita el")
     await expect(list.getByText("Cómo se calcula")).toBeVisible()
     await observe(page, info, "agente-citas")
     await page.keyboard.press("Escape")
@@ -194,6 +199,20 @@ for (const width of [1440, 390]) {
     await expect(summary).toContainText("y recuperó 1 cita · S/ 430.00 cobrados en esas citas")
   })
 }
+
+test("En una cuenta demo no se dice «pagaste»: se cuenta lo mismo y se avisa, como en Facturación", async ({ owner, fixtureDb }, info) => {
+  await lastMonth(fixtureDb, owner)
+  await fixtureDb.update(saasSubscription).set({ isDemo: true }).where(eq(saasSubscription.organizationId, owner.org.id))
+  const page = owner.page
+  await page.setViewportSize({ width: 1440, height: 844 })
+  await gotoHydrated(page, tenant(owner.org.slug, "/reports?tab=agente&period=mes_pasado"))
+  const money = page.getByRole("region", { name: "Lo que se contó por el agente y lo cobrado en sus citas" })
+  await expect(money).toContainText("Cuenta demo: se cuenta lo que hacen los agentes, pero no se cobra.")
+  await expect(money).toContainText("USD 34.80")
+  await expect(money).not.toContainText("Lo que pagaste")
+  await expect(money).not.toContainText("se cobraron aparte")
+  await observe(page, info, "agente-demo")
+})
 
 test("Agente es de quien dirige: recepción no lo ve y el servidor lo rechaza", async ({ owner, fixtureDb }) => {
   await fixtureDb.update(member).set({ role: "reception" }).where(and(eq(member.organizationId, owner.org.id), eq(member.userId, owner.user.id)))

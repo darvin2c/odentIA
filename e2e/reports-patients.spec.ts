@@ -3,7 +3,7 @@ import type { Db } from "@odentia/db"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patient, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
-import type { Page, TestInfo } from "@playwright/test"
+import type { Locator, Page, TestInfo } from "@playwright/test"
 import { sql } from "drizzle-orm"
 import { PANEL, tenant } from "./env"
 import { call, chooseOption, expect, fillPatientNames, test, type OwnerFixture, writtenDate } from "./fixtures"
@@ -59,9 +59,10 @@ async function fourPeople(db: Db, owner: OwnerFixture) {
     startsAt: lastMonth(8), endsAt: new Date(lastMonth(8).getTime() + 30 * 60_000), durationMin: 30, status: "atendida", createdAt: lastMonth(5),
   })
   const [plan] = await db.insert(treatmentPlan).values({ organizationId, patientId: luciaPatient, title: "Plan" }).returning({ id: treatmentPlan.id })
+  // Recibió el presupuesto el mes pasado y lo aceptó este mes, después del periodo.
   await db.insert(treatmentBudget).values({
     organizationId, patientId: luciaPatient, planId: plan!.id, budgetNumber: 1, title: "Ortodoncia", currency: "PEN",
-    status: "aceptado", presentedAt: lastMonth(9), decidedAt: lastMonth(12),
+    status: "aceptado", presentedAt: lastMonth(9), decidedAt: new Date(),
   })
   const rosa = await person("Rosa Quispe", lastMonth(6))
   const rosaPatient = randomUUID()
@@ -96,7 +97,7 @@ for (const width of [1440, 375]) {
       await expect(figures).toContainText("Nos buscaron por primera vez")
       await expect(figures).toContainText("Escribieron o los registró recepción")
       const funnel = page.getByRole("region", { name: "Dónde se caen los pacientes" })
-      // Las mismas personas paso a paso: Lucía aceptó en el mes y cuenta, aunque haya decidido después.
+      // Las mismas personas paso a paso: Lucía nos buscó el mes pasado y aceptó este mes, después del periodo, y cuenta.
       await expect(funnel.getByRole("button", { name: /^Nos buscaron: 4/ })).toBeVisible()
       await expect(funnel.getByRole("button", { name: /^Agendaron: 2\. 50 %/ })).toBeVisible()
       await expect(funnel.getByRole("button", { name: /^Aceptaron: 1\. 100 %/ })).toBeVisible()
@@ -113,7 +114,8 @@ for (const width of [1440, 375]) {
       const booked = surface(page, { name: "Agendaron" }).first()
       await expect(booked.getByRole("link", { name: "Lucía Ramos" })).toBeVisible()
       await expect(booked.getByRole("link", { name: "Rosa Quispe" })).toBeVisible()
-      await expect(booked.getByText("Ya tiene otra cita")).toBeVisible()
+      // Rosa tiene una sola cita, la que viene: no es «otra».
+      await expect(booked.getByText("Tiene cita por venir")).toBeVisible()
       await expect(booked.getByText("Cómo se calcula")).toBeVisible()
       await observe(page, info, "lista-agendaron")
       await page.keyboard.press("Escape")
@@ -191,21 +193,32 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
   })
   const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } })
   const anon = await context.newPage()
-  const next = () => anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+  const progress = anon.getByText(/^Paso \d+ de \d+$/)
+  // Un paso por pantalla: lo opcional se salta y en salud se contesta «No».
+  const advanceTo = async (target: Locator) => {
+    for (let step = 0; step < 8 && !(await target.isVisible()); step += 1) {
+      for (const question of [/alérgic/, /alguna enfermedad/, /algún medicamento/]) {
+        const group = anon.getByRole("group", { name: question })
+        if (await group.isVisible()) await group.getByRole("button", { name: "No", exact: true }).click()
+      }
+      const before = await progress.textContent()
+      const skip = anon.getByRole("button", { name: "Saltar", exact: true })
+      await ((await skip.isVisible()) ? skip : anon.getByRole("button", { name: "Siguiente", exact: true })).click()
+      await expect(progress).not.toHaveText(before ?? "")
+    }
+    await expect(target).toBeVisible()
+  }
   try {
     await gotoHydrated(anon, tenant(owner.org.slug, "/registro?via=qr"))
+    await anon.getByRole("radio", { name: "Para mí" }).click()
+    await advanceTo(anon.getByLabel(/^Nombres/))
     await fillPatientNames(anon, "Olga Referida")
     await anon.getByLabel("Fecha de nacimiento").fill(writtenDate("1985-06-15"))
-    await next()
-    await anon.getByLabel(/^Teléfono(?: \*)?$/).fill("+51999300301")
-    await next()
-    for (const question of ["¿Tiene alergias?", "¿Tiene alguna enfermedad actual?", "¿Toma medicación actualmente?"]) {
-      await anon.getByLabel(question).click()
-      await anon.getByRole("option", { name: "No", exact: true }).click()
-    }
-    await next()
+    await advanceTo(anon.getByLabel(/^Teléfono/))
+    await anon.getByLabel(/^Teléfono/).fill("+51999300301")
     // «Para conocerte mejor»: una lista, no texto libre; «¿Cuál?» aparece con «Otro» y se va con otra opción.
     const kind = anon.getByRole("combobox", { name: /^Cómo nos conoció/ })
+    await advanceTo(kind)
     const which = anon.getByLabel("¿Cuál?", { exact: true })
     await expect(which).toHaveCount(0)
     await chooseOption(kind, { label: "Otro" })
@@ -213,8 +226,9 @@ test("registro en línea: «Cómo nos conoció» es la misma lista cuando la cl�
     await chooseOption(kind, { label: "Recomendación de alguien" })
     await expect(which).toHaveCount(0)
     await info.attach("registro-en-linea", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
-    await next()
-    await anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
+    const consent = anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ })
+    await advanceTo(consent)
+    await consent.check()
     await anon.getByRole("button", { name: "Enviar registro", exact: true }).click()
     await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible({ timeout: 20_000 })
   } finally {

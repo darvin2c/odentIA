@@ -100,7 +100,10 @@ async function screenBlockers(tx: Db, orgId: string, topic: HelpTopic | undefine
   if (topic.id === "agenda" || topic.id === "disponibilidad") {
     const chairs = await total(tx.select({ total: count() }).from(scheduleChair).where(and(eq(scheduleChair.organizationId, orgId), eq(scheduleChair.isActive, true))))
     if (chairs === 0) out.push({ text: "No hay ninguna unidad dental creada. Sin unidad dental no se puede reservar una cita.", ...at("disponibilidad") })
-    const schedules = await total(tx.select({ total: count() }).from(professionalSchedule).where(eq(professionalSchedule.organizationId, orgId)))
+    // Solo el vigente: cambiar un horario deja cerrado el anterior (ADR 0060), y ese ya no reserva nada.
+    const schedules = await total(
+      tx.select({ total: count() }).from(professionalSchedule).where(and(eq(professionalSchedule.organizationId, orgId), eq(professionalSchedule.isActive, true))),
+    )
     if (schedules === 0) out.push({ text: "Ningún profesional tiene horario de atención. Sin horario no aparecen en la agenda ni se les puede reservar.", ...at("disponibilidad") })
     const services = await total(tx.select({ total: count() }).from(serviceCatalog).where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.isActive, true))))
     if (services === 0) out.push({ text: "Todavía no hay servicios en la clínica; las citas se pueden reservar, pero sin servicio ni duración sugerida.", ...at("servicios") })

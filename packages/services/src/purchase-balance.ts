@@ -62,11 +62,15 @@ type BalanceRow = {
   createdAt: Date | string
 }
 
-/** Lo que vale cada orden y lo que se le pagó, hoy. */
+/**
+ * Lo que vale cada orden y lo que se le pagó, hoy. Con `dueOnly`, solo las que
+ * tienen algo recibido sin pagar (`dueCents > 0`), filtradas en la consulta:
+ * quien pone un tope después no deja fuera una compra vieja.
+ */
 export async function purchaseBalances(
   tx: Db,
   orgId: string,
-  filter: { orderIds?: string[]; supplierId?: string; currency?: string; openOnly?: boolean } = {},
+  filter: { orderIds?: string[]; supplierId?: string; currency?: string; openOnly?: boolean; dueOnly?: boolean } = {},
 ): Promise<PurchaseBalance[]> {
   const where: SQL[] = [sql`o.organization_id = ${orgId}`]
   if (filter.orderIds) {
@@ -76,6 +80,9 @@ export async function purchaseBalances(
   if (filter.supplierId) where.push(sql`o.supplier_id = ${filter.supplierId}`)
   if (filter.currency) where.push(sql`o.currency = ${filter.currency}`)
   if (filter.openOnly) where.push(sql`o.status in ('confirmada','parcialmente_recibida','recibida')`)
+  // La misma regla que `dueCents` abajo: una cancelada no debe nada; las demás, lo recibido menos lo pagado.
+  if (filter.dueOnly)
+    where.push(sql`o.status <> 'cancelada' and coalesce(l.received, 0) - coalesce(e.cash, 0) - coalesce(u.credit, 0) > 0`)
   const rows = await tx.execute<BalanceRow>(sql`
     select o.id as "orderId", o.order_number as "orderNumber", o.supplier_id as "supplierId", s.name as "supplierName",
       o.status, o.currency, w.branch_id as "branchId", b.name as "branchName",

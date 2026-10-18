@@ -209,52 +209,6 @@ export function durationLabel(seconds: number): string {
 
 // --- Respuestas ---------------------------------------------------------------------
 
-export interface FinanceTotals {
-  currency: string
-  netoCents: number
-  gastadoCents: number
-  quedaCents: number
-}
-
-export interface MoneyBucket extends FinanceTotals {
-  /** Cobrado bruto del tramo. */
-  cobradoCents: number
-  devolucionesCents: number
-  anulacionesCents: number
-  /** Efectivo neto del tramo (cobros en efectivo menos lo devuelto o anulado). */
-  efectivoCents: number
-  byMethod: Array<{ key: string; label: string; cash: boolean; cents: number }>
-  byCategory: Array<{ category: string; cents: number }>
-}
-
-export interface ReportMoney extends ReportHead {
-  byCurrency: MoneyBucket[]
-  byProfessional: Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>
-  byPromotion: Array<{
-    promotionId: string
-    name: string
-    currency: string
-    veces: number
-    cobradoCents: number
-    /** «from»: promoción «desde», con precio distinto en cada caso. */
-    mode: "fixed" | "from" | null
-    averageCents: number | null
-  }>
-  /** Lo que se debía al cierre del tramo. */
-  outstanding: Array<{ currency: string; pendienteCents: number; pacientes: number }>
-  /** Cierres de caja hechos en el tramo, sumados por moneda. */
-  closures: Array<{
-    currency: string
-    cierres: number
-    efectivoCents: number
-    efectivoDevueltoCents: number
-    gastosCajaCents: number
-    diferenciasCents: number
-  }>
-  previousTotals: FinanceTotals[]
-  series: Array<YearMonth & { partial: boolean; totals: FinanceTotals[] }>
-}
-
 export interface AppointmentTotals {
   total: number
   attended: number
@@ -270,59 +224,6 @@ export interface ControlTotals {
   pending: number
   cancelled: number
   unknown: number
-}
-
-export interface ReportAgenda extends ReportHead {
-  appointments: AppointmentTotals
-  previousAppointments: AppointmentTotals
-  byProfessional: Array<{ userId: string; name: string; total: number; attended: number; noShow: number }>
-  bySource: Array<{ source: string; count: number }>
-  controls: ControlTotals
-  previousControls: ControlTotals
-  /** «Espera en sala»: mediana de minutos entre «Llegó» y el inicio de la atención; null sin datos. */
-  waitInRoom: { medianMinutes: number | null; measured: number; byProfessional: Array<{ userId: string; name: string; medianMinutes: number; measured: number }> }
-  previousWaitInRoom: number | null
-  wholeClinic: string[]
-  series: Array<YearMonth & { partial: boolean } & AppointmentTotals>
-}
-
-export interface BudgetTotals {
-  currency: string
-  accepted: { count: number; cents: number }
-  waiting: { count: number; cents: number }
-  rejected: { count: number; cents: number }
-}
-
-export interface ReportSales extends ReportHead {
-  newPatients: number
-  previousNewPatients: number
-  budgets: BudgetTotals[]
-  previousBudgets: BudgetTotals[]
-  procedures: Array<{ name: string; currency: string | null; count: number; cents: number }>
-  previousProcedureCount: number
-  opportunities: Array<{ status: string; count: number }>
-  /** Por qué se perdieron las del periodo: clave del motivo y cuántas. */
-  lostReasons?: Array<{ reason: string; count: number }>
-  wholeClinic: string[]
-  series: Array<YearMonth & { partial: boolean; newPatients: number }>
-}
-
-export interface ResponseTotals {
-  conversations: number
-  responded: number
-  timedResponses: number
-  avgFirstResponseSeconds: number | null
-  byAgent: number
-  byTeam: number
-  handedOff: number
-}
-
-export interface ReportService extends ReportHead {
-  responses: ResponseTotals
-  previousResponses: ResponseTotals
-  byChannel: Array<{ channel: string | null; count: number }>
-  wholeClinic: string[]
-  series: Array<YearMonth & { partial: boolean; conversations: number; responded: number }>
 }
 
 export const REPORT_LISTS = [
@@ -368,7 +269,7 @@ export interface ReportListRow {
   /** Null: la persona escribió pero aún no es paciente. */
   patientId: string | null
   personName: string
-  /** Canal por el que nos buscó, en las listas del embudo. */
+  /** Canal por el que nos buscó: solo viaja en las listas del embudo. */
   channel?: string | null
   title: string | null
   professionalName: string | null
@@ -382,6 +283,10 @@ export interface ReportListRow {
 
 export interface ReportList extends ReportHead {
   list: ReportListKey
+  /** Con una sede elegida, la lista no es de una sede (personas del embudo, controles): es de toda la clínica. */
+  wholeClinic?: boolean
+  /** Los plazos de las listas de Pacientes, para decirlos en «Cómo se calcula». */
+  rules?: { stoppedDays: number; lapsedMonths: number }
   /** Filas que existen; la respuesta trae como mucho 200. */
   total: number
   rows: ReportListRow[]
@@ -416,10 +321,7 @@ export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled
 export type ReportSection =
   | "summary"
   | "professionals"
-  | "money"
   | "agenda"
-  | "sales"
-  | "service"
   | "agent"
   | "finance"
   | "finance/commissions"
@@ -601,20 +503,27 @@ export interface AgentBillingLine {
 
 /** Lo pagado a odentIA por el agente: las cuentas de Facturación, en la moneda del plan. */
 export interface AgentBilling {
+  /** Null sin plan: no hay importe que mostrar. */
   currency: string | null
+  /** Si se factura: `no` es «así sería tu factura» (demo, prueba o sin plan, `notCharged`); `en_parte`, `uncharged` queda fuera. */
+  charging: "si" | "no" | "en_parte"
+  notCharged: "demo" | "prueba" | "sin_plan" | null
   lines: AgentBillingLine[]
   refunds: { count: number; amountCents: number }
   totalCents: number
   coveredCents: number
   overCents: number
+  /** De lo que pasó del crédito, lo del mes que corre: se cobrará al cerrarlo. */
+  pendingCents: number
+  uncharged: { count: number; amountCents: number }
   trial: { count: number; amountCents: number }
   unpriced: number
   /** Cuántos meses del plan toca el periodo: cada uno trae su crédito. */
   planMonths: number
   /** Cuándo empieza el primero de esos meses (ISO): de ahí el día en que se renueva el crédito. */
   planStart: string | null
-  /** Crédito del plan por mes. */
-  planCreditCents: number
+  /** Crédito de cada mes del periodo; null si no todos traen el mismo. */
+  planCreditCents: number | null
   tax: { label: string; rateBps: number } | null
 }
 
@@ -795,7 +704,13 @@ export interface PurchaseBalance {
 
 export interface PurchasesToPay {
   currency: string
-  unpaid: { orders: number; cents: number; oldest: PurchaseBalance | null }
+  /** En la moneda de la clínica; otra moneda va aparte, nunca se suma. */
+  unpaid: {
+    orders: number
+    cents: number
+    oldest: PurchaseBalance | null
+    otherCurrencies: Array<{ currency: string; orders: number; cents: number }>
+  }
   orders: PurchaseBalance[]
   credits: Array<{ supplierId: string; supplierName: string; currency: string; cents: number }>
 }

@@ -1039,10 +1039,23 @@ export async function voidExpense(
   input: { reason: string },
   opts: { fromCommission?: boolean } = {},
 ) {
+  const [found] = await tx
+    .select({ purchaseOrderId: expense.purchaseOrderId })
+    .from(expense)
+    .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
+  if (!found) throw notFound("Gasto")
+  // El pago de una compra se anula con su orden y su proveedor bloqueados antes
+  // que el gasto, en el mismo orden que al pagarla o cancelarla: dos de esas
+  // operaciones a la vez se esperan en fila en vez de bloquearse entre sí.
+  if (found.purchaseOrderId) {
+    const order = await lockPurchaseOrder(tx, orgId, found.purchaseOrderId)
+    await lockSupplier(tx, orgId, order.supplierId)
+  }
   const [current] = await tx
     .select()
     .from(expense)
     .where(and(eq(expense.id, expenseId), eq(expense.organizationId, orgId)))
+    .for("update")
   if (!current) throw notFound("Gasto")
   if (current.voidedAt) throw conflict("EXPENSE_VOIDED", "El gasto ya está anulado")
   // El gasto que registra el pago de una comisión se anula con ese pago: si
@@ -1121,7 +1134,12 @@ export function purchaseOrderLabel(orderNumber: number): string {
   return `OC-${String(orderNumber).padStart(4, "0")}`
 }
 
-async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) {
+/**
+ * Bloquea la orden. Todo lo que cambia lo pagado de una compra (pagar, anular
+ * un pago o un uso de lo que se tiene a favor, cancelar) bloquea primero la
+ * orden y después su proveedor (`lockSupplier`), siempre en ese orden.
+ */
+export async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) {
   const [row] = await tx
     .select()
     .from(purchaseOrder)
@@ -1132,7 +1150,7 @@ async function lockPurchaseOrder(tx: Db, orgId: string, orderId: string) {
 }
 
 /** Lo que se tiene a favor con un proveedor cambia de a uno: se bloquea el proveedor. */
-async function lockSupplier(tx: Db, orgId: string, supplierId: string): Promise<void> {
+export async function lockSupplier(tx: Db, orgId: string, supplierId: string): Promise<void> {
   await tx
     .select({ id: supplier.id })
     .from(supplier)
@@ -1158,11 +1176,28 @@ export async function assertSupplierCreditCovered(tx: Db, orgId: string, orderId
     .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, orderId)))
   if (!order) return
   await lockSupplier(tx, orgId, order.supplierId)
-  if ((await creditWith(tx, orgId, order.supplierId, order.currency)) < 0)
+  if ((await creditWith(tx, orgId, order.supplierId, order.currency)) < 0) {
+    // Dice qué compras lo usaron: ese uso se anula en su detalle, en Inventario › Compras.
+    const users = await tx
+      .select({ orderNumber: purchaseOrder.orderNumber })
+      .from(supplierCreditUse)
+      .innerJoin(purchaseOrder, and(eq(purchaseOrder.organizationId, supplierCreditUse.organizationId), eq(purchaseOrder.id, supplierCreditUse.orderId)))
+      .where(
+        and(
+          eq(supplierCreditUse.organizationId, orgId),
+          eq(supplierCreditUse.supplierId, order.supplierId),
+          eq(supplierCreditUse.currency, order.currency),
+          isNull(supplierCreditUse.voidedAt),
+        ),
+      )
+      .orderBy(desc(supplierCreditUse.createdAt))
+      .limit(3)
+    const labels = [...new Set(users.map((row) => purchaseOrderLabel(Number(row.orderNumber))))]
     throw conflict(
       "SUPPLIER_CREDIT_USED",
-      "Lo pagado de más en esta compra ya se usó para pagar otra: anula antes ese uso del saldo a favor",
+      `Lo pagado de más en esta compra ya se usó para pagar ${labels.length > 0 ? labels.join(", ") : "otra compra"}: anula antes ese uso en el detalle de esa compra, en Inventario › Compras`,
     )
+  }
 }
 
 export interface PayPurchaseOrderInput {
@@ -1178,6 +1213,13 @@ export interface PayPurchaseOrderInput {
   notes?: string | null
   /** Lo que la pantalla mostró por pagar: si cambió mientras tanto, no se paga sobre otra cifra. */
   expectedDueCents?: number
+  /**
+   * Lo pagado que mostró la pantalla. Si cambió, alguien pagó mientras tanto o
+   * este mismo pago ya entró (un envío repetido): no se registra otra vez. No
+   * es una clave de idempotencia (el gasto no tiene dónde guardarla): el
+   * reintento recibe un aviso, no el pago que ya se hizo.
+   */
+  expectedPaidCents?: number
 }
 
 /**
@@ -1201,6 +1243,11 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
   if (amountCents + creditCents <= 0) throw validation("El pago debe ser mayor que cero")
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
   if (!before) throw notFound("Orden de compra")
+  if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
+    throw conflict(
+      "PURCHASE_PAID_CHANGED",
+      "Esta compra tiene un pago nuevo desde que la abriste (puede ser este mismo, si se envió dos veces): vuelve a mirarla antes de pagar",
+    )
   if (input.expectedDueCents !== undefined && input.expectedDueCents !== before.dueCents)
     throw conflict("PURCHASE_DUE_CHANGED", "Lo que falta pagar de esta compra cambió mientras lo revisabas: vuelve a mirarlo")
   if (creditCents > 0) {
@@ -1210,7 +1257,9 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
       throw conflict("SUPPLIER_CREDIT_TOO_MUCH", "Lo que usas a favor no puede pasar de lo que falta pagar de la orden")
   }
   const label = purchaseOrderLabel(before.orderNumber)
-  const kind = before.receivedCents === 0 ? "Adelanto de compra" : "Pago de compra"
+  // Sin nada recibido por pagar y con algo aún por llegar, lo que se paga es un adelanto
+  // (también en una compra recibida en parte y al día).
+  const kind = before.dueCents === 0 && before.status !== "recibida" ? "Adelanto de compra" : "Pago de compra"
   const part = before.dueCents > 0 && amountCents + creditCents < before.dueCents ? " (una parte)" : ""
   let paid: typeof expense.$inferSelect | null = null
   if (amountCents > 0) {
@@ -1256,6 +1305,14 @@ export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: strin
 
 /** Deshace un uso de lo que se tenía a favor: vuelve a estar a favor y la compra vuelve a deberlo. */
 export async function voidSupplierCreditUse(tx: Db, orgId: string, actorUserId: string, id: string, input: { reason: string }) {
+  const [found] = await tx
+    .select({ orderId: supplierCreditUse.orderId })
+    .from(supplierCreditUse)
+    .where(and(eq(supplierCreditUse.organizationId, orgId), eq(supplierCreditUse.id, id)))
+  if (!found) throw notFound("Uso del saldo a favor")
+  // Orden y proveedor primero, como al pagar y al cancelar.
+  const order = await lockPurchaseOrder(tx, orgId, found.orderId)
+  await lockSupplier(tx, orgId, order.supplierId)
   const [current] = await tx
     .select()
     .from(supplierCreditUse)
@@ -1274,27 +1331,41 @@ export async function voidSupplierCreditUse(tx: Db, orgId: string, actorUserId: 
 
 /**
  * Lo que hay que pagar de las compras: las recibidas sin pagar (el aviso de
- * Finanzas › Gastos) y las que aún no llegan (se pueden adelantar), con lo que
- * se tiene a favor con cada proveedor. De la clínica o de una sede.
+ * Finanzas › Gastos) y lo que aún falta que llegue (se puede adelantar, también
+ * de una compra recibida en parte y al día), con lo que se tiene a favor con
+ * cada proveedor. De la clínica o de una sede. El aviso cuenta y suma en la
+ * moneda de la clínica; otra moneda va aparte y nunca se suma.
  */
 export async function getPurchasesToPay(tx: Db, orgId: string, query: { branchId?: string } = {}) {
   const { currency: unit } = await getOrgLocale(tx, orgId)
   const open = (await purchaseBalances(tx, orgId, { openOnly: true })).filter(
-    (order) => (!query.branchId || order.branchId === query.branchId) && (order.dueCents > 0 || order.receivedCents === 0),
+    (order) =>
+      (!query.branchId || order.branchId === query.branchId) &&
+      (order.dueCents > 0 || (order.status !== "recibida" && order.orderedCents > order.paidCents)),
   )
-  const unpaid = open.filter((order) => order.dueCents > 0)
+  const unpaid = open.filter((order) => order.dueCents > 0 && order.currency === unit)
   const oldest = unpaid.reduce<PurchaseBalance | null>(
     (first, order) =>
       order.firstReceivedAt && (!first?.firstReceivedAt || order.firstReceivedAt < first.firstReceivedAt) ? order : first,
     null,
   )
+  const others = new Map<string, { currency: string; orders: number; cents: number }>()
+  for (const order of open) {
+    if (order.dueCents <= 0 || order.currency === unit) continue
+    const entry = others.get(order.currency) ?? { currency: order.currency, orders: 0, cents: 0 }
+    entry.orders += 1
+    entry.cents = addCents(entry.cents, order.dueCents)
+    others.set(order.currency, entry)
+  }
   return {
     currency: unit,
     /** «3 compras recibidas sin pagar: S/ 2 300. La más antigua llegó hace 34 días.» */
     unpaid: {
       orders: unpaid.length,
-      cents: unpaid.filter((order) => order.currency === unit).reduce((total, order) => total + order.dueCents, 0),
+      cents: unpaid.reduce((total, order) => addCents(total, order.dueCents), 0),
       oldest,
+      /** Compras en otra moneda sin pagar, cada moneda por su lado. */
+      otherCurrencies: [...others.values()],
     },
     /** Lo que se puede pagar ahora: primero lo que más tiempo lleva recibido sin pagar, después lo que aún no llega. */
     orders: [...open].sort(
@@ -1771,7 +1842,7 @@ async function promotionOfApps(
  * devolución consume primero el saldo sin aplicar del pago y solo el
  * excedente reduce la base comisionable, a prorrata del importe aplicado.
  */
-async function allocateRefunds(
+export async function allocateRefunds(
   tx: Db,
   orgId: string,
   apps: PromotionApp[],

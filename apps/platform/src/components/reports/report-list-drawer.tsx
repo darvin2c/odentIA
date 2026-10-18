@@ -9,21 +9,45 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { QueryErrorState } from "../../lib/query-error"
-import { fetchReportList, firstContactChannel, reportKey, type ReportListKey, type ReportListRow, type ReportQuery, spanLabel } from "../../lib/reports"
+import {
+  fetchReportList,
+  firstContactChannel,
+  reportKey,
+  type ReportList,
+  type ReportListKey,
+  type ReportListRow,
+  type ReportQuery,
+  spanLabel,
+} from "../../lib/reports"
+import { during } from "./report-parts"
 
 /** Filas a la vista antes de «Mostrar las otras». */
 const PREVIEW = 8
 
+/** Lo que dice la lista de quien tiene una cita por venir, si no se dice otra cosa. */
+const NEXT_APPOINTMENT = "Ya tiene otra cita"
+
 interface ListCopy {
   title: string
+  /** El título con los plazos que entrega el servidor, cuando ya llegó la lista. */
+  titleOf?: (list: ReportList) => string
   noun: { one: string; many: string }
-  /** Cómo se calcula, en una línea; recibe el periodo ya escrito. */
-  how: (period: string) => string
+  /** Cómo se calcula, en una línea; recibe el periodo ya escrito y la lista (sus plazos). */
+  how: (period: string, list: ReportList) => string
   where: { to: "/agenda" | "/people" | "/finance" | "/inbox"; label: string }
   /** La fila lleva a la sección del paciente donde se resuelve. */
   patientTab?: "plan" | "cobros"
   /** «Ya tiene otra cita» solo importa donde alguien va a llamar. */
   showNext: boolean
+  /** Cómo se dice que tiene una cita por venir cuando la fila no es una cita: no es «otra». */
+  nextLabel?: string
+  /** Es a hoy, no de un periodo: el encabezado no lo nombra. */
+  asOfToday?: boolean
+}
+
+/** Las listas del embudo: personas con el canal por el que nos buscaron. */
+function isFunnelList(list: ReportListKey): boolean {
+  return list.startsWith("funnel_")
 }
 
 const LISTS: Record<ReportListKey, ListCopy> = {
@@ -73,28 +97,33 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   funnel_sought: {
     title: "Nos buscaron por primera vez",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `Personas cuya primera conversación, por cualquier canal, o su registro como paciente fue en ${period}.`,
+    how: (period) =>
+      `Personas cuya primera conversación, por cualquier canal, o su registro como paciente fue en ${period}. Si alguien escribe por un paciente (su madre, por ejemplo), cuenta el paciente, desde el primer mensaje de quien escribió y por su canal. Spam y bloqueados no cuentan.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
   funnel_booked: {
     title: "Agendaron",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que agendaron una cita desde entonces, hasta hoy. Es «Evaluación agendada» en Oportunidades.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que desde entonces tienen una cita sin cancelar (aunque no vinieran) o llegaron a un paso posterior, hasta hoy. Como «Evaluación agendada» en Oportunidades: quien canceló sin agendar otra no cuenta.`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: true,
+    nextLabel: "Tiene cita por venir",
   },
   funnel_came: {
     title: "Vinieron",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que agendaron y vinieron: una de esas citas quedó atendida.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que desde entonces tienen una cita atendida o una atención firmada, o recibieron un presupuesto.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
   funnel_budget: {
     title: "Recibieron presupuesto",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que vinieron y recibieron un presupuesto. Es «Presupuesto enviado» en Oportunidades.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que recibieron un presupuesto desde entonces, aunque después lo aceptaran o rechazaran. Como «Presupuesto enviado» en Oportunidades.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     patientTab: "plan",
     showNext: false,
@@ -102,7 +131,8 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   funnel_accepted: {
     title: "Aceptaron su presupuesto",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto, del todo o en parte. Es «Ganada» en Oportunidades.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que aceptaron un presupuesto que recibieron desde entonces, del todo o en parte. Como «Ganada» en Oportunidades.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     patientTab: "plan",
     showNext: false,
@@ -110,7 +140,7 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   funnel_paid: {
     title: "Pagaron algo",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y pagaron algo.`,
+    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que aceptaron su presupuesto y pagaron algo desde entonces.`,
     where: { to: "/finance", label: "Ir a Finanzas" },
     patientTab: "cobros",
     showNext: false,
@@ -118,21 +148,25 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   funnel_lost_booked: {
     title: "No agendaron",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que todavía no agendaron una cita.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que hoy no tienen una cita sin cancelar ni llegaron a un paso posterior: no agendaron o cancelaron sin agendar otra.`,
     where: { to: "/inbox", label: "Abrir la Bandeja" },
     showNext: false,
   },
   funnel_lost_came: {
     title: "Agendaron y no vinieron",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que agendaron y todavía no tienen una cita atendida: no vinieron, cancelaron o su cita aún no llega.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que tienen una cita sin cancelar y todavía no vinieron: faltaron («No vino») o su cita aún no llega. Quien canceló sin agendar otra está en «No agendaron».`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: true,
+    nextLabel: "Tiene cita por venir",
   },
   funnel_lost_budget: {
     title: "Vinieron y no recibieron presupuesto",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period}, los que vinieron y todavía no recibieron un presupuesto.`,
+    how: (period) =>
+      `De quienes nos buscaron por primera vez en ${period}, los que vinieron (una cita atendida o una atención firmada) y todavía no recibieron un presupuesto.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     patientTab: "plan",
     showNext: false,
@@ -156,7 +190,8 @@ const LISTS: Record<ReportListKey, ListCopy> = {
   funnel_stopped: {
     title: "Dejaron de escribir",
     noun: { one: "persona", many: "personas" },
-    how: (period) => `De quienes nos buscaron por primera vez en ${period} y no agendaron, los que preguntaron algo y no escriben hace más de 3 días; ninguna de sus conversaciones sigue abierta.`,
+    how: (period, list) =>
+      `De quienes nos buscaron por primera vez en ${period} y no agendaron, los que preguntaron algo y no escriben hace más de ${days(list.rules?.stoppedDays)}: ninguna conversación suya, ni de quien escribió por ellos, sigue abierta.`,
     where: { to: "/inbox", label: "Abrir la Bandeja" },
     showNext: false,
   },
@@ -166,20 +201,23 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     how: (period) => `Controles que tocaban en ${period} y no se hicieron: siguen pendientes, se cancelaron o se marcaron hechos sin una atención cerrada.`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: true,
+    nextLabel: "Tiene cita por venir",
   },
   lapsed: {
-    title: "Sin venir hace más de 6 meses",
+    title: "Sin venir hace meses",
+    titleOf: (list) => `Sin venir hace más de ${months(list.rules?.lapsedMonths)}`,
     noun: { one: "persona", many: "personas" },
-    how: () =>
-      "A hoy: su última cita atendida fue hace más de 6 meses y no tienen cita por venir, presupuesto que espere respuesta ni control pendiente. La fecha es la de su última cita.",
+    how: (_, list) =>
+      `A hoy: su última cita atendida fue hace más de ${months(list.rules?.lapsedMonths)} y no tienen cita por venir, presupuesto que espere respuesta ni control pendiente. La fecha es la de su última cita.`,
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
+    asOfToday: true,
   },
   debts_overdue: {
     title: "Te deben hace más de 30 días",
     noun: { one: "persona", many: "personas" },
-    how: (period) =>
-      `Quién debía al cerrar ${period}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» del Administrador.`,
+    how: (period, list) =>
+      `${owedAt(period, list)}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» del Administrador.`,
     where: { to: "/finance", label: "Ir a Finanzas" },
     patientTab: "cobros",
     showNext: false,
@@ -188,14 +226,15 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     title: "Citas que agendó el agente",
     noun: { one: "cita", many: "citas" },
     how: (period) =>
-      `Citas que el agente reservó en ${period}, en su conversación o desde su enlace. El importe es lo que la persona pagó hasta hoy en esa cita, sin lo anulado ni lo devuelto.`,
+      `Citas que el agente reservó ${during(period)}, en su conversación o desde su enlace. La fecha es la de la reserva; la de la cita va al lado. El importe es lo que la persona pagó hasta hoy en esa cita, sin lo anulado ni lo devuelto.`,
     where: { to: "/agenda", label: "Abrir la Agenda" },
     showNext: false,
   },
   agent_handoffs: {
     title: "Pasaron al equipo",
     noun: { one: "conversación", many: "conversaciones" },
-    how: (period) => `Conversaciones que el agente pasó al equipo en ${period}, con el motivo que dejó. Cada una se abre en la Bandeja.`,
+    how: (period) =>
+      `De quienes escribieron por primera vez ${during(period)}, las conversaciones que el agente pasó al equipo hasta hoy, con el motivo que dejó. Cada una se abre en la Bandeja.`,
     where: { to: "/inbox", label: "Abrir la Bandeja" },
     showNext: false,
   },
@@ -208,7 +247,13 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     where: { to: "/agenda", label: "Abrir la Agenda" },
     patientTab: "plan",
     showNext: false,
+    asOfToday: true,
   },
+}
+
+/** A qué momento se cuenta lo que se debe: hoy si el periodo sigue en curso; si no, su cierre. */
+function owedAt(period: string, list: ReportList): string {
+  return list.period.partial ? "Quién debe hoy" : `Quién debía al cerrar ${period}`
 }
 
 /** «Te deben» por antigüedad: la misma regla del saldo vencido, cada persona en el tramo de su concepto más antiguo. */
@@ -216,18 +261,36 @@ function agingLists(): Record<"debts_age_0_30" | "debts_age_31_60" | "debts_age_
   const copy = (title: string, range: string): ListCopy => ({
     title: `Te deben: ${title}`,
     noun: { one: "persona", many: "personas" },
-    how: (period) =>
-      `Quién debía al cerrar ${period} y cuyo concepto sin pagar más antiguo se anotó ${range}. Lo que debe es lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, como en «Saldo vencido».`,
+    how: (period, list) =>
+      `${owedAt(period, list)} y cuyo concepto sin pagar más antiguo se anotó ${range}. Lo que debe es lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, como en «Saldo vencido».`,
     where: { to: "/finance", label: "Ir a Finanzas" },
     patientTab: "cobros",
     showNext: false,
   })
   return {
     debts_age_0_30: copy("hasta 30 días", "hace 30 días o menos"),
-    debts_age_31_60: copy("de 31 a 60 días", "hace 31 a 60 días"),
-    debts_age_61_90: copy("de 61 a 90 días", "hace 61 a 90 días"),
+    debts_age_31_60: copy("de 31 a 60 días", "hace más de 30 días y hasta 60"),
+    debts_age_61_90: copy("de 61 a 90 días", "hace más de 60 días y hasta 90"),
     debts_age_90_plus: copy("más de 90 días", "hace más de 90 días"),
   }
+}
+
+/** «3 días»: el plazo que entrega el servidor con la lista. */
+function days(count: number | undefined): string {
+  if (count === undefined) return "unos días"
+  return count === 1 ? "1 día" : `${count} días`
+}
+
+/** «6 meses»: el plazo que entrega el servidor con la lista. */
+function months(count: number | undefined): string {
+  if (count === undefined) return "unos meses"
+  return count === 1 ? "1 mes" : `${count} meses`
+}
+
+/** «3 personas · septiembre de 2026 · Centro»: lo que es a hoy no nombra un periodo y lo que no es de una sede no nombra la sede. */
+function describe(copy: ListCopy, data: ReportList, period: string): string {
+  const where = data.wholeClinic ? "toda la clínica" : (data.branch?.name ?? "todas las sedes")
+  return [`${data.total} ${data.total === 1 ? copy.noun.one : copy.noun.many}`, copy.asOfToday ? "a hoy" : period, where].join(" · ")
 }
 
 function when(row: ReportListRow, list: ReportListKey, locale: string, timeZone: string): { day: string; hour: string | null } {
@@ -259,12 +322,8 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
   return (
     <DetailDrawer
       open
-      title={copy.title}
-      description={
-        data
-          ? `${data.total} ${data.total === 1 ? copy.noun.one : copy.noun.many} · ${period} · ${data.branch?.name ?? "todas las sedes"}`
-          : undefined
-      }
+      title={data && copy.titleOf ? copy.titleOf(data) : copy.title}
+      description={data ? describe(copy, data, period) : undefined}
       onClose={onClose}
       isLoading={report.isPending}
       actions={
@@ -291,7 +350,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                 {rows.map((row) => {
                   const at = when(row, list, data.locale, data.timezone)
                   const detail = [
-                    row.channel !== undefined ? firstContactChannel(row.channel) : null,
+                    isFunnelList(list) && row.channel !== undefined ? firstContactChannel(row.channel) : null,
                     row.title,
                     row.professionalName,
                     data.branch ? null : row.branchName,
@@ -333,7 +392,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                       ) : null}
                       {copy.showNext && row.hasNextAppointment ? (
                         <Badge variant="success" className="shrink-0">
-                          Ya tiene otra cita
+                          {copy.nextLabel ?? NEXT_APPOINTMENT}
                         </Badge>
                       ) : null}
                     </li>
@@ -354,7 +413,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
           )}
           <div className="flex flex-col gap-0.5 rounded-xl bg-muted px-3.5 py-3 text-[13px]">
             <span className="font-bold">Cómo se calcula</span>
-            <span>{copy.how(period)}</span>
+            <span>{copy.how(period, data)}</span>
           </div>
         </div>
       ) : null}

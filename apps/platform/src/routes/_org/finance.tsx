@@ -136,7 +136,7 @@ interface FinanceSearch {
   cierre?: string
   /** Sede elegida (`useActiveBranch`). */
   branch?: string
-  /** Mes de Comisiones; sin él, el mes en curso de la clínica. */
+  /** Mes de Comisiones, y el mes con que abre Gastos («Ver gasto» de una compra); sin él, el mes en curso de la clínica. */
   year?: number
   month?: number
   /** Profesional con el detalle abierto en Comisiones (solo administración). */
@@ -523,6 +523,7 @@ function FinanceWorkspace() {
                 key={ws.branchId}
                 ws={ws}
                 canWrite={canWrite}
+                initialMonth={search.year !== undefined && search.month !== undefined ? { year: search.year, month: search.month } : undefined}
                 onExpense={() => setPanel({ kind: "gasto" })}
               />
             ) : null}
@@ -1667,16 +1668,19 @@ function receiptText(row: ExpenseRow): string | null {
 function ExpensesTab({
   ws,
   canWrite,
+  initialMonth,
   onExpense,
 }: {
   ws: Workspace
   canWrite: boolean
+  /** El mes con que abre (el del pago de una compra); sin él, el mes en curso. */
+  initialMonth?: MonthRef | undefined
   onExpense: () => void
 }) {
   const { branchId, locale, orgTimeZone } = ws
   const queryClient = useQueryClient()
   const thisMonth = currentMonthIn(orgTimeZone)
-  const [month, setMonth] = useState<MonthRef>(thisMonth)
+  const [month, setMonth] = useState<MonthRef>(initialMonth ?? thisMonth)
   const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
   const [voidError, setVoidError] = useState<string | null>(null)
   const expenses = useQuery({
@@ -1772,10 +1776,19 @@ function ExpensesTab({
         ) : null}
       </section>
 
-      {unpaid && unpaid.orders > 0 ? (
+      {unpaid && (unpaid.orders > 0 || unpaid.otherCurrencies.length > 0) ? (
         <Alert className="border-warning/40 bg-warning-soft">
           <AlertTitle>
-            {plural(unpaid.orders, "compra recibida", "compras recibidas")} sin pagar: {formatMoney(unpaid.cents, ws.currency, locale)}
+            {[
+              ...(unpaid.orders > 0
+                ? [`${plural(unpaid.orders, "compra recibida", "compras recibidas")} sin pagar: ${formatMoney(unpaid.cents, ws.currency, locale)}`]
+                : []),
+              // Las de otra moneda van aparte y sin convertir.
+              ...unpaid.otherCurrencies.map(
+                (other) =>
+                  `${plural(other.orders, "compra recibida", "compras recibidas")} sin pagar en ${other.currency}: ${formatMoney(other.cents, other.currency, locale)}`,
+              ),
+            ].join(" · ")}
           </AlertTitle>
           <AlertDescription className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <span>

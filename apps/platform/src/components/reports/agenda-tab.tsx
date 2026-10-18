@@ -31,6 +31,7 @@ import {
   type ReportQuery,
   spanLabel,
 } from "../../lib/reports"
+import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
 import { type Better, ChangeLine, EmptyLine, ReportCard } from "./report-parts"
 
@@ -265,10 +266,10 @@ function FreeHours({ data }: { data: AgendaReport }) {
   const monthLabel = (key: string) => dayText(`${key}-15`, locale, { month: "long", year: "numeric" })
   const shortMonth = (key: string) => dayText(`${key}-15`, locale, { month: "short" }).replace(/\./g, "")
   const periodText = spanLabel(data.period, locale)
-  const views: Array<{ key: MapView; label: string }> = [
-    { key: "dias", label: "Día a día" },
-    { key: "horas", label: "Hora por mes" },
-    { key: "semana", label: "Semana tipo" },
+  const views: Array<{ value: MapView; label: string }> = [
+    { value: "dias", label: "Día a día" },
+    { value: "horas", label: "Hora por mes" },
+    { value: "semana", label: "Semana tipo" },
   ]
   const legend = { low: "Libre", high: "Ocupada", noData: "Sin horario o cerrado" }
 
@@ -500,23 +501,8 @@ function FreeHours({ data }: { data: AgendaReport }) {
               ))}
             </ChoiceSelect>
           ) : null}
-          <fieldset className="flex rounded-lg bg-secondary p-[3px]">
-            <legend className="sr-only">Vista del mapa</legend>
-            {views.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                aria-pressed={view === item.key}
-                onClick={() => setView(item.key)}
-                className={cn(
-                  "min-h-11 rounded-md px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8",
-                  view === item.key ? "bg-card font-extrabold text-primary-soft-foreground shadow-sm" : "font-semibold text-foreground/80",
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-          </fieldset>
+          <ChoiceButtons label="Vista del mapa" value={view} options={views} onChange={setView} />
+
         </div>
       </div>
       <p className="text-xs text-foreground/80">{scope}</p>

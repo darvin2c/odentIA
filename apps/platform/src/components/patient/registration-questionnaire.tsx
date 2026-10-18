@@ -272,7 +272,7 @@ const WHERE: ReadonlyArray<readonly [string, string, string?]> = [
   ["demographics.educationLevel", "census", "educationLevel"],
   ["demographics.occupation", "census", "occupation"],
   ["demographics.origin", "census", "origin"],
-  ["demographics.referralKind", "census", "referralSource"],
+  ["demographics.referralKind", "census", "referralKind"],
   ["demographics.referralSource", "census", "referralSource"],
   ["representative.relationship", "rep", "repRelation"],
   ["representative.phone", "rep", "repPhone"],
@@ -1664,7 +1664,7 @@ export function RegistrationQuestionnaire({
             </Labeled>
           ) : null}
           {asked("referralSource") ? (
-            <Labeled name="referralSource" label="¿Cómo nos conoció?" optional>
+            <Labeled name="referralKind" label="¿Cómo nos conoció?" optional>
               <Pick
                 label="Cómo nos conoció"
                 value={draft.referralKind}

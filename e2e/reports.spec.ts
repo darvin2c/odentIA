@@ -235,7 +235,14 @@ test("reportes es de quien dirige: recepción no entra y el servidor lo rechaza"
   const page = owner.page
   await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
   await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
-  for (const section of ["summary", "professionals", "money", "agenda", "finance", "finance/commissions", "finance/outlook", "finance/promotions", "sales", "service", "list/no_show", "list/debts_overdue", "list/debts_age_31_60"]) {
+  // Pacientes: la pestaña, la tarjeta del embudo y cada lista de personas (también las de quienes aún no son pacientes).
+  const patientLists = ["sought", "booked", "came", "budget", "accepted", "paid", "lost_booked", "lost_came", "lost_budget", "lost_accepted", "lost_paid", "stopped"]
+    .map((step) => `list/funnel_${step}`)
+    .concat("list/controls_missed", "list/lapsed")
+  for (const section of [
+    "summary", "professionals", "agenda", "finance", "finance/commissions", "finance/outlook", "finance/promotions",
+    "list/no_show", "list/debts_overdue", "list/debts_age_31_60", "patients", "funnel", ...patientLists,
+  ]) {
     const response = await api(page, "GET", `/api/reports/${section}?period=este_mes`, owner.org.slug)
     expect(response.status, section).toBe(403)
   }

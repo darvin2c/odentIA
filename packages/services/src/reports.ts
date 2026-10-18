@@ -143,38 +143,6 @@ export async function waitInRoom(tx: Db, orgId: string, scope: Pick<ReportScope,
   }
 }
 
-export async function getReportAgenda(tx: Db, orgId: string, query: ReportQuery, now: Date = new Date()) {
-  const scope = await reportScope(tx, orgId, query, now)
-  const { window } = scope
-  const branchSql = scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``
-  const inWindow = sql`a.organization_id=${orgId} and a.starts_at >= ${at(window.start)} and a.starts_at < ${at(window.end)}
-    and ${settledAppointment(now)} ${branchSql}`
-  const byProfessional = await tx.execute<{ userId: string; name: string; total: number; attended: number; noShow: number }>(sql`
-    select a.dentist_user_id as "userId", u.name, count(*)::int as total,
-      count(*) filter (where a.status='atendida')::int as attended,
-      count(*) filter (where a.status='no_asistio')::int as "noShow"
-    from appointment a join "user" u on u.id=a.dentist_user_id
-    where ${inWindow}
-    group by a.dentist_user_id, u.name order by attended desc, u.name`)
-  const bySource = await tx.execute<{ source: string; count: number }>(sql`
-    select a.source, count(*)::int as count from appointment a
-    where ${inWindow} group by a.source order by count desc, a.source`)
-  return {
-    ...reportHead(scope),
-    appointments: await appointmentTotals(tx, orgId, scope, window),
-    previousAppointments: await appointmentTotals(tx, orgId, scope, window.previous),
-    byProfessional: [...byProfessional],
-    bySource: [...bySource],
-    controls: await controlTotals(tx, orgId, window),
-    previousControls: await controlTotals(tx, orgId, window.previous),
-    waitInRoom: await waitInRoom(tx, orgId, scope, window),
-    previousWaitInRoom: (await waitInRoom(tx, orgId, scope, window.previous)).medianMinutes,
-    /** Los controles son de la persona, no de una sede. */
-    wholeClinic: scope.branch ? (["controls"] as const) : ([] as const),
-    series: await monthlySeries(scope, (span) => appointmentTotals(tx, orgId, scope, span)),
-  }
-}
-
 // --- Pacientes y ventas ---------------------------------------------------------------------
 
 /** La primera cita atendida de cada persona: `first_visit(id, patient_id, starts_at, branch_id, service_name, dentist_user_id)`. */

@@ -253,6 +253,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         receiptNumber: z.string().max(60).nullish(),
         notes: z.string().max(2000).nullish(),
         expectedDueCents: z.number().int().min(0).optional(),
+        // Lo pagado que vio la pantalla: un envío repetido no paga dos veces.
+        expectedPaidCents: z.number().int().min(0).optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -270,8 +272,10 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     if (!canAccess(memberRole, "finance.write")) return forbid(c)
     const parsed = reasonInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const id = z.uuid().safeParse(c.req.param("id"))
+    if (!id.success) return validationError(c, id.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => voidSupplierCreditUse(tx, orgId, userId, c.req.param("id"), parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => voidSupplierCreditUse(tx, orgId, userId, id.data, parsed.data)),
     )
   })
 

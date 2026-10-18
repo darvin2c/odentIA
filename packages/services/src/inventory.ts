@@ -32,7 +32,7 @@ import { orgCounter, patient } from "@odentia/db/schema/clinical"
 import { expense } from "@odentia/db/schema/finance"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, ilike, isNotNull, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql } from "drizzle-orm"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -40,7 +40,7 @@ import {
   ServiceError,
   validation,
 } from "./errors.js"
-import { assertSupplierCreditCovered, voidExpense, voidSupplierCreditUse } from "./finance.js"
+import { assertSupplierCreditCovered, lockPurchaseOrder, lockSupplier, voidExpense, voidSupplierCreditUse } from "./finance.js"
 import { requireOrgCurrency } from "./locale.js"
 import { type PurchaseBalance, purchaseBalances, supplierCredits } from "./purchase-balance.js"
 import { createWorkspaceNotification, settleWorkspaceNotifications } from "./workspace.js"
@@ -757,6 +757,12 @@ export async function listPurchaseOrders(
     conditions.push(eq(purchaseOrder.status, options.status))
   }
   if (options?.supplierId) conditions.push(eq(purchaseOrder.supplierId, options.supplierId))
+  if (options?.payment === "por_pagar") {
+    // El filtro va en la consulta, antes del tope: una compra vieja por pagar no queda fuera.
+    const due = await purchaseBalances(tx, orgId, { dueOnly: true, supplierId: options.supplierId })
+    if (due.length === 0) return []
+    conditions.push(inArray(purchaseOrder.id, due.map((row) => row.orderId)))
+  }
   const rows = await tx
     .select({
       id: purchaseOrder.id,
@@ -785,8 +791,7 @@ export async function listPurchaseOrders(
   const balances = new Map(
     (await purchaseBalances(tx, orgId, { orderIds: rows.map((row) => row.id) })).map((balance) => [balance.orderId, balance]),
   )
-  const withBalance = rows.map((row) => ({ ...row, balance: balances.get(row.id) ?? null }))
-  return options?.payment === "por_pagar" ? withBalance.filter((row) => (row.balance?.dueCents ?? 0) > 0) : withBalance
+  return rows.map((row) => ({ ...row, balance: balances.get(row.id) ?? null }))
 }
 
 function requireEditableStatus(order: { status: string }, action: string) {
@@ -795,7 +800,8 @@ function requireEditableStatus(order: { status: string }, action: string) {
 }
 
 export async function confirmPurchaseOrder(tx: Db, orgId: string, actorUserId: string, id: string) {
-  const order = await requireOrder(tx, orgId, id)
+  // Bloqueada: una cancelación al mismo tiempo no queda deshecha por esta confirmación.
+  const order = await lockPurchaseOrder(tx, orgId, id)
   if (order.status !== "borrador") throw conflict("Solo se confirma una orden en borrador")
   const [row] = await tx
     .update(purchaseOrder)
@@ -810,7 +816,9 @@ export async function confirmPurchaseOrder(tx: Db, orgId: string, actorUserId: s
  * Cancela una orden sin recepciones. Si ya tiene pagos (adelantos), hay que
  * decir qué pasa con ellos: anularlos (el proveedor devolvió el dinero) o
  * dejarlos a favor con el proveedor para la próxima compra; nunca quedan
- * sueltos (ADR 0061).
+ * sueltos (ADR 0061). La orden y su proveedor se bloquean al empezar, en el
+ * mismo orden que al pagar (`payPurchaseOrder`) y al anular un pago: un pago o
+ * una anulación al mismo tiempo esperan, y el estado se lee ya bloqueado.
  */
 export async function cancelPurchaseOrder(
   tx: Db,
@@ -819,7 +827,8 @@ export async function cancelPurchaseOrder(
   id: string,
   input: { payments?: "anular" | "a_favor"; reason?: string } = {},
 ) {
-  const order = await requireOrder(tx, orgId, id)
+  const order = await lockPurchaseOrder(tx, orgId, id)
+  await lockSupplier(tx, orgId, order.supplierId)
   requireEditableStatus(order, "cancelación")
   const lines = await orderLines(tx, orgId, id)
   if (lines.some((line) => line.receivedQuantity > 0))
@@ -890,18 +899,13 @@ export async function receivePurchaseOrder(
   const receptionKey = idempotencyKey?.trim() ?? ""
   if (!receptionKey || receptionKey.length > 200)
     throw validation("La recepción necesita una clave de idempotencia")
-  const order = await requireOrder(tx, orgId, id)
+  // Serializa recepciones concurrentes de la misma orden, y el estado se lee ya
+  // bloqueado: una orden que se canceló mientras tanto no recibe mercadería.
+  const order = await lockPurchaseOrder(tx, orgId, id)
   requireEditableStatus(order, "recepción")
   if (order.status !== "confirmada" && order.status !== "parcialmente_recibida")
     throw conflict("La orden debe estar confirmada para recibir mercadería")
   if (!lines?.length) throw validation("La recepción necesita al menos una línea")
-  // Serializa recepciones concurrentes de la misma orden.
-  await tx
-    .select({ id: purchaseOrder.id })
-    .from(purchaseOrder)
-    .where(and(eq(purchaseOrder.organizationId, orgId), eq(purchaseOrder.id, id)))
-    .for("update")
-    .limit(1)
   const expected = await tx
     .select()
     .from(purchaseOrderLine)

@@ -1,8 +1,10 @@
 /**
  * Reportes › Agente: lo pagado son las mismas cuentas de la factura de
- * odentIA (ADR 0031); lo cobrado en sus citas son los pagos de esas citas, sin
- * contar dos veces la que además fue recuperada; las conversaciones y la
- * primera respuesta siguen la regla de la antigua «Atención».
+ * odentIA (ADR 0031) y solo se dice «pagaste» donde el cobro factura; lo
+ * cobrado en sus citas son los pagos de esas citas, sin lo devuelto con la
+ * regla de las comisiones y sin contar dos veces la que además fue
+ * recuperada; las conversaciones y la primera respuesta siguen la regla de la
+ * antigua «Atención».
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
@@ -30,7 +32,6 @@ import {
   agentBookedMany,
   agentCollectedMany,
   agentConversationsMany,
-  agentHandoffsMany,
   agentRecoveredMany,
   firstResponsesMany,
   getAgentReportList,
@@ -45,17 +46,18 @@ import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
 
+const admin = "agent-report-admin"
 let planId: string
 
 beforeAll(async () => {
-  const admin = "agent-report-admin"
   await ownerDb.insert(user).values({ id: admin, name: "Administración", email: "admin@agent-report.test" })
   await ownerDb.update(saasPlan).set({ isDefault: false })
+  // La cuota no es el crédito: lo pagado por el agente no es la factura entera.
   const plan = await createSaasPlan(ownerDb, admin, {
     code: "agent-report-odentia",
     name: "Plan odentIA",
     currency: "USD",
-    priceCents: 2900,
+    priceCents: 3500,
     creditCents: 2900,
     conversationMicros: 500_000,
     consultationMicros: 400_000,
@@ -119,8 +121,11 @@ async function visit(c: Clinic, patientId: string, input: { source: string; book
   return row!
 }
 
-/** La atención cerrada de una cita con su cargo y lo que se pagó de él (y lo devuelto de ese pago). */
-async function charged(c: Clinic, visitRow: Awaited<ReturnType<typeof visit>>, input: { cents: number; paid: number; refunded?: number }) {
+/**
+ * La atención cerrada de una cita con su cargo y lo que se aplicó de un pago
+ * (`payment`, por defecto lo aplicado: el resto queda a favor) y lo devuelto de ese pago.
+ */
+async function charged(c: Clinic, visitRow: Awaited<ReturnType<typeof visit>>, input: { cents: number; paid: number; payment?: number; refunded?: number }) {
   const endedAt = visitRow.endsAt
   const [session] = await ownerDb
     .insert(encounter)
@@ -151,7 +156,7 @@ async function charged(c: Clinic, visitRow: Awaited<ReturnType<typeof visit>>, i
     .returning()
   const [payment] = await ownerDb
     .insert(patientPayment)
-    .values({ organizationId: c.orgId, patientId: visitRow.patientId, branchId: c.branchId, amountCents: input.paid, currency: "PEN", paidAt: endedAt, methodName: "Efectivo" })
+    .values({ organizationId: c.orgId, patientId: visitRow.patientId, branchId: c.branchId, amountCents: input.payment ?? input.paid, currency: "PEN", paidAt: endedAt, methodName: "Efectivo" })
     .returning()
   await ownerDb.insert(patientPaymentApplication).values({ organizationId: c.orgId, patientId: visitRow.patientId, paymentId: payment!.id, chargeId: charge!.id, amountCents: input.paid, createdAt: endedAt })
   if (input.refunded) {
@@ -184,7 +189,7 @@ const cuotaOf = async (chargeId: string) =>
   (await ownerDb.select().from(saasChargeLine).where(and(eq(saasChargeLine.chargeId, chargeId), eq(saasChargeLine.kind, "cuota"))))[0]?.amountCents ?? 0
 
 describe("lo que pagaste por el agente", () => {
-  it("es la factura del mes: lo que pasó del crédito más el crédito del plan, con la devolución de la cita recuperada", async () => {
+  it("es lo que cubrió el crédito más lo que la factura suma a la cuota, con la devolución de la cita recuperada", async () => {
     const c = await clinic(OCTOBER)
     const rosa = await person(c, "Rosa Quispe")
     // El Administrador le escribe en octubre, ella conversa con Recepción y el agente le reserva para noviembre.
@@ -220,14 +225,21 @@ describe("lo que pagaste por el agente", () => {
     const [october, november] = await chargesOf(c.orgId)
 
     const [inOctober, inNovember] = await c.run((tx) => agentBillingMany(tx, c.orgId, [OCTOBER, NOVEMBER], day("2026-12-05T12:00:00Z")))
-    // Noviembre pasó del crédito: lo pagado es la factura sin impuesto (cuota + cita − devolución).
-    expect(november).toMatchObject({ subtotalCents: 3250 })
+    // Factura de noviembre sin impuesto: cuota 35,00 + cita 4,00 − devolución 0,50.
+    expect(november).toMatchObject({ subtotalCents: 3850 })
+    expect(await cuotaOf(november!.id)).toBe(3500)
+    // Lo pagado por el agente: el crédito que gastó (29,00) y lo que la factura sumó a la cuota (3,50).
     expect(inNovember).toMatchObject({
       currency: "USD",
-      totalCents: november!.subtotalCents,
+      charging: "si",
+      notCharged: null,
+      totalCents: 3250,
       coveredCents: 2900,
       overCents: (november!.subtotalCents ?? 0) - (await cuotaOf(november!.id)),
+      pendingCents: 0,
       refunds: { count: 1, amountCents: 50 },
+      planMonths: 1,
+      planCreditCents: 2900,
     })
     expect(inNovember?.lines).toEqual([
       { kind: "conversacion", count: 58, unitMicros: 500_000, amountCents: 2900 },
@@ -235,15 +247,33 @@ describe("lo que pagaste por el agente", () => {
       { kind: "cita", count: 1, unitMicros: 4_000_000, amountCents: 400 },
     ])
     // Octubre no pasó del crédito: la factura es solo la cuota y la conversación la cubrió el crédito.
+    expect(october).toMatchObject({ subtotalCents: 3500 })
     expect(inOctober).toMatchObject({ totalCents: 50, coveredCents: 50, overCents: (october!.subtotalCents ?? 0) - (await cuotaOf(october!.id)) })
     expect(inOctober?.overCents).toBe(0)
 
     // La pestaña entera da lo mismo para el mes de la factura, y no lo entrega a quien no ve Facturación.
     const report = await c.run((tx) => getReportAgent(tx, c.orgId, { period: "2026-11" }, day("2026-12-05T12:00:00Z"), { billing: true }))
-    expect(report.paid).toMatchObject({ totalCents: november!.subtotalCents, planCreditCents: 2900, tax: { label: "IGV", rateBps: 1800 } })
+    expect(report.paid).toMatchObject({ totalCents: 3250, overCents: 350, planCreditCents: 2900, tax: { label: "IGV", rateBps: 1800 } })
     expect(report.recovered.current).toBe(1)
     const hidden = await c.run((tx) => getReportAgent(tx, c.orgId, { period: "2026-11" }, day("2026-12-05T12:00:00Z")))
     expect(hidden.paid).toBeNull()
+
+    // La clínica cambia a un plan con menos crédito: los meses ya cobrados siguen con el crédito del plan de su cargo.
+    const smaller = await createSaasPlan(ownerDb, admin, {
+      code: `agent-report-chico-${randomUUID().slice(0, 6)}`,
+      name: "Plan chico",
+      currency: "USD",
+      priceCents: 1500,
+      creditCents: 1000,
+      conversationMicros: 500_000,
+      consultationMicros: 400_000,
+      recoveryMicros: 4_000_000,
+      trialCreditCents: 5000,
+      trialMaxCreditCents: 13000,
+    })
+    await ownerDb.update(saasSubscription).set({ planId: smaller.id }).where(eq(saasSubscription.organizationId, c.orgId))
+    const [again] = await c.run((tx) => agentBillingMany(tx, c.orgId, [NOVEMBER], day("2026-12-05T12:00:00Z")))
+    expect(again).toMatchObject({ coveredCents: 2900, overCents: 350, planCreditCents: 2900 })
   })
 
   it("un mes calendario que cruza dos tramos toma cada acción con el estado de su tramo", async () => {
@@ -257,11 +287,40 @@ describe("lo que pagaste por el agente", () => {
     const [tramo, november] = await c.run((tx) =>
       agentBillingMany(tx, c.orgId, [{ start, end: day("2026-11-15T05:00:00Z") }, NOVEMBER], day("2026-11-20T12:00:00Z")),
     )
-    expect(first).toMatchObject({ subtotalCents: 3000 })
+    expect(first).toMatchObject({ subtotalCents: 3600 })
     expect(tramo).toMatchObject({ totalCents: 3000, coveredCents: 2900, overCents: (first!.subtotalCents ?? 0) - (await cuotaOf(first!.id)) })
-    // Noviembre (desde el 1) toma las 26 últimas: 24 dentro del crédito del tramo y las 2 que pasaron.
-    expect(november).toMatchObject({ totalCents: 1300, coveredCents: 1200, overCents: 100 })
+    // Noviembre (desde el 1) toma las 26 últimas: 24 dentro del crédito del tramo y las 2 que pasaron, ya cobradas.
+    expect(november).toMatchObject({ charging: "si", totalCents: 1300, coveredCents: 1200, overCents: 100, pendingCents: 0, planMonths: 2, planStart: start.toISOString() })
     expect(november?.lines[0]?.count).toBe(26)
+  })
+
+  it("lo que pasa del crédito en el mes que corre se cobrará al cerrarlo; en una cuenta demo no se cobra nada", async () => {
+    const c = await clinic(OCTOBER)
+    await filler(c.orgId, 60, day("2026-10-02T12:00:00Z"))
+    const [running] = await c.run((tx) => agentBillingMany(tx, c.orgId, [OCTOBER], day("2026-10-25T12:00:00Z")))
+    expect(running).toMatchObject({ charging: "si", notCharged: null, totalCents: 3000, coveredCents: 2900, overCents: 100, pendingCents: 100 })
+
+    // La misma cuenta, de demostración: se cuenta igual (así sería la factura), pero no se cobra.
+    await ownerDb.update(saasSubscription).set({ isDemo: true }).where(eq(saasSubscription.organizationId, c.orgId))
+    const [demo] = await c.run((tx) => agentBillingMany(tx, c.orgId, [OCTOBER], day("2026-10-25T12:00:00Z")))
+    expect(demo).toMatchObject({ charging: "no", notCharged: "demo", totalCents: 3000, overCents: 100 })
+    expect(demo?.lines[0]?.count).toBe(60)
+    const report = await c.run((tx) => getReportAgent(tx, c.orgId, { period: "2026-10" }, day("2026-10-25T12:00:00Z"), { billing: true }))
+    expect(report.paid).toMatchObject({ charging: "no", notCharged: "demo" })
+  })
+
+  it("sin suscripción el mes es el calendario entero, como en Facturación, aunque el periodo empiece a mitad de mes", async () => {
+    const c = await clinic()
+    // Una clínica anterior al cobro: sin suscripción, nada se factura.
+    await ownerDb.delete(saasSubscription).where(eq(saasSubscription.organizationId, c.orgId))
+    // Del 2 al 12 de septiembre se gasta el crédito entero; el 20 llegan dos más.
+    await filler(c.orgId, 58, day("2026-09-02T12:00:00Z"), 4)
+    await filler(c.orgId, 2, day("2026-09-20T15:00:00Z"))
+    const fortnight = { start: day("2026-09-15T05:00:00Z"), end: OCTOBER.start }
+    const [half] = await c.run((tx) => agentBillingMany(tx, c.orgId, [fortnight], day("2026-10-20T12:00:00Z")))
+    // Las dos del 20 ya no caben en el crédito de septiembre: el mes no vuelve a empezar el 15.
+    expect(half).toMatchObject({ charging: "no", notCharged: "sin_plan", totalCents: 100, coveredCents: 0, overCents: 100, planMonths: 0, planStart: null })
+    expect(half?.lines[0]?.count).toBe(2)
   })
 })
 
@@ -307,6 +366,10 @@ describe("lo que hizo el agente y lo cobrado en sus citas", () => {
       booked: { visits: 2, byCurrency: [{ currency: "PEN", cents: 21_000 }] },
       recovered: { visits: 1, byCurrency: [{ currency: "PEN", cents: 30_000 }] },
     })
+    // Agosto no vuelve a contar la cita de Diego: es la recuperada de septiembre.
+    expect(await c.run((tx) => agentCollectedMany(tx, c.orgId, undefined, [{ start: day("2026-08-01T05:00:00Z"), end: SEPTEMBER.start }]))).toEqual([
+      { booked: { visits: 0, byCurrency: [] }, recovered: { visits: 0, byCurrency: [] } },
+    ])
     // El Resumen dice lo mismo junto a «Citas que agendó el agente».
     expect(await c.run((tx) => agentBookingsMany(tx, c.orgId, undefined, [SEPTEMBER]))).toEqual([{ booked: 3, recovered: 1 }])
     const summary = await c.run((tx) => getReportSummary(tx, c.orgId, { period: "2026-09" }, day("2026-10-05T12:00:00Z")))
@@ -316,13 +379,52 @@ describe("lo que hizo el agente y lo cobrado en sus citas", () => {
     expect(await c.run((tx) => agentRecoveredMany(tx, c.orgId, undefined, [SEPTEMBER]))).toEqual([0])
     await ownerDb.update(appointment).set({ status: "atendida" }).where(eq(appointment.id, d.id))
 
-    // «Ver cuáles»: las tres que agendó en septiembre, con lo pagado en cada una.
+    // «Ver cuáles»: las tres que agendó en septiembre, con lo pagado en cada una; la fecha de la fila es la de la reserva.
     const list = await c.run((tx) => getAgentReportList(tx, c.orgId, { period: "2026-09", list: "agent_booked" }, day("2026-10-05T12:00:00Z")))
     expect(list.total).toBe(3)
     expect(Object.fromEntries(list.rows.map((row) => [row.personName, row.cents]))).toEqual({ "Ana Paz": 15_000, "Bruno Díaz": 6_000, "Elena Mora": null })
+    const elenaRow = list.rows.find((row) => row.personName === "Elena Mora")
+    expect(elenaRow?.at).toBe("2026-09-20T15:00:00.000Z")
+    expect(elenaRow?.title).toMatch(/^Cita el mar 20 oct, 10:00.* · Limpieza dental$/)
     // Otra sede no tiene sus citas.
     const [elsewhere] = await ownerDb.insert(branch).values({ organizationId: c.orgId, name: "Norte" }).returning()
     expect(await c.run((tx) => agentBookedMany(tx, c.orgId, elsewhere!.id, [SEPTEMBER]))).toEqual([{ booked: 0, attended: 0, all: 0 }])
+  })
+
+  it("lo devuelto gasta primero lo que el pago dejó a favor, como en las comisiones", async () => {
+    const c = await clinic()
+    const fabio = await person(c, "Fabio Lara")
+    // Paga 300: se aplican 200 a la cita del agente y los 100 que quedaron a favor se le devuelven.
+    const f = await visit(c, fabio.patientId, { source: "agent", bookedAt: day("2026-09-03T15:00:00Z"), startsAt: day("2026-09-10T15:00:00Z"), status: "atendida" })
+    await charged(c, f, { cents: 20_000, paid: 20_000, payment: 30_000, refunded: 10_000 })
+    const [collected] = await c.run((tx) => agentCollectedMany(tx, c.orgId, undefined, [SEPTEMBER], day("2026-10-05T12:00:00Z")))
+    expect(collected?.booked).toEqual({ visits: 1, byCurrency: [{ currency: "PEN", cents: 20_000 }] })
+    const list = await c.run((tx) => getAgentReportList(tx, c.orgId, { period: "2026-09", list: "agent_booked" }, day("2026-10-05T12:00:00Z")))
+    expect(list.rows[0]?.cents).toBe(20_000)
+  })
+
+  it("la cita que reservó un mes y se recuperó el siguiente se cuenta una sola vez", async () => {
+    const c = await clinic()
+    const gina = await person(c, "Gina Ríos")
+    // El agente reserva el 28 de septiembre y Gina viene el 3 de octubre: el cobro la cuenta como recuperada.
+    const g = await visit(c, gina.patientId, { source: "agent", bookedAt: day("2026-09-28T15:00:00Z"), startsAt: day("2026-10-03T15:00:00Z"), status: "atendida" })
+    await charged(c, g, { cents: 12_000, paid: 12_000 })
+    await ownerDb.insert(saasAction).values({
+      organizationId: c.orgId,
+      kind: "cita",
+      occurredAt: day("2026-10-03T16:00:00Z"),
+      contactId: gina.contactId,
+      appointmentId: g.id,
+      channel: "agent",
+      windowStart: day("2026-09-25T15:00:00Z"),
+      detail: "Volvió tras «Retomar un presupuesto» y reservó en la conversación",
+      dedupeKey: `cita:${g.id}`,
+    })
+    const [september, october] = await c.run((tx) => agentCollectedMany(tx, c.orgId, undefined, [SEPTEMBER, OCTOBER], day("2026-10-20T12:00:00Z")))
+    expect(september).toEqual({ booked: { visits: 0, byCurrency: [] }, recovered: { visits: 0, byCurrency: [] } })
+    expect(october).toEqual({ booked: { visits: 0, byCurrency: [] }, recovered: { visits: 1, byCurrency: [{ currency: "PEN", cents: 12_000 }] } })
+    // La cifra «Citas que agendó» de septiembre sí la cuenta: la reservó entonces.
+    expect(await c.run((tx) => agentBookedMany(tx, c.orgId, undefined, [SEPTEMBER]))).toEqual([{ booked: 1, attended: 1, all: 1 }])
   })
 
   it("conversaciones que atendió, las que pasó al equipo y quién respondió primero", async () => {
@@ -363,11 +465,22 @@ describe("lo que hizo el agente y lo cobrado en sus citas", () => {
     await thread("Sin respuesta", day("2026-09-05T15:00:00Z"), [])
     // Un envío de prueba no es una respuesta.
     await thread("Envío de prueba", day("2026-09-06T15:00:00Z"), [{ by: "agent", seconds: 30, mock: true }])
+    // Escribió por primera vez en agosto y pasó al equipo en septiembre: no es de quienes escribieron en septiembre.
+    const august = await thread("Escribió en agosto", day("2026-08-20T15:00:00Z"), [])
+    await ownerDb.insert(agentHandoff).values({ organizationId: c.orgId, conversationId: august, reason: "Pide una factura", summary: "Pide una factura", createdAt: day("2026-09-10T15:00:00Z") })
 
     expect(await c.run((tx) => agentConversationsMany(tx, c.orgId, [SEPTEMBER]))).toEqual([{ attended: 2, alone: 1 }])
-    expect(await c.run((tx) => agentHandoffsMany(tx, c.orgId, [SEPTEMBER]))).toEqual([1])
     const [first] = await c.run((tx) => firstResponsesMany(tx, c.orgId, [SEPTEMBER]))
-    expect(first).toEqual({ conversations: 5, responded: 3, byAgent: 2, byTeam: 1, agentMedianSeconds: 90, teamMedianSeconds: 600 })
+    expect(first).toEqual({
+      conversations: 5,
+      responded: 3,
+      byAgent: 2,
+      byTeam: 1,
+      agentMedianSeconds: 90,
+      teamMedianSeconds: 600,
+      handedOff: 1,
+      byChannel: [{ channel: "whatsapp", count: 5 }],
+    })
 
     // «Ver cuáles»: la conversación que pasó, con su motivo; quien escribió aún no es paciente.
     const list = await c.run((tx) => getAgentReportList(tx, c.orgId, { period: "2026-09", list: "agent_handoffs" }, day("2026-10-05T12:00:00Z")))

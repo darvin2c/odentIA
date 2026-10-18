@@ -6,12 +6,12 @@
  * solo con color.
  */
 import { formatMoney } from "@odentia/clinical"
-import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
-import { ColumnChart, EmptyState, LoadingState, Sparkline } from "@odentia/ui-patterns"
+import { cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@odentia/ui"
+import { ColumnChart, EmptyState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowDown, ArrowUp, Bot } from "lucide-react"
-import { type ReactNode, useId } from "react"
+import type { ReactNode } from "react"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
@@ -34,7 +34,7 @@ import {
   spanLabel,
 } from "../../lib/reports"
 import { FunnelCard } from "./patients-tab"
-import { type Better, ChangeLine, EmptyLine, ReportCard, WHOLE_CLINIC } from "./report-parts"
+import { EmptyLine, FooterButton, ReportCard, SummaryFigure, travel, WHOLE_CLINIC } from "./report-parts"
 
 /** Lo que se aparta de la clínica más de estos puntos lleva su marca en la tabla por profesional. */
 const APART_POINTS = 5
@@ -45,14 +45,6 @@ function compactMoney(cents: number, locale: string): string {
   return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(cents / 100)
 }
 
-/** «de S/ 38 900 a S/ 48 200»: el recorrido de la línea pequeña dicho con palabras. */
-export function travel(values: Array<number | null>, format: (value: number) => string): string {
-  const known = values.filter((value): value is number => value !== null)
-  if (known.length === 0) return "sin datos"
-  if (known.length === 1) return format(known[0] as number)
-  return `de ${format(known[0] as number)} a ${format(known[known.length - 1] as number)}`
-}
-
 /** Una diferencia de dinero dicha con palabras: «S/ 620 más que en agosto». */
 function moneyChange(current: number, previous: number, currency: string, locale: string, phrase: string): Comparison {
   const difference = current - previous
@@ -60,64 +52,11 @@ function moneyChange(current: number, previous: number, currency: string, locale
   return { text: `${formatMoney(Math.abs(difference), currency, locale)} ${difference > 0 ? "más" : "menos"} ${phrase}`, direction: difference > 0 ? "up" : "down" }
 }
 
-export function SummaryFigure({
-  title,
-  icon,
-  value,
-  spark,
-  sparkLabel,
-  sparkPartial,
-  change,
-  better,
-  detail,
-  note,
-  footer,
-}: {
-  title: string
-  icon?: ReactNode
-  value: ReactNode
-  spark: Array<number | null>
-  sparkLabel: string
-  /** El último mes de la línea todavía corre. */
-  sparkPartial?: boolean
-  change?: Comparison | null
-  better: Better
-  detail?: ReactNode
-  note?: string
-  footer?: ReactNode
-}) {
-  const id = useId()
-  return (
-    <section aria-labelledby={id} className="elevated flex min-w-0 flex-col gap-1 rounded-xl border bg-card px-[18px] py-4">
-      <h3 id={id} className="flex items-center gap-1.5 text-[13px] font-bold text-muted-foreground">
-        {icon}
-        {title}
-        {note ? <span className="font-medium">· {note}</span> : null}
-      </h3>
-      <div className="flex min-w-0 items-end justify-between gap-3">
-        <span className="min-w-0 truncate text-[28px] leading-9 font-extrabold tracking-tight tabular-nums">{value}</span>
-        <Sparkline values={spark} label={`${sparkLabel}${sparkPartial ? ". El último mes no está completo" : ""}`} lastPartial={sparkPartial} />
-      </div>
-      {change !== undefined ? <ChangeLine change={change} better={better} /> : null}
-      {detail ? <span className="text-[13px] text-foreground/80">{detail}</span> : null}
-      {footer ? <div className="mt-auto pt-1.5">{footer}</div> : null}
-    </section>
-  )
-}
-
 function FooterLink({ to, children }: { to: SummaryTarget; children: ReactNode }) {
   return (
     <Link to="/reports" search={(prev) => ({ ...prev, tab: to, lista: undefined })} className="inline-flex min-h-11 items-center text-[13px] font-bold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8">
       {children}
     </Link>
-  )
-}
-
-export function FooterButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-bold sm:min-h-8" onClick={onClick}>
-      {children}
-    </Button>
   )
 }
 

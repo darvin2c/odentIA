@@ -32,7 +32,7 @@ const KIND_LINE: Record<SaasActionKind, (count: number) => string> = {
 }
 
 /** ¿Cobra esta suscripción por acción? Activa o en gracia, con plan, no demo y con su mes empezado. */
-function chargeable(sub: typeof saasSubscription.$inferSelect): boolean {
+export function chargeable(sub: typeof saasSubscription.$inferSelect): boolean {
   return !sub.isDemo && sub.planId !== null && sub.activatedAt !== null && (sub.status === "activa" || sub.status === "gracia")
 }
 
