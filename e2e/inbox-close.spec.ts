@@ -83,7 +83,7 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   await page.setViewportSize({ width: 1440, height: 900 })
   const tab = (name: RegExp) => page.getByRole("button", { name })
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
-  // Cuatro pestañas que no se superponen; sin vista abre «Por atender» (ADR 0049).
+  // Cuatro pestañas que no se superponen; sin vista abre «Por atender» (ADR 0050).
   await expect(tab(/^Por atender 2$/)).toHaveAttribute("aria-pressed", "true")
   await expect(tab(/^Cerradas 0$/)).toBeVisible()
   await expect(page.getByRole("button", { name: /^(Abiertas|Esperan respuesta|Con el equipo)/ })).toHaveCount(0)

@@ -491,7 +491,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   enviar_enlace_cita: "El enlace solo dice para quién, qué servicio y qué sede; el día y la hora los elige la persona en la página.",
   pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",
-  recordar_tema: "Solo lleva el id del tema: anota que la persona volvió a preguntar y avisa a quien lo tiene (ADR 0049).",
+  recordar_tema: "Solo lleva el id del tema: anota que la persona volvió a preguntar y avisa a quien lo tiene (ADR 0050).",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",
   update_contact: "Pendiente: la ruta de contactos aún declara sus campos; el agente solo toca nombre y campos personalizados.",

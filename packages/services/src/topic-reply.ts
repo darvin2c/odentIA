@@ -9,7 +9,7 @@ import { handoffOpenSql } from "./handoff-state.js"
 import { updateTask } from "./tasks.js"
 
 /**
- * Una persona del equipo responde en la Bandeja (ADR 0049). Si cita un mensaje
+ * Una persona del equipo responde en la Bandeja (ADR 0050). Si cita un mensaje
  * de la persona, la respuesta sale citada y responde su tema:
  * - Si el mensaje es de un tema abierto, ese tema pasa a quien responde (si
  *   lo tenía otra persona, se le avisa) y, con «Enviar y resolver», queda
@@ -125,7 +125,7 @@ async function requireOpenTopic(tx: Db, orgId: string, conversationId: string, t
 
 /**
  * «Tomar este tema» (sin confirmación; se avisa a quien lo tenía) o «Pasar
- * este tema a…» (`toUserId`). El agente sigue con lo demás (ADR 0049).
+ * este tema a…» (`toUserId`). El agente sigue con lo demás (ADR 0050).
  */
 export async function takeTopic(
   tx: Db,
@@ -150,7 +150,7 @@ export async function resolveTopic(
 }
 
 /**
- * La persona respondió citando un mensaje de alguien del equipo (ADR 0049):
+ * La persona respondió citando un mensaje de alguien del equipo (ADR 0050):
  * va al tema de esa persona. Si tiene uno abierto en el hilo se anota ahí; si
  * no, se le abre uno con este mensaje. El agente no lo responde.
  */

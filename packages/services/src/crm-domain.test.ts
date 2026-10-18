@@ -640,7 +640,7 @@ it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran
     status: "queued",
     createdAt: t2,
   })
-  // «Por atender» (ADR 0049): sin responder y sin el agente a cargo; un
+  // «Por atender» (ADR 0050): sin responder y sin el agente a cargo; un
   // saliente que sigue en cola todavía no es respuesta.
   await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convUn, false))
   await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convQueued, false))

@@ -149,7 +149,7 @@ export async function processOutbound(
         return
       }
       const built: OutboundMessage = await buildOutbound(row, deps)
-      // Respuesta citada (ADR 0049): el id del proveedor del mensaje citado.
+      // Respuesta citada (ADR 0050): el id del proveedor del mensaje citado.
       let outbound = built
       if (row.message.replyToMessageId) {
         const [quoted] = await tx

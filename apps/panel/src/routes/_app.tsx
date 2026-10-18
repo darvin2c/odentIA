@@ -1,4 +1,6 @@
 import {
+  AccessLinkPasswordGate,
+  LegalGate,
   AppShell,
   type AppShellNavEntry,
   Brand,
@@ -15,14 +17,18 @@ import {
 } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { adminAccessQuery } from "../lib/admin-access"
-import { adminUrl } from "../lib/host"
+import { adminUrl, legalLinks } from "../lib/host"
 import { Building2, CircleHelp, KeyRound, ShieldCheck, UserRound } from "lucide-react"
-import { authClient } from "../lib/auth-client"
+import { authClient, authFetch } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
-import { requireVerifiedSession } from "../lib/guards"
+import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 
 export const Route = createFileRoute("/_app")({
-  beforeLoad: async () => ({ session: await requireVerifiedSession() }),
+  beforeLoad: async ({ location }) => {
+    const session = await requireVerifiedSession()
+    await requireTermsAccepted(location)
+    return { session }
+  },
   component: AppLayout,
 })
 
@@ -100,6 +106,10 @@ function AppLayout() {
           <SideDockSlot />
         </div>
       </SideDockProvider>
+      {/* Después de entrar con el enlace de acceso: pide la nueva contraseña. */}
+      <AccessLinkPasswordGate request={authFetch} />
+      {/* Términos nuevos: los acepta cada persona al entrar. */}
+      <LegalGate request={authFetch} links={legalLinks} />
     </AppShell>
   )
 }

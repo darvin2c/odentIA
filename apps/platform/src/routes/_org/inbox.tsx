@@ -164,7 +164,7 @@ const CHANNEL_FILTER_OPTIONS = [
 ] as const
 
 /**
- * Las cuatro pestañas de la Bandeja (ADR 0049): no se superponen, así cada
+ * Las cuatro pestañas de la Bandeja (ADR 0050): no se superponen, así cada
  * conversación está en una sola y los números suman. Sin vista en la URL se
  * abre «Por atender», lo único que pide a una persona. Solo valen las que
  * tienen pestaña: una vista sin control visible dejaría la lista filtrada sin
@@ -202,7 +202,7 @@ function InboxPage() {
   const navigate = useNavigate({ from: Route.fullPath })
   const listSearch = useListSearch()
   const channel = listSearch.get("channel")
-  // «Solo las mías»: los temas de quien mira y los que nadie tomó (ADR 0049).
+  // «Solo las mías»: los temas de quien mira y los que nadie tomó (ADR 0050).
   const mine = listSearch.get("mine") === "1"
   const search = listSearch.get("q") ?? ""
   // Vistas de trabajo (filtrado SQL en el servidor, antes de paginar); el orden es
@@ -682,7 +682,7 @@ function StateLabel({ words, className = "" }: { words: ConversationWords; class
       </span>
     )
   }
-  // Color con un solo significado (ADR 0049): ámbar lo que pide a una persona,
+  // Color con un solo significado (ADR 0050): ámbar lo que pide a una persona,
   // rojo solo «Ahora», gris esperar o cerrada; siempre con su frase.
   const tone =
     words.tone === "urgent"
@@ -856,7 +856,7 @@ function ConversationList({
         const initials = item.contact.displayName.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("")
         const ChannelIcon = channelIcon(item.connection.channel)
         const words = conversationWords({ ...item, myUserId })
-        // Con un tema abierto, la fila dice la pregunta que hay que contestar, no el último mensaje (ADR 0049).
+        // Con un tema abierto, la fila dice la pregunta que hay que contestar, no el último mensaje (ADR 0050).
         const topic = item.attention?.topics?.[0]
         const preview = topic
           ? `${!topic.assigneeUserId || topic.assigneeUserId === myUserId ? "Te toca: " : ""}«${topicQuote(topic)}»`
@@ -1014,7 +1014,7 @@ function ThreadView({
   /** Cierre según la lista, mientras llega el detalle. */
   listClosure?: ConversationClosure | null
   canSeeProposals: boolean
-  /** Desde «Por atender» el hilo abre en «Solo este tema» (ADR 0049). */
+  /** Desde «Por atender» el hilo abre en «Solo este tema» (ADR 0050). */
   startOnTopic?: boolean
   /** Abre el siguiente tema por atender; ausente si no hay otro. */
   onNextTopic?: () => void
@@ -1076,7 +1076,7 @@ function ThreadView({
   const canOpenPeople = usePermission("patients.read")
   const canSeeNonPatients = usePermission("crm.read")
   const [briefFor, setBriefFor] = useState<string | null>(null)
-  // Temas (ADR 0049): a qué mensaje responde la caja (undefined = el tema pendiente
+  // Temas (ADR 0050): a qué mensaje responde la caja (undefined = el tema pendiente
   // más antiguo de quien mira; null = mensaje nuevo, sin tema), si se ve solo el
   // tema y si el último envío lo dejó resuelto.
   const [replyTo, setReplyTo] = useState<string | null | undefined>(undefined)
@@ -1100,7 +1100,7 @@ function ThreadView({
     setReplyTo(undefined)
     setDoneTopic(false)
   }, [id])
-  // Desde «Por atender» cada hilo abre en «Solo este tema» (ADR 0049).
+  // Desde «Por atender» cada hilo abre en «Solo este tema» (ADR 0050).
   useEffect(() => {
     setOnlyTopic(startOnTopic)
   }, [startOnTopic])
@@ -1186,7 +1186,7 @@ function ThreadView({
     onError: sendFailed,
   })
 
-  // «Tomar este tema», «Pasar este tema a…» y «Marcar resuelto» (ADR 0049).
+  // «Tomar este tema», «Pasar este tema a…» y «Marcar resuelto» (ADR 0050).
   const topicMutation = useMutation({
     retry: false,
     mutationFn: ({ topicId, path, body }: { topicId: string; path: "take" | "resolve"; body?: unknown }) =>
@@ -1360,7 +1360,7 @@ function ThreadView({
   // El estado del detalle manda: reabierta, la lista podría traer todavía el cierre anterior.
   const closure = closed ? (detail.closure ?? conv.closure ?? listClosure ?? null) : null
   const words = conversationWords({ status: conv.status, attention: threadAttention, closure, myUserId })
-  // Temas del hilo (ADR 0049): primero los de quien mira y los que nadie tomó.
+  // Temas del hilo (ADR 0050): primero los de quien mira y los que nadie tomó.
   const topics = threadAttention?.topics ?? []
   const forMe = (topic: InboxTopic) => !topic.assigneeUserId || topic.assigneeUserId === myUserId
   const orderedTopics = [...topics.filter(forMe), ...topics.filter((topic) => !forMe(topic))]
@@ -1441,7 +1441,7 @@ function ThreadView({
             {detail.contact.isActive === false && <Badge variant="secondary">Archivado</Badge>}
           </div>
         </div>
-        {/* Un botón principal por estado vive en el tema (ADR 0049); aquí solo lo de la conversación. */}
+        {/* Un botón principal por estado vive en el tema (ADR 0050); aquí solo lo de la conversación. */}
         <div className="flex flex-wrap items-center gap-1.5">
         {topics.length > 0 || threadAttention?.handoffPriority ? (
           <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setBriefFor(conv.id)}>
@@ -1848,7 +1848,7 @@ function ThreadView({
 type ShownItem = { kind: "message"; msg: ChatMessage } | { kind: "fold"; count: number; firstId: string }
 
 /**
- * «Solo este tema» (ADR 0049): quedan a la vista el mensaje que originó el tema,
+ * «Solo este tema» (ADR 0050): quedan a la vista el mensaje que originó el tema,
  * las veces que volvió a preguntar, lo que se le respondió citándolos, lo que
  * escribió el equipo desde que se abrió y la respuesta del agente justo después
  * de cada pregunta repetida. Lo demás se pliega en una línea.
@@ -1888,7 +1888,7 @@ function quoteOf(
 }
 
 /**
- * Lo que hay que contestar en este hilo (ADR 0049), arriba del historial: la
+ * Lo que hay que contestar en este hilo (ADR 0050), arriba del historial: la
  * pregunta citada, quién la tiene y desde cuándo, lo que ya se le dijo y un
  * solo botón principal, «Responder». Tomar, pasar a otra persona y marcar
  * resuelto van en «…». Con varios temas, primero los de quien mira.

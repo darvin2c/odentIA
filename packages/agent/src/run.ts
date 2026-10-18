@@ -344,7 +344,7 @@ async function attendAgentRun(
         return { skip: { reason: OUT_OF_HOURS, model: effectiveModel, silent: true } }
       }
       if (limit) return { skip: { reason: limit, model: effectiveModel } }
-      // Una persona del equipo conversa en vivo (ADR 0049): el agente espera
+      // Una persona del equipo conversa en vivo (ADR 0050): el agente espera
       // hasta 15 minutos después de su último mensaje y entonces vuelve; si
       // para entonces ella ya respondió, la corrida no tiene nada que hacer.
       const [team] = await tx
@@ -371,7 +371,7 @@ async function attendAgentRun(
         .where(and(eq(message.id, inboundJob.messageId), eq(message.organizationId, orgId)))
         .limit(1)
       if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
-      // Responde citando un mensaje de una persona del equipo (ADR 0049): es
+      // Responde citando un mensaje de una persona del equipo (ADR 0050): es
       // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
       if (trigger.replyToMessageId) {
         const [quoted] = await tx
@@ -688,7 +688,7 @@ async function attendAgentRun(
             reportAgentNoReply(tx, orgId, { conversationId, triggerMessageId: attendedMessageId }),
           ).catch(() => true)
         : false
-    // El agente nunca se calla (ADR 0049): si nada salió y nadie del equipo la
+    // El agente nunca se calla (ADR 0050): si nada salió y nadie del equipo la
     // tomó, la primera vez se le pide un momento y se reintenta; si vuelve a
     // pasar con el mismo mensaje, queda un tema para recepción con el aviso fijo.
     // El «momento» que ya salió cuenta como respuesta para `reportAgentNoReply`: por eso se mira `silent`.

@@ -51,13 +51,13 @@ export interface ConversationAttention {
   outOfHours: boolean
   /** Quién tiene la conversación asignada, si alguien. */
   assignedName: string | null
-  /** Una persona del equipo conversa en vivo: el agente espera (ADR 0049). */
+  /** Una persona del equipo conversa en vivo: el agente espera (ADR 0050). */
   teamLive: boolean
-  /** Temas sin resolver del hilo, el más urgente primero (ADR 0049). */
+  /** Temas sin resolver del hilo, el más urgente primero (ADR 0050). */
   topics: InboxTopic[]
 }
 
-/** Horas tras las que un tema sin resolver pasa a «Ahora» (ADR 0049). */
+/** Horas tras las que un tema sin resolver pasa a «Ahora» (ADR 0050). */
 export const TOPIC_URGENT_AFTER_HOURS = 2
 
 /** Un tema sin resolver: lo que una persona del equipo tiene que contestar. */

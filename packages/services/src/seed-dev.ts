@@ -10,6 +10,8 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  */
+import { LEGAL } from "@odentia/auth/legal"
+import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
@@ -429,6 +431,8 @@ async function wipeSeed(): Promise<void> {
     "mailbox_oauth_state",
     "schedule_block",
     "professional_schedule",
+    "processing_agreement_acceptance",
+    "home_visit",
   ]) {
     await db.execute(
       sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B})`,
@@ -690,6 +694,9 @@ await db.transaction(async (tx) => {
   ])
   await tx.update(saasSubscription).set({ isDemo: true }).where(inArray(saasSubscription.organizationId, SEED_ORGS))
 })
+// Las cuentas semilla ya aceptaron los documentos vigentes; si no, entrar las
+// llevaría a «Un paso antes de seguir» (lienzo «Términos con Google»).
+const SEED_TERMS = { termsVersion: LEGAL.terms.version, termsAcceptedAt: new Date() }
 await db.insert(user).values([
   {
     id: ANA_ID,
@@ -698,6 +705,7 @@ await db.insert(user).values([
     lastName: "Torres",
     email: "ana@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
   {
     id: LUIS_ID,
@@ -706,6 +714,7 @@ await db.insert(user).values([
     lastName: "Prado",
     email: "luis@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
   {
     id: CORA_ID,
@@ -714,6 +723,7 @@ await db.insert(user).values([
     lastName: "Vega",
     email: "cora@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
   {
     id: ROJAS_ID,
@@ -722,6 +732,7 @@ await db.insert(user).values([
     lastName: "Rojas",
     email: "rojas@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
 ])
 const passwordHash = await hashPassword(PASSWORD)
@@ -765,6 +776,11 @@ await db.insert(member).values([
     createdAt: new Date(),
   },
 ])
+// Cada clínica semilla aceptó el contrato de encargo por su dueña.
+await db.insert(processingAgreementAcceptance).values([
+  { organizationId: ORG_A, version: LEGAL.agreement.version, acceptedBy: ANA_ID },
+  { organizationId: ORG_B, version: LEGAL.agreement.version, acceptedBy: CORA_ID },
+])
 // Colegiatura con la que firman (ADR 0003). Luis queda sin colegiatura en la
 // clínica B para ejercitar el aviso «falta tu colegiatura» al cerrar.
 // Título y colegio se escriben: el perfil no trae los de ningún país por defecto.
@@ -798,7 +814,7 @@ await db.insert(orgProfile).values([
     timezone: "America/Lima",
     // La lista de diagnósticos que recomienda Perú (decisión 26).
     diagnosisSystem: "ICD-10",
-    // El que da el agente ante una urgencia (ADR 0049); la clínica B no tiene y ve el aviso.
+    // El que da el agente ante una urgencia (ADR 0050); la clínica B no tiene y ve el aviso.
     emergencyPhone: "+5115550123",
   },
   {
@@ -1156,7 +1172,7 @@ const convCarlos = await seedConversation({
   contactId: contactIdByName.get("Carlos Paredes")!,
   connectionId: connA.id,
   thread: "seed-thread-4",
-  // Derivar no apaga al agente (ADR 0049): el precio es un tema del equipo y él sigue con lo demás.
+  // Derivar no apaga al agente (ADR 0050): el precio es un tema del equipo y él sigue con lo demás.
   unreadCount: 1,
   lastInboundAt: hoursAgo(3),
   lastMessageAt: hoursAgo(3),
@@ -1326,7 +1342,7 @@ const carlosTopic = await createHandoff(db, ORG_A, null, {
   priority: "alta",
   createdBy: "agent",
 })
-// El agente no se calla (ADR 0049): responde lo que sabe y anota cuando vuelve a preguntar por el tema.
+// El agente no se calla (ADR 0050): responde lo que sabe y anota cuando vuelve a preguntar por el tema.
 await seedMessage({
   orgId: ORG_A,
   conversationId: convCarlos.id,

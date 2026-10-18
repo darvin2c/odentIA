@@ -64,7 +64,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   const derived = await thread("Derivada", { agentStatus: "off" })
   await handoff(derived, "baja")
   await handoff(derived, "alta")
-  // Tema cuya tarea se completó directo en la base: derivar no apagó al agente (ADR 0049), así que vuelve a él.
+  // Tema cuya tarea se completó directo en la base: derivar no apagó al agente (ADR 0050), así que vuelve a él.
   const resolved = await thread("Resuelta")
   const done = await handoff(resolved, "media")
   await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, done.taskId as string))
@@ -112,7 +112,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
   expect(detail.closure).toBeNull()
 
   const ids = async (input: Parameters<typeof listInboxConversations>[2]) => (await list(input)).items.map((item) => item.id).sort()
-  // Cuatro vistas que no se superponen (ADR 0049): cada conversación cae en una sola.
+  // Cuatro vistas que no se superponen (ADR 0050): cada conversación cae en una sola.
   expect(await ids({ view: "attend" })).toEqual([derived.id])
   expect(await ids({ view: "agent" })).toEqual([waiting.id, resolved.id, stale.id].sort())
   // «Esperan al paciente» usa la misma vigencia: la vencida sin marcar no cuenta.

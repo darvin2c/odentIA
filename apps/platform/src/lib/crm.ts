@@ -15,7 +15,7 @@ export interface ConversationPreview {
 
 /** Lo que una conversación espera del equipo o del agente (lo calcula el servidor). */
 export interface ConversationAttention {
-  /** Temas sin resolver, el más urgente primero (ADR 0049). Ausente en respuestas antiguas en caché. */
+  /** Temas sin resolver, el más urgente primero (ADR 0050). Ausente en respuestas antiguas en caché. */
   topics?: InboxTopic[]
   /** Una persona del equipo conversa en vivo: el agente espera. */
   teamLive?: boolean
@@ -82,7 +82,7 @@ export interface ConversationListItem {
 }
 
 /** Totales de los chips de la Bandeja para los filtros vigentes (sin `status`). */
-/** Totales de las cuatro pestañas de la Bandeja, que no se superponen (ADR 0049). */
+/** Totales de las cuatro pestañas de la Bandeja, que no se superponen (ADR 0050). */
 export interface InboxSummary {
   open: number
   /** «Por atender»: piden a una persona. */
@@ -93,7 +93,7 @@ export interface InboxSummary {
   closed: number
 }
 
-/** Un tema que tiene que contestar una persona del equipo (ADR 0049). */
+/** Un tema que tiene que contestar una persona del equipo (ADR 0050). */
 export interface InboxTopic {
   id: string
   reason: string

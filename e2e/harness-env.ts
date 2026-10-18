@@ -149,6 +149,8 @@ export function stackEnv(runtime: HarnessRuntime): Record<string, string> {
     S3_PUBLIC_URL: `${s3Endpoint}/${AVATARS_BUCKET}`,
     SECRETS_KEY: "b895edcf574a7ca79434e50769e9ded6daace1636bc40d71f1310c3f43c5982b",
     CHANNEL_VALIDATE_EXTERNAL: "false",
+    // Sin consultar Have I Been Pwned: las pruebas no dependen de la red ni de sus claves de ejemplo.
+    PASSWORD_BREACH_CHECK: "false",
     CHANNEL_SENDER_MODE: "mock",
     LLM_MODEL: "fake",
     // Ventana mínima: ejercita la cola con retardo sin alargar los recorridos.

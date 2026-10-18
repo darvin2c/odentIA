@@ -51,7 +51,7 @@ const listQuery = filtersQuery.extend({
 
 const textInput = z.object({
   text: z.string().min(1).max(4000),
-  // Responder citando un mensaje de la persona (ADR 0049).
+  // Responder citando un mensaje de la persona (ADR 0050).
   replyToMessageId: z.string().uuid().optional(),
   // «Enviar, sigue pendiente»: el tema queda abierto. Por defecto se resuelve.
   keepPending: z.boolean().optional(),
@@ -159,7 +159,7 @@ export function createConversationsRoute(deps: CrmDeps) {
     }
   })
 
-  // Temas de la conversación (ADR 0049): tomar, pasar a otra persona y resolver.
+  // Temas de la conversación (ADR 0050): tomar, pasar a otra persona y resolver.
   app.post("/:id/topics/:topicId/take", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = z.object({ toUserId: z.string().min(1).max(100).optional() }).strict()

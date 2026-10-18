@@ -1,4 +1,4 @@
-# 0049 · El agente nunca se calla: lo derivado es un tema, no la conversación
+# 0050 · El agente nunca se calla: lo derivado es un tema, no la conversación
 
 Fecha: 2026-10-18 · Estado: aceptada · Modifica a [0024](0024-ninguna-conversacion-queda-abierta.md) en «Lo que tiene una persona» · Complementa a [0021](0021-el-agente-siempre-responde-y-sabe-todo-lo-de-la-clinica.md)
 
@@ -30,4 +30,4 @@ Derivar a una persona apagaba al agente en toda la conversación (`agent_status 
 
 ## Referencias
 
-`packages/services/src/agent-operations.ts` (`createHandoff`), `packages/services/src/conversation-state.ts`, `packages/agent/src/tools.ts` (`request_human_handoff`, `recordar_tema`), `packages/db/drizzle/0009_temas_para_el_equipo.sql`.
+`packages/services/src/agent-operations.ts` (`createHandoff`), `packages/services/src/conversation-state.ts`, `packages/agent/src/tools.ts` (`request_human_handoff`, `recordar_tema`), `packages/db/drizzle/0014_temas_para_el_equipo.sql`.

@@ -378,7 +378,7 @@ export async function closeConversation(tx: Db, orgId: string, id: string, actor
 }
 
 /**
- * Completar la tarea de un tema ya no cierra la conversación (ADR 0049): el
+ * Completar la tarea de un tema ya no cierra la conversación (ADR 0050): el
  * agente sigue con lo demás y el ciclo la cierra por silencio, como cualquier
  * otra. Se mantienen para quien pregunta qué pasará al completarla: nada.
  */
@@ -411,7 +411,7 @@ export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: str
 /**
  * «Tomar»: los temas abiertos del hilo pasan a quien los toma (sin
  * confirmación; se avisa a quien los tenía). El agente no se apaga: sigue con
- * lo demás (ADR 0049). Tomar una cerrada la reabre antes (ADR 0024).
+ * lo demás (ADR 0050). Tomar una cerrada la reabre antes (ADR 0024).
  */
 export async function takeConversation(tx: Db, orgId: string, id: string, userId: string): Promise<void> {
   const [membership] = await tx
@@ -447,7 +447,7 @@ export async function takeConversation(tx: Db, orgId: string, id: string, userId
 
 /**
  * Vuelve a encender al agente en el hilo y quita la asignación. Los temas
- * abiertos siguen con su responsable: el agente nunca los responde (ADR 0049).
+ * abiertos siguen con su responsable: el agente nunca los responde (ADR 0050).
  */
 export async function releaseConversation(tx: Db, orgId: string, id: string, actorUserId: string | null): Promise<void> {
   const thread = await threadForWriting(tx, orgId, id)
@@ -500,7 +500,7 @@ export async function agentReplyBlockedReason(tx: Db, orgId: string, id: string)
   if (row.agentStatus !== "on") {
     return "Una persona del equipo apagó el agente en esta conversación mientras preparabas la respuesta: no envíes nada; la sigue ella."
   }
-  // Una persona del equipo conversa en vivo: el agente espera (ADR 0049).
+  // Una persona del equipo conversa en vivo: el agente espera (ADR 0050).
   const [live] = await tx.execute<{ live: boolean }>(sql`select ${teamLiveSql(sql.raw("c"))} as live from conversation c
     where c.id = ${id} and c.organization_id = ${orgId}`)
   if (live?.live) {
@@ -636,7 +636,7 @@ export async function tickConversationCare(
 
   async function careFor(inner: Db, row: CareRow): Promise<"nudged" | "closed" | null> {
     // Un tema que el equipo ya respondió y por el que la persona no volvió a
-    // preguntar se da por resuelto con la misma regla de silencio (ADR 0049).
+    // preguntar se da por resuelto con la misma regla de silencio (ADR 0050).
     if (row.handoffOpen && !(await settleAnsweredTopics(inner, row))) return null
     const attended = cfg.channels === null || cfg.channels.includes(row.channel)
     // Con una persona a cargo no se cierra sola: la muestra «Te espera».

@@ -230,7 +230,7 @@ export const HANDOFF_PRIORITIES = ["alta", "media", "baja"] as const
 export type HandoffPriority = (typeof HANDOFF_PRIORITIES)[number]
 
 /**
- * Temas para el equipo (ADR 0049): lo que el agente no puede responder, o lo
+ * Temas para el equipo (ADR 0050): lo que el agente no puede responder, o lo
  * que una persona del equipo atiende, con resumen factual, motivo, prioridad,
  * responsable y tarea de seguimiento (la tarea vive en `task` y da el estado y
  * el plazo). Un tema abierto no apaga al agente: el agente sigue con lo demás.

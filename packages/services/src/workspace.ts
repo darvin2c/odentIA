@@ -447,7 +447,7 @@ async function waitingCases(
 ): Promise<{ items: WaitingCase[]; total: number }> {
   // Lo que ya tomó otra persona no espera a quien mira; quien dirige lo ve todo.
   // Quien no ve los casos del agente (el odontólogo) recibe solo los temas que
-  // le pasaron, como una duda clínica de su paciente (ADR 0049).
+  // le pasaron, como una duda clínica de su paciente (ADR 0050).
   const listed = await listHandoffs(tx, orgId, { limit: 100, open: true, order: "urgencia", ...(all ? {} : { visibleTo: userId }) })
   const rows = onlyMine ? listed.filter((row) => row.assigneeUserId === userId) : listed
   const items = rows

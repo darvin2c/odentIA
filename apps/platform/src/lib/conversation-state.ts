@@ -37,7 +37,7 @@ function since(iso: string): string {
 }
 
 /**
- * La palabra de la fila y de la cabecera del hilo (ADR 0049). Orden: cerrada;
+ * La palabra de la fila y de la cabecera del hilo (ADR 0050). Orden: cerrada;
  * su tema más urgente (de quién es: nadie, tú u otra persona); sin responder y
  * sin el agente; espera al paciente; la atiende el agente. Sin `attention`
  * (respuesta antigua en caché) una abierta no dice nada. El color sigue la

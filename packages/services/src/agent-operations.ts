@@ -3267,7 +3267,7 @@ export async function reportAgentNoReply(
 const HANDOFF_DUE_HOURS: Record<HandoffPriority, number> = { alta: 4, media: 24, baja: 72 }
 
 /**
- * Tema para el equipo (ADR 0049): resumen factual, motivo, prioridad,
+ * Tema para el equipo (ADR 0050): resumen factual, motivo, prioridad,
  * responsable, tarea de seguimiento y el mensaje de la persona que lo originó
  * (por defecto, su último entrante). No apaga al agente: el agente sigue con
  * lo demás. Una duda clínica sin responsable va al profesional que atiende al
@@ -3497,7 +3497,7 @@ export async function claimHandoff(
   /**
    * `takeOver`: «Tomar este tema» aunque lo tenga otra persona (sin
    * confirmación; a ella se le avisa). `toUserId`: «Pasar este tema a…»; por
-   * defecto, quien actúa. Ninguna de las dos apaga al agente (ADR 0049).
+   * defecto, quien actúa. Ninguna de las dos apaga al agente (ADR 0050).
    */
   opts: { takeOver?: boolean; toUserId?: string } = {},
 ): Promise<HandoffItem> {
@@ -3599,7 +3599,7 @@ async function topicPersonName(tx: Db, orgId: string, contactId: string | null):
 
 /**
  * La persona volvió a preguntar por un tema que tiene una persona del equipo
- * (ADR 0049): el agente no lo responde; se anota el mensaje en el tema y se
+ * (ADR 0050): el agente no lo responde; se anota el mensaje en el tema y se
  * avisa a su responsable (o, sin responsable, queda resaltado en «Por atender»).
  */
 export async function recordTopicAskedAgain(

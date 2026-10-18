@@ -440,7 +440,7 @@ function ReceptionPage() {
         </p>
       ) : null}
 
-      {/* Sin teléfono para urgencias el agente remite a emergencias: se dice con su acción (ADR 0049). */}
+      {/* Sin teléfono para urgencias el agente remite a emergencias: se dice con su acción (ADR 0050). */}
       {orgProfile.data && !orgProfile.data.emergencyPhone ? (
         <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm ${besideTest}`}>
           <span className="font-semibold">Sin teléfono para urgencias.</span>

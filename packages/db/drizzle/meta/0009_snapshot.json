@@ -1,5 +1,5 @@
 {
-  "id": "9a2ae2ee-6851-4b82-9ab0-5e774b414212",
+  "id": "c6a953e9-8499-4b58-bda2-c568a2d2a9bd",
   "prevId": "dd34f3a4-d96c-44a9-8bc9-006eb190795b",
   "version": "7",
   "dialect": "postgresql",
@@ -3470,25 +3470,6 @@
           "notNull": true,
           "default": "'agent'"
         },
-        "source_message_id": {
-          "name": "source_message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "asked_message_ids": {
-          "name": "asked_message_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "asked_again_at": {
-          "name": "asked_again_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3570,21 +3551,6 @@
             "contact_id"
           ],
           "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "agent_handoff_conversation_id_source_message_id_message_conversation_id_id_fk": {
-          "name": "agent_handoff_conversation_id_source_message_id_message_conversation_id_id_fk",
-          "tableFrom": "agent_handoff",
-          "tableTo": "message",
-          "columnsFrom": [
-            "conversation_id",
-            "source_message_id"
-          ],
-          "columnsTo": [
-            "conversation_id",
             "id"
           ],
           "onDelete": "no action",
@@ -6186,6 +6152,18 @@
         "image": {
           "name": "image",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terms_version": {
+          "name": "terms_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terms_accepted_at": {
+          "name": "terms_accepted_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -22743,12 +22721,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "reply_to_message_id": {
-          "name": "reply_to_message_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -22758,27 +22730,6 @@
         }
       },
       "indexes": {
-        "message_conversation_id_uidx": {
-          "name": "message_conversation_id_uidx",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "message_conversation_external_uidx": {
           "name": "message_conversation_external_uidx",
           "columns": [
@@ -22848,21 +22799,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "message_conversation_id_reply_to_message_id_message_conversation_id_id_fk": {
-          "name": "message_conversation_id_reply_to_message_id_message_conversation_id_id_fk",
-          "tableFrom": "message",
-          "tableTo": "message",
-          "columnsFrom": [
-            "conversation_id",
-            "reply_to_message_id"
-          ],
-          "columnsTo": [
-            "conversation_id",
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
@@ -24996,12 +24932,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'Recibo interno. No es un documento fiscal.'"
-        },
-        "emergency_phone": {
-          "name": "emergency_phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",

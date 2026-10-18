@@ -266,7 +266,7 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     }
     // `to` es el externalThreadId del parse (`tg:<chatId>`).
     const chatId = msg.to.startsWith("tg:") ? msg.to.slice("tg:".length) : msg.to
-    // Respuesta citada (ADR 0049): el id propio es `tg:<chat>:<message_id>`.
+    // Respuesta citada (ADR 0050): el id propio es `tg:<chat>:<message_id>`.
     const quoted = msg.replyToExternalId?.startsWith(`tg:${chatId}:`) ? Number(msg.replyToExternalId.split(":")[2]) : NaN
     const reply = Number.isInteger(quoted) ? { reply_parameters: { message_id: quoted, allow_sending_without_reply: true } } : {}
     if (msg.kind.type === "text") {

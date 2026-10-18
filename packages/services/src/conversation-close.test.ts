@@ -187,7 +187,7 @@ describe("«Resolver», «Tomar» y «Devolver al agente»", () => {
     expect(await c.run((tx) => getResolvePreview(tx, c.orgId, late.id))).toMatchObject({ farewell: false, farewellText: null })
   })
 
-  it("completar la tarea de un tema no cierra la conversación: el agente sigue con lo demás (ADR 0049)", async () => {
+  it("completar la tarea de un tema no cierra la conversación: el agente sigue con lo demás (ADR 0050)", async () => {
     const c = await clinic()
     const conv = await c.thread("Fabio")
     await c.say(conv.id, "in", "Necesito ayuda", new Date())
@@ -363,7 +363,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
 
   it("con una persona a cargo no se cierra ni avisa en la campana: la muestra «Te espera» a quien la lleva", async () => {
     const c = await clinic()
-    // Una persona la lleva entera: apagó al agente en el hilo (ADR 0049; asignar ya no lo hace).
+    // Una persona la lleva entera: apagó al agente en el hilo (ADR 0050; asignar ya no lo hace).
     const mine = await c.thread("Nora Paz", { assignedUserId: c.ownerId, agentStatus: "off", lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(mine.id, "in", "Hola", IN)
     await c.say(mine.id, "out", "Hola Nora", OUT, "user")
@@ -410,7 +410,7 @@ describe("lo que el agente redactó no sale si el equipo apagó al agente, conve
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, own.id))).toBeNull()
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, taken.id))).toMatch(/apagó el agente/)
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, closed.id))).toMatch(/cerró la conversación/)
-    // Una persona del equipo escribió hace menos de 15 minutos: el agente espera (ADR 0049).
+    // Una persona del equipo escribió hace menos de 15 minutos: el agente espera (ADR 0050).
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, live.id))).toMatch(/conversando/)
     expect(await c.run((tx) => agentReplyBlockedReason(tx, c.orgId, earlier.id))).toBeNull()
   })
@@ -436,7 +436,7 @@ describe("tope por persona", () => {
   })
 })
 
-describe("temas para el equipo: el agente nunca se calla (ADR 0049)", () => {
+describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
   const IN = new Date("2026-10-12T14:00:00Z")
   const OUT = new Date("2026-10-12T14:01:00Z")
   const tick = (c: Awaited<ReturnType<typeof clinic>>, now: Date) => c.run((tx) => tickConversationCare(tx, c.orgId, now))

@@ -82,7 +82,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const { waiting, derived, firstAppointment, proposeAppointment } = await seedThreads(owner, fixtureDb, nextEventId)
 
   // El servidor cuenta las vistas sobre todo lo filtrado y describe cada hilo.
-  // Cuatro vistas que no se superponen (ADR 0049): el caso derivado es un tema «Por atender»
+  // Cuatro vistas que no se superponen (ADR 0050): el caso derivado es un tema «Por atender»
   // y la cita propuesta espera al paciente.
   expect(await call(page, "GET", "/api/conversations/summary", org.slug)).toEqual({
     open: 2, attend: 1, agent: 0, awaitingPatient: 1, closed: 0,

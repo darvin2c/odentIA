@@ -90,7 +90,7 @@ const profileSchema = z.object({
   fiscalDocType: z.string(),
   fiscalDocNumber: z.string(),
   fiscalAddress: z.string(),
-  // Teléfono para urgencias (ADR 0049): E.164 del campo de teléfono o vacío.
+  // Teléfono para urgencias (ADR 0050): E.164 del campo de teléfono o vacío.
   emergencyPhone: z.string(),
   countryCode: z.string().length(2, "Elige el país"),
   currency: z.string().length(3, "Elige la moneda"),

@@ -76,7 +76,7 @@ export function routeOutcome(route: AgentRoute): Record<string, unknown> {
  * turno, y con WIDEN_TOOL recupera el resto si el camino se eligió mal. Los
  * caminos que no figuran aquí reciben todas.
  */
-// `recordar_tema`: con un tema abierto, la persona puede preguntar por él en cualquier camino (ADR 0049).
+// `recordar_tema`: con un tema abierto, la persona puede preguntar por él en cualquier camino (ADR 0050).
 const ALWAYS = ["send_reply", "request_human_handoff", "recordar_tema"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.

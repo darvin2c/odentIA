@@ -335,7 +335,7 @@ export interface AgentToolCtx {
 }
 
 /**
- * Tema para el equipo (ADR 0049): registro estructurado (resumen, motivo,
+ * Tema para el equipo (ADR 0050): registro estructurado (resumen, motivo,
  * prioridad, tarea y el mensaje que lo originó). No apaga al agente: el tema
  * queda en «Por atender» y el agente sigue con lo demás. Misma vía para
  * palabra clave, herramienta y maxTurns.

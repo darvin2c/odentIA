@@ -44,7 +44,7 @@ export interface AgentCaseProposal {
   expiresAt: string | null
 }
 
-/** Un tema que tiene el equipo (ADR 0049): el agente nunca lo responde. */
+/** Un tema que tiene el equipo (ADR 0050): el agente nunca lo responde. */
 export interface AgentCaseTopic {
   id: string
   reason: string
@@ -178,7 +178,7 @@ export function formatAgentCaseForPrompt(
   const facts: string[] = []
   if (state.topics?.length) {
     sections.push(
-      `Temas con el equipo (ADR 0049; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene y cuándo le responde; responde con normalidad todo lo demás:
+      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene y cuándo le responde; responde con normalidad todo lo demás:
 ${state.topics
         .map(
           (t) =>

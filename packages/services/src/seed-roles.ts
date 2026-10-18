@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { LEGAL } from "@odentia/auth/legal"
 import { account, member, user } from "@odentia/db/schema/auth"
 import { hashPassword } from "better-auth/crypto"
 import { and, eq } from "drizzle-orm"
@@ -60,6 +61,9 @@ export async function seedRoles(
         lastName: seed.lastName,
         email: seed.email,
         emailVerified: true,
+        // Ya aceptaron los documentos vigentes: entrar no pasa por «Un paso antes de seguir».
+        termsVersion: LEGAL.terms.version,
+        termsAcceptedAt: new Date(),
       })
     }
     const existingAccount = await tx

@@ -183,7 +183,7 @@ export interface OutboundMessage {
    */
   listUnsubscribe?: string
   /**
-   * Responde citando este mensaje (el id del proveedor, ADR 0049). Quien no
+   * Responde citando este mensaje (el id del proveedor, ADR 0050). Quien no
    * sabe citar lo ignora: el texto sale igual.
    */
   replyToExternalId?: string

@@ -208,7 +208,7 @@ it("solo se omite el mensaje que una corrida leyó: ni la hora de creación ni u
   expect(await ledgerOf(first.conversationId)).toEqual(["sin_respuesta"])
   expect(await run(silentThenReply, second.conversationId, second.messageId)).toBe("done")
   expect(silentThenReply.calls).toHaveLength(2)
-  // El «Dame un momento» de la primera corrida y la respuesta de la segunda (ADR 0049).
+  // El «Dame un momento» de la primera corrida y la respuesta de la segunda (ADR 0050).
   expect(await repliesOf(first.conversationId)).toHaveLength(2)
 
   // Un mensaje que se confirma tarde con una hora de creación anterior a la de

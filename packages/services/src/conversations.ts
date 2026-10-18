@@ -126,7 +126,7 @@ export interface MessageItem {
    * conversación: cuál fue. Nulo en cualquier otro mensaje.
    */
   automatic: { key: string; name: string } | null
-  /** Mensaje de la misma conversación al que responde, citado (ADR 0049). */
+  /** Mensaje de la misma conversación al que responde, citado (ADR 0050). */
   replyToMessageId: string | null
   createdAt: string
 }
@@ -395,7 +395,7 @@ export async function ingestInbound(
     }
   }
 
-  // La persona respondió citando un mensaje de esta conversación (ADR 0049).
+  // La persona respondió citando un mensaje de esta conversación (ADR 0050).
   let replyToMessageId: string | null = null
   if (event.replyToExternalId) {
     const [quoted] = await tx
@@ -679,7 +679,7 @@ export async function sendOutbound(
     senderKind: "user" | "agent"
     senderUserId?: string | null
     content: OutboundContent
-    /** Responde citando este mensaje de la misma conversación (ADR 0049). */
+    /** Responde citando este mensaje de la misma conversación (ADR 0050). */
     replyToMessageId?: string | null
   },
 ): Promise<MessageItem> {
@@ -706,7 +706,7 @@ export async function sendOutbound(
     lastMessageAt: now,
     updatedAt: now,
   }
-  // Escribir no apaga al agente (ADR 0049): mientras la persona del equipo
+  // Escribir no apaga al agente (ADR 0050): mientras la persona del equipo
   // conversa en vivo, el agente espera (`teamLiveSql`) y luego vuelve solo.
   if (input.senderKind === "user") patch.unreadCount = 0
   await tx.update(conversation).set(patch).where(eq(conversation.id, input.conversationId))

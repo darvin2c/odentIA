@@ -1112,7 +1112,7 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
   const id = ingested.conversationId
   expect((await app.request(`/conversations/${id}/take`, { method: "POST" })).status).toBe(200)
   const taken = (await (await app.request(`/conversations/${id}`)).json()) as { data: { conversation: { agentStatus: string }; attention: { assignedName: string | null; unanswered: boolean }; closure: unknown } }
-  // Tomar no apaga al agente (ADR 0049): sigue con lo que no sea del equipo.
+  // Tomar no apaga al agente (ADR 0050): sigue con lo que no sea del equipo.
   expect(taken.data.conversation.agentStatus).toBe("on")
   expect(taken.data.attention).toMatchObject({ assignedName: "Dueña", unanswered: true })
   expect(taken.data.closure).toBeNull()

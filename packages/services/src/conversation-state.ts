@@ -58,13 +58,13 @@ export function proposalPendingExistsSql(conv: SQL): SQL {
 /**
  * Una persona del equipo la lleva entera: alguien apagó el agente en el hilo
  * con el interruptor manual. Un tema abierto no cuenta: el agente sigue con lo
- * demás (ADR 0049).
+ * demás (ADR 0050).
  */
 export function personInChargeSql(conv: SQL): SQL {
   return sql`(${conv}.agent_status = 'off')`
 }
 
-/** Minutos que el agente espera después del último mensaje de una persona del equipo (ADR 0049). */
+/** Minutos que el agente espera después del último mensaje de una persona del equipo (ADR 0050). */
 export const TEAM_LIVE_MINUTES = 15
 
 /** Una persona del equipo escribió en el hilo hace menos de `TEAM_LIVE_MINUTES`: conversa en vivo. */
@@ -118,7 +118,7 @@ export function awaitingPatientSql(conv: SQL): SQL {
 }
 
 /**
- * «Por atender» (ADR 0049): abierta y con un tema sin resolver, o una que el
+ * «Por atender» (ADR 0050): abierta y con un tema sin resolver, o una que el
  * agente no atiende (apagado en el hilo, en la clínica o en ese canal) y no
  * espera al paciente. Es lo único que pide a una persona.
  */
@@ -141,7 +141,7 @@ export function stillOpenWithPersonSql(conv: SQL): SQL {
 }
 
 /**
- * Vistas de la Bandeja (ADR 0049): cuatro que no se superponen, así cada
+ * Vistas de la Bandeja (ADR 0050): cuatro que no se superponen, así cada
  * conversación cae en una sola y los totales suman.
  * - `attend`, «Por atender»: pide a una persona (`needsPersonSql`).
  * - `awaiting_patient`: no tiene temas y espera al paciente.

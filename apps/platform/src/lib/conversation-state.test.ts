@@ -39,7 +39,7 @@ afterEach(() => {
 })
 
 describe("en qué está una conversación abierta", () => {
-  it("un tema dice de quién es: de nadie con su urgencia, tuyo u de otra persona (ADR 0049)", () => {
+  it("un tema dice de quién es: de nadie con su urgencia, tuyo u de otra persona (ADR 0050)", () => {
     const topic = {
       id: "t1", reason: "Descuento", priority: "media" as const, urgent: false, assigneeUserId: null, assigneeName: null,
       createdBy: "agent" as const, createdAt: NOW.toISOString(), dueAt: null, taskId: null,

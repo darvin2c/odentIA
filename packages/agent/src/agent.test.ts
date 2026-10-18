@@ -234,7 +234,7 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .from(conversation)
       .where(eq(conversation.id, conversationId)),
   )
-  expect(conv?.agentStatus).toBe("on") // derivar no apaga al agente (ADR 0049)
+  expect(conv?.agentStatus).toBe("on") // derivar no apaga al agente (ADR 0050)
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
   const tasks = await withOrgContext(appDb, "org_a", (tx) =>
     tx
@@ -381,7 +381,7 @@ it("la respuesta cierra el turno: una sola llamada al modelo y sin derivar con m
   }
 })
 
-it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pasar, queda un tema con el aviso fijo (ADR 0049)", async () => {
+it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pasar, queda un tema con el aviso fijo (ADR 0050)", async () => {
   const stamp = Date.now()
   const receptionId = `agent-reception-${stamp}`
   await ownerDb.insert(user).values({ id: receptionId, name: "Recepción", email: `recepcion-${stamp}@example.test` })
@@ -1443,7 +1443,7 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   const [resolved] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
   expect(resolved!.status).toBe("done")
-  // Completar el tema no cierra la conversación (ADR 0049): el agente sigue con lo demás.
+  // Completar el tema no cierra la conversación (ADR 0050): el agente sigue con lo demás.
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ agentStatus: conversation.agentStatus, status: conversation.status })
       .from(conversation).where(eq(conversation.id, conversationId)))
