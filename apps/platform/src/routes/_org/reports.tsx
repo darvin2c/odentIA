@@ -14,11 +14,11 @@ import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
 import { AgendaTab } from "../../components/reports/agenda-tab"
+import { AgentTab } from "../../components/reports/agent-tab"
 import { MoneyTab } from "../../components/reports/money-tab"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
 import { ReportPeriodPicker } from "../../components/reports/report-period"
 import { SalesTab } from "../../components/reports/sales-tab"
-import { ServiceTab } from "../../components/reports/service-tab"
 import { AdminWatch, SummaryTab } from "../../components/reports/summary-tab"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { EmptyState } from "@odentia/ui-patterns"
@@ -50,7 +50,7 @@ const TAB_COPY: Record<ReportTab, { title: string; question: string }> = {
   finanzas: { title: "Finanzas", question: "Cuánto entró, cuánto se gastó y cuánto falta cobrar" },
   pacientes: { title: "Pacientes", question: "El trabajo nuevo que entró y el que se hizo" },
   agenda: { title: "Agenda", question: "Si los pacientes vinieron y quién los atendió" },
-  agente: { title: "Agente", question: "Cómo respondimos a quien escribió" },
+  agente: { title: "Agente", question: "Lo que hizo el agente, lo que pagaste por él y cómo respondimos a quien escribió" },
 }
 
 /** Los avisos del Administrador vienen marcados con la pregunta de antes. */
@@ -231,7 +231,7 @@ function ReportsPage() {
               ) : tab === "pacientes" ? (
                 <SalesTab query={query} onOpenList={openList} advice={adviceNote("pacientes")} />
               ) : (
-                <ServiceTab query={query} />
+                <AgentTab query={query} onOpenList={openList} />
               )}
             </>
           )}

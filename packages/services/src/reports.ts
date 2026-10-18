@@ -16,6 +16,7 @@ import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { screenedSql } from "./conversation-state.js"
 import { budgetLineUnitsSql, budgetValueOptionSql } from "./budgets.js"
 import { getFinanceResultBetween, getFinanceTotalsBetween } from "./finance.js"
+import { getAgentReportList } from "./report-agent.js"
 import { OVERDUE_DAYS, overdueDebtSql } from "./report-debts.js"
 import { addMonths, reportDayOf, monthStart, monthsOf, type ReportBucket, type ReportSpan, type YearMonth } from "./report-periods.js"
 import {
@@ -541,13 +542,16 @@ export const REPORT_LISTS = [
   "budgets_waiting",
   "new_patients",
   "debts_overdue",
+  "agent_booked",
+  "agent_handoffs",
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
 export type ReportListRow = {
   id: string
   at: string
-  patientId: string
+  /** Null: la persona escribió pero aún no es paciente (no tiene ficha). */
+  patientId: string | null
   personName: string
   /** Lo que identifica la fila: prestación de la cita, título del control o del presupuesto. */
   title: string | null
@@ -557,6 +561,8 @@ export type ReportListRow = {
   hasNextAppointment: boolean
   cents: number | null
   currency: string | null
+  /** La fila lleva a esta conversación en la Bandeja en vez de a la ficha. */
+  conversationId?: string | null
 }
 
 const REPORT_LIST_LIMIT = 200
@@ -567,6 +573,8 @@ export async function getReportList(
   query: ReportQuery & { list: ReportListKey },
   now: Date = new Date(),
 ) {
+  // Las listas de Reportes › Agente viven con sus cifras.
+  if (query.list === "agent_booked" || query.list === "agent_handoffs") return getAgentReportList(tx, orgId, { ...query, list: query.list }, now)
   const scope = await reportScope(tx, orgId, query, now)
   const { window } = scope
   const start = at(window.start)

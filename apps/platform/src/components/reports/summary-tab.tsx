@@ -45,7 +45,7 @@ function compactMoney(cents: number, locale: string): string {
 }
 
 /** «de S/ 38 900 a S/ 48 200»: el recorrido de la línea pequeña dicho con palabras. */
-function travel(values: Array<number | null>, format: (value: number) => string): string {
+export function travel(values: Array<number | null>, format: (value: number) => string): string {
   const known = values.filter((value): value is number => value !== null)
   if (known.length === 0) return "sin datos"
   if (known.length === 1) return format(known[0] as number)
@@ -59,7 +59,7 @@ function moneyChange(current: number, previous: number, currency: string, locale
   return { text: `${formatMoney(Math.abs(difference), currency, locale)} ${difference > 0 ? "más" : "menos"} ${phrase}`, direction: difference > 0 ? "up" : "down" }
 }
 
-function SummaryFigure({
+export function SummaryFigure({
   title,
   icon,
   value,
@@ -112,7 +112,7 @@ function FooterLink({ to, children }: { to: SummaryTarget; children: ReactNode }
   )
 }
 
-function FooterButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+export function FooterButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
     <Button type="button" variant="link" className="h-auto min-h-11 p-0 text-[13px] font-bold sm:min-h-8" onClick={onClick}>
       {children}
@@ -213,7 +213,14 @@ export function SummaryTab({ query, onOpenList, advice }: { query: ReportQuery; 
           sparkLabel={`Citas que agendó el agente ${twelve}: ${travel(data.agent.months, String)}`}
           change={data.agent.current.booked === 0 && data.agent.previous.booked === 0 ? undefined : absoluteChange(data.agent.current.booked, data.agent.previous.booked, phrase, locale)}
           better="up"
-          detail={data.agent.current.recovered > 0 ? `y recuperó ${data.agent.current.recovered} ${data.agent.current.recovered === 1 ? "cita" : "citas"}` : undefined}
+          detail={
+            [
+              data.agent.current.recovered > 0 ? `y recuperó ${data.agent.current.recovered} ${data.agent.current.recovered === 1 ? "cita" : "citas"}` : null,
+              data.agent.current.collectedCents > 0 ? `${money(data.agent.current.collectedCents)} cobrados en esas citas` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
           footer={<FooterLink to="agente">Ver en Agente</FooterLink>}
         />
         <SummaryFigure

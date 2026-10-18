@@ -19,7 +19,7 @@ interface ListCopy {
   noun: { one: string; many: string }
   /** Cómo se calcula, en una línea; recibe el periodo ya escrito. */
   how: (period: string) => string
-  where: { to: "/agenda" | "/people" | "/finance"; label: string }
+  where: { to: "/agenda" | "/people" | "/finance" | "/inbox"; label: string }
   /** La fila lleva a la sección del paciente donde se resuelve. */
   patientTab?: "plan" | "cobros"
   /** «Ya tiene otra cita» solo importa donde alguien va a llamar. */
@@ -79,13 +79,28 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     patientTab: "cobros",
     showNext: false,
   },
+  agent_booked: {
+    title: "Citas que agendó el agente",
+    noun: { one: "cita", many: "citas" },
+    how: (period) =>
+      `Citas que el agente reservó en ${period}, en su conversación o desde su enlace. El importe es lo que la persona pagó hasta hoy en esa cita, sin lo anulado ni lo devuelto.`,
+    where: { to: "/agenda", label: "Abrir la Agenda" },
+    showNext: false,
+  },
+  agent_handoffs: {
+    title: "Pasaron al equipo",
+    noun: { one: "conversación", many: "conversaciones" },
+    how: (period) => `Conversaciones que el agente pasó al equipo en ${period}, con el motivo que dejó. Cada una se abre en la Bandeja.`,
+    where: { to: "/inbox", label: "Abrir la Bandeja" },
+    showNext: false,
+  },
 }
 
 function when(row: ReportListRow, list: ReportListKey, locale: string, timeZone: string): { day: string; hour: string | null } {
   const date = new Date(row.at)
   const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date).replace(/\./g, "")
   // Un control, un presupuesto o una deuda tienen día, no hora.
-  const timed = list === "no_show" || list === "cancelled" || list === "unmarked" || list === "new_patients"
+  const timed = list === "no_show" || list === "cancelled" || list === "unmarked" || list === "new_patients" || list === "agent_booked" || list === "agent_handoffs"
   return { day, hour: timed ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone }).format(date) : null }
 }
 
@@ -119,9 +134,15 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
       onClose={onClose}
       isLoading={report.isPending}
       actions={
-        <Link to={copy.where.to} className={buttonVariants()}>
-          {copy.where.label}
-        </Link>
+        copy.where.to === "/inbox" ? (
+          <Link to="/inbox" search={{ conversation: undefined }} className={buttonVariants()}>
+            {copy.where.label}
+          </Link>
+        ) : (
+          <Link to={copy.where.to} className={buttonVariants()}>
+            {copy.where.label}
+          </Link>
+        )
       }
     >
       {report.isError ? (
@@ -148,14 +169,22 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                         ) : null}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
-                        <Link
-                          to="/patients/$patientId"
-                          params={{ patientId: row.patientId }}
-                          search={copy.patientTab ? { tab: copy.patientTab } : {}}
-                          className="truncate font-semibold hover:underline"
-                        >
-                          {row.personName}
-                        </Link>
+                        {row.conversationId ? (
+                          <Link to="/inbox" search={{ conversation: row.conversationId }} className="truncate font-semibold hover:underline">
+                            {row.personName}
+                          </Link>
+                        ) : row.patientId ? (
+                          <Link
+                            to="/patients/$patientId"
+                            params={{ patientId: row.patientId }}
+                            search={copy.patientTab ? { tab: copy.patientTab } : {}}
+                            className="truncate font-semibold hover:underline"
+                          >
+                            {row.personName}
+                          </Link>
+                        ) : (
+                          <span className="truncate font-semibold">{row.personName}</span>
+                        )}
                         {detail ? <span className="text-[13px] text-muted-foreground">{detail}</span> : null}
                       </span>
                       {row.cents !== null && row.currency ? (

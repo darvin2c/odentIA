@@ -332,6 +332,8 @@ export const REPORT_LISTS = [
   "budgets_waiting",
   "new_patients",
   "debts_overdue",
+  "agent_booked",
+  "agent_handoffs",
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -342,7 +344,8 @@ export function isReportList(value: unknown): value is ReportListKey {
 export interface ReportListRow {
   id: string
   at: string
-  patientId: string
+  /** Null: la persona escribió pero aún no es paciente. */
+  patientId: string | null
   personName: string
   title: string | null
   professionalName: string | null
@@ -350,6 +353,8 @@ export interface ReportListRow {
   hasNextAppointment: boolean
   cents: number | null
   currency: string | null
+  /** La fila lleva a su conversación en la Bandeja. */
+  conversationId?: string | null
 }
 
 export interface ReportList extends ReportHead {
@@ -385,7 +390,7 @@ export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled
   return apiFetch(`/api/reports/advice?${params(query)}`)
 }
 
-export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service"
+export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service" | "agent"
 
 // --- Resumen ------------------------------------------------------------------------
 
@@ -420,7 +425,8 @@ export interface ReportSummary extends ReportHead {
     months: Array<{ noShow: number; total: number }>
   }
   agent: {
-    current: { booked: number; recovered: number }
+    /** `collectedCents`: lo cobrado en esas citas, en la moneda de la clínica (Reportes › Agente). */
+    current: { booked: number; recovered: number; collectedCents: number }
     previous: { booked: number; recovered: number }
     months: number[]
   }
@@ -478,4 +484,71 @@ export function fetchReportList(list: ReportListKey, query: ReportQuery): Promis
 /** Clave de caché de una sección: cambia con el periodo y la sede, que valen para toda la pantalla. */
 export function reportKey(section: string, query: ReportQuery): readonly unknown[] {
   return ["report", section, query.period, query.branchId ?? null]
+}
+
+// --- Agente -------------------------------------------------------------------------
+
+export interface AgentFirstResponses {
+  conversations: number
+  responded: number
+  byAgent: number
+  byTeam: number
+  /** Mediana hasta la primera respuesta, en segundos; null sin respuestas medidas. */
+  agentMedianSeconds: number | null
+  teamMedianSeconds: number | null
+}
+
+export interface AgentBillingLine {
+  kind: "conversacion" | "consulta" | "cita"
+  count: number
+  /** Precio de cada una si todas lo comparten. */
+  unitMicros: number | null
+  amountCents: number
+}
+
+/** Lo pagado a odentIA por el agente: las cuentas de Facturación, en la moneda del plan. */
+export interface AgentBilling {
+  currency: string | null
+  lines: AgentBillingLine[]
+  refunds: { count: number; amountCents: number }
+  totalCents: number
+  coveredCents: number
+  overCents: number
+  trial: { count: number; amountCents: number }
+  unpriced: number
+  /** Cuántos meses del plan toca el periodo: cada uno trae su crédito. */
+  planMonths: number
+  /** Cuándo empieza el primero de esos meses (ISO): de ahí el día en que se renueva el crédito. */
+  planStart: string | null
+  /** Crédito del plan por mes. */
+  planCreditCents: number
+  tax: { label: string; rateBps: number } | null
+}
+
+export interface ReportAgent extends ReportHead {
+  months: ReportBucket[]
+  conversations: { current: { attended: number; alone: number }; previous: { attended: number; alone: number }; months: number[] }
+  booked: { current: { booked: number; attended: number }; previous: { booked: number; attended: number }; months: number[] }
+  recovered: { current: number; previous: number; months: number[] }
+  dictated: { current: number; previous: number; months: number[] }
+  /** Lo cobrado en sus citas, hasta hoy, en la moneda de la clínica; otras monedas aparte. */
+  collected: {
+    currency: string
+    booked: { visits: number; cents: number }
+    recovered: { visits: number; cents: number }
+    others: Array<{ currency: string; cents: number }>
+  }
+  /** Null: quien mira no ve Facturación. */
+  paid: AgentBilling | null
+  /** Citas que agendó por tramo (null antes de que empezara) y todas las reservadas. */
+  chart: Array<ReportBucket & { booked: number | null; all: number }>
+  since: string | null
+  responses: {
+    current: AgentFirstResponses
+    previous: AgentFirstResponses
+    handedOff: number
+    previousHandedOff: number
+    byChannel: Array<{ channel: string | null; count: number }>
+  }
+  wholeClinic: string[]
 }
