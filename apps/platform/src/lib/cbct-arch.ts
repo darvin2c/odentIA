@@ -1,4 +1,4 @@
-import type { CbctVolume, PlaneImage } from "./cbct-volume"
+import { type CbctVolume, computePresets, type PlaneImage, type WindowLevel } from "./cbct-volume"
 
 /**
  * El arco dental de una tomografía y lo que se arma con él (ADR 0055): la
@@ -66,6 +66,46 @@ function percentile(sorted: readonly number[], p: number): number {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * p)))] ?? 0
 }
 
+/** Solo el esmalte (y el metal): lo más brillante del brillo «Diente», sin la dentina ni la cortical. */
+function enamelThreshold(presets: CbctVolume["presets"]): number {
+  return presets.diente.center + presets.diente.width / 4
+}
+
+/**
+ * Entre unos cortes de muestra, el que cruza los dientes (el de más esmalte) y
+ * el brillo «Hueso» del estudio. Es para la miniatura: el corte del medio de
+ * una tomografía de campo grande cae en la nariz o en la base del cráneo.
+ */
+export function occlusalSample(samples: readonly Int16Array[]): { index: number; window: WindowLevel } | null {
+  if (!samples.length) return null
+  const total = samples.reduce((n, s) => n + s.length, 0)
+  const data = new Int16Array(total)
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  let offset = 0
+  for (const sample of samples) {
+    data.set(sample, offset)
+    offset += sample.length
+    for (const v of sample) {
+      if (v < min) min = v
+      if (v > max) max = v
+    }
+  }
+  const presets = computePresets(data, { min, max })
+  const threshold = enamelThreshold(presets)
+  let index = Math.floor(samples.length / 2)
+  let best = 0
+  samples.forEach((sample, k) => {
+    let n = 0
+    for (let i = 0; i < sample.length; i += 3) if (sample[i]! > threshold) n++
+    if (n > best) {
+      best = n
+      index = k
+    }
+  })
+  return { index, window: presets.hueso }
+}
+
 /**
  * Propone el arco (decisión 2): busca la banda de cortes con más esmalte,
  * proyecta su máximo y ajusta una parábola a lo brillante, dos veces para
@@ -73,8 +113,7 @@ function percentile(sorted: readonly number[], p: number): number {
  */
 export function detectArch(volume: CbctVolume): ArchProposal | null {
   const { nx, ny, nz, data } = volume
-  // Solo el esmalte: lo más brillante del brillo «Diente», sin la dentina ni la cortical.
-  const threshold = volume.presets.diente.center + volume.presets.diente.width / 4
+  const threshold = enamelThreshold(volume.presets)
   const plane = nx * ny
   const counts = new Uint32Array(nz)
   for (let z = 0; z < nz; z++) {

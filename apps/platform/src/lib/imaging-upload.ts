@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from "react"
 import { ApiError, apiFetch } from "./api"
 import { API_URL } from "./auth-client"
-import { decodeDicom, renderDicom } from "./dicom"
+import { occlusalSample } from "./cbct-arch"
+import type { WindowLevel } from "./cbct-volume"
+import { decodeDicom, openDicom, renderDicom } from "./dicom"
 import { orgSlugFromHostname, requestHostname } from "./host"
 import type { ScannedDicom, StudyCandidate } from "./imaging-scan"
 
@@ -173,6 +175,8 @@ async function run(
   const toConfirm: number[] = []
   const retried = new Set<number>()
   let failure: string | null = null
+  // Lee archivos locales, así que no espera a la subida.
+  const thumbnail = thumbnailBlob(candidate)
 
   const updateBytes = () => {
     let partial = 0
@@ -197,9 +201,11 @@ async function run(
       }
     }
     if (data.completedAt) {
+      // La miniatura se armó mientras subían los archivos y se guarda antes de
+      // decir «lista»: quien cierra la ventana en ese momento no la pierde.
+      await saveThumbnail(patientId, documentId, await thumbnail)
       patch(documentId, { status: "lista", uploadedCount: data.fileCount, sentBytes: job.totalBytes })
       onChange?.()
-      void makeThumbnail(patientId, documentId, candidate).then(() => onChange?.())
     }
   }
 
@@ -347,28 +353,47 @@ export function dismissUploadJob(documentId: string) {
   emit()
 }
 
+/** Cortes que se leen para elegir la miniatura. */
+const THUMBNAIL_SAMPLES = 24
+
 /**
- * Miniatura de la galería: el corte del medio de la serie mayor, con su
- * ventana, en WebP de hasta 320 px. Si el navegador no puede leerlo, la
- * tarjeta queda sin miniatura.
+ * Miniatura de la galería: entre 24 cortes repartidos en la serie mayor, el
+ * que cruza los dientes, con el brillo «Hueso» del estudio (el que abre el
+ * visor), en WebP de hasta 320 px. En color queda el corte del medio. Si el
+ * navegador no puede leerlo, la tarjeta queda sin miniatura (null).
  */
-async function makeThumbnail(patientId: string, documentId: string, candidate: StudyCandidate) {
+async function thumbnailBlob(candidate: StudyCandidate): Promise<Blob | null> {
   try {
     const series = candidate.mainSeries
-    if (!series.length) return
-    const single = series.length === 1
-    const file = single ? series[0]! : series[Math.floor(series.length / 2)]!
-    const image = await decodeDicom(
-      await file.file.arrayBuffer(),
-      single ? Math.floor(file.frames / 2) : 0,
-    )
+    if (!series.length) return null
+    // Un archivo con todos los cuadros o un archivo por corte.
+    const multiframe = series.length === 1 ? openDicom(await series[0]!.file.arrayBuffer()) : null
+    const count = multiframe ? Math.max(1, series[0]!.frames) : series.length
+    const n = Math.min(THUMBNAIL_SAMPLES, count)
+    const picks = [...new Set(Array.from({ length: n }, (_, k) => Math.floor(((k + 0.5) * count) / n)))]
+    const decode = async (at: number) =>
+      multiframe ? multiframe.decode(at) : decodeDicom(await series[at]!.file.arrayBuffer())
+    let chosen = picks[Math.floor(picks.length / 2)]!
+    let brightness: WindowLevel | null = null
+    const samples: Int16Array[] = []
+    for (const at of picks) {
+      const values = (await decode(at)).values
+      if (!values) break
+      samples.push(Int16Array.from(values, (v) => Math.max(-32768, Math.min(32767, Math.round(v)))))
+    }
+    const occlusal = samples.length === picks.length ? occlusalSample(samples) : null
+    if (occlusal) {
+      chosen = picks[occlusal.index]!
+      brightness = occlusal.window
+    }
+    const image = await decode(chosen)
     const scale = Math.min(1, 320 / Math.max(image.width, image.height))
     const full = document.createElement("canvas")
     full.width = image.width
     full.height = image.height
     full.getContext("2d")?.putImageData(
       new ImageData(
-        new Uint8ClampedArray(renderDicom(image, { ...image.window, invert: false })),
+        new Uint8ClampedArray(renderDicom(image, { ...(brightness ?? image.window), invert: false })),
         image.width,
         image.height,
       ),
@@ -379,8 +404,15 @@ async function makeThumbnail(patientId: string, documentId: string, candidate: S
     small.width = Math.max(1, Math.round(image.width * scale))
     small.height = Math.max(1, Math.round(image.height * scale))
     small.getContext("2d")?.drawImage(full, 0, 0, small.width, small.height)
-    const blob = await new Promise<Blob | null>((resolve) => small.toBlob(resolve, "image/webp", 0.82))
-    if (!blob) return
+    return await new Promise<Blob | null>((resolve) => small.toBlob(resolve, "image/webp", 0.82))
+  } catch {
+    return null
+  }
+}
+
+async function saveThumbnail(patientId: string, documentId: string, blob: Blob | null) {
+  if (!blob) return
+  try {
     const form = new FormData()
     form.append("file", blob, "miniatura.webp")
     const slug = orgSlugFromHostname(window.location.hostname)

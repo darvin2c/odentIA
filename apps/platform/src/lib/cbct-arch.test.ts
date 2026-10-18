@@ -1,6 +1,6 @@
 import { cbctDemoTeeth, generateCbctPhantom } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
-import { crossSection, detectArch, panorama, panoramaRows, sampleCurve, toothAt, toothIndex } from "./cbct-arch"
+import { crossSection, detectArch, occlusalSample, panorama, panoramaRows, sampleCurve, toothAt, toothIndex } from "./cbct-arch"
 import { volumeFromSlices } from "./cbct-volume"
 
 const V = 0.5
@@ -137,6 +137,29 @@ describe("arco de una tomografía real", () => {
     expect(Math.abs(middle.y * V - 22)).toBeLessThan(5)
     expect(arch!.z).toBeGreaterThanOrEqual(8)
     expect(arch!.z).toBeLessThanOrEqual(16)
+  })
+
+  it("la miniatura sale del corte con dientes, no del medio de la serie", () => {
+    const n = 80
+    // Tejido blando con un anillo de hueso, como un corte del cráneo; esmalte solo en uno.
+    const slice = (teeth: boolean) =>
+      Int16Array.from({ length: n * n }, (_, i) => {
+        const x = (i % n) - 40
+        const y = Math.floor(i / n) - 40
+        const r = Math.hypot(x, y)
+        if (teeth && Math.abs(y + 10 - 0.02 * x * x) < 3 && Math.abs(x) < 25) return 2400 + (i % 500)
+        return r < 30 ? (r > 26 ? 1300 : 400) : 0
+      })
+    const pick = occlusalSample(Array.from({ length: 10 }, (_, k) => slice(k === 2)))
+    expect(pick?.index).toBe(2)
+    expect(pick!.window.center).toBeGreaterThan(400)
+  })
+
+  it("en el fantoma, la miniatura cae en la banda oclusal", () => {
+    const plane = volume.nx * volume.ny
+    const picks = Array.from({ length: 24 }, (_, k) => Math.floor(((k + 0.5) * volume.nz) / 24))
+    const pick = occlusalSample(picks.map((z) => volume.data.slice(z * plane, (z + 1) * plane)))!
+    expect(Math.abs(phantom.sliceZ[picks[pick.index]!]!)).toBeLessThan(9)
   })
 
   it("sin dientes en forma de arco no propone nada", () => {
