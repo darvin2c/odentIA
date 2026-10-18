@@ -13,6 +13,7 @@
 import { LEGAL } from "@odentia/auth/legal"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { encodeDemoCtSlice, encodeDemoDicom, generateCbctPhantom } from "@odentia/clinical"
+import { PDFDocument, StandardFonts } from "pdf-lib"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
@@ -2187,6 +2188,36 @@ const errada = await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
 await retirePatientDocument(db, ORG_A, ANA_ID, rosaPatientId, errada.id, {
   reason: "Subida al paciente equivocado",
 })
+// Un informe suelto en PDF: no es imagen ni consentimiento, así que Documentos
+// lo muestra en «Otros archivos» y lo abre en el mismo visor (issue 149).
+{
+  const pdf = await PDFDocument.create()
+  const sheet = pdf.addPage([595, 842])
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  sheet.drawText("Informe de laboratorio (demostración)", { x: 56, y: 770, size: 16, font })
+  sheet.drawText("Hemograma y coagulación previos a la exodoncia: dentro de rangos.", {
+    x: 56,
+    y: 740,
+    size: 11,
+    font,
+  })
+  const bytes = Buffer.from(await pdf.save())
+  const ref = await storage.putPatientDocument({
+    orgId: ORG_A,
+    patientId: rosaPatientId,
+    bytes,
+    contentType: "application/pdf",
+    ext: "pdf",
+  })
+  await registerPatientDocument(db, ORG_A, ANA_ID, rosaPatientId, {
+    category: "informe",
+    label: "[DEMO] Informe de laboratorio previo a la exodoncia",
+    storageKey: ref.objectKey,
+    contentType: ref.mimeType,
+    sizeBytes: bytes.byteLength,
+    source: "Laboratorio de demostración",
+  })
+}
 // Cierre con datos útiles: evolución e indicaciones. Lo que sigue lo dice el plan.
 await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   evolution: "Obturación de pieza 36 sin complicaciones; endodoncia de 46 programada.",
