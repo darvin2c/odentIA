@@ -4,8 +4,9 @@ import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { patient, treatmentBudget, treatmentPlan } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import type { Page, TestInfo } from "@playwright/test"
-import { tenant } from "./env"
-import { expect, test, type OwnerFixture } from "./fixtures"
+import { sql } from "drizzle-orm"
+import { PANEL, tenant } from "./env"
+import { call, chooseOption, expect, fillPatientNames, test, type OwnerFixture, writtenDate } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
@@ -158,4 +159,79 @@ test("«Cómo nos conoció» se elige de una lista y «Otro» pide cuál", async
   await info.attach("mas-datos", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await form.getByRole("button", { name: "Guardar" }).click()
   await expect(page.getByText("Otro: Feria de salud")).toBeVisible()
+})
+
+/** Lo que guardó la ficha de una persona: la opción de la lista y lo que dijo. */
+async function referralOf(db: Db, organizationId: string, displayName: string) {
+  const rows = await db.execute<{ kind: string | null; said: string | null }>(sql`
+    select p.referral_kind as kind, p.referral_source as said from patient p
+    join contact c on c.organization_id = p.organization_id and c.id = p.person_id
+    where p.organization_id = ${organizationId} and c.display_name = ${displayName}`)
+  return rows[0] ?? null
+}
+
+test("alta interna: «Cómo nos conoció» se elige de la lista, «Otro» pide cuál y la ficha guarda los dos", async ({ owner, fixtureDb }, info) => {
+  const page = owner.page
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, "/people"))
+  await page.locator("header").getByRole("button", { name: "Nueva persona", exact: true }).click()
+  const person = surface(page, { name: "Nueva persona", exact: true }).first()
+  await person.getByLabel("Primer apellido", { exact: true }).fill("Referida")
+  await person.getByLabel("Nombres", { exact: true }).fill("Nora")
+  await person.getByRole("button", { name: "Crear y abrir su página", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Nora Referida" })).toBeVisible()
+
+  await page.getByRole("button", { name: "Registrar", exact: true }).click()
+  const form = surface(page, { name: "Nuevo paciente", exact: true }).first()
+  await form.getByRole("button", { name: "Siguiente", exact: true }).click()
+  // Una lista, no texto libre: «¿Cuál?» aparece solo con «Otro» y se vacía al elegir otra opción.
+  const kind = form.getByRole("combobox", { name: /^Cómo nos conoció/ })
+  const which = form.getByLabel("Cómo nos conoció: ¿cuál?")
+  await expect(which).toHaveCount(0)
+  await chooseOption(kind, { label: "Otro" })
+  await which.fill("Volante")
+  await chooseOption(kind, { label: "Redes sociales" })
+  await expect(which).toHaveCount(0)
+  await chooseOption(kind, { label: "Otro" })
+  await expect(which).toHaveValue("")
+  await which.fill("Feria de salud")
+  await info.attach("alta-interna", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  // Salud, odontológicos y revisión.
+  for (let step = 0; step < 3; step += 1) await form.getByRole("button", { name: "Siguiente", exact: true }).click()
+  await expect(form.getByText("Otro: Feria de salud")).toBeVisible()
+  await form.getByRole("button", { name: "Registrar paciente", exact: true }).click()
+  await expect.poll(() => referralOf(fixtureDb, owner.org.id, "Nora Referida")).toEqual({ kind: "otro", said: "Feria de salud" })
+})
+
+test("registro en línea: la misma lista cuando la clínica la pregunta, sin texto si no es «Otro»", async ({ owner, fixtureDb, browser }, info) => {
+  const page = owner.page
+  const current = await call<{ version: number; fields: Record<string, string> }>(page, "GET", "/api/patient-registration/config", owner.org.slug)
+  await call(page, "PUT", "/api/patient-registration/config", owner.org.slug, {
+    enabled: true,
+    fields: { ...current.fields, referralSource: "optional" },
+    privacyNotice: "Aviso e2e: tus datos se usan solo para tu atención clínica (demostración).",
+    expectedVersion: current.version,
+  })
+  const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } })
+  const anon = await context.newPage()
+  try {
+    await gotoHydrated(anon, tenant(owner.org.slug, "/registro?via=qr"))
+    await fillPatientNames(anon, "Olga Referida")
+    await anon.getByLabel("Fecha de nacimiento").fill(writtenDate("1985-06-15"))
+    await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    await anon.getByLabel(/^Teléfono(?: \*)?$/).fill("+51999300301")
+    await chooseOption(anon.getByRole("combobox", { name: /^Cómo nos conoció/ }), { label: "Recomendación de alguien" })
+    await expect(anon.getByLabel("Cómo nos conoció: ¿cuál?")).toHaveCount(0)
+    await info.attach("registro-en-linea", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
+    const submit = anon.getByRole("button", { name: "Enviar registro", exact: true })
+    for (let step = 0; step < 4 && !(await submit.isVisible()); step += 1) await anon.getByRole("button", { name: "Siguiente", exact: true }).click()
+    // La revisión dice la opción elegida, sin texto aparte.
+    await expect(anon.getByRole("definition").filter({ hasText: "Recomendación de alguien" })).toHaveText("Recomendación de alguien")
+    await anon.getByRole("checkbox", { name: /Autorizo el tratamiento de mis datos/ }).check()
+    await submit.click()
+    await expect(anon.getByText("Paciente registrado", { exact: true })).toBeVisible({ timeout: 20_000 })
+  } finally {
+    await context.close()
+  }
+  expect(await referralOf(fixtureDb, owner.org.id, "Olga Referida")).toEqual({ kind: "recomendacion", said: null })
 })
