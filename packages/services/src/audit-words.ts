@@ -437,6 +437,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "questionnaire.submitted": say("Envió un cuestionario desde el portal", "paciente"),
   // Su enlace (ADR 0037): lo que la persona hizo en su página personal.
   "personal_link.sent": say("Le envió su enlace"),
+  "personal_link.shown": say("Le mostró su enlace en la clínica"),
   "personal_link.revoked": say("Quitó su enlace"),
   "personal_link.data_sent": say("Completó sus datos desde su enlace", "paciente"),
   "personal_link.budget_decided": say("Respondió un presupuesto desde su enlace", "paciente"),

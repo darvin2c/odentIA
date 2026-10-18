@@ -904,8 +904,8 @@ it("conexiones: la lista dice cómo está cada una; el alta a mano, la clave y l
   expect(wa).toMatchObject({
     webhookVerifiedAt: null,
     health: null,
-    // Los tres con el botón de «Su enlace» no se piden sin la dirección pública de la clínica.
-    messages: { aprobados: 0, enRevision: 10, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 3 },
+    // Los cuatro con el botón de «Su enlace» no se piden sin la dirección pública de la clínica.
+    messages: { aprobados: 0, enRevision: 10, rechazados: 0, pausados: 0, retirados: 0, sinPedir: 4 },
   })
   expect(typeof wa?.["lastInboundAt"]).toBe("string")
   expect((await reception.request("/channels/connections")).status).toBe(403)
@@ -958,6 +958,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const items = ((await listed.json()) as { data: { id: string; origin: string }[] }).data
   expect(items.map((item) => [item.id, item.origin])).toEqual([
     ["recordatorio_cita", "agente"],
+    ["recordatorio_cita_datos", "agente"],
     ["aviso_cita_reservada", "agente"],
     ["aviso_cita_reservada_datos", "agente"],
     ["aviso_cita_movida", "agente"],
@@ -1010,7 +1011,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(13)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(14)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {

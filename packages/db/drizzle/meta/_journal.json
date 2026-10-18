@@ -176,6 +176,20 @@
       "when": 1792354985615,
       "tag": "0024_las_medidas_de_la_tomografia_reglas",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792355045615,
+      "tag": "0025_apellidos_en_un_campo",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792355105615,
+      "tag": "0026_lo_que_escribio_quien_se_parece",
+      "breakpoints": true
     }
   ]
 }

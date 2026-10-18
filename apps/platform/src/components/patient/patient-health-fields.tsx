@@ -43,6 +43,7 @@ import {
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
 } from "../../lib/patients"
+import { ChoiceButtons } from "../choice-buttons"
 import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 
@@ -161,26 +162,21 @@ export function DeclarationStateSelect({
   error?: string
   label?: string
 }): React.JSX.Element {
-  const options: DeclarationState[] = ["unanswered", "unknown", "none", "recorded"]
+  // Tres botones a la vista; «Sin responder» es no haber tocado ninguno.
+  const options = (["none", "recorded", "unknown"] as const).map((option) => ({
+    value: option,
+    label: DECLARATION_STATE_LABELS[option],
+  }))
   return (
     <Field>
-      <FieldLabel htmlFor={id}>{label ?? "Respuesta"}</FieldLabel>
-      <Select
-        value={value}
-        onValueChange={(v) => onChange(v as DeclarationState)}
+      <FieldLabel id={id}>{label ?? "Respuesta"}</FieldLabel>
+      <ChoiceButtons
+        label={label ?? "Respuesta"}
+        value={value === "unanswered" ? null : value}
+        options={options}
+        onChange={(next) => onChange(next)}
         disabled={readOnly}
-      >
-        <SelectTrigger id={id}>
-          <SelectValue>{DECLARATION_STATE_LABELS[value]}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {DECLARATION_STATE_LABELS[option]}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </Field>
   )

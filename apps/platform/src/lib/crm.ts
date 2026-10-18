@@ -192,6 +192,8 @@ export interface ConversationDetail {
    * aprobado. Nulo en los demás canales; ausente en respuestas antiguas en caché.
    */
   whatsappWindow?: { open: boolean; lastInboundAt: string | null } | null
+  /** Paciente al que le faltan datos: la Bandeja ofrece pegar su enlace. Ausente en respuestas antiguas. */
+  missingData?: { patientId: string; missing: Array<{ key: string; label: string }> } | null
   /** Spam o bloqueada (ADR 0054); ausente en respuestas antiguas en caché. */
   screen?: ContactScreenView
   messages: ChatMessage[]

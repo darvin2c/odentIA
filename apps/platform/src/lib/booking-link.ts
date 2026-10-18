@@ -55,7 +55,7 @@ export interface PersonalLinkView {
   booking: { needsRegistration: boolean; service: { name: string; durationMin: number | null } | null; branchId: string | null } | null
   branches: BookingLinkBranch[]
   appointment: BookingAppointment | null
-  data: { missing: MissingDatum[] } | null
+  data: { missing: MissingDatum[]; health: boolean } | null
   budgets: PortalBudget[]
   consents: Array<{ id: string; title: string }>
   questionnaire: { title: string } | null
@@ -229,6 +229,11 @@ export interface PersonalDataForm {
   today: string
   /** Ya tiene representante legal: si la fecha dice que es menor, no se le vuelve a pedir. */
   hasRepresentative: boolean
+  /** El registro de la clínica: el cuestionario pregunta lo que falta con sus mismas pantallas. */
+  registration: RegistrationConfig
+  /** Si se le pregunta su salud (nadie la registró aún en su ficha). */
+  asksHealth: boolean
+  firstName: string | null
 }
 
 export function fetchPersonalDataForm(slug: string, token: string): Promise<{ data: PersonalDataForm }> {
@@ -245,6 +250,7 @@ export interface PersonalDataInput {
     phone?: string
     relationshipDetail?: string
   } | null
+  health?: RegistrationAnswers["health"] | null
 }
 
 /** «Tus datos»: solo lo que falta, una sola vez. */

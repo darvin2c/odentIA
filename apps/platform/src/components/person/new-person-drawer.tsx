@@ -9,10 +9,10 @@ import { hcLabel } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonListItem } from "../../lib/people"
 import { mutationErrorMessage } from "../../lib/query-error"
 
-const EMPTY = { paternalSurname: "", maternalSurname: "", givenNames: "", email: "" }
+const EMPTY = { givenNames: "", surnames: "", email: "" }
 
 /**
- * «Nueva persona»: su nombre separado y cómo ubicarla, con las reglas de la
+ * «Nuevo contacto»: nombres, apellidos y cómo ubicarla, con las reglas de la
  * ficha. Antes de crearla muestra a quien ya coincide por nombre o teléfono,
  * para no duplicar a nadie. Al guardar se abre su página, donde se registra
  * como paciente sin volver a escribir nada.
@@ -33,10 +33,10 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
   }, [open])
   // Coincidencias: por teléfono si lo hay; si no, por apellido.
   useEffect(() => {
-    const next = phone ? phone.replace(/\D/g, "").slice(-8) : values.paternalSurname.trim()
+    const next = phone ? phone.replace(/\D/g, "").slice(-8) : values.surnames.trim()
     const timer = setTimeout(() => setProbe(next.length >= 3 ? next : ""), 300)
     return () => clearTimeout(timer)
-  }, [phone, values.paternalSurname])
+  }, [phone, values.surnames])
   const matches = useQuery({
     queryKey: ["people", "probe", probe],
     queryFn: () =>
@@ -51,8 +51,7 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
       apiFetch<{ data: { id: string } }>("/api/people", {
         method: "POST",
         body: JSON.stringify({
-          paternalSurname: values.paternalSurname || null,
-          maternalSurname: values.maternalSurname || null,
+          familyName: values.surnames.trim() || null,
           givenNames: values.givenNames || null,
           phone,
           email: values.email || null,
@@ -66,9 +65,7 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
   })
   const set = (key: keyof typeof EMPTY) => (event: React.ChangeEvent<HTMLInputElement>) =>
     setValues((prev) => ({ ...prev, [key]: event.target.value }))
-  const ready = Boolean(
-    values.givenNames.trim() && (values.paternalSurname.trim() || values.maternalSurname.trim()),
-  )
+  const ready = Boolean(values.givenNames.trim() && values.surnames.trim())
   const found = probe ? (matches.data?.data ?? []) : []
   return (
     <FormDrawer
@@ -76,37 +73,20 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
       onClose={() => {
         if (!create.isPending) onClose()
       }}
-      title="Nueva persona"
-      description="Su nombre y cómo ubicarla. Después, en su página, la registras como paciente con lo que ya sabes."
+      title="Nuevo contacto"
+      description="Alguien que aún no es paciente: quien pregunta, o un familiar. Si viene a atenderse, usa «Nuevo paciente»."
       submitLabel="Crear y abrir su página"
       isSubmitting={create.isPending}
       submitDisabled={!ready}
-      isDirty={Boolean(values.givenNames || values.paternalSurname || phone)}
+      isDirty={Boolean(values.givenNames || values.surnames || phone)}
       error={create.error ? mutationErrorMessage(create.error) : null}
       onSubmit={(event) => {
         event.preventDefault()
         if (ready) create.mutate()
       }}
     >
+      {/* Como en el registro: primero los nombres, luego los apellidos. */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field>
-          <FieldLabel htmlFor="new-person-paternal">Primer apellido</FieldLabel>
-          <Input
-            id="new-person-paternal"
-            maxLength={100}
-            value={values.paternalSurname}
-            onChange={set("paternalSurname")}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="new-person-maternal">Segundo apellido</FieldLabel>
-          <Input
-            id="new-person-maternal"
-            maxLength={100}
-            value={values.maternalSurname}
-            onChange={set("maternalSurname")}
-          />
-        </Field>
         <Field className="sm:col-span-2">
           <FieldLabel htmlFor="new-person-given">Nombres</FieldLabel>
           <Input
@@ -116,7 +96,17 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
             onChange={set("givenNames")}
           />
         </Field>
-        <Field>
+        <Field className="sm:col-span-2">
+          <FieldLabel htmlFor="new-person-surnames">Apellidos</FieldLabel>
+          <Input
+            id="new-person-surnames"
+            maxLength={200}
+            value={values.surnames}
+            onChange={set("surnames")}
+          />
+        </Field>
+        {/* El teléfono ocupa la fila: con el país al lado, a media fila el número no cabe. */}
+        <Field className="sm:col-span-2">
           <FieldLabel htmlFor="new-person-phone">Teléfono</FieldLabel>
           <PhoneInput
             id="new-person-phone"
@@ -125,7 +115,7 @@ export function NewPersonDrawer({ open, onClose }: { open: boolean; onClose: () 
             onChange={setPhone}
           />
         </Field>
-        <Field>
+        <Field className="sm:col-span-2">
           <FieldLabel htmlFor="new-person-email">Correo</FieldLabel>
           <Input
             id="new-person-email"

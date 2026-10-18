@@ -58,11 +58,11 @@ async function bogotaClinic() {
 }
 
 function answers(demographics: Record<string, unknown>) {
-  const names = { givenNames: "Andrea", paternalSurname: "Rojas", ...demographics }
+  const names = { givenNames: "Andrea", familyName: "Rojas", ...demographics }
   return {
     submissionId: randomUUID(),
     answers: {
-      demographics: { displayName: `${names.givenNames} ${names.paternalSurname}`, ...names },
+      demographics: { displayName: `${names.givenNames} ${names.familyName}`, ...names },
       respondent: "staff" as const,
       privacyAccepted: false,
     },

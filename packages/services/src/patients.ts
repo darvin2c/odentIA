@@ -82,8 +82,7 @@ function uniqueConstraintOf(error: unknown): string {
 export interface CreatePatientInput {
   displayName: string
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   docCountry?: string | null
   nationality?: string | null
   birthCountry?: string | null
@@ -173,8 +172,7 @@ function splitIdentity(data: Record<string, unknown>): { identity: Record<string
 type IdentityInput = {
   displayName: string
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   docType?: string | null
   docNumber?: string | null
   docCountry?: string | null
@@ -223,8 +221,7 @@ async function adoptIdentity(
       .set({
         displayName: provisional ? identity.displayName : current.displayName,
         givenNames: current.givenNames ?? identity.givenNames ?? null,
-        paternalSurname: current.paternalSurname ?? identity.paternalSurname ?? null,
-        maternalSurname: current.maternalSurname ?? identity.maternalSurname ?? null,
+        familyName: current.familyName ?? identity.familyName ?? null,
         docType: takesDocument ? (identity.docType ?? null) : current.docType,
         docNumber: takesDocument ? (identity.docNumber ?? null) : current.docNumber,
         docCountry: takesDocument ? (identity.docCountry ?? null) : current.docCountry,
@@ -252,8 +249,7 @@ async function adoptIdentity(
     .set({
       displayName: identity.displayName,
       givenNames: identity.givenNames ?? current.givenNames,
-      paternalSurname: identity.paternalSurname ?? current.paternalSurname,
-      maternalSurname: identity.maternalSurname ?? current.maternalSurname,
+      familyName: identity.familyName ?? current.familyName,
       docType: withDocument ? (identity.docType ?? null) : current.docType,
       docNumber: withDocument ? (identity.docNumber ?? null) : current.docNumber,
       docCountry: withDocument ? (identity.docCountry ?? null) : current.docCountry,
@@ -281,6 +277,13 @@ export interface RegistrationHold {
   ownerPatientId: string | null
   /** Lo que escribió quien se registró, para comparar. */
   declared: { displayName: string; phone: string | null; email: string | null }
+  /** Por qué se parece: el mismo documento o el mismo celular (nunca solo el nombre). */
+  match: "documento" | "celular"
+  /**
+   * Todas sus respuestas, si vino del registro en línea: recepción decide con
+   * ellas si es la misma persona («¿Es la misma persona?»).
+   */
+  answers?: unknown
 }
 
 /** Texto neutro para quien se registra: no confirma que el documento exista. */
@@ -362,6 +365,7 @@ export async function createPatient(
         ownerName: row?.displayName ?? "otra persona",
         ownerPatientId: row?.patientId ?? null,
         declared: { displayName: identity.displayName, phone: identity.phone ?? null, email: identity.email ?? null },
+        match: "documento",
       })
     }
   }
@@ -934,8 +938,7 @@ export async function findPatientDuplicates(tx: Db, orgId: string, input: { disp
 export interface UpdatePatientPatch {
   displayName?: string
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   docCountry?: string | null
   nationality?: string | null
   birthCountry?: string | null
@@ -982,8 +985,7 @@ async function assertTenantBranch(tx: Db, orgId: string, branchId: string): Prom
 const PATCH_FIELDS = [
   "displayName",
   "givenNames",
-  "paternalSurname",
-  "maternalSurname",
+  "familyName",
   "docCountry",
   "nationality",
   "birthCountry",

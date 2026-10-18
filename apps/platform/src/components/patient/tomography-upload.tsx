@@ -66,7 +66,8 @@ export function usePatientIdentity(patientId: string) {
     ? {
         displayName: patient.displayName,
         givenNames: patient.givenNames ?? null,
-        familyNames: [patient.paternalSurname, patient.maternalSurname].filter(Boolean).join(" ") || null,
+        // Los apellidos ya van juntos en un solo campo (ADR 0058).
+        familyNames: patient.familyName ?? null,
       }
     : null
 }

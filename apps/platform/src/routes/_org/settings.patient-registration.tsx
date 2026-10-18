@@ -1,59 +1,40 @@
 import type {
-  RegistrationAnswers,
   RegistrationConfig,
   RegistrationFieldKey,
   RegistrationFieldMode,
 } from "@odentia/clinical"
-import { REGISTRATION_FIELDS as CATALOGUE, registrationConfigSchema } from "@odentia/clinical"
+import { registrationConfigSchema } from "@odentia/clinical"
 import {
   Alert,
   AlertDescription,
-  Badge,
   Button,
   buttonVariants,
   Checkbox,
   cn,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Field,
-  FieldDescription,
   FieldError,
   FieldLabel,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Skeleton,
   Textarea,
   toast,
 } from "@odentia/ui"
-import {
-  type CountryCode,
-  EmptyState,
-  normalizeCountry,
-  PageHeader,
-  phonePlaceholder,
-  SubmitButton,
-  toE164,
-} from "@odentia/ui-patterns"
+import { Switch } from "@odentia/ui/components/switch"
+import { EmptyState, PageHeader, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { QrCode } from "lucide-react"
 import { useEffect, useState } from "react"
-import { PatientRegistrationForm } from "../../components/patient/patient-registration-form"
+import { RegistrationQuestionnaire } from "../../components/patient/registration-questionnaire"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
+import { RegistrationFieldsPicker } from "../../components/settings/registration-fields-picker"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { orgSlugFromHostname, requestHostname, tenantUrl } from "../../lib/host"
 import { useClinicalProfile, useOrgProfile } from "../../lib/org"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import { fetchRegistrationConfig, saveRegistrationConfig } from "../../lib/patient-registration"
+import { brandedQrDataUrl, brandedQrPng, registrationSheetPng } from "../../lib/branded-qr"
 
 export const Route = createFileRoute("/_org/settings/patient-registration")({
   component: PatientRegistrationSettingsPage,
@@ -62,55 +43,16 @@ export const Route = createFileRoute("/_org/settings/patient-registration")({
 const orgRouteApi = getRouteApi("/_org")
 
 const TITLE = "Registro de pacientes"
-const SUBTITLE = "Qué se le pide a quien se registra con el enlace de la clínica, el aviso que acepta y su código QR."
+const SUBTITLE =
+  "Qué le pedimos a cada paciente, lo registre recepción o se registre solo, y el aviso de privacidad."
 
 /** La tarjeta de página, la misma en toda la plataforma. */
 const CARD = "elevated flex flex-col gap-5 rounded-xl border bg-card p-5 sm:p-6"
 
-const MODE_LABELS: Record<RegistrationFieldMode, string> = {
-  hidden: "No se pide",
-  optional: "Opcional",
-  required: "Obligatorio",
-}
-
-/**
- * Los datos de la persona en tres grupos (decisión 10 de la fase 3): lo que
- * hace falta para atender se pide siempre; lo que pide la clínica se elige; lo
- * censal solo puede ser opcional o no pedirse. Debajo, salud y odontológicos.
- */
-const GROUPS = [
-  { id: "clinic", title: "Los que pide tu clínica", description: "Cuentan para el aviso «Faltan datos para atenderla» solo si los marcas obligatorios." },
-  { id: "census", title: "Opcionales", description: "Solo «Opcional» o «No se pide»: no cuentan para el aviso. En la ficha van plegados en «Más datos»." },
-  { id: "salud", title: "Salud", description: null },
-  { id: "odontologicos", title: "Odontológicos", description: null },
-] as const
-
-/** Los que van en pareja se eligen en una sola fila. */
-const PAIRED: Partial<Record<RegistrationFieldKey, { with: RegistrationFieldKey; label: string }>> = {
-  docType: { with: "docNumber", label: "Documento" },
-  emergencyContactName: { with: "emergencyContactPhone", label: "Contacto de emergencia" },
-}
-const PAIR_SECONDS = new Set<RegistrationFieldKey>(["docNumber", "emergencyContactPhone"])
-
-/**
- * Datos de ejemplo de la vista previa. El teléfono sale del país de la
- * clínica (el ejemplo oficial de su plan de numeración), nunca de uno fijo;
- * sin país en el perfil, el campo queda vacío.
- */
-function previewValues(country: CountryCode | undefined): Partial<RegistrationAnswers> {
-  const phone = country ? toE164(phonePlaceholder(country), country) : null
-  return {
-    demographics: {
-      displayName: "Paciente de ejemplo",
-      birthDate: "1990-05-12",
-      ...(phone ? { phone } : {}),
-    },
-    respondent: "patient",
-    privacyAccepted: true,
-  }
-}
-
-type Draft = Pick<RegistrationConfig, "fields" | "enabled" | "privacyNotice" | "askReminders" | "askMessages">
+type Draft = Pick<
+  RegistrationConfig,
+  "fields" | "enabled" | "privacyNotice" | "askReminders" | "askMessages"
+>
 
 function PatientRegistrationSettingsPage() {
   const canRead = usePermission("settings.read")
@@ -151,7 +93,6 @@ function RegistrationSettings() {
   const profile = useOrgProfile()
   // Y lo que solo se pide en un país (la procedencia en Perú; ADR 0036).
   const clinicalProfile = useClinicalProfile()
-  const countryCode = normalizeCountry(profile.data?.countryCode)
   const { org } = orgRouteApi.useRouteContext()
   const slug = org?.slug ?? orgSlugFromHostname(requestHostname()) ?? ""
   const publicLink = tenantUrl(slug, "/registro")
@@ -172,9 +113,11 @@ function RegistrationSettings() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   /** Otra persona guardó antes: el borrador se conserva y hay que volver a guardar. */
   const [conflict, setConflict] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const [previewDone, setPreviewDone] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  /** La hoja del mostrador (A5) y el PNG del código, listos para descargar. */
+  const [qrPng, setQrPng] = useState<string | null>(null)
+  const [sheetPng, setSheetPng] = useState<string | null>(null)
   const [qrPending, setQrPending] = useState(false)
   const [qrError, setQrError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -242,7 +185,9 @@ function RegistrationSettings() {
       if (details && typeof details === "object") {
         setFormErrors(details)
       } else {
-        setFormErrors({ general: shape?.message ?? "No pudimos guardar el registro. Vuelve a intentarlo." })
+        setFormErrors({
+          general: shape?.message ?? "No pudimos guardar el registro. Vuelve a intentarlo.",
+        })
       }
     },
   })
@@ -252,7 +197,10 @@ function RegistrationSettings() {
       <div className="flex max-w-3xl flex-col gap-6">
         <PageHeader title={TITLE} subtitle={SUBTITLE} />
         {configQuery.isError ? (
-          <SettingsLoadError what="el registro de pacientes" onRetry={() => void configQuery.refetch()} />
+          <SettingsLoadError
+            what="el registro de pacientes"
+            onRetry={() => void configQuery.refetch()}
+          />
         ) : (
           <RegistrationSkeleton />
         )}
@@ -265,12 +213,11 @@ function RegistrationSettings() {
   const dirty = baseline !== null && !sameDraft(draft, baseline)
   const published = baseline?.enabled ?? false
 
-  function setMode(key: RegistrationFieldKey, mode: RegistrationFieldMode) {
+  function setModes(keys: RegistrationFieldKey[], mode: RegistrationFieldMode) {
     setFields((current) => {
       if (!current) return current
-      const next = { ...current, [key]: mode }
-      const pair = PAIRED[key]
-      if (pair) next[pair.with] = mode
+      const next = { ...current }
+      for (const key of keys) next[key] = mode
       return next
     })
   }
@@ -309,12 +256,19 @@ function RegistrationSettings() {
     setQrPending(true)
     setQrError(null)
     try {
-      // Importación dinámica: qrcode solo se usa en esta pantalla y no debe
-      // entrar al bundle inicial de la plataforma.
-      const { default: QRCode } = await import("qrcode")
-      setQrDataUrl(
-        await QRCode.toDataURL(qrLink, { width: 512, margin: 4, errorCorrectionLevel: "M" }),
-      )
+      // El código con el [32] al centro; el nombre y el logo de la clínica van en la hoja.
+      const [svg, png, sheet] = await Promise.all([
+        brandedQrDataUrl(qrLink),
+        brandedQrPng(qrLink),
+        registrationSheetPng({
+          clinicName: profile.data?.tradeName || org?.name || slug,
+          logoUrl: profile.data?.logo ?? null,
+          url: qrLink,
+        }),
+      ])
+      setQrDataUrl(svg)
+      setQrPng(png)
+      setSheetPng(sheet)
     } catch {
       setQrError("No pudimos generar el código QR. Vuelve a intentarlo.")
     } finally {
@@ -327,316 +281,289 @@ function RegistrationSettings() {
   )
 
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
+    <div className="flex max-w-6xl flex-col gap-6">
       <PageDraftGuard dirty={dirty} />
-      <PageHeader
-        title={TITLE}
-        subtitle={SUBTITLE}
-        actions={
-          <Button type="button" variant="secondary" className="min-h-11" onClick={() => setPreviewOpen(true)}>
-            Vista previa
-          </Button>
-        }
-      />
-
-      {configQuery.isError ? (
-        <SettingsLoadError stale what="el registro de pacientes" onRetry={() => void configQuery.refetch()} />
-      ) : null}
-      {!canWrite ? (
-        <p role="note" className="text-sm text-muted-foreground">
-          Puedes ver el registro; cambiarlo es de quien administra la clínica.
-        </p>
-      ) : null}
-
-      <section className={CARD} aria-labelledby="registro-siempre">
-        <h2 id="registro-siempre" className="font-heading text-base font-medium">
-          Necesarios para atender
-        </h2>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-col">
-            <span className="text-sm font-medium">Nombres y apellidos · Fecha de nacimiento · Teléfono o correo</span>
-            <span className="text-sm text-muted-foreground">
-              Siempre: hacen falta para atender. El teléfono o el correo de quien habla por ella cuentan como suyos.
-            </span>
-          </div>
-          <Badge variant="outline">Siempre</Badge>
-        </div>
-      </section>
-
-      {GROUPS.map((group) => (
-        <section key={group.id} className={CARD} aria-labelledby={`registro-grupo-${group.id}`}>
-          <div className="flex flex-col gap-1.5">
-            <h2 id={`registro-grupo-${group.id}`} className="font-heading text-base font-medium">
-              {group.title}
-            </h2>
-            {group.description ? <p className="text-sm text-muted-foreground">{group.description}</p> : null}
-          </div>
-          <div className="flex flex-col gap-4">
-            {CATALOGUE.filter((field) =>
-              group.id === "salud" || group.id === "odontologicos"
-                ? field.step === group.id
-                : field.group === group.id,
-            )
-              .filter((field) => !PAIR_SECONDS.has(field.key))
-              // «Procedencia» solo se pide en clínicas de Perú.
-              .filter((field) => field.key !== "origin" || clinicalProfile.origin)
-              .map((field) => {
-                const key = field.key as RegistrationFieldKey
-                const census = field.group === "census"
-                const modes = (Object.keys(MODE_LABELS) as RegistrationFieldMode[]).filter(
-                  (mode) => !census || mode !== "required",
-                )
-                const label = PAIRED[key]?.label ?? field.label
-                return (
-                  <Field key={field.key}>
-                    <FieldLabel htmlFor={`registro-campo-${field.key}`}>{label}</FieldLabel>
-                    <Select
-                      value={fields[key]}
-                      items={Object.fromEntries(modes.map((mode) => [mode, MODE_LABELS[mode]]))}
-                      onValueChange={(value) => setMode(key, value as RegistrationFieldMode)}
-                      disabled={!canWrite}
-                    >
-                      <SelectTrigger id={`registro-campo-${field.key}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {modes.map((mode) => (
-                          <SelectItem key={mode} value={mode}>
-                            {MODE_LABELS[mode]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {key === "docType" ? (
-                      <FieldDescription>El tipo, el número y el país que lo emitió se piden juntos.</FieldDescription>
-                    ) : null}
-                    {formErrors[key] ? <FieldError>{formErrors[key]}</FieldError> : null}
-                  </Field>
-                )
-              })}
-          </div>
-        </section>
-      ))}
-
-      <section className={CARD} aria-labelledby="registro-mensajes">
-        <div className="flex flex-col gap-1.5">
-          <h2 id="registro-mensajes" className="font-heading text-base font-medium">
-            Mensajes de la clínica
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Lo que el registro pregunta, además de la atención. Lo que la persona acepte vale de inmediato para lo
-            que el agente le escribe por su cuenta; sin preguntarlo, casi nadie podrá recibirlo.
-          </p>
-        </div>
-        <ul className="flex flex-col divide-y rounded-xl border">
-          <li className="flex items-center gap-3 p-3">
-            <div className="flex-1">
-              <div className="text-sm font-medium">Atención</div>
-              <div className="text-sm text-muted-foreground">Siempre se pide: es la base del registro.</div>
-            </div>
-            <span className="text-xs font-semibold text-muted-foreground">Fijo</span>
-          </li>
-          <li className="flex min-h-11 items-center gap-3 p-3">
-            <Checkbox
-              id="registro-otros-mensajes"
-              checked={askMessages}
-              onCheckedChange={(value) => setAskMessages(value === true)}
-              disabled={!canWrite}
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-start">
+        <div className="flex min-w-0 flex-col gap-6">
+          {configQuery.isError ? (
+            <SettingsLoadError
+              stale
+              what="el registro de pacientes"
+              onRetry={() => void configQuery.refetch()}
             />
-            <label htmlFor="registro-otros-mensajes" className="flex-1">
-              <span className="block text-sm font-medium">Novedades y promociones de la clínica</span>
-              <span className="block text-sm text-muted-foreground">
-                Es lo único que pide permiso. Lo de su atención (citas, controles, presupuestos) no se pregunta: es parte del servicio.
-              </span>
-            </label>
-          </li>
-        </ul>
-      </section>
+          ) : null}
+          {!canWrite ? (
+            <p role="note" className="text-sm text-muted-foreground">
+              Puedes ver el registro; cambiarlo es de quien administra la clínica.
+            </p>
+          ) : null}
 
-      <section className={CARD} aria-labelledby="registro-publicacion">
-        <div className="flex flex-col gap-1.5">
-          <h2 id="registro-publicacion" className="font-heading text-base font-medium">
-            Aviso de privacidad y publicación
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            El aviso lo escribe tu clínica y se muestra antes de pedir el consentimiento.
-          </p>
-        </div>
-        <Field>
-          <FieldLabel htmlFor="registro-aviso">Aviso de privacidad</FieldLabel>
-          <Textarea
-            id="registro-aviso"
-            value={privacyNotice}
-            onChange={(event) => setPrivacyNotice(event.target.value)}
-            rows={5}
-            disabled={!canWrite}
-          />
-          {formErrors.privacyNotice ? <FieldError>{formErrors.privacyNotice}</FieldError> : null}
-        </Field>
-        <div className="flex min-h-11 items-center gap-3">
-          <Checkbox
-            id="registro-habilitado"
-            checked={enabled}
-            onCheckedChange={(value) => setEnabled(value === true)}
-            disabled={!canWrite}
-          />
-          <label htmlFor="registro-habilitado" className="text-sm">
-            Formulario público habilitado
-          </label>
-        </div>
-      </section>
+          <section className={CARD} aria-labelledby="registro-datos">
+            <div className="flex flex-col gap-1.5">
+              <h2 id="registro-datos" className="font-heading text-base font-medium">
+                Qué le pedimos
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Elige, dato por dato, si es obligatorio, opcional o no se pregunta. Vale para
+                recepción y para lo que llena el paciente en su celular; en «Así lo ve el paciente»
+                ves cómo le queda.
+              </p>
+            </div>
+            <RegistrationFieldsPicker
+              fields={fields}
+              onMode={setModes}
+              disabled={!canWrite}
+              showOrigin={clinicalProfile.origin}
+            />
+            {Object.keys(formErrors).some((key) => key in fields) ? (
+              <FieldError>
+                {Object.entries(formErrors)
+                  .filter(([key]) => key in fields)
+                  .map(([, message]) => message)
+                  .join(" ")}
+              </FieldError>
+            ) : null}
+          </section>
 
-      <section className={CARD} aria-labelledby="registro-enlace">
-        <div className="flex flex-col gap-1.5">
-          <h2 id="registro-enlace" className="font-heading text-base font-medium">
-            Enlace público y código QR
-          </h2>
-          <p className="text-sm break-all text-muted-foreground">{publicLink}</p>
-        </div>
-        {!published ? (
-          <p role="status" className="rounded-xl border bg-muted p-3 text-sm">
-            El formulario público está apagado: el enlace y el código QR no admiten registros.
-            {enabled ? " Ya lo marcaste arriba; falta guardar." : ""}
-          </p>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" className="min-h-11" onClick={() => void handleCopyLink()}>
-            {copied ? "Enlace copiado" : "Copiar enlace"}
-          </Button>
-          {qrDataUrl ? (
-            <>
+          <section className={CARD} aria-labelledby="registro-mensajes">
+            <div className="flex flex-col gap-1.5">
+              <h2 id="registro-mensajes" className="font-heading text-base font-medium">
+                Mensajes de la clínica
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Lo que el registro pregunta, además de la atención. Lo que la persona acepte vale de
+                inmediato para lo que el agente le escribe por su cuenta; sin preguntarlo, casi
+                nadie podrá recibirlo.
+              </p>
+            </div>
+            <ul className="flex flex-col divide-y rounded-xl border">
+              <li className="flex items-center gap-3 p-3">
+                <div className="flex-1">
+                  <div className="text-sm font-medium">Atención</div>
+                  <div className="text-sm text-muted-foreground">
+                    Siempre se pide: es la base del registro.
+                  </div>
+                </div>
+                <span className="text-xs font-semibold text-muted-foreground">Fijo</span>
+              </li>
+              <li className="flex min-h-11 items-center gap-3 p-3">
+                <Checkbox
+                  id="registro-otros-mensajes"
+                  checked={askMessages}
+                  onCheckedChange={(value) => setAskMessages(value === true)}
+                  disabled={!canWrite}
+                />
+                <label htmlFor="registro-otros-mensajes" className="flex-1">
+                  <span className="block text-sm font-medium">
+                    Novedades y promociones de la clínica
+                  </span>
+                  <span className="block text-sm text-muted-foreground">
+                    Es lo único que pide permiso. Lo de su atención (citas, controles, presupuestos)
+                    no se pregunta: es parte del servicio.
+                  </span>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section className={CARD} aria-labelledby="registro-publicacion">
+            <div className="flex flex-col gap-1.5">
+              <h2 id="registro-publicacion" className="font-heading text-base font-medium">
+                Aviso de privacidad y publicación
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                El aviso lo escribe tu clínica y se muestra antes de pedir el consentimiento.
+              </p>
+            </div>
+            <Field>
+              <FieldLabel htmlFor="registro-aviso">Aviso de privacidad</FieldLabel>
+              <Textarea
+                id="registro-aviso"
+                value={privacyNotice}
+                onChange={(event) => setPrivacyNotice(event.target.value)}
+                rows={5}
+                disabled={!canWrite}
+              />
+              {formErrors.privacyNotice ? (
+                <FieldError>{formErrors.privacyNotice}</FieldError>
+              ) : null}
+            </Field>
+            <div className="flex min-h-11 items-center justify-between gap-3 rounded-2xl border p-3">
+              <label htmlFor="registro-habilitado" className="flex min-w-0 flex-col">
+                <span className="text-sm font-medium">Que se registren solos</span>
+                <span className="text-sm text-muted-foreground">
+                  Con el enlace de la clínica o el código QR de recepción.
+                </span>
+              </label>
+              <Switch
+                id="registro-habilitado"
+                checked={enabled}
+                onCheckedChange={(value) => setEnabled(value === true)}
+                disabled={!canWrite}
+              />
+            </div>
+          </section>
+
+          <section className={CARD} aria-labelledby="registro-enlace">
+            <div className="flex flex-col gap-1.5">
+              <h2 id="registro-enlace" className="font-heading text-base font-medium">
+                Enlace público y código QR
+              </h2>
+              <p className="text-sm break-all text-muted-foreground">{publicLink}</p>
+            </div>
+            {!published ? (
+              <p role="status" className="rounded-xl border bg-muted p-3 text-sm">
+                El formulario público está apagado: el enlace y el código QR no admiten registros.
+                {enabled ? " Ya lo marcaste arriba; falta guardar." : ""}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 variant="secondary"
                 className="min-h-11"
-                onClick={() => void handleGenerateQr()}
-                disabled={qrPending}
+                onClick={() => void handleCopyLink()}
               >
-                Volver a generar
+                {copied ? "Enlace copiado" : "Copiar enlace"}
               </Button>
-              {/* Descarga de un archivo: es un enlace (`download`), no un botón. */}
-              <a
-                href={qrDataUrl}
-                download={`registro-${slug}.png`}
-                className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}
+              {qrDataUrl ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-11"
+                    onClick={() => void handleGenerateQr()}
+                    disabled={qrPending}
+                  >
+                    Volver a generar
+                  </Button>
+                  {/* Descarga de un archivo: es un enlace (`download`), no un botón. */}
+                  {sheetPng ? (
+                    <a
+                      href={sheetPng}
+                      download={`hoja-registro-${slug}.png`}
+                      className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}
+                    >
+                      Descargar la hoja para imprimir
+                    </a>
+                  ) : null}
+                  {qrPng ? (
+                    <a
+                      href={qrPng}
+                      download={`registro-${slug}.png`}
+                      className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}
+                    >
+                      Descargar el código QR
+                    </a>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            {qrError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {qrError}
+              </p>
+            ) : null}
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={`Código QR del registro de ${slug}`}
+                className="size-64 max-w-full rounded-xl border bg-white p-2"
+              />
+            ) : (
+              <EmptyState
+                icon={QrCode}
+                title="Aún no hay código QR"
+                description="Genéralo para descargarlo o imprimir la hoja del mostrador. Lleva al registro de tu clínica, para quien llega sin ficha."
+                actionLabel={qrPending ? "Generando…" : "Generar código QR"}
+                onAction={() => {
+                  if (!qrPending) void handleGenerateQr()
+                }}
+              />
+            )}
+          </section>
+
+          {conflict ? (
+            <Alert>
+              <AlertDescription>
+                Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y
+                vuelve a guardar.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {formErrors.general ? (
+            <Alert variant="destructive">
+              <AlertDescription>{formErrors.general}</AlertDescription>
+            </Alert>
+          ) : null}
+          {otherErrors.length > 0 ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                {otherErrors.map(([, message]) => message).join(" ")}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {canWrite ? (
+            <div>
+              <SubmitButton
+                type="button"
+                className="min-h-11"
+                pending={saveMutation.isPending}
+                onClick={handleSave}
               >
-                Descargar el código QR
-              </a>
-            </>
+                Guardar
+              </SubmitButton>
+            </div>
           ) : null}
         </div>
-        {qrError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {qrError}
-          </p>
-        ) : null}
-        {qrDataUrl ? (
-          <img
-            src={qrDataUrl}
-            alt={`Código QR del registro de ${slug}`}
-            className="size-64 max-w-full rounded-xl border bg-white p-2"
-          />
-        ) : (
-          <EmptyState
-            icon={QrCode}
-            title="Aún no hay código QR"
-            description="Genéralo para descargarlo e imprimirlo. Lleva al registro de tu clínica."
-            actionLabel={qrPending ? "Generando…" : "Generar código QR"}
-            onAction={() => {
-              if (!qrPending) void handleGenerateQr()
-            }}
-          />
-        )}
-      </section>
-
-      {conflict ? (
-        <Alert>
-          <AlertDescription>
-            Otra persona guardó un cambio antes que tú. Tu borrador sigue aquí: revísalo y vuelve a guardar.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {formErrors.general ? (
-        <Alert variant="destructive">
-          <AlertDescription>{formErrors.general}</AlertDescription>
-        </Alert>
-      ) : null}
-      {otherErrors.length > 0 ? (
-        <Alert variant="destructive">
-          <AlertDescription>{otherErrors.map(([, message]) => message).join(" ")}</AlertDescription>
-        </Alert>
-      ) : null}
-      {canWrite ? (
-        <div>
-          <SubmitButton type="button" className="min-h-11" pending={saveMutation.isPending} onClick={handleSave}>
-            Guardar
-          </SubmitButton>
-        </div>
-      ) : null}
-
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-h-[90vh] w-full overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Vista previa del formulario</DialogTitle>
-            <DialogDescription>
-              Datos de ejemplo, solo en esta pantalla. Finalizar no guarda nada.
-            </DialogDescription>
-          </DialogHeader>
-          {previewDone ? (
-            <p role="status" className="rounded-xl border bg-muted p-3 text-sm">
-              Vista previa: no se guardaron datos
+        <aside
+          className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-4"
+          aria-label="Así lo ve el paciente"
+        >
+          <div className="flex flex-col gap-0.5">
+            <h2 className="font-heading text-base font-medium">Así lo ve el paciente</h2>
+            <p className="text-sm text-muted-foreground">
+              Con lo que marcaste, una pregunta a la vez, en su celular. Es una vista previa: no
+              guarda nada.
             </p>
-          ) : (
-            <PatientRegistrationForm
-              mode="preview"
-              config={{ version: expectedVersion, enabled, fields, privacyNotice, askReminders, askMessages }}
-              today={today}
-              defaultCountry={countryCode}
-              countryCode={profile.data?.countryCode ?? null}
-              context={{ kind: "generic" }}
-              initialValues={previewValues(countryCode)}
-              onSubmit={async () => {
-                setPreviewDone(true)
-              }}
-            >
-              {(view) => (
-                <form onSubmit={view.onSubmit} className="space-y-6">
-                  {view.progress}
-                  {view.body}
-                  <div className="flex flex-col gap-3">
-                    {view.error ? (
-                      <p role="alert" className="text-sm text-destructive">
-                        {view.error}
-                      </p>
-                    ) : null}
-                    <SubmitButton
-                      type="submit"
-                      pending={view.isSubmitting}
-                      disabled={view.submitDisabled}
-                      className="w-full"
-                    >
-                      {view.submitLabel}
-                    </SubmitButton>
-                    {view.previous}
-                  </div>
-                </form>
-              )}
-            </PatientRegistrationForm>
-          )}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setPreviewOpen(false)
-                setPreviewDone(false)
-              }}
-            >
-              Cerrar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+          <div className="max-h-[75vh] min-h-[32rem] overflow-y-auto rounded-[2rem] border-8 border-foreground/85 bg-background p-5 shadow-sm">
+            {previewDone ? (
+              <div className="flex flex-col items-start gap-3 p-2">
+                <p role="status" className="text-sm">
+                  Vista previa: no se guardaron datos.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setPreviewDone(false)}
+                >
+                  Volver a la vista previa
+                </Button>
+              </div>
+            ) : (
+              <RegistrationQuestionnaire
+                config={{
+                  version: expectedVersion,
+                  enabled,
+                  fields,
+                  privacyNotice,
+                  askReminders,
+                  askMessages,
+                }}
+                today={today}
+                countryCode={profile.data?.countryCode ?? null}
+                shortcuts={false}
+                onSubmit={async () => {
+                  setPreviewDone(true)
+                }}
+              />
+            )}
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }

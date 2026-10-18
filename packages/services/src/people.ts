@@ -79,8 +79,7 @@ export interface PersonPage {
   id: string
   displayName: string
   givenNames: string | null
-  paternalSurname: string | null
-  maternalSurname: string | null
+  familyName: string | null
   docType: string | null
   docNumber: string | null
   docCountry: string | null
@@ -269,8 +268,7 @@ export async function getPersonPage(
     id: row.id,
     displayName: row.displayName,
     givenNames: row.givenNames,
-    paternalSurname: row.paternalSurname,
-    maternalSurname: row.maternalSurname,
+    familyName: row.familyName,
     docType: row.docType,
     docNumber: row.docNumber,
     docCountry: row.docCountry,
@@ -544,8 +542,7 @@ export async function listPeople(
 export const PERSON_IDENTITY_FIELDS = [
   "displayName",
   "givenNames",
-  "paternalSurname",
-  "maternalSurname",
+  "familyName",
   "docType",
   "docNumber",
   "docCountry",
@@ -626,8 +623,7 @@ export async function updatePersonIdentity(
   const merged = {
     displayName: locked.displayName,
     givenNames: locked.givenNames,
-    paternalSurname: locked.paternalSurname,
-    maternalSurname: locked.maternalSurname,
+    familyName: locked.familyName,
     docType: locked.docType,
     docNumber: locked.docNumber,
     docCountry: locked.docCountry,
@@ -647,7 +643,7 @@ export async function updatePersonIdentity(
   }
   // El nombre visible se deriva del nombre separado; si solo cambia el nombre
   // separado, el visible provisional sale de él para validar.
-  const composed = [merged.givenNames, merged.paternalSurname, merged.maternalSurname]
+  const composed = [merged.givenNames, merged.familyName]
     .filter(Boolean)
     .join(" ")
   if (composed && trimmed.displayName === undefined) merged.displayName = composed
@@ -700,8 +696,7 @@ export async function updatePersonIdentity(
 
 export interface CreatePersonInput {
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   displayName?: string | null
   phone?: string | null
   email?: string | null
@@ -754,9 +749,8 @@ export async function createPerson(
 ): Promise<{ id: string }> {
   const clean = (value: string | null | undefined) => value?.trim().replace(/\s+/g, " ") || null
   const givenNames = clean(input.givenNames)
-  const paternalSurname = clean(input.paternalSurname)
-  const maternalSurname = clean(input.maternalSurname)
-  const composed = [givenNames, paternalSurname, maternalSurname].filter(Boolean).join(" ")
+  const familyName = clean(input.familyName)
+  const composed = [givenNames, familyName].filter(Boolean).join(" ")
   const displayName = composed || clean(input.displayName)
   if (!displayName) throw validation("Indica el nombre de la persona")
   const countryCode = await findOrgCountry(tx, orgId)
@@ -764,8 +758,7 @@ export async function createPerson(
     {
       displayName,
       givenNames,
-      paternalSurname,
-      maternalSurname,
+      familyName,
       phone: clean(input.phone),
       email: clean(input.email),
       docType: clean(input.docType),
@@ -797,8 +790,7 @@ export async function createPerson(
       {
         displayName,
         givenNames,
-        paternalSurname,
-        maternalSurname,
+        familyName,
         phone: clean(input.phone),
         email: clean(input.email),
         birthDate: clean(input.birthDate),

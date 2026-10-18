@@ -323,6 +323,7 @@ export function PersonHeader({
               <NewEncounterButton
                 patientId={patient.id}
                 openEncounterId={summary?.openEncounterId}
+                openFromSearch
               />
             ) : null}
             {canEdit ? (

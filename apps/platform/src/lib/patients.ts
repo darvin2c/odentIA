@@ -18,8 +18,7 @@ export interface Patient {
   displayName: string
   /** Nombre separado (ADR 0004); el visible se deriva de él. */
   givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
+  familyName?: string | null
   identityNeedsReview?: boolean
   bloodGroup?: BloodGroup | null
   docType?: string | null

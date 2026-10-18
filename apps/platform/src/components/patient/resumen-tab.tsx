@@ -17,7 +17,7 @@ import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
 import { usePlanNextStep } from "./plan/plan-next"
-import { SendPersonalLinkButton } from "./send-personal-link"
+import { PersonalLinkActions } from "./send-personal-link"
 
 interface Pending {
   id: string
@@ -215,8 +215,8 @@ export function PatientPendingCard({
         id: "filiacion",
         title: gaps.length > 0 ? "Faltan datos para atenderla" : "Apellidos por confirmar",
         detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
-        action: (
-          <span className="flex flex-wrap gap-2">
+        action: (() => {
+          const complete = (
             <Button
               size="sm"
               variant="outline"
@@ -224,9 +224,14 @@ export function PatientPendingCard({
             >
               Completar
             </Button>
-            {gaps.length > 0 ? <SendPersonalLinkButton patientId={patientId} /> : null}
-          </span>
-        ),
+          )
+          // Su enlace: enviarlo, o copiarlo y mostrar su código cuando no se puede enviar.
+          return gaps.length > 0 ? (
+            <PersonalLinkActions patientId={patientId} missing={filiationGapsText(gaps)} leading={complete} />
+          ) : (
+            <span className="flex flex-wrap gap-2">{complete}</span>
+          )
+        })(),
       })
   }
   for (const task of tasksQuery.data?.data ?? [])

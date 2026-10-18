@@ -149,8 +149,7 @@ export function FiliacionPanel({
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <Section title="Identidad" onEdit={edit("identidad")}>
           <Item label="Nombres">{p.givenNames}</Item>
-          <Item label="Primer apellido">{p.paternalSurname}</Item>
-          <Item label="Segundo apellido">{p.maternalSurname}</Item>
+          <Item label="Apellidos">{p.familyName}</Item>
           <Item label="Documento">{documentLine(p.docType, p.docNumber, p.docCountry)}</Item>
           <Item label="Nacimiento">
             {p.birthDate

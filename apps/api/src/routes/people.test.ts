@@ -311,7 +311,7 @@ describe("la página de la persona: cada bloque con su propio permiso", () => {
       docNumber: "AB1234",
       docCountry: "VE",
       givenNames: "Rosa",
-      paternalSurname: "Quispe",
+      familyName: "Quispe",
     })
     expect(ok.status).toBe(200)
     expect(
@@ -332,16 +332,15 @@ describe("la Bandeja crea y busca a la persona con lo mismo que «Nueva persona�
     // Lo que envía «Nueva conversación» de la Bandeja.
     const created = await send("reception", "POST", "/people", {
       givenNames: "Carmen",
-      paternalSurname: "Ruiz",
-      maternalSurname: null,
+      familyName: "Ruiz",
       phone: "+51987650777",
     })
     expect(created.status).toBe(201)
     const { data } = (await created.json()) as { data: { id: string } }
-    const [row] = await ownerDb.execute<{ given_names: string; paternal_surname: string; display_name: string }>(
-      sql`select given_names, paternal_surname, display_name from contact where id = ${data.id}`,
+    const [row] = await ownerDb.execute<{ given_names: string; family_name: string; display_name: string }>(
+      sql`select given_names, family_name, display_name from contact where id = ${data.id}`,
     )
-    expect(row).toMatchObject({ given_names: "Carmen", paternal_surname: "Ruiz", display_name: "Carmen Ruiz" })
+    expect(row).toMatchObject({ given_names: "Carmen", family_name: "Ruiz", display_name: "Carmen Ruiz" })
     // El mismo buscador que la lista de personas: compara los dígitos del teléfono.
     const found = (await (await get("reception", `/people?ver=todos&q=${encodeURIComponent("987 650 777")}`)).json()) as {
       data: { id: string }[]

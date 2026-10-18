@@ -39,6 +39,16 @@ export interface WaitingBudgets {
   items: Array<{ id: string; patientId: string; patientName: string; title: string; presentedAt: string | null }>
 }
 export type WaitingRow =
+  /** Terminó su registro por su enlace hoy y tiene cita hoy sin llegar: «Llegó» al entrar. */
+  | {
+      kind: "registrationDone"
+      appointmentId: string
+      patientId: string
+      patientName: string
+      sentAt: string
+      startsAt: string
+      dentistName: string | null
+    }
   /** Una atención de otro día que quedó en borrador y lleva quien mira: «Continuar» o «Anular con motivo». */
   | {
       kind: "staleEncounter"
@@ -117,6 +127,8 @@ export type WaitingRow =
       personName: string | null
       detail: string
       createdAt: string
+      /** `registro`: hay lo que escribió para decidir en «¿Es la misma persona?». */
+      held?: boolean
     }
   /** Pidió volver a entrar al portal: recepción le envía un enlace nuevo y le dice el código aparte. */
   | { kind: "portalReentry"; id: string; patientId: string; contactName: string; grantId: string | null; createdAt: string }

@@ -175,6 +175,7 @@ const OWN_DATA: MessageDef["data"] = [
 const NOTICE_TITLES: Record<string, string> = {
   aviso_cita_reservada: "Recordar la cita: cita reservada",
   aviso_cita_reservada_datos: "Recordar la cita: cita reservada, faltan datos",
+  recordatorio_cita_datos: "Recordar la cita: recordatorio, faltan datos",
   aviso_cita_movida: "Recordar la cita: cambio de fecha",
   aviso_cita_cancelada: "Recordar la cita: cita cancelada",
 }
@@ -896,6 +897,8 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
   aviso_cita_reservada: () => "Al reservar una cita desde la Agenda, la ficha o la conversación.",
   aviso_cita_reservada_datos: () =>
     "Al reservar una cita a quien le faltan datos para atenderla: en lugar del aviso de reserva, con su enlace para completarlos.",
+  recordatorio_cita_datos: () =>
+    "Antes de la cita, a quien aún le faltan datos para atenderla: en lugar del recordatorio, con el botón «Completar mis datos».",
   aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
   aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",
 }

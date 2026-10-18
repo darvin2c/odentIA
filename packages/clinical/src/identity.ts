@@ -293,31 +293,12 @@ export function identityDocumentError(
   }
 }
 
-/** «Rosa María» + «Quispe» + «Huamán» → «Rosa María Quispe Huamán». */
-export function composeDisplayName(parts: {
-  givenNames?: string | null
-  paternalSurname?: string | null
-  maternalSurname?: string | null
-}): string {
-  return [parts.givenNames, parts.paternalSurname, parts.maternalSurname]
+/** «Rosa María» + «Quispe Huamán» → «Rosa María Quispe Huamán». */
+export function composeDisplayName(parts: { givenNames?: string | null; familyName?: string | null }): string {
+  return [parts.givenNames, parts.familyName]
     .map((part) => part?.trim().replace(/\s+/g, " "))
     .filter(Boolean)
     .join(" ")
-}
-
-/**
- * Reparte «Apellidos» escritos en un solo campo. Con exactamente dos palabras
- * son paterno y materno; con una, o con más (apellidos compuestos como «De la
- * Cruz»), no se adivina: todo queda como primer apellido y lo separa quien
- * revisa la identidad en la clínica.
- */
-export function splitSurnames(raw: string | null | undefined): {
-  paternalSurname: string
-  maternalSurname: string
-} {
-  const words = (raw ?? "").trim().split(/\s+/).filter(Boolean)
-  if (words.length === 2) return { paternalSurname: words[0]!, maternalSurname: words[1]! }
-  return { paternalSurname: words.join(" "), maternalSurname: "" }
 }
 
 /**

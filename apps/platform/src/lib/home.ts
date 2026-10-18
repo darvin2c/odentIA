@@ -73,6 +73,15 @@ function listed(parts: string[]): string {
 /** Título, detalle y acción de una fila de «Te espera». */
 export function waitingText(row: WaitingRow, context: HomeTextContext): { title: string; detail: string; action: string } {
   switch (row.kind) {
+    case "registrationDone":
+      return {
+        title: `${row.patientName} terminó su registro`,
+        detail: joined([
+          `Por su enlace ${ago(row.sentAt)}`,
+          `Tiene cita hoy a las ${formatClock(row.startsAt, context.locale, context.timezone)}${row.dentistName ? ` con ${row.dentistName}` : ""}`,
+        ]),
+        action: "Abrir su página",
+      }
     case "staleEncounter": {
       const missing = row.missing.map((key) => CLOSING_WORDS[key] ?? key)
       return {
@@ -166,6 +175,13 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         action: "Enviar",
       }
     case "possibleDuplicate":
+      if (row.source === "registro" && row.held) {
+        return {
+          title: `Se registró por el código QR: ¿es ${row.patientName}?`,
+          detail: joined([`Desde el código QR ${ago(row.createdAt)}`, row.detail]),
+          action: `Ver a ${row.patientName}`,
+        }
+      }
       if (row.source === "registro") {
         return {
           title: `Alguien se registró con el documento de ${row.patientName}: revisa si es ella`,
@@ -252,13 +268,15 @@ type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
  * ella»; quien se registró con el documento de otra, «Descartar»; la posible
  * ficha repetida de «Su enlace», «Revisada».
  */
-export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descartar" | "revisada"; label: string; primary: boolean }[] {
+export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descartar" | "revisada" | "revisar"; label: string; primary: boolean }[] {
   if (row.source === "representante") {
     return [
       { id: "confirmar", label: "Confirmar", primary: true },
       { id: "descartar", label: "No es ella", primary: false },
     ]
   }
+  // Con lo que escribió guardado, «Revisar» abre «¿Es la misma persona?»; sin ello, solo descartar.
+  if (row.source === "registro" && row.held) return [{ id: "revisar", label: "Revisar", primary: true }]
   if (row.source === "registro") return [{ id: "descartar", label: "Descartar", primary: false }]
   return [{ id: "revisada", label: "Revisada", primary: false }]
 }
@@ -266,6 +284,7 @@ export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descar
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
   if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry") return `${row.kind}:${row.id}`
+  if (row.kind === "registrationDone") return `registrationDone:${row.appointmentId}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`
   if (row.kind === "promotion") return `promotion:${row.messageId}`

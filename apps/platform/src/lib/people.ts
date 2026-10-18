@@ -50,8 +50,7 @@ export interface PersonPage {
   id: string
   displayName: string
   givenNames: string | null
-  paternalSurname: string | null
-  maternalSurname: string | null
+  familyName: string | null
   docType: string | null
   docNumber: string | null
   docCountry: string | null

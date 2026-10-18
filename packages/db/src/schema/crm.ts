@@ -309,10 +309,13 @@ export const contact = pgTable("contact", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   organizationId: orgFk("organization_id"),
   displayName: text("display_name").notNull(),
-  /** Nombre separado (ADR 0004); display_name se deriva de él en la base. */
+  /**
+   * «Nombres» y «Apellidos», dos campos (ADR 0004 y 0058); display_name se
+   * deriva de ellos en la base. Los apellidos van juntos, como el «family» de
+   * HL7 FHIR HumanName: «Quispe Mamani», «De la Cruz Ríos».
+   */
   givenNames: text("given_names"),
-  paternalSurname: text("paternal_surname"),
-  maternalSurname: text("maternal_surname"),
+  familyName: text("family_name"),
   /** El nombre se separó por heurística: guardar los datos de la persona lo confirma. */
   identityNeedsReview: boolean("identity_needs_review").notNull().default(false),
   /** País emisor del documento (ISO 3166-1 alfa-2). */
@@ -619,6 +622,32 @@ export const crmTask = pgTable(
     index("task_org_opportunity_idx").on(table.organizationId, table.opportunityId),
     index("task_org_patient_idx").on(table.organizationId, table.patientId),
     index("task_org_status_due_idx").on(table.organizationId, table.status, table.dueAt),
+  ],
+)
+
+/**
+ * Lo que escribió quien se registró por el registro en línea (el código QR
+ * general) y se parece a una persona que ya está en la clínica: el mismo
+ * documento o el mismo celular. No se crea ni se cambia a nadie: queda aquí,
+ * unido a su fila de «Te espera» (`registro_con_documento`), hasta que
+ * recepción decide si es la misma persona. Se borra al decidir.
+ */
+export const registrationHold = pgTable(
+  "registration_hold",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    taskId: uuid("task_id").notNull(),
+    /** Por qué se parece: `documento` o `celular` (nunca solo el nombre). */
+    match: text("match").notNull(),
+    /** Las respuestas del registro tal como llegaron (`RegistrationAnswers`). */
+    answers: jsonb("answers").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("registration_hold_match_check", sql`${table.match} IN ('documento', 'celular')`),
+    foreignKey({ columns: [table.organizationId, table.taskId], foreignColumns: [crmTask.organizationId, crmTask.id] }).onDelete("cascade"),
+    uniqueIndex("registration_hold_task_uidx").on(table.organizationId, table.taskId),
   ],
 )
 

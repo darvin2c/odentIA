@@ -235,7 +235,7 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
     .returning({ id: conversation.id })
   const body = (top: Record<string, unknown>) =>
     JSON.stringify(
-      registrationBody("Carmen Huamán", { givenNames: "Carmen", paternalSurname: "Huamán", phone: "+51987654100" }, {
+      registrationBody("Carmen Huamán", { givenNames: "Carmen", familyName: "Huamán", phone: "+51987654100" }, {
         contextContactId: person.id,
         contacts: [{ contactId: person.id, relationship: "self", isPreferred: true }],
         ...top,
@@ -247,8 +247,9 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   // Sin lo mínimo, el alta interna exige lo que pide la clínica: lo que fallaba al reservar.
   const full = await post("reception", { conversationId: thread!.id })
   expect(full.status).toBe(400)
-  // Fuera de la conversación de la persona, lo mínimo no se acepta; sin permiso de pacientes, tampoco.
-  expect((await post("reception", { scope: "essentials" })).status).toBe(400)
+  // Lo mínimo es para alguien nuevo o para la persona de la página (o alguien a
+  // su cargo): sin vínculo con ella no se acepta; sin permiso de pacientes, tampoco.
+  expect((await post("reception", { scope: "essentials", contacts: [] })).status).toBe(400)
   expect((await post("dentist", { scope: "essentials", conversationId: thread!.id })).status).toBe(403)
   expect((await post("reception", { scope: "otro", conversationId: thread!.id })).status).toBe(400)
 
@@ -259,14 +260,14 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   const detailBody = (await detail.json()) as {
     data: { patient: { birthDate: string | null; identityNeedsReview: boolean }; contacts: { contactId: string; relationship: string }[] }
   }
-  expect(detailBody.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
+  expect(detailBody.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
   expect(detailBody.data.contacts).toEqual([expect.objectContaining({ contactId: person.id, relationship: "self" })])
 
   // Desde la Agenda, sin conversación: alguien nuevo con nombres, apellidos y
-  // teléfono, aunque la clínica pida la fecha de nacimiento. Pide además agendar.
+  // teléfono, aunque la clínica pida la fecha de nacimiento.
   const fresh = (phone: string | null) =>
     JSON.stringify({
-      ...registrationBody("Pedro Ríos", { givenNames: "Pedro", paternalSurname: "Ríos", ...(phone ? { phone } : {}) }),
+      ...registrationBody("Pedro Ríos", { givenNames: "Pedro", familyName: "Ríos", ...(phone ? { phone } : {}) }),
       scope: "essentials",
     })
   const postFresh = (role: string, phone: string | null) =>
@@ -279,7 +280,7 @@ it("recepción registra con lo mínimo al reservar a la persona de una conversac
   const agendaDetail = (await (await buildApp("reception").request(`/patients/${agendaId}`, { method: "GET" })).json()) as {
     data: { patient: { birthDate: string | null; identityNeedsReview: boolean } }
   }
-  expect(agendaDetail.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: true })
+  expect(agendaDetail.data.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
   // Las demás pruebas registran sin configuración publicada (alta rápida).
   await ownerDb.execute(sql`delete from patient_registration_config where organization_id = 'org_a'`)
 })

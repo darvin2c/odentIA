@@ -30,7 +30,7 @@ describe("contrato de registro", () => {
   })
   it("lo mínimo del equipo al reservar no exige lo que pide la clínica: queda pendiente", () => {
     const saved = { ...config, version: 1 }
-    const minimal: RegistrationAnswers = { demographics: { displayName: "Carmen Huamán", givenNames: "Carmen", paternalSurname: "Huamán", phone: "+51987654100" }, respondent: "staff", privacyAccepted: false }
+    const minimal: RegistrationAnswers = { demographics: { displayName: "Carmen Huamán", givenNames: "Carmen", familyName: "Huamán", phone: "+51987654100" }, respondent: "staff", privacyAccepted: false }
     const internal = { ...publicContext, mode: "internal" } as const
     expect(validateRegistrationAnswers(saved, minimal, internal)).toHaveProperty("demographics.birthDate")
     expect(validateRegistrationAnswers(saved, minimal, { ...internal, scope: "essentials" })).toEqual({})
@@ -42,7 +42,7 @@ describe("contrato de registro", () => {
   })
   it("el teléfono de quien habla por la persona cuenta como suyo, en el registro y en lo que falta de su ficha", () => {
     const saved = { ...config, version: 1 }
-    const child: RegistrationAnswers = { demographics: { displayName: "Mateo Quispe", givenNames: "Mateo", paternalSurname: "Quispe", birthDate: "2020-03-01" }, respondent: "staff", privacyAccepted: false,
+    const child: RegistrationAnswers = { demographics: { displayName: "Mateo Quispe", givenNames: "Mateo", familyName: "Quispe", birthDate: "2020-03-01" }, respondent: "staff", privacyAccepted: false,
       representative: { displayName: "Rosa Quispe", relationship: "guardian", relationshipDetail: "Madre", phone: "+51987654301", docType: "DNI", docNumber: "45678901" } }
     expect(pendingRegistrationFields(saved, child).map((field) => field.key)).not.toContain("phone")
     expect(missingPersonData(saved, child.demographics, { representativeContact: true }).map((field) => field.key)).not.toContain("phone")
@@ -61,9 +61,9 @@ describe("contrato de registro", () => {
     expect(registrationConfigSchema.safeParse({ ...config, fields: { ...config.fields, phone: "hidden" } }).success).toBe(false)
     // Sin apellidos separados, sin nacimiento y sin teléfono ni correo: falta lo necesario.
     expect(missingPersonData(config, { displayName: "Lucía" }, { representativeContact: false }).map((field) => field.key))
-      .toEqual(["givenNames", "paternalSurname", "birthDate", "phone"])
+      .toEqual(["givenNames", "familyName", "birthDate", "phone"])
     // El correo basta como medio de contacto, aunque falte el teléfono.
-    expect(missingPersonData(config, { givenNames: "Lucía", paternalSurname: "Fernández", birthDate: "1995-07-30", email: "lucia@example.com" }, { representativeContact: false })).toEqual([])
+    expect(missingPersonData(config, { givenNames: "Lucía", familyName: "Fernández", birthDate: "1995-07-30", email: "lucia@example.com" }, { representativeContact: false })).toEqual([])
   })
   it("un documento se lee con la etiqueta del catálogo, nunca con su código", () => {
     expect(documentText("PASAPORTE", "AB1234567")).toBe("Pasaporte AB1234567")

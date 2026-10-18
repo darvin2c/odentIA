@@ -28,6 +28,10 @@ export interface WaitingHandlers {
    * vincular ni cambiar a nadie.
    */
   onDiscard?: (row: RowOf<"possibleDuplicate">) => void
+  /** «Llegó»: quien terminó su registro entra a la clínica. */
+  onArrived?: (row: RowOf<"registrationDone">) => void
+  /** «Revisar»: abre «¿Es la misma persona?» con lo que escribió quien se registró por el código QR. */
+  onReviewRegistration?: (row: RowOf<"possibleDuplicate">) => void
   /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
   onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
   /** La fila cuya acción está en curso: sus botones se desactivan y el de la acción dice que trabaja. */
@@ -58,6 +62,7 @@ function iconOf(row: WaitingRow): ReactNode {
   if (row.kind === "unreached") return <AgentMark className="rounded-full" />
   if (row.kind === "case") return <TypeIcon icon={UserRound} urgent={row.priority === "alta"} />
   if (row.kind === "staleEncounter") return <TypeIcon icon={Stethoscope} />
+  if (row.kind === "registrationDone") return <TypeIcon icon={UsersRound} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
   if (row.kind === "unconfirmed" || (row.kind === "more" && row.of === "unconfirmed")) return <TypeIcon icon={CalendarClock} />
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
@@ -89,6 +94,8 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
     case "case":
       // Los casos del agente viven aquí y en el panel lateral (decisión 21): sin conversación, su tarea en Tareas.
       return row.conversationId ? null : <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
+    case "registrationDone":
+      return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} {...props} />
     case "staleEncounter":
       return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
     case "unconfirmed":
@@ -149,13 +156,17 @@ function quickActions(row: WaitingRow, handlers: WaitingHandlers): QuickAction[]
     const take = handlers.onTake
     return [{ id: "tomar", label: "Tomar", run: () => take(row), primary: true }]
   }
+  if (row.kind === "registrationDone" && handlers.onArrived) {
+    const arrived = handlers.onArrived
+    return [{ id: "llego", label: "Llegó", run: () => arrived(row), primary: true }]
+  }
   if (row.kind === "staleEncounter" && handlers.onVoidEncounter) {
     const discard = handlers.onVoidEncounter
     return [{ id: "anular", label: "Anular con motivo", run: () => discard(row), primary: false }]
   }
   // Un documento repetido: la fila lleva a la persona y los botones confirman o descartan (sin permiso, no hay botón).
   if (row.kind === "possibleDuplicate") {
-    const run = { confirmar: handlers.onConfirmRepresentative, descartar: handlers.onDiscard, revisada: handlers.onReviewed }
+    const run = { confirmar: handlers.onConfirmRepresentative, descartar: handlers.onDiscard, revisada: handlers.onReviewed, revisar: handlers.onReviewRegistration }
     return duplicateActions(row).flatMap((action) => {
       const handler = run[action.id]
       return handler ? [{ ...action, run: () => handler(row) }] : []

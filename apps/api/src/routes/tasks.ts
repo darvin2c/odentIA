@@ -2,6 +2,8 @@ import { withOrgContext } from "@odentia/db"
 import {
   createTask,
   discardRegistrationTask,
+  getRegistrationHold,
+  resolveRegistrationHold,
   getTask,
   getTaskResolvePreview,
   listTasks,
@@ -195,6 +197,32 @@ export function createTasksRoute(deps: CrmDeps) {
     if (!params.success) return validationError(c, params.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => discardRegistrationTask(tx, orgId, userId, params.data.id)),
+    )
+  })
+
+  // «¿Es la misma persona?»: lo que escribió quien se registró por el código QR, al lado de lo que ya estaba.
+  app.get("/:id/registration", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Revisar un registro es de quien edita los datos de las personas"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    c.header("Cache-Control", "no-store")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getRegistrationHold(tx, orgId, params.data.id)))
+  })
+
+  app.post("/:id/registration", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "patients.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "Revisar un registro es de quien edita los datos de las personas"), 403)
+    }
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    const body = z.strictObject({ same: z.boolean(), familyName: z.enum(["saved", "declared"]).optional() }).safeParse(await c.req.json().catch(() => null))
+    if (!params.success) return validationError(c, params.error.issues)
+    if (!body.success) return validationError(c, body.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => resolveRegistrationHold(tx, orgId, userId, params.data.id, body.data)),
     )
   })
 

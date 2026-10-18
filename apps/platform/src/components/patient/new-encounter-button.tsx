@@ -13,8 +13,8 @@ import {
 import { addDays, FormDrawer, minutesToInstant, SubmitButton, zonedDateOf } from "@odentia/ui-patterns"
 import { canAccess } from "@odentia/auth/permissions"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useNavigate, useSearch } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
 import { type AgendaAppointment, invalidateAppointmentQueries, professionalSaid } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -136,6 +136,7 @@ export function NewEncounterButton({
   appointment,
   variant = "default",
   size = "default",
+  openFromSearch = false,
 }: {
   patientId: string
   detail?: PatientFull
@@ -144,6 +145,11 @@ export function NewEncounterButton({
   appointment?: AttendedAppointment
   /** En un vacío («Todavía no tiene atenciones») va como acción secundaria. */
   variant?: "default" | "outline"
+  /**
+   * El de la cabecera: con `?atender=true` (viene de «Atender ahora» al
+   * registrarlo) abre «Atender sin cita» una vez y quita el parámetro.
+   */
+  openFromSearch?: boolean
   size?: "default" | "sm"
 }) {
   const canWrite = usePermission("clinical.write")
@@ -163,6 +169,7 @@ export function NewEncounterButton({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const search = useSearch({ strict: false }) as { atender?: boolean }
   const openQuery = useQuery({
     queryKey: ["open-encounter", patientId],
     queryFn: () =>
@@ -221,6 +228,15 @@ export function NewEncounterButton({
       setSaving(false)
     }
   }
+  const wantsToAttend = openFromSearch && search.atender === true
+  useEffect(() => {
+    if (!wantsToAttend || !canWrite || openQuery.isPending) return
+    if (!inProgressId && !visit) {
+      setError(null)
+      setDrawerOpen(true)
+    }
+    void navigate({ to: ".", search: (previous: Record<string, unknown>) => ({ ...previous, atender: undefined }), replace: true } as never)
+  }, [wantsToAttend, canWrite, openQuery.isPending, inProgressId, visit, navigate])
   if (!canWrite) return null
   if (!appointment && inProgressId) {
     return (

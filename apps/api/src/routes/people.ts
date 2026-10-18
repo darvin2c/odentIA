@@ -31,11 +31,12 @@ const listQuery = z.object({
 })
 
 const nameText = z.string().max(100).nullable().optional()
+/** Los apellidos juntos: «De la Cruz Ríos» (ADR 0058). */
+const familyText = z.string().max(200).nullable().optional()
 const createInput = z
   .object({
     givenNames: nameText,
-    paternalSurname: nameText,
-    maternalSurname: nameText,
+    familyName: familyText,
     phone: z.string().max(50).nullable().optional(),
     email: z.string().max(200).nullable().optional(),
   })
@@ -45,8 +46,7 @@ const identityInput = z
   .object({
     displayName: z.string().max(200).nullable().optional(),
     givenNames: nameText,
-    paternalSurname: nameText,
-    maternalSurname: nameText,
+    familyName: familyText,
     docType: z.string().max(20).nullable().optional(),
     docNumber: z.string().max(20).nullable().optional(),
     docCountry: z.string().max(2).nullable().optional(),

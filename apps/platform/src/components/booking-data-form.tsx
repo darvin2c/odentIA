@@ -47,9 +47,8 @@ const RELATIONSHIPS: readonly Relationship[] = ["guardian", "family", "other"]
 /** Nombre y documento de una persona, tal como se escriben en la pantalla. */
 interface PersonDraft {
   givenNames: string
-  /** Primer y segundo apellido por separado (decisión 10 de la fase 3). */
-  paternalSurname: string
-  maternalSurname: string
+  /** Los apellidos juntos, en un solo campo (ADR 0058). */
+  familyName: string
   /** Vacío mientras no se elija: vale el primero de los que se usan en el país de la clínica. */
   docType: IdentityDocType | ""
   docNumber: string
@@ -76,7 +75,7 @@ export interface BookingDataDraft {
 
 export function emptyBookingDataDraft(): BookingDataDraft {
   // El primer tipo de documento del país de la clínica, no uno fijo de esta pantalla.
-  const person = (): PersonDraft => ({ givenNames: "", paternalSurname: "", maternalSurname: "", docType: "", docNumber: "", docCountry: "" })
+  const person = (): PersonDraft => ({ givenNames: "", familyName: "", docType: "", docNumber: "", docCountry: "" })
   return {
     me: person(),
     phone: null,
@@ -90,17 +89,17 @@ export function emptyBookingDataDraft(): BookingDataDraft {
   }
 }
 
-type PersonField = "givenNames" | "paternalSurname" | "maternalSurname" | "docNumber" | "docCountry"
+type PersonField = "givenNames" | "familyName" | "docNumber" | "docCountry"
 type FieldKey = `me.${PersonField}` | `other.${PersonField}` | "phone" | "otherBirthDate" | "relationship" | "privacyAccepted"
 /** En el orden de la pantalla: el primero con error recibe el foco. */
 const FIELD_ORDER: readonly FieldKey[] = [
   "me.givenNames",
-  "me.paternalSurname",
+  "me.familyName",
   "me.docNumber",
   "me.docCountry",
   "phone",
   "other.givenNames",
-  "other.paternalSurname",
+  "other.familyName",
   "other.docNumber",
   "other.docCountry",
   "otherBirthDate",
@@ -125,15 +124,13 @@ function buildAnswers(profile: ClinicalCountryProfile, draft: BookingDataDraft, 
   const forOther = draft.who === "representative"
   const patient = forOther ? draft.other : draft.me
   const givenNames = patient.givenNames.trim()
-  const paternalSurname = patient.paternalSurname.trim().replace(/\s+/g, " ")
-  const maternalSurname = patient.maternalSurname.trim().replace(/\s+/g, " ")
+  const familyName = patient.familyName.trim().replace(/\s+/g, " ")
   const myDocNumber = draft.me.docNumber.trim()
   return {
     demographics: {
-      displayName: composeDisplayName({ givenNames, paternalSurname, maternalSurname }),
+      displayName: composeDisplayName({ givenNames, familyName }),
       givenNames,
-      paternalSurname,
-      ...(maternalSurname ? { maternalSurname } : {}),
+      familyName,
       docType: docTypeOf(profile, patient),
       docNumber: patient.docNumber.trim(),
       ...(asksCountry(profile, patient) && patient.docCountry ? { docCountry: patient.docCountry } : {}),
@@ -145,8 +142,7 @@ function buildAnswers(profile: ClinicalCountryProfile, draft: BookingDataDraft, 
           representative: {
             displayName: composeDisplayName({
               givenNames: draft.me.givenNames.trim(),
-              paternalSurname: draft.me.paternalSurname.trim(),
-              maternalSurname: draft.me.maternalSurname.trim(),
+              familyName: draft.me.familyName.trim(),
             }),
             relationship: minor ? "guardian" : draft.relationship,
             relationshipDetail: "",
@@ -234,22 +230,13 @@ function PersonFields({
         onChange={(givenNames) => onChange({ givenNames }, "givenNames")}
       />
       <TextField
-        name={`${scope}.paternalSurname`}
-        label="Primer apellido"
+        name={`${scope}.familyName`}
+        label="Apellidos"
         autoComplete={mine ? "family-name" : "off"}
-        maxLength={100}
-        value={person.paternalSurname}
-        error={errors[`${scope}.paternalSurname`]}
-        onChange={(paternalSurname) => onChange({ paternalSurname }, "paternalSurname")}
-      />
-      <TextField
-        name={`${scope}.maternalSurname`}
-        label="Segundo apellido"
-        autoComplete="off"
-        maxLength={100}
-        value={person.maternalSurname}
-        error={errors[`${scope}.maternalSurname`]}
-        onChange={(maternalSurname) => onChange({ maternalSurname }, "maternalSurname")}
+        maxLength={200}
+        value={person.familyName}
+        error={errors[`${scope}.familyName`]}
+        onChange={(familyName) => onChange({ familyName }, "familyName")}
       />
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-2 gap-y-3">
         <Field>
@@ -391,10 +378,10 @@ export function BookingDataForm({
     }
     const patient = forOther ? "other" : "me"
     if (!draft.me.givenNames.trim()) put("me.givenNames", "Escribe tus nombres")
-    if (!draft.me.paternalSurname.trim()) put("me.paternalSurname", "Escribe tu primer apellido")
+    if (!draft.me.familyName.trim()) put("me.familyName", "Escribe tus apellidos")
     if (forOther) {
       if (!draft.other.givenNames.trim()) put("other.givenNames", "Escribe sus nombres")
-      if (!draft.other.paternalSurname.trim()) put("other.paternalSurname", "Escribe su primer apellido")
+      if (!draft.other.familyName.trim()) put("other.familyName", "Escribe sus apellidos")
       if (!draft.otherBirthDate) put("otherBirthDate", "Indica su fecha de nacimiento")
       // De quien escribe, el registro solo exige el documento si representa a un menor.
       put("me.docNumber", found["representative.docNumber"])
@@ -402,7 +389,7 @@ export function BookingDataForm({
     }
     if (!draft[patient].docNumber.trim()) put(`${patient}.docNumber`, "Escribe el número de documento")
     put(`${patient}.givenNames`, found["demographics.givenNames"])
-    put(`${patient}.paternalSurname`, found["demographics.paternalSurname"])
+    put(`${patient}.familyName`, found["demographics.familyName"])
     put(`${patient}.docNumber`, found["demographics.docNumber"] ?? found["demographics.docType"])
     put(`${patient}.docCountry`, found["demographics.docCountry"])
     put("otherBirthDate", found["demographics.birthDate"])
@@ -487,7 +474,7 @@ export function BookingDataForm({
               { who: next === "representative" ? "representative" : "patient" },
               "me.docNumber",
               "other.givenNames",
-              "other.paternalSurname",
+              "other.familyName",
               "other.docNumber",
               "other.docCountry",
               "otherBirthDate",

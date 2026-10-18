@@ -149,6 +149,7 @@ export async function composeJobMessage(
     spec.key === "seguimiento_no_asistencia" || spec.key === "cita_cancelada" || spec.key === "aviso_cita_cancelada"
   const upcoming =
     spec.key === "recordatorio_cita" ||
+    spec.key === "recordatorio_cita_datos" ||
     spec.key === "aviso_cita_reservada" ||
     spec.key === "aviso_cita_reservada_datos" ||
     spec.key === "aviso_cita_movida"

@@ -605,8 +605,7 @@ describe("identidad estándar", () => {
     expect(
       composeDisplayName({
         givenNames: " Rosa  María",
-        paternalSurname: "Quispe",
-        maternalSurname: "Huamán",
+        familyName: "Quispe  Huamán",
       }),
     ).toBe("Rosa María Quispe Huamán")
     expect(ageLabel("2025-12-15", new Date("2026-10-08T12:00:00Z"))).toBe("9 meses")

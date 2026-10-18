@@ -27,12 +27,16 @@ import {
   publishConsentTemplate,
 } from "./clinical-forms.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { getPatientHealth } from "./clinical.js"
 import { addPlanItem } from "./plan.js"
 import { getPatientRegistrationConfig, savePatientRegistrationConfig } from "./patient-registration.js"
 import { createPatient, patientPersonId, requirePatient, setPatientContact } from "./patients.js"
 import { configurePublicLinks } from "./public-links.js"
+import { getWorkspaceHome, type WorkspaceAccess } from "./workspace.js"
 import {
   decidePersonalLinkBudget,
+  bookedDataLink,
+  getPersonalLinkDataForm,
   getPersonalLinkView,
   personalLinkForEmailToken,
   signPersonalLinkConsent,
@@ -53,7 +57,7 @@ async function minimal(f: Awaited<ReturnType<typeof clinicalFixture>>, name: { g
     createPatient(tx, ORG, f.actor, {
       displayName: `${name.given} ${name.surname}`,
       givenNames: name.given,
-      paternalSurname: name.surname,
+      familyName: name.surname,
       phone: "+51987111222",
     }),
   )
@@ -119,7 +123,7 @@ it("un documento que ya es de otra ficha no se guarda y deja «Posible ficha rep
     createPatient(tx, ORG, f.actor, {
       displayName: "Juan Pérez",
       givenNames: "Juan",
-      paternalSurname: "Pérez",
+      familyName: "Pérez",
       docType: "DNI",
       docNumber: "41231234",
     }),
@@ -253,7 +257,7 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
     createPatient(tx, ORG, f.actor, {
       displayName: "Lucía Fernández",
       givenNames: "Lucía",
-      paternalSurname: "Fernández",
+      familyName: "Fernández",
       birthDate: "1995-07-30",
       docType: "DNI",
       docNumber: "40000004",
@@ -410,4 +414,77 @@ it("lo aceptado se reserva una sola vez, y solo quien decide por el paciente", a
   await ownerDb.insert(patientContact).values({ organizationId: ORG, patientId: f.patient.id, contactId: tia!.id, relationship: "family", createdBy: f.actor })
   const hers = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tia!.id, patientId: f.patient.id }, { secretsKey: KEY }))
   await expect(f.run((tx) => reserveBookingLink(tx, ORG, hers.token, pick(second)))).rejects.toMatchObject({ code: "PORTAL_FORBIDDEN" })
+})
+
+it("«Tus datos y tu salud»: la salud se pregunta solo si nadie la registró y entra declarada", async () => {
+  const f = await clinicalFixture()
+  const lia = await minimal(f, { given: "Lía", surname: "Paz" })
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: lia.personId, patientId: lia.patientId }, { secretsKey: KEY }))
+  const view = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(view.data?.health).toBe(true)
+  const form = await f.run((tx) => getPersonalLinkDataForm(tx, ORG, link.token))
+  expect(form).toMatchObject({ asksHealth: true, firstName: "Lía" })
+  expect(form.registration.fields).toBeDefined()
+
+  await f.run((tx) =>
+    submitPersonalLinkData(tx, ORG, link.token, {
+      data: { birthDate: "1992-06-01" },
+      health: { allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] } },
+    }),
+  )
+  const health = await f.run((tx) => getPatientHealth(tx, ORG, lia.patientId))
+  expect(health.revision).toBeGreaterThan(0)
+  expect(health.allergies.map((item) => item.substance)).toContain("Penicilina")
+  const notes = await ownerDb.select({ body: crmNote.body }).from(crmNote).where(eq(crmNote.contactId, lia.personId))
+  expect(notes.map((note) => note.body).join(" ")).toContain("Declaró su salud")
+})
+
+it("al confirmar la cita del agente, a quien le faltan datos se le da su enlace; a quien no, nada", async () => {
+  const f = await clinicalFixture()
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: "odentia.test" })
+  try {
+    const tomas = await minimal(f, { given: "Tomás", surname: "Vega" })
+    const ask = () =>
+      f.run((tx) => bookedDataLink(tx, ORG, { contactId: tomas.personId, patientId: tomas.patientId, appointmentId: null }, { secretsKey: KEY }))
+    const data = await ask()
+    expect(data?.missing).toContain("fecha de nacimiento")
+    // Es su mismo enlace, con el token escrito: el que ya tiene, no otro.
+    const again = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: tomas.personId, patientId: tomas.patientId }, { secretsKey: KEY }))
+    expect(again.reused).toBe(true)
+    expect(data?.url).toContain(again.token)
+
+    await f.run((tx) => submitPersonalLinkData(tx, ORG, again.token, { data: { birthDate: "1990-03-03" } }))
+    expect((await ask())?.missing ?? []).not.toContain("fecha de nacimiento")
+  } finally {
+    configurePublicLinks(null)
+  }
+})
+
+it("Inicio: quien terminó su registro hoy y tiene cita hoy sale en «Te espera» hasta que llega", async () => {
+  const f = await clinicalFixture()
+  const carla = await minimal(f, { given: "Carla", surname: "Núñez" })
+  const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Centro", timezone: "UTC" }).returning({ id: branch.id })
+  const chair = await f.run((tx) => createChair(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+  const startsAt = new Date(Date.now() + 60_000)
+  const [booked] = await ownerDb
+    .insert(appointment)
+    .values({ organizationId: ORG, branchId: site!.id, patientId: carla.patientId, dentistUserId: f.actor, chairId: chair.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30 })
+    .returning({ id: appointment.id })
+  const access: WorkspaceAccess = {
+    patients: true, appointments: true, conversations: false, tasks: false, finance: false, clinical: false,
+    crm: false, agent: false, allTasks: false, configure: false, ownAppointments: false,
+  }
+  const rows = async () =>
+    (await f.run((tx) => getWorkspaceHome(tx, ORG, f.actor, access, { branchId: site!.id }))).waiting.filter((row) => row.kind === "registrationDone")
+  expect(await rows()).toEqual([])
+
+  const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: carla.personId, patientId: carla.patientId }, { secretsKey: KEY }))
+  await f.run((tx) => submitPersonalLinkData(tx, ORG, link.token, { data: { birthDate: "1994-07-07" } }))
+  expect(await rows()).toEqual([
+    expect.objectContaining({ kind: "registrationDone", appointmentId: booked!.id, patientId: carla.patientId, patientName: "Carla Núñez", dentistName: "Clínico" }),
+  ])
+
+  // Llegó: la fila se va.
+  await ownerDb.update(appointment).set({ status: "confirmada", arrivedAt: new Date(), arrivedBy: f.actor }).where(eq(appointment.id, booked!.id))
+  expect(await rows()).toEqual([])
 })

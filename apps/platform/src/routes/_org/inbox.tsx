@@ -128,6 +128,7 @@ import {
 import { screenReasonWords } from "../../lib/contact-screen"
 import { useOrgEvents } from "../../lib/org-events"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
+import { filiationGapsText } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
 import {
   closeWithoutResolvingWords,
@@ -1276,6 +1277,27 @@ function ThreadView({
     },
   })
 
+  // A la paciente le faltan datos: su enlace se escribe en el mensaje y quien
+  // atiende lo revisa y lo envía (nunca sale solo). Dentro de la conversación
+  // abierta no hace falta mensaje aprobado.
+  const [linkPasted, setLinkPasted] = useState(false)
+  useEffect(() => {
+    setLinkPasted(false)
+  }, [id])
+  const ownLinkMutation = useMutation({
+    mutationFn: (input: { contactId: string; patientId: string }) =>
+      createPersonalLinkForContact(input.contactId, id, input.patientId),
+    onSuccess: (result) => {
+      const firstName = detail?.contact.displayName.split(" ")[0] ?? ""
+      setComposer(`${firstName ? `${firstName}, c` : "C"}ompleta tus datos y tu salud aquí (toma 2 minutos): ${result.data.url}`)
+      setLinkPasted(true)
+      setRegistrationError(null)
+    },
+    onError: (error) => {
+      setRegistrationError(error instanceof ApiError ? error.message : "No se pudo preparar su enlace")
+    },
+  })
+
   // Intención `prepareRegistration` (desde Contactos → Enviar registro):
   // usa la misma mutación que el botón, una sola vez por hilo.
   // El ref evita duplicados por re-render/StrictMode; el replace del padre
@@ -1904,6 +1926,25 @@ function ThreadView({
                 <Bot className="size-3.5 shrink-0" aria-hidden />
                 Estás conversando en vivo: el agente espera 15 minutos después del último mensaje del equipo y luego sigue con lo demás.
               </p>
+            ) : null}
+            {canRegister && detail.missingData && !linkPasted && detail.whatsappWindow?.open !== false && !windowClosed ? (
+              <div className="flex min-w-0 items-center gap-2 rounded-lg border-l-4 border-primary bg-primary/5 px-3 py-1.5 text-xs">
+                <span className="min-w-0 flex-1 truncate">
+                  A {detail.contact.displayName.split(" ")[0]} le faltan datos: {filiationGapsText(detail.missingData.missing).toLowerCase()}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto shrink-0 px-2 py-1 text-xs font-semibold text-primary"
+                  disabled={ownLinkMutation.isPending}
+                  onClick={() => {
+                    if (detail.missingData) ownLinkMutation.mutate({ contactId: detail.contact.id, patientId: detail.missingData.patientId })
+                  }}
+                >
+                  Pegar su enlace
+                </Button>
+              </div>
             ) : null}
             {effectiveReplyTo !== null || topics.length > 0 ? (
               <div className="flex min-w-0 items-center gap-2 rounded-lg border-l-4 border-warning bg-warning-soft/60 px-3 py-1.5 text-xs">
