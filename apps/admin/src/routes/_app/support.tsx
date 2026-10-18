@@ -744,7 +744,8 @@ function SupportPage() {
                     Asignarme
                   </Button>
                 ) : null}
-                {STATUSES.filter((value) => value !== kase.status).map((value) => (
+                {/* Una «Revisión de cobro» se resuelve al decidirla (ADR 0054). */}
+                {STATUSES.filter((value) => value !== kase.status && !(value === "resuelto" && kase.review?.status === "pendiente")).map((value) => (
                   <Button
                     key={value}
                     type="button"

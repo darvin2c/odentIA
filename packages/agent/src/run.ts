@@ -390,7 +390,7 @@ async function attendAgentRun(
       if (!trigger) return { skip: { reason: "missing-trigger", model: effectiveModel } }
       // Responde citando un mensaje de una persona del equipo (ADR 0050): es
       // de su tema y el agente no se mete; se anota en su tema o se le abre uno.
-      if (trigger.replyToMessageId) {
+      if (trigger.replyToMessageId && screenMode !== "recheck") {
         const [quoted] = await tx
           .select({ senderKind: message.senderKind, senderUserId: message.senderUserId })
           .from(message)
@@ -497,6 +497,23 @@ async function attendAgentRun(
         cfg,
       }
     })
+    // A quien está en Spam no se le avisa ni se le abre un tema antes de que
+    // Jev mire lo nuevo (ADR 0054): pausa, topes o un modelo sin responder lo
+    // dejan en Spam, sin escribirle; su siguiente mensaje se vuelve a mirar.
+    const stayInSpam = async (): Promise<"done"> => {
+      await ledger(db, orgId, {
+        conversationId,
+        triggerMessageId: inboundMessageId,
+        model: effectiveModel,
+        status: "omitida",
+        startedAt,
+        endedAt: new Date(),
+        llmCalls: 0,
+        error: SPAM_UNDECIDED_RUN_REASON,
+      })
+      return "done"
+    }
+    if ("skip" in prepared && configProblem && screenMode === "recheck") return stayInSpam()
     if ("skip" in prepared && configProblem) {
       // Sin modelo utilizable: el interlocutor pasa a una persona y quien
       // administra el agente recibe un único aviso por problema y día.
@@ -540,6 +557,7 @@ async function attendAgentRun(
       if (gate.capReached && !(await hasOpenConversationAction(tx, orgId, toolCtx.contactId))) return "TOPE_GASTO" as const
       return null
     }).catch(() => null)
+    if (spend && screenMode === "recheck") return stayInSpam()
     if (spend) {
       await performHandoff(toolCtx, spend === "SALDO_PRUEBA" ? "agentes en pausa: se usó todo el saldo de prueba" : "se alcanzó el tope de gasto del mes")
       await noticeAfterHandoff(toolCtx)
@@ -566,6 +584,7 @@ async function attendAgentRun(
       const handedOff = await contactHadRunToday(tx, orgId, toolCtx.contactId, { status: "handoff", error: CONTACT_DAILY_LIMIT })
       return handedOff ? ("silencio" as const) : ("derivar" as const)
     })
+    if (contactLimit && screenMode === "recheck") return stayInSpam()
     if (contactLimit === "derivar") {
       await performHandoff(toolCtx, `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`)
       await noticeAfterHandoff(toolCtx)
@@ -587,6 +606,7 @@ async function attendAgentRun(
     // alcanzarlo, el caso pasa a una persona y se avisa una vez por día.
     const usedToday = await withOrgContext(db, orgId, (tx) => countAgentModelRunsToday(tx, orgId))
     if (usedToday >= cfg.dailyRunLimit) {
+      if (screenMode === "recheck") return stayInSpam()
       return finishWithProviderProblem({
         code: "DAILY_LIMIT",
         detail: `Se alcanzó el tope diario de ${cfg.dailyRunLimit} corridas del agente`,

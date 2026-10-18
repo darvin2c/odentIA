@@ -18,6 +18,7 @@ import {
 import { screenInbound, sendToSpam, takeOutOfSpam } from "./contact-screen-actions.js"
 import { type IngestDeps, ingestInbound, listConversations, sendOutbound } from "./conversations.js"
 import { summarizeInbox } from "./inbox.js"
+import { handleAutomationReply } from "./automation.js"
 import { mayWriteFirst } from "./message-permission.js"
 import { createPatient } from "./patients.js"
 import { listPeople } from "./people.js"
@@ -208,7 +209,33 @@ it("bloquear: nunca a un paciente; nadie le escribe; desbloquear lo devuelve", a
   expect(audit.map((row) => row.action)).toEqual(["contact.blocked", "contact.unblocked"])
 })
 
-it("lo que sigue en Spam se borra a los 90 días; lo de un bloqueado, no; «Por registrar» no los muestra", async () => {
+it("registrarla como paciente la saca de Spam; a una bloqueada no se la registra; «BAJA» se anota sin responderle", async () => {
+  let spam = await write("907", "Cupón gratis aquí")
+  for (let i = 1; i < SPAM_REPEAT_COUNT; i += 1) spam = await write("907", "Cupón gratis aquí")
+  expect(spam.screen.screen).toBe("spam")
+  const own = { contactId: spam.screen.contactId, relationship: "self" as const, isPreferred: true }
+  await run((tx) => createPatient(tx, ORG, USER, { displayName: "Lucía Paredes", contacts: [own] }))
+  expect((await run((tx) => getContactScreenView(tx, ORG, spam.screen.contactId))).screen).toBeNull()
+
+  const harasser = await write("908", "Te voy a buscar")
+  const harasserId = await run((tx) => contactOfConversation(tx, ORG, harasser.conversationId))
+  await run((tx) => blockContact(tx, ORG, { contactId: harasserId, userId: USER, reason: "amenazas", note: "Amenazó a recepción" }))
+  await expect(
+    run((tx) => createPatient(tx, ORG, USER, { displayName: "Mario Díaz", contacts: [{ contactId: harasserId, relationship: "self" as const, isPreferred: true }] })),
+  ).rejects.toMatchObject({ code: "CONTACT_BLOCKED" })
+
+  // «BAJA» de un bloqueado: queda su baja y no sale ningún mensaje.
+  const before = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from message where conversation_id = ${harasser.conversationId}::uuid and direction = 'out'`)
+  expect(await run((tx) => handleAutomationReply(tx, ORG, { conversationId: harasser.conversationId, replyId: null, text: "BAJA" }, { storage: storageStub, silent: true }))).toBe(true)
+  const after = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from message where conversation_id = ${harasser.conversationId}::uuid and direction = 'out'`)
+  expect(after[0]?.n).toBe(before[0]?.n)
+  const stopped = await ownerDb.execute<{ action: string }>(sql`select action from audit_event where entity_id = ${harasserId} and action = 'automation_consent.stop_word'`)
+  expect(stopped).toHaveLength(1)
+})
+
+it("lo que mandó en Spam se borra a los 90 días; lo de antes de Spam y lo de un bloqueado, no; «Por registrar» no los muestra", async () => {
+  // Antes de llegar a Spam escribió algo real: eso no se borra nunca.
+  await write("905", "Hola, ¿cuánto cuesta una limpieza?")
   let spam = await write("905", "Préstamos al instante")
   for (let i = 1; i < SPAM_REPEAT_COUNT; i += 1) spam = await write("905", "Préstamos al instante")
   const blocked = await write("906", "Te voy a denunciar")
@@ -216,6 +243,10 @@ it("lo que sigue en Spam se borra a los 90 días; lo de un bloqueado, no; «Por 
   await run((tx) => blockContact(tx, ORG, { contactId: blockedContact, userId: USER, reason: "acoso", note: "Insultos" }))
   await ownerDb.execute(sql`update message set created_at = now() - make_interval(days => ${SPAM_KEEP_DAYS + 5})
     where conversation_id in (${spam.conversationId}::uuid, ${blocked.conversationId}::uuid)`)
+  await ownerDb.execute(sql`update message set created_at = now() - make_interval(days => 200)
+    where conversation_id = ${spam.conversationId}::uuid and body = 'Hola, ¿cuánto cuesta una limpieza?'`)
+  await ownerDb.execute(sql`update contact set screened_at = now() - make_interval(days => ${SPAM_KEEP_DAYS + 5})
+    where id = ${spam.screen.contactId}::uuid`)
 
   const result = await run((tx) => redactOldSpam(tx, ORG))
   expect(result.redacted).toBe(SPAM_REPEAT_COUNT)
@@ -223,7 +254,9 @@ it("lo que sigue en Spam se borra a los 90 días; lo de un bloqueado, no; «Por 
     sql`select conversation_id, body, redacted_at is not null as redacted from message
       where conversation_id in (${spam.conversationId}::uuid, ${blocked.conversationId}::uuid)`,
   )
-  expect(rows.filter((row) => row.conversation_id === spam.conversationId).every((row) => row.redacted && row.body === null)).toBe(true)
+  const spamRows = rows.filter((row) => row.conversation_id === spam.conversationId)
+  expect(spamRows.filter((row) => row.redacted && row.body === null)).toHaveLength(SPAM_REPEAT_COUNT)
+  expect(spamRows.filter((row) => !row.redacted).map((row) => row.body)).toEqual(["Hola, ¿cuánto cuesta una limpieza?"])
   expect(rows.filter((row) => row.conversation_id === blocked.conversationId).every((row) => !row.redacted && row.body)).toBe(true)
 
   const toRegister = await run((tx) => listPeople(tx, ORG, { view: "por_registrar", limit: 100 }, () => true))

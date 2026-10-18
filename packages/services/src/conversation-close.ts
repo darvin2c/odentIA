@@ -612,6 +612,8 @@ export async function tickConversationCare(
       and(
         eq(conversation.organizationId, orgId),
         eq(conversation.status, "open"),
+        // A quien está en Spam o bloqueado no se le insiste ni se le despide (ADR 0054).
+        sql`${contact.screen} is null`,
         sql`coalesce(${conversation.lastMessageAt}, ${conversation.attentionStartedAt}) <= ${quietSince.toISOString()}::timestamptz`,
       ),
     )

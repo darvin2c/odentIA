@@ -11,6 +11,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   handleAutomationReply,
   ingestInbound,
+  isStopWord,
   screenInbound,
   ServiceError,
   type Storage,
@@ -90,6 +91,22 @@ export async function processInbound(
         conversationId: result.conversationId,
         messageId: result.messageId,
       })
+      const content = msg.message.event.content
+      // «BAJA» o «STOP» de quien está en Spam o bloqueado se anota sin responderle.
+      if (screen.screen !== null && content.type === "text" && !content.replyId && isStopWord(content.text)) {
+        await tx
+          .transaction((inner) =>
+            handleAutomationReply(inner, orgId, { conversationId: result.conversationId, replyId: null, text: content.text }, {
+              storage: deps.storage,
+              silent: true,
+            }),
+          )
+          .catch((error: unknown) => {
+            if (error instanceof ServiceError) return false
+            throw error
+          })
+        return
+      }
       if (screen.screen === "blocked") return
       if (screen.screen === "spam" && !screen.recheck) return
       // Un botón de un mensaje automático («Confirmar», «No más recordatorios»)
@@ -97,7 +114,6 @@ export async function processInbound(
       // una corrida. Va en su propio punto de guardado: si su respuesta no puede
       // salir, el mensaje ya ingresado no se pierde y la conversación sigue su
       // curso normal.
-      const content = msg.message.event.content
       if (content.type === "text") {
         const handled = await tx
           .transaction((inner) =>

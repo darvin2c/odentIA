@@ -249,6 +249,29 @@ export async function leaveSpam(
 }
 
 /**
+ * Antes de que una persona pase a ser paciente (decisión 14): un paciente no
+ * está en Spam ni bloqueado. Si estaba en Spam, sale (queda en la auditoría);
+ * si está bloqueada, no se registra hasta que alguien la desbloquee.
+ */
+export async function screenBeforePatient(tx: Db, orgId: string, contactId: string, userId: string | null): Promise<void> {
+  await tx.execute(sql`select 1 from contact where organization_id = ${orgId} and id = ${contactId} for update`)
+  const facts = await contactScreenFacts(tx, orgId, contactId)
+  if (facts.screen === "blocked") {
+    throw new ServiceError("CONTACT_BLOCKED", 409, "Esta persona está bloqueada: desbloquéala antes de registrarla como paciente")
+  }
+  if (facts.screen !== "spam") return
+  await tx
+    .update(contact)
+    .set({ screen: null, screenedAt: null, screenedByUserId: null, screenReason: null, screenNote: null, updatedAt: new Date() })
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, contactId)))
+  await audit(tx, orgId, userId, "contact.spam_left_patient", contactId, {
+    markedByUserId: facts.byUserId,
+    markedAt: facts.at?.toISOString() ?? null,
+    reason: facts.reason,
+  })
+}
+
+/**
  * Bloquear a una persona (tablero 5b): solo alguien del equipo, con motivo y
  * lo que pasó escrito. Un paciente no se bloquea: se archiva (decisión 14).
  * El bloqueo en WhatsApp lo hace el worker (`pendingProviderBlocks`).
@@ -381,10 +404,22 @@ export async function spamRechecksToday(tx: Db, orgId: string, contactId: string
 }
 
 /**
+ * Lo que se borra de alguien en Spam (decisión 16): solo lo que la persona
+ * mandó desde que entró a Spam (con la hora de repeticiones que la llevó) y
+ * tiene más de `SPAM_KEEP_DAYS`. Lo anterior a Spam, lo que escribió la
+ * clínica y lo de un paciente nunca se borran.
+ */
+const spamToRedactSql = sql`${message.direction} = 'in'
+  and ${contact.screenedAt} is not null
+  and ${message.createdAt} >= ${contact.screenedAt} - make_interval(mins => ${SPAM_REPEAT_MINUTES})
+  and ${message.createdAt} < now() - make_interval(days => ${SPAM_KEEP_DAYS})
+  and not exists (select 1 from patient p where p.organization_id = ${contact.organizationId} and p.person_id = ${contact.id})`
+
+/**
  * Borra el texto y los adjuntos de lo que sigue en Spam pasados
- * `SPAM_KEEP_DAYS` (decisión 16). Lo de un bloqueado no se borra: puede
- * servir de prueba. Devuelve las claves de los adjuntos para que quien llama
- * los quite del almacenamiento después de confirmar.
+ * `SPAM_KEEP_DAYS` (decisión 16; qué entra, `spamToRedactSql`). Lo de un
+ * bloqueado no se borra: puede servir de prueba. Devuelve las claves de los
+ * adjuntos para que quien llama los quite del almacenamiento después de confirmar.
  */
 export async function redactOldSpam(tx: Db, orgId: string, limit = 500): Promise<{ redacted: number; objectKeys: string[] }> {
   const rows = await tx
@@ -397,7 +432,7 @@ export async function redactOldSpam(tx: Db, orgId: string, limit = 500): Promise
         eq(message.organizationId, orgId),
         eq(contact.screen, "spam"),
         isNull(message.redactedAt),
-        lt(message.createdAt, sql`now() - make_interval(days => ${SPAM_KEEP_DAYS})`),
+        spamToRedactSql,
       ),
     )
     .limit(limit)
@@ -424,7 +459,10 @@ export async function orgsWithOldSpam(ownerDb: Db): Promise<string[]> {
     where c.screen = 'spam' and exists (
       select 1 from conversation cv join message m on m.organization_id = cv.organization_id and m.conversation_id = cv.id
       where cv.organization_id = c.organization_id and cv.contact_id = c.id and m.redacted_at is null
-        and m.created_at < now() - make_interval(days => ${SPAM_KEEP_DAYS}))`)
+        and m.direction = 'in' and c.screened_at is not null
+        and m.created_at >= c.screened_at - make_interval(mins => ${SPAM_REPEAT_MINUTES})
+        and m.created_at < now() - make_interval(days => ${SPAM_KEEP_DAYS})
+        and not exists (select 1 from patient p where p.organization_id = c.organization_id and p.person_id = c.id))`)
   return rows.map((r) => r.organization_id)
 }
 

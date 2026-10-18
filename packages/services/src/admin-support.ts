@@ -13,6 +13,7 @@ import { member, organization, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { branch, orgProfile } from "@odentia/db/schema/org"
+import { saasActionReview } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
@@ -996,6 +997,15 @@ export async function setSupportCaseStatus(
   status: SupportStatus,
 ): Promise<void> {
   const kase = await requireStaffCase(db, caseId)
+  // Una «Revisión de cobro» se resuelve al decidirla, con su respuesta (ADR 0054).
+  if (kase.kind === "cobro" && status === "resuelto") {
+    const [pending] = await db
+      .select({ id: saasActionReview.id })
+      .from(saasActionReview)
+      .where(and(eq(saasActionReview.supportCaseId, caseId), eq(saasActionReview.status, "pendiente")))
+      .limit(1)
+    if (pending) throw new ServiceError("REVIEW_PENDING", 409, "Decide la revisión con «Devolver» o «Mantener el cobro» antes de resolver el caso")
+  }
   const leavingResolved = kase.status === "resuelto" && status !== "resuelto"
   // Pasar a «Esperando a la clínica» le pide algo: cuenta como novedad sin
   // leer en su lista y, si no lo ve, le llega «Soporte de odentIA necesita algo de ti».

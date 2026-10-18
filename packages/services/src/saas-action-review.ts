@@ -13,6 +13,7 @@ import {
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { openSupportCaseFromHelp, replyToSupportCase, setSupportCaseStatus } from "./admin-support.js"
+import { contactScreenFacts } from "./contact-screen.js"
 import { sendToSpam } from "./contact-screen-actions.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { currentSaasPeriod, microsToCents } from "./saas-actions.js"
@@ -182,6 +183,15 @@ async function createReview(
   return { status: "pendiente", automatic: false, caseId: kase.id }
 }
 
+/**
+ * Las revisiones de una clínica van de a una (con su transacción): el tope
+ * del 10 % se cuenta y se usa sin que otra pedida a la vez lo pase, y una
+ * fila pedida dos veces a la vez da «Ya pediste…», no un error.
+ */
+async function lockReviews(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`saas_review:${orgId}`}))`)
+}
+
 /** La acción de la clínica, si está dentro de lo que se puede revisar. */
 async function reviewableAction(tx: Db, orgId: string, actionId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(actionId)) throw notFound("Acción")
@@ -217,6 +227,7 @@ export async function requestActionReview(
   const reason = input.reason as SaasReviewReason
   const note = input.note?.trim() ? input.note.trim() : null
   if (note && note.length > NOTE_MAX) throw validation(`Lo que cuentas admite hasta ${NOTE_MAX} caracteres`)
+  await lockReviews(tx, orgId)
   const { action, period } = await reviewableAction(tx, orgId, input.actionId)
   if (action.priceMicros === null) throw new ServiceError("REVIEW_NOT_CHARGED", 409, "Esta acción no tiene precio: no se cobra")
   const [existing] = await tx
@@ -230,7 +241,10 @@ export async function requestActionReview(
   const automatic = spamOfPerson && (await withinAutoCap(tx, orgId, period))
   const result = await createReview(tx, orgId, actor, action, { reason, note, allowRead: Boolean(input.allowRead), automatic })
   // Era spam: la persona pasa a Spam y sus otras conversaciones cobradas se revisan igual.
-  if (spamOfPerson && action.contactId) await markSpamAndRefund(tx, orgId, actor, action.contactId)
+  // Si ya está bloqueada se queda bloqueada: la revisión de esta fila basta.
+  if (spamOfPerson && action.contactId && (await contactScreenFacts(tx, orgId, action.contactId)).screen !== "blocked") {
+    await markSpamAndRefund(tx, orgId, actor, action.contactId)
+  }
   return result
 }
 
@@ -245,6 +259,7 @@ export async function markSpamAndRefund(
   actor: { userId: string; roleLabel: string },
   contactId: string,
 ): Promise<{ changed: boolean; refunded: number; reviewing: number }> {
+  await lockReviews(tx, orgId)
   const { changed } = await sendToSpam(tx, orgId, { contactId, userId: actor.userId })
   if (await isPatientContact(tx, orgId, contactId)) return { changed, refunded: 0, reviewing: 0 }
   const { current, previous } = await reviewablePeriods(tx, orgId)
