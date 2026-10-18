@@ -22,6 +22,7 @@ export * from "./consent.js"
 export * from "./money.js"
 export * from "./budget-words.js"
 export * from "./patient-registration.js"
+export * from "./periodontal.js"
 export type {
   FindingColorKind,
   FindingDefinition,

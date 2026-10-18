@@ -72,6 +72,12 @@ import { ConsentSigningScreen, useSignAs } from "./consent-signing"
 import { EncounterClosingDialog } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
+import {
+  EncounterPeriodontalBlock,
+  PeriodontalCaptureHost,
+  periodontalBlockSummary,
+  useEncounterPeriodontal,
+} from "../periodontal/encounter-periodontal"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
 import { EncounterPlanPanel } from "./encounter-plan-panel"
 import { BudgetSendButton } from "./plan/budget-send"
@@ -114,6 +120,7 @@ type SectionKey =
   | "hallazgos"
   | "examen"
   | "odontograma"
+  | "periodontograma"
   | "procedimientos"
   | "plan"
   | "documentos"
@@ -447,6 +454,10 @@ export function EncounterEditor({
     queryFn: () => apiFetch<{ data: OdontogramState }>(`/api/patients/${patientId}/odontogram`),
     enabled: canRead,
   })
+  // El periodontograma de esta atención, si se empezó (issue 49).
+  const periodontal = useEncounterPeriodontal(patientId, encounterId)
+  // La captura se monta aquí, no en su bloque: sobrevive a que la superficie lateral cambie de forma.
+  const [periodontalCapture, setPeriodontalCapture] = useState<string | null>(null)
   const branchesQuery = useQuery({
     queryKey: ["branches"],
     queryFn: () => apiFetch<{ data: Array<{ id: string; name: string }> }>("/api/branches"),
@@ -952,6 +963,13 @@ export function EncounterEditor({
           ? "Sin hallazgos en esta atención"
           : `${detail.odontogramEntries.length} hallazgo(s) de esta atención`,
       empty: detail.odontogramEntries.length === 0,
+    },
+    {
+      key: "periodontograma",
+      title: "Periodontograma",
+      description: "Sondaje de seis sitios por pieza, sangrado, placa y la clasificación de 2017. Queda fijo al firmar.",
+      summary: periodontalBlockSummary(periodontal.item),
+      empty: periodontal.item === null,
     },
     {
       key: "hallazgos",
@@ -1488,6 +1506,17 @@ export function EncounterEditor({
         )}
       </div>
     ),
+    periodontograma: (
+      <EncounterPeriodontalBlock
+        patientId={patientId}
+        encounterId={encounterId}
+        // No `locked`: la captura abierta no se cierra mientras otro bloque guarda.
+        disabled={!canWrite || !attending || finalizing || voiding}
+        beforeWrite={flush}
+        onChanged={handleChildChanged}
+        onCapture={setPeriodontalCapture}
+      />
+    ),
     procedimientos: (
       <EncounterProcedures
         patientId={patientId}
@@ -1985,6 +2014,12 @@ export function EncounterEditor({
         who={signer}
         consents={unsignedConsents}
         odontogram={closingQuery.data?.data.odontogram ?? null}
+        periodontal={closingQuery.data?.data.periodontal ?? null}
+        onKeepProbing={() => {
+          setConfirmOpen(false)
+          setContextOpen(false)
+          setOpenSection("periodontograma")
+        }}
         startedAt={encounter.startedAt}
         endTime={endTime}
         onEndTime={setEndTime}
@@ -2001,6 +2036,16 @@ export function EncounterEditor({
       >
         <p className="text-xs text-muted-foreground">{finalizeDescription}</p>
       </EncounterClosingDialog>
+      {periodontalCapture ? (
+        <PeriodontalCaptureHost
+          patientId={patientId}
+          chartId={periodontalCapture}
+          onClose={() => {
+            setPeriodontalCapture(null)
+            void handleChildChanged()
+          }}
+        />
+      ) : null}
       <ConsentSigningScreen
         open={signingDocs !== null}
         documents={signingDocs ?? []}

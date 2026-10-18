@@ -5,8 +5,10 @@ import {
   clinicalSummaryFor,
   defaultSection,
   documentFilterFromSearch,
+  navSectionOf,
   resolveSection,
   sectionFromSearch,
+  subsectionNav,
   suggestedDentition,
   visibleAreas,
   visibleSections,
@@ -98,15 +100,20 @@ describe("pestañas de la página de la persona por rol (tablero 2, «Qué ve ca
     expect(sectionFromSearch("coordinacion")).toBe("plan")
   })
 
-  it("Clínica en cuatro secciones; el odontólogo ve 11 y el propietario 15 (ADR 0035)", () => {
+  it("Clínica en cuatro secciones; el odontólogo ve 12 y el propietario 16 (ADR 0035)", () => {
     expect(areaNav("clinica", as("dentist")).map((entry) => entry.label)).toEqual([
       "Antecedentes",
       "Odontograma",
       "Historia",
       "Documentos",
     ])
-    expect(visibleSections(as("dentist"))).toHaveLength(11)
-    expect(visibleSections(as("owner"))).toHaveLength(15)
+    // Periodontograma va debajo de Odontograma (issue 49): no suma una pestaña.
+    expect(subsectionNav("periodontograma", as("dentist")).map((entry) => entry.label)).toEqual(["Odontograma", "Periodontograma"])
+    expect(subsectionNav("odontograma", as("dentist"))).toHaveLength(2)
+    expect(subsectionNav("historia", as("dentist"))).toEqual([])
+    expect(navSectionOf("periodontograma")).toBe("odontograma")
+    expect(visibleSections(as("dentist"))).toHaveLength(12)
+    expect(visibleSections(as("owner"))).toHaveLength(16)
     // Recepción y caja no cambian.
     expect(visibleSections(as("reception")).map((section) => section.id)).not.toContain("antecedentes")
     expect(visibleSections(as("cashier")).map((section) => section.area)).not.toContain("clinica")

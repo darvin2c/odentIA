@@ -120,6 +120,20 @@
       "when": 1792306402641,
       "tag": "0016_el_agente_usa_un_solo_modelo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792342177223,
+      "tag": "0017_periodontograma",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792342179284,
+      "tag": "0018_periodontograma_reglas",
+      "breakpoints": true
     }
   ]
 }
