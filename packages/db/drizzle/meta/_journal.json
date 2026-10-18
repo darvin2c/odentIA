@@ -124,29 +124,43 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1792333854171,
-      "tag": "0017_la_tomografia_va_directo_al_almacenamiento",
+      "when": 1792342177223,
+      "tag": "0017_periodontograma",
       "breakpoints": true
     },
     {
       "idx": 18,
       "version": "7",
-      "when": 1792333856058,
-      "tag": "0018_la_tomografia_va_directo_al_almacenamiento_reglas",
+      "when": 1792342179284,
+      "tag": "0018_periodontograma_reglas",
       "breakpoints": true
     },
     {
       "idx": 19,
       "version": "7",
-      "when": 1792336303024,
-      "tag": "0019_las_medidas_de_la_tomografia",
+      "when": 1792350979343,
+      "tag": "0019_la_tomografia_va_directo_al_almacenamiento",
       "breakpoints": true
     },
     {
       "idx": 20,
       "version": "7",
-      "when": 1792336304972,
-      "tag": "0020_las_medidas_de_la_tomografia_reglas",
+      "when": 1792350981343,
+      "tag": "0020_la_tomografia_va_directo_al_almacenamiento_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792350983343,
+      "tag": "0021_las_medidas_de_la_tomografia",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792350985343,
+      "tag": "0022_las_medidas_de_la_tomografia_reglas",
       "breakpoints": true
     }
   ]

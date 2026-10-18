@@ -2,7 +2,7 @@ import type * as dicomParser from "dicom-parser"
 import { DicomUnsupportedError, openDicom } from "./dicom"
 
 /**
- * El volumen de una tomografía en la memoria del navegador (ADR 0055): los
+ * El volumen de una tomografía en la memoria del navegador (ADR 0056): los
  * cortes de la serie mayor, ordenados por su posición (Image Position Patient
  * sobre la normal del corte), como enteros de 16 bits en unidades de modalidad
  * (HU en una tomografía calibrada). Las vistas son remuestreos de este volumen.
@@ -133,7 +133,7 @@ function otsu3(hist: Uint32Array): [number, number] {
 }
 
 /**
- * Brillos calculados con los grises de este estudio (ADR 0055): la CBCT no
+ * Brillos calculados con los grises de este estudio (ADR 0056): la CBCT no
  * tiene una escala común entre equipos. Otsu de tres clases separa aire,
  * tejido blando y tejido duro; con eso, «Tejido blando» va del límite con el
  * aire al límite con el hueso, «Hueso» del tejido blando al 85 % de lo duro

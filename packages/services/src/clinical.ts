@@ -1909,7 +1909,7 @@ export interface PatientDocumentWithContext {
   toothNumbers: number[]
   tags: string[]
   contextVersion: number
-  /** Tomografía de muchos archivos (ADR 0054); null en el resto. */
+  /** Tomografía de muchos archivos (ADR 0055); null en el resto. */
   imaging?: ImagingSummary | null
 }
 

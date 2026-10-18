@@ -22,7 +22,7 @@
  * sus alergias activas (declaradas en el registro o validadas), nunca el resto
  * de la ficha. No implica `clinical.read`. `clinical.receive` es la otra:
  * quien recibe el CD sube la tomografía a la ficha y ve que llegó, sin
- * abrirla ni descargarla (ADR 0054).
+ * abrirla ni descargarla (ADR 0055).
  *
  * Invariante: lo clínico (`clinical.read`/`.write`) nunca se entrega a
  * recepción/caja y lo financiero (`finance.*`) nunca a recepción/clínica.

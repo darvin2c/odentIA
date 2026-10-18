@@ -1,7 +1,7 @@
 import { type CbctVolume, computePresets, type PlaneImage, type WindowLevel } from "./cbct-volume"
 
 /**
- * El arco dental de una tomografía y lo que se arma con él (ADR 0055): la
+ * El arco dental de una tomografía y lo que se arma con él (ADR 0056): la
  * panorámica reconstruida (reformateo curvo con grosor) y los cortes
  * transversales, perpendiculares al arco. Coordenadas del arco en vóxeles del
  * corte axial (x = columna, y = fila); distancias en mm.

@@ -171,7 +171,7 @@ export function DocumentUploadDialog({
   const drafts = draftEncounters(encounters)
   const defaultIsDraft =
     defaultEncounterId != null && drafts.some((e) => e.id === defaultEncounterId)
-  // Una carpeta de CD o un ZIP con una tomografía siguen su propio recorrido (ADR 0054).
+  // Una carpeta de CD o un ZIP con una tomografía siguen su propio recorrido (ADR 0055).
   const tomography = useTomographyFlow({
     patientId,
     where: "Su fila en Documentos",

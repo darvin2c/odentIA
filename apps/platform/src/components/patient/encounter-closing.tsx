@@ -16,7 +16,7 @@ import { TimeSelect } from "@odentia/ui-patterns"
 import { useId } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
-import type { ClosingOdontogram } from "../../lib/encounters"
+import type { ClosingOdontogram, ClosingPeriodontal } from "../../lib/encounters"
 
 /** «16, 26 y 36». */
 function teethWords(teeth: number[]): string {
@@ -82,6 +82,8 @@ export function EncounterClosingDialog({
   who,
   consents,
   odontogram = null,
+  periodontal = null,
+  onKeepProbing,
   startedAt,
   endTime,
   onEndTime,
@@ -103,6 +105,10 @@ export function EncounterClosingDialog({
   consents: ConsentNeed[]
   /** En clínicas de Perú, el odontograma que firmará este cierre. */
   odontogram?: ClosingOdontogram | null
+  /** El periodontograma de la atención: queda fijo al firmar; a medias se firma como parcial. */
+  periodontal?: ClosingPeriodontal | null
+  /** «Seguir midiendo»: vuelve a la atención con el periodontograma abierto. */
+  onKeepProbing?: () => void
   startedAt: string | null | undefined
   /** «HH:MM»; vacío = ahora. */
   endTime: string
@@ -154,6 +160,29 @@ export function EncounterClosingDialog({
                 ) : null}
               </div>
             </div>
+          ) : null}
+          {periodontal ? (
+            periodontal.pending ? (
+              <div className="flex flex-col gap-2 rounded-lg border border-warning/50 p-3">
+                <span className="font-medium">Periodontograma sin terminar: falta {periodontal.pending}.</span>
+                <span className="text-xs text-muted-foreground">
+                  Puede pasar en un control, si solo se mide un sector. Los índices se calculan con lo medido y el periodontograma dice «Parcial».
+                </span>
+                {onKeepProbing ? (
+                  <Button type="button" size="sm" variant="outline" className="self-start" disabled={pending} onClick={onKeepProbing}>
+                    Seguir midiendo
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-lg border p-3">
+                <span className="font-medium">
+                  Periodontograma: {periodontal.teeth} {periodontal.teeth === 1 ? "pieza" : "piezas"}
+                  {periodontal.implants ? ` y ${periodontal.implants} ${periodontal.implants === 1 ? "implante" : "implantes"}` : ""}.
+                </span>{" "}
+                <span className="text-muted-foreground">Queda fijo al firmar.</span>
+              </div>
+            )
           ) : null}
           {consents.map((need) => {
             const line = consentLine(need, who)
@@ -214,7 +243,7 @@ export function EncounterClosingDialog({
             Volver
           </Button>
           <Button type="button" disabled={!ready} onClick={onConfirm}>
-            {pending ? "Firmando…" : "Finalizar y firmar"}
+            {pending ? "Firmando…" : periodontal?.pending ? "Firmar como parcial" : "Finalizar y firmar"}
           </Button>
         </DialogFooter>
       </DialogContent>

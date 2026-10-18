@@ -51,6 +51,8 @@ import {
   patientRegistration,
   patientRegistrationLink,
   patientResponsibility,
+  periodontalChart,
+  periodontalTooth,
   prescription,
   prescriptionItem,
   serviceCatalog,
@@ -146,6 +148,7 @@ import { seedAgent } from "./seed-agent.js"
 import { seedAutomation, seedChannelTemplates } from "./seed-automation.js"
 import { seedAvailability } from "./seed-availability.js"
 import { seedChannels } from "./seed-channels.js"
+import { seedPeriodontalCase } from "./seed-periodontal.js"
 import { generateConsentPdf } from "./consent-pdf.js"
 import { makeImageThumbnail } from "./thumbnails.js"
 import { registerToothFinding } from "./tooth-panel.js"
@@ -535,6 +538,9 @@ async function wipeSeed(): Promise<void> {
   await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
   await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
   await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
+  // El periodontograma apunta a su atención (ADR 0054): va antes que ella.
+  await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, SEED_ORGS))
+  await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, SEED_ORGS))
   await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
   // La atención referencia su cita (ADR 0002): las citas se borran después.
   await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
@@ -2104,7 +2110,7 @@ for (const previa of [
 }
 // Tomografía de demostración (un fantoma sintético, no es de un paciente) para
 // el visor de tomografía: la serie CT entra por el mismo camino que la de un CD
-// (ADR 0054). Lleva el nombre de Rosa para que no salte el aviso de nombre.
+// (ADR 0055). Lleva el nombre de Rosa para que no salte el aviso de nombre.
 {
   const phantom = generateCbctPhantom()
   const root = "2.25.3400000000000000000034"
@@ -2506,6 +2512,16 @@ await decideBudget(db, ORG_A, ANA_ID, luciaPatientId, cierreLucia.budget.id, {
     { planItemId: luciaResinas[36]!, decision: "pospuesto" },
   ],
   decisionNote: "Respondió por WhatsApp: la 16 y la 26 ahora, la 36 después.",
+})
+
+// Periodontograma (issue 49): Carlos Paredes, con la visita inicial y la
+// reevaluación tras el raspado, como en el lienzo (tableros 4 y 11).
+await seedPeriodontalCase(db, {
+  orgId: ORG_A,
+  dentistUserId: ANA_ID,
+  patientId: patientIdByName.get("Carlos Paredes")!,
+  branchId: miraflores.id,
+  daysAgo,
 })
 
 // --- Volumen para paginación: 40 contactos+pacientes ---

@@ -13,7 +13,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 
 /**
- * Tomografías (ADR 0054): un documento de la ficha con muchos archivos DICOM
+ * Tomografías (ADR 0055): un documento de la ficha con muchos archivos DICOM
  * que el navegador sube directo al almacenamiento. El servicio reserva los
  * archivos, marca como recibidos los que la ruta ya comprobó en el bucket y da
  * por terminada la subida cuando llegaron todos. Quien sube puede no leer la

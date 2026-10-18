@@ -53,7 +53,7 @@ describe("permiso operativo agent.decide", () => {
     expect(ALL_PERMISSIONS).toContain("clinical.alerts")
   })
 
-  it("recepción recibe la tomografía sin abrirla (ADR 0054)", () => {
+  it("recepción recibe la tomografía sin abrirla (ADR 0055)", () => {
     expect(canAccess("reception", "clinical.receive")).toBe(true)
     expect(canAccess("reception", "clinical.read")).toBe(false)
     expect(canAccess("cashier", "clinical.receive")).toBe(false)

@@ -1,4 +1,4 @@
-# 0054. La tomografía va directo al almacenamiento
+# 0055. La tomografía va directo al almacenamiento
 
 - **Fecha:** 2026-10-18
 - **Estado:** aceptada (fase 2 del lienzo del visor de tomografía, issue 34)

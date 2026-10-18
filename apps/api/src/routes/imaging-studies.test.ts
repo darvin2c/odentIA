@@ -12,7 +12,7 @@ import type { CrmDeps } from "./helpers.js"
 import { createPatientsRoute } from "./patients.js"
 
 /**
- * Tomografías (ADR 0054): recepción sube y ve el avance sin abrirla; la API
+ * Tomografías (ADR 0055): recepción sube y ve el avance sin abrirla; la API
  * solo da por recibido lo que de verdad llegó al bucket y es DICOM; la
  * descarga es un ZIP con los archivos tal como llegaron.
  */

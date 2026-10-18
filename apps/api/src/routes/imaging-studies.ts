@@ -24,7 +24,7 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
 /**
- * Tomografías (ADR 0054). `/imaging/uploads` es la subida: la usa quien
+ * Tomografías (ADR 0055). `/imaging/uploads` es la subida: la usa quien
  * recibe el CD (`clinical.receive`) o quien escribe en la ficha, y solo
  * devuelve el avance. `/imaging/studies` es abrirla y descargarla, con
  * `clinical.read`. Los permisos los decide el guarda de `patients.ts`.

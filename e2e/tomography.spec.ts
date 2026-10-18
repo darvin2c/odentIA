@@ -7,7 +7,7 @@ import { gotoHydrated } from "./hydration"
 import { surface } from "./surface"
 
 /**
- * Tomografía (issue 34, ADR 0054 y 0055): la carpeta de un CD se sube desde
+ * Tomografía (issue 34, ADR 0055 y 0056): la carpeta de un CD se sube desde
  * Imágenes directo al almacenamiento, la API la da por completa y el visor la
  * abre en «Panorámica y cortes» con el arco propuesto.
  */

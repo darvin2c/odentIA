@@ -1,4 +1,11 @@
-import { assertTreatmentSite, parseVitals, VALID_FDI_TEETH } from "@odentia/clinical"
+import {
+  assertTreatmentSite,
+  emptyPeriodontalTooth,
+  parseVitals,
+  pendingProbingWords,
+  type PeriodontalToothRecord,
+  VALID_FDI_TEETH,
+} from "@odentia/clinical"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
@@ -13,6 +20,8 @@ import {
   odontogramEntry,
   patient,
   patientCharge,
+  periodontalChart,
+  periodontalTooth,
   prescription,
   treatmentBudget,
   treatmentBudgetItem,
@@ -1500,6 +1509,47 @@ export interface ClosingCheck {
    * firma odontogramas.
    */
   odontogram: ClosingOdontogram | null
+  /**
+   * El periodontograma de la atención, que queda fijo al firmarla (decisión 6),
+   * o null si no tiene. A medias no bloquea: se firma como parcial.
+   */
+  periodontal: ClosingPeriodontal | null
+}
+
+export interface ClosingPeriodontal {
+  /** Piezas naturales e implantes que se sondean. */
+  teeth: number
+  implants: number
+  /** Lo que falta sondear en palabras («abajo por fuera, de la 43 a la 47»); null si está completo. */
+  pending: string | null
+}
+
+/** El periodontograma de la atención para el cierre: cuántas piezas y qué falta. */
+async function closingPeriodontalOf(tx: Db, orgId: string, encounterId: string): Promise<ClosingPeriodontal | null> {
+  const [chart] = await tx
+    .select({ id: periodontalChart.id, expectedTeeth: periodontalChart.expectedTeeth, implantTeeth: periodontalChart.implantTeeth })
+    .from(periodontalChart)
+    .where(and(eq(periodontalChart.organizationId, orgId), eq(periodontalChart.encounterId, encounterId)))
+    .limit(1)
+  if (!chart) return null
+  const rows = await tx
+    .select({
+      toothNumber: periodontalTooth.toothNumber,
+      skipped: periodontalTooth.skipped,
+      probingDepth: periodontalTooth.probingDepth,
+    })
+    .from(periodontalTooth)
+    .where(and(eq(periodontalTooth.organizationId, orgId), eq(periodontalTooth.chartId, chart.id)))
+  const stored = new Map(rows.map((row) => [row.toothNumber, row]))
+  const teeth: PeriodontalToothRecord[] = chart.expectedTeeth.map((tooth) => ({
+    ...emptyPeriodontalTooth(tooth),
+    ...(stored.get(tooth) ?? {}),
+  }))
+  return {
+    teeth: chart.expectedTeeth.length - chart.implantTeeth.length,
+    implants: chart.implantTeeth.length,
+    pending: pendingProbingWords(teeth, chart.expectedTeeth),
+  }
 }
 
 const CLOSING_MESSAGES: Record<ClosingRequirement, string> = {
@@ -1550,7 +1600,8 @@ export async function checkEncounterClosing(
     (need) => need.status !== "firmado",
   )
   const odontogram = await closingOdontogramOf(tx, orgId, row.patientId, row.id)
-  return { ready: missing.length === 0, missing, consents, odontogram }
+  const periodontal = await closingPeriodontalOf(tx, orgId, row.id)
+  return { ready: missing.length === 0, missing, consents, odontogram, periodontal }
 }
 
 export async function getEncounterClosing(

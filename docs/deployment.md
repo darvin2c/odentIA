@@ -126,7 +126,7 @@ administrativas ausentes. El bootstrap nominal y TOTP se describen en
 ### Bucket de adjuntos: CORS para las tomografías
 
 Las tomografías van del navegador directo al bucket de adjuntos
-(`S3_ATTACHMENTS_BUCKET`) con URLs firmadas (ADR 0054), y el visor las lee de la
+(`S3_ATTACHMENTS_BUCKET`) con URLs firmadas (ADR 0055), y el visor las lee de la
 misma forma. El bucket sigue privado, pero debe aceptar CORS desde la plataforma.
 Sin CORS, la subida se detiene con un aviso y la tomografía queda a medias. En R2
 (Configuración del bucket › CORS):

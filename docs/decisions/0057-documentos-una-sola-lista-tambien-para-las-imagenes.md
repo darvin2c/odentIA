@@ -1,4 +1,4 @@
-# 0056 · Documentos: una sola lista, también para las imágenes
+# 0057 · Documentos: una sola lista, también para las imágenes
 
 Fecha: 2026-10-18 · **Estado:** aceptada (lienzo del issue 149, aprobado entero en su versión 3) · Precisa [0035](0035-la-ficha-en-cuatro-secciones.md): las imágenes ya no «se ven en su galería».
 

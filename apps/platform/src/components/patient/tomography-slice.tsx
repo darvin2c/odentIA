@@ -3,7 +3,7 @@ import { type PlaneImage, type WindowLevel, windowToRgba } from "../../lib/cbct-
 import { activeOrgLocale } from "../../lib/locale"
 
 /**
- * Un corte de la tomografía en un lienzo (ADR 0055): la imagen con su ventana,
+ * Un corte de la tomografía en un lienzo (ADR 0056): la imagen con su ventana,
  * la retícula, las medidas y lo que dibuje cada vista encima. Clic, rueda,
  * flechas y arrastre llegan en coordenadas de la imagen.
  */

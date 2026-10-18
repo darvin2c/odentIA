@@ -1,6 +1,6 @@
 {
-  "id": "1853bfee-07c5-4fca-acf8-1b580bb2e394",
-  "prevId": "f0042326-1b31-49bc-8d7f-36c6528aa57c",
+  "id": "14e88c50-9797-42fc-84f7-1cc8c354294b",
+  "prevId": "b7c328a0-ccb5-4977-bcbf-3bd113d14acb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12264,331 +12264,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.imaging_study": {
-      "name": "imaging_study",
-      "schema": "",
-      "columns": {
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "patient_id": {
-          "name": "patient_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "study_instance_uid": {
-          "name": "study_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dicom_patient_name": {
-          "name": "dicom_patient_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "modality": {
-          "name": "modality",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "file_count": {
-          "name": "file_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "total_bytes": {
-          "name": "total_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slice_count": {
-          "name": "slice_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "voxel_mm": {
-          "name": "voxel_mm",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "thumbnail_key": {
-          "name": "thumbnail_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "imaging_study_org_document_uidx": {
-          "name": "imaging_study_org_document_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "imaging_study_org_patient_study_idx": {
-          "name": "imaging_study_org_patient_study_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "patient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "study_instance_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "imaging_study_organization_id_organization_id_fk": {
-          "name": "imaging_study_organization_id_organization_id_fk",
-          "tableFrom": "imaging_study",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "tableTo": "organization",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "imaging_study_patient_id_patient_id_fk": {
-          "name": "imaging_study_patient_id_patient_id_fk",
-          "tableFrom": "imaging_study",
-          "columnsFrom": [
-            "patient_id"
-          ],
-          "tableTo": "patient",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "imaging_study_document_fk": {
-          "name": "imaging_study_document_fk",
-          "tableFrom": "imaging_study",
-          "columnsFrom": [
-            "organization_id",
-            "document_id"
-          ],
-          "tableTo": "patient_document",
-          "columnsTo": [
-            "organization_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "imaging_study_file_count_check": {
-          "name": "imaging_study_file_count_check",
-          "value": "\"imaging_study\".\"file_count\" BETWEEN 1 AND 5000"
-        },
-        "imaging_study_total_bytes_check": {
-          "name": "imaging_study_total_bytes_check",
-          "value": "\"imaging_study\".\"total_bytes\" BETWEEN 1 AND 1073741824"
-        },
-        "imaging_study_slice_count_check": {
-          "name": "imaging_study_slice_count_check",
-          "value": "\"imaging_study\".\"slice_count\" BETWEEN 1 AND 20000"
-        },
-        "imaging_study_uid_check": {
-          "name": "imaging_study_uid_check",
-          "value": "char_length(\"imaging_study\".\"study_instance_uid\") BETWEEN 1 AND 64"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.imaging_study_file": {
-      "name": "imaging_study_file",
-      "schema": "",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "file_index": {
-          "name": "file_index",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sop_instance_uid": {
-          "name": "sop_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "series_instance_uid": {
-          "name": "series_instance_uid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_at": {
-          "name": "uploaded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "imaging_study_file_sop_uidx": {
-          "name": "imaging_study_file_sop_uidx",
-          "columns": [
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sop_instance_uid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "imaging_study_file_organization_id_organization_id_fk": {
-          "name": "imaging_study_file_organization_id_organization_id_fk",
-          "tableFrom": "imaging_study_file",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "tableTo": "organization",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        },
-        "imaging_study_file_study_fk": {
-          "name": "imaging_study_file_study_fk",
-          "tableFrom": "imaging_study_file",
-          "columnsFrom": [
-            "organization_id",
-            "document_id"
-          ],
-          "tableTo": "imaging_study",
-          "columnsTo": [
-            "organization_id",
-            "document_id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "imaging_study_file_document_id_file_index_pk": {
-          "name": "imaging_study_file_document_id_file_index_pk",
-          "columns": [
-            "document_id",
-            "file_index"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "imaging_study_file_size_check": {
-          "name": "imaging_study_file_size_check",
-          "value": "\"imaging_study_file\".\"size_bytes\" BETWEEN 1 AND 1073741824"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.odontogram_assessment": {
       "name": "odontogram_assessment",
       "schema": "",
@@ -17286,6 +16961,496 @@
         "payment_ticket_total_check": {
           "name": "payment_ticket_total_check",
           "value": "\"payment_ticket\".\"total_cents\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.periodontal_chart": {
+      "name": "periodontal_chart",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patient_id": {
+          "name": "patient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encounter_id": {
+          "name": "encounter_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expected_teeth": {
+          "name": "expected_teeth",
+          "type": "smallint[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "implant_teeth": {
+          "name": "implant_teeth",
+          "type": "smallint[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::smallint[]"
+        },
+        "diagnosis": {
+          "name": "diagnosis",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grade": {
+          "name": "grade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "extent": {
+          "name": "extent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bone_loss_percent": {
+          "name": "bone_loss_percent",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "teeth_lost_to_periodontitis": {
+          "name": "teeth_lost_to_periodontitis",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cigarettes_per_day": {
+          "name": "cigarettes_per_day",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "diabetes": {
+          "name": "diabetes",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hba1c": {
+          "name": "hba1c",
+          "type": "numeric(3, 1)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "periodontitis_status": {
+          "name": "periodontitis_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "classified_by": {
+          "name": "classified_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "classified_at": {
+          "name": "classified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "periodontal_chart_encounter_uidx": {
+          "name": "periodontal_chart_encounter_uidx",
+          "columns": [
+            {
+              "expression": "encounter_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "periodontal_chart_org_id_uidx": {
+          "name": "periodontal_chart_org_id_uidx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "periodontal_chart_org_patient_idx": {
+          "name": "periodontal_chart_org_patient_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "patient_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "periodontal_chart_organization_id_organization_id_fk": {
+          "name": "periodontal_chart_organization_id_organization_id_fk",
+          "tableFrom": "periodontal_chart",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "periodontal_chart_classified_by_user_id_fk": {
+          "name": "periodontal_chart_classified_by_user_id_fk",
+          "tableFrom": "periodontal_chart",
+          "columnsFrom": [
+            "classified_by"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "periodontal_chart_created_by_user_id_fk": {
+          "name": "periodontal_chart_created_by_user_id_fk",
+          "tableFrom": "periodontal_chart",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "periodontal_chart_encounter_fk": {
+          "name": "periodontal_chart_encounter_fk",
+          "tableFrom": "periodontal_chart",
+          "columnsFrom": [
+            "organization_id",
+            "patient_id",
+            "encounter_id"
+          ],
+          "tableTo": "encounter",
+          "columnsTo": [
+            "organization_id",
+            "patient_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "periodontal_chart_diagnosis_check": {
+          "name": "periodontal_chart_diagnosis_check",
+          "value": "\"periodontal_chart\".\"diagnosis\" IS NULL OR \"periodontal_chart\".\"diagnosis\" IN ('health','gingivitis','periodontitis')"
+        },
+        "periodontal_chart_stage_check": {
+          "name": "periodontal_chart_stage_check",
+          "value": "(\"periodontal_chart\".\"diagnosis\" = 'periodontitis') = (\"periodontal_chart\".\"stage\" IS NOT NULL AND \"periodontal_chart\".\"grade\" IS NOT NULL) AND (\"periodontal_chart\".\"stage\" IS NULL OR \"periodontal_chart\".\"stage\" BETWEEN 1 AND 4) AND (\"periodontal_chart\".\"grade\" IS NULL OR \"periodontal_chart\".\"grade\" IN ('A','B','C'))"
+        },
+        "periodontal_chart_extent_check": {
+          "name": "periodontal_chart_extent_check",
+          "value": "(\"periodontal_chart\".\"diagnosis\" IS NULL OR \"periodontal_chart\".\"diagnosis\" = 'health') = (\"periodontal_chart\".\"extent\" IS NULL) AND (\"periodontal_chart\".\"extent\" IS NULL OR \"periodontal_chart\".\"extent\" IN ('localized','generalized') OR (\"periodontal_chart\".\"diagnosis\" = 'periodontitis' AND \"periodontal_chart\".\"extent\" = 'molar_incisor'))"
+        },
+        "periodontal_chart_status_check": {
+          "name": "periodontal_chart_status_check",
+          "value": "\"periodontal_chart\".\"periodontitis_status\" IS NULL OR (\"periodontal_chart\".\"diagnosis\" = 'periodontitis' AND \"periodontal_chart\".\"periodontitis_status\" IN ('stable','remission','unstable'))"
+        },
+        "periodontal_chart_classified_check": {
+          "name": "periodontal_chart_classified_check",
+          "value": "(\"periodontal_chart\".\"diagnosis\" IS NULL) = (\"periodontal_chart\".\"classified_at\" IS NULL) AND (\"periodontal_chart\".\"classified_at\" IS NULL) = (\"periodontal_chart\".\"classified_by\" IS NULL)"
+        },
+        "periodontal_chart_inputs_check": {
+          "name": "periodontal_chart_inputs_check",
+          "value": "(\"periodontal_chart\".\"bone_loss_percent\" IS NULL OR \"periodontal_chart\".\"bone_loss_percent\" BETWEEN 0 AND 100) AND (\"periodontal_chart\".\"teeth_lost_to_periodontitis\" IS NULL OR \"periodontal_chart\".\"teeth_lost_to_periodontitis\" BETWEEN 0 AND 32) AND (\"periodontal_chart\".\"cigarettes_per_day\" IS NULL OR \"periodontal_chart\".\"cigarettes_per_day\" BETWEEN 0 AND 200) AND (\"periodontal_chart\".\"hba1c\" IS NULL OR (\"periodontal_chart\".\"diabetes\" AND \"periodontal_chart\".\"hba1c\" BETWEEN 3 AND 20))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.periodontal_tooth": {
+      "name": "periodontal_tooth",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chart_id": {
+          "name": "chart_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tooth_number": {
+          "name": "tooth_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "probing_depth": {
+          "name": "probing_depth",
+          "type": "smallint[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recession": {
+          "name": "recession",
+          "type": "smallint[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bleeding": {
+          "name": "bleeding",
+          "type": "boolean[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "suppuration": {
+          "name": "suppuration",
+          "type": "boolean[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mobility": {
+          "name": "mobility",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "furcation": {
+          "name": "furcation",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "plaque": {
+          "name": "plaque",
+          "type": "boolean[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "peri_implant": {
+          "name": "peri_implant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "periodontal_tooth_chart_tooth_uidx": {
+          "name": "periodontal_tooth_chart_tooth_uidx",
+          "columns": [
+            {
+              "expression": "chart_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tooth_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "periodontal_tooth_organization_id_organization_id_fk": {
+          "name": "periodontal_tooth_organization_id_organization_id_fk",
+          "tableFrom": "periodontal_tooth",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "tableTo": "organization",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "periodontal_tooth_updated_by_user_id_fk": {
+          "name": "periodontal_tooth_updated_by_user_id_fk",
+          "tableFrom": "periodontal_tooth",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "tableTo": "user",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "periodontal_tooth_chart_fk": {
+          "name": "periodontal_tooth_chart_fk",
+          "tableFrom": "periodontal_tooth",
+          "columnsFrom": [
+            "organization_id",
+            "chart_id"
+          ],
+          "tableTo": "periodontal_chart",
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "periodontal_tooth_fdi_check": {
+          "name": "periodontal_tooth_fdi_check",
+          "value": "\"periodontal_tooth\".\"tooth_number\" IN (11,12,13,14,15,16,17,18,21,22,23,24,25,26,27,28,31,32,33,34,35,36,37,38,41,42,43,44,45,46,47,48)"
+        },
+        "periodontal_tooth_sites_check": {
+          "name": "periodontal_tooth_sites_check",
+          "value": "cardinality(\"periodontal_tooth\".\"probing_depth\") = 6 AND cardinality(\"periodontal_tooth\".\"recession\") = 6 AND cardinality(\"periodontal_tooth\".\"bleeding\") = 6 AND cardinality(\"periodontal_tooth\".\"suppuration\") = 6"
+        },
+        "periodontal_tooth_ranges_check": {
+          "name": "periodontal_tooth_ranges_check",
+          "value": "0 <= ALL(\"periodontal_tooth\".\"probing_depth\") AND 15 >= ALL(\"periodontal_tooth\".\"probing_depth\") AND -10 <= ALL(\"periodontal_tooth\".\"recession\") AND 15 >= ALL(\"periodontal_tooth\".\"recession\")"
+        },
+        "periodontal_tooth_mobility_check": {
+          "name": "periodontal_tooth_mobility_check",
+          "value": "\"periodontal_tooth\".\"mobility\" IS NULL OR \"periodontal_tooth\".\"mobility\" BETWEEN 0 AND 3"
+        },
+        "periodontal_tooth_furcation_check": {
+          "name": "periodontal_tooth_furcation_check",
+          "value": "jsonb_typeof(\"periodontal_tooth\".\"furcation\") = 'object'"
+        },
+        "periodontal_tooth_plaque_check": {
+          "name": "periodontal_tooth_plaque_check",
+          "value": "\"periodontal_tooth\".\"plaque\" IS NULL OR cardinality(\"periodontal_tooth\".\"plaque\") = 4"
+        },
+        "periodontal_tooth_peri_implant_check": {
+          "name": "periodontal_tooth_peri_implant_check",
+          "value": "\"periodontal_tooth\".\"peri_implant\" IS NULL OR \"periodontal_tooth\".\"peri_implant\" IN ('health','mucositis','peri_implantitis')"
         }
       },
       "isRLSEnabled": false

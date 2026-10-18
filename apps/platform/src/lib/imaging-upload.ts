@@ -8,7 +8,7 @@ import { orgSlugFromHostname, requestHostname } from "./host"
 import type { ScannedDicom, StudyCandidate } from "./imaging-scan"
 
 /**
- * Cola de subida de tomografías (ADR 0054). Vive fuera de la pantalla: cerrar
+ * Cola de subida de tomografías (ADR 0055). Vive fuera de la pantalla: cerrar
  * la ventana de subida o cambiar de página no la detiene, y si se corta
  * internet espera a que vuelva y sigue donde quedó. Cada archivo va directo
  * al almacenamiento con su URL firmada; la API comprueba lo recibido por

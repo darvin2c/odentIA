@@ -1,3 +1,95 @@
 @import "@odentia/ui/globals.css";
 @source "../../../../packages/ui/src";
 @source "../../../../packages/ui-patterns/src";
+
+/*
+ * Periodontograma (issue 49): colores clínicos del gráfico. El borde de la
+ * encía va en rojo y el fondo de la bolsa en azul, como en el periodontograma
+ * en papel; la placa en violeta para no confundirse con el sangrado.
+ */
+.perio {
+  --perio-gm: #d1342f;
+  --perio-cal: #1f5fd1;
+  --perio-pocket: rgb(31 95 209 / 0.14);
+  --perio-enamel: #fdfbf6;
+  --perio-dentin: #efe8da;
+  --perio-tooth-line: #a3acba;
+  --perio-shine: rgb(255 255 255 / 0.95);
+  --perio-implant: #7b8794;
+  --perio-implant-dark: #56616d;
+  --perio-bop: #d1342f;
+  --perio-sup: #d48806;
+  --perio-plaque: #7c3aed;
+  --perio-grid: #e5eaf1;
+}
+.dark .perio {
+  --perio-gm: #f87171;
+  --perio-cal: #6aa5ff;
+  --perio-pocket: rgb(106 165 255 / 0.2);
+  --perio-enamel: #2c3647;
+  --perio-dentin: #222a38;
+  --perio-tooth-line: #5e6d84;
+  --perio-shine: rgb(255 255 255 / 0.12);
+  --perio-implant: #8a96a6;
+  --perio-implant-dark: #5b6676;
+  --perio-bop: #f87171;
+  --perio-sup: #fbbf24;
+  --perio-plaque: #a78bfa;
+  --perio-grid: #232c3b;
+}
+.perio svg .lbl { font-size: 10px; fill: var(--muted-foreground); font-weight: 650; }
+.perio svg .lbl-strong { font-size: 11px; font-weight: 800; fill: var(--foreground); letter-spacing: 0.02em; }
+.perio svg .tick { font-family: ui-monospace, Consolas, monospace; font-size: 8px; fill: var(--muted-foreground); }
+.perio svg .n { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; fill: var(--foreground); }
+.perio svg .n.zero { fill: var(--muted-foreground); }
+.perio svg .n.warn { fill: var(--warning); font-weight: 700; }
+.perio svg .n.deep { fill: var(--danger); font-weight: 800; }
+.perio svg .n-bg { fill: var(--danger-soft); }
+.perio svg .tn { font-size: 11.5px; font-weight: 800; fill: var(--foreground); }
+.perio svg .tn.dim { fill: var(--muted-foreground); font-weight: 600; }
+.perio svg .tag { font-size: 8px; fill: var(--muted-foreground); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.perio svg .enamel { fill: var(--perio-enamel); stroke: var(--perio-tooth-line); stroke-width: 0.9; }
+.perio svg .dentin { fill: var(--perio-dentin); stroke: var(--perio-tooth-line); stroke-width: 0.9; }
+.perio svg .dentin.back { opacity: 0.5; }
+.perio svg .shine { fill: none; stroke: var(--perio-shine); stroke-width: 1.6; stroke-linecap: round; }
+.perio svg .fixture { fill: var(--perio-implant); stroke: var(--perio-implant-dark); stroke-width: 0.8; }
+.perio svg .thread { stroke: var(--perio-implant-dark); stroke-width: 1; }
+.perio svg .ghost-tooth { fill: none; stroke: var(--perio-tooth-line); stroke-width: 0.9; stroke-dasharray: 2.5 2.5; opacity: 0.7; }
+.perio svg .cej { stroke: var(--perio-tooth-line); stroke-width: 1; stroke-dasharray: 2 2; }
+.perio svg .mm { stroke: var(--perio-grid); stroke-width: 1; }
+.perio svg .gm { fill: none; stroke: var(--perio-gm); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.perio svg .cal { fill: none; stroke: var(--perio-cal); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.perio svg .cal.ghost { stroke-dasharray: 4 3; stroke-width: 1.3; opacity: 0.75; }
+.perio svg .pocket { fill: var(--perio-pocket); }
+.perio svg .sitedot { fill: var(--card); stroke: var(--perio-cal); stroke-width: 1.4; }
+.perio svg .sep { stroke: var(--perio-grid); stroke-width: 1; }
+.perio svg .sext { stroke: var(--border); stroke-width: 1.2; }
+.perio svg .mid { stroke: var(--perio-tooth-line); stroke-width: 1.3; }
+.perio svg .bop { fill: var(--perio-bop); }
+.perio svg .sup { fill: none; stroke: var(--perio-sup); stroke-width: 1.8; }
+.perio svg .site-empty { fill: none; stroke: var(--input); stroke-width: 1; }
+.perio svg .furca { stroke: var(--foreground); stroke-width: 1.2; fill: var(--card); stroke-linejoin: round; }
+.perio svg .furca-fill { fill: var(--foreground); }
+.perio svg .colhl { fill: var(--primary-soft); opacity: 0; transition: opacity 0.15s ease; }
+.perio svg .colhl.hover { opacity: 0.45; }
+.perio svg .colhl.sel { opacity: 0.85; }
+.perio svg .colhl.focus { opacity: 0.6; stroke: var(--primary); stroke-width: 1.5; }
+.perio svg .hit { fill: transparent; cursor: pointer; }
+.perio svg .hit:focus { outline: none; }
+.perio svg .marker { fill: var(--primary); }
+.perio svg .pz { fill: var(--card); stroke: var(--border); stroke-width: 0.35; }
+.perio svg .pz.on { fill: var(--perio-plaque); }
+.perio svg .pz.none { fill: var(--muted); }
+.perio svg .pz.press { cursor: pointer; }
+.perio svg .pz.press:hover { fill: color-mix(in srgb, var(--perio-plaque) 30%, var(--card)); }
+.perio svg .pz.press.on:hover { fill: var(--perio-plaque); opacity: 0.85; }
+.perio svg .occl { fill: var(--muted); stroke: var(--border); stroke-width: 0.35; }
+.perio svg .pz-line { fill: none; stroke: var(--perio-tooth-line); stroke-width: 0.6; }
+.perio svg .chg-good { fill: var(--success); }
+.perio svg .chg-bad { fill: var(--danger); }
+.perio svg .chg-same { fill: var(--muted); stroke: var(--border); stroke-width: 0.6; }
+.perio svg .chg-implant { fill: var(--perio-grid); }
+.perio .legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .perio svg .colhl { transition: none; }
+}

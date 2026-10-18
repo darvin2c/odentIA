@@ -38,7 +38,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
 
 /**
- * Visor de tomografía a pantalla completa (ADR 0055): el volumen se arma en el
+ * Visor de tomografía a pantalla completa (ADR 0056): el volumen se arma en el
  * navegador y cada vista es un corte del volumen. Brillo por estudio, medida y
  * ángulo (orientativos), teclado y, en un celular, solo ver.
  */

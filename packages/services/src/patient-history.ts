@@ -30,6 +30,7 @@ import { validation } from "./errors.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { checkEncounterClosing, type ClosingRequirement } from "./encounters.js"
 import { requirePatient } from "./patients.js"
+import { latestPeriodontalBrief, type PeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { listTreatmentJourneys } from "./treatment-journey.js"
 
 /** Presupuestos que ya no representan trabajo vigente. */
@@ -609,6 +610,8 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
     proposedBudgets,
     anamnesisBrief,
     recentDocuments,
+    // «Encías»: el último periodontograma firmado y el último diagnóstico confirmado.
+    periodontal: await latestPeriodontalBrief(tx, orgId, patientId),
   }
 }
 
@@ -673,6 +676,8 @@ export interface TimelineItem {
   dueAt?: Date | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** El periodontograma de la atención: un hecho de ella (ADR 0054). */
+  periodontal?: PeriodontalBrief | null
 }
 
 /** Cómo se dice el tipo de una orden en la historia. */
@@ -831,9 +836,10 @@ export async function getTimeline(
           ),
         ),
     ])
-    const [planned, docs] = await Promise.all([
+    const [planned, docs, periodontal] = await Promise.all([
       loadPlannedForEncounters(tx, orgId, encounters),
       loadDocsForEncounters(tx, orgId, patientId, encounters),
+      periodontalBriefsByEncounter(tx, orgId, encounters),
     ])
     for (const row of records) {
       const rowProcedures = procedures.filter((p) => p.encounterId === row.id)
@@ -868,6 +874,7 @@ export async function getTimeline(
         plannedItems: planned.get(row.id) ?? [],
         indications: row.indications,
         encounterId: row.id,
+        periodontal: periodontal.get(row.id) ?? null,
       })
     }
   }

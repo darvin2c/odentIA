@@ -1,4 +1,4 @@
--- imaging_measurement (ADR 0055): cada clínica ve solo lo suyo; la aplicación
+-- imaging_measurement (ADR 0056): cada clínica ve solo lo suyo; la aplicación
 -- no borra ni reescribe una medida: solo la retira, y lo retirado no vuelve.
 ALTER TABLE public.imaging_measurement ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE ONLY public.imaging_measurement FORCE ROW LEVEL SECURITY;--> statement-breakpoint

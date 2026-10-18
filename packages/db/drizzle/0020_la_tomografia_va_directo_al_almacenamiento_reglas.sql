@@ -1,4 +1,4 @@
--- imaging_study / imaging_study_file (ADR 0054): cada clínica ve solo lo suyo.
+-- imaging_study / imaging_study_file (ADR 0055): cada clínica ve solo lo suyo.
 -- La aplicación no borra: una tomografía cancelada se retira desde su documento.
 -- Lo que puede cambiar es lo que avanza con la subida: la miniatura, el fin de
 -- la subida y, por archivo, cuándo se comprobó que llegó. Lo recibido no se deshace.

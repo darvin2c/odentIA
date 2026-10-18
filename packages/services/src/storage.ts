@@ -65,7 +65,7 @@ export interface Storage {
   getAttachment?(objectKey: string): Promise<Uint8Array>
   /**
    * URL firmada para que el navegador suba un objeto con PUT directo al bucket
-   * privado (tomografías, ADR 0054). Exige CORS en el bucket. Opcional en dobles.
+   * privado (tomografías, ADR 0055). Exige CORS en el bucket. Opcional en dobles.
    */
   uploadUrl?(objectKey: string, contentType: string, ttlSeconds?: number): Promise<string>
   /**

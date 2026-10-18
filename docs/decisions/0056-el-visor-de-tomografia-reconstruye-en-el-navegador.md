@@ -1,4 +1,4 @@
-# 0055. El visor de tomografía reconstruye en el navegador
+# 0056. El visor de tomografía reconstruye en el navegador
 
 - **Fecha:** 2026-10-18
 - **Estado:** aceptada (fases 3 y 4 del lienzo del visor de tomografía, issue 34)
@@ -30,4 +30,4 @@ La odontóloga necesita ver la tomografía en tres cortes (desde arriba, de fren
 
 - `apps/platform/src/lib/cbct-volume.ts`, `apps/platform/src/lib/cbct-arch.ts`
 - `apps/platform/src/components/patient/tomography-viewer.tsx`
-- Lienzo «Visor de tomografía», tableros 5 a 8 y decisiones 1 a 3 y 7 a 9; ADR 0054
+- Lienzo «Visor de tomografía», tableros 5 a 8 y decisiones 1 a 3 y 7 a 9; ADR 0055

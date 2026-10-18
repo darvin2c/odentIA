@@ -2,7 +2,7 @@ import * as dicomParser from "dicom-parser"
 
 /**
  * Lee en el navegador lo que trae una carpeta de CD, un ZIP o una selección de
- * archivos y encuentra la tomografía (ADR 0054). Solo mira la cabecera de cada
+ * archivos y encuentra la tomografía (ADR 0055). Solo mira la cabecera de cada
  * DICOM (PS3.10): el resto del CD (el visor del centro de imágenes, sus
  * programas e imágenes de muestra y el DICOMDIR) no se sube.
  */

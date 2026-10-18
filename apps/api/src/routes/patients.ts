@@ -99,6 +99,7 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
 import { createImagingStudiesRoute } from "./imaging-studies.js"
+import { createPatientPeriodontalRoute } from "./patient-periodontal.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
 import type { PlatformLlm } from "@odentia/agent"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"
@@ -506,12 +507,13 @@ const CLINICAL_SUBPATHS = [
   "/health",
   "/anamnesis",
   "/odontogram",
+  "/periodontal",
   "/timeline",
   "/summary",
 ]
 
 /**
- * Subida de tomografías (ADR 0054): la hace quien escribe en la ficha o quien
+ * Subida de tomografías (ADR 0055): la hace quien escribe en la ficha o quien
  * recibe el CD sin leerla (`clinical.receive`); solo entrega el avance, así que
  * no deja traza de lectura clínica. Abrirla es `/imaging/studies`, clínico.
  */
@@ -546,6 +548,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/health", "antecedentes"],
   ["/anamnesis", "antecedentes"],
   ["/odontogram", "odontograma"],
+  ["/periodontal", "periodontograma"],
   ["/timeline", "historia"],
   ["/encounters", "atenciones"],
   ["/diagnoses", "diagnosticos"],
@@ -1637,6 +1640,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.route("/", createImagingStudiesRoute(deps))
   app.route("/", createPatientTreatmentsRoute(deps))
   app.route("/", createPatientFollowUpsRoute(deps))
+  app.route("/", createPatientPeriodontalRoute(deps))
   // El dictado del asistente clínico necesita el proveedor del modelo; sin él no se monta.
   if (deps.llm) app.route("/", createEncounterDictationRoute({ ...deps, llm: deps.llm }))
   app.route("/", createPatientPrescriptionsRoute(deps))

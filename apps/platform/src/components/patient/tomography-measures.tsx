@@ -8,7 +8,7 @@ import { activeOrgLocale } from "../../lib/locale"
 import { formatMeasure } from "./tomography-slice"
 
 /**
- * Medidas guardadas de una tomografía (decisión 3 del lienzo, ADR 0055): cada
+ * Medidas guardadas de una tomografía (decisión 3 del lienzo, ADR 0056): cada
  * medida queda con quién y cuándo, sin tocar el archivo; quitarla la retira.
  * Quien no escribe en la ficha mide igual, pero su medida no se guarda.
  */
