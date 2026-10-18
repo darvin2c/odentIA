@@ -614,7 +614,7 @@ it("la próxima acción es una tarea, y solo una: sigue a quien la lleva y se ci
   ).rejects.toThrow("se cerró")
 })
 
-it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de paginar", async () => {
+it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran en SQL antes de paginar", async () => {
   const prefix = `Vista ${TAG}`
   const cUn = await makeContact("org_a", `${prefix} Un`)
   const cOk = await makeContact("org_a", `${prefix} Ok`)
@@ -640,23 +640,17 @@ it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de pag
     status: "queued",
     createdAt: t2,
   })
-  const unanswered = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", { view: "unanswered", q: prefix, limit: 100 }),
+  // «Por atender» (ADR 0050): sin responder y sin el agente a cargo; un
+  // saliente que sigue en cola todavía no es respuesta.
+  await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convUn, false))
+  await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convQueued, false))
+  const attend = await withOrgContext(appDb, "org_a", (tx) =>
+    listConversations(tx, "org_a", { view: "attend", q: prefix, limit: 100 }),
   )
-  const unIds = unanswered.items.map((c) => c.id)
+  const unIds = attend.items.map((c) => c.id)
   expect(unIds).toContain(convUn)
   expect(unIds).toContain(convQueued)
   expect(unIds).not.toContain(convOk)
-  // Con el equipo: agente apagado en una abierta.
-  await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convUn, false))
-  const human = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", { view: "team", q: `${prefix} Un`, limit: 100 }),
-  )
-  expect(human.items.map((c) => c.id)).toContain(convUn)
-  const agentOn = await withOrgContext(appDb, "org_a", (tx) =>
-    listConversations(tx, "org_a", { view: "team", q: `${prefix} Ok`, limit: 100 }),
-  )
-  expect(agentOn.items.map((c) => c.id)).not.toContain(convOk)
   // Esperan al paciente: una propuesta espera su sí, o se le respondió y no contesta;
   // un saliente que sigue en cola todavía no es respuesta.
   await ownerDb.insert(agentProposal).values({
@@ -672,6 +666,7 @@ it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de pag
   const approval = await withOrgContext(appDb, "org_a", (tx) =>
     listConversations(tx, "org_a", { view: "awaiting_patient", q: prefix, limit: 100 }),
   )
+  // Con una propuesta que espera su sí, espera al paciente aunque el agente esté apagado.
   expect(approval.items.map((c) => c.id)).toContain(convUn)
   expect(approval.items.map((c) => c.id)).toContain(convOk)
   expect(approval.items.map((c) => c.id)).not.toContain(convQueued)
@@ -680,14 +675,14 @@ it("conversaciones: vistas unanswered/human/approval filtran en SQL antes de pag
   let cursor: string | undefined
   for (;;) {
     const page = await withOrgContext(appDb, "org_a", (tx) =>
-      listConversations(tx, "org_a", { view: "unanswered", q: prefix, limit: 1, cursor }),
+      listConversations(tx, "org_a", { view: "attend", q: prefix, limit: 1, cursor }),
     )
     paged.push(...page.items.map((c) => c.id))
     if (!page.nextCursor) break
     cursor = page.nextCursor
   }
   expect(new Set(paged).size).toBe(paged.length)
-  expect(paged).toContain(convUn)
+  expect(paged).toContain(convQueued)
   expect(paged).not.toContain(convOk)
 })
 

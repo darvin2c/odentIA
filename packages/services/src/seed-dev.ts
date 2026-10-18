@@ -10,6 +10,8 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  */
+import { LEGAL } from "@odentia/auth/legal"
+import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { encodeDemoDicom } from "@odentia/clinical"
 import sharp from "sharp"
 import { randomUUID } from "node:crypto"
@@ -73,7 +75,7 @@ import {
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm"
-import { createHandoff } from "./agent-operations.js"
+import { createHandoff, recordTopicAskedAgain } from "./agent-operations.js"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createAppointment, createChair, setAppointmentArrival } from "./appointments.js"
 import { createScheduleBlock, setProfessionalSchedule } from "./availability.js"
@@ -429,6 +431,8 @@ async function wipeSeed(): Promise<void> {
     "mailbox_oauth_state",
     "schedule_block",
     "professional_schedule",
+    "processing_agreement_acceptance",
+    "home_visit",
   ]) {
     await db.execute(
       sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B})`,
@@ -652,7 +656,7 @@ async function seedMessage(args: {
   externalId: string
   status: string
   createdAt: Date
-}): Promise<void> {
+}): Promise<{ id: string }> {
   const [row] = await db
     .insert(message)
     .values({
@@ -670,6 +674,7 @@ async function seedMessage(args: {
     })
     .returning({ id: message.id })
   if (!row) throw new Error(`No se pudo crear el mensaje ${args.externalId}`)
+  return row
 }
 
 async function countWhere(table: string, orgId: string): Promise<number> {
@@ -689,6 +694,9 @@ await db.transaction(async (tx) => {
   ])
   await tx.update(saasSubscription).set({ isDemo: true }).where(inArray(saasSubscription.organizationId, SEED_ORGS))
 })
+// Las cuentas semilla ya aceptaron los documentos vigentes; si no, entrar las
+// llevaría a «Un paso antes de seguir» (lienzo «Términos con Google»).
+const SEED_TERMS = { termsVersion: LEGAL.terms.version, termsAcceptedAt: new Date() }
 await db.insert(user).values([
   {
     id: ANA_ID,
@@ -697,6 +705,7 @@ await db.insert(user).values([
     lastName: "Torres",
     email: "ana@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
   {
     id: LUIS_ID,
@@ -705,6 +714,7 @@ await db.insert(user).values([
     lastName: "Prado",
     email: "luis@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
   {
     id: CORA_ID,
@@ -713,6 +723,7 @@ await db.insert(user).values([
     lastName: "Vega",
     email: "cora@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
   {
     id: ROJAS_ID,
@@ -721,6 +732,7 @@ await db.insert(user).values([
     lastName: "Rojas",
     email: "rojas@odentia.dev",
     emailVerified: true,
+    ...SEED_TERMS,
   },
 ])
 const passwordHash = await hashPassword(PASSWORD)
@@ -764,6 +776,11 @@ await db.insert(member).values([
     createdAt: new Date(),
   },
 ])
+// Cada clínica semilla aceptó el contrato de encargo por su dueña.
+await db.insert(processingAgreementAcceptance).values([
+  { organizationId: ORG_A, version: LEGAL.agreement.version, acceptedBy: ANA_ID },
+  { organizationId: ORG_B, version: LEGAL.agreement.version, acceptedBy: CORA_ID },
+])
 // Colegiatura con la que firman (ADR 0003). Luis queda sin colegiatura en la
 // clínica B para ejercitar el aviso «falta tu colegiatura» al cerrar.
 // Título y colegio se escriben: el perfil no trae los de ningún país por defecto.
@@ -797,6 +814,8 @@ await db.insert(orgProfile).values([
     timezone: "America/Lima",
     // La lista de diagnósticos que recomienda Perú (decisión 26).
     diagnosisSystem: "ICD-10",
+    // El que da el agente ante una urgencia (ADR 0050); la clínica B no tiene y ve el aviso.
+    emergencyPhone: "+5115550123",
   },
   {
     organizationId: ORG_B,
@@ -1153,10 +1172,10 @@ const convCarlos = await seedConversation({
   contactId: contactIdByName.get("Carlos Paredes")!,
   connectionId: connA.id,
   thread: "seed-thread-4",
-  agentStatus: "off",
+  // Derivar no apaga al agente (ADR 0050): el precio es un tema del equipo y él sigue con lo demás.
   unreadCount: 1,
-  lastInboundAt: hoursAgo(6),
-  lastMessageAt: hoursAgo(6),
+  lastInboundAt: hoursAgo(3),
+  lastMessageAt: hoursAgo(3),
 })
 await seedMessage({
   orgId: ORG_A,
@@ -1315,7 +1334,7 @@ await upsertAgentConfig(db, ORG_A, {
 })
 
 // --- Derivaciones del agente: cola con plazo visible y caso ya tomado ---
-await createHandoff(db, ORG_A, null, {
+const carlosTopic = await createHandoff(db, ORG_A, null, {
   conversationId: convCarlos.id,
   reason: "Pregunta por precio de extracción y pide hablar con una persona",
   summary:
@@ -1323,9 +1342,51 @@ await createHandoff(db, ORG_A, null, {
   priority: "alta",
   createdBy: "agent",
 })
+// El agente no se calla (ADR 0050): responde lo que sabe y anota cuando vuelve a preguntar por el tema.
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Eso lo ve el equipo de Dental Smile: te escriben hoy antes de las 19:00.",
+  externalId: "seed-msg-8a",
+  status: "read",
+  createdAt: new Date(hoursAgo(6).getTime() + 60_000),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "¿Atienden los sábados?",
+  externalId: "seed-msg-8b",
+  status: "received",
+  createdAt: hoursAgo(5),
+})
+await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "out",
+  senderKind: "agent",
+  body: "Sí, los sábados atendemos de 9:00 a 13:00.",
+  externalId: "seed-msg-8c",
+  status: "read",
+  createdAt: new Date(hoursAgo(5).getTime() + 60_000),
+})
+const carlosAgain = await seedMessage({
+  orgId: ORG_A,
+  conversationId: convCarlos.id,
+  direction: "in",
+  senderKind: "contact",
+  body: "¿Y lo del precio de la extracción?",
+  externalId: "seed-msg-8d",
+  status: "received",
+  createdAt: hoursAgo(3),
+})
+await recordTopicAskedAgain(db, ORG_A, { handoffId: carlosTopic.id, messageId: carlosAgain.id })
 await createHandoff(db, ORG_A, null, {
   conversationId: convJorge.id,
-  reason: "El interlocutor se mostró molesto por la espera",
+  reason: "Jorge se mostró molesto por la espera",
   summary: "Jorge reportó demora en la atención anterior; se derivó a recepción para seguimiento.",
   priority: "media",
   assigneeUserId: LUIS_ID,

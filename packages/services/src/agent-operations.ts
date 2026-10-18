@@ -41,7 +41,6 @@ import {
 import {
   listMessages,
   sendOutbound,
-  setAgentStatus,
 } from "./conversations.js"
 import { type AiUsageEntry, knownCostMicros, recordAiUsage } from "./ai-usage.js"
 import { countConversationAction } from "./saas-actions.js"
@@ -63,7 +62,7 @@ import { OPERATIONS } from "./operation-fields.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
 import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
-import { createWorkspaceNotification } from "./workspace.js"
+import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { getAccountSummary } from "./payments.js"
 import { cancelOwnAppointment, confirmOwnAppointment, moveOwnAppointment } from "./own-appointment.js"
@@ -3146,6 +3145,22 @@ export async function countAgentModelRunsToday(tx: Db, orgId: string): Promise<n
 }
 
 /**
+ * Corridas con modelo de hoy (zona de la clínica) en las conversaciones de una
+ * persona. Acota a quien escribe sin parar (un bot, una cadena): sin este tope
+ * por persona, un solo número podía agotar el tope diario de la clínica y
+ * dejar sin agente a todos los demás.
+ */
+export async function countContactModelRunsToday(tx: Db, orgId: string, contactId: string): Promise<number> {
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const [row] = await tx.execute<{ count: number }>(sql`
+    select count(*)::int as count from agent_run_ledger l
+    join conversation c on c.id = l.conversation_id and c.organization_id = l.organization_id
+    where l.organization_id = ${orgId} and c.contact_id = ${contactId} and l.llm_calls > 0
+      and (l.started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date`)
+  return row?.count ?? 0
+}
+
+/**
  * El proveedor del modelo no sirve (configuración, credencial rechazada, sin
  * saldo) o se alcanzó el tope diario: aviso a quien administra el agente, uno
  * por problema y día. El del modelo no nombra claves ni variables: la cuenta
@@ -3252,9 +3267,11 @@ export async function reportAgentNoReply(
 const HANDOFF_DUE_HOURS: Record<HandoffPriority, number> = { alta: 4, media: 24, baja: 72 }
 
 /**
- * Derivación con resumen factual, motivo, prioridad, responsable y tarea de
- * seguimiento. Apaga el agente en la conversación; el caso aparece en «Te
- * espera» de quien puede tomarlo (no en la campana).
+ * Tema para el equipo (ADR 0050): resumen factual, motivo, prioridad,
+ * responsable, tarea de seguimiento y el mensaje de la persona que lo originó
+ * (por defecto, su último entrante). No apaga al agente: el agente sigue con
+ * lo demás. Una duda clínica sin responsable va al profesional que atiende al
+ * paciente. Aparece en «Por atender» y en «Te espera» (no en la campana).
  */
 export async function createHandoff(
   tx: Db,
@@ -3271,9 +3288,14 @@ export async function createHandoff(
     createdBy?: string
     asks?: string | null
     pending?: string | null
+    /** El mensaje de la persona que se responde; por defecto, su último entrante. */
+    sourceMessageId?: string | null
+    /** Duda clínica: sin responsable, va al profesional que atiende al paciente. */
+    clinical?: boolean
   },
 ): Promise<HandoffItem> {
   const conv = await requireConversationInOrg(tx, orgId, input.conversationId)
+  const sourceMessageId = await topicSourceMessage(tx, orgId, input.conversationId, input.sourceMessageId ?? null)
   const reason = cleanReason(input.reason, 500)
   if (!reason) throw validation("El motivo es obligatorio")
   const summary = cleanReason(input.summary, 2000)
@@ -3294,6 +3316,9 @@ export async function createHandoff(
     }
     assigneeUserId ??= task.assigneeUserId
   }
+  if (!assigneeUserId && input.clinical && conv.contactId) {
+    assigneeUserId = await treatingProfessional(tx, orgId, conv.contactId)
+  }
   if (assigneeUserId) {
     const [membership] = await tx
       .select({ userId: member.userId })
@@ -3305,7 +3330,7 @@ export async function createHandoff(
   const createdBy = input.createdBy === "user" ? "user" : "agent"
   task ??= await createTask(tx, orgId, {
     // Un solo nombre en toda la aplicación (decisión 1): la prioridad la dice la fila, no el título.
-    title: `Te lo pasó el agente: ${reason}`.slice(0, 200),
+    title: (createdBy === "user" ? `Tema pendiente: ${reason}` : `Te lo pasó el agente: ${reason}`).slice(0, 200),
     contactId: conv.contactId,
     conversationId: input.conversationId,
     assigneeUserId,
@@ -3329,10 +3354,10 @@ export async function createHandoff(
       assigneeUserId,
       taskId: task.id,
       createdBy,
+      sourceMessageId,
     })
     .returning()
   if (!row) throw new Error("No se pudo registrar la derivación")
-  await setAgentStatus(tx, orgId, input.conversationId, false, actorUserId ?? undefined)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
@@ -3344,6 +3369,46 @@ export async function createHandoff(
   // Sin aviso en la campana: el caso aparece en «Te espera», una sola vez.
   await notify(tx, { orgId, kind: "agent.handoff.created", at: new Date().toISOString() })
   return enrichHandoff(tx, row)
+}
+
+/**
+ * El mensaje de la persona que origina un tema: el pedido, si es un entrante
+ * de esa conversación; si no, su último entrante. Nulo si nunca escribió.
+ */
+async function topicSourceMessage(tx: Db, orgId: string, conversationId: string, requested: string | null): Promise<string | null> {
+  if (requested) {
+    const [found] = await tx
+      .select({ id: conversationMessage.id })
+      .from(conversationMessage)
+      .where(and(eq(conversationMessage.id, requested), eq(conversationMessage.organizationId, orgId), eq(conversationMessage.conversationId, conversationId)))
+      .limit(1)
+    if (!found) throw validation("El mensaje citado no es de esta conversación")
+    return found.id
+  }
+  const [last] = await tx
+    .select({ id: conversationMessage.id })
+    .from(conversationMessage)
+    .where(and(eq(conversationMessage.organizationId, orgId), eq(conversationMessage.conversationId, conversationId), eq(conversationMessage.direction, "in")))
+    .orderBy(desc(conversationMessage.createdAt), desc(conversationMessage.id))
+    .limit(1)
+  return last?.id ?? null
+}
+
+/**
+ * El profesional que atiende al paciente de esta persona: el de su cita no
+ * cancelada más cercana a hoy (la última que tuvo o la próxima). Nulo si no
+ * es paciente o nunca tuvo cita: el tema queda para recepción.
+ */
+async function treatingProfessional(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  const rows = await tx.execute<{ dentist_user_id: string }>(sql`
+    select a.dentist_user_id from appointment a
+    join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
+    join member mb on mb.organization_id = a.organization_id and mb.user_id = a.dentist_user_id
+    where a.organization_id = ${orgId} and p.person_id = ${contactId}
+      and a.status <> 'cancelada'
+    order by abs(extract(epoch from (a.starts_at - now()))) asc
+    limit 1`)
+  return rows[0]?.dentist_user_id ?? null
 }
 
 const HANDOFF_BRIEF_CHARS = 400
@@ -3429,23 +3494,34 @@ export async function claimHandoff(
   orgId: string,
   userId: string,
   handoffId: string,
-  /** «Tomar» la conversación: el caso pasa a quien la toma aunque ya tuviera responsable. */
-  opts: { takeOver?: boolean } = {},
+  /**
+   * `takeOver`: «Tomar este tema» aunque lo tenga otra persona (sin
+   * confirmación; a ella se le avisa). `toUserId`: «Pasar este tema a…»; por
+   * defecto, quien actúa. Ninguna de las dos apaga al agente (ADR 0050).
+   */
+  opts: { takeOver?: boolean; toUserId?: string } = {},
 ): Promise<HandoffItem> {
+  const target = opts.toUserId ?? userId
   const [membership] = await tx
     .select({ userId: member.userId })
     .from(member)
-    .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
+    .where(and(eq(member.organizationId, orgId), eq(member.userId, target)))
     .limit(1)
-  if (!membership) throw validation("Solo un miembro de la organización puede tomar la derivación")
+  if (!membership) throw validation("Solo un miembro de la organización puede tener el tema")
+  const [before] = await tx
+    .select({ assigneeUserId: agentHandoff.assigneeUserId })
+    .from(agentHandoff)
+    .where(and(eq(agentHandoff.id, handoffId), eq(agentHandoff.organizationId, orgId)))
+    .limit(1)
+  const passing = opts.toUserId !== undefined && opts.toUserId !== userId
   const [claimed] = await tx
     .update(agentHandoff)
-    .set({ assigneeUserId: userId })
+    .set({ assigneeUserId: target })
     .where(
       and(
         eq(agentHandoff.id, handoffId),
         eq(agentHandoff.organizationId, orgId),
-        ...(opts.takeOver ? [] : [isNull(agentHandoff.assigneeUserId)]),
+        ...(opts.takeOver || passing ? [] : [isNull(agentHandoff.assigneeUserId)]),
         handoffStillOpen(),
       ),
     )
@@ -3458,9 +3534,9 @@ export async function claimHandoff(
       .limit(1)
     if (!existing) throw notFound("Derivación")
     if (existing.taskId && (await getTask(tx, orgId, existing.taskId)).status !== "open") {
-      throw new ServiceError("HANDOFF_RESOLVED", 409, "Este caso ya se resolvió: no se puede tomar")
+      throw new ServiceError("HANDOFF_RESOLVED", 409, "Este tema ya se resolvió: no se puede tomar")
     }
-    if (existing.assigneeUserId === userId) {
+    if (existing.assigneeUserId === target) {
       const [row] = await tx
         .select()
         .from(agentHandoff)
@@ -3468,27 +3544,104 @@ export async function claimHandoff(
         .limit(1)
       return enrichHandoff(tx, row!)
     }
-    throw new ServiceError("HANDOFF_ALREADY_CLAIMED", 409, "Otra persona ya tomó este caso")
+    throw new ServiceError("HANDOFF_ALREADY_CLAIMED", 409, "Otra persona ya tomó este tema")
   }
   if (claimed.taskId) {
-    await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: userId, actorUserId: userId })
-  }
-  // Quien toma el caso tiene también la conversación: así lo ven la Bandeja y el ciclo que cierra.
-  if (claimed.conversationId) {
-    await tx
-      .update(conversation)
-      .set({ assignedUserId: userId, updatedAt: new Date() })
-      .where(and(eq(conversation.id, claimed.conversationId), eq(conversation.organizationId, orgId)))
+    await updateTask(tx, orgId, claimed.taskId, { assigneeUserId: target, actorUserId: userId })
   }
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId: userId,
-    action: "agent.handoff_claimed",
+    action: passing ? "agent.handoff_passed" : "agent.handoff_claimed",
     entity: "agent_handoff",
     entityId: claimed.id,
-    metadata: { taskId: claimed.taskId },
+    metadata: { taskId: claimed.taskId, from: before?.assigneeUserId ?? null, to: target },
   })
+  // Se avisa a quien lo tenía y, si se lo pasan, a quien lo recibe.
+  const [actor] = await tx.select({ name: user.name }).from(user).where(eq(user.id, userId)).limit(1)
+  const who = await topicPersonName(tx, orgId, claimed.contactId)
+  const href = claimed.conversationId ? `/inbox?conversation=${claimed.conversationId}` : "/inbox"
+  if (before?.assigneeUserId && before.assigneeUserId !== target) {
+    await createWorkspaceNotification(tx, orgId, {
+      userId: before.assigneeUserId,
+      dedupeKey: `tema:${claimed.id}:tomado:${target}`,
+      title: `${actor?.name ?? "Alguien"} tomó el tema de ${who}`,
+      body: claimed.reason,
+      href,
+      permission: "conversations.read",
+      actorUserId: userId,
+    })
+  }
+  if (passing) {
+    await createWorkspaceNotification(tx, orgId, {
+      userId: target,
+      dedupeKey: `tema:${claimed.id}:pasado:${target}`,
+      title: `${actor?.name ?? "Alguien"} te pasó el tema de ${who}`,
+      body: claimed.reason,
+      href,
+      permission: "conversations.read",
+      actorUserId: userId,
+    })
+  }
   return enrichHandoff(tx, claimed)
+}
+
+/** Nombre de la persona de un tema, para los avisos. */
+async function topicPersonName(tx: Db, orgId: string, contactId: string | null): Promise<string> {
+  if (!contactId) return "una persona"
+  const [row] = await tx
+    .select({ name: contact.displayName })
+    .from(contact)
+    .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
+    .limit(1)
+  return row?.name ?? "una persona"
+}
+
+/**
+ * La persona volvió a preguntar por un tema que tiene una persona del equipo
+ * (ADR 0050): el agente no lo responde; se anota el mensaje en el tema y se
+ * avisa a su responsable (o, sin responsable, queda resaltado en «Por atender»).
+ */
+export async function recordTopicAskedAgain(
+  tx: Db,
+  orgId: string,
+  input: { handoffId: string; messageId: string | null },
+): Promise<{ assigneeName: string | null; reason: string }> {
+  const [row] = await tx
+    .select()
+    .from(agentHandoff)
+    .where(and(eq(agentHandoff.id, input.handoffId), eq(agentHandoff.organizationId, orgId), handoffStillOpen()))
+    .limit(1)
+  if (!row) throw notFound("Tema")
+  const asked = new Set(row.askedMessageIds ?? [])
+  if (input.messageId) {
+    const [msg] = await tx
+      .select({ id: conversationMessage.id })
+      .from(conversationMessage)
+      .where(and(eq(conversationMessage.id, input.messageId), eq(conversationMessage.organizationId, orgId),
+        eq(conversationMessage.conversationId, row.conversationId ?? "00000000-0000-0000-0000-000000000000")))
+      .limit(1)
+    if (msg) asked.add(msg.id)
+  }
+  await tx
+    .update(agentHandoff)
+    .set({ askedMessageIds: [...asked].slice(-20), askedAgainAt: new Date() })
+    .where(eq(agentHandoff.id, row.id))
+  let assigneeName: string | null = null
+  if (row.assigneeUserId) {
+    const [assignee] = await tx.select({ name: user.name }).from(user).where(eq(user.id, row.assigneeUserId)).limit(1)
+    assigneeName = assignee?.name ?? null
+    const who = await topicPersonName(tx, orgId, row.contactId)
+    await upsertWorkspaceNotification(tx, orgId, {
+      userId: row.assigneeUserId,
+      dedupeKey: `tema:${row.id}:pregunta`,
+      title: `${who} volvió a preguntar por su tema`,
+      body: row.reason,
+      href: row.conversationId ? `/inbox?conversation=${row.conversationId}` : "/inbox",
+      permission: "conversations.read",
+    })
+  }
+  return { assigneeName, reason: row.reason }
 }
 
 /* ---------- Supervisión: libro de corridas reales ---------- */

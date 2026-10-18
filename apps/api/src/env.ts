@@ -53,6 +53,8 @@ const envSchema = z.object({
   S3_PUBLIC_URL: z.string().url(),
   SECRETS_KEY: z.string().min(1),
   CHANNEL_VALIDATE_EXTERNAL: z.enum(["true", "false"]).default("true"),
+  /** Rechazar contraseñas filtradas consultando Have I Been Pwned; `false` en pruebas sin red. */
+  PASSWORD_BREACH_CHECK: z.enum(["true", "false"]).default("true"),
   GMAIL_CLIENT_ID: z.string().default(""),
   GMAIL_CLIENT_SECRET: z.string().default(""),
   GMAIL_REDIRECT_URI: z.string().default(""),

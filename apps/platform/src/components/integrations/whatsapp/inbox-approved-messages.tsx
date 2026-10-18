@@ -1,4 +1,4 @@
-import { Button, buttonVariants, cn, FieldLabel, Input, RadioGroup, RadioGroupItem, ScrollArea, Skeleton } from "@odentia/ui"
+import { Button, buttonVariants, cn, FieldLabel, Input, RadioGroup, RadioGroupItem, Skeleton } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -168,8 +168,9 @@ export function InboxApprovedMessages({
           <span id={legendId} className="text-sm font-semibold">
             Elige el mensaje
           </span>
-          {/* Con muchos mensajes, la lista se desplaza dentro de la zona: el hilo sigue a la vista. */}
-          <ScrollArea className="[&_[data-slot=scroll-area-viewport]]:max-h-[45dvh]">
+          {/* La lista no tiene desplazamiento propio: en la Bandeja se desplaza toda la zona de
+              escritura (aviso, lista y botón), con su tope, y el historial queda a la vista. */}
+          <div>
           <RadioGroup
             aria-labelledby={legendId}
             className="gap-2 py-0.5 pr-3 pl-0.5"
@@ -224,7 +225,7 @@ export function InboxApprovedMessages({
               )
             })}
           </RadioGroup>
-          </ScrollArea>
+          </div>
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}

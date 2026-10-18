@@ -148,7 +148,19 @@ export async function processOutbound(
           .where(eq(message.id, messageId))
         return
       }
-      const outbound: OutboundMessage = await buildOutbound(row, deps)
+      const built: OutboundMessage = await buildOutbound(row, deps)
+      // Respuesta citada (ADR 0050): el id del proveedor del mensaje citado.
+      let outbound = built
+      if (row.message.replyToMessageId) {
+        const [quoted] = await tx
+          .select({ externalId: message.externalId })
+          .from(message)
+          .where(and(eq(message.id, row.message.replyToMessageId), eq(message.conversationId, row.message.conversationId)))
+          .limit(1)
+        if (quoted?.externalId && !quoted.externalId.startsWith("mock-")) {
+          outbound = { ...built, replyToExternalId: quoted.externalId }
+        }
+      }
       let externalId: string
       if (deps.senderMode === "mock") {
         externalId = `mock-${randomUUID()}`

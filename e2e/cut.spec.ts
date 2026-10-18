@@ -15,7 +15,8 @@ async function register(page: Page, user: UiUser): Promise<void> {
   await page.getByLabel("Apellidos").fill(rest.join(" "))
   await page.getByLabel("Correo").fill(user.email)
   await page.getByLabel("Contraseña").fill(user.password)
-  await page.getByRole("button", { name: "Registrarme" }).click()
+  await page.getByRole("checkbox", { name: /Acepto los Términos/ }).check()
+  await page.getByRole("button", { name: /^(Obtén .+ de crédito|Crear mi cuenta)$/ }).click()
   await expect(page).toHaveURL(/verify-email-sent/)
 }
 
@@ -28,7 +29,7 @@ async function login(page: Page, user: UiUser): Promise<void> {
   await gotoHydrated(page, "/login")
   await page.getByLabel("Correo").fill(user.email)
   await page.getByLabel("Contraseña").fill(user.password)
-  await page.getByRole("button", { name: "Ingresar" }).click()
+  await page.getByRole("button", { name: "Entrar", exact: true }).click()
 }
 
 async function onboard(page: Page, org: UiOrg): Promise<void> {
@@ -122,7 +123,7 @@ test("auth: retorno al tenant conserva origen", async ({ browser, createOwner },
     expect(nextUrl.pathname).toBe("/settings/branches")
     await page.getByLabel("Correo").fill(owner.user.email)
     await page.getByLabel("Contraseña").fill(owner.user.password)
-    await page.getByRole("button", { name: "Ingresar" }).click()
+    await page.getByRole("button", { name: "Entrar", exact: true }).click()
     await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/settings/branches"))
     expect(new URL(page.url()).origin).toBe(expectedOrigin)
     await expect(page.getByText("Sede Central")).toBeVisible()

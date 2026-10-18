@@ -27,9 +27,11 @@ import {
   createBookingLink,
   requestPortalReentry,
   annotateHandoff,
+  agentReplyBlockedReason,
   closeConversationWith,
   closurePendingReason,
   createHandoff,
+  recordTopicAskedAgain,
   createProposal,
   createTask,
   findFreeGaps,
@@ -323,20 +325,27 @@ export interface AgentToolCtx {
   treatment?: "tu" | "usted" | null
   /** El agente se despidió y cerró la conversación en esta corrida. */
   closed?: boolean
+  /**
+   * Mientras el modelo escribía, el equipo tomó o cerró la conversación: lo
+   * redactado no sale y la corrida termina sin respuesta del agente.
+   */
+  takenOver?: boolean
   /** En una prueba, los servicios cuyo precio ya dijo el agente (no hay traza que leer). */
   pricedSubjects?: string[]
 }
 
 /**
- * Derivación a humano: registro estructurado (resumen, motivo, prioridad,
- * tarea), apaga el agente y lo deja en «Te espera» del equipo. Misma vía
- * para keyword, tool y maxTurns.
+ * Tema para el equipo (ADR 0050): registro estructurado (resumen, motivo,
+ * prioridad, tarea y el mensaje que lo originó). No apaga al agente: el tema
+ * queda en «Por atender» y el agente sigue con lo demás. Misma vía para
+ * palabra clave, herramienta y maxTurns.
  */
 export async function performHandoff(
   ctx: AgentToolCtx,
   reason: string,
   summary?: string,
   priority: "alta" | "media" | "baja" = "media",
+  clinical = false,
 ): Promise<void> {
   if (ctx.dryRun) {
     ctx.handedOff = true
@@ -349,6 +358,8 @@ export async function performHandoff(
       summary: summary?.trim() ? summary : reason,
       priority,
       createdBy: "agent",
+      sourceMessageId: ctx.triggerId,
+      clinical,
     })
     ctx.handoffId = handoff.id
   })
@@ -485,6 +496,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `No se le puede escribir: ${outcome.waiting} El caso pasó a una persona; no envíes más mensajes.`
   }
   /**
+   * Justo antes de enviar: si el equipo tomó o cerró la conversación mientras
+   * el modelo redactaba, no sale nada y el turno termina (`takenOver`). Con
+   * una derivación de esta misma corrida el agente ya se apagó a sí mismo.
+   */
+  const teamTookOver = async (): Promise<string | null> => {
+    if (ctx.dryRun || ctx.handedOff) return null
+    const reason = await inOrg((tx) => agentReplyBlockedReason(tx, ctx.orgId, ctx.conversationId))
+    if (!reason) return null
+    ctx.takenOver = true
+    ctx.replySettled = true
+    return reason
+  }
+  /**
    * Crea la propuesta comercial con clave estable por trigger + herramienta
    * + payload. En modo directo se ejecuta en el mismo acto; si exige la
    * confirmación del interlocutor, queda pendiente con su recorrido real. Los
@@ -512,7 +536,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
             conversationId: ctx.conversationId,
             triggerId: ctx.triggerId,
             tool: toolName,
-            payload,
+            // Un mensaje es uno por disparador y herramienta, diga lo que diga:
+            // si la corrida se reintenta, el modelo redacta otro texto y, con
+            // el texto en la clave, la persona recibía dos respuestas. Un envío
+            // fallido no bloquea el siguiente (`createProposal` le da otra clave).
+            payload: action === "enviar_mensaje" && ctx.triggerId ? { message: "reply" } : payload,
           }),
           secretsKey: ctx.secretsKey,
         }),
@@ -759,6 +787,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // WINDOW_CLOSED ya no lanza: llega como `fallida` y propose retoma la
       // conversación con el sistema. Lo que sí lanza (infra 429/5xx incluida)
       // no reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
+      const takenOver = await teamTookOver()
+      if (takenOver) return takenOver
       const sent: ProposalItem[] = []
       // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
       const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
@@ -799,6 +829,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ctx.simulatedReply = text
         return `[SIMULACIÓN] Se enviaría la despedida y se cerraría la conversación: ${text}`
       }
+      const takenOver = await teamTookOver()
+      if (takenOver) return takenOver
       const sent: ProposalItem[] = []
       const outcome = await propose("enviar_mensaje", { kind: "text", text }, "despedirse_y_cerrar", undefined, (proposal) => {
         sent.push(proposal)
@@ -1859,7 +1891,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const requestHandoff = tool(
-    async ({ reason, summary, priority, assigneeUserId, message, asks, pending }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string }) => {
+    async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
@@ -1898,6 +1930,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           createdBy: "agent",
           asks,
           pending,
+          sourceMessageId: ctx.triggerId,
+          clinical: clinical === true,
         }),
       )
       ctx.handedOff = true
@@ -1911,13 +1945,32 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
         if (ctx.replySettled) await annotate(true)
       }
-      return `Derivado a humano (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes más mensajes.`
+      return `Tema pasado al equipo (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes más mensajes en este turno; en los siguientes sigues atendiendo todo lo demás.`
     },
     {
       name: "request_human_handoff",
       description:
-        "Deriva a un humano con motivo, resumen factual de lo conversado y prioridad (alta/media/baja): queda en la cola del equipo con plazo según prioridad. Apaga el agente y cierra el turno: pon en message el aviso breve para el interlocutor (por ejemplo, que una persona continuará la atención), porque después no podrás enviarle nada.",
+        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Cierra este turno: pon en message el aviso breve de quién lo verá y cuándo le responde y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
       schema: operationAgentSchema("derivacion.crear"),
+    },
+  )
+
+  const rememberTopic = tool(
+    async ({ tema_id }: { tema_id: string }) => {
+      if (ctx.dryRun) return "[SIMULACIÓN] Se anotaría que volvió a preguntar y se avisaría a quien tiene el tema."
+      const result = await inOrg((tx) =>
+        recordTopicAskedAgain(tx, ctx.orgId, { handoffId: tema_id, messageId: ctx.triggerId }),
+      ).catch(() => null)
+      if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
+      return result.assigneeName
+        ? `Anotado y avisado a ${result.assigneeName}. Dile a la persona que ${result.assigneeName} tiene su consulta y cuándo le responde; no respondas el tema tú.`
+        : "Anotado: el equipo lo verá. Dile a la persona que su consulta la tiene el equipo y cuándo le responden; no respondas el tema tú."
+    },
+    {
+      name: "recordar_tema",
+      description:
+        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene y cuándo le responde, sin responder el tema.",
+      schema: z.object({ tema_id: z.string().uuid().describe("El id del tema, de «Temas con el equipo».") }),
     },
   )
 
@@ -1956,6 +2009,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     noteCase,
     rememberFact,
     requestHandoff,
+    rememberTopic,
   ]
   const tools = all.filter(
     (candidate) =>

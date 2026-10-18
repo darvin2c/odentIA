@@ -60,7 +60,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
-import { type AgentRuntime, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
+import { type AgentRuntime, CONTACT_DAILY_RUN_LIMIT, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
 import { compileAgentGraph } from "./graph.js"
 import { extractDictation } from "./dictation.js"
 import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
@@ -234,7 +234,7 @@ it("handoff por palabra clave apaga el agente y crea tarea", async () => {
       .from(conversation)
       .where(eq(conversation.id, conversationId)),
   )
-  expect(conv?.agentStatus).toBe("off")
+  expect(conv?.agentStatus).toBe("on") // derivar no apaga al agente (ADR 0050)
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
   const tasks = await withOrgContext(appDb, "org_a", (tx) =>
     tx
@@ -352,7 +352,7 @@ it("maxTurns deriva cuando el modelo no llega a responder", async () => {
     const { conversationId, messageId } = await ingestText("tg:ag4", "evt-ag4", "Hola")
     const model = new ScriptedModel((_messages, call) => toolCall("listar_tareas", {}, `call-${call}`))
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
   } finally {
@@ -381,7 +381,7 @@ it("la respuesta cierra el turno: una sola llamada al modelo y sin derivar con m
   }
 })
 
-it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin aviso en la campana", async () => {
+it("texto sin herramienta de envío: pide un momento y reintenta; si vuelve a pasar, queda un tema con el aviso fijo (ADR 0050)", async () => {
   const stamp = Date.now()
   const receptionId = `agent-reception-${stamp}`
   await ownerDb.insert(user).values({ id: receptionId, name: "Recepción", email: `recepcion-${stamp}@example.test` })
@@ -391,7 +391,8 @@ it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin 
   const { conversationId, messageId } = await ingestText("tg:ag-mudo", "evt-ag-mudo", "¿Atienden sábados?")
   const model = new ScriptedModel(() => new AIMessage({ content: "Sí, atendemos los sábados." }))
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  expect(await agentMessages(conversationId)).toEqual([])
+  // La persona no queda sin nada: un momento, y la corrida vuelve a la cola.
+  expect(await agentMessages(conversationId)).toEqual(["Dame un momento, te respondo enseguida."])
   expect(await agentStatusOf(conversationId)).toBe("on")
   expect(await ledgerRows(conversationId)).toEqual([{ status: "sin_respuesta", llmCalls: 1, toolsUsed: [] }])
   const notices = await withOrgContext(appDb, "org_a", (tx) =>
@@ -406,6 +407,13 @@ it("texto sin herramienta de envío queda como sin_respuesta, sin derivar y sin 
   // vuelve a llamar al modelo, y tampoco avisa en la campana.
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(model.seen).toHaveLength(2)
+  // La segunda vez con el mismo mensaje pasa a recepción como tema, con el aviso fijo.
+  expect((await ledgerRows(conversationId)).map((row) => row.status)).toEqual(["sin_respuesta", "handoff"])
+  // Sin orden en la consulta: se comparan los dos mensajes, no su posición.
+  expect((await agentMessages(conversationId)).sort()).toEqual([
+    "Dame un momento, te respondo enseguida.",
+    "Recibimos tu mensaje. Una persona del equipo te va a responder por aquí.",
+  ])
   const again = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ id: workspaceNotification.id })
@@ -478,7 +486,7 @@ it("derivar con aviso envía el mensaje y registra la derivación en una sola ll
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(model.seen.length).toBe(1)
   expect(await agentMessages(conversationId)).toEqual(["Te paso con una persona del equipo."])
-  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentStatusOf(conversationId)).toBe("on")
   const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
     tx
       .select({ priority: agentHandoff.priority })
@@ -519,7 +527,7 @@ it("si odentIA no tiene la cuenta del proveedor del modelo elegido, el caso pasa
     const { conversationId, messageId } = await ingestText("tg:ag-sin-cuenta", "evt-ag-sin-cuenta", "Hola")
     // Solo hay cuenta de OpenAI: la clave de un proveedor nunca sirve para el otro.
     expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave-openai", baseUrl: "http://127.0.0.1:9/v1" } })).toBe("done")
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx.select({ error: agentRunLedger.error, model: agentRunLedger.model }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
     )
@@ -543,7 +551,7 @@ it("una credencial rechazada no reintenta: deriva, avisa una vez a quien adminis
     const first = await ingestText("tg:ag-401", "evt-ag-401", "Hola")
     expect(await runAgent(first.conversationId, first.messageId, 0, platform)).toBe("done")
     expect(provider.hits()).toBe(1)
-    expect(await agentStatusOf(first.conversationId)).toBe("off")
+    expect(await agentStatusOf(first.conversationId)).toBe("on")
     expect(await agentMessages(first.conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
     const rows = await ledgerRows(first.conversationId)
     expect(rows).toHaveLength(1)
@@ -602,7 +610,7 @@ it("una cuota agotada (402) tampoco reintenta y avisa con su propio título", as
     const { conversationId, messageId } = await ingestText("tg:ag-402", "evt-ag-402", "Hola")
     expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave", baseUrl: `http://127.0.0.1:${address.port}/v1` } })).toBe("done")
     expect(hits).toBe(1)
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
     )
@@ -745,7 +753,7 @@ it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", asy
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
     expect(model.seen.length).toBe(0)
     expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
-    expect(await agentStatusOf(conversationId)).toBe("off")
+    expect(await agentStatusOf(conversationId)).toBe("on")
     const [row] = await withOrgContext(appDb, "org_a", (tx) =>
       tx
         .select({ status: agentRunLedger.status, error: agentRunLedger.error })
@@ -1413,7 +1421,7 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   const winner = firstTry.status === "fulfilled" ? ownerId : recepId
   const loser = firstTry.status === "fulfilled" ? secondTry : firstTry
   expect(loser.status).toBe("rejected")
-  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otra persona ya tomó este caso")
+  expect(String((loser as PromiseRejectedResult).reason)).toContain("Otra persona ya tomó este tema")
   // La tarea vinculada pasa al mismo responsable.
   const [claimedTask] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
@@ -1435,12 +1443,11 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
   const [resolved] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select().from(crmTask).where(eq(crmTask.id, handoff.taskId!)))
   expect(resolved!.status).toBe("done")
-  // Era el único caso del hilo: completarlo resuelve la conversación (ADR 0024),
-  // con el equipo como motivo y el agente encendido para la próxima atención.
+  // Completar el tema no cierra la conversación (ADR 0050): el agente sigue con lo demás.
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ agentStatus: conversation.agentStatus, status: conversation.status, closeReason: conversation.closeReason, closedByUserId: conversation.closedByUserId })
+    tx.select({ agentStatus: conversation.agentStatus, status: conversation.status })
       .from(conversation).where(eq(conversation.id, conversationId)))
-  expect(conv).toMatchObject({ status: "closed", closeReason: "equipo", closedByUserId: winner, agentStatus: "on" })
+  expect(conv).toMatchObject({ status: "open", agentStatus: "on" })
 })
 
 /** Sede con unidad dental, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
@@ -1596,25 +1603,52 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
 })
 
 it("una respuesta con un precio que no está en lo consultado no sale y, a la segunda, el caso pasa a una persona", async () => {
-  const { conversationId, messageId } = await ingestText("tg:precio-inventado", "evt-precio-1", "¿Cuánto cuesta la limpieza?")
-  const model = new ScriptedModel(() => toolCall("send_reply", { text: "La limpieza cuesta S/ 99." }, `envio-${Date.now()}`))
-  expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  // Dos intentos: el primero vuelve al modelo con el dato que falta; el segundo deriva.
-  expect(model.seen).toHaveLength(2)
-  const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
-  expect(feedback).toContain("No enviado: precio «S/ 99»")
-  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
-  expect(await agentStatusOf(conversationId)).toBe("off")
-  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
-  const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
-  expect(traces.map((trace) => trace.outcome)).toEqual(["bloqueada", "bloqueada"])
-  expect(traces[0]?.checks).toEqual([{ kind: "precio", value: "S/ 99", ok: false, source: null }])
-  expect(traces[0]?.messageId).toBeNull()
-  const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ reason: agentHandoff.reason, summary: agentHandoff.summary }).from(agentHandoff)
-      .where(eq(agentHandoff.conversationId, conversationId)))
-  expect(handoff?.reason).toBe("El agente no pudo sustentar un dato de su respuesta")
-  expect(handoff?.summary).toContain("S/ 99")
+  // Las cifras de un identificador no sustentan un precio: la referencia de
+  // este profesional llega en los datos de la clínica y lleva el mismo «99»
+  // del precio inventado. Con los profesionales de otras pruebas (ids con
+  // Date.now) pasaba lo mismo a veces y la respuesta salía.
+  const dentistId = "dentista-precio-185"
+  expect(professionalRef("org_a", dentistId)).toBe("pro-99d040905f")
+  const [sede] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede Precio", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  await ownerDb.insert(user).values({ id: dentistId, name: "Dentista Precio", email: `${dentistId}@example.test` })
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
+  const schedule = (weekdays: number[]) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      setProfessionalSchedule(tx, "org_a", dentistId, {
+        branchId: sede!.id,
+        dentistUserId: dentistId,
+        rules: weekdays.map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+      }))
+  await schedule([1, 2, 3, 4, 5])
+  try {
+    const { conversationId, messageId } = await ingestText("tg:precio-inventado", "evt-precio-1", "¿Cuánto cuesta la limpieza?")
+    const model = new ScriptedModel((_messages, call) => toolCall("send_reply", { text: "La limpieza cuesta S/ 99." }, `envio-${call}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(systemTextOf(model.seen[0] ?? [])).toContain("pro-99d040905f")
+    // Dos intentos: el primero vuelve al modelo con el dato que falta; el segundo deriva.
+    expect(model.seen).toHaveLength(2)
+    const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
+    expect(feedback).toContain("No enviado: precio «S/ 99»")
+    expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
+    expect(await agentStatusOf(conversationId)).toBe("on")
+    expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
+    const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+    expect(traces.map((trace) => trace.outcome)).toEqual(["bloqueada", "bloqueada"])
+    expect(traces[0]?.checks).toEqual([{ kind: "precio", value: "S/ 99", ok: false, source: null }])
+    expect(traces[0]?.messageId).toBeNull()
+    const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ reason: agentHandoff.reason, summary: agentHandoff.summary }).from(agentHandoff)
+        .where(eq(agentHandoff.conversationId, conversationId)))
+    expect(handoff?.reason).toBe("El agente no pudo sustentar un dato de su respuesta")
+    expect(handoff?.summary).toContain("S/ 99")
+  } finally {
+    await schedule([])
+  }
 })
 
 it("un precio de una respuesta oficial sale y deja constancia de en qué se basó", async () => {
@@ -2282,7 +2316,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
         "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "elegir_mensajes",
-        "enviar_comprobante", "pedir_volver_al_portal", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
+        "enviar_comprobante", "pedir_volver_al_portal", "recordar_tema", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
         "ver_sedes_y_servicios",
       ],
     )
@@ -2325,7 +2359,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(asks.offered).toEqual([["request_human_handoff"]])
     expect(systemTextOf(asks.seen[0] ?? [])).toContain("el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso")
     expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] }])
-    expect(await agentStatusOf(handoff.conversationId)).toBe("off")
+    expect(await agentStatusOf(handoff.conversationId)).toBe("on")
     expect(handoff.handoffs).toHaveLength(1)
     expect(handoff.handoffs[0]).toMatchObject({
       reason: "Pide hablar con una persona",
@@ -2637,7 +2671,7 @@ it("un error que se repite deriva y avisa a la persona con el texto fijo", async
     message: { kind: "inbound_message", orgId: "org_a", conversationId, messageId },
   })
   expect(await broken).toBe("done")
-  expect(await agentStatusOf(conversationId)).toBe("off")
+  expect(await agentStatusOf(conversationId)).toBe("on")
   expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
 })
 
@@ -2687,4 +2721,77 @@ it("buscar_huecos nunca muestra el usuario del profesional: proponer_cita recibe
   await propose.invoke({ ...slot, dentistUserId: ref })
   const [proposal] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
   expect(proposal?.payload).toMatchObject({ dentistUserId: fx.dentistId })
+})
+
+/** Un modelo que, mientras «redacta», deja que pase algo en la base (el equipo toma o cierra la conversación). */
+class SlowScriptedModel extends ScriptedModel {
+  constructor(
+    script: (messages: BaseMessage[], call: number) => AIMessage,
+    private readonly meanwhile: () => Promise<unknown>,
+  ) {
+    super(script)
+  }
+  override async _generate(messages: BaseMessage[]): Promise<ChatResult> {
+    await this.meanwhile()
+    return super._generate(messages)
+  }
+}
+
+it("si el equipo toma o cierra la conversación mientras el modelo escribe, lo redactado no sale ni se cobra", async () => {
+  for (const [thread, meanwhile] of [
+    ["tg:tomada-en-curso", (id: string) => ownerDb.update(conversation).set({ agentStatus: "off" }).where(eq(conversation.id, id))],
+    ["tg:cerrada-en-curso", (id: string) => withOrgContext(appDb, "org_a", (tx) => closeConversationWith(tx, "org_a", id, { reason: "manual", byUserId: null }))],
+  ] as const) {
+    const { conversationId, messageId } = await ingestText(thread, `evt-${thread}`, "Hola, ¿tienen cita el lunes?")
+    const model = new SlowScriptedModel(
+      () => toolCall("send_reply", { text: "Sí, el lunes a primera hora." }, "call-1"),
+      () => meanwhile(conversationId),
+    )
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(model.seen).toHaveLength(1)
+    expect(await agentMessages(conversationId)).toEqual([])
+    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+    expect(row).toEqual({ status: "omitida", error: "team-took-over" })
+    const [conv] = await ownerDb.select({ status: conversation.status }).from(conversation).where(eq(conversation.id, conversationId))
+    expect(conv?.status).toBe(thread === "tg:cerrada-en-curso" ? "closed" : "open")
+  }
+})
+
+it("quien escribe sin parar pasa al equipo sin llamar al modelo, y los demás siguen atendidos", async () => {
+  const { conversationId, messageId } = await ingestText("tg:sin-parar", "evt-sin-parar", "Hola otra vez")
+  await ownerDb.insert(agentRunLedger).values(
+    Array.from({ length: CONTACT_DAILY_RUN_LIMIT }, () => ({
+      organizationId: "org_a", conversationId, model: "fake", status: "ok", startedAt: new Date(), llmCalls: 1,
+    })),
+  )
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen).toHaveLength(0)
+  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])
+  expect(await agentStatusOf(conversationId)).toBe("on")
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ error: agentRunLedger.error }).from(agentRunLedger).where(and(eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.status, "handoff"))))
+  expect(rows).toEqual([{ error: "CONTACT_DAILY_LIMIT" }])
+
+  const other = await ingestText("tg:otra-persona", "evt-otra-persona", "Hola, quiero info")
+  const answering = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime en qué te ayudo." }, "call-1"))
+  expect(await runScripted(answering, other.conversationId, other.messageId)).toBe("done")
+  expect(await agentMessages(other.conversationId)).toEqual(["Hola, dime en qué te ayudo."])
+})
+
+it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no como «[adjunto]»", async () => {
+  const { conversationId } = await ingestText("tg:imagen", "evt-imagen-1", "Les mando la foto")
+  const [image] = await ownerDb
+    .insert(message)
+    .values({
+      organizationId: "org_a", conversationId, direction: "in", senderKind: "contact", status: "received",
+      contentType: "image", body: null, externalId: "evt-imagen-2", createdAt: new Date(Date.now() + 1000),
+    })
+    .returning({ id: message.id })
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "Gracias, ¿qué te molesta?" }, "call-1"))
+  expect(await runScripted(model, conversationId, image!.id)).toBe("done")
+  const said = model.seen[0]!.map((m) => String(m.content)).join("\n")
+  expect(said).toContain("Envió una imagen que no puedes ver")
+  expect(said).not.toContain("[adjunto]")
 })

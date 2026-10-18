@@ -29,3 +29,14 @@ export const tenantUrl = (slug: string, path = "/") =>
   `https://${slug}.${BASE_DOMAIN}${BASE_PORT}${path}`
 
 export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
+
+/** Página de la web de marketing (dominio raíz). */
+export const webUrl = (path = "/") => `https://${BASE_DOMAIN}${BASE_PORT}${path}`
+
+/** Los documentos que se aceptan y dónde escribir si no se está de acuerdo. */
+export const legalLinks = {
+  terms: webUrl("/terminos"),
+  privacy: webUrl("/privacidad"),
+  agreement: webUrl("/encargo-de-tratamiento"),
+  support: webUrl("/contacto"),
+}

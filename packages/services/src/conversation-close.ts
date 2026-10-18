@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { agentCaseMemory, agentHandoff, agentProposal, type AgentCaseNote } from "@odentia/db/schema/agent"
 import { member } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
-import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { claimHandoff } from "./agent-operations.js"
@@ -12,6 +12,7 @@ import {
   handoffOpenExistsSql,
   lastAcceptedOutSql,
   proposalPendingExistsSql,
+  teamLiveSql,
   unansweredSql,
 } from "./conversation-state.js"
 import { reopenIfClosed, sendOutbound } from "./conversations.js"
@@ -35,6 +36,9 @@ import { updateTask } from "./tasks.js"
 
 export const CONVERSATION_CLOSE_REASONS = ["resuelta", "sin_respuesta", "equipo", "manual"] as const
 export type ConversationCloseReason = (typeof CONVERSATION_CLOSE_REASONS)[number]
+
+/** Retraso del ciclo tras el que ya no se da por puntual: pasado esto, una despedida espera al «Horario para escribir». */
+const CARE_LATE_MS = 15 * 60 * 1000
 
 /** Horas desde el último mensaje del agente tras las que insiste, una sola vez por atención. */
 export const NUDGE_AFTER_HOURS = 3
@@ -374,62 +378,40 @@ export async function closeConversation(tx: Db, orgId: string, id: string, actor
 }
 
 /**
- * La conversación que resuelve completar esta tarea: la del caso que pasó el
- * agente, si sigue abierta y no le queda otro caso sin resolver. Nula si
- * completar la tarea no toca ninguna conversación.
+ * Completar la tarea de un tema ya no cierra la conversación (ADR 0050): el
+ * agente sigue con lo demás y el ciclo la cierra por silencio, como cualquier
+ * otra. Se mantienen para quien pregunta qué pasará al completarla: nada.
  */
-async function conversationResolvedByTask(tx: Db, orgId: string, taskId: string): Promise<string | null> {
+export async function getTaskResolvePreview(
+  _tx: Db,
+  _orgId: string,
+  _taskId: string,
+  _now = new Date(),
+): Promise<{ conversationId: string; contactName: string; preview: ResolvePreview } | null> {
+  return null
+}
+
+/** Tras completar la tarea de un tema: avisa a la Bandeja; la conversación sigue con el agente. */
+export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: string, _actorUserId: string | null): Promise<boolean> {
   const [handoff] = await tx
     .select({ conversationId: agentHandoff.conversationId })
     .from(agentHandoff)
     .where(and(eq(agentHandoff.organizationId, orgId), eq(agentHandoff.taskId, taskId)))
     .limit(1)
-  const conversationId = handoff?.conversationId
-  if (!conversationId) return null
-  const [thread] = await tx
-    .select({ status: conversation.status })
-    .from(conversation)
-    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
-    .limit(1)
-  if (thread?.status !== "open") return null
-  if ((await countOpenHandoffsOf(tx, orgId, conversationId, taskId)) > 0) return null
-  return conversationId
-}
-
-/**
- * Lo que pasará al completar la tarea de un caso que pasó el agente: lo mismo
- * que «Resolver» (`getResolvePreview`), dicho antes en Tareas y en «Contexto».
- * Nulo si completarla no cierra ninguna conversación.
- */
-export async function getTaskResolvePreview(
-  tx: Db,
-  orgId: string,
-  taskId: string,
-  now = new Date(),
-): Promise<{ conversationId: string; contactName: string; preview: ResolvePreview } | null> {
-  const conversationId = await conversationResolvedByTask(tx, orgId, taskId)
-  if (!conversationId) return null
-  const thread = await threadForWriting(tx, orgId, conversationId)
-  return { conversationId, contactName: thread.contactName, preview: await getResolvePreview(tx, orgId, conversationId, now) }
-}
-
-/**
- * Tras completar la tarea de una derivación: si el hilo sigue abierto y no
- * le queda otra derivación sin resolver, el equipo lo resolvió.
- */
-export async function resolveAfterHandoffTask(tx: Db, orgId: string, taskId: string, actorUserId: string | null): Promise<boolean> {
-  const conversationId = await conversationResolvedByTask(tx, orgId, taskId)
-  if (!conversationId) return false
-  await resolveConversationByTeam(tx, orgId, conversationId, actorUserId)
-  return true
+  if (handoff?.conversationId) {
+    await tx.execute(
+      sql`select pg_notify('org_events', ${JSON.stringify({ orgId, kind: "conversation.updated", conversationId: handoff.conversationId, at: new Date().toISOString() })})`,
+    )
+  }
+  return false
 }
 
 /* ------------------------------ Tomar y devolver ------------------------------ */
 
 /**
- * «Tomar»: la conversación pasa a quien la toma, el agente se apaga en el hilo
- * y las derivaciones abiertas quedan a su nombre. Tomar una cerrada la reabre
- * antes (ADR 0024): nunca queda una conversación cerrada a cargo de alguien.
+ * «Tomar»: los temas abiertos del hilo pasan a quien los toma (sin
+ * confirmación; se avisa a quien los tenía). El agente no se apaga: sigue con
+ * lo demás (ADR 0050). Tomar una cerrada la reabre antes (ADR 0024).
  */
 export async function takeConversation(tx: Db, orgId: string, id: string, userId: string): Promise<void> {
   const [membership] = await tx
@@ -443,7 +425,7 @@ export async function takeConversation(tx: Db, orgId: string, id: string, userId
   const now = new Date()
   await tx
     .update(conversation)
-    .set({ assignedUserId: userId, agentStatus: "off", updatedAt: now })
+    .set({ assignedUserId: userId, updatedAt: now })
     .where(and(eq(conversation.id, thread.id), eq(conversation.organizationId, orgId)))
   const open = await tx
     .select({ id: agentHandoff.id })
@@ -464,14 +446,11 @@ export async function takeConversation(tx: Db, orgId: string, id: string, userId
 }
 
 /**
- * «Devolver al agente»: sin asignación y con el agente encendido. Con un caso
- * derivado abierto no se devuelve: antes se resuelve o se deja con el equipo.
+ * Vuelve a encender al agente en el hilo y quita la asignación. Los temas
+ * abiertos siguen con su responsable: el agente nunca los responde (ADR 0050).
  */
 export async function releaseConversation(tx: Db, orgId: string, id: string, actorUserId: string | null): Promise<void> {
   const thread = await threadForWriting(tx, orgId, id)
-  if ((await countOpenHandoffsOf(tx, orgId, id)) > 0) {
-    throw new ServiceError("HANDOFF_OPEN", 409, "Resuelve antes el caso o déjalo con el equipo")
-  }
   const now = new Date()
   await tx
     .update(conversation)
@@ -500,6 +479,32 @@ export async function closurePendingReason(tx: Db, orgId: string, id: string): P
   }
   if ((await countOpenHandoffsOf(tx, orgId, id)) > 0) {
     return "El caso está con una persona del equipo: no cierres la conversación."
+  }
+  return null
+}
+
+/**
+ * Por qué el agente ya no debe enviar lo que redactó: mientras el modelo
+ * escribía (puede tardar minutos), una persona tomó la conversación o la
+ * cerró. Enviar igual le hablaría encima al equipo y, en una cerrada, la
+ * reabriría (`sendOutbound`). Nulo si la conversación sigue siendo del agente.
+ */
+export async function agentReplyBlockedReason(tx: Db, orgId: string, id: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ status: conversation.status, agentStatus: conversation.agentStatus })
+    .from(conversation)
+    .where(and(eq(conversation.id, id), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!row) return "La conversación ya no existe: no envíes nada."
+  if (row.status !== "open") return "El equipo cerró la conversación mientras preparabas la respuesta: no envíes nada."
+  if (row.agentStatus !== "on") {
+    return "Una persona del equipo apagó el agente en esta conversación mientras preparabas la respuesta: no envíes nada; la sigue ella."
+  }
+  // Una persona del equipo conversa en vivo: el agente espera (ADR 0050).
+  const [live] = await tx.execute<{ live: boolean }>(sql`select ${teamLiveSql(sql.raw("c"))} as live from conversation c
+    where c.id = ${id} and c.organization_id = ${orgId}`)
+  if (live?.live) {
+    return "Una persona del equipo está conversando ahora con esta persona: no envíes nada; el agente vuelve cuando ella deje de escribir."
   }
   return null
 }
@@ -630,7 +635,9 @@ export async function tickConversationCare(
   return summary
 
   async function careFor(inner: Db, row: CareRow): Promise<"nudged" | "closed" | null> {
-    if (row.handoffOpen) return null
+    // Un tema que el equipo ya respondió y por el que la persona no volvió a
+    // preguntar se da por resuelto con la misma regla de silencio (ADR 0050).
+    if (row.handoffOpen && !(await settleAnsweredTopics(inner, row))) return null
     const attended = cfg.channels === null || cfg.channels.includes(row.channel)
     // Con una persona a cargo no se cierra sola: la muestra «Te espera».
     if (row.assignedUserId !== null || row.agentStatus === "off" || !attended) return null
@@ -639,6 +646,13 @@ export async function tickConversationCare(
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
     const writable = canWriteNow(row, now)
     if (now.getTime() >= closeAt.getTime()) {
+      // La despedida nunca sale fuera del «Horario para escribir». `closeAt` ya
+      // cae en él (a veces en su último minuto); si el ciclo llega tarde y el
+      // horario cerró, espera a que abra (si para entonces ya no se puede
+      // escribir, cierra sin despedida, como cualquier ventana vencida).
+      const late = now.getTime() - closeAt.getTime() > CARE_LATE_MS
+      if (writable && late && !isWritingTime(now, schedule)) return null
+      if (!(await stillQuiet(inner, row))) return null
       if (writable) {
         // Antes de cerrar, porque al cerrar vence la propuesta.
         const proposedWhen = await proposedAppointmentWhen(inner, orgId, row.id)
@@ -658,6 +672,7 @@ export async function tickConversationCare(
     const asks = (last.body ?? "").trim().endsWith("?")
     if (!row.proposalPending && !asks && !offered) return null
     const when = proposed ? proposalWhen(proposed.payload["startsAt"], zone) : null
+    if (!(await stillQuiet(inner, row))) return null
     const text = nudgeText(voice, greetingName(row.contactName), proposed && when ? { action: proposed.action, when } : null)
     await sendFixed(inner, orgId, row.id, format(text, row.channel), { senderKind: "agent" })
     await inner
@@ -665,6 +680,48 @@ export async function tickConversationCare(
       .set({ nudgedAt: now })
       .where(and(eq(conversation.id, row.id), eq(conversation.organizationId, orgId)))
     return "nudged"
+  }
+
+  /**
+   * Resuelve los temas del hilo que una persona del equipo ya respondió (un
+   * saliente suyo aceptado después de crearse el tema y de la última vez que
+   * la persona volvió a preguntar) cuando la persona lleva `closeAfterHours`
+   * sin escribir. Devuelve si ya no le queda ningún tema abierto.
+   */
+  async function settleAnsweredTopics(inner: Db, row: CareRow): Promise<boolean> {
+    const silentSince = row.lastInboundAt ?? row.attentionStartedAt
+    if (now.getTime() - silentSince.getTime() < cfg.closeAfterHours * HOUR_MS) return false
+    const answered = await inner.execute<{ task_id: string }>(sql`
+      select h.task_id from agent_handoff h
+      where h.organization_id = ${orgId} and h.conversation_id = ${row.id} and h.task_id is not null
+        and ${handoffOpenSql(sql.raw("h"))}
+        and exists (select 1 from message m where m.organization_id = h.organization_id and m.conversation_id = h.conversation_id
+          and m.sender_kind = 'user' and ${acceptedOutSql(sql.raw("m"))}
+          and m.created_at > greatest(h.created_at, coalesce(h.asked_again_at, '-infinity'::timestamptz)))`)
+    for (const item of answered) {
+      await updateTask(inner, orgId, item.task_id, { status: "done" })
+      await inner
+        .update(crmTask)
+        .set({ settledReason: "Respondido por el equipo; la persona no volvió a preguntar" })
+        .where(and(eq(crmTask.id, item.task_id), eq(crmTask.organizationId, orgId)))
+    }
+    return (await countOpenHandoffsOf(inner, orgId, row.id)) === 0
+  }
+
+  /**
+   * La fila se leyó al empezar el ciclo; antes de escribir o cerrar se bloquea
+   * y se comprueba que la persona no escribió entretanto ni la cerró alguien.
+   * Sin esto, un mensaje que entra en ese momento quedaba en una conversación
+   * cerrada y fuera de «Te espera».
+   */
+  async function stillQuiet(inner: Db, row: CareRow): Promise<boolean> {
+    const [fresh] = await inner
+      .select({ status: conversation.status, lastInboundAt: conversation.lastInboundAt })
+      .from(conversation)
+      .where(and(eq(conversation.id, row.id), eq(conversation.organizationId, orgId)))
+      .for("update")
+    if (!fresh || fresh.status !== "open") return false
+    return (fresh.lastInboundAt?.getTime() ?? 0) === (row.lastInboundAt?.getTime() ?? 0)
   }
 
   function format(text: string, channel: string): string {

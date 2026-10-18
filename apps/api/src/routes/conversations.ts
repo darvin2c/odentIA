@@ -21,6 +21,9 @@ import {
   resolveConversationIdentity,
   sendApprovedMessage,
   sendOutbound,
+  sendTeamReply,
+  takeTopic,
+  resolveTopic,
   setAgentStatus,
   summarizeInbox,
   takeConversation,
@@ -35,6 +38,8 @@ const filtersQuery = z.object({
   status: z.enum(CONVERSATION_STATUSES).optional(),
   channel: z.string().optional(),
   assigned: z.string().optional(),
+  // «Solo las mías»: los temas de quien consulta y los que nadie tomó.
+  mine: z.enum(["1"]).optional(),
   q: z.string().optional(),
 })
 
@@ -44,7 +49,13 @@ const listQuery = filtersQuery.extend({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 })
 
-const textInput = z.object({ text: z.string().min(1).max(4000) })
+const textInput = z.object({
+  text: z.string().min(1).max(4000),
+  // Responder citando un mensaje de la persona (ADR 0050).
+  replyToMessageId: z.string().uuid().optional(),
+  // «Enviar, sigue pendiente»: el tema queda abierto. Por defecto se resuelve.
+  keepPending: z.boolean().optional(),
+})
 
 const approvedInput = z.object({
   messageId: z.string().min(1).max(80),
@@ -80,12 +91,13 @@ export function createConversationsRoute(deps: CrmDeps) {
   })
 
   app.get("/", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { mine, ...filters } = parsed.data
     try {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
-        listInboxConversations(tx, orgId, parsed.data),
+        listInboxConversations(tx, orgId, { ...filters, ...(mine ? { mineOf: userId } : {}) }),
       )
       return c.json({ data: items, nextCursor })
     } catch (e) {
@@ -96,11 +108,12 @@ export function createConversationsRoute(deps: CrmDeps) {
   // Totales de las vistas de la bandeja con los mismos filtros que la lista.
   // Registrado antes de `/:id` para que «summary» no se lea como un id.
   app.get("/summary", async (c) => {
-    const { orgId } = orgContextOf(c)
+    const { orgId, userId } = orgContextOf(c)
     const parsed = filtersQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { mine, ...filters } = parsed.data
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => summarizeInbox(tx, orgId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) => summarizeInbox(tx, orgId, { ...filters, ...(mine ? { mineOf: userId } : {}) })),
     )
   })
 
@@ -146,17 +159,46 @@ export function createConversationsRoute(deps: CrmDeps) {
     }
   })
 
+  // Temas de la conversación (ADR 0050): tomar, pasar a otra persona y resolver.
+  app.post("/:id/topics/:topicId/take", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = z.object({ toUserId: z.string().min(1).max(100).optional() }).strict()
+      .safeParse((await c.req.json().catch(() => ({}))) ?? {})
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        takeTopic(tx, orgId, {
+          conversationId: c.req.param("id"),
+          topicId: c.req.param("topicId"),
+          userId,
+          ...(parsed.data.toUserId ? { toUserId: parsed.data.toUserId } : {}),
+        }),
+      ),
+    )
+  })
+
+  app.post("/:id/topics/:topicId/resolve", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        await resolveTopic(tx, orgId, { conversationId: c.req.param("id"), topicId: c.req.param("topicId"), userId })
+        return { ok: true }
+      }),
+    )
+  })
+
   app.post("/:id/messages", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = textInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        sendOutbound(tx, orgId, {
+        sendTeamReply(tx, orgId, {
           conversationId: c.req.param("id"),
-          senderKind: "user",
-          senderUserId: userId,
+          userId,
           content: { type: "text", text: parsed.data.text },
+          replyToMessageId: parsed.data.replyToMessageId ?? null,
+          keepPending: parsed.data.keepPending ?? false,
         }),
       ),
     )

@@ -2,7 +2,7 @@
  * Núcleo admin: invariantes puras + integración real contra Postgres
  * (harness compartido, migraciones completas) + smoke HTTP de rotación.
  */
-import { createAuth } from "@odentia/auth"
+import { createAuth, LEGAL_VERSION } from "@odentia/auth"
 import { sql } from "drizzle-orm"
 import { beforeEach, describe, expect, it } from "vitest"
 import { z } from "zod"
@@ -186,6 +186,7 @@ describe("admin-core contra Postgres", () => {
       trustedOrigins: ["http://localhost:3000"],
       googleClientId: "",
       googleClientSecret: "",
+      passwordBreachCheck: false,
     })
     const jar: Record<string, string> = {}
     function storeCookies(res: Response): void {
@@ -217,7 +218,7 @@ describe("admin-core contra Postgres", () => {
     }
     const email = "smoke@example.test"
     const password = "Demo1234"
-    const signup = await call("/sign-up/email", { name: "Smoke", email, password })
+    const signup = await call("/sign-up/email", { name: "Smoke", email, password, termsVersion: LEGAL_VERSION })
     expect(signup.status).toBeLessThan(300)
     await ownerDb.execute(sql`update "user" set email_verified=true where email=${email}`)
     const signin = await call("/sign-in/email", { email, password })

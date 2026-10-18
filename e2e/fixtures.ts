@@ -1,3 +1,4 @@
+import { LEGAL } from "@odentia/auth/legal"
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { account, user as users } from "@odentia/db/schema/auth"
@@ -64,7 +65,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           email: `${tag}-${id}@test.dev`, password: PASSWORD,
         }
         await fixtureDb.transaction(async tx => {
-          await tx.insert(users).values({ id, name: user.name, firstName: user.firstName, lastName: user.lastName, email: user.email, emailVerified: true })
+          await tx.insert(users).values({ id, name: user.name, firstName: user.firstName, lastName: user.lastName, email: user.email, emailVerified: true,
+            // Ya aceptó los documentos vigentes; su clínica copia el contrato de encargo al crearse.
+            termsVersion: LEGAL.terms.version, termsAcceptedAt: new Date(),
+            processingAgreementVersion: LEGAL.agreement.version, processingAgreementAcceptedAt: new Date() })
           await tx.insert(account).values({ id: randomUUID(), accountId: id, userId: id, providerId: "credential", password: passwordHash, updatedAt: new Date() })
         })
         const context = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true })

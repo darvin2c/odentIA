@@ -374,14 +374,43 @@ interface SourceFacts {
 }
 
 /**
- * Identificadores internos (sedes, servicios, pacientes, propuestas): sus
- * cifras no son importes, horas ni fechas. Sin taparlos, un precio inventado
- * pasaría la comprobación con solo coincidir con un trozo de un id.
+ * Identificadores internos (sedes, servicios, pacientes, propuestas y la
+ * referencia de un profesional, `professionalRef`: «pro-» y diez cifras
+ * hexadecimales): sus cifras no son importes, horas ni fechas. Sin taparlos,
+ * un precio inventado pasaría la comprobación con solo coincidir con un trozo
+ * de un id («pro-3a99f0c1d2» sustentaba «S/ 99»).
  */
-const INTERNAL_ID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
+const INTERNAL_ID = /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|pro-[0-9a-f]{10})\b/gi
+
+/**
+ * Una dirección web, hasta donde la RFC 3986 (apéndice C) da por terminada una
+ * URI escrita en un texto: un espacio, unas comillas (también las «» del
+ * español) o «<>»; dentro tampoco van «\^`{|}». Sus cifras no son datos: el
+ * token de «Su enlace» (64 cifras hexadecimales) vuelve en las respuestas
+ * anteriores del agente y sustentaba un precio inventado de dos cifras en el
+ * 97 % de los enlaces; igual el token del registro, el mapa de una sede o el
+ * dominio. Termina en las comillas porque lo que una herramienta devuelve como
+ * objeto llega en JSON sin espacios: el importe que sigue al enlace se lee.
+ */
+const WEB_ADDRESS = /\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi
+/** La versión de una cita en `ver_resumen_paciente` («versión 3»): un contador para reprogramarla, no un importe. */
+const APPOINTMENT_VERSION = /\bversión \d+/g
+/**
+ * El cursor de una lista por páginas (`listar_oportunidades`, `ver_otros_canales`,
+ * `nextNotesCursor` de `leer_contexto_comercial`): base64url de un objeto JSON,
+ * que empieza siempre por «eyJ» (`{"` y una letra).
+ */
+const PAGE_CURSOR = /(?<![\w-])eyJ[\w-]+/g
+
+/** Lo que no se lee como dato en una fuente; se tapa sin mover las posiciones del texto. */
+const NOT_FACTS = [INTERNAL_ID, WEB_ADDRESS, APPOINTMENT_VERSION, PAGE_CURSOR]
+
+function mask(text: string, pattern: RegExp): string {
+  return text.replace(pattern, (found) => " ".repeat(found.length))
+}
 
 function factsOf(item: Evidence, timeZone: string): SourceFacts {
-  const text = normalize(item.text).replace(INTERNAL_ID, (id) => " ".repeat(id.length))
+  const text = NOT_FACTS.reduce(mask, normalize(item.text))
   const amounts = new Set<number>()
   const exact = new Set<number>()
   const times = new Set<number>()
@@ -467,7 +496,9 @@ export function verifyReply(
     .map((item) => factsOf(item, zone.timezone))
     .reverse()
   const checks: FactCheck[] = []
-  const text = normalize(reply)
+  // La respuesta se lee como las fuentes: el enlace que envía el agente no es un importe,
+  // aunque su token traiga «9cad42» y la clínica cobre en dólares canadienses.
+  const text = mask(normalize(reply), WEB_ADDRESS)
   const segments = priceSegments(evidence, zone.timezone)
 
   const amounts = extractAmounts(text, amountPattern(zone.currency, zone.locale))

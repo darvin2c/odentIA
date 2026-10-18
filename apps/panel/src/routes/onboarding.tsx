@@ -34,11 +34,14 @@ import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../lib/api"
 import { authClient } from "../lib/auth-client"
-import { requireVerifiedSession } from "../lib/guards"
+import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
 
 export const Route = createFileRoute("/onboarding")({
-  beforeLoad: () => requireVerifiedSession(),
+  beforeLoad: async ({ location }) => {
+    await requireVerifiedSession()
+    await requireTermsAccepted(location)
+  },
   validateSearch: (search: Record<string, unknown>) => ({
     continue: typeof search.continue === "string" ? search.continue : undefined,
   }),

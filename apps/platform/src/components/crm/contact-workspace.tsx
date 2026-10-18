@@ -1,5 +1,5 @@
-import { Badge, Button, buttonVariants, cn, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, internationalText } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, ScrollArea, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
+import { ConfirmDialog, EmptyState, internationalText, LoadingState } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
 import {
@@ -337,7 +337,7 @@ export function ContactWorkspace({
   }
 
   if (contextQuery.isLoading) {
-    return <p className="p-4 text-sm text-muted-foreground">Cargando contexto…</p>
+    return <LoadingState className="min-h-0 flex-1" message="Cargando contexto…" />
   }
 
   if (contextQuery.isError || !workspace) {
@@ -399,10 +399,9 @@ export function ContactWorkspace({
                 : completion.error
 
   return (
-    <section
-      aria-label="Contexto del contacto"
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto elevated rounded-xl border bg-card p-4"
-    >
+    // El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa.
+    <ScrollArea className="elevated min-h-0 flex-1 rounded-xl border bg-card">
+    <section aria-label="Contexto del contacto" className="flex flex-col gap-3 p-4">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h2
@@ -1082,6 +1081,7 @@ export function ContactWorkspace({
         }}
       />
     </section>
+    </ScrollArea>
   )
 }
 
