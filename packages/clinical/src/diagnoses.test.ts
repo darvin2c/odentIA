@@ -26,6 +26,9 @@ describe("listas de diagnósticos", () => {
     expect(findingDiagnosisCode("ICD-10", "caries", null)).toBe("K02.9")
     expect(findingDiagnosisCode("ICD-10", "fracture")).toBe("S02.5")
     expect(findingDiagnosisCode("ICD-11", "caries", "dentin")).toBe("DA08.0")
+    expect(findingDiagnosisCode("ICD-11", "root_remnant")).toBe("DA0A.3")
+    expect(findingDiagnosisCode("ICD-11", "missing_tooth", "caries_extraction")).toBe("DA0A.1")
+    expect(findingDiagnosisCode("ICD-11", "missing_tooth", "orthodontic")).toBeNull()
     expect(findingDiagnosisCode("ICD-10", "crown")).toBeNull()
   })
 

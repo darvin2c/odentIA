@@ -14,8 +14,12 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   invocación de build ni que cada contenedor ocupe el tamaño completo de la imagen.
 - PostgreSQL 18 lleva PGMQ y pg_cron mediante `infra/dev/postgres/Dockerfile`.
   Cambiarlo por una imagen stock sin esas extensiones no es una sustitución válida.
-- `migrate` termina después de aplicar las migraciones; detenido con código cero
-  es su estado normal. API y worker dependen de su finalización.
+- `migrate` aplica las migraciones y carga las listas de diagnósticos oficiales
+  del repositorio (`seed:diagnoses`: la CIE-11 de la OMS; sin cambios no escribe
+  nada, y con `NODE_ENV=production` nunca carga las semillas de desarrollo).
+  Termina después; detenido con código cero es su estado normal. API y worker
+  dependen de su finalización. La CIE-10 no está incluida: con el permiso escrito
+  de la OPS se carga una vez con su archivo (ver `docs/development.md`).
 - La historia de migraciones empieza en la base del 2026-10-16 (ADR 0045). Una
   base creada antes no se migra a ella, tampoco la de producción: se recrea su
   volumen antes de desplegar. Antes de esa fecha no hubo datos reales.

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { inflateRawSync } from "node:zlib"
 import {
   type DiagnosisSystemKey,
   diagnosisSearchText,
@@ -13,7 +14,8 @@ import {
  * archivo, que se decide con el encabezado; o ClaML (ISO 13120), el XML en
  * que la OMS publica la CIE-10. Acepta los códigos con † y * y los que vienen
  * sin punto («K021»), y la tabulación de la CIE-11 de la OMS (columnas
- * «Code», «Title», «ClassKind» y la URI de la linealización).
+ * «Code», «Title», «ClassKind», «ChapterNo» y la URI de la linealización),
+ * también dentro del .zip tal como se descarga.
  */
 
 export interface DiagnosisSourceRow {
@@ -117,6 +119,19 @@ const CODE_HEADERS = new Set(["code", "codigo", "cod", "clave"])
 const TITLE_HEADERS = new Set(["description", "descripcion", "title", "titulo", "nombre"])
 const URI_HEADERS = ["linearization (release) uri", "linearization uri", "uri", "foundation uri"]
 const KIND_HEADERS = new Set(["classkind", "class kind", "kind"])
+/** Título oficial en inglés de la tabulación de la CIE-11, solo para lo que la traducción no trae. */
+const ENGLISH_TITLE_HEADERS = new Set(["titleen", "title en"])
+const CHAPTER_HEADERS = new Set(["chapterno", "chapter no", "chapter"])
+/**
+ * Capítulos de la CIE-11 que se cargan: del 01 al 25, los que se registran
+ * solos como diagnóstico. Quedan fuera, según la guía de referencia de la OMS:
+ * el X, porque los códigos de extensión «nunca se usan sin un código
+ * principal» (§2.9); el 26, porque la medicina tradicional se usa «junto con»
+ * los capítulos 01–25 (§2.23.22), y la sección V, que evalúa el funcionamiento
+ * y no es una afección (§2.11). Lo que se carga va completo, con su código,
+ * título y URI sin cambios (licencia de la CIE-11, cláusulas 1.2.2 y 1.2.3).
+ */
+const ICD11_REGISTRABLE_CHAPTER = /^(0[1-9]|1\d|2[0-5])$/
 
 /** Filas de un CSV o TSV con encabezado (código y título; URI y tipo de clase si los trae). */
 export function parseDiagnosisDelimited(text: string): DiagnosisSourceRow[] {
@@ -127,20 +142,24 @@ export function parseDiagnosisDelimited(text: string): DiagnosisSourceRow[] {
   const titleAt = keys.findIndex((key) => TITLE_HEADERS.has(key))
   const uriAt = URI_HEADERS.map((name) => keys.indexOf(name)).find((at) => at >= 0) ?? -1
   const kindAt = keys.findIndex((key) => KIND_HEADERS.has(key))
+  const englishAt = keys.findIndex((key) => ENGLISH_TITLE_HEADERS.has(key))
+  const chapterAt = kindAt >= 0 ? keys.findIndex((key) => CHAPTER_HEADERS.has(key)) : -1
   if (codeAt < 0 || titleAt < 0)
     throw new Error(
       `Encabezado inesperado: ${header.join(" | ")} (se espera el código y la descripción)`,
     )
+  // La tabulación antepone un guion por nivel de profundidad («- - Caries dental»): no es parte del título.
+  const cleanTitle = (value: string | undefined) => (value ?? "").trim().replace(/^(-\s*)+/, "").trim()
   const rows: DiagnosisSourceRow[] = []
   lines.forEach((cells, index) => {
     const code = (cells[codeAt] ?? "").trim()
     // La tabulación de la CIE-11 trae capítulos y bloques sin código: solo cuentan las categorías.
     if (kindAt >= 0 && (cells[kindAt] ?? "").trim().toLowerCase() !== "category") return
+    if (chapterAt >= 0 && !ICD11_REGISTRABLE_CHAPTER.test((cells[chapterAt] ?? "").trim())) return
     if (!code) throw new Error(`Fila ${index + 2}: falta el código`)
-    const title = (cells[titleAt] ?? "")
-      .trim()
-      .replace(/^(-\s*)+/, "")
-      .trim()
+    // La edición en español deja sin traducir unos pocos títulos (dos en 2026-01, QA47.6 y
+    // QA47.7): se guarda el título oficial en inglés del mismo archivo, nunca uno inventado.
+    const title = cleanTitle(cells[titleAt]) || (englishAt >= 0 ? cleanTitle(cells[englishAt]) : "")
     const uri = uriAt >= 0 ? (cells[uriAt] ?? "").trim() || null : null
     rows.push({ code, title, uri })
   })
@@ -193,6 +212,69 @@ export function parseClaml(text: string, language = "es"): DiagnosisSourceRow[] 
   }
   if (rows.length === 0) throw new Error('El ClaML no trae categorías (<Class kind="category">)')
   return rows
+}
+
+/**
+ * Las entradas de un .zip (APPNOTE de PKWARE), sin dependencias: Node no trae
+ * un lector y la OMS publica sus tabulaciones así. Basta lo que esos archivos
+ * usan: sin cifrar, guardado (0) o deflate (8) y menos de 4 GB (sin Zip64).
+ */
+export function readZipEntries(bytes: Uint8Array): Map<string, Buffer> {
+  const data = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const minEnd = Math.max(0, data.length - 22 - 0xffff)
+  let end = -1
+  for (let at = data.length - 22; at >= minEnd; at--)
+    if (data.readUInt32LE(at) === 0x06054b50) {
+      end = at
+      break
+    }
+  if (end < 0) throw new Error("No es un .zip: falta el directorio central")
+  const count = data.readUInt16LE(end + 10)
+  let at = data.readUInt32LE(end + 16)
+  const entries = new Map<string, Buffer>()
+  for (let i = 0; i < count; i++) {
+    if (data.readUInt32LE(at) !== 0x02014b50) throw new Error("El .zip está dañado")
+    const flags = data.readUInt16LE(at + 8)
+    const method = data.readUInt16LE(at + 10)
+    const compressedSize = data.readUInt32LE(at + 20)
+    const size = data.readUInt32LE(at + 24)
+    const nameLength = data.readUInt16LE(at + 28)
+    const extraLength = data.readUInt16LE(at + 30)
+    const commentLength = data.readUInt16LE(at + 32)
+    const localAt = data.readUInt32LE(at + 42)
+    const name = data.toString("utf8", at + 46, at + 46 + nameLength)
+    at += 46 + nameLength + extraLength + commentLength
+    if (name.endsWith("/")) continue
+    if (flags & 1) throw new Error(`${name} está cifrado`)
+    if (data.readUInt32LE(localAt) !== 0x04034b50) throw new Error("El .zip está dañado")
+    const start = localAt + 30 + data.readUInt16LE(localAt + 26) + data.readUInt16LE(localAt + 28)
+    const raw = data.subarray(start, start + compressedSize)
+    const content =
+      method === 0 ? Buffer.from(raw) : method === 8 ? inflateRawSync(raw) : null
+    if (!content) throw new Error(`${name} usa una compresión que no se lee (${method})`)
+    if (content.length !== size) throw new Error(`${name} no tiene el tamaño que declara el .zip`)
+    entries.set(name, content)
+  }
+  return entries
+}
+
+/**
+ * El texto de la lista: el archivo tal cual o, si es un .zip, su único archivo
+ * de datos (.txt, .tsv, .csv o .xml; la OMS suma un readme y una hoja de
+ * cálculo, que no se leen). El SHA-256 se verifica antes, sobre el archivo
+ * descargado.
+ */
+export function diagnosisFileText(bytes: Uint8Array): string {
+  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
+  if (!isZip) return Buffer.from(bytes).toString("utf8")
+  const data = [...readZipEntries(bytes)].filter(
+    ([name]) => /\.(txt|tsv|csv|xml)$/i.test(name) && !/(^|\/)readme\.txt$/i.test(name),
+  )
+  if (data.length !== 1)
+    throw new Error(
+      `El .zip debe traer un solo archivo de datos y trae ${data.length}: ${data.map(([name]) => name).join(", ")}`,
+    )
+  return data[0]![1].toString("utf8")
 }
 
 /** Lee el archivo según su forma: ClaML si es XML, si no CSV o TSV. */
