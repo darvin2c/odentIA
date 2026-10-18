@@ -118,11 +118,11 @@ for (const width of [1440, 375]) {
       await page.keyboard.press("Escape")
       await expect(page).not.toHaveURL(/lista=/)
 
-      // Quienes se cayeron: aún no son pacientes y abren su página de persona.
+      // Quienes se cayeron: aún no son pacientes y abren su conversación en la Bandeja.
       await funnel.getByRole("button", { name: "Ver los 2" }).click()
       await expect(page).toHaveURL(/lista=funnel_lost_booked/)
       const lost = surface(page, { name: "No agendaron" }).first()
-      await expect(lost.getByRole("link", { name: "Mario Torres" })).toHaveAttribute("href", /\/people\//)
+      await expect(lost.getByRole("link", { name: "Mario Torres" })).toHaveAttribute("href", /\/inbox\?conversation=/)
       await expect(lost).toContainText("Instagram")
       await page.keyboard.press("Escape")
 

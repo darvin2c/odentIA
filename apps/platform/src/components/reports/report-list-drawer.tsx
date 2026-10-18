@@ -70,15 +70,6 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
-  debts_overdue: {
-    title: "Te deben hace más de 30 días",
-    noun: { one: "persona", many: "personas" },
-    how: (period) =>
-      `Quién debía al cerrar ${period}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» del Administrador.`,
-    where: { to: "/finance", label: "Ir a Finanzas" },
-    patientTab: "cobros",
-    showNext: false,
-  },
   funnel_sought: {
     title: "Nos buscaron por primera vez",
     noun: { one: "persona", many: "personas" },
@@ -184,6 +175,15 @@ const LISTS: Record<ReportListKey, ListCopy> = {
     where: { to: "/people", label: "Ir a Pacientes" },
     showNext: false,
   },
+  debts_overdue: {
+    title: "Te deben hace más de 30 días",
+    noun: { one: "persona", many: "personas" },
+    how: (period) =>
+      `Quién debía al cerrar ${period}: lo que suman sus conceptos por cobrar menos lo que pagó y lo que tiene a favor, si su concepto sin pagar más antiguo se anotó hace más de 30 días. Es la misma regla de «Saldo vencido» del Administrador.`,
+    where: { to: "/finance", label: "Ir a Finanzas" },
+    patientTab: "cobros",
+    showNext: false,
+  },
 }
 
 function when(row: ReportListRow, list: ReportListKey, locale: string, timeZone: string): { day: string; hour: string | null } {
@@ -224,9 +224,15 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
       onClose={onClose}
       isLoading={report.isPending}
       actions={
-        <Link to={copy.where.to} className={buttonVariants()}>
-          {copy.where.label}
-        </Link>
+        copy.where.to === "/inbox" ? (
+          <Link to="/inbox" search={{ conversation: undefined }} className={buttonVariants()}>
+            {copy.where.label}
+          </Link>
+        ) : (
+          <Link to={copy.where.to} className={buttonVariants()}>
+            {copy.where.label}
+          </Link>
+        )
       }
     >
       {report.isError ? (
@@ -260,18 +266,17 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                         ) : null}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
-                        {row.patientId ? (
+                        {row.conversationId ? (
+                          <Link to="/inbox" search={{ conversation: row.conversationId }} className="truncate font-semibold hover:underline">
+                            {row.personName}
+                          </Link>
+                        ) : row.patientId ? (
                           <Link
                             to="/patients/$patientId"
                             params={{ patientId: row.patientId }}
                             search={copy.patientTab ? { tab: copy.patientTab } : {}}
                             className="truncate font-semibold hover:underline"
                           >
-                            {row.personName}
-                          </Link>
-                        ) : row.personId ? (
-                          // Todavía no es paciente: su página de persona, con sus conversaciones.
-                          <Link to="/people/$personId" params={{ personId: row.personId }} className="truncate font-semibold hover:underline">
                             {row.personName}
                           </Link>
                         ) : (

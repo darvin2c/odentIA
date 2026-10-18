@@ -390,10 +390,13 @@ export function isPatientReportList(value: string): value is PatientReportListKe
 
 /** Una fila de estas listas: es de una persona, que puede no ser paciente todavía. */
 export type PatientReportListRow = Omit<ReportListRow, "patientId"> & {
+  /** Null: la persona escribió pero aún no es paciente. */
   patientId: string | null
   personId: string
   /** Canal por el que nos buscó, en las listas del embudo. */
   channel: string | null
+  /** De quien aún no es paciente, su conversación más reciente: la fila lleva a la Bandeja. */
+  conversationId: string | null
 }
 
 const LIST_LIMIT = 200
@@ -434,7 +437,7 @@ export async function getPatientReportList(
         select f.id, f.due_at as at, f.patient_id as "patientId", pp.id as "personId", pp.display_name as "personName",
           f.title, null::text as "professionalName", null::text as "branchName",
           ${nextAppointment(sql`f.patient_id`)} as "hasNextAppointment",
-          null::text as cents, null::text as currency, null::text as channel, count(*) over()::int as total
+          null::text as cents, null::text as currency, null::text as channel, null::uuid as "conversationId", count(*) over()::int as total
         from clinical_follow_up f
         left join encounter e on e.id = f.completed_encounter_id and e.organization_id = ${orgId}
         join patient p on p.id = f.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
@@ -448,7 +451,7 @@ export async function getPatientReportList(
         with ${lapsedSql(orgId, scope, now)}
         select v.patient_id::text as id, v.starts_at as at, v.patient_id as "patientId", pp.id as "personId", pp.display_name as "personName",
           v.service_name as title, u.name as "professionalName", br.name as "branchName",
-          false as "hasNextAppointment", null::text as cents, null::text as currency, null::text as channel, count(*) over()::int as total
+          false as "hasNextAppointment", null::text as cents, null::text as currency, null::text as channel, null::uuid as "conversationId", count(*) over()::int as total
         from lapsed v
         join patient p on p.id = v.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         left join branch br on br.id = v.branch_id and br.organization_id = ${orgId}
@@ -463,7 +466,11 @@ export async function getPatientReportList(
         select f.person_id::text as id, f.first_at as at, f.patient_id as "patientId", f.person_id as "personId", pp.display_name as "personName",
           null::text as title, null::text as "professionalName", null::text as "branchName",
           (f.patient_id is not null and ${nextAppointment(sql`f.patient_id`)}) as "hasNextAppointment",
-          null::text as cents, null::text as currency, f.channel, count(*) over()::int as total
+          null::text as cents, null::text as currency, f.channel,
+          case when f.patient_id is null then (
+            select c.id from conversation c where c.organization_id = ${orgId} and c.contact_id = f.person_id
+            order by c.last_message_at desc nulls last, c.created_at desc, c.id limit 1) end as "conversationId",
+          count(*) over()::int as total
         from funnel f join contact pp on pp.organization_id = ${orgId} and pp.id = f.person_id
         where ${where}
         order by f.first_at desc, f.person_id limit ${LIST_LIMIT}`)),

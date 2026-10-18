@@ -17,7 +17,7 @@ import { type Pipeline, usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   absoluteChange,
-  fetchReport,
+  fetchPatientsReport,
   FUNNEL_STEPS,
   type FunnelCounts,
   type FunnelStep,
@@ -195,7 +195,7 @@ function DropCallout({
 
 /** Resumen › «Dónde se caen los pacientes»: el embudo corto, dónde se caen más y el enlace a la pestaña. */
 export function FunnelCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void }) {
-  const report = useQuery({ queryKey: reportKey("funnel", query), queryFn: () => fetchReport<ReportFunnel>("funnel", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("funnel", query), queryFn: () => fetchPatientsReport<ReportFunnel>("funnel", query), retry: false })
   const stageNames = useStageNames()
   const id = useId()
   const header = (
@@ -256,7 +256,7 @@ function FooterButton({ onClick, children }: { onClick: () => void; children: Re
 
 export function PatientsTab({ query, onOpenList, advice }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void; advice?: ReactNode }) {
   const navigate = useNavigate()
-  const report = useQuery({ queryKey: reportKey("patients", query), queryFn: () => fetchReport<ReportPatients>("patients", query), retry: false })
+  const report = useQuery({ queryKey: reportKey("patients", query), queryFn: () => fetchPatientsReport<ReportPatients>("patients", query), retry: false })
   const stageNames = useStageNames()
 
   if (report.isPending) return <LoadingState />

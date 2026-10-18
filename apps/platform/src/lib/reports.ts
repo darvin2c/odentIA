@@ -332,7 +332,6 @@ export const REPORT_LISTS = [
   "controls_pending",
   "budgets_waiting",
   "new_patients",
-  "debts_overdue",
   // Pacientes: las personas de cada paso del embudo, las que se cayeron en él y las de «Si vuelven».
   "funnel_sought",
   "funnel_booked",
@@ -348,6 +347,7 @@ export const REPORT_LISTS = [
   "funnel_stopped",
   "controls_missed",
   "lapsed",
+  "debts_overdue",
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -358,18 +358,19 @@ export function isReportList(value: unknown): value is ReportListKey {
 export interface ReportListRow {
   id: string
   at: string
-  /** Nulo en las listas de Pacientes cuando la persona aún no es paciente: la fila abre su página (`personId`). */
+  /** Null: la persona escribió pero aún no es paciente. */
   patientId: string | null
-  personId?: string
+  personName: string
   /** Canal por el que nos buscó, en las listas del embudo. */
   channel?: string | null
-  personName: string
   title: string | null
   professionalName: string | null
   branchName: string | null
   hasNextAppointment: boolean
   cents: number | null
   currency: string | null
+  /** La fila lleva a su conversación en la Bandeja. */
+  conversationId?: string | null
 }
 
 export interface ReportList extends ReportHead {
@@ -405,7 +406,7 @@ export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled
   return apiFetch(`/api/reports/advice?${params(query)}`)
 }
 
-export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service" | "patients" | "funnel"
+export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service"
 
 // --- Resumen ------------------------------------------------------------------------
 
@@ -475,6 +476,11 @@ export interface ReportProfessionals extends ReportHead {
 export const FUNNEL_STEPS = ["sought", "booked", "came", "budget", "accepted", "paid"] as const
 export type FunnelStep = (typeof FUNNEL_STEPS)[number]
 export type FunnelCounts = Record<FunnelStep, number>
+
+/** Reportes › Pacientes y la tarjeta del embudo del Resumen. */
+export function fetchPatientsReport<T>(section: "patients" | "funnel", query: ReportQuery): Promise<{ data: T }> {
+  return apiFetch<{ data: T }>(`/api/reports/${section}?${params(query)}`)
+}
 
 /** Por dónde nos buscó: el canal de su primera conversación, «Recepción» si lo registró el equipo. */
 export function firstContactChannel(channel: string | null): string {

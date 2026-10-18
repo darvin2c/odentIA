@@ -246,6 +246,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["estadísticas", "indicadores", "métricas", "informes", "gráficos", "cuántas citas", "ventas del mes", "inasistencias", "pacientes nuevos", "presupuestos aceptados", "resultado del mes", "cuánto queda", "espera en sala", "cuánto esperan"],
     faqs: [
       { q: "¿Qué es «Espera en sala»?", a: "Cuántos minutos pasan entre que se marca «Llegó» y empieza la atención, la mitad de las veces menos y la mitad más, por profesional. Solo cuenta lo que se mide: si nadie marca la llegada, dice «Sin datos»." },
+      { q: "¿Qué es «Dónde se caen los pacientes»?", a: "En Reportes › Pacientes: las personas que nos buscaron por primera vez en el periodo (escribieron por cualquier canal o las registró recepción) y hasta dónde llegaron hasta hoy: agendaron, vinieron, recibieron presupuesto, lo aceptaron y pagaron algo. Son siempre las mismas personas, aunque el paso ocurra después del periodo, y los pasos son los de Oportunidades. «Aquí se caen más» marca el paso donde más se quedaron; toca cualquier paso para ver a esas personas." },
     ],
   },
   {
