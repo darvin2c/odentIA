@@ -1,4 +1,4 @@
-import { SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
+import { FDI_ADULT, FDI_CHILD, SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -7,12 +7,20 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
 } from "@odentia/ui"
 import {
   DataRefreshMarker,
   DetailDrawer,
   EmptyState,
   LoadingState,
+  SearchInput,
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -49,7 +57,16 @@ import {
   type Prescription,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { groupByMonth, teethWords } from "../../lib/document-list"
+import {
+  countWords,
+  fileFilter,
+  filesShownElsewhere,
+  groupByMonth,
+  isImageCategory,
+  matchesSearch,
+  teethWords,
+  visibleDocumentFilters,
+} from "../../lib/document-list"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { fetchSignedOdontograms } from "../../lib/odontogram"
 import { useClinicalProfile } from "../../lib/org"
@@ -81,9 +98,8 @@ import { imagingFacts, useImagingState } from "./tomography-detail"
 type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "odontograma"
 type Tone = "success" | "warning" | "outline" | "secondary"
 
-/** El filtro de tipo de cada papel. */
-const FILTER_OF_KIND: Record<Kind, DocumentFilter> = {
-  archivo: "imagenes",
+/** El filtro de tipo de cada papel; el de un archivo depende de qué es (`fileFilter`). */
+const FILTER_OF_KIND: Record<Exclude<Kind, "archivo">, DocumentFilter> = {
   receta: "recetas",
   orden: "ordenes",
   formulario: "formularios",
@@ -121,6 +137,12 @@ type RowAction =
 interface Row {
   key: string
   kind: Kind
+  /** El filtro de tipo que lo muestra. */
+  filter: DocumentFilter
+  /** Sus piezas: las de la imagen o las del tratamiento al que pertenece. */
+  teeth: number[]
+  /** Un archivo retirado: no sale en la lista, sino en «Ver retirados». */
+  retired: boolean
   title: string
   /** La segunda línea completa: fecha y lo que dice del papel. */
   detail: string
@@ -175,24 +197,28 @@ function fileDetail(doc: PatientDocument, encounter: Encounter | undefined): str
 
 /**
  * Clínica › Documentos, «buscar un papel» (ADR 0035 y lienzo del issue 149):
- * una sola lista de lo que la atención emite o adjunta, separada por mes. Los
- * filtros por tipo («Todo» primero, como en Historia) acortan la misma lista;
- * las imágenes son una fila más, con su tipo, su fecha de toma y su miniatura,
- * y se abren de una vez en su visor. «Nuevo ▾» abre directo el formulario y
- * cada fila lleva su única acción.
+ * una sola lista de lo que la atención emite o adjunta, separada por mes, con
+ * un buscador para todos los papeles y el filtro «Pieza» de Historia. Los
+ * filtros por tipo («Todo» primero, como en Historia) acortan la misma lista y
+ * solo aparecen si filtran algo; las imágenes son una fila más, con su tipo,
+ * su fecha de toma y su miniatura, y se abren de una vez en su visor. «Nuevo ▾»
+ * abre directo el formulario y cada fila lleva su única acción. Lo retirado se
+ * consulta al pie. Todo vive en la dirección (`tipo`, `q`, `tooth`, `estado`,
+ * `documentId`).
  */
 export function DocumentosSection({
   patientId,
   filter,
   encounterId,
-  initialTooth,
+  tooth,
   documentId,
 }: {
   patientId: string
   filter?: DocumentFilter
   /** La atención en curso: lo que se crea aquí queda unido a ella. */
   encounterId?: string
-  initialTooth?: number
+  /** La pieza del filtro «Pieza» (`?tooth=`). */
+  tooth?: number
   /** El archivo abierto en el visor (`?documentId=`). */
   documentId?: string
 }) {
@@ -211,9 +237,13 @@ export function DocumentosSection({
   const openerRef = useRef<HTMLElement | null>(null)
   const activeChipRef = useRef<HTMLButtonElement | null>(null)
 
+  // Con los retirados: no salen en la lista, pero el pie dice cuántos hay.
   const files = useQuery({
-    queryKey: ["patient-documents", patientId],
-    queryFn: () => apiFetch<{ data: PatientDocument[] }>(`/api/patients/${patientId}/documents`),
+    queryKey: ["patient-documents", patientId, "con-retirados"],
+    queryFn: () =>
+      apiFetch<{ data: PatientDocument[] }>(
+        `/api/patients/${patientId}/documents?includeRetired=true`,
+      ),
   })
   const prescriptions = useQuery({
     queryKey: ["prescriptions", patientId],
@@ -277,8 +307,20 @@ export function DocumentosSection({
     )
   }
 
+  const query = listSearch.get("q") ?? ""
+  const showRetired = listSearch.get("estado") === "retirados"
   const setFilter = (next: DocumentFilter | undefined) =>
     listSearch.setParams({ tipo: next, documentId: undefined })
+  const clearFilters = () =>
+    listSearch.setParams({
+      tipo: undefined,
+      q: undefined,
+      tooth: undefined,
+      estado: undefined,
+      documentId: undefined,
+    })
+  const setRetired = (retired: boolean) =>
+    listSearch.setParams({ estado: retired ? "retirados" : undefined, documentId: undefined })
 
   const openDocument = (id: string) => {
     if (document.activeElement instanceof HTMLElement) openerRef.current = document.activeElement
@@ -337,37 +379,69 @@ export function DocumentosSection({
     [allFiles],
   )
 
-  // El PDF de un consentimiento firmado y la foto de la hoja en papel ya están
-  // en su consentimiento: no salen dos veces.
-  const consentFileIds = new Set(
-    (consents.data?.data ?? []).flatMap(
-      (consent) => [consent.pdfDocumentId, consent.paperDocumentId].filter(Boolean) as string[],
-    ),
+  // Las piezas de un papel unido a un tratamiento: «Pieza 36» encuentra el
+  // consentimiento y la receta de la endodoncia de la 36.
+  const planById = useMemo(
+    () => new Map((planItems.data?.data ?? []).map((item) => [item.id, item])),
+    [planItems.data],
+  )
+  const teethOf = (planItemId: string | null): number[] => {
+    const toothNumber = planItemId ? planById.get(planItemId)?.toothNumber : null
+    return toothNumber != null ? [toothNumber] : []
+  }
+
+  // Cada papel sale una vez (decisión 11): el PDF firmado y la hoja de un
+  // consentimiento viven en su consentimiento, y el informe de una orden, en su orden.
+  const shownElsewhere = filesShownElsewhere(
+    consents.data?.data ?? [],
+    orders.data?.data ?? [],
+    allFiles,
   )
   const pendingSigner = signerWords(patient.data?.data, responsibilities.data?.data)
   const rows: Row[] = [
     ...allFiles
-      .filter((doc) => !consentFileIds.has(doc.id))
-      .map(
-        (doc): Row => ({
+      .filter((doc) => !shownElsewhere.has(doc.id))
+      .map((doc): Row => {
+        const detail = fileDetail(
+          doc,
+          doc.encounterId ? encounterById.get(doc.encounterId) : undefined,
+        )
+        return {
           key: `archivo-${doc.id}`,
           kind: "archivo",
+          filter: fileFilter(doc.category),
+          teeth: doc.toothNumbers,
+          retired: Boolean(doc.retiredAt),
           title: doc.label,
-          detail: fileDetail(doc, doc.encounterId ? encounterById.get(doc.encounterId) : undefined),
+          detail: doc.retiredAt
+            ? [
+                `Retirado el ${formatDate(doc.retiredAt)}`,
+                doc.retireReason ? `Motivo: ${doc.retireReason}` : null,
+                detail,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : detail,
           date: takenAt(doc),
           // Toda radiografía nace sin informar: se dice, pero no cuenta como
           // pendiente (decisión 9); el informe va en la evolución o en la orden.
-          status:
-            doc.reportStatus === "pendiente" ? { label: "Sin informar", tone: "warning" } : null,
+          status: doc.retiredAt
+            ? { label: "Retirado", tone: "outline" }
+            : doc.reportStatus === "pendiente"
+              ? { label: "Sin informar", tone: "warning" }
+              : null,
           needsAction: false,
           action: { type: "ver" },
           open: { kind: "archivo", document: doc },
-        }),
-      ),
+        }
+      }),
     ...(prescriptions.data?.data ?? []).map(
       (item): Row => ({
         key: `receta-${item.id}`,
         kind: "receta",
+        filter: FILTER_OF_KIND.receta,
+        teeth: teethOf(item.planItemId),
+        retired: false,
         title: `Receta N.º ${item.prescriptionNumber}`,
         detail: `${formatDate(item.issuedAt)} · ${item.status === "anulada" ? (item.cancelReason ?? "Anulada") : "Emitida"}`,
         date: item.issuedAt,
@@ -388,6 +462,9 @@ export function DocumentosSection({
       return {
         key: `orden-${order.id}`,
         kind: "orden",
+        filter: FILTER_OF_KIND.orden,
+        teeth: [],
+        retired: false,
         title: `${ORDER_KIND_TITLES[order.kind]} · ${order.title}`,
         detail: `${formatDate(order.createdAt)} · ${
           order.status === "solicitado" ? "Pedida · sin resultado" : `Para ${order.recipient}`
@@ -414,6 +491,9 @@ export function DocumentosSection({
         return {
           key: `formulario-${response.id}`,
           kind: "formulario",
+          filter: FILTER_OF_KIND.formulario,
+          teeth: [],
+          retired: false,
           title: `Formulario · ${response.templateTitle ?? "Formulario clínico"}`,
           detail: `${formatDate(date)} · ${
             response.status === "finalizado"
@@ -438,6 +518,9 @@ export function DocumentosSection({
       return {
         key: `consentimiento-${consent.id}`,
         kind: "consentimiento",
+        filter: FILTER_OF_KIND.consentimiento,
+        teeth: teethOf(consent.planItemId),
+        retired: false,
         title: `Consentimiento · ${consent.titleSnapshot}`,
         detail: `${formatDate(date)} · ${
           consent.status === "pendiente"
@@ -468,6 +551,9 @@ export function DocumentosSection({
       (item): Row => ({
         key: `odontograma-${item.id}`,
         kind: "odontograma",
+        filter: FILTER_OF_KIND.odontograma,
+        teeth: [],
+        retired: false,
         title: `Odontograma firmado · ${SIGNED_ODONTOGRAM_PURPOSE_LABELS[item.purpose]}`,
         detail: `${formatDate(item.createdAt)} · ${item.examinerName} · ${item.registrationNumber}`,
         date: item.createdAt,
@@ -479,10 +565,29 @@ export function DocumentosSection({
     ),
   ].sort((a, b) => b.date.localeCompare(a.date))
 
-  const pendingCount = rows.filter((row) => row.needsAction).length
-  const visible = rows.filter((row) =>
-    !filter ? true : filter === "requieren" ? row.needsAction : FILTER_OF_KIND[row.kind] === filter,
-  )
+  const current = rows.filter((row) => !row.retired)
+  const retiredCount = rows.length - current.length
+  const pendingCount = current.filter((row) => row.needsAction).length
+  // Un solo buscador para todos los papeles (decisión 2) y la pieza de Historia
+  // (decisión 7), sumados al filtro de tipo. Lo retirado se ve aparte.
+  const visible = showRetired
+    ? rows.filter((row) => row.retired)
+    : current.filter(
+        (row) =>
+          (!filter || (filter === "requieren" ? row.needsAction : row.filter === filter)) &&
+          (tooth == null || row.teeth.includes(tooth)) &&
+          matchesSearch(
+            [
+              row.title,
+              row.detail,
+              row.status?.label,
+              ...(row.open.kind === "archivo" ? row.open.document.tags : []),
+            ]
+              .filter(Boolean)
+              .join(" "),
+            query,
+          ),
+      )
   const groups = groupByMonth(visible, (row) => row.date, monthHeading)
   // «Anterior» y «Siguiente» del visor recorren los archivos a la vista.
   const sequence = visible.flatMap((row) =>
@@ -585,53 +690,114 @@ export function DocumentosSection({
     }
   }
 
-  const chipOptions = DOCUMENT_FILTERS.filter(
-    (option) => option.id !== "odontogramas" || signsOdontogram,
+  // Solo los filtros que filtran algo (decisión 8); sin ninguno, tampoco «Todo».
+  const chipIds = visibleDocumentFilters(
+    DOCUMENT_FILTERS.filter((option) => option.id !== "odontogramas" || signsOdontogram).map(
+      (option) => option.id,
+    ),
+    new Set(current.map((row) => row.filter)),
+    pendingCount,
+    current.length,
+    filter,
   )
-  const chips = (
-    <fieldset className="m-0 max-w-full min-w-0 border-0 p-0">
-      <legend className="sr-only">Filtrar documentos</legend>
-      <div className="relative flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
-        {/* «Todo» va primero y, en el teléfono, queda fijo mientras la fila se desliza. */}
-        <Button
-          ref={!filter ? activeChipRef : undefined}
-          type="button"
-          size="sm"
-          variant={!filter ? "default" : "outline"}
-          aria-pressed={!filter}
-          className="sticky left-0 z-10 shrink-0 max-sm:shadow-[6px_0_8px_-6px_rgb(0_0_0/0.35)] sm:static"
-          onClick={() => setFilter(undefined)}
-        >
-          Todo
-        </Button>
-        {chipOptions.map((option) => {
-          const active = filter === option.id
-          return (
-            <Button
-              key={option.id}
-              ref={active ? activeChipRef : undefined}
-              type="button"
-              size="sm"
-              variant={active ? "default" : "outline"}
-              aria-pressed={active}
-              className="shrink-0"
-              onClick={() => setFilter(active ? undefined : option.id)}
-            >
-              {option.id === "requieren" ? `${option.label} · ${pendingCount}` : option.label}
-            </Button>
-          )
-        })}
-      </div>
-    </fieldset>
-  )
+  const chipOptions = DOCUMENT_FILTERS.filter((option) => chipIds.includes(option.id))
+  const filterName = (id: DocumentFilter) =>
+    id === "requieren"
+      ? "lo que requiere acción"
+      : (DOCUMENT_FILTERS.find((option) => option.id === id)?.label ?? id)
+  // Sin resultados se dice qué filtros están puestos: nunca hay uno que no se vea.
+  const noResults = [
+    query ? `Buscaste «${query}»` : "No hay papeles",
+    filter ? `en ${filterName(filter)}` : null,
+    tooth != null ? `de la pieza ${tooth}` : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  const narrowed = Boolean(query) || tooth != null
+  const chips =
+    chipOptions.length === 0 ? null : (
+      <fieldset className="m-0 max-w-full min-w-0 border-0 p-0">
+        <legend className="sr-only">Filtrar documentos</legend>
+        <div className="relative flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+          {/* «Todo» va primero y, en el teléfono, queda fijo mientras la fila se desliza. */}
+          <Button
+            ref={!filter ? activeChipRef : undefined}
+            type="button"
+            size="sm"
+            variant={!filter ? "default" : "outline"}
+            aria-pressed={!filter}
+            className="sticky left-0 z-10 shrink-0 max-sm:shadow-[6px_0_8px_-6px_rgb(0_0_0/0.35)] sm:static"
+            onClick={() => setFilter(undefined)}
+          >
+            Todo
+          </Button>
+          {chipOptions.map((option) => {
+            const active = filter === option.id
+            return (
+              <Button
+                key={option.id}
+                ref={active ? activeChipRef : undefined}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                aria-pressed={active}
+                className="shrink-0"
+                onClick={() => setFilter(active ? undefined : option.id)}
+              >
+                {option.id === "requieren" ? `${option.label} · ${pendingCount}` : option.label}
+              </Button>
+            )
+          })}
+        </div>
+      </fieldset>
+    )
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">Buscar un papel</p>
-        {newMenu}
-      </div>
-      {chips}
+      {showRetired ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 p-3 text-sm"
+        >
+          <span>Retirados: no se borran. Quedan con la fecha y el motivo de su retiro.</span>
+          <Button type="button" size="sm" variant="outline" onClick={() => setRetired(false)}>
+            Volver a la lista
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            {current.length > 0 || narrowed || filter ? (
+              <>
+                <SearchInput placeholder="Buscar un papel" className="min-w-0 flex-1 basis-56" />
+                <ToothFilter
+                  value={tooth}
+                  onChange={(next) =>
+                    listSearch.setParams({
+                      tooth: next != null ? String(next) : undefined,
+                      documentId: undefined,
+                    })
+                  }
+                />
+              </>
+            ) : null}
+            <div className="ml-auto">{newMenu}</div>
+          </div>
+          {chips}
+          {current.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <p aria-live="polite" className="tabular-nums">
+                {countWords(visible.length, filter, tooth)}
+              </p>
+              {narrowed ? (
+                <Button type="button" size="sm" variant="link" onClick={clearFilters}>
+                  Quitar filtros
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      )}
 
       {allPending ? (
         <LoadingState message="Cargando documentos…" />
@@ -658,7 +824,7 @@ export function DocumentosSection({
             </div>
           ) : null}
 
-          {rows.length === 0 && !loading && failed.length === 0 ? (
+          {current.length === 0 && !showRetired && !loading && failed.length === 0 ? (
             <EmptyState
               icon={FileStack}
               title="Todavía no tiene documentos"
@@ -669,10 +835,10 @@ export function DocumentosSection({
           ) : visible.length === 0 && !loading ? (
             <EmptyState
               icon={FileStack}
-              title="Sin resultados"
-              description="Ningún papel coincide con el filtro elegido."
-              actionLabel="Ver todo"
-              onAction={() => setFilter(undefined)}
+              title="Ningún papel coincide"
+              description={`${noResults}.`}
+              actionLabel="Quitar filtros"
+              onAction={clearFilters}
             />
           ) : (
             <div className="elevated rounded-xl border bg-card px-4 sm:px-6">
@@ -718,6 +884,13 @@ export function DocumentosSection({
             </div>
           )}
           {loading ? <DataRefreshMarker message="Cargando el resto de los papeles…" /> : null}
+          {retiredCount > 0 && !showRetired ? (
+            <div>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setRetired(true)}>
+                {retiredCount === 1 ? "Ver 1 retirado" : `Ver ${retiredCount} retirados`}
+              </Button>
+            </div>
+          ) : null}
         </>
       )}
 
@@ -748,7 +921,7 @@ export function DocumentosSection({
       <DocumentUploadDialog
         patientId={patientId}
         defaultEncounterId={encounterId}
-        initialTeeth={initialTooth != null ? [initialTooth] : undefined}
+        initialTeeth={tooth != null ? [tooth] : undefined}
         encounters={encounters.data ?? []}
         planItems={planItems.data?.data ?? []}
         suggestions={tagSuggestions}
@@ -883,6 +1056,52 @@ function RowShell({
   )
 }
 
+const ALL_TEETH = "todas"
+const TOOTH_ITEMS: Record<string, string> = {
+  [ALL_TEETH]: "Todas las piezas",
+  ...Object.fromEntries([...FDI_ADULT, ...FDI_CHILD].map((n) => [String(n), `Pieza ${n}`])),
+}
+
+/** «Todas las piezas ▾»: el mismo filtro de pieza que Historia (decisión 7). */
+function ToothFilter({
+  value,
+  onChange,
+}: {
+  value: number | undefined
+  onChange: (tooth: number | undefined) => void
+}) {
+  return (
+    <Select
+      items={TOOTH_ITEMS}
+      value={value != null ? String(value) : ALL_TEETH}
+      onValueChange={(next) => onChange(next && next !== ALL_TEETH ? Number(next) : undefined)}
+    >
+      <SelectTrigger aria-label="Pieza" className="w-auto min-w-40">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL_TEETH}>Todas las piezas</SelectItem>
+        <SelectGroup>
+          <SelectLabel>Permanentes</SelectLabel>
+          {FDI_ADULT.map((n) => (
+            <SelectItem key={n} value={String(n)}>
+              Pieza {n}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+        <SelectGroup>
+          <SelectLabel>Temporales</SelectLabel>
+          {FDI_CHILD.map((n) => (
+            <SelectItem key={n} value={String(n)}>
+              Pieza {n}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
+}
+
 function KindIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -916,7 +1135,6 @@ function FileRow({
   const [broken, setBroken] = useState(false)
   const url = wantsThumb && !broken ? (thumb.data?.data.url ?? null) : null
   const upload = useImagingState(patientId, doc)
-  const isImage = doc.category === "radiografia" || doc.category === "foto_clinica"
 
   const media = url ? (
     <img
@@ -927,7 +1145,7 @@ function FileRow({
       className="size-10 shrink-0 rounded-md bg-muted object-cover"
     />
   ) : (
-    <KindIcon icon={isImage ? ImageIcon : FileText} />
+    <KindIcon icon={isImageCategory(doc.category) ? ImageIcon : FileText} />
   )
 
   const status = upload ? { label: upload.text, tone: "warning" as const } : row.status

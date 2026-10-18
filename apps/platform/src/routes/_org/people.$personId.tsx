@@ -307,7 +307,7 @@ function PersonPageRoute() {
             patientId={patientId}
             filter={tipo}
             encounterId={openEncounterId}
-            initialTooth={tooth}
+            tooth={tooth}
             documentId={documentId}
           />
         ) : null
