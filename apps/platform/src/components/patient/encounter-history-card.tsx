@@ -120,6 +120,31 @@ export function EncounterHistoryCard({
           </div>
         ) : null}
         <SignedOdontogramFact patientId={patientId} encounterId={item.refId} />
+        {item.periodontal ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span>
+              <span className="font-medium">Periodontograma</span>
+              <span className="text-muted-foreground">
+                {[
+                  item.periodontal.classification,
+                  item.periodontal.bleedingPercent !== null ? `sangrado ${item.periodontal.bleedingPercent} %` : null,
+                  item.periodontal.partial ? "parcial" : null,
+                ]
+                  .filter(Boolean)
+                  .map((part) => ` · ${part}`)
+                  .join("")}
+              </span>
+            </span>
+            <Link
+              to="/patients/$patientId"
+              params={{ patientId }}
+              search={{ tab: "periodontograma", periodontograma: item.periodontal.chartId } as { tab: "periodontograma" }}
+              className={buttonVariants({ variant: "link", size: "sm" })}
+            >
+              Ver
+            </Link>
+          </div>
+        ) : null}
         {item.indications ? (
           <p className="text-sm">
             <span className="font-medium">Indicaciones: </span>

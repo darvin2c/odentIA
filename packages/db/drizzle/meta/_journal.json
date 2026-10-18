@@ -124,22 +124,29 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1792343018044,
-      "tag": "0017_spam_y_bloqueados",
+      "when": 1792342177223,
+      "tag": "0017_periodontograma",
       "breakpoints": true
     },
     {
       "idx": 18,
       "version": "7",
-      "when": 1792345478824,
-      "tag": "0018_revision_de_cobros",
+      "when": 1792342179284,
+      "tag": "0018_periodontograma_reglas",
       "breakpoints": true
     },
     {
       "idx": 19,
       "version": "7",
-      "when": 1792345480626,
-      "tag": "0019_revision_de_cobros_reglas",
+      "when": 1792353383611,
+      "tag": "0019_spam_y_revision_de_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792353397074,
+      "tag": "0020_revision_de_cobros_reglas",
       "breakpoints": true
     }
   ]
