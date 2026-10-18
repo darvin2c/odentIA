@@ -66,7 +66,7 @@ export function TomographyDetail({
 }) {
   const imaging = doc.imaging!
   const state = useImagingState(patientId, doc)
-  const flow = useTomographyFlow({ patientId, where: "La tarjeta en Imágenes", onChange: () => void onChanged() })
+  const flow = useTomographyFlow({ patientId, where: "Su fila en Documentos", onChange: () => void onChanged() })
   const [wrongStudy, setWrongStudy] = useState(false)
   const [viewing, setViewing] = useState(false)
 
@@ -115,7 +115,7 @@ export function TomographyDetail({
   return (
     <div className="flex min-w-0 flex-col gap-3 rounded-md border p-4">
       {job ? (
-        <TomographyProgress job={job} where="La tarjeta en Imágenes" />
+        <TomographyProgress job={job} where="Su fila en Documentos" />
       ) : (
         <div role="status" className="flex flex-col gap-1 text-sm">
           <p className="font-semibold">

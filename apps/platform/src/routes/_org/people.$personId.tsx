@@ -75,10 +75,6 @@ const FILTER_KEYS = [
   "estado",
   "decision",
   "ejecucion",
-  "categoria",
-  "atencion",
-  "tratamiento",
-  "etiqueta",
 ] as const
 export type PersonSearch = {
   /** Sección abierta. La pestaña se deriva de ella (ver `lib/patient-areas`). */
@@ -312,16 +308,7 @@ function PersonPageRoute() {
             filter={tipo}
             encounterId={openEncounterId}
             initialTooth={tooth}
-            initialDocumentId={documentId}
-            onFilter={(next, nextDocumentId) =>
-              void navigate({
-                search: {
-                  tab: "documentos",
-                  ...(next ? { tipo: next } : {}),
-                  ...(nextDocumentId ? { documentId: nextDocumentId } : {}),
-                },
-              })
-            }
+            documentId={documentId}
           />
         ) : null
       case "cuenta":

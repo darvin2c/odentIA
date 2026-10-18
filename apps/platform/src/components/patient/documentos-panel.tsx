@@ -8,11 +8,27 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@odentia/ui"
-import { DetailDrawer, EmptyState, LoadingState } from "@odentia/ui-patterns"
+import {
+  DataRefreshMarker,
+  DetailDrawer,
+  EmptyState,
+  LoadingState,
+  useListSearch,
+} from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ChevronDown, FileStack } from "lucide-react"
-import { useCallback, useState } from "react"
+import {
+  ChevronDown,
+  ClipboardList,
+  FileStack,
+  FileText,
+  Image as ImageIcon,
+  ListChecks,
+  type LucideIcon,
+  Pill,
+  Signature,
+} from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import {
   type ClinicalOrder,
@@ -33,25 +49,39 @@ import {
   type Prescription,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
+import { groupByMonth, teethWords } from "../../lib/document-list"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { fetchSignedOdontograms } from "../../lib/odontogram"
 import { useClinicalProfile } from "../../lib/org"
 import { DOCUMENT_FILTERS, type DocumentFilter } from "../../lib/patient-areas"
-import { documentCategoryLabel } from "../../lib/patient-overview"
-import { ageFrom, type PatientDocument, type PatientFull, type PlanItem } from "../../lib/patients"
+import {
+  ageFrom,
+  type Encounter,
+  type PatientDocument,
+  type PatientFull,
+  type PlanItem,
+} from "../../lib/patients"
 import { PrescriptionEntry, RecetasPanel } from "./clinical-panels"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
 import { ConsentDetail, NewConsentDrawer } from "./consentimientos-tab"
-import { DocumentOpenButton } from "./document-open-button"
+import { categoryLabel, formatTakenAt, imageTypeLabel, takenAt } from "./document-labels"
+import { DocumentUploadDialog } from "./document-upload-dialog"
+import {
+  DocumentViewerHost,
+  isImageDoc,
+  usePatientEncounters,
+  useSignedUrl,
+} from "./document-viewer"
 import type { NewDocumentKind } from "./encounter-documents"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
-import { ImagenesTab } from "./imagenes-tab"
 import { NewOrderDrawer, OrderResultDrawer, OrderRow } from "./ordenes-tab"
-import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import { imagingFacts, useImagingState } from "./tomography-detail"
 
 type Kind = "archivo" | "receta" | "orden" | "formulario" | "consentimiento" | "odontograma"
 type Tone = "success" | "warning" | "outline" | "secondary"
 
-/** El filtro de tipo de cada papel (las imágenes tienen su galería). */
+/** El filtro de tipo de cada papel. */
 const FILTER_OF_KIND: Record<Kind, DocumentFilter> = {
   archivo: "imagenes",
   receta: "recetas",
@@ -59,6 +89,15 @@ const FILTER_OF_KIND: Record<Kind, DocumentFilter> = {
   formulario: "formularios",
   consentimiento: "consentimientos",
   odontograma: "odontogramas",
+}
+
+/** El icono de cada clase de papel, en el lugar de la miniatura de una imagen. */
+const ICON_OF_KIND: Record<Exclude<Kind, "archivo">, LucideIcon> = {
+  receta: Pill,
+  orden: ClipboardList,
+  formulario: ListChecks,
+  consentimiento: Signature,
+  odontograma: FileText,
 }
 
 /** «Nuevo ▾»: abre directo el formulario de creación de cada papel. */
@@ -83,7 +122,9 @@ interface Row {
   key: string
   kind: Kind
   title: string
+  /** La segunda línea completa: fecha y lo que dice del papel. */
   detail: string
+  /** La fecha que ordena la lista; en una imagen, la de toma (decisión 5). */
   date: string
   status: { label: string; tone: Tone } | null
   /** Queda algo por hacer sobre el papel (firmar, completar, recibir resultado). */
@@ -99,43 +140,76 @@ interface Row {
     | { kind: "odontograma"; assessmentId: string }
 }
 
-const IMAGE_CATEGORIES = new Set(["radiografia", "foto_clinica"])
+/** «Octubre de 2026», en el idioma y la zona de la clínica. */
+function monthHeading(iso: string): string {
+  const text = new Date(iso).toLocaleDateString(activeOrgLocale(), {
+    month: "long",
+    year: "numeric",
+    timeZone: activeOrgTimeZone(),
+  })
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+/** La segunda línea de una imagen o archivo: tipo, toma, forma, piezas, atención y origen. */
+function fileDetail(doc: PatientDocument, encounter: Encounter | undefined): string {
+  const today = formatDate(new Date().toISOString())
+  const encounterDay = encounter ? formatDate(encounter.createdAt) : null
+  return [
+    imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category),
+    formatTakenAt(doc),
+    doc.imaging?.completedAt ? imagingFacts(doc.imaging) : null,
+    teethWords(doc.toothNumbers),
+    doc.encounterId
+      ? encounterDay === today
+        ? "Atención de hoy"
+        : encounterDay
+          ? `Atención del ${encounterDay}`
+          : "De una atención"
+      : null,
+    // El origen no se repite cuando ya está en el nombre.
+    doc.source && !doc.label.toLowerCase().includes(doc.source.toLowerCase()) ? doc.source : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
 
 /**
- * Clínica › Documentos, «buscar un papel» (ADR 0035): una sola lista de lo que
- * la atención emite o adjunta, con filtros por tipo y «Requieren acción».
- * «Nuevo ▾» abre directo el formulario de creación; cada fila lleva su única
- * acción (firmar, subir el resultado, imprimir, completar) y se abre al lado.
- * Las imágenes se ven en su galería, con la comparación.
+ * Clínica › Documentos, «buscar un papel» (ADR 0035 y lienzo del issue 149):
+ * una sola lista de lo que la atención emite o adjunta, separada por mes. Los
+ * filtros por tipo («Todo» primero, como en Historia) acortan la misma lista;
+ * las imágenes son una fila más, con su tipo, su fecha de toma y su miniatura,
+ * y se abren de una vez en su visor. «Nuevo ▾» abre directo el formulario y
+ * cada fila lleva su única acción.
  */
 export function DocumentosSection({
   patientId,
   filter,
   encounterId,
   initialTooth,
-  initialDocumentId,
-  onFilter,
+  documentId,
 }: {
   patientId: string
   filter?: DocumentFilter
   /** La atención en curso: lo que se crea aquí queda unido a ella. */
   encounterId?: string
   initialTooth?: number
-  initialDocumentId?: string
-  /** Cambia el filtro; con una imagen, la abre en su galería. */
-  onFilter: (filter: DocumentFilter | undefined, documentId?: string) => void
+  /** El archivo abierto en el visor (`?documentId=`). */
+  documentId?: string
 }) {
   const queryClient = useQueryClient()
+  const listSearch = useListSearch()
   const canWrite = usePermission("clinical.write")
   // El odontograma firmado es de las clínicas de Perú (NTS 188; ADR 0036).
   const signsOdontogram = useClinicalProfile().odontogram?.signedOdontogram === true
   const [menuOpen, setMenuOpen] = useState(false)
   const [creating, setCreating] = useState<Exclude<NewDocumentKind, "archivo"> | null>(null)
-  const [uploadRequested, setUploadRequested] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
   const [opened, setOpened] = useState<Row["open"] | null>(null)
   const [signing, setSigning] = useState<ConsentDocument[] | null>(null)
   const [resultFor, setResultFor] = useState<ClinicalOrder | null>(null)
-  const uploadHandled = useCallback(() => setUploadRequested(false), [])
+  // El control que abrió el visor recupera el foco al cerrarlo.
+  const openerRef = useRef<HTMLElement | null>(null)
+  const activeChipRef = useRef<HTMLButtonElement | null>(null)
 
   const files = useQuery({
     queryKey: ["patient-documents", patientId],
@@ -172,12 +246,13 @@ export function DocumentosSection({
     queryKey: ["responsibilities", patientId],
     queryFn: () => fetchResponsibilities(patientId),
   })
-  // Para crear: los tratamientos (la receta los ofrece) y los formularios publicados.
+  // Los tratamientos: la receta los ofrece y el visor y la subida los nombran.
   const planItems = useQuery({
     queryKey: ["plan-items", patientId],
     queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
-    enabled: creating === "receta",
   })
+  // Las atenciones: la fila dice de cuál es una imagen y la subida las ofrece.
+  const encounters = usePatientEncounters(patientId)
   const templates = useQuery({
     queryKey: ["form-templates-published", encounterId ? "mine-first" : "all"],
     queryFn: () =>
@@ -189,6 +264,7 @@ export function DocumentosSection({
     await Promise.all(
       [
         ["patient-documents", patientId],
+        ["patient-document-context", patientId],
         ["prescriptions", patientId],
         ["clinical-orders", patientId],
         ["form-responses", patientId],
@@ -196,19 +272,28 @@ export function DocumentosSection({
         ["odontogram-assessments", patientId],
         ["patient-summary", patientId],
         ["timeline", patientId],
+        ["encounter", patientId],
       ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     )
   }
 
+  const setFilter = (next: DocumentFilter | undefined) =>
+    listSearch.setParams({ tipo: next, documentId: undefined })
+
+  const openDocument = (id: string) => {
+    if (document.activeElement instanceof HTMLElement) openerRef.current = document.activeElement
+    listSearch.setParams({ documentId: id })
+  }
+  const closeDocument = () => {
+    listSearch.setParams({ documentId: undefined }, { replace: true })
+    window.setTimeout(() => openerRef.current?.focus(), 0)
+  }
+
   const startNew = (kind: NewDocumentKind) => {
     setMenuOpen(false)
-    if (kind === "archivo") {
-      // Las imágenes y los archivos se suben desde su galería, ya filtrada.
-      setUploadRequested(true)
-      if (filter !== "imagenes") onFilter("imagenes")
-      return
-    }
-    setCreating(kind)
+    // La imagen o el archivo se suben encima de la lista, sin cambiar el filtro.
+    if (kind === "archivo") setUploadOpen(true)
+    else setCreating(kind)
   }
 
   const newMenu = canWrite ? (
@@ -231,7 +316,7 @@ export function DocumentosSection({
   ) : null
 
   const sources = [
-    { name: "archivos", query: files },
+    { name: "imágenes y archivos", query: files },
     { name: "recetas", query: prescriptions },
     { name: "órdenes", query: orders },
     { name: "formularios", query: forms },
@@ -242,6 +327,16 @@ export function DocumentosSection({
   const failed = sources.filter((source) => source.query.isError)
   const loading = sources.some((source) => source.query.isPending)
 
+  const allFiles = files.data?.data ?? []
+  const encounterById = useMemo(
+    () => new Map((encounters.data ?? []).map((e) => [e.id, e])),
+    [encounters.data],
+  )
+  const tagSuggestions = useMemo(
+    () => [...new Set(allFiles.flatMap((d) => d.tags))].sort((a, b) => a.localeCompare(b, "es")),
+    [allFiles],
+  )
+
   // El PDF de un consentimiento firmado y la foto de la hoja en papel ya están
   // en su consentimiento: no salen dos veces.
   const consentFileIds = new Set(
@@ -251,21 +346,19 @@ export function DocumentosSection({
   )
   const pendingSigner = signerWords(patient.data?.data, responsibilities.data?.data)
   const rows: Row[] = [
-    ...(files.data?.data ?? [])
+    ...allFiles
       .filter((doc) => !consentFileIds.has(doc.id))
       .map(
         (doc): Row => ({
           key: `archivo-${doc.id}`,
           kind: "archivo",
           title: doc.label,
-          detail: [
-            documentCategoryLabel(doc.category),
-            doc.toothNumbers.length > 0 ? `Pieza ${doc.toothNumbers.join(", ")}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · "),
-          date: doc.createdAt,
-          status: null,
+          detail: fileDetail(doc, doc.encounterId ? encounterById.get(doc.encounterId) : undefined),
+          date: takenAt(doc),
+          // Toda radiografía nace sin informar: se dice, pero no cuenta como
+          // pendiente (decisión 9); el informe va en la evolución o en la orden.
+          status:
+            doc.reportStatus === "pendiente" ? { label: "Sin informar", tone: "warning" } : null,
           needsAction: false,
           action: { type: "ver" },
           open: { kind: "archivo", document: doc },
@@ -276,14 +369,17 @@ export function DocumentosSection({
         key: `receta-${item.id}`,
         kind: "receta",
         title: `Receta N.º ${item.prescriptionNumber}`,
-        detail: item.status === "anulada" ? (item.cancelReason ?? "Anulada") : "Emitida",
+        detail: `${formatDate(item.issuedAt)} · ${item.status === "anulada" ? (item.cancelReason ?? "Anulada") : "Emitida"}`,
         date: item.issuedAt,
         status:
           item.status === "anulada"
             ? { label: "Anulada", tone: "outline" }
             : { label: "Vigente", tone: "success" },
         needsAction: false,
-        action: item.status === "anulada" ? { type: "ver" } : { type: "imprimir", prescriptionId: item.id },
+        action:
+          item.status === "anulada"
+            ? { type: "ver" }
+            : { type: "imprimir", prescriptionId: item.id },
         open: { kind: "receta", prescription: item },
       }),
     ),
@@ -293,14 +389,18 @@ export function DocumentosSection({
         key: `orden-${order.id}`,
         kind: "orden",
         title: `${ORDER_KIND_TITLES[order.kind]} · ${order.title}`,
-        detail:
-          order.status === "solicitado"
-            ? `Pedida el ${formatDate(order.createdAt)} · sin resultado`
-            : `Para ${order.recipient}`,
+        detail: `${formatDate(order.createdAt)} · ${
+          order.status === "solicitado" ? "Pedida · sin resultado" : `Para ${order.recipient}`
+        }`,
         date: order.createdAt,
         status: {
           label: ORDER_STATUS_LABELS[order.status],
-          tone: order.status === "completado" ? "success" : order.status === "cancelado" ? "outline" : "warning",
+          tone:
+            order.status === "completado"
+              ? "success"
+              : order.status === "cancelado"
+                ? "outline"
+                : "warning",
         },
         needsAction: open,
         action: open && canWrite ? { type: "resultado", order } : { type: "ver" },
@@ -309,37 +409,43 @@ export function DocumentosSection({
     }),
     ...(forms.data?.data ?? [])
       .filter((response) => response.status !== "descartado")
-      .map(
-        (response): Row => ({
+      .map((response): Row => {
+        const date = response.finalizedAt ?? response.createdAt
+        return {
           key: `formulario-${response.id}`,
           kind: "formulario",
           title: `Formulario · ${response.templateTitle ?? "Formulario clínico"}`,
-          detail:
+          detail: `${formatDate(date)} · ${
             response.status === "finalizado"
               ? "Finalizado"
               : response.submittedAt
                 ? "Lo declaró la persona · por revisar"
-                : "Sin finalizar",
-          date: response.finalizedAt ?? response.createdAt,
+                : "Sin finalizar"
+          }`,
+          date,
           status:
             response.status === "finalizado"
               ? { label: "Finalizado", tone: "success" }
               : { label: "Borrador", tone: "warning" },
           needsAction: response.status === "borrador",
-          action: response.status === "borrador" && canWrite ? { type: "completar" } : { type: "ver" },
+          action:
+            response.status === "borrador" && canWrite ? { type: "completar" } : { type: "ver" },
           open: { kind: "formulario", response },
-        }),
-      ),
-    ...(consents.data?.data ?? []).map(
-      (consent): Row => ({
+        }
+      }),
+    ...(consents.data?.data ?? []).map((consent): Row => {
+      const date = consent.signedAt ?? consent.createdAt
+      return {
         key: `consentimiento-${consent.id}`,
         kind: "consentimiento",
         title: `Consentimiento · ${consent.titleSnapshot}`,
-        detail:
+        detail: `${formatDate(date)} · ${
           consent.status === "pendiente"
-            ? (consentLinkWords(consent) ?? (pendingSigner ? `Falta la firma de ${pendingSigner}` : "Falta la firma"))
-            : `Firma: ${consent.signerName}`,
-        date: consent.signedAt ?? consent.createdAt,
+            ? (consentLinkWords(consent) ??
+              (pendingSigner ? `Falta la firma de ${pendingSigner}` : "Falta la firma"))
+            : `Firma: ${consent.signerName}`
+        }`,
+        date,
         status: {
           label: CONSENT_STATUS_LABELS[consent.status],
           tone:
@@ -350,17 +456,20 @@ export function DocumentosSection({
                 : "outline",
         },
         needsAction: consent.status === "pendiente",
-        action: consent.status === "pendiente" && canWrite ? { type: "firmar", consent } : { type: "ver" },
+        action:
+          consent.status === "pendiente" && canWrite
+            ? { type: "firmar", consent }
+            : { type: "ver" },
         open: { kind: "consentimiento", consent },
-      }),
-    ),
+      }
+    }),
     // El odontograma firmado: se ve e imprime con el gráfico de la norma.
     ...(signsOdontogram ? (odontograms.data?.data ?? []) : []).map(
       (item): Row => ({
         key: `odontograma-${item.id}`,
         kind: "odontograma",
         title: `Odontograma firmado · ${SIGNED_ODONTOGRAM_PURPOSE_LABELS[item.purpose]}`,
-        detail: `${item.examinerName} · ${item.registrationNumber}`,
+        detail: `${formatDate(item.createdAt)} · ${item.examinerName} · ${item.registrationNumber}`,
         date: item.createdAt,
         status: null,
         needsAction: false,
@@ -374,21 +483,53 @@ export function DocumentosSection({
   const visible = rows.filter((row) =>
     !filter ? true : filter === "requieren" ? row.needsAction : FILTER_OF_KIND[row.kind] === filter,
   )
+  const groups = groupByMonth(visible, (row) => row.date, monthHeading)
+  // «Anterior» y «Siguiente» del visor recorren los archivos a la vista.
+  const sequence = visible.flatMap((row) =>
+    row.open.kind === "archivo" ? [row.open.document] : [],
+  )
+  const viewing = documentId ? allFiles.find((doc) => doc.id === documentId) : undefined
+
+  // En el teléfono la fila de filtros se desliza: el filtro puesto queda a la
+  // vista. Solo se mueve la fila, nunca la página.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se recoloca al cambiar el filtro.
+  useEffect(() => {
+    const chip = activeChipRef.current
+    const row = chip?.parentElement
+    if (!chip || !row || row.scrollWidth <= row.clientWidth) return
+    row.scrollLeft = chip.offsetLeft - (row.clientWidth - chip.offsetWidth) / 2
+  }, [filter])
 
   const actionButton = (row: Row) => {
     const { action } = row
     switch (action.type) {
       case "firmar":
         // Firmado desde «Su enlace»: solo falta que el profesional lo confirme.
-        if (action.consent.personSignedAt) return <ConsentLinkActions document={action.consent} onChanged={() => void consents.refetch()} />
+        if (action.consent.personSignedAt)
+          return (
+            <ConsentLinkActions
+              document={action.consent}
+              onChanged={() => void consents.refetch()}
+            />
+          )
         return (
-          <Button type="button" size="sm" onClick={() => setSigning([action.consent])}>
+          <Button
+            type="button"
+            size="sm"
+            aria-label={`Firmar ${row.title}`}
+            onClick={() => setSigning([action.consent])}
+          >
             Firmar
           </Button>
         )
       case "resultado":
         return (
-          <Button type="button" size="sm" onClick={() => setResultFor(action.order)}>
+          <Button
+            type="button"
+            size="sm"
+            aria-label={`Subir resultado de ${row.title}`}
+            onClick={() => setResultFor(action.order)}
+          >
             Subir resultado
           </Button>
         )
@@ -398,6 +539,7 @@ export function DocumentosSection({
             to="/patients/$patientId/prescriptions/$prescriptionId/print"
             params={{ patientId, prescriptionId: action.prescriptionId }}
             target="_blank"
+            aria-label={`Imprimir ${row.title}`}
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
             Imprimir
@@ -409,6 +551,7 @@ export function DocumentosSection({
             to="/patients/$patientId/odontogram/$assessmentId/print"
             params={{ patientId, assessmentId: action.assessmentId }}
             target="_blank"
+            aria-label={`Imprimir ${row.title}`}
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
             Imprimir
@@ -416,50 +559,69 @@ export function DocumentosSection({
         )
       case "completar":
         return (
-          <Button type="button" size="sm" onClick={() => setOpened(row.open)}>
+          <Button
+            type="button"
+            size="sm"
+            aria-label={`Completar ${row.title}`}
+            onClick={() => setOpened(row.open)}
+          >
             Completar
           </Button>
         )
       case "ver":
-        return row.open.kind === "archivo" ? (
-          IMAGE_CATEGORIES.has(row.open.document.category) ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => onFilter("imagenes", row.open.kind === "archivo" ? row.open.document.id : undefined)}
-            >
-              Ver en la galería
-            </Button>
-          ) : (
-            <DocumentOpenButton patientId={patientId} documentId={row.open.document.id} label="Ver" />
-          )
-        ) : (
-          <Button type="button" size="sm" variant="outline" onClick={() => setOpened(row.open)}>
+        return (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label={`Ver ${row.title}`}
+            onClick={() =>
+              row.open.kind === "archivo" ? openDocument(row.open.document.id) : setOpened(row.open)
+            }
+          >
             Ver
           </Button>
         )
     }
   }
 
+  const chipOptions = DOCUMENT_FILTERS.filter(
+    (option) => option.id !== "odontogramas" || signsOdontogram,
+  )
   const chips = (
-    <fieldset className="m-0 flex max-w-full min-w-0 flex-wrap gap-2 border-0 p-0">
+    <fieldset className="m-0 max-w-full min-w-0 border-0 p-0">
       <legend className="sr-only">Filtrar documentos</legend>
-      {DOCUMENT_FILTERS.filter((option) => option.id !== "odontogramas" || signsOdontogram).map((option) => {
-        const active = filter === option.id
-        return (
-          <Button
-            key={option.id}
-            type="button"
-            size="sm"
-            variant={active ? "default" : "outline"}
-            aria-pressed={active}
-            onClick={() => onFilter(active ? undefined : option.id)}
-          >
-            {option.id === "requieren" ? `${option.label} · ${pendingCount}` : option.label}
-          </Button>
-        )
-      })}
+      <div className="relative flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+        {/* «Todo» va primero y, en el teléfono, queda fijo mientras la fila se desliza. */}
+        <Button
+          ref={!filter ? activeChipRef : undefined}
+          type="button"
+          size="sm"
+          variant={!filter ? "default" : "outline"}
+          aria-pressed={!filter}
+          className="sticky left-0 z-10 shrink-0 max-sm:shadow-[6px_0_8px_-6px_rgb(0_0_0/0.35)] sm:static"
+          onClick={() => setFilter(undefined)}
+        >
+          Todo
+        </Button>
+        {chipOptions.map((option) => {
+          const active = filter === option.id
+          return (
+            <Button
+              key={option.id}
+              ref={active ? activeChipRef : undefined}
+              type="button"
+              size="sm"
+              variant={active ? "default" : "outline"}
+              aria-pressed={active}
+              className="shrink-0"
+              onClick={() => setFilter(active ? undefined : option.id)}
+            >
+              {option.id === "requieren" ? `${option.label} · ${pendingCount}` : option.label}
+            </Button>
+          )
+        })}
+      </div>
     </fieldset>
   )
 
@@ -471,18 +633,7 @@ export function DocumentosSection({
       </div>
       {chips}
 
-      {filter === "imagenes" ? (
-        <ImagenesTab
-          patientId={patientId}
-          encounterId={encounterId}
-          initialTooth={initialTooth}
-          initialDocumentId={initialDocumentId}
-          openUpload={uploadRequested}
-          onUploadHandled={uploadHandled}
-          showUploadButton={false}
-          onUploaded={refresh}
-        />
-      ) : allPending ? (
+      {allPending ? (
         <LoadingState message="Cargando documentos…" />
       ) : (
         <>
@@ -520,48 +671,53 @@ export function DocumentosSection({
               icon={FileStack}
               title="Sin resultados"
               description="Ningún papel coincide con el filtro elegido."
-              actionLabel="Ver todos"
-              onAction={() => onFilter(undefined)}
+              actionLabel="Ver todo"
+              onAction={() => setFilter(undefined)}
             />
           ) : (
-            <ul className="flex flex-col divide-y elevated rounded-xl border bg-card px-4 sm:px-6">
-              {visible.map((row) => (
-                <li
-                  key={row.key}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
-                >
-                  {row.open.kind === "archivo" || row.open.kind === "odontograma" ? (
-                    // Un archivo se abre con su botón (la galería o el visor); el
-                    // odontograma firmado, con su hoja.
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <span className="break-words font-medium">{row.title}</span>
-                      <span className="break-words text-muted-foreground">
-                        {formatDate(row.date)}
-                        {row.detail ? ` · ${row.detail}` : ""}
-                      </span>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="flex min-w-0 flex-1 flex-col rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
-                      onClick={() => setOpened(row.open)}
-                    >
-                      <span className="break-words font-medium">{row.title}</span>
-                      <span className="break-words text-muted-foreground">
-                        {formatDate(row.date)}
-                        {row.detail ? ` · ${row.detail}` : ""}
-                      </span>
-                    </button>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {row.status ? <Badge variant={row.status.tone}>{row.status.label}</Badge> : null}
-                    {actionButton(row)}
-                  </div>
-                </li>
+            <div className="elevated rounded-xl border bg-card px-4 sm:px-6">
+              <h2 className="sr-only">Documentos</h2>
+              {groups.map((group) => (
+                <section key={group.heading} aria-label={group.heading}>
+                  <h3 className="pt-4 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    {group.heading}
+                  </h3>
+                  <ul className="flex flex-col divide-y">
+                    {group.items.map((row) =>
+                      row.open.kind === "archivo" ? (
+                        <FileRow
+                          key={row.key}
+                          patientId={patientId}
+                          row={row}
+                          doc={row.open.document}
+                          canWrite={canWrite}
+                          onOpen={() =>
+                            row.open.kind === "archivo" && openDocument(row.open.document.id)
+                          }
+                        />
+                      ) : (
+                        <RowShell
+                          key={row.key}
+                          media={
+                            <KindIcon icon={ICON_OF_KIND[row.kind as Exclude<Kind, "archivo">]} />
+                          }
+                          title={row.title}
+                          detail={row.detail}
+                          // El odontograma firmado se ve con su hoja: «Imprimir».
+                          onOpen={
+                            row.open.kind === "odontograma" ? undefined : () => setOpened(row.open)
+                          }
+                          status={row.status}
+                          action={actionButton(row)}
+                        />
+                      ),
+                    )}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
           )}
-          {loading ? <p className="text-sm text-muted-foreground">Cargando el resto…</p> : null}
+          {loading ? <DataRefreshMarker message="Cargando el resto de los papeles…" /> : null}
         </>
       )}
 
@@ -571,6 +727,35 @@ export function DocumentosSection({
         canWrite={canWrite}
         onClose={() => setOpened(null)}
         onChanged={refresh}
+      />
+
+      {viewing ? (
+        <DocumentViewerHost
+          patientId={patientId}
+          doc={viewing}
+          sequence={sequence}
+          allDocs={allFiles}
+          encounters={encounters.data ?? []}
+          planItems={planItems.data?.data ?? []}
+          tagSuggestions={tagSuggestions}
+          canWrite={canWrite}
+          onNavigate={(id) => listSearch.setParams({ documentId: id }, { replace: true })}
+          onClose={closeDocument}
+          onChanged={refresh}
+        />
+      ) : null}
+
+      <DocumentUploadDialog
+        patientId={patientId}
+        defaultEncounterId={encounterId}
+        initialTeeth={initialTooth != null ? [initialTooth] : undefined}
+        encounters={encounters.data ?? []}
+        planItems={planItems.data?.data ?? []}
+        suggestions={tagSuggestions}
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        onSuccess={refresh}
+        onOpenDocument={openDocument}
       />
 
       {/* Lo que se crea desde «Nuevo», unido a la atención en curso si la hay. */}
@@ -648,6 +833,156 @@ export function DocumentosSection({
   )
 }
 
+/** Una fila de la lista: miniatura o icono, nombre que abre el papel, estado y su acción. */
+function RowShell({
+  media,
+  title,
+  detail,
+  onOpen,
+  status,
+  action,
+  children,
+}: {
+  media: React.ReactNode
+  title: string
+  detail: string
+  onOpen?: () => void
+  status: { label: string; tone: Tone } | null
+  action: React.ReactNode
+  children?: React.ReactNode
+}) {
+  const text = (
+    <>
+      <span className="break-words font-medium">{title}</span>
+      <span className="break-words text-muted-foreground">{detail}</span>
+    </>
+  )
+  return (
+    <li className="flex flex-wrap items-center gap-3 py-3 text-sm">
+      {media}
+      {onOpen ? (
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 basis-48 flex-col rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
+          onClick={onOpen}
+        >
+          {text}
+          {children}
+        </button>
+      ) : (
+        <div className="flex min-w-0 flex-1 basis-48 flex-col">
+          {text}
+          {children}
+        </div>
+      )}
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        {status ? <Badge variant={status.tone}>{status.label}</Badge> : null}
+        {action}
+      </div>
+    </li>
+  )
+}
+
+function KindIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+      <Icon aria-hidden className="size-5" />
+    </span>
+  )
+}
+
+/**
+ * La fila de una imagen o archivo (decisiones 3 y 4): su miniatura, su tipo y
+ * su fecha de toma; «Ver» la abre de una vez. Una tomografía a medio subir dice
+ * cuánto falta y no se abre en el visor hasta estar completa.
+ */
+function FileRow({
+  patientId,
+  row,
+  doc,
+  canWrite,
+  onOpen,
+}: {
+  patientId: string
+  row: Row
+  doc: PatientDocument
+  canWrite: boolean
+  onOpen: () => void
+}) {
+  const imaging = doc.imaging ?? null
+  // Solo una imagen o una tomografía con miniatura tienen qué dibujar.
+  const wantsThumb = imaging ? Boolean(imaging.thumbnailKey) : isImageDoc(doc)
+  const thumb = useSignedUrl(patientId, doc.id, "thumb", wantsThumb)
+  const [broken, setBroken] = useState(false)
+  const url = wantsThumb && !broken ? (thumb.data?.data.url ?? null) : null
+  const upload = useImagingState(patientId, doc)
+  const isImage = doc.category === "radiografia" || doc.category === "foto_clinica"
+
+  const media = url ? (
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      onError={() => setBroken(true)}
+      className="size-10 shrink-0 rounded-md bg-muted object-cover"
+    />
+  ) : (
+    <KindIcon icon={isImage ? ImageIcon : FileText} />
+  )
+
+  const status = upload ? { label: upload.text, tone: "warning" as const } : row.status
+  const action = upload ? (
+    canWrite && !upload.active ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        aria-label={`Subir lo que falta de ${row.title}`}
+        onClick={onOpen}
+      >
+        Subir lo que falta
+      </Button>
+    ) : null
+  ) : (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      aria-label={`Ver ${row.title}`}
+      onClick={onOpen}
+    >
+      Ver
+    </Button>
+  )
+
+  return (
+    <RowShell
+      media={media}
+      title={row.title}
+      detail={row.detail}
+      onOpen={onOpen}
+      status={status}
+      action={action}
+    >
+      {upload?.active ? (
+        <span
+          role="progressbar"
+          aria-label="Avance de la subida"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={upload.percent}
+          className="mt-1 block h-1.5 max-w-64 overflow-hidden rounded-full bg-muted"
+        >
+          <span
+            className="block h-full rounded-full bg-primary"
+            style={{ width: `${upload.percent}%` }}
+          />
+        </span>
+      ) : null}
+    </RowShell>
+  )
+}
+
 /** Un papel abierto al lado: su detalle con lo que se puede hacer con él. */
 function OpenedDocument({
   patientId,
@@ -692,14 +1027,17 @@ function OpenedDocument({
       {opened.kind === "consentimiento" ? (
         <ConsentDetail
           document={
-            (consents.data?.data ?? []).find((row) => row.id === opened.consent.id) ?? opened.consent
+            (consents.data?.data ?? []).find((row) => row.id === opened.consent.id) ??
+            opened.consent
           }
           canWrite={canWrite}
           onChanged={onChanged}
         />
       ) : opened.kind === "orden" ? (
         <OrderRow
-          order={(orders.data?.data ?? []).find((row) => row.id === opened.order.id) ?? opened.order}
+          order={
+            (orders.data?.data ?? []).find((row) => row.id === opened.order.id) ?? opened.order
+          }
           canWrite={canWrite}
           onChanged={() => void onChanged()}
         />

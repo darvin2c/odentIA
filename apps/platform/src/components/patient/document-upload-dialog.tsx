@@ -174,7 +174,7 @@ export function DocumentUploadDialog({
   // Una carpeta de CD o un ZIP con una tomografía siguen su propio recorrido (ADR 0054).
   const tomography = useTomographyFlow({
     patientId,
-    where: "La tarjeta en Imágenes",
+    where: "Su fila en Documentos",
     onChange: () => void onSuccess(),
   })
   const [noStudy, setNoStudy] = useState(false)

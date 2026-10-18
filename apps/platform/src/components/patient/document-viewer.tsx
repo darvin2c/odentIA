@@ -1,12 +1,4 @@
-import { IMAGE_TYPES } from "@odentia/clinical"
 import {
-  Attachment,
-  AttachmentAction,
-  AttachmentActions,
-  AttachmentContent,
-  AttachmentDescription,
-  AttachmentMedia,
-  AttachmentTitle,
   Badge,
   Button,
   buttonVariants,
@@ -16,9 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
   Field,
-  FieldError,
   FieldLabel,
-  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -26,20 +16,13 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import {
-  ConfirmDialog,
-  EmptyState,
-  FilterBar,
-  type FilterDef,
-  FormDrawer,LoadingState, 
-  type SortOption,
-  useListSearch } from "@odentia/ui-patterns"
+import { ConfirmDialog, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { FileText, Image as ImageIcon } from "lucide-react"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { timeAgo, usePermission } from "../../lib/crm"
+import { activeOrgLocale } from "../../lib/locale"
 import type {
   Encounter,
   PatientDocument,
@@ -54,11 +37,9 @@ import {
   planItemLabel,
   reportStatusLabel,
   takenAt,
-  UPLOAD_CATEGORIES,
 } from "./document-labels"
 import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
 import { DicomViewer } from "./dicom-viewer"
-import { DocumentUploadDialog } from "./document-upload-dialog"
 import {
   AdjustedImage,
   DEFAULT_ADJUSTMENTS,
@@ -67,21 +48,19 @@ import {
   ImageCompare,
 } from "./image-viewer"
 import { TagsInput } from "./tags-input"
-import { imagingFacts, TomographyDetail, useImagingState } from "./tomography-detail"
+import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
 import { ToothSelector } from "./tooth-selector"
-import { activeOrgLocale } from "../../lib/locale"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
 /** Los vínculos del detalle llevan a otra pantalla: enlaces con aspecto de botón, no botones. */
 const linkButton = buttonVariants({ size: "sm", variant: "outline" })
-type SortKey = "recientes" | "antiguos" | "titulo"
 
 /** Alias local: el listado ya trae el contexto vigente fusionado (tipos comunes de Main). */
 type DocView = PatientDocument
 
-function isImageDoc(doc: PatientDocument): boolean {
+export function isImageDoc(doc: PatientDocument): boolean {
   return doc.contentType.startsWith("image/")
 }
 
@@ -93,21 +72,8 @@ function isDicomDoc(doc: PatientDocument): boolean {
   return doc.contentType === "application/dicom"
 }
 
-/** Periodos del filtro, en días hacia atrás desde hoy. */
-const PERIODS: Record<string, { label: string; days: number }> = {
-  "30d": { label: "Últimos 30 días", days: 30 },
-  "6m": { label: "Últimos 6 meses", days: 183 },
-  "12m": { label: "Últimos 12 meses", days: 365 },
-  "24m": { label: "Últimos 24 meses", days: 730 },
-}
-
-function monthHeading(iso: string): string {
-  const text = new Date(iso).toLocaleDateString(activeOrgLocale(), { month: "long", year: "numeric" })
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
 /** URL firmada del archivo; `thumb` pide la miniatura (o el original si no la hay). */
-function useSignedUrl(
+export function useSignedUrl(
   patientId: string,
   documentId: string,
   variant: "original" | "thumb" = "original",
@@ -125,72 +91,10 @@ function useSignedUrl(
   })
 }
 
-export interface ImagenesTabProps {
-  patientId: string
-  encounterId?: string
-  initialTooth?: number
-  initialDocumentId?: string
-  readOnly?: boolean
-  onUploaded?: () => void | Promise<void>
-  disabled?: boolean
-  beforeWrite?: () => Promise<void>
-  onPendingChange?: (pending: boolean) => void
-  /** Desde Documentos, «Nuevo ▾ › Imagen o archivo» abre el envío sin otro clic. */
-  openUpload?: boolean
-  onUploadHandled?: () => void
-  /** En Documentos el envío lo abre «Nuevo ▾»: la galería no repite su botón. */
-  showUploadButton?: boolean
-}
-
-export function ImagenesTab({
-  patientId,
-  encounterId,
-  initialTooth,
-  initialDocumentId,
-  readOnly,
-  onUploaded,
-  disabled,
-  beforeWrite,
-  onPendingChange,
-  openUpload = false,
-  onUploadHandled,
-  showUploadButton = true,
-}: ImagenesTabProps) {
-  const queryClient = useQueryClient()
-  const canWrite = usePermission("clinical.write")
+/** Todas las atenciones de la persona, página por página: el visor y la subida las nombran. */
+export function usePatientEncounters(patientId: string, enabled = true) {
   const canRead = usePermission("clinical.read")
-
-  const listSearch = useListSearch()
-  const [teeth, setTeeth] = useState<number[]>(initialTooth != null ? [initialTooth] : [])
-  const [viewingId, setViewingId] = useState<string | null>(null)
-  // Una tomografía completa se abre directo en su visor (tablero 6 del lienzo).
-  const [scanId, setScanId] = useState<string | null>(null)
-  const [contextDoc, setContextDoc] = useState<DocView | null>(null)
-  const [resumeId, setResumeId] = useState<string | null>(null)
-  const [uploadOpen, setUploadOpen] = useState(false)
-  const openerRef = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (initialTooth != null) setTeeth([initialTooth])
-  }, [initialTooth])
-  useEffect(() => {
-    if (!openUpload) return
-    setUploadOpen(true)
-    onUploadHandled?.()
-  }, [openUpload, onUploadHandled])
-
-  // Los retirados no están en la galería; se consultan aparte con su motivo.
-  const showRetired = listSearch.get("estado") === "retirados"
-  const docsQuery = useQuery({
-    queryKey: ["patient-documents", patientId, showRetired ? "con-retirados" : "activos"],
-    queryFn: () =>
-      apiFetch<{ data: DocView[] }>(
-        `/api/patients/${patientId}/documents${showRetired ? "?includeRetired=true" : ""}`,
-      ),
-    enabled: canRead,
-  })
-
-  const encountersQuery = useQuery({
+  return useQuery({
     queryKey: ["encounters", patientId],
     queryFn: async () => {
       const all: Encounter[] = []
@@ -207,526 +111,176 @@ export function ImagenesTab({
       } while (cursor)
       return all
     },
-    enabled: canRead,
+    enabled: canRead && enabled,
   })
-  const planQuery = useQuery({
-    queryKey: ["plan-items", patientId],
-    queryFn: () => apiFetch<{ data: PlanItem[] }>(`/api/patients/${patientId}/plan`),
-    enabled: canRead,
-  })
-
-  const allDocs = docsQuery.data?.data ?? []
-  const encounters = encountersQuery.data ?? []
-  const planItems = planQuery.data?.data ?? []
-  const planById = useMemo(() => new Map(planItems.map((p) => [p.id, p])), [planItems])
-  const encounterById = useMemo(() => new Map(encounters.map((e) => [e.id, e])), [encounters])
-  const allTags = useMemo(
-    () => [...new Set(allDocs.flatMap((d) => d.tags))].sort((a, b) => a.localeCompare(b, "es")),
-    [allDocs],
-  )
-  useEffect(() => {
-    if (initialDocumentId && docsQuery.data?.data.some((d) => d.id === initialDocumentId)) {
-      setViewingId(initialDocumentId)
-    }
-  }, [initialDocumentId, docsQuery.data])
-
-  const searchText = (listSearch.get("q") ?? "").trim().toLowerCase()
-  const categoryParam = listSearch.get("categoria")
-  const atencionParam = listSearch.get("atencion")
-  const planParam = listSearch.get("tratamiento")
-  const etiquetaParam = listSearch.get("etiqueta")
-  // `?tipo=` es el filtro de Documentos (allí «imagenes» abre esta galería): el
-  // tipo de imagen va en su propio parámetro para que no se pisen.
-  const tipoParam = listSearch.get("imagen")
-  const periodoParam = listSearch.get("periodo")
-  const sortParam = listSearch.get("sort")
-  const sort: SortKey = sortParam === "antiguos" || sortParam === "titulo" ? sortParam : "recientes"
-  // En una atención, el filtro prefiere esa atención salvo "todas" explícito.
-  const atencion = atencionParam === "todas" ? undefined : (atencionParam ?? encounterId)
-
-  const filters: FilterDef[] = useMemo(
-    () => [
-      {
-        key: "categoria",
-        label: "Categoría",
-        type: "select",
-        options: UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) })),
-      },
-      {
-        key: "imagen",
-        label: "Tipo",
-        type: "select",
-        options: IMAGE_TYPES.map((t) => ({ value: t, label: imageTypeLabel(t) ?? t })),
-      },
-      {
-        key: "periodo",
-        label: "Periodo",
-        type: "select",
-        options: Object.entries(PERIODS).map(([value, p]) => ({ value, label: p.label })),
-      },
-      {
-        key: "atencion",
-        label: "Atención",
-        type: "select",
-        options: [
-          ...(encounterId ? [{ value: "todas", label: "Todas" }] : []),
-          { value: "ninguna", label: "Sin atención (generales)" },
-          ...encounters.map((e) => ({ value: e.id, label: encounterLabel(e) })),
-        ],
-      },
-      {
-        key: "tratamiento",
-        label: "Tratamiento",
-        type: "select",
-        placement: "overflow",
-        options: [
-          { value: "ninguno", label: "Sin tratamiento" },
-          ...planItems.map((p) => ({ value: p.id, label: planItemLabel(p) })),
-        ],
-      },
-      {
-        key: "etiqueta",
-        label: "Etiqueta",
-        type: "select",
-        placement: "overflow",
-        options: allTags.map((t) => ({ value: t, label: t })),
-      },
-      {
-        key: "estado",
-        label: "Estado",
-        type: "select",
-        placement: "overflow",
-        options: [{ value: "retirados", label: "Retirados" }],
-      },
-    ],
-    [encounterId, encounters, planItems, allTags],
-  )
-
-  const sortOptions: SortOption[] = useMemo(
-    () => [
-      { value: "recientes", label: "Toma más reciente" },
-      { value: "antiguos", label: "Toma más antigua" },
-      { value: "titulo", label: "Título A–Z" },
-    ],
-    [],
-  )
-
-  const filtered = useMemo(() => {
-    const teethSet = new Set(teeth)
-    const since =
-      periodoParam && PERIODS[periodoParam]
-        ? Date.now() - PERIODS[periodoParam]!.days * 86_400_000
-        : null
-    const list = allDocs.filter((d) => {
-      if (showRetired !== Boolean(d.retiredAt)) return false
-      if (searchText && !d.label.toLowerCase().includes(searchText)) return false
-      if (categoryParam && d.category !== categoryParam) return false
-      if (tipoParam && d.imageType !== tipoParam) return false
-      if (since != null && new Date(takenAt(d)).getTime() < since) return false
-      if (teeth.length > 0 && !d.toothNumbers.some((t) => teethSet.has(t))) return false
-      if (atencion === "ninguna") {
-        if (d.encounterId) return false
-      } else if (atencion && d.encounterId !== atencion) {
-        return false
-      }
-      if (planParam === "ninguno") {
-        if (d.planItemId) return false
-      } else if (planParam && d.planItemId !== planParam) {
-        return false
-      }
-      if (etiquetaParam && !d.tags.includes(etiquetaParam)) return false
-      return true
-    })
-    return [...list].sort((a, b) => {
-      if (sort === "antiguos") return takenAt(a).localeCompare(takenAt(b))
-      if (sort === "titulo") return a.label.localeCompare(b.label, "es")
-      return takenAt(b).localeCompare(takenAt(a))
-    })
-  }, [
-    allDocs,
-    showRetired,
-    searchText,
-    categoryParam,
-    tipoParam,
-    periodoParam,
-    teeth,
-    atencion,
-    planParam,
-    etiquetaParam,
-    sort,
-  ])
-
-  // Por fecha de toma, agrupado por mes; por título, lista única.
-  const groups = useMemo(() => {
-    if (sort === "titulo") return [{ heading: null as string | null, docs: filtered }]
-    const out: Array<{ heading: string | null; docs: DocView[] }> = []
-    for (const doc of filtered) {
-      const heading = monthHeading(takenAt(doc))
-      const last = out[out.length - 1]
-      if (last && last.heading === heading) last.docs.push(doc)
-      else out.push({ heading, docs: [doc] })
-    }
-    return out
-  }, [filtered, sort])
-
-  const viewing = viewingId ? (allDocs.find((d) => d.id === viewingId) ?? null) : null
-  const viewingIndex = viewing ? filtered.findIndex((d) => d.id === viewing.id) : -1
-  const openViewing = (id: string) => {
-    if (document.activeElement instanceof HTMLElement) openerRef.current = document.activeElement
-    const doc = allDocs.find((d) => d.id === id)
-    if (doc?.imaging?.completedAt) setScanId(id)
-    else setViewingId(id)
-  }
-  const scanDoc = scanId ? (allDocs.find((d) => d.id === scanId) ?? null) : null
-
-  const listError =
-    docsQuery.error instanceof ApiError
-      ? (docsQuery.error.shape.message ?? "No se pudieron cargar los documentos.")
-      : docsQuery.error
-        ? "No se pudieron cargar los documentos."
-        : null
-
-  const invalidateAfterChange = async () => {
-    await Promise.all(
-      [
-        "patient-documents",
-        "patient-document-context",
-        "timeline",
-        "patient",
-        "patient-summary",
-        "encounter",
-      ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
-    )
-    await onUploaded?.()
-  }
-
-  return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <section
-        aria-label="Archivo clínico"
-        className="flex min-w-0 flex-col gap-3 rounded-lg border p-4"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">
-            {showRetired ? "Archivos retirados" : "Imágenes y archivos"} ({filtered.length})
-          </h2>
-          {!readOnly && canWrite && showUploadButton && (
-            <Button size="sm" disabled={disabled} onClick={() => setUploadOpen(true)}>
-              Subir imagen o documento
-            </Button>
-          )}
-        </div>
-
-        <FilterBar
-          filters={filters}
-          sortOptions={sortOptions}
-          searchPlaceholder="Buscar por título"
-        />
-
-        <details className="rounded-md border px-3 py-2">
-          <summary className="cursor-pointer text-sm font-medium">
-            Filtrar por piezas{teeth.length > 0 ? ` (${teeth.length})` : ""}
-          </summary>
-          <div className="pt-2">
-            <ToothSelector value={teeth} onChange={setTeeth} label="Piezas del filtro" />
-          </div>
-        </details>
-
-        {docsQuery.isPending && <LoadingState message="Cargando…" />}
-        {listError && (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm text-destructive">{listError}</p>
-            <Button size="sm" variant="outline" onClick={() => void docsQuery.refetch()}>
-              Reintentar
-            </Button>
-          </div>
-        )}
-        {!docsQuery.isPending && !listError && filtered.length === 0 && (
-          <EmptyState
-            title="Sin archivos"
-            description={
-              allDocs.length === 0
-                ? encounterId
-                  ? "Esta atención aún no tiene archivos vinculados."
-                  : "Aún no hay radiografías, fotos ni documentos."
-                : "Ningún archivo coincide con los filtros actuales."
-            }
-          />
-        )}
-        {groups.map((group) =>
-          group.docs.length === 0 ? null : (
-            <section
-              key={group.heading ?? "todos"}
-              aria-label={group.heading ?? "Archivos"}
-              className="flex flex-col gap-2"
-            >
-              {group.heading && (
-                <h3 className="text-xs font-medium text-muted-foreground">{group.heading}</h3>
-              )}
-              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {group.docs.map((doc) => (
-                  <DocCard
-                    key={doc.id}
-                    patientId={patientId}
-                    doc={doc}
-                    planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
-                    encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
-                    onOpen={() => openViewing(doc.id)}
-                  />
-                ))}
-              </ul>
-            </section>
-          ),
-        )}
-        <p className="text-xs text-muted-foreground">
-          Los archivos forman parte de la historia clínica: no se borran. Uno subido por error se
-          retira con motivo y queda en «Estado: Retirados».
-        </p>
-      </section>
-
-      <Dialog
-        open={viewing !== null && contextDoc === null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setViewingId(null)
-            openerRef.current?.focus()
-          }
-        }}
-      >
-        {viewing && (
-          <DialogContent
-            aria-label={`Ver ${viewing.label}`}
-            className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)]"
-          >
-            <DialogHeader>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <DialogTitle>{viewing.label}</DialogTitle>
-                  <DialogDescription>
-                    {imageTypeLabel(viewing.imageType) ?? categoryLabel(viewing.category)} ·{" "}
-                    {formatTakenAt(viewing)}
-                    {viewing.toothNumbers.length > 0 ? ` · Pieza ${viewing.toothNumbers.join(", ")}` : ""}
-                    {filtered.length > 1 ? ` · ${viewingIndex + 1} de ${filtered.length}` : ""}
-                  </DialogDescription>
-                </div>
-                {viewingIndex > 0 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setViewingId(filtered[viewingIndex - 1]!.id)}
-                  >
-                    Anterior
-                  </Button>
-                )}
-                {viewingIndex >= 0 && viewingIndex < filtered.length - 1 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setViewingId(filtered[viewingIndex + 1]!.id)}
-                  >
-                    Siguiente
-                  </Button>
-                )}
-              </div>
-            </DialogHeader>
-            <DocumentViewer
-              patientId={patientId}
-              doc={viewing}
-              planItem={viewing.planItemId ? planById.get(viewing.planItemId) : undefined}
-              encounter={viewing.encounterId ? encounterById.get(viewing.encounterId) : undefined}
-              canEdit={!readOnly && canWrite && !disabled && !viewing.retiredAt}
-              onEditContext={() => {
-                setResumeId(viewingId)
-                setContextDoc(viewing)
-              }}
-              compareCandidates={allDocs.filter(
-                (d) => d.id !== viewing.id && !d.retiredAt && isImageDoc(d),
-              )}
-              onChanged={invalidateAfterChange}
-              onRetired={async () => {
-                setViewingId(null)
-                await invalidateAfterChange()
-              }}
-            />
-          </DialogContent>
-        )}
-      </Dialog>
-      <DocumentUploadDialog
-        patientId={patientId}
-        defaultEncounterId={encounterId}
-        defaultPlanItemId={planParam || undefined}
-        initialTeeth={initialTooth != null ? [initialTooth] : undefined}
-        encounters={encounters}
-        planItems={planItems}
-        suggestions={allTags}
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        onSuccess={invalidateAfterChange}
-        beforeWrite={beforeWrite}
-        onPendingChange={onPendingChange}
-        disabled={disabled}
-        onOpenDocument={(documentId) => setViewingId(documentId)}
-      />
-      {scanDoc && (
-        <TomographyViewer
-          patientId={patientId}
-          doc={scanDoc}
-          open
-          canWrite={canWrite}
-          onClose={() => setScanId(null)}
-          onDetails={() => {
-            setScanId(null)
-            setViewingId(scanDoc.id)
-          }}
-        />
-      )}
-
-      {contextDoc && (
-        <ContextDrawer
-          patientId={patientId}
-          doc={contextDoc}
-          encounters={encounters}
-          planItems={planItems}
-          suggestions={allTags}
-          open={contextDoc !== null}
-          onOpenChange={(open) => {
-            if (!open) {
-              setContextDoc(null)
-              if (resumeId) {
-                setViewingId(resumeId)
-                setResumeId(null)
-              }
-            }
-          }}
-          onSaved={async (updated) => {
-            setContextDoc(null)
-            setResumeId(null)
-            await invalidateAfterChange()
-            if (updated?.id) setViewingId(updated.id)
-          }}
-          beforeWrite={beforeWrite}
-          onPendingChange={onPendingChange}
-          disabled={disabled}
-        />
-      )}
-    </div>
-  )
 }
 
-function DocCard({
+/** Las flechas pasan de archivo salvo cuando el foco está en un control que las usa. */
+function arrowsBelongToControl(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return true
+  const role = target.getAttribute("role")
+  return role === "slider" || role === "combobox" || role === "listbox" || role === "option"
+}
+
+/**
+ * Lo que abre una fila de Documentos (lienzo del issue 149, decisión 3): la
+ * tomografía completa en su visor, de una vez; lo demás (radiografía, foto,
+ * PDF, DICOM o una tomografía a medio subir) en el visor de archivos.
+ * «Anterior» y «Siguiente» recorren los archivos de la lista a la vista, en su
+ * orden; ahí mismo se compara (decisión 6).
+ */
+export function DocumentViewerHost({
   patientId,
   doc,
-  planItem,
-  encounter,
-  onOpen,
+  sequence,
+  allDocs,
+  encounters,
+  planItems,
+  tagSuggestions,
+  canWrite,
+  onNavigate,
+  onClose,
+  onChanged,
 }: {
   patientId: string
-  doc: DocView
-  planItem?: PlanItem
-  encounter?: Encounter
-  onOpen: () => void
+  doc: PatientDocument
+  /** Los archivos de la lista a la vista, en su orden. */
+  sequence: PatientDocument[]
+  /** Todos los archivos activos de la persona: los candidatos a comparar. */
+  allDocs: PatientDocument[]
+  encounters: Encounter[]
+  planItems: PlanItem[]
+  tagSuggestions: string[]
+  canWrite: boolean
+  onNavigate: (documentId: string) => void
+  onClose: () => void
+  onChanged: () => Promise<void>
 }) {
-  const imaging = doc.imaging ?? null
-  // Una tomografía solo tiene miniatura cuando el navegador ya la armó.
-  const urlQuery = useSignedUrl(patientId, doc.id, "thumb", !imaging || Boolean(imaging.thumbnailKey))
-  const url = urlQuery.data?.data.url ?? null
-  const teeth = doc.toothNumbers
-  const tags = doc.tags
-  const uploadState = useImagingState(patientId, doc)
+  // La tomografía completa abre su visor; «Detalles» lleva a su ficha de archivo.
+  const [details, setDetails] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: cada archivo abre en su vista.
+  useEffect(() => {
+    setDetails(false)
+    setEditing(false)
+  }, [doc.id])
+  const planById = useMemo(() => new Map(planItems.map((p) => [p.id, p])), [planItems])
+  const encounterById = useMemo(() => new Map(encounters.map((e) => [e.id, e])), [encounters])
+  const index = sequence.findIndex((d) => d.id === doc.id)
+  const previous = index > 0 ? sequence[index - 1] : undefined
+  const next = index >= 0 && index < sequence.length - 1 ? sequence[index + 1] : undefined
+
+  if (doc.imaging?.completedAt && !details && !editing) {
+    return (
+      <TomographyViewer
+        patientId={patientId}
+        doc={doc}
+        open
+        canWrite={canWrite}
+        onClose={onClose}
+        onDetails={() => setDetails(true)}
+      />
+    )
+  }
 
   return (
-    <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`Ver ${doc.label}`}
-        className="flex w-full min-w-0 flex-col gap-2 rounded-lg border p-2 text-left transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+    <>
+      <Dialog
+        open={!editing}
+        onOpenChange={(open) => {
+          if (!open) onClose()
+        }}
       >
-        <span className="relative block aspect-square w-full overflow-hidden rounded-md bg-muted">
-          {url && (isImageDoc(doc) || imaging) ? (
-            // URL firmada directa: sin object URLs, sin fugas de recursos multimedia.
-            // object-contain: la radiografía se ve completa, sin recortes.
-            <img src={url} alt="" loading="lazy" className="h-full w-full object-contain" />
-          ) : urlQuery.isPending && urlQuery.fetchStatus !== "idle" ? (
-            <span className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              Cargando…
-            </span>
-          ) : (
-            <span className="flex h-full items-center justify-center">
-              {isPdfDoc(doc) ? (
-                <FileText className="size-10 text-muted-foreground" aria-hidden="true" />
-              ) : (
-                <ImageIcon className="size-10 text-muted-foreground" aria-hidden="true" />
+        <DialogContent
+          aria-label={`Ver ${doc.label}`}
+          className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)]"
+          onKeyDown={(event) => {
+            if (arrowsBelongToControl(event.target)) return
+            if (event.key === "ArrowLeft" && previous) {
+              event.preventDefault()
+              onNavigate(previous.id)
+            } else if (event.key === "ArrowRight" && next) {
+              event.preventDefault()
+              onNavigate(next.id)
+            }
+          }}
+        >
+          <DialogHeader>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <DialogTitle>{doc.label}</DialogTitle>
+                <DialogDescription>
+                  {imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)} ·{" "}
+                  {formatTakenAt(doc)}
+                  {doc.toothNumbers.length > 0
+                    ? ` · ${doc.toothNumbers.length === 1 ? "Pieza" : "Piezas"} ${doc.toothNumbers.join(", ")}`
+                    : ""}
+                  {sequence.length > 1 && index >= 0 ? ` · ${index + 1} de ${sequence.length}` : ""}
+                </DialogDescription>
+              </div>
+              {previous && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-keyshortcuts="ArrowLeft"
+                  onClick={() => onNavigate(previous.id)}
+                >
+                  Anterior
+                </Button>
               )}
-            </span>
-          )}
-          <Badge variant="secondary" className="absolute top-1.5 left-1.5 max-w-[90%] truncate">
-            {imageTypeLabel(doc.imageType) ?? categoryLabel(doc.category)}
-          </Badge>
-          {doc.retiredAt ? (
-            <Badge variant="destructive" className="absolute right-1.5 bottom-1.5">
-              Retirado
-            </Badge>
-          ) : uploadState ? (
-            <Badge variant="outline" className="absolute right-1.5 bottom-1.5 bg-background">
-              {uploadState.text}
-            </Badge>
-          ) : doc.reportStatus === "pendiente" ? (
-            <Badge variant="outline" className="absolute right-1.5 bottom-1.5 bg-background">
-              Sin informar
-            </Badge>
-          ) : null}
-        </span>
-        <span className="flex min-w-0 flex-col gap-1 px-0.5 pb-0.5">
-          <span className="truncate text-sm font-medium">{doc.label}</span>
-          {uploadState && (
-            <span
-              role="progressbar"
-              aria-label="Avance de la subida"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={uploadState.percent}
-              className="block h-1.5 overflow-hidden rounded-full bg-muted"
-            >
-              <span className="block h-full rounded-full bg-primary" style={{ width: `${uploadState.percent}%` }} />
-            </span>
-          )}
-          {imaging && <span className="text-xs text-muted-foreground">{imagingFacts(imaging)}</span>}
-          <span className="text-xs text-muted-foreground">
-            {formatTakenAt(doc)}
-            {teeth.length > 0 &&
-              ` · ${teeth.length === 1 ? `Pieza ${teeth[0]}` : `${teeth.length} piezas`}`}
-          </span>
-          {teeth.length > 1 && (
-            <span className="flex flex-wrap gap-1" aria-label={`Piezas: ${teeth.join(", ")}`}>
-              {teeth.slice(0, 4).map((t) => (
-                <Badge key={t} variant="outline">
-                  {t}
-                </Badge>
-              ))}
-              {teeth.length > 4 && <Badge variant="outline">+{teeth.length - 4}</Badge>}
-            </span>
-          )}
-          <span className="text-xs text-muted-foreground">
-            {encounter ? `Atención · ${timeAgo(encounter.createdAt)}` : "Sin atención"}
-            {planItem ? ` · ${planItem.title}` : ""}
-            {doc.source ? ` · ${doc.source}` : ""}
-          </span>
-          {tags.length > 0 && (
-            <span className="flex flex-wrap gap-1" aria-label={`Etiquetas: ${tags.join(", ")}`}>
-              {tags.slice(0, 3).map((t) => (
-                <Badge key={t} variant="secondary">
-                  {t}
-                </Badge>
-              ))}
-              {tags.length > 3 && <Badge variant="secondary">+{tags.length - 3}</Badge>}
-            </span>
-          )}
-        </span>
-      </button>
-    </li>
+              {next && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-keyshortcuts="ArrowRight"
+                  onClick={() => onNavigate(next.id)}
+                >
+                  Siguiente
+                </Button>
+              )}
+            </div>
+          </DialogHeader>
+          <DocumentViewer
+            patientId={patientId}
+            doc={doc}
+            planItem={doc.planItemId ? planById.get(doc.planItemId) : undefined}
+            encounter={doc.encounterId ? encounterById.get(doc.encounterId) : undefined}
+            canEdit={canWrite && !doc.retiredAt}
+            onEditContext={() => setEditing(true)}
+            compareCandidates={allDocs.filter(
+              (d) => d.id !== doc.id && !d.retiredAt && isImageDoc(d),
+            )}
+            onChanged={onChanged}
+            onRetired={async () => {
+              onClose()
+              await onChanged()
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+      {editing && (
+        <ContextDrawer
+          patientId={patientId}
+          doc={doc}
+          encounters={encounters}
+          planItems={planItems}
+          suggestions={tagSuggestions}
+          open
+          onOpenChange={(open) => {
+            if (!open) setEditing(false)
+          }}
+          onSaved={async (updated) => {
+            setEditing(false)
+            await onChanged()
+            if (updated?.id && updated.id !== doc.id) onNavigate(updated.id)
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -764,6 +318,7 @@ function DocumentViewer({
   const [actionError, setActionError] = useState<string | null>(null)
   const retireId = useId()
   const compareSelectId = useId()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: otro archivo empieza sin ajustes.
   useEffect(() => {
     setAdjustments(DEFAULT_ADJUSTMENTS)
     setCompareId("")
@@ -836,7 +391,12 @@ function DocumentViewer({
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem]">
       {doc.imaging ? (
-        <TomographyDetail patientId={patientId} doc={doc} canUpload={canEdit} onChanged={onChanged} />
+        <TomographyDetail
+          patientId={patientId}
+          doc={doc}
+          canUpload={canEdit}
+          onChanged={onChanged}
+        />
       ) : urlQuery.isPending ? (
         <LoadingState message="Cargando…" />
       ) : error || !url ? (
@@ -861,7 +421,12 @@ function DocumentViewer({
         />
       ) : isImageDoc(doc) ? (
         <div className="flex min-w-0 flex-col gap-3">
-          <AdjustedImage src={url} alt={doc.label} adjustments={adjustments} className="max-h-[65vh]" />
+          <AdjustedImage
+            src={url}
+            alt={doc.label}
+            adjustments={adjustments}
+            className="max-h-[65vh]"
+          />
           <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
         </div>
       ) : isPdfDoc(doc) ? (
@@ -876,7 +441,10 @@ function DocumentViewer({
       {/* Visor arriba; columna de metadata (plegable en móvil) debajo/al lado. */}
       <div className="flex min-w-0 flex-col gap-3">
         {doc.retiredAt && (
-          <div role="status" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          <div
+            role="status"
+            className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+          >
             <p className="font-medium">Retirado {timeAgo(doc.retiredAt)}</p>
             <p className="text-muted-foreground">Motivo: {doc.retireReason}</p>
           </div>
@@ -1017,7 +585,12 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Tratamiento</dt>
               <dd>
                 {doc.planItemId ? (
-                  <Link to="/patients/$patientId" params={{ patientId }} search={planSearch} className={linkButton}>
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={planSearch}
+                    className={linkButton}
+                  >
                     {planItem ? `Ver plan: ${planItem.title}` : "Ver plan"}
                   </Link>
                 ) : (
@@ -1065,7 +638,12 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Control</dt>
               <dd>
                 {doc.followUpId ? (
-                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "plan" }} className={linkButton}>
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={{ tab: "plan" }}
+                    className={linkButton}
+                  >
                     Ver controles
                   </Link>
                 ) : (
@@ -1077,7 +655,12 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Receta</dt>
               <dd>
                 {doc.prescriptionId ? (
-                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "recetas" }} className={linkButton}>
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={{ tab: "recetas" }}
+                    className={linkButton}
+                  >
                     Ver recetas
                   </Link>
                 ) : (
@@ -1089,7 +672,12 @@ function DocumentViewer({
               <dt className="text-xs text-muted-foreground">Pago</dt>
               <dd>
                 {doc.paymentId ? (
-                  <Link to="/patients/$patientId" params={{ patientId }} search={{ tab: "cuenta" }} className={linkButton}>
+                  <Link
+                    to="/patients/$patientId"
+                    params={{ patientId }}
+                    search={{ tab: "cuenta" }}
+                    className={linkButton}
+                  >
                     Ver cuenta
                   </Link>
                 ) : (
@@ -1131,7 +719,7 @@ function DocumentViewer({
             size="sm"
             variant="outline"
             onClick={() => {
-              const link = `${window.location.origin}/patients/${patientId}?tab=imagenes&documentId=${doc.id}`
+              const link = `${window.location.origin}/patients/${patientId}?tab=documentos&documentId=${doc.id}`
               void navigator.clipboard
                 ?.writeText(link)
                 .catch(() => window.prompt("Copia el enlace:", link))
@@ -1384,91 +972,116 @@ function ContextDrawer({
       error={serverError}
     >
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="sticky top-0 rounded-md border bg-background p-3">
-        <p className="mb-2 text-sm font-medium">{doc.label}</p>
-        {previewQuery.isPending ? <p>Cargando imagen…</p> : previewQuery.isError ? (
-          <Button type="button" variant="outline" onClick={() => void previewQuery.refetch()}>Reintentar vista previa</Button>
-        ) : previewQuery.data && (isImageDoc(doc) ?
-          <img src={previewQuery.data.data.url} alt={doc.label} className="max-h-[60vh] w-full object-contain" /> :
-          isPdfDoc(doc) ? <embed src={previewQuery.data.data.url} type="application/pdf" className="h-[60vh] w-full" /> :
-          <a href={previewQuery.data.data.url} target="_blank" rel="noreferrer">Abrir archivo original</a>)}
-      </div>
-      <fieldset disabled={pending || disabled} className="flex flex-col gap-3">
-        {conflict && (
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2">
-            <p className="text-xs text-muted-foreground">
-              La revisión vigente cambió (ahora v{doc.contextVersion} o superior). Recargarla
-              reemplaza este formulario.
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={pending}
-              onClick={() => void reloadRevision()}
+        <div className="sticky top-0 rounded-md border bg-background p-3">
+          <p className="mb-2 text-sm font-medium">{doc.label}</p>
+          {previewQuery.isPending ? (
+            <p>Cargando imagen…</p>
+          ) : previewQuery.isError ? (
+            <Button type="button" variant="outline" onClick={() => void previewQuery.refetch()}>
+              Reintentar vista previa
+            </Button>
+          ) : (
+            previewQuery.data &&
+            (isImageDoc(doc) ? (
+              <img
+                src={previewQuery.data.data.url}
+                alt={doc.label}
+                className="max-h-[60vh] w-full object-contain"
+              />
+            ) : isPdfDoc(doc) ? (
+              <embed
+                src={previewQuery.data.data.url}
+                type="application/pdf"
+                className="h-[60vh] w-full"
+              />
+            ) : (
+              <a href={previewQuery.data.data.url} target="_blank" rel="noreferrer">
+                Abrir archivo original
+              </a>
+            ))
+          )}
+        </div>
+        <fieldset disabled={pending || disabled} className="flex flex-col gap-3">
+          {conflict && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2">
+              <p className="text-xs text-muted-foreground">
+                La revisión vigente cambió (ahora v{doc.contextVersion} o superior). Recargarla
+                reemplaza este formulario.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => void reloadRevision()}
+              >
+                Recargar revisión
+              </Button>
+            </div>
+          )}
+          <Field>
+            <FieldLabel htmlFor={encounterChoiceId}>Atención</FieldLabel>
+            <Select
+              items={Object.fromEntries(encounters.map((e) => [e.id, encounterLabel(e)] as const))}
+              value={encounterChoice}
+              onValueChange={(v) => setEncounterChoice(v ?? "")}
             >
-              Recargar revisión
-            </Button>
-          </div>
-        )}
-        <Field>
-          <FieldLabel htmlFor={encounterChoiceId}>Atención</FieldLabel>
-          <Select
-            items={Object.fromEntries(encounters.map((e) => [e.id, encounterLabel(e)] as const))}
-            value={encounterChoice}
-            onValueChange={(v) => setEncounterChoice(v ?? "")}
-          >
-            <SelectTrigger id={encounterChoiceId} aria-label="Atención vinculada">
-              <SelectValue placeholder="General (sin atención)" />
-            </SelectTrigger>
-            <SelectContent>
-              {encounters.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {encounterLabel(e)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {encounterChoice && (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setEncounterChoice("")}>
-              Quitar vínculo a atención
-            </Button>
-          )}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={planChoiceId}>Tratamiento</FieldLabel>
-          <Select
-            items={Object.fromEntries(planItems.map((p) => [p.id, planItemLabel(p)] as const))}
-            value={planChoice}
-            onValueChange={(v) => setPlanChoice(v ?? "")}
-          >
-            <SelectTrigger id={planChoiceId} aria-label="Tratamiento vinculado">
-              <SelectValue placeholder="Sin tratamiento" />
-            </SelectTrigger>
-            <SelectContent>
-              {planItems.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {planItemLabel(p)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {planChoice && (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setPlanChoice("")}>
-              Quitar vínculo a tratamiento
-            </Button>
-          )}
-        </Field>
-        <DocumentLinkSelects
-          patientId={patientId}
-          value={links}
-          idPrefix={`${planChoiceId}-links`}
-          procedures={procedures}
-          onChange={(patch) => setLinks((current) => ({ ...current, ...patch }))}
-        />
-        <ToothSelector value={teeth} onChange={setTeeth} label="Piezas" />
-        <TagsInput value={tags} onChange={setTags} suggestions={suggestions} />
-      </fieldset>
+              <SelectTrigger id={encounterChoiceId} aria-label="Atención vinculada">
+                <SelectValue placeholder="General (sin atención)" />
+              </SelectTrigger>
+              <SelectContent>
+                {encounters.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {encounterLabel(e)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {encounterChoice && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setEncounterChoice("")}
+              >
+                Quitar vínculo a atención
+              </Button>
+            )}
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={planChoiceId}>Tratamiento</FieldLabel>
+            <Select
+              items={Object.fromEntries(planItems.map((p) => [p.id, planItemLabel(p)] as const))}
+              value={planChoice}
+              onValueChange={(v) => setPlanChoice(v ?? "")}
+            >
+              <SelectTrigger id={planChoiceId} aria-label="Tratamiento vinculado">
+                <SelectValue placeholder="Sin tratamiento" />
+              </SelectTrigger>
+              <SelectContent>
+                {planItems.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {planItemLabel(p)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {planChoice && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setPlanChoice("")}>
+                Quitar vínculo a tratamiento
+              </Button>
+            )}
+          </Field>
+          <DocumentLinkSelects
+            patientId={patientId}
+            value={links}
+            idPrefix={`${planChoiceId}-links`}
+            procedures={procedures}
+            onChange={(patch) => setLinks((current) => ({ ...current, ...patch }))}
+          />
+          <ToothSelector value={teeth} onChange={setTeeth} label="Piezas" />
+          <TagsInput value={tags} onChange={setTags} suggestions={suggestions} />
+        </fieldset>
       </div>
     </FormDrawer>
   )
