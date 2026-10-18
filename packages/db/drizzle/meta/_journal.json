@@ -127,6 +127,20 @@
       "when": 1792343018044,
       "tag": "0017_spam_y_bloqueados",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792345478824,
+      "tag": "0018_revision_de_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792345480626,
+      "tag": "0019_revision_de_cobros_reglas",
+      "breakpoints": true
     }
   ]
 }

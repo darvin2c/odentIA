@@ -4,7 +4,7 @@ import {
   blockPerson,
   confirmPhoneMatch,
   contactOfConversation,
-  sendToSpam,
+  markSpamAndRefund,
   takeOutOfSpam,
   unblockPerson,
   phoneMatchOf,
@@ -34,6 +34,7 @@ import {
   summarizeInbox,
   takeConversation,
 } from "@odentia/services"
+import { ORG_ROLES, type OrgRole, ROLE_LABELS } from "@odentia/auth/permissions"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -385,12 +386,14 @@ export function createConversationsRoute(deps: CrmDeps) {
   const contactOf = contactOfConversation
 
   // «Es spam»: quien escribe en conversaciones. No vale para un paciente (409).
+  // Sus conversaciones ya cobradas se devuelven solas dentro del tope (decisión 5).
   app.post("/:id/spam", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    const role = (ORG_ROLES as readonly string[]).includes(memberRole) ? (memberRole as OrgRole) : null
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, async (tx) => {
         const contactId = await contactOf(tx, orgId, c.req.param("id"))
-        return sendToSpam(tx, orgId, { contactId, userId })
+        return markSpamAndRefund(tx, orgId, { userId, roleLabel: role ? ROLE_LABELS[role] : memberRole }, contactId)
       }),
     )
   })

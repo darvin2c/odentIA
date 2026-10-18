@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto"
 import { deflateSync } from "node:zlib"
 import { DEFAULT_REGISTRATION_CONFIG, TREATMENT_SPECIALTIES } from "@odentia/clinical"
 import { createOwnerDb } from "@odentia/db"
+import { supportNotice } from "@odentia/db/schema/admin-support"
 import { saasAction, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { appointment, scheduleChair } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
@@ -102,6 +103,7 @@ import {
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
 import { blockContact, markSpam } from "./contact-screen.js"
+import { decideActionReview, requestActionReview } from "./saas-action-review.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -159,7 +161,7 @@ import { seedReports } from "./seed-reports.js"
 import { seedRoles } from "./seed-roles.js"
 import { seedWebchat } from "./seed-webchat.js"
 import { seedWorkspace } from "./seed-workspace.js"
-import { SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
+import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "./seed-admin-core.js"
 import { seedAdminOrganizations } from "./seed-admin-organizations.js"
 import { seedAdminSupport } from "./seed-admin-support.js"
 import { respondConsumerComplaint, submitConsumerComplaint } from "./consumer-complaints.js"
@@ -358,6 +360,8 @@ async function wipeSeed(): Promise<void> {
     .where(inArray(message.organizationId, SEED_ORGS))
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
+    // La revisión de un cobro apunta a su acción y a su caso de Soporte.
+    "saas_action_review",
     "support_access_audit",
     "support_access_grant",
     "support_attachment",
@@ -3421,6 +3425,44 @@ await db.transaction(async (tx) => {
       dedupeKey: "semilla:cita:0",
     },
   ]).onConflictDoNothing()
+  // «Pedir revisión» (issue 77, ADR 0054): Ana, la dueña, pidió revisar dos
+  // conversaciones; odentIA mantuvo una con su respuesta y la otra espera en
+  // Soporte. Sus avisos a soporte quedan como enviados: la semilla no envía nada.
+  const reviewed = await db
+    .select({ id: saasAction.id, key: saasAction.dedupeKey })
+    .from(saasAction)
+    .where(and(eq(saasAction.organizationId, ORG_A), inArray(saasAction.dedupeKey, ["semilla:conversacion:2", "semilla:conversacion:4"])))
+  const actionOf = (key: string) => reviewed.find((row) => row.key === key)?.id
+  const ana = { userId: ANA_ID, roleLabel: "Dueño" }
+  const caseIds: string[] = []
+  const kept = actionOf("semilla:conversacion:2")
+  if (kept) {
+    const asked = await requestActionReview(db, ORG_A, ana, {
+      actionId: kept,
+      reason: "doble",
+      note: "Ejemplo de la semilla: creo que esta conversación ya se contó el día anterior.",
+    })
+    if (asked.caseId) {
+      caseIds.push(asked.caseId)
+      await decideActionReview(db, { userId: SEED_STAFF_ADMIN_ID, role: "admin" }, {
+        caseId: asked.caseId,
+        accept: false,
+        answer: "Ejemplo de la semilla: es una sola conversación ese día; la del día anterior fue con otra persona.",
+      })
+    }
+  }
+  const pending = actionOf("semilla:conversacion:4")
+  if (pending) {
+    const asked = await requestActionReview(db, ORG_A, ana, {
+      actionId: pending,
+      reason: "agente",
+      note: "Ejemplo de la semilla: le dio un horario del sábado que no tenemos.",
+    })
+    if (asked.caseId) caseIds.push(asked.caseId)
+  }
+  if (caseIds.length) {
+    await db.update(supportNotice).set({ emailState: "enviado", emailedAt: new Date() }).where(inArray(supportNotice.caseId, caseIds))
+  }
 }
 // Uso de IA del mes para la ficha de la clínica en la administración (ADR 0031).
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no

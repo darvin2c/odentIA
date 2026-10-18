@@ -34,7 +34,15 @@ Hay dos estados de la persona, en una sola columna (`contact.screen`). Ninguno s
 
 - En la Bandeja, Spam y Bloqueados son dos listas junto a las pestañas, en gris. Bloqueados no lleva número: no es trabajo.
 
+- **Pedir revisión** de un cobro. En «Cada acción de tus agentes», el dueño y la administración piden revisar cualquier fila del mes en curso o del anterior, una vez por fila. Se dice «revisión» y no «reclamo», que en Perú es el del Libro de Reclamaciones.
+  - Si era spam de quien no es paciente, se devuelve al instante y la persona pasa a Spam, hasta el 10 % de las conversaciones del mes. Lo mismo pasa con sus conversaciones cobradas cuando alguien del equipo dice «Es spam».
+  - Pasado ese tope, y en todo lo demás, revisa odentIA: un caso de Soporte de tipo «Revisión de cobro» con la fila adentro. Decide quien tiene el rol admin, siempre con lo que se le dice a la clínica, y el caso queda resuelto.
+  - odentIA lee la conversación solo si la clínica lo permite: hasta la respuesta y como mucho 7 días, con registro en la auditoría.
+  - Lo devuelto antes de cobrarse no se cobra. Lo ya cobrado sale en el cargo siguiente como «Devolución por revisión», que resta como la devolución de la cita recuperada. Un cargo emitido no cambia y la revisión es una fila nueva (`saas_action_review`).
+
 ## Alternativas descartadas
+
+- **Devolver todo el spam sin tope.** Una clínica podría marcar como spam a pacientes reales para no pagar. El tope del 10 % cuesta, en el peor mes, menos de un punto de margen (lienzo, tablero 8).
 
 - **Un solo estado, «Bloqueado» para todo.** En WhatsApp bloquear significa que la persona no puede escribir; para un error de Jev sería un castigo.
 - **Responder una vez a quien cae en Spam.** Ayuda si Jev se equivoca con un paciente, pero le confirma el número a cada estafador y puede enganchar a la respuesta automática de otro negocio.
@@ -46,9 +54,10 @@ Hay dos estados de la persona, en una sola columna (`contact.screen`). Ninguno s
 - La Bandeja, Inicio y Reportes muestran solo lo que alguien tiene que atender.
 - Un error de Jev tiene dos salidas: la persona escribe algo real o el equipo dice «No es spam».
 - Revisar si suben los «No es spam» de una clínica: el umbral se mide con `eval:spam`.
+- La devolución de un cobro ya facturado acredita el precio entero de la fila, aunque el crédito del mes la hubiera cubierto. Es a favor de la clínica y no se corrige mientras no haya casos.
 
 ## Referencias
 
-- Código: `contact-screen.ts`, `contact-screen-actions.ts`, `conversation-state.ts` (vistas `spam` y `blocked`), `apps/worker/src/contact-screens.ts` y `setBlocked` de WhatsApp.
-- Lienzo del issue 77, decisiones 1 a 16.
+- Código: `contact-screen.ts`, `contact-screen-actions.ts`, `conversation-state.ts` (vistas `spam` y `blocked`), `apps/worker/src/contact-screens.ts` y `setBlocked` de WhatsApp. La revisión de cobros: `saas-action-review.ts`, el estado `devuelta` de `listPeriodActions` y la línea `revision` de `saas-invoicing.ts`.
+- Lienzo del issue 77, decisiones 1 a 16 y tableros 6 a 8.
 - [Block Users API](https://developers.facebook.com/docs/whatsapp/cloud-api/block-users) y [precios de WhatsApp](https://developers.facebook.com/docs/whatsapp/pricing), leídas el 2026-10-18.

@@ -23,7 +23,8 @@ import { enqueueSupportInboxNotice } from "./support-notices.js"
 /* ---------- Tipos ---------- */
 
 export type SupportStatus = "abierto" | "en_atencion" | "esperando_clinica" | "resuelto"
-export type SupportKind = "pregunta" | "problema" | "acceso"
+/** `cobro`: la clínica pidió revisar una fila de lo que se le cobró (ADR 0054). */
+export type SupportKind = "pregunta" | "problema" | "acceso" | "cobro"
 
 export const SUPPORT_STATUSES: SupportStatus[] = [
   "abierto",
@@ -300,7 +301,7 @@ function toListItem(
     id: row.id,
     organizationId: row.organizationId,
     organizationName: null,
-    kind: (["pregunta", "problema", "acceso"] as string[]).includes(row.kind)
+    kind: (["pregunta", "problema", "acceso", "cobro"] as string[]).includes(row.kind)
       ? (row.kind as SupportKind)
       : "pregunta",
     question: row.question,
@@ -1321,7 +1322,7 @@ export async function supportMetrics(db: Db, actor: AdminActor): Promise<Support
     (SUPPORT_STATUSES as string[]).includes(row.status),
   )
   const validKinds = byKind.filter(
-    (row) => row.kind === "pregunta" || row.kind === "problema" || row.kind === "acceso",
+    (row) => row.kind === "pregunta" || row.kind === "problema" || row.kind === "acceso" || row.kind === "cobro",
   )
   return {
     byStatus: validStatuses.map((row) => ({

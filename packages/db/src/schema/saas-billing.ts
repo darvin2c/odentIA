@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
+import { supportCase } from "./admin-support.js"
 import { organization, user } from "./auth.js"
 import { orgFk, timestamps } from "./crm.js"
 
@@ -567,11 +568,15 @@ export const saasChargeLine = pgTable(
       columns: [table.organizationId, table.chargeId],
       foreignColumns: [saasCharge.organizationId, saasCharge.id],
     }),
-    check("saas_charge_line_kind_check", sql`${table.kind} IN ('cuota','conversacion','consulta','cita','devolucion','credito','impuesto')`),
-    // Solo la devolución resta: la conversación ya cobrada que llevó a una cita recuperada.
+    check(
+      "saas_charge_line_kind_check",
+      sql`${table.kind} IN ('cuota','conversacion','consulta','cita','devolucion','revision','credito','impuesto')`,
+    ),
+    // Solo las devoluciones restan: la conversación ya cobrada que llevó a una cita
+    // recuperada y lo que odentIA devolvió al revisar un cobro ya facturado (ADR 0054).
     check(
       "saas_charge_line_amount_check",
-      sql`${table.quantity} >= 0 AND CASE WHEN ${table.kind} = 'devolucion' THEN ${table.amountCents} <= 0 ELSE ${table.amountCents} >= 0 END`,
+      sql`${table.quantity} >= 0 AND CASE WHEN ${table.kind} IN ('devolucion','revision') THEN ${table.amountCents} <= 0 ELSE ${table.amountCents} >= 0 END`,
     ),
   ],
 )
@@ -624,5 +629,75 @@ export const saasAction = pgTable(
       "saas_action_price_check",
       sql`(${table.basePriceMicros} IS NULL) = (${table.priceMicros} IS NULL) AND coalesce(${table.priceMicros}, 0) >= 0 AND ${table.discountBps} BETWEEN 0 AND 9000`,
     ),
+  ],
+)
+
+/** Por qué pide la clínica revisar un cobro (issue 77, ADR 0054). */
+export const SAAS_REVIEW_REASONS = ["spam", "agente", "doble", "otro"] as const
+export type SaasReviewReason = (typeof SAAS_REVIEW_REASONS)[number]
+export const SAAS_REVIEW_STATUSES = ["pendiente", "devuelta", "mantenida"] as const
+export type SaasReviewStatus = (typeof SAAS_REVIEW_STATUSES)[number]
+
+/**
+ * «Pedir revisión» de una fila de «Cada acción de tus agentes» (ADR 0054): una
+ * por acción. El spam dentro del tope se devuelve solo (`automatic`); lo demás
+ * lo decide odentIA en un caso de Soporte, con lo que le dice a la clínica.
+ * Devuelta antes de cobrarse, la fila no se cobra; ya cobrada, sale como
+ * «Devolución por revisión» en el cargo siguiente (`creditChargeId`). La
+ * aplicación solo pide y lee: decidir y anotar el cargo es del personal (owner).
+ */
+export const saasActionReview = pgTable(
+  "saas_action_review",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    actionId: uuid("action_id")
+      .notNull()
+      .references(() => saasAction.id),
+    reason: text("reason").notNull(),
+    /** Lo que contó la clínica, si quiso. */
+    note: text("note"),
+    requestedByUserId: text("requested_by_user_id")
+      .notNull()
+      .references(() => user.id),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Hasta cuándo puede leer odentIA esa conversación (decisión 11); nulo = no dio permiso o ya se respondió. */
+    readUntil: timestamp("read_until", { withTimezone: true }),
+    status: text("status").notNull().default("pendiente"),
+    /** Se devolvió sola (spam dentro del tope): nadie de odentIA la decidió. */
+    automatic: boolean("automatic").notNull().default(false),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedByStaffId: text("decided_by_staff_id").references(() => user.id),
+    /** Lo que odentIA le dice a la clínica al decidir. */
+    answer: text("answer"),
+    supportCaseId: uuid("support_case_id"),
+    /** Ya estaba cobrada: el cargo que la devolvió con «Devolución por revisión». */
+    creditChargeId: uuid("credit_charge_id"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("saas_action_review_action_uidx").on(table.organizationId, table.actionId),
+    index("saas_action_review_status_idx").on(table.status, table.requestedAt),
+    foreignKey({
+      name: "saas_action_review_case_fk",
+      columns: [table.supportCaseId, table.organizationId],
+      foreignColumns: [supportCase.id, supportCase.organizationId],
+    }),
+    foreignKey({
+      name: "saas_action_review_credit_charge_fk",
+      columns: [table.organizationId, table.creditChargeId],
+      foreignColumns: [saasCharge.organizationId, saasCharge.id],
+    }),
+    check("saas_action_review_reason_check", sql`${table.reason} IN ('spam','agente','doble','otro')`),
+    check("saas_action_review_note_check", sql`${table.note} IS NULL OR length(${table.note}) <= 1000`),
+    // Pendiente: nada decidido. Devuelta sola: sin personal. Decidida por odentIA: quién, cuándo y qué le dijo.
+    check(
+      "saas_action_review_decision_check",
+      sql`(${table.status} = 'pendiente' AND ${table.decidedAt} IS NULL AND ${table.decidedByStaffId} IS NULL AND ${table.answer} IS NULL AND NOT ${table.automatic})
+        OR (${table.status} = 'devuelta' AND ${table.automatic} AND ${table.decidedAt} IS NOT NULL AND ${table.decidedByStaffId} IS NULL)
+        OR (${table.status} IN ('devuelta','mantenida') AND NOT ${table.automatic} AND ${table.decidedAt} IS NOT NULL
+          AND ${table.decidedByStaffId} IS NOT NULL AND length(trim(${table.answer})) > 0)`,
+    ),
+    check("saas_action_review_credit_check", sql`${table.creditChargeId} IS NULL OR ${table.status} = 'devuelta'`),
   ],
 )

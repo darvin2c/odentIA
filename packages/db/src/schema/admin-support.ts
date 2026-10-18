@@ -56,7 +56,8 @@ export const supportCase = pgTable(
     index("support_case_opener_idx").on(table.openedBy, table.createdAt),
     // Destino de las FK compuestas de mensajes/adjuntos/permisos: impide cruces de organización.
     uniqueIndex("support_case_id_org_uidx").on(table.id, table.organizationId),
-    check("support_case_kind_check", sql`${table.kind} in ('pregunta','problema','acceso')`),
+    // `cobro`: la clínica pidió revisar una fila de lo que se le cobró (ADR 0054).
+    check("support_case_kind_check", sql`${table.kind} in ('pregunta','problema','acceso','cobro')`),
     check("support_case_opener_check", sql`${table.openedBy} is not null or ${table.organizationId} is null`),
     check(
       "support_case_status_check",

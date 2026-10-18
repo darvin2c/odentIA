@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDictationSuggestion, patientContact } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { type SaasActionKind, saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { type SaasActionKind, saasAction, saasActionReview, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, asc, eq, gt, gte, inArray, lt, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
 import { ServiceError } from "./errors.js"
@@ -260,7 +260,27 @@ export async function countRecoveredAppointment(tx: Db, orgId: string, appointme
 
 /* ---------- Lo que ve la clínica: el mes y cada fila ---------- */
 
-export type SaasActionState = "prueba" | "credito" | "sobre_credito" | "dentro_de_cita" | "esperando" | "sin_precio" | "anulada"
+/** `devuelta`: odentIA la devolvió al revisarla antes de cobrarla (ADR 0054); no se cobra. */
+export type SaasActionState = "prueba" | "credito" | "sobre_credito" | "dentro_de_cita" | "esperando" | "sin_precio" | "anulada" | "devuelta"
+
+/** La revisión que pidió la clínica sobre una fila (ADR 0054). */
+export interface SaasReviewView {
+  id: string
+  status: "pendiente" | "devuelta" | "mantenida"
+  reason: string
+  /** Se devolvió sola (spam dentro del tope). */
+  automatic: boolean
+  requestedAt: Date
+  /** Lo que odentIA le dijo a la clínica al decidir. */
+  answer: string | null
+  decidedAt: Date | null
+  /** Ya cobrada y devuelta en un cargo siguiente. */
+  credited: boolean
+  /** Quien la pidió (o marcó «Es spam»). */
+  byName: string | null
+  /** El caso de Soporte donde la sigue la clínica; nulo si se devolvió sola. */
+  caseId: string | null
+}
 
 export interface SaasActionRow {
   id: string
@@ -279,6 +299,8 @@ export interface SaasActionRow {
   chargeId: string | null
   /** De una cita recuperada: las conversaciones que llevaron a ella y ya se cobraron; se devuelven con la cita. */
   refunds: SaasRefund[]
+  /** La revisión que pidió la clínica, si pidió (ADR 0054). */
+  review: SaasReviewView | null
 }
 
 export interface SaasRefund {
@@ -388,12 +410,16 @@ export async function listPeriodActions(
     orgId,
     rows.filter((row) => row.kind === "cita" && row.appointmentId !== null && attended.has(row.appointmentId)),
   )
+  const reviews = await reviewsOf(tx, orgId, rows.map((row) => row.id))
   let usedMicros = 0
   const creditMicros = period.creditCents * 10_000
   return rows.map((row) => {
     let state: SaasActionState
     const own = refunds.get(row.id) ?? []
+    const review = reviews.get(row.id) ?? null
     if (row.kind === "cita" && row.appointmentId && !attended.has(row.appointmentId)) state = "anulada"
+    // Devuelta antes de cobrarse: no gasta crédito ni se cobra (ADR 0054). Ya cobrada, la devuelve el cargo siguiente.
+    else if (row.chargeId === null && review?.status === "devuelta") state = "devuelta"
     // La que aún no se cobró va dentro de la cita; la ya cobrada se devuelve con ella.
     else if (row.chargeId === null && insideCita(row)) state = "dentro_de_cita"
     else if (row.priceMicros === null) state = "sin_precio"
@@ -417,8 +443,35 @@ export async function listPeriodActions(
       discountBps: row.discountBps,
       state,
       chargeId: row.chargeId,
+      review,
     }
   })
+}
+
+/** Las revisiones de estas acciones, por acción. */
+export async function reviewsOf(tx: Db, orgId: string, actionIds: string[]): Promise<Map<string, SaasReviewView>> {
+  const result = new Map<string, SaasReviewView>()
+  if (!actionIds.length) return result
+  const rows = await tx
+    .select({ review: saasActionReview, byName: user.name })
+    .from(saasActionReview)
+    .leftJoin(user, eq(user.id, saasActionReview.requestedByUserId))
+    .where(and(eq(saasActionReview.organizationId, orgId), inArray(saasActionReview.actionId, actionIds)))
+  for (const { review: row, byName } of rows) {
+    result.set(row.actionId, {
+      id: row.id,
+      status: row.status as SaasReviewView["status"],
+      reason: row.reason,
+      automatic: row.automatic,
+      requestedAt: row.requestedAt,
+      answer: row.answer,
+      decidedAt: row.decidedAt,
+      credited: row.creditChargeId !== null,
+      byName,
+      caseId: row.supportCaseId,
+    })
+  }
+  return result
 }
 
 /**
@@ -504,6 +557,7 @@ export async function listPendingRecoveries(tx: Db, orgId: string): Promise<Saas
     state: "esperando",
     chargeId: null,
     refunds: [],
+    review: null,
   }))
 }
 
@@ -543,7 +597,7 @@ export async function getSaasConsumption(tx: Db, orgId: string, now = new Date()
   const pricing = await getActionPricing(tx, orgId)
   const actions = await listPeriodActions(tx, orgId, period)
   const pending = await listPendingRecoveries(tx, orgId)
-  const billable = actions.filter((row) => row.state !== "anulada" && row.state !== "dentro_de_cita")
+  const billable = actions.filter((row) => row.state !== "anulada" && row.state !== "dentro_de_cita" && row.state !== "devuelta")
   const kinds: SaasActionKind[] = ["conversacion", "consulta", "cita"]
   const lines = kinds.map((kind) => {
     const ofKind = billable.filter((row) => row.kind === kind)
