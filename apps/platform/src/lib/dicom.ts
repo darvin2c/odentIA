@@ -172,8 +172,28 @@ function ybrToRgb(y: number, cb: number, cr: number): [number, number, number] {
   ]
 }
 
-export async function decodeDicom(buffer: ArrayBuffer, frame = 0): Promise<DicomImage> {
+/** Un archivo DICOM ya leído: sus cuadros se decodifican cuando se piden. */
+export interface DicomFile {
+  dataset: dicomParser.DataSet
+  frames: number
+  decode(frame: number): Promise<DicomImage>
+}
+
+/** Lee la cabecera una sola vez; útil para recorrer muchos cuadros del mismo archivo. */
+export function openDicom(buffer: ArrayBuffer): DicomFile {
   const ds = dicomParser.parseDicom(new Uint8Array(buffer))
+  return {
+    dataset: ds,
+    frames: Math.max(1, ds.intString("x00280008") ?? 1),
+    decode: (frame) => decodeFrame(ds, frame),
+  }
+}
+
+export async function decodeDicom(buffer: ArrayBuffer, frame = 0): Promise<DicomImage> {
+  return openDicom(buffer).decode(frame)
+}
+
+async function decodeFrame(ds: dicomParser.DataSet, frame: number): Promise<DicomImage> {
   const syntax = str(ds, "x00020010") ?? "1.2.840.10008.1.2"
   const rows = ds.uint16("x00280010") ?? 0
   const cols = ds.uint16("x00280011") ?? 0

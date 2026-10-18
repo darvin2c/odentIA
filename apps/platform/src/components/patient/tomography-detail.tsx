@@ -1,10 +1,9 @@
 import { Button, buttonVariants } from "@odentia/ui"
 import { Download } from "lucide-react"
 import { useState } from "react"
-import { API_URL } from "../../lib/auth-client"
-import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { TomographyViewer } from "./tomography-viewer"
 import type { SelectedFile } from "../../lib/imaging-scan"
-import { cancelStudyUpload, useImagingUploads } from "../../lib/imaging-upload"
+import { cancelStudyUpload, tomographyDownloadUrl, useImagingUploads } from "../../lib/imaging-upload"
 import { activeOrgLocale } from "../../lib/locale"
 import type { ImagingSummary, PatientDocument } from "../../lib/patients"
 import {
@@ -13,12 +12,6 @@ import {
   TomographyProgress,
   useTomographyFlow,
 } from "./tomography-upload"
-
-/** Enlace de descarga del ZIP; `?org=` porque un enlace no envía la cabecera de la clínica. */
-export function tomographyDownloadUrl(patientId: string, documentId: string): string {
-  const slug = orgSlugFromHostname(requestHostname()) ?? ""
-  return `${API_URL}/api/patients/${patientId}/imaging/studies/${documentId}/download?org=${encodeURIComponent(slug)}`
-}
 
 export function imagingFacts(imaging: ImagingSummary): string {
   const parts = [`${imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes`]
@@ -75,6 +68,7 @@ export function TomographyDetail({
   const state = useImagingState(patientId, doc)
   const flow = useTomographyFlow({ patientId, where: "La tarjeta en Imágenes", onChange: () => void onChanged() })
   const [wrongStudy, setWrongStudy] = useState(false)
+  const [viewing, setViewing] = useState(false)
 
   if (!state) {
     return (
@@ -82,6 +76,9 @@ export function TomographyDetail({
         {viewer}
         <div className="flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm">
           <span className="min-w-0 flex-1 text-muted-foreground">{imagingFacts(imaging)}</span>
+          <Button type="button" size="sm" onClick={() => setViewing(true)}>
+            Abrir visor
+          </Button>
           <a
             href={tomographyDownloadUrl(patientId, doc.id)}
             download
@@ -95,6 +92,9 @@ export function TomographyDetail({
           La descarga es un ZIP con la tomografía tal como llegó, para abrirla en el programa del equipo o
           en Weasis.
         </p>
+        {viewing && (
+          <TomographyViewer patientId={patientId} doc={doc} open onClose={() => setViewing(false)} />
+        )}
       </div>
     )
   }

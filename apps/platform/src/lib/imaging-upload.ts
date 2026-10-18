@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react"
 import { ApiError, apiFetch } from "./api"
 import { API_URL } from "./auth-client"
 import { decodeDicom, renderDicom } from "./dicom"
-import { orgSlugFromHostname } from "./host"
+import { orgSlugFromHostname, requestHostname } from "./host"
 import type { ScannedDicom, StudyCandidate } from "./imaging-scan"
 
 /**
@@ -143,6 +143,12 @@ function put(url: string, file: Blob, signal: AbortSignal, onBytes: (sent: numbe
     signal.addEventListener("abort", () => xhr.abort(), { once: true })
     xhr.send(file)
   })
+}
+
+/** Enlace de descarga del ZIP; `?org=` porque un enlace no envía la cabecera de la clínica. */
+export function tomographyDownloadUrl(patientId: string, documentId: string): string {
+  const slug = orgSlugFromHostname(requestHostname()) ?? ""
+  return `${API_URL}/api/patients/${patientId}/imaging/studies/${documentId}/download?org=${encodeURIComponent(slug)}`
 }
 
 const base = (patientId: string, documentId: string) =>

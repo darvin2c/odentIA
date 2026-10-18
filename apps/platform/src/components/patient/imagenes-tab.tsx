@@ -68,6 +68,7 @@ import {
 } from "./image-viewer"
 import { TagsInput } from "./tags-input"
 import { imagingFacts, TomographyDetail, useImagingState } from "./tomography-detail"
+import { TomographyViewer } from "./tomography-viewer"
 import { ToothSelector } from "./tooth-selector"
 import { activeOrgLocale } from "../../lib/locale"
 
@@ -162,6 +163,8 @@ export function ImagenesTab({
   const listSearch = useListSearch()
   const [teeth, setTeeth] = useState<number[]>(initialTooth != null ? [initialTooth] : [])
   const [viewingId, setViewingId] = useState<string | null>(null)
+  // Una tomografía completa se abre directo en su visor (tablero 6 del lienzo).
+  const [scanId, setScanId] = useState<string | null>(null)
   const [contextDoc, setContextDoc] = useState<DocView | null>(null)
   const [resumeId, setResumeId] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -368,8 +371,11 @@ export function ImagenesTab({
   const viewingIndex = viewing ? filtered.findIndex((d) => d.id === viewing.id) : -1
   const openViewing = (id: string) => {
     if (document.activeElement instanceof HTMLElement) openerRef.current = document.activeElement
-    setViewingId(id)
+    const doc = allDocs.find((d) => d.id === id)
+    if (doc?.imaging?.completedAt) setScanId(id)
+    else setViewingId(id)
   }
+  const scanDoc = scanId ? (allDocs.find((d) => d.id === scanId) ?? null) : null
 
   const listError =
     docsQuery.error instanceof ApiError
@@ -561,6 +567,18 @@ export function ImagenesTab({
         disabled={disabled}
         onOpenDocument={(documentId) => setViewingId(documentId)}
       />
+      {scanDoc && (
+        <TomographyViewer
+          patientId={patientId}
+          doc={scanDoc}
+          open
+          onClose={() => setScanId(null)}
+          onDetails={() => {
+            setScanId(null)
+            setViewingId(scanDoc.id)
+          }}
+        />
+      )}
 
       {contextDoc && (
         <ContextDrawer
