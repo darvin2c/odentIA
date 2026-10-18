@@ -2472,24 +2472,29 @@ it("el asistente clínico ordena el dictado con el esquema de la atención y no 
       answering({
         indicaciones: [{ service: "resina", dicho: "El paciente pidió una resina" }],
         correcciones: [{ sugerencia: 1, cambios: { toothNumber: 26 }, dicho: "No, es la veintiséis" }, { sugerencia: 7, cambios: { toothNumber: 11 } }],
-        quitar: [{ sugerencia: 2 }, { sugerencia: 3 }],
+        quitar: [{ sugerencia: 2, dicho: "Quita el control." }, { sugerencia: 3, dicho: "Quita el control." }],
       }) as never,
   }, {
     orgId: "org_a",
-    transcript: "No, es la veintiséis, y le ponemos una resina.",
+    transcript: "No, es la veintiséis, y le ponemos una resina. Quita el control.",
     context: "En la veinticinco hacemos endodoncia.",
     pending: [{ label: "Plan de tratamiento: Endodoncia, Pieza 25" }, { label: "Controles: Control en 6 meses" }],
   })
   expect(live.corrections).toEqual([{ index: 0, changes: { toothNumber: 26 }, sourceText: "No, es la veintiséis" }])
-  expect(live.removals).toEqual([{ index: 1, sourceText: "" }])
+  expect(live.removals).toEqual([{ index: 1, sourceText: "Quita el control." }])
   expect(live.drafts).toEqual([{ kind: "plan", payload: { service: "resina" }, sourceText: "" }])
   const asked = String(seen.at(-1)?.at(-1)?.content)
   expect(asked).toContain("1. Plan de tratamiento: Endodoncia, Pieza 25")
   expect(asked).toContain("Ya ordenado antes en este dictado")
   expect(asked).toContain("Lo nuevo que dictó:")
 
-  // Un tipo de diagnóstico que no existe, o ninguna llamada: no se ordena nada a medias.
-  await expect(extract({ diagnosticos: [{ diagnosisCode: "K02.1", diagnosisType: "seguro" }] })).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
+  // El 7 (corrección) y el 3 (quitar) no son de ninguna pendiente: no se adivina, se cuenta para avisar.
+  expect(live.omitted).toBe(2)
+
+  // Un tipo de diagnóstico que no existe no bota la pausa: llega con su dato y el servicio lo deja por revisar.
+  const odd = await extract({ diagnosticos: [{ diagnosisCode: "K02.1", diagnosisType: "seguro" }], controles: [] })
+  expect(odd.drafts).toEqual([{ kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "seguro" }, sourceText: "" }])
+  // Sin ninguna llamada no se ordena nada: no se inventa.
   await expect(extract(null)).rejects.toMatchObject({ code: "DICTATION_UNREADABLE" })
   await expect(extractDictation(appDb, deps, { orgId: "org_a", transcript: "  " })).rejects.toMatchObject({ code: "VALIDATION" })
   // Con el modelo de demostración responde por reglas, sin proveedor.

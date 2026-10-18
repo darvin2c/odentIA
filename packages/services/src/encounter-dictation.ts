@@ -35,9 +35,10 @@ function conflict(code: string, message: string): ServiceError {
 
 /** Texto máximo de un dictado que se procesa de una vez. */
 export const DICTATION_CHARS = 12_000
-/** Sugerencias por dictado: más que esto es ruido, no una atención. */
-const DICTATION_MAX_SUGGESTIONS = 40
-const SOURCE_CHARS = 600
+/** Sugerencias que se guardan de un tramo del dictado: más que esto es ruido, no una atención. */
+export const DICTATION_MAX_SUGGESTIONS = 40
+/** Lo que se guarda de «lo que dijiste» de cada sugerencia. */
+export const DICTATION_SOURCE_CHARS = 600
 const SERVICE_CANDIDATES = 3
 
 export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
@@ -550,7 +551,7 @@ export async function saveDictationSegment(
       dentistUserId: actorUserId,
       kind: draft.kind,
       payload: withMeta(ready.payload, stamp({})),
-      sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS),
+      sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS),
       status: ready.status,
       note: ready.note,
     })
@@ -804,7 +805,7 @@ export async function previewDictationSuggestions(tx: Db, orgId: string, drafts:
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const ready = await prepare(tx, draft, services, diagnosisSystem)
     if (!ready) continue
-    out.push({ kind: draft.kind, payload: ready.payload, sourceText: (draft.sourceText ?? "").slice(0, SOURCE_CHARS), status: ready.status, note: ready.note, summary: summarize(draft.kind, ready.payload, zone) })
+    out.push({ kind: draft.kind, payload: ready.payload, sourceText: (draft.sourceText ?? "").slice(0, DICTATION_SOURCE_CHARS), status: ready.status, note: ready.note, summary: summarize(draft.kind, ready.payload, zone) })
   }
   return out
 }
