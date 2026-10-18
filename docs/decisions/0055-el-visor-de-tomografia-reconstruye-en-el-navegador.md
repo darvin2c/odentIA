@@ -12,7 +12,7 @@ La odontóloga necesita ver la tomografía en tres cortes (desde arriba, de fren
 - **Reconstrucción propia en la CPU.** El volumen se carga en memoria como enteros de 16 bits (HU) y cada vista es un remuestreo del volumen: los tres cortes ortogonales, la panorámica y los cortes transversales. La panorámica es un reformateo curvo de grosor fijo a lo largo del arco, y los transversales son planos perpendiculares a él. Con 512³ vóxeles cada vista se calcula en milisegundos, sin WebGL.
 - **Lo que Cornerstone sí aporta, se usa.** Sus códecs WebAssembly ya leen las compresiones (fase 1).
 - **El arco lo propone el visor**, con un polinomio de segundo grado ajustado al esmalte en la banda oclusal (decisión 2), y se corrige arrastrando cinco puntos. Si no se encuentra, se marca con cinco clics.
-- **Los brillos se calculan con cada estudio**, por percentiles de su histograma: la CBCT no tiene una escala de grises común entre equipos.
+- **Los brillos se calculan con cada estudio**: un Otsu de tres clases separa en su histograma el aire, el tejido blando y el tejido duro, y cada brillo sale de esas clases. La CBCT no tiene una escala de grises común entre equipos. Los percentiles sobre todo el cuerpo resultaron frágiles: según el campo de visión, el hueso quedaba negro.
 - **Las medidas guardadas** viven en `imaging_measurement` (decisión 3), en coordenadas del paciente en mm, con quién y cuándo. Quitar una medida la retira; no se borra.
 
 ## Alternativas descartadas

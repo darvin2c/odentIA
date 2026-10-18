@@ -20,7 +20,7 @@ import {
   useImagingUploads,
 } from "../../lib/imaging-upload"
 import { activeOrgLocale } from "../../lib/locale"
-import type { Patient } from "../../lib/patients"
+import type { PatientFull } from "../../lib/patients"
 import { ToothSelector } from "./tooth-selector"
 
 /** Tope por tomografía (decisión 4 del lienzo; lo valida también la API). */
@@ -58,9 +58,10 @@ function capturedAtOf(value: string | null): string | null {
 export function usePatientIdentity(patientId: string) {
   const query = useQuery({
     queryKey: ["patient", patientId],
-    queryFn: () => apiFetch<{ data: Patient }>(`/api/patients/${patientId}`),
+    // La misma consulta (y forma) que el resto de la ficha: `{ data: PatientFull }`.
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
   })
-  const patient = query.data?.data
+  const patient = query.data?.data.patient
   return patient
     ? {
         displayName: patient.displayName,

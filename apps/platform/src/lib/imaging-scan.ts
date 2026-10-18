@@ -273,8 +273,8 @@ export function mayHoldStudy(selection: readonly SelectedFile[], singleFileMaxBy
   return notPlain.length > 1 || selection.some((item) => item.file.size > singleFileMaxBytes)
 }
 
-function words(value: string): string[] {
-  return value
+function words(value: string | null | undefined): string[] {
+  return (value ?? "")
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()

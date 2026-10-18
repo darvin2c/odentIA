@@ -490,6 +490,9 @@ importers:
       '@odentia/auth':
         specifier: workspace:*
         version: link:../packages/auth
+      '@odentia/clinical':
+        specifier: workspace:*
+        version: link:../packages/clinical
       '@odentia/db':
         specifier: workspace:*
         version: link:../packages/db

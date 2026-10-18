@@ -67,6 +67,15 @@ describe("volumen de la tomografía", () => {
     expect(blando.center).toBeLessThan(hueso.center)
     expect(hueso.center).toBeLessThan(diente.center)
     expect(diente.center + diente.width / 2).toBeGreaterThan(1800)
+    // El hueso esponjoso (~470 HU) se ve en grises con «Hueso», no negro ni blanco,
+    // también en otro campo de visión y otro vóxel (el de la e2e).
+    const gray = (w: { center: number; width: number }, v: number) => (v - (w.center - w.width / 2)) / w.width
+    expect(gray(hueso, 470)).toBeGreaterThan(0.1)
+    expect(gray(hueso, 470)).toBeLessThan(0.6)
+    const other = generateCbctPhantom({ size: 128, slices: 100, voxelMm: 0.6 })
+    const otherVolume = volumeFromSlices(other.data.map(toHu), { nx: 128, ny: 128, sx: 0.6, sy: 0.6, sz: 0.6 })
+    expect(gray(otherVolume.presets.hueso, 470)).toBeGreaterThan(0.1)
+    expect(gray(otherVolume.presets.hueso, 470)).toBeLessThan(0.6)
     // Corridos 1000 (otro equipo, otra escala): los brillos se corren con ellos.
     const shifted = Int16Array.from(volume.data, (v) => v + 1000)
     const moved = computePresets(shifted, { min: volume.range.min + 1000, max: volume.range.max + 1000 })

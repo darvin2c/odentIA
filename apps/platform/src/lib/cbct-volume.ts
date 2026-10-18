@@ -103,40 +103,42 @@ function median(values: number[]): number {
   return sorted[Math.floor(sorted.length / 2)] ?? 0
 }
 
-/** Umbral de Otsu sobre un histograma: separa el fondo (aire) del cuerpo. */
-function otsu(hist: Uint32Array): number {
-  let total = 0
-  let sum = 0
-  for (let i = 0; i < hist.length; i++) {
-    total += hist[i]!
-    sum += i * hist[i]!
+/**
+ * Otsu de tres clases sobre un histograma: los dos umbrales que mejor separan
+ * aire, tejido blando y tejido duro (hueso y dientes).
+ */
+function otsu3(hist: Uint32Array): [number, number] {
+  const n = hist.length
+  const count = new Float64Array(n + 1)
+  const sum = new Float64Array(n + 1)
+  for (let i = 0; i < n; i++) {
+    count[i + 1] = count[i]! + hist[i]!
+    sum[i + 1] = sum[i]! + i * hist[i]!
   }
-  let wB = 0
-  let sumB = 0
-  let best = 0
-  let threshold = 0
-  for (let i = 0; i < hist.length; i++) {
-    wB += hist[i]!
-    if (!wB) continue
-    const wF = total - wB
-    if (!wF) break
-    sumB += i * hist[i]!
-    const mB = sumB / wB
-    const mF = (sum - sumB) / wF
-    const between = wB * wF * (mB - mF) ** 2
-    if (between > best) {
-      best = between
-      threshold = i
+  const part = (a: number, b: number) => {
+    const w = count[b + 1]! - count[a]!
+    return w ? (sum[b + 1]! - sum[a]!) ** 2 / w : 0
+  }
+  let best = -1
+  let cut: [number, number] = [Math.floor(n / 3), Math.floor((2 * n) / 3)]
+  for (let t1 = 0; t1 < n - 2; t1++)
+    for (let t2 = t1 + 1; t2 < n - 1; t2++) {
+      const between = part(0, t1) + part(t1 + 1, t2) + part(t2 + 1, n - 1)
+      if (between > best) {
+        best = between
+        cut = [t1, t2]
+      }
     }
-  }
-  return threshold
+  return cut
 }
 
 /**
  * Brillos calculados con los grises de este estudio (ADR 0055): la CBCT no
- * tiene una escala común entre equipos. Sobre los vóxeles del cuerpo (Otsu
- * separa el aire): tejido blando del 2 % al 70 %, hueso del 50 % al 99,5 % y
- * diente del 92 % al 99,95 %.
+ * tiene una escala común entre equipos. Otsu de tres clases separa aire,
+ * tejido blando y tejido duro; con eso, «Tejido blando» va del límite con el
+ * aire al límite con el hueso, «Hueso» del tejido blando al 85 % de lo duro
+ * (el hueso en grises y los dientes casi blancos) y «Diente» de la mitad de lo
+ * duro a su máximo (esmalte, dentina y pulpa).
  */
 export function computePresets(data: Int16Array, range: { min: number; max: number }): Record<BrightnessPreset, WindowLevel> {
   const span = Math.max(1, range.max - range.min + 1)
@@ -144,27 +146,37 @@ export function computePresets(data: Int16Array, range: { min: number; max: numb
   const scale = bins / span
   const hist = new Uint32Array(bins)
   const stride = Math.max(1, Math.floor(data.length / 2_000_000))
-  for (let i = 0; i < data.length; i += stride) hist[Math.min(bins - 1, Math.floor((data[i]! - range.min) * scale))]!++
-  const cut = otsu(hist)
-  let body = 0
-  for (let i = cut + 1; i < bins; i++) body += hist[i]!
-  const percentile = (p: number) => {
-    const target = body * p
+  for (let i = stride >> 1; i < data.length; i += stride) hist[Math.min(bins - 1, Math.floor((data[i]! - range.min) * scale))]!++
+  // Umbrales en un histograma grueso (256) para que el Otsu de tres clases sea rápido.
+  const coarseBins = Math.min(256, bins)
+  const factor = bins / coarseBins
+  const coarse = new Uint32Array(coarseBins)
+  for (let i = 0; i < bins; i++) coarse[Math.min(coarseBins - 1, Math.floor(i / factor))]! += hist[i]!
+  const [c1, c2] = otsu3(coarse)
+  const t1 = Math.round((c1 + 1) * factor)
+  const t2 = Math.round((c2 + 1) * factor)
+  const value = (bin: number) => range.min + bin / scale
+  const classPercentile = (from: number, to: number, p: number) => {
+    let total = 0
+    for (let i = from; i < to; i++) total += hist[i]!
+    if (!total) return null
     let acc = 0
-    for (let i = cut + 1; i < bins; i++) {
+    for (let i = from; i < to; i++) {
       acc += hist[i]!
-      if (acc >= target) return range.min + i / scale
+      if (acc >= total * p) return value(i)
     }
-    return range.max
+    return value(to - 1)
   }
   const window = (low: number, high: number): WindowLevel => ({
     center: (low + high) / 2,
     width: Math.max(1, high - low),
   })
+  const softMid = classPercentile(t1, t2, 0.5) ?? value(t1)
+  const hard = (p: number) => classPercentile(t2, bins, p) ?? range.max
   return {
-    blando: window(percentile(0.02), percentile(0.7)),
-    hueso: window(percentile(0.5), percentile(0.995)),
-    diente: window(percentile(0.92), percentile(0.9995)),
+    blando: window(value(t1), value(t2)),
+    hueso: window(softMid, hard(0.85)),
+    diente: window(hard(0.5), hard(0.999)),
   }
 }
 

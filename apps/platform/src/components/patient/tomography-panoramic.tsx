@@ -195,7 +195,11 @@ export function PanoramicView({
         tool === "angulo"
           ? planeAngleDeg(image, points[0]!, points[1]!, points[2]!)
           : planeDistanceMm(image, points[0]!, points[1]!),
-      toothNumber: curve.length ? toothAt(curve, at, jaw) : null,
+      // La pieza a la altura de la medida: el corte transversal o la columna de la panorámica.
+      toothNumber:
+        curve.length && view !== "axial"
+          ? toothAt(curve, view === "transversal" ? at : Math.round(points[0]!.x), jaw)
+          : null,
     })
   }
   const asPlane = (m: SavedMeasure, points: Point[]): PlaneMeasure => ({
@@ -294,11 +298,11 @@ export function PanoramicView({
   const tick = useCallback(
     (ctx: CanvasRenderingContext2D, image: PlaneImage) => {
       if (!curve.length) return
-      const unit = Math.max(1, image.width / 400)
+      // En píxeles de la imagen: finas, porque el lienzo se agranda en pantalla.
       for (const k of CROSS_OFFSETS) {
         const x = clampIndex(index) + k * perMm
-        ctx.strokeStyle = k === 0 ? "#f59e0b" : "rgba(148, 163, 184, 0.7)"
-        ctx.lineWidth = k === 0 ? 2 * unit : unit
+        ctx.strokeStyle = k === 0 ? "#f59e0b" : "rgba(148, 163, 184, 0.6)"
+        ctx.lineWidth = k === 0 ? Math.max(0.6, image.width / 320) : Math.max(0.3, image.width / 800)
         ctx.beginPath()
         ctx.moveTo(x, image.height * 0.08)
         ctx.lineTo(x, image.height * 0.95)

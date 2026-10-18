@@ -235,7 +235,9 @@ export function ImagenesTab({
   const atencionParam = listSearch.get("atencion")
   const planParam = listSearch.get("tratamiento")
   const etiquetaParam = listSearch.get("etiqueta")
-  const tipoParam = listSearch.get("tipo")
+  // `?tipo=` es el filtro de Documentos (allí «imagenes» abre esta galería): el
+  // tipo de imagen va en su propio parámetro para que no se pisen.
+  const tipoParam = listSearch.get("imagen")
   const periodoParam = listSearch.get("periodo")
   const sortParam = listSearch.get("sort")
   const sort: SortKey = sortParam === "antiguos" || sortParam === "titulo" ? sortParam : "recientes"
@@ -251,7 +253,7 @@ export function ImagenesTab({
         options: UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) })),
       },
       {
-        key: "tipo",
+        key: "imagen",
         label: "Tipo",
         type: "select",
         options: IMAGE_TYPES.map((t) => ({ value: t, label: imageTypeLabel(t) ?? t })),
