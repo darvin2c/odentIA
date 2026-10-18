@@ -1602,25 +1602,52 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
 })
 
 it("una respuesta con un precio que no está en lo consultado no sale y, a la segunda, el caso pasa a una persona", async () => {
-  const { conversationId, messageId } = await ingestText("tg:precio-inventado", "evt-precio-1", "¿Cuánto cuesta la limpieza?")
-  const model = new ScriptedModel(() => toolCall("send_reply", { text: "La limpieza cuesta S/ 99." }, `envio-${Date.now()}`))
-  expect(await runScripted(model, conversationId, messageId)).toBe("done")
-  // Dos intentos: el primero vuelve al modelo con el dato que falta; el segundo deriva.
-  expect(model.seen).toHaveLength(2)
-  const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
-  expect(feedback).toContain("No enviado: precio «S/ 99»")
-  expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
-  expect(await agentStatusOf(conversationId)).toBe("on")
-  expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
-  const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
-  expect(traces.map((trace) => trace.outcome)).toEqual(["bloqueada", "bloqueada"])
-  expect(traces[0]?.checks).toEqual([{ kind: "precio", value: "S/ 99", ok: false, source: null }])
-  expect(traces[0]?.messageId).toBeNull()
-  const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.select({ reason: agentHandoff.reason, summary: agentHandoff.summary }).from(agentHandoff)
-      .where(eq(agentHandoff.conversationId, conversationId)))
-  expect(handoff?.reason).toBe("El agente no pudo sustentar un dato de su respuesta")
-  expect(handoff?.summary).toContain("S/ 99")
+  // Las cifras de un identificador no sustentan un precio: la referencia de
+  // este profesional llega en los datos de la clínica y lleva el mismo «99»
+  // del precio inventado. Con los profesionales de otras pruebas (ids con
+  // Date.now) pasaba lo mismo a veces y la respuesta salía.
+  const dentistId = "dentista-precio-185"
+  expect(professionalRef("org_a", dentistId)).toBe("pro-99d040905f")
+  const [sede] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede Precio", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  await ownerDb.insert(user).values({ id: dentistId, name: "Dentista Precio", email: `${dentistId}@example.test` })
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${dentistId}`}, 'org_a', ${dentistId}, 'member', now())`)
+  const schedule = (weekdays: number[]) =>
+    withOrgContext(appDb, "org_a", (tx) =>
+      setProfessionalSchedule(tx, "org_a", dentistId, {
+        branchId: sede!.id,
+        dentistUserId: dentistId,
+        rules: weekdays.map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+      }))
+  await schedule([1, 2, 3, 4, 5])
+  try {
+    const { conversationId, messageId } = await ingestText("tg:precio-inventado", "evt-precio-1", "¿Cuánto cuesta la limpieza?")
+    const model = new ScriptedModel((_messages, call) => toolCall("send_reply", { text: "La limpieza cuesta S/ 99." }, `envio-${call}`))
+    expect(await runScripted(model, conversationId, messageId)).toBe("done")
+    expect(systemTextOf(model.seen[0] ?? [])).toContain("pro-99d040905f")
+    // Dos intentos: el primero vuelve al modelo con el dato que falta; el segundo deriva.
+    expect(model.seen).toHaveLength(2)
+    const feedback = String(model.seen[1]?.[model.seen[1].length - 1]?.content)
+    expect(feedback).toContain("No enviado: precio «S/ 99»")
+    expect(await agentMessages(conversationId)).toEqual([HANDOFF_NOTICE])  // Derivar siempre avisa (ADR 0024).
+    expect(await agentStatusOf(conversationId)).toBe("on")
+    expect((await ledgerRows(conversationId)).map((r) => r.status)).toEqual(["handoff"])
+    const traces = await withOrgContext(appDb, "org_a", (tx) => listAnswerTraces(tx, "org_a", conversationId))
+    expect(traces.map((trace) => trace.outcome)).toEqual(["bloqueada", "bloqueada"])
+    expect(traces[0]?.checks).toEqual([{ kind: "precio", value: "S/ 99", ok: false, source: null }])
+    expect(traces[0]?.messageId).toBeNull()
+    const [handoff] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ reason: agentHandoff.reason, summary: agentHandoff.summary }).from(agentHandoff)
+        .where(eq(agentHandoff.conversationId, conversationId)))
+    expect(handoff?.reason).toBe("El agente no pudo sustentar un dato de su respuesta")
+    expect(handoff?.summary).toContain("S/ 99")
+  } finally {
+    await schedule([])
+  }
 })
 
 it("un precio de una respuesta oficial sale y deja constancia de en qué se basó", async () => {
