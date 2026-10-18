@@ -103,7 +103,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 })
 
 /**
- * Llena «Nombres» y «Apellidos» del registro (ADR 0054): la primera palabra
+ * Llena «Nombres» y «Apellidos» del registro (ADR 0058): la primera palabra
  * son los nombres y el resto los apellidos; el nombre visible se compone.
  */
 export async function fillPatientNames(scope: Page | Locator, fullName: string) {

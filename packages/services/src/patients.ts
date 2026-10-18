@@ -27,6 +27,7 @@ import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { user } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm"
+import { screenBeforePatient } from "./contact-screen.js"
 import { requireContact } from "./contacts.js"
 import { endPairAccess } from "./pair-access.js"
 import { createPerson, findPersonByDocument, setPersonArchived } from "./people.js"
@@ -383,6 +384,8 @@ export async function createPatient(
     if (existing) {
       const [already] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.personId, existing))).limit(1)
       if (already) throw conflict("ALREADY_PATIENT", "El contacto ya tiene una ficha propia")
+      // Un paciente no está en Spam ni bloqueado (ADR 0054).
+      await screenBeforePatient(tx, orgId, existing, actorUserId)
       // Desde fuera solo puede ser su propio contacto (el de su conversación): se completa, no se reemplaza.
       await adoptIdentity(tx, orgId, existing, identity, { onlyFill: fromOutside })
       personId = existing

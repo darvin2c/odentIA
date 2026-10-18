@@ -1,4 +1,4 @@
-# 0054 · Nombres y Apellidos, dos campos
+# 0058 · Nombres y Apellidos, dos campos
 
 Fecha: 2026-10-18 · Estado: aceptada · Actualiza [0004](0004-identidad-estandar.md) (nombre separado) y [0014](0014-reservar-desde-un-enlace-personal.md) (apellidos de los datos esenciales). Decisión 11 del lienzo de pacientes (issues 98, 99, 103 y 43).
 

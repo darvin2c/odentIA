@@ -211,15 +211,31 @@ export function LastVisitCard({
   patientId,
   summary,
   attend,
+  onPeriodontal,
 }: {
   patientId: string
   summary: PatientSummary
   /** «Atender», el mismo botón de la cabecera. */
   attend: ReactNode
+  /** «Ver periodontograma»: abre Clínica › Odontograma › Periodontograma. */
+  onPeriodontal?: () => void
 }): React.JSX.Element {
   const memberName = useMemberName()
   const visit = summary.lastVisit
   const dentist = summary.lastEncounter?.dentistUserId
+  const gums = summary.periodontal
+  // «Encías: Periodontitis · Estadio III · Grado B · sangrado 10 % (12 oct)».
+  const gumsLine = gums
+    ? [
+        gums.classification
+          ? `${gums.classification.startsWith("Estadio") ? "Periodontitis · " : ""}${gums.classification}`
+          : null,
+        gums.bleedingPercent !== null ? `sangrado ${gums.bleedingPercent} % (${dayOf(gums.date)})` : `sondaje del ${dayOf(gums.date)}`,
+        gums.partial ? "parcial" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null
   return (
     <SummaryCard
       title="Última atención"
@@ -253,6 +269,18 @@ export function LastVisitCard({
               .filter(Boolean)
               .join(" · ") || "Sin diagnósticos registrados"}
           </p>
+          {gumsLine ? (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+              <p>
+                <span className="text-muted-foreground">Encías:</span> {gumsLine}
+              </p>
+              {onPeriodontal ? (
+                <Button type="button" size="sm" variant="ghost" onClick={onPeriodontal}>
+                  Ver periodontograma
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-2">

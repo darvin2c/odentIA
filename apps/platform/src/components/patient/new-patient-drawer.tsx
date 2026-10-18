@@ -83,7 +83,7 @@ const WHO_OPTIONS: ReadonlyArray<{ value: WhoCompletes; label: string }> = [
 
 interface Draft {
   givenNames: string
-  /** Los apellidos juntos, en un solo campo (ADR 0054). */
+  /** Los apellidos juntos, en un solo campo (ADR 0058). */
   surnames: string
   phone: string | null
   birthDate: string

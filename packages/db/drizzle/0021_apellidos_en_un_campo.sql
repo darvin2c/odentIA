@@ -1,4 +1,4 @@
--- «Nombres» y «Apellidos», dos campos (ADR 0054, decisión 11 del lienzo de
+-- «Nombres» y «Apellidos», dos campos (ADR 0058, decisión 11 del lienzo de
 -- pacientes). Los apellidos van juntos en `family_name`, como el «family» de
 -- HL7 FHIR HumanName: el primer apellido pasa entero y el segundo se le suma
 -- detrás. El nombre visible no cambia: lo sigue derivando la base.

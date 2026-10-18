@@ -3161,6 +3161,47 @@ export async function countContactModelRunsToday(tx: Db, orgId: string, contactI
 }
 
 /**
+ * ¿Hubo hoy (zona de la clínica), en las conversaciones de una persona, una
+ * corrida que terminó con este estado y este motivo? Así el agente pasa al
+ * equipo una sola vez por día a quien llegó a su tope por persona.
+ */
+export async function contactHadRunToday(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  input: { status: AgentRunStatus; error: string },
+): Promise<boolean> {
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const [row] = await tx.execute<{ found: boolean }>(sql`
+    select exists (
+      select 1 from agent_run_ledger l
+      join conversation c on c.id = l.conversation_id and c.organization_id = l.organization_id
+      where l.organization_id = ${orgId} and c.contact_id = ${contactId}
+        and l.status = ${input.status} and l.error = ${input.error}
+        and (l.started_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date
+    ) as found`)
+  return row?.found === true
+}
+
+/**
+ * ¿La persona ya recibió hoy (zona de la clínica) este mismo texto del agente,
+ * en cualquiera de sus conversaciones? Lo que el canal rechazó no cuenta: no
+ * le llegó. Con esto un texto fijo sale como mucho una vez por persona y día.
+ */
+export async function contactGotAgentTextToday(tx: Db, orgId: string, contactId: string, text: string): Promise<boolean> {
+  const { timezone } = await getOrgLocale(tx, orgId)
+  const [row] = await tx.execute<{ found: boolean }>(sql`
+    select exists (
+      select 1 from message m
+      join conversation c on c.id = m.conversation_id and c.organization_id = m.organization_id
+      where m.organization_id = ${orgId} and c.contact_id = ${contactId}
+        and m.direction = 'out' and m.sender_kind = 'agent' and m.status <> 'failed' and m.body = ${text}
+        and (m.created_at at time zone ${timezone})::date = (now() at time zone ${timezone})::date
+    ) as found`)
+  return row?.found === true
+}
+
+/**
  * El proveedor del modelo no sirve (configuración, credencial rechazada, sin
  * saldo) o se alcanzó el tope diario: aviso a quien administra el agente, uno
  * por problema y día. El del modelo no nombra claves ni variables: la cuenta

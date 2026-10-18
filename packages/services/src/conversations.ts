@@ -12,6 +12,7 @@ import {
   channelConnection,
   contact,
   contactIdentity,
+  type ContactScreen,
   conversation,
   message,
 } from "@odentia/db/schema/crm"
@@ -29,6 +30,7 @@ import {
   lockChannelIdentity,
   OMNI_CHANNELS,
 } from "./contacts.js"
+import { assertContactWritable, type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql } from "./conversation-state.js"
@@ -82,15 +84,16 @@ export interface IngestDeps {
 /**
  * ¿El agente leerá lo que entra en este hilo? Encendido en la conversación y
  * en la clínica, y atendiendo ese canal. El horario no cuenta: fuera de él lo
- * lee al abrir.
+ * lee al abrir. A quien está en Spam o bloqueado no lo lee (ADR 0054).
  */
 async function agentReadsThread(tx: Db, orgId: string, conversationId: string, channel: string): Promise<boolean> {
   const [conv] = await tx
-    .select({ agentStatus: conversation.agentStatus })
+    .select({ agentStatus: conversation.agentStatus, screen: contact.screen })
     .from(conversation)
+    .innerJoin(contact, and(eq(contact.organizationId, conversation.organizationId), eq(contact.id, conversation.contactId)))
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
-  if (conv?.agentStatus !== "on") return false
+  if (conv?.agentStatus !== "on" || conv.screen !== null) return false
   const [cfg] = await tx
     .select({ enabled: agentConfig.enabled, channels: agentConfig.channels })
     .from(agentConfig)
@@ -129,6 +132,8 @@ export interface MessageItem {
   automatic: { key: string; name: string } | null
   /** Mensaje de la misma conversación al que responde, citado (ADR 0050). */
   replyToMessageId: string | null
+  /** Se borró su texto y sus adjuntos: era spam y pasaron 90 días (ADR 0054). */
+  redactedAt: string | null
   createdAt: string
 }
 function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem["automatic"] = null): MessageItem {
@@ -154,6 +159,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
         ? row.templateParams
         : null,
     replyToMessageId: row.replyToMessageId ?? null,
+    redactedAt: row.redactedAt ? row.redactedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -632,6 +638,8 @@ async function requireWritableConversation(tx: Db, orgId: string, conversationId
       .limit(1)
   const [row] = await read()
   if (!row) throw notFound("Conversación")
+  // A una persona bloqueada no le escribe nadie: ni el equipo, ni el agente, ni lo automático (ADR 0054).
+  await assertContactWritable(tx, orgId, row.conversation.contactId)
   if (row.conversation.status !== "closed") return row
   await reopenIfClosed(tx, orgId, conversationId, { userId: by.userId, via: "envio" })
   const [reopened] = await read()
@@ -835,7 +843,8 @@ export interface ConversationListItem {
   unreadCount: number
   assignedUserId: string | null
   lastMessageAt: string | null
-  contact: { id: string; displayName: string; isActive: boolean }
+  /** `screen`: en Spam o bloqueada, con su motivo (ADR 0054); nulo si no. */
+  contact: { id: string; displayName: string; isActive: boolean; screen: ContactScreen | null; screenReason: string | null }
   connection: { id: string; channel: string; provider: string; displayName: string }
   preview: { body: string | null; direction: string; senderKind: string; createdAt: string } | null
 }
@@ -1005,7 +1014,13 @@ export async function listConversations(
     unreadCount: r.conversation.unreadCount,
     assignedUserId: r.conversation.assignedUserId,
     lastMessageAt: r.conversation.lastMessageAt ? r.conversation.lastMessageAt.toISOString() : null,
-    contact: { id: r.contact.id, displayName: r.contact.displayName, isActive: r.contact.isActive },
+    contact: {
+      id: r.contact.id,
+      displayName: r.contact.displayName,
+      isActive: r.contact.isActive,
+      screen: (r.contact.screen as ContactScreen | null) ?? null,
+      screenReason: r.contact.screenReason,
+    },
     connection: {
       id: r.connection.id,
       channel: r.connection.channel,
@@ -1223,6 +1238,8 @@ export interface ConversationDetail {
    * Nulo si no es paciente o no le falta nada.
    */
   missingData: { patientId: string; missing: MissingPersonDatum[] } | null
+  /** Spam o bloqueada, quién y por qué, y si salió sola de Spam hace poco (ADR 0054). */
+  screen: ContactScreenView
   messages: MessageItem[]
   messagesCursor: string | null
 }
@@ -1292,6 +1309,7 @@ export async function getConversationDetail(
           }
         : null,
     missingData: patientId && missing.length > 0 ? { patientId, missing } : null,
+    screen: await getContactScreenView(tx, orgId, row.contact.id),
     messages: items,
     messagesCursor: nextCursor,
   }

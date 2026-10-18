@@ -148,7 +148,7 @@ const email = text(200).refine(v => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 
 const codeOrEmpty = <T extends readonly [string, ...string[]]>(values: T) => z.enum([...values, ""]).nullable().optional()
 export const demographicsSchema = z.strictObject({
   displayName: text(200).min(1, "Escribe el nombre de la persona"),
-  /** «Nombres» y «Apellidos», dos campos (ADR 0054); el nombre visible se deriva de ellos. */
+  /** «Nombres» y «Apellidos», dos campos (ADR 0058); el nombre visible se deriva de ellos. */
   givenNames: optionalText(100), familyName: optionalText(200),
   birthDate: optionalText(10), docType: codeOrEmpty(DOC_TYPES),
   docNumber: optionalText(20), docCountry: optionalText(2), nationality: optionalText(2),

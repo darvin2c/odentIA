@@ -35,7 +35,10 @@ export function mayWriteFirstSql(orgId: string, contactId: SQL, purpose: Consent
   const status = (of: ConsentPurpose, value: string) => sql`exists (
     select 1 from automation_consent s
     where s.organization_id = ${orgId} and s.contact_id = ${contactId} and s.purpose = ${of} and s.status = ${value})`
-  const all = sql`not ${status("avisos", "revoked")}`
+  // A quien está en Spam o bloqueado lo automático no le escribe nunca (ADR 0054).
+  const screened = sql`exists (select 1 from contact s_scr
+    where s_scr.organization_id = ${orgId} and s_scr.id = ${contactId} and s_scr.screen is not null)`
+  const all = sql`not ${status("avisos", "revoked")} and not ${screened}`
   if (purpose === "avisos") return sql`(${contactId} is not null and ${all})`
   const own = purpose === "novedades" ? status(purpose, "granted") : sql`not ${status(purpose, "revoked")}`
   return sql`(${contactId} is not null and ${all} and ${own})`

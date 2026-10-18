@@ -1,3 +1,4 @@
+import { ContactScreenBanner } from "../../components/inbox-contact-screen"
 import { FDI_ADULT, FDI_CHILD } from "@odentia/clinical"
 import {
   Button,
@@ -32,6 +33,7 @@ import { DocumentosSection } from "../../components/patient/documentos-panel"
 import { HistoriaTab } from "../../components/patient/historia-tab"
 import { OdontogramaTab } from "../../components/patient/odontograma-tab"
 import { PersonHeader } from "../../components/patient/patient-header"
+import { PeriodontogramaTab } from "../../components/periodontal/periodontograma-tab"
 import { PlanTab } from "../../components/patient/plan-tab"
 import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { PersonChannels } from "../../components/person/person-channels"
@@ -49,12 +51,14 @@ import {
   type DocumentFilter,
   documentFilterFromSearch,
   isPatientSectionId,
+  navSectionOf,
   PATIENT_AREAS,
   type PageOf,
   type PatientSectionId,
   resolveSection,
   sectionFromSearch,
   sectionOf,
+  subsectionNav,
   visibleAreas,
   visibleSections,
 } from "../../lib/patient-areas"
@@ -92,6 +96,8 @@ export type PersonSearch = {
   tipo?: DocumentFilter
   /** Viene de registrarlo con «Atender ahora»: abre «Atender sin cita». */
   atender?: boolean
+  /** El periodontograma abierto (desde Historia o el Resumen). */
+  periodontograma?: string
 } & Partial<Record<(typeof FILTER_KEYS)[number], string>>
 
 /** La búsqueda de la página, también la de los enlaces guardados de la ficha anterior (`?tab=`). */
@@ -115,6 +121,7 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
     documentId: searchId(search.documentId),
     itemId: searchId(search.itemId),
     ...(search.atender === true || search.atender === "true" ? { atender: true } : {}),
+    periodontograma: searchId(search.periodontograma),
   }
 }
 
@@ -137,7 +144,7 @@ const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
 
 function PersonPageRoute() {
   const { personId } = Route.useParams()
-  const { tab, tooth, planId, budgetId, documentId, itemId, tipo } = Route.useSearch()
+  const { tab, tooth, planId, budgetId, documentId, itemId, tipo, periodontograma } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const queryClient = useQueryClient()
   const can = useCan()
@@ -245,6 +252,31 @@ function PersonPageRoute() {
     return render(patientId, patientDetail)
   }
 
+  // Lo que cuelga de una sección se elige dentro de ella: «Odontograma · Periodontograma».
+  const subsections = subsectionNav(section, can, pageOf)
+  const withSubsections = (node: ReactNode): ReactNode =>
+    subsections.length > 1 ? (
+      <div className="flex min-w-0 flex-col gap-4">
+        <Tabs
+          value={section}
+          onValueChange={(value) => {
+            if (isPatientSectionId(value)) openTab(value)
+          }}
+        >
+          <TabsList aria-label={`Dentro de ${sectionOf(navSectionOf(section)).label}`}>
+            {subsections.map((item) => (
+              <TabsTrigger key={item.value} value={item.value}>
+                {item.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        {node}
+      </div>
+    ) : (
+      node
+    )
+
   const content = (): ReactNode => {
     switch (section) {
       case "resumen":
@@ -279,15 +311,27 @@ function PersonPageRoute() {
           />
         )
       case "odontograma":
-        return needsPatient((id, full) => (
-          <OdontogramaTab
-            patientId={id}
-            initialTooth={tooth}
-            birthDate={full.patient.birthDate}
-            onOpenItem={openItem}
-            onOpenPlans={() => openTab("plan")}
-          />
-        ))
+        return withSubsections(
+          needsPatient((id, full) => (
+            <OdontogramaTab
+              patientId={id}
+              initialTooth={tooth}
+              birthDate={full.patient.birthDate}
+              onOpenItem={openItem}
+              onOpenPlans={() => openTab("plan")}
+            />
+          )),
+        )
+      case "periodontograma":
+        return withSubsections(
+          patientId ? (
+            <PeriodontogramaTab
+              patientId={patientId}
+              initialChartId={periodontograma}
+              onToothHistory={(next) => openTab("historia", next)}
+            />
+          ) : null,
+        )
       case "plan":
         // Una sola sección para todos: cada rol ve lo suyo dentro (ADR 0034).
         return patientId ? (
@@ -412,6 +456,15 @@ function PersonPageRoute() {
         summary={summary.data?.data}
         onSection={openTab}
       />
+      {/* En Spam o bloqueada: el mismo aviso de la Bandeja, con «No es spam» o «Desbloquear» (ADR 0054). */}
+      <ContactScreenBanner
+        target={{ base: `/api/people/${person.id}`, contactName: person.displayName }}
+        view={person.screen}
+        canWrite={can("conversations.write")}
+        canBlock={can("crm.write")}
+        canMarkSpam={false}
+        className="rounded-xl border"
+      />
       <Tabs
         className="min-w-0 w-full"
         value={current.area}
@@ -434,7 +487,7 @@ function PersonPageRoute() {
           {entries.length > 1 ? (
             <Tabs
               className="min-w-0 w-full gap-4"
-              value={current.id}
+              value={navSectionOf(current.id)}
               onValueChange={(value) => {
                 if (isPatientSectionId(value)) openTab(value)
               }}
@@ -451,7 +504,7 @@ function PersonPageRoute() {
                   ))}
                 </TabsList>
               </div>
-              <TabsContent value={current.id}>{content()}</TabsContent>
+              <TabsContent value={navSectionOf(current.id)}>{content()}</TabsContent>
             </Tabs>
           ) : (
             content()

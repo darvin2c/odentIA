@@ -860,6 +860,39 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     }
   },
 
+  /**
+   * Bloquear y desbloquear números (Block Users API): POST o DELETE en
+   * `block_users`, que responde por número. El número viaja sin el prefijo
+   * `wa:` del hilo. Meta solo bloquea a quien escribió en las últimas 24 horas.
+   * https://developers.facebook.com/docs/whatsapp/cloud-api/block-users
+   */
+  async setBlocked(config, input, deps) {
+    const cfg = getConfig(config)
+    const plain = (user: string) => (user.startsWith("wa:") ? user.slice("wa:".length) : user)
+    const users = input.users.map(plain)
+    const { status, json } = await graphFetch(
+      cfg,
+      `${cfg.phoneNumberId}/block_users`,
+      { method: input.blocked ? "POST" : "DELETE", body: { messaging_product: "whatsapp", block_users: users.map((user) => ({ user })) } },
+      deps,
+    )
+    const result = json && typeof json === "object" && "block_users" in json ? (json.block_users as Record<string, unknown>) : null
+    const inputsOf = (key: string): string[] => {
+      const list = result?.[key]
+      if (!Array.isArray(list)) return []
+      return list
+        .map((item) => (item && typeof item === "object" && "input" in item && typeof item.input === "string" ? item.input : null))
+        .filter((value): value is string => value !== null)
+    }
+    const confirmed = new Set(inputsOf(input.blocked ? "added_users" : "removed_users"))
+    if (status >= 400 && confirmed.size === 0) {
+      throw new Error(`WhatsApp no ${input.blocked ? "bloqueó" : "desbloqueó"} el número: ${graphError(status, json)}`)
+    }
+    const done = input.users.filter((user) => confirmed.has(plain(user)))
+    const failed = input.users.filter((user) => !confirmed.has(plain(user)))
+    return { done, failed }
+  },
+
   async validateConnection(config, deps) {
     const cfg = getConfig(config)
     const { status, json } = await graphFetch(

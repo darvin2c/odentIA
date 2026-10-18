@@ -65,7 +65,7 @@ import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
  * que la clínica pide. Al enviar valida con la misma regla del servidor
  * (`validateRegistrationAnswers`) y lo que falla lleva a su pantalla y su campo.
  *
- * «Nombres» y «Apellidos» son dos campos (ADR 0054).
+ * «Nombres» y «Apellidos» son dos campos (ADR 0058).
  */
 type Respondent = "patient" | "representative"
 type Declared = "" | "none" | "recorded" | "unknown"

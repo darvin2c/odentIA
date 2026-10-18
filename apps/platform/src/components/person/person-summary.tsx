@@ -218,6 +218,7 @@ export function PersonSummary({
                     />
                   )
                 }
+                onPeriodontal={() => onSection("periodontograma")}
               />
             ) : summary?.isError ? (
               <QueryErrorState error={summary.error} onRetry={() => void summary.refetch()} />

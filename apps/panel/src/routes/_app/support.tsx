@@ -29,7 +29,7 @@ const accountCase = z.object({
   id: z.string(),
   organizationId: z.string().nullable(),
   organizationName: z.string().nullable(),
-  kind: z.enum(["pregunta", "problema", "acceso"]),
+  kind: z.enum(["pregunta", "problema", "acceso", "cobro"]),
   question: z.string(),
   status: supportStatus,
   updatedAt: z.string(),

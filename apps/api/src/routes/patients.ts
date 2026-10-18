@@ -98,6 +98,7 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 import { createPatientBudgetsRoute } from "./patient-budgets.js"
+import { createPatientPeriodontalRoute } from "./patient-periodontal.js"
 import { createPatientDocumentContextRoute } from "./patient-document-context.js"
 import type { PlatformLlm } from "@odentia/agent"
 import { createEncounterDictationRoute } from "./encounter-dictation.js"
@@ -504,6 +505,7 @@ const CLINICAL_SUBPATHS = [
   "/health",
   "/anamnesis",
   "/odontogram",
+  "/periodontal",
   "/timeline",
   "/summary",
 ]
@@ -537,6 +539,7 @@ const ACCESS_RESOURCE_BY_PREFIX: Array<[string, ClinicalAccessResource]> = [
   ["/health", "antecedentes"],
   ["/anamnesis", "antecedentes"],
   ["/odontogram", "odontograma"],
+  ["/periodontal", "periodontograma"],
   ["/timeline", "historia"],
   ["/encounters", "atenciones"],
   ["/diagnoses", "diagnosticos"],
@@ -1602,6 +1605,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.route("/", createPatientDocumentContextRoute(deps))
   app.route("/", createPatientTreatmentsRoute(deps))
   app.route("/", createPatientFollowUpsRoute(deps))
+  app.route("/", createPatientPeriodontalRoute(deps))
   // El dictado del asistente clínico necesita el proveedor del modelo; sin él no se monta.
   if (deps.llm) app.route("/", createEncounterDictationRoute({ ...deps, llm: deps.llm }))
   app.route("/", createPatientPrescriptionsRoute(deps))

@@ -4,7 +4,10 @@ import {
   addSupportInternalNote,
   assertStaffAttachmentTarget,
   assignSupportCase,
+  decideActionReview,
+  getReviewOfCase,
   getSupportCaseForStaff,
+  readReviewConversation,
   listSupportAccessAudit,
   listSupportAssignees,
   listSupportCasesForStaff,
@@ -37,7 +40,7 @@ export interface AdminSupportDeps {
 
 const listQuery = z.object({
   status: z.enum(["abierto", "en_atencion", "esperando_clinica", "resuelto"]).optional(),
-  kind: z.enum(["pregunta", "problema", "acceso"]).optional(),
+  kind: z.enum(["pregunta", "problema", "acceso", "cobro"]).optional(),
   assignee: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
@@ -103,7 +106,33 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
 
   app.get("/cases/:id", (c) =>
     runService(c, 200, () =>
-      deps.ownerDb.transaction((tx) => getSupportCaseForStaff(tx, staffOf(c), c.req.param("id"))),
+      deps.ownerDb.transaction(async (tx) => {
+        const detail = await getSupportCaseForStaff(tx, staffOf(c), c.req.param("id"))
+        // «Revisión de cobro» (ADR 0054): el caso trae la fila que la clínica pidió revisar.
+        return detail.kind === "cobro" ? { ...detail, review: await getReviewOfCase(tx as Db, detail.id) } : detail
+      }),
+    ),
+  )
+
+  /** Devolver o mantener un cobro revisado: decide quien ve la facturación (rol admin), siempre con lo que se le dice a la clínica. */
+  app.post("/cases/:id/review/decide", async (c) => {
+    const parsed = z
+      .object({ accept: z.boolean(), answer: z.string().trim().min(1).max(1000) })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      deps.ownerDb.transaction(async (tx) => {
+        await decideActionReview(tx as Db, adminOf(c), { caseId: c.req.param("id"), ...parsed.data })
+        return { ok: true }
+      }),
+    )
+  })
+
+  /** La conversación de la revisión, solo con el permiso de la clínica y mientras dure; queda auditado. */
+  app.get("/cases/:id/review/conversation", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) => readReviewConversation(tx as Db, staffOf(c), c.req.param("id"))),
     ),
   )
 

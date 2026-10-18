@@ -124,15 +124,43 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1792339154825,
-      "tag": "0017_apellidos_en_un_campo",
+      "when": 1792342177223,
+      "tag": "0017_periodontograma",
       "breakpoints": true
     },
     {
       "idx": 18,
       "version": "7",
-      "when": 1792351501923,
-      "tag": "0018_lo_que_escribio_quien_se_parece",
+      "when": 1792342179284,
+      "tag": "0018_periodontograma_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792353383611,
+      "tag": "0019_spam_y_revision_de_cobros",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792353397074,
+      "tag": "0020_revision_de_cobros_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792353457074,
+      "tag": "0021_apellidos_en_un_campo",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792353517074,
+      "tag": "0022_lo_que_escribio_quien_se_parece",
       "breakpoints": true
     }
   ]

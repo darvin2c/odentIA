@@ -876,3 +876,29 @@ it("relaciones: contacto de otra organización responde 404", async () => {
   })
   expect(foreign.status).toBe(404)
 })
+
+it("el periodontograma es parte de la clínica y su lectura queda en la bitácora", async () => {
+  const get = (role: string, path: string) =>
+    buildApp(role).request(`/patients/${patientId}${path}`, { method: "GET" })
+  expect((await get("reception", "/periodontal")).status).toBe(403)
+  expect((await get("cashier", "/periodontal")).status).toBe(403)
+  const hits = async () => {
+    const log = await buildApp("admin").request(`/patients/${patientId}/access-log`, { method: "GET" })
+    const entries = ((await log.json()) as { data: { resource: string; hits: number }[] }).data
+    return entries.find((entry) => entry.resource === "periodontograma")?.hits ?? 0
+  }
+  const before = await hits()
+  const list = await get("dentist", "/periodontal")
+  expect(list.status).toBe(200)
+  expect(((await list.json()) as { data: unknown[] }).data).toEqual([])
+  expect(await hits()).toBe(before + 1)
+  // Empezar exige una atención en borrador de quien la lleva: sin ella, 404.
+  const start = await buildApp("dentist").request(`/patients/${patientId}/periodontal`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ encounterId: crypto.randomUUID() }),
+  })
+  expect(start.status).toBe(404)
+  const invalid = await buildApp("dentist").request(`/patients/${patientId}/periodontal/compare?before=x&after=y`, { method: "GET" })
+  expect(invalid.status).toBe(400)
+})

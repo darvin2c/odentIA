@@ -12,7 +12,7 @@ import { clinicalProfileFor, documentIssuerCountry, validateDemographics } from 
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
-import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
+import { channelConnection, contact, contactIdentity, type ContactScreen, conversation } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
@@ -26,6 +26,7 @@ import {
   phoneWhatsAppState,
   requireContact,
 } from "./contacts.js"
+import { type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { personSearchCondition } from "./person-search.js"
@@ -92,6 +93,8 @@ export interface PersonPage {
   email: string | null
   /** Archivada entera: la persona o su ficha (lo que quedó de antes de unir los dos indicadores). */
   archived: boolean
+  /** Spam o bloqueada (ADR 0054); solo para quien lee conversaciones o maneja contactos. */
+  screen: ContactScreenView | null
   createdAt: string
   kind: PersonKind
   /** Su historia clínica, si ya está registrada como paciente. */
@@ -276,6 +279,7 @@ export async function getPersonPage(
     phoneWhatsApp: await phoneWhatsAppState(tx, orgId, row.id),
     email: row.email,
     archived,
+    screen: readsConversations || can("crm.read") ? await getContactScreenView(tx, orgId, row.id) : null,
     createdAt: row.createdAt.toISOString(),
     kind: own
       ? "paciente"
@@ -334,6 +338,8 @@ export interface PersonListItem {
   docNumber: string | null
   sex: string | null
   phone: string | null
+  /** En Spam o bloqueada (ADR 0054); solo para quien lee conversaciones. */
+  screen: ContactScreen | null
   /** Hasta dos nombres de los pacientes de los que es responsable, y cuántos son. */
   responsibleFor: string[]
   responsibleCount: number
@@ -361,7 +367,8 @@ function viewCondition(view: PeopleView) {
     case "pacientes":
       return sql`p.id is not null and not ${ARCHIVED_SQL}`
     case "por_registrar":
-      return sql`p.id is null and not ${RESPONSIBLE_SQL} and not ${ARCHIVED_SQL}`
+      // Spam y bloqueados no son contactos nuevos (ADR 0054): se encuentran en «Todos».
+      return sql`p.id is null and not ${RESPONSIBLE_SQL} and not ${ARCHIVED_SQL} and c.screen is null`
     case "responsables":
       return sql`${RESPONSIBLE_SQL} and not ${ARCHIVED_SQL}`
     case "archivados":
@@ -448,13 +455,14 @@ export async function listPeople(
     doc_number: string | null
     sex: string | null
     phone: string | null
+    screen: ContactScreen | null
     last_interaction_at: string | null
     responsible_names: string[] | null
     responsible_count: number
     next_appointment_at: string | null
   }>(sql`
     select c.id, c.display_name, c.is_active, p.id as patient_id, p.patient_number,
-      c.doc_type, c.doc_number, c.sex, c.phone,
+      c.doc_type, c.doc_number, c.sex, c.phone, c.screen,
       to_char(c.last_interaction_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as last_interaction_at,
       (select array_agg(n order by n) from (
         select rc.display_name as n from patient_contact r
@@ -508,6 +516,8 @@ export async function listPeople(
       docNumber: r.doc_number,
       sex: r.sex,
       phone: r.phone,
+      // Lo dice solo a quien lee conversaciones: es lo que ve la Bandeja.
+      screen: chats ? r.screen : null,
       responsibleFor: r.responsible_names ?? [],
       responsibleCount,
       nextAppointmentAt: agenda ? r.next_appointment_at : null,

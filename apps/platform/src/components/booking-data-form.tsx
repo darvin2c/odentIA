@@ -47,7 +47,7 @@ const RELATIONSHIPS: readonly Relationship[] = ["guardian", "family", "other"]
 /** Nombre y documento de una persona, tal como se escriben en la pantalla. */
 interface PersonDraft {
   givenNames: string
-  /** Los apellidos juntos, en un solo campo (ADR 0054). */
+  /** Los apellidos juntos, en un solo campo (ADR 0058). */
   familyName: string
   /** Vacío mientras no se elija: vale el primero de los que se usan en el país de la clínica. */
   docType: IdentityDocType | ""
