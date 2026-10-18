@@ -330,7 +330,7 @@ export function AnswerInput({
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Los archivos se suben en «Imágenes y archivos» y aquí se vinculan.
+            Los archivos se suben en Documentos y aquí se vinculan.
           </p>
           {help}
         </Field>

@@ -327,11 +327,11 @@ export function DocumentUploadDialog({
     } catch {
       // Fallo de red o respuesta ilegible: el archivo pudo haberse guardado.
       // No se reintenta a ciegas: se refresca el listado y la fila exige
-      // decisión explícita (verificar en la galería o reenviar).
+      // decisión explícita (verificar en Documentos o reenviar).
       patchRow(row.key, {
         status: "unconfirmed",
         error:
-          "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la galería antes de reenviar para no duplicar.",
+          "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar.",
       })
       await onSuccess()
       return false
@@ -537,7 +537,7 @@ export function DocumentUploadDialog({
 
         {unconfirmedRows.length > 0 && (
           <p className="text-xs text-muted-foreground">
-            Hay {unconfirmedRows.length} archivo(s) con resultado no confirmado. La galería ya se
+            Hay {unconfirmedRows.length} archivo(s) con resultado no confirmado. La lista de Documentos ya se
             actualizó: verifica si aparecen antes de reenviar.
           </p>
         )}
@@ -818,7 +818,7 @@ function QueuedRow({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Guardado en la galería
+          Guardado en Documentos
           {row.category
             ? ` como ${imageTypeLabel(row.imageType) ?? categoryLabel(row.category)}`
             : ""}

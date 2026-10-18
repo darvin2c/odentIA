@@ -687,7 +687,7 @@ test("documentos: una sola lista para buscar un papel, con sus filtros y cada fi
   const view = page.getByRole("button", { name: "Ver Periapical de control" })
   await view.click()
   await expect(page).toHaveURL(/documentId=/)
-  const viewer = page.getByRole("dialog", { name: "Ver Periapical de control" })
+  const viewer = page.getByRole("dialog", { name: "Periapical de control" })
   await expect(viewer.getByText("Detalles del archivo")).toBeVisible()
   // El visor dice solo lo que tiene: nada de «Sin … vinculado».
   await expect(viewer.getByText(/Sin .* vinculad/)).toHaveCount(0)

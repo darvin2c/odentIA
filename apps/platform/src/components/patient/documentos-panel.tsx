@@ -24,7 +24,7 @@ import {
   useListSearch,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouter } from "@tanstack/react-router"
 import {
   ChevronDown,
   ClipboardList,
@@ -208,7 +208,7 @@ function fileDetail(doc: PatientDocument, encounter: Encounter | undefined): str
  */
 export function DocumentosSection({
   patientId,
-  filter,
+  filter: requestedFilter,
   encounterId,
   tooth,
   documentId,
@@ -224,9 +224,13 @@ export function DocumentosSection({
 }) {
   const queryClient = useQueryClient()
   const listSearch = useListSearch()
+  const router = useRouter()
   const canWrite = usePermission("clinical.write")
   // El odontograma firmado es de las clínicas de Perú (NTS 188; ADR 0036).
   const signsOdontogram = useClinicalProfile().odontogram?.signedOdontogram === true
+  // Fuera de Perú no hay filtro «Odontogramas»: un enlace con él abre todo.
+  const filter =
+    requestedFilter === "odontogramas" && !signsOdontogram ? undefined : requestedFilter
   const [menuOpen, setMenuOpen] = useState(false)
   const [creating, setCreating] = useState<Exclude<NewDocumentKind, "archivo"> | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -322,14 +326,34 @@ export function DocumentosSection({
   const setRetired = (retired: boolean) =>
     listSearch.setParams({ estado: retired ? "retirados" : undefined, documentId: undefined })
 
+  // Abrir el visor agrega una entrada al historial: cerrarlo es volver atrás,
+  // y «Atrás» del navegador también lo cierra.
+  const pushedRef = useRef(false)
+  const closingRef = useRef(false)
   const openDocument = (id: string) => {
     if (document.activeElement instanceof HTMLElement) openerRef.current = document.activeElement
+    pushedRef.current = true
     listSearch.setParams({ documentId: id })
   }
   const closeDocument = () => {
-    listSearch.setParams({ documentId: undefined }, { replace: true })
-    window.setTimeout(() => openerRef.current?.focus(), 0)
+    // El diálogo puede avisar el cierre más de una vez: se cierra una sola.
+    if (!documentId || closingRef.current) return
+    closingRef.current = true
+    if (pushedRef.current) {
+      pushedRef.current = false
+      router.history.back()
+    } else listSearch.setParams({ documentId: undefined }, { replace: true })
   }
+  // Al cerrarse el visor (con su botón, Esc o «Atrás»), el foco vuelve a la fila.
+  const hadDocument = useRef(Boolean(documentId))
+  useEffect(() => {
+    closingRef.current = false
+    if (hadDocument.current && !documentId) {
+      pushedRef.current = false
+      window.setTimeout(() => openerRef.current?.focus(), 0)
+    }
+    hadDocument.current = Boolean(documentId)
+  }, [documentId])
 
   const startNew = (kind: NewDocumentKind) => {
     setMenuOpen(false)
@@ -397,10 +421,15 @@ export function DocumentosSection({
     orders.data?.data ?? [],
     allFiles,
   )
+  // Mientras no se sabe qué vive en un consentimiento o en una orden, esos
+  // archivos no salen sueltos: así no aparecen y desaparecen.
+  const settledFile = (doc: PatientDocument) =>
+    isImageCategory(doc.category) ||
+    (doc.category === "consentimiento" ? consents.isSuccess : orders.isSuccess)
   const pendingSigner = signerWords(patient.data?.data, responsibilities.data?.data)
   const rows: Row[] = [
     ...allFiles
-      .filter((doc) => !shownElsewhere.has(doc.id))
+      .filter((doc) => settledFile(doc) && !shownElsewhere.has(doc.id))
       .map((doc): Row => {
         const detail = fileDetail(
           doc,
@@ -590,8 +619,11 @@ export function DocumentosSection({
       )
   const groups = groupByMonth(visible, (row) => row.date, monthHeading)
   // «Anterior» y «Siguiente» del visor recorren los archivos a la vista.
+  // La tomografía completa abre su propio visor: no entra en el recorrido.
   const sequence = visible.flatMap((row) =>
-    row.open.kind === "archivo" ? [row.open.document] : [],
+    row.open.kind === "archivo" && !row.open.document.imaging?.completedAt
+      ? [row.open.document]
+      : [],
   )
   const viewing = documentId ? allFiles.find((doc) => doc.id === documentId) : undefined
 

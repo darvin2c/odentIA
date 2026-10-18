@@ -196,7 +196,6 @@ export function DocumentViewerHost({
         }}
       >
         <DialogContent
-          aria-label={`Ver ${doc.label}`}
           // En el teléfono ocupa toda la pantalla (tablero 5 del lienzo).
           className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)] max-md:top-0 max-md:left-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:pb-0"
           onKeyDown={(event) => {
@@ -798,7 +797,7 @@ function DocumentViewer({
       <ConfirmDialog
         open={retireOpen}
         title="Retirar archivo"
-        description="Sale de la galería, de la historia por pieza y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer."
+        description="Sale de Documentos, de la historia por pieza y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer."
         confirmLabel="Retirar"
         pending={actionPending}
         confirmDisabled={!retireReason.trim()}
