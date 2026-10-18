@@ -1,6 +1,6 @@
 import { cbctDemoTeeth, generateCbctPhantom } from "@odentia/clinical"
 import { describe, expect, it } from "vitest"
-import { crossSection, detectArch, panorama, sampleCurve, toothAt, toothIndex } from "./cbct-arch"
+import { crossSection, detectArch, panorama, panoramaRows, sampleCurve, toothAt, toothIndex } from "./cbct-arch"
 import { volumeFromSlices } from "./cbct-volume"
 
 const V = 0.5
@@ -44,6 +44,18 @@ describe("arco, panorámica y cortes transversales", () => {
     expect(pano.colMm).toBeCloseTo(V)
   })
 
+  it("la panorámica de los maxilares es la misma imagen, recortada alrededor del plano oclusal", () => {
+    const full = panorama(volume, curve)
+    const [from, to] = panoramaRows(volume, arch!.z)
+    const jaws = panorama(volume, curve, 12, from, to)
+    expect(jaws.zTop).toBe(Math.min(volume.nz - 1, to))
+    expect(jaws.height).toBe(jaws.zTop - Math.max(0, from) + 1)
+    const fullRow = volume.nz - 1 - jaws.zTop
+    const column = Math.floor(curve.length / 2)
+    for (const r of [0, Math.floor(jaws.height / 2), jaws.height - 1])
+      expect(jaws.values[r * jaws.width + column]).toBe(full.values[(fullRow + r) * full.width + column])
+  })
+
   it("«Ir a la pieza» cae cerca de la 36 y el corte muestra su reborde sin diente", () => {
     const real = cbctDemoTeeth().find((t) => t.fdi === 37)!
     const at = toothIndex(curve, 36)!
@@ -64,5 +76,78 @@ describe("arco, panorámica y cortes transversales", () => {
     expect(crest).toBeDefined()
     expect(Math.abs(crest!.z - -11.5)).toBeLessThan(2)
     expect(lowerHalf.some(({ v, z }) => z > -11 && v > 2000)).toBe(false)
+  })
+})
+
+/**
+ * Un arco como el de una tomografía real (la de 3D Slicer): coronas de 9 mm de
+ * grosor con el esmalte por fuera, el arco de arriba 3 mm por delante del de
+ * abajo y una U de frente redondo y lados rectos, que una parábola sigue solo a
+ * grandes rasgos. Con aire, tejido blando, hueso, dentina y esmalte.
+ */
+function thickArchVolume(): ReturnType<typeof volumeFromSlices> {
+  const n = 160
+  const slices = 24
+  // La U en mm: media elipse adelante y lados rectos de 12 mm hacia atrás.
+  const distanceTo = (grow: number) => {
+    const curve: { x: number; y: number }[] = []
+    for (let k = 0; k <= 200; k++) {
+      const t = Math.PI + (Math.PI * k) / 200
+      curve.push({ x: 40 + (26 + grow) * Math.cos(t), y: 50 + (28 + grow) * Math.sin(t) })
+    }
+    for (let k = 1; k <= 24; k++) {
+      curve.unshift({ x: 14 - grow, y: 50 + k / 2 })
+      curve.push({ x: 66 + grow, y: 50 + k / 2 })
+    }
+    const distance = new Float32Array(n * n)
+    for (let y = 0; y < n; y++)
+      for (let x = 0; x < n; x++) {
+        let best = Infinity
+        for (const p of curve) best = Math.min(best, Math.hypot(x * V - p.x, y * V - p.y))
+        distance[y * n + x] = best
+      }
+    return distance
+  }
+  const lower = distanceTo(0)
+  const upper = distanceTo(3)
+  const data = Array.from({ length: slices }, (_, z) => {
+    const crown = z >= 6 && z <= 11 ? lower : z >= 13 && z <= 18 ? upper : null
+    const slice = new Int16Array(n * n)
+    for (let i = 0; i < n * n; i++) {
+      const x = (i % n) * V - 40
+      const y = Math.floor(i / n) * V - 45
+      let value = Math.hypot(x, y) < 40 ? 400 : 0
+      if (lower[i]! <= 8) value = 900
+      const d = crown?.[i]
+      if (d !== undefined && d <= 4.5) value = d >= 3 ? 2400 + ((i * 7919) % 600) : 1700
+      slice[i] = value
+    }
+    return slice
+  })
+  return volumeFromSlices(data, { nx: n, ny: n, sx: V, sy: V, sz: V })
+}
+
+describe("arco de una tomografía real", () => {
+  it("propone el arco aunque los dientes sean gruesos y la U no sea una parábola", () => {
+    const arch = detectArch(thickArchVolume())
+    expect(arch).not.toBeNull()
+    // El punto del medio cae sobre los incisivos (x = 40 mm, y = 22 mm).
+    const middle = arch!.control[2]!
+    expect(Math.abs(middle.x * V - 40)).toBeLessThan(3)
+    expect(Math.abs(middle.y * V - 22)).toBeLessThan(5)
+    expect(arch!.z).toBeGreaterThanOrEqual(8)
+    expect(arch!.z).toBeLessThanOrEqual(16)
+  })
+
+  it("sin dientes en forma de arco no propone nada", () => {
+    const n = 120
+    // Un anillo de hueso denso, como un corte del cráneo: no abre hacia atrás.
+    const ring = Array.from({ length: 12 }, () =>
+      Int16Array.from({ length: n * n }, (_, i) => {
+        const r = Math.hypot((i % n) - 60, Math.floor(i / n) - 60) * V
+        return r > 24 && r < 27 ? 1800 + Math.round((27 - r) * 300) : r <= 24 ? 400 : 0
+      }),
+    )
+    expect(detectArch(volumeFromSlices(ring, { nx: n, ny: n, sx: V, sy: V, sz: V }))).toBeNull()
   })
 })

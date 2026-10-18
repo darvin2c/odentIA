@@ -115,8 +115,11 @@ export function detectArch(volume: CbctVolume): ArchProposal | null {
     points.map((p) => Math.abs(p.y - (a * p.x * p.x + b * p.x + c))).sort((m, n) => m - n),
     0.5,
   )
-  // Un arco: abre hacia atrás (y crece), mide más de 3 cm de ancho y la parábola lo sigue.
-  if (a <= 0 || right - left < 30 || residual > 3) return null
+  // Un arco: abre hacia atrás (y crece), mide más de 3 cm de ancho y la parábola lo sigue
+  // a menos de medio molar. Un arco real no es una parábola, el esmalte es la cáscara de
+  // coronas de 8 a 10 mm y el de arriba va por delante del de abajo: en la tomografía de
+  // 3D Slicer el residuo es de 3 a 4,6 mm según el umbral; lo que no es un arco pasa de 10.
+  if (a <= 0 || right - left < 30 || residual > 6) return null
   const control = Array.from({ length: 5 }, (_, k) => {
     const x = left + ((right - left) * k) / 4
     return { x: x / volume.sx, y: (a * x * x + b * x + c) / volume.sy }
@@ -203,14 +206,33 @@ function bilinear(volume: CbctVolume, x: number, y: number, z: number): number {
   return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy
 }
 
+export interface CrossImage extends PlaneImage {
+  /** Corte (z) de la primera fila: la fila r está en z = zTop − r. */
+  zTop: number
+}
+
+/** Filas de `zFrom` a `zTo` dentro del volumen, con la de arriba primero. */
+function rowsWithin(volume: CbctVolume, zFrom: number, zTo: number): { low: number; zTop: number; height: number } {
+  const low = Math.max(0, Math.min(volume.nz - 1, Math.round(zFrom)))
+  const zTop = Math.max(low, Math.min(volume.nz - 1, Math.round(zTo)))
+  return { low, zTop, height: zTop - low + 1 }
+}
+
 /**
  * Panorámica reconstruida: para cada punto del arco y cada corte, el promedio
  * a lo largo de la normal en `thicknessMm` (como una radiografía panorámica).
- * La derecha del paciente queda a la izquierda; arriba es arriba.
+ * La derecha del paciente queda a la izquierda; arriba es arriba. Entre los
+ * cortes `zFrom` y `zTo` (todo el alto si no se dicen).
  */
-export function panorama(volume: CbctVolume, curve: readonly CurveSample[], thicknessMm = 12): PlaneImage {
+export function panorama(
+  volume: CbctVolume,
+  curve: readonly CurveSample[],
+  thicknessMm = 12,
+  zFrom = 0,
+  zTo = volume.nz - 1,
+): CrossImage {
   const width = curve.length
-  const height = volume.nz
+  const { zTop, height } = rowsWithin(volume, zFrom, zTo)
   const values = new Int16Array(width * height)
   const step = Math.min(volume.sx, volume.sy)
   const offsets: number[] = []
@@ -218,19 +240,22 @@ export function panorama(volume: CbctVolume, curve: readonly CurveSample[], thic
   for (let i = 0; i < width; i++) {
     const c = curve[i]!
     for (let r = 0; r < height; r++) {
-      const z = height - 1 - r
       let sum = 0
-      for (const o of offsets) sum += bilinear(volume, c.x + c.nx * o, c.y + c.ny * o, z)
+      for (const o of offsets) sum += bilinear(volume, c.x + c.nx * o, c.y + c.ny * o, zTop - r)
       values[r * width + i] = Math.round(sum / offsets.length)
     }
   }
   const spacing = curve.length > 1 ? curve[1]!.s - curve[0]!.s : volume.sx
-  return { width, height, values, colMm: spacing, rowMm: volume.sz }
+  return { width, height, values, colMm: spacing, rowMm: volume.sz, zTop }
 }
 
-export interface CrossImage extends PlaneImage {
-  /** Corte (z) de la primera fila: la fila r está en z = zTop − r. */
-  zTop: number
+/**
+ * Alto de la panorámica: los dos maxilares, como en una radiografía panorámica
+ * (de 4 cm bajo el plano oclusal a 4,5 cm sobre él). Una tomografía de campo
+ * grande trae también la órbita y la base del cráneo, que achican los dientes.
+ */
+export function panoramaRows(volume: CbctVolume, occlusalZ: number): [number, number] {
+  return [occlusalZ - Math.round(40 / volume.sz), occlusalZ + Math.round(45 / volume.sz)]
 }
 
 /**
@@ -249,9 +274,7 @@ export function crossSection(
   const c = curve[Math.max(0, Math.min(curve.length - 1, Math.round(index)))]!
   const step = Math.min(volume.sx, volume.sy)
   const width = Math.round((2 * halfWidthMm) / step) + 1
-  const low = Math.max(0, Math.min(volume.nz - 1, Math.round(zFrom)))
-  const zTop = Math.max(low, Math.min(volume.nz - 1, Math.round(zTo)))
-  const height = zTop - low + 1
+  const { zTop, height } = rowsWithin(volume, zFrom, zTo)
   const values = new Int16Array(width * height)
   for (let col = 0; col < width; col++) {
     const o = col * step - halfWidthMm

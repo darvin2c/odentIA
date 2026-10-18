@@ -10,6 +10,7 @@ import {
   detectArch,
   jawRows,
   panorama,
+  panoramaRows,
   type Point,
   sampleCurve,
   toothAt,
@@ -72,9 +73,11 @@ function projectOnCross(volume: CbctVolume, c: CurveSample, image: CrossImage, p
   return out
 }
 
-function projectOnPanorama(volume: CbctVolume, curve: readonly CurveSample[], points: Vec3[]): Point[] | null {
+function projectOnPanorama(volume: CbctVolume, curve: readonly CurveSample[], image: CrossImage, points: Vec3[]): Point[] | null {
   const out: Point[] = []
   for (const [x, y, z] of points) {
+    const row = image.zTop - z / volume.sz
+    if (row < 0 || row > image.height - 1) return null
     let best = 0
     let bestD = Number.POSITIVE_INFINITY
     for (let i = 0; i < curve.length; i++) {
@@ -85,7 +88,7 @@ function projectOnPanorama(volume: CbctVolume, curve: readonly CurveSample[], po
       }
     }
     if (Math.sqrt(bestD) > 1.5) return null
-    out.push({ x: best, y: volume.nz - 1 - z / volume.sz })
+    out.push({ x: best, y: row })
   }
   return out
 }
@@ -138,7 +141,11 @@ export function PanoramicView({
 }) {
   const queryClient = useQueryClient()
   const { proposal, control, setControl, axialZ, setAxialZ, curve } = useArch(volume)
-  const pano = useMemo(() => (curve.length ? panorama(volume, curve) : null), [volume, curve])
+  const occlusalZ = proposal?.z ?? axialZ
+  const pano = useMemo(
+    () => (curve.length ? panorama(volume, curve, 12, ...panoramaRows(volume, occlusalZ)) : null),
+    [volume, curve, occlusalZ],
+  )
   const step = curve.length > 1 ? curve[1]!.s - curve[0]!.s : volume.sx
   const perMm = Math.max(1, Math.round(1 / step))
   const teeth = doc.toothNumbers
@@ -157,7 +164,6 @@ export function PanoramicView({
     [curve.length, perMm],
   )
   // Los transversales muestran el maxilar de la pieza elegida (el inferior si no hay).
-  const occlusalZ = proposal?.z ?? axialZ
   const crosses = useMemo(() => {
     if (!curve.length) return []
     const [zFrom, zTo] = jawRows(volume, occlusalZ, jaw)
@@ -185,7 +191,7 @@ export function PanoramicView({
       view === "transversal"
         ? crossPointToVoxel(curve[at]!, image as CrossImage, q)
         : view === "panoramica"
-          ? { x: curve[Math.round(q.x)]!.x, y: curve[Math.round(q.x)]!.y, z: volume.nz - 1 - q.y }
+          ? { x: curve[Math.round(q.x)]!.x, y: curve[Math.round(q.x)]!.y, z: (image as CrossImage).zTop - q.y }
           : { x: q.x, y: q.y, z: axialZ }
     void saved.keep({
       kind: tool === "angulo" ? "angulo" : "distancia",
@@ -366,7 +372,7 @@ export function PanoramicView({
             measures={measures
               .filter((m) => m.view === "panoramica")
               .flatMap((m) => {
-                const points = projectOnPanorama(volume, curve, m.points)
+                const points = projectOnPanorama(volume, curve, pano, m.points)
                 return points ? [asPlane(m, points)] : []
               })}
             draft={draft?.view === "panoramica" ? draft.points : undefined}
