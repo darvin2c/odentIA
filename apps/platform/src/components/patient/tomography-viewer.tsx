@@ -7,6 +7,9 @@ import {
   Field,
   FieldLabel,
   Slider,
+  Tabs,
+  TabsList,
+  TabsTrigger,
 } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { LoadingState } from "@odentia/ui-patterns"
@@ -20,16 +23,17 @@ import {
   type CbctVolume,
   loadCbctVolume,
   type Plane,
-  type PlaneImage,
   planeAngleDeg,
   planeCount,
   planeDistanceMm,
   planeImage,
   type WindowLevel,
-  windowToRgba,
 } from "../../lib/cbct-volume"
 import { DicomUnsupportedError, decodeDicom, renderDicom } from "../../lib/dicom"
 import { tomographyDownloadUrl } from "../../lib/imaging-upload"
+import { MEASURE_NOTE, MeasureList, type SavedMeasures, useSavedMeasures, type Vec3 } from "./tomography-measures"
+import { PanoramicView } from "./tomography-panoramic"
+import { type PlaneMeasure, type Point, SliceCanvas, type Tool } from "./tomography-slice"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientDocument } from "../../lib/patients"
 
@@ -45,19 +49,6 @@ export interface StudyFiles {
   files: { index: number; url: string; sizeBytes: number; seriesInstanceUid: string }[]
 }
 
-export type Point = { x: number; y: number }
-export type Tool = "ninguna" | "medir" | "angulo"
-
-export interface PlaneMeasure {
-  id: string
-  /** Vista y corte donde se marcó. */
-  view: string
-  index: number
-  kind: "distancia" | "angulo"
-  points: Point[]
-  value: number
-}
-
 const PRESET_LABELS: Record<BrightnessPreset, string> = {
   hueso: "Hueso",
   diente: "Diente",
@@ -68,12 +59,6 @@ const PLANE_NAMES: Record<Plane, { label: string; technical: string }> = {
   axial: { label: "Desde arriba", technical: "axial" },
   coronal: { label: "De frente", technical: "coronal" },
   sagittal: { label: "De lado", technical: "sagital" },
-}
-
-export function formatMeasure(measure: Pick<PlaneMeasure, "kind" | "value">): string {
-  return measure.kind === "angulo"
-    ? `${measure.value.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 1 })}°`
-    : `${measure.value.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 1 })} mm`
 }
 
 /** ¿Es un teléfono? Ahí el visor solo muestra (decisión 8). */
@@ -87,136 +72,6 @@ export function useViewOnly(): boolean {
     return () => query.removeEventListener("change", update)
   }, [])
   return viewOnly
-}
-
-/** Una imagen de corte en un lienzo, con su retícula y sus medidas. */
-export function SliceCanvas({
-  image,
-  window,
-  label,
-  technical,
-  cross,
-  measures,
-  draft,
-  tool,
-  onPick,
-  onMark,
-  onStep,
-  overlay,
-  className,
-}: {
-  image: PlaneImage
-  window: WindowLevel
-  label: string
-  technical?: string
-  /** Retícula en coordenadas de la imagen. */
-  cross?: Point | null
-  measures?: PlaneMeasure[]
-  draft?: Point[]
-  tool: Tool
-  onPick?: (point: Point) => void
-  onMark?: (point: Point) => void
-  onStep?: (delta: number) => void
-  /** Dibujo extra (arco, líneas de corte) en coordenadas de la imagen. */
-  overlay?: (ctx: CanvasRenderingContext2D, image: PlaneImage) => void
-  className?: string
-}) {
-  const ref = useRef<HTMLCanvasElement | null>(null)
-  const rgba = useMemo(() => windowToRgba(image.values, window), [image, window])
-  useEffect(() => {
-    const canvas = ref.current
-    if (!canvas) return
-    canvas.width = image.width
-    canvas.height = image.height
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), image.width, image.height), 0, 0)
-    const unit = Math.max(1, image.width / 320)
-    if (cross) {
-      ctx.lineWidth = unit
-      ctx.strokeStyle = "rgba(34, 211, 238, 0.7)"
-      ctx.beginPath()
-      ctx.moveTo(0, cross.y)
-      ctx.lineTo(image.width, cross.y)
-      ctx.stroke()
-      ctx.strokeStyle = "rgba(245, 158, 11, 0.7)"
-      ctx.beginPath()
-      ctx.moveTo(cross.x, 0)
-      ctx.lineTo(cross.x, image.height)
-      ctx.stroke()
-    }
-    overlay?.(ctx, image)
-    const drawPath = (points: Point[], color: string) => {
-      ctx.strokeStyle = color
-      ctx.fillStyle = color
-      ctx.lineWidth = unit * 1.5
-      ctx.beginPath()
-      points.forEach((p, i) => {
-        if (i) ctx.lineTo(p.x, p.y)
-        else ctx.moveTo(p.x, p.y)
-      })
-      ctx.stroke()
-      for (const p of points) {
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, unit * 2.5, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-    for (const measure of measures ?? []) {
-      drawPath(measure.points, "#f59e0b")
-      const last = measure.points[measure.points.length - 1]!
-      ctx.font = `${Math.round(unit * 11)}px system-ui, sans-serif`
-      ctx.fillStyle = "#fde68a"
-      ctx.fillText(formatMeasure(measure), last.x + unit * 5, last.y - unit * 5)
-    }
-    if (draft?.length) drawPath(draft, "#fbbf24")
-  }, [image, rgba, cross, measures, draft, overlay])
-
-  const toImage = (event: React.MouseEvent<HTMLCanvasElement>): Point => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * image.width,
-      y: ((event.clientY - rect.top) / rect.height) * image.height,
-    }
-  }
-  const aspect = (image.width * image.colMm) / (image.height * image.rowMm)
-  return (
-    <div className={`relative min-w-0 bg-black ${className ?? ""}`}>
-      <canvas
-        ref={ref}
-        role="img"
-        aria-label={`${label}${measures?.length ? `; ${measures.map(formatMeasure).join(", ")}` : ""}`}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: el corte se recorre con las flechas del teclado.
-        tabIndex={0}
-        className={`mx-auto block max-h-full w-full max-w-full object-contain focus-visible:outline-2 focus-visible:outline-cyan-400 ${tool === "ninguna" ? "cursor-crosshair" : "cursor-cell"}`}
-        style={{ aspectRatio: String(aspect) }}
-        onClick={(event) => {
-          const point = toImage(event)
-          if (tool === "ninguna") onPick?.(point)
-          else onMark?.(point)
-        }}
-        onWheel={(event) => {
-          if (!onStep) return
-          event.preventDefault()
-          onStep((event.deltaY > 0 ? 1 : -1) * (event.shiftKey ? 5 : 1))
-        }}
-        onKeyDown={(event) => {
-          if (!onStep) return
-          const step = { ArrowUp: -1, ArrowDown: 1, PageUp: -10, PageDown: 10 }[event.key]
-          if (step) {
-            event.preventDefault()
-            onStep(step)
-          }
-        }}
-      />
-      <span
-        className="absolute top-2 left-2 rounded bg-black/70 px-1.5 py-0.5 text-[0.7rem] font-semibold tracking-wide text-slate-300 uppercase"
-        title={technical ? `Corte ${technical}` : undefined}
-      >
-        {label}
-      </span>
-    </div>
-  )
 }
 
 /** Brillo: los tres del estudio y el ajuste fino en «Más». */
@@ -289,18 +144,22 @@ export function BrightnessControls({
 }
 
 /** Las tres vistas ortogonales con la retícula compartida. */
+const VIEW_OF: Record<Plane, "axial" | "coronal" | "sagital"> = {
+  axial: "axial",
+  coronal: "coronal",
+  sagittal: "sagital",
+}
+
 function ThreePlanes({
   volume,
   window,
   tool,
-  measures,
-  onMeasure,
+  saved,
 }: {
   volume: CbctVolume
   window: WindowLevel
   tool: Tool
-  measures: PlaneMeasure[]
-  onMeasure: (measure: Omit<PlaneMeasure, "id">) => void
+  saved: SavedMeasures
 }) {
   const [point, setPoint] = useState({
     x: Math.floor(volume.nx / 2),
@@ -349,18 +208,51 @@ function ThreePlanes({
     const points = [...current, p]
     if (points.length < needed) return setDraft({ plane, points })
     const image = images[plane]
-    onMeasure({
-      view: plane,
-      index: indexOf(plane),
+    // Puntos en mm dentro del volumen, como se guardan.
+    const toMm = (q: Point): Vec3 => {
+      const v =
+        plane === "axial"
+          ? { x: q.x, y: q.y, z: point.z }
+          : plane === "coronal"
+            ? { x: q.x, y: point.y, z: volume.nz - 1 - q.y }
+            : { x: point.x, y: q.x, z: volume.nz - 1 - q.y }
+      return [v.x * volume.sx, v.y * volume.sy, v.z * volume.sz]
+    }
+    void saved.keep({
+      view: VIEW_OF[plane],
       kind: tool === "angulo" ? "angulo" : "distancia",
-      points,
+      points: points.map(toMm),
       value:
         tool === "angulo"
           ? planeAngleDeg(image, points[0]!, points[1]!, points[2]!)
           : planeDistanceMm(image, points[0]!, points[1]!),
+      toothNumber: null,
     })
     setDraft(null)
   }
+  /** Las medidas guardadas que caen en el corte que se ve. */
+  const shown = (plane: Plane): PlaneMeasure[] =>
+    saved.measures
+      .filter((m) => m.view === VIEW_OF[plane])
+      .flatMap((m) => {
+        const near = (v: number, at: number) => Math.abs(v - at) < 0.6
+        const fits = m.points.every(([x, y, z]) =>
+          plane === "axial"
+            ? near(z / volume.sz, point.z)
+            : plane === "coronal"
+              ? near(y / volume.sy, point.y)
+              : near(x / volume.sx, point.x),
+        )
+        if (!fits) return []
+        const points = m.points.map(([x, y, z]) =>
+          plane === "axial"
+            ? { x: x / volume.sx, y: y / volume.sy }
+            : plane === "coronal"
+              ? { x: x / volume.sx, y: volume.nz - 1 - z / volume.sz }
+              : { x: y / volume.sy, y: volume.nz - 1 - z / volume.sz },
+        )
+        return [{ id: m.id, view: m.view, index: 0, kind: m.kind, points, value: m.value }]
+      })
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 gap-px bg-slate-800 md:grid-cols-3">
       {(["axial", "coronal", "sagittal"] as const).map((plane) => (
@@ -372,7 +264,7 @@ function ThreePlanes({
             label={PLANE_NAMES[plane].label}
             technical={PLANE_NAMES[plane].technical}
             cross={crossOf(plane)}
-            measures={measures.filter((m) => m.view === plane && m.index === indexOf(plane))}
+            measures={shown(plane)}
             draft={draft?.plane === plane ? draft.points : undefined}
             tool={tool}
             onPick={(p) => pick(plane, p)}
@@ -562,9 +454,6 @@ export function VolumeLoadError({
   )
 }
 
-export const MEASURE_NOTE = (voxelMm: number | null) =>
-  `Medidas orientativas${voxelMm ? `, con el tamaño de vóxel del archivo (${voxelMm.toLocaleString(activeOrgLocale(), { maximumFractionDigits: 2 })} mm)` : ""}. Para planificar una cirugía, confírmalas en el programa del equipo.`
-
 /** Pantalla completa del visor. `children` permite agregar vistas (la panorámica). */
 export function TomographyViewer({
   patientId,
@@ -572,6 +461,7 @@ export function TomographyViewer({
   open,
   onClose,
   onDetails,
+  canWrite = false,
 }: {
   patientId: string
   doc: PatientDocument
@@ -579,6 +469,8 @@ export function TomographyViewer({
   onClose: () => void
   /** Abre el detalle del documento (informe, contexto, retiro). */
   onDetails?: () => void
+  /** Escribe en la ficha: guarda medidas y la vista en la atención. */
+  canWrite?: boolean
 }) {
   const loaded = useCbctVolume(patientId, doc.id)
   const volume = loaded.volume
@@ -586,7 +478,9 @@ export function TomographyViewer({
   const [preset, setPreset] = useState<BrightnessPreset | "mas">("hueso")
   const [custom, setCustom] = useState<WindowLevel | null>(null)
   const [tool, setTool] = useState<Tool>("ninguna")
-  const [measures, setMeasures] = useState<PlaneMeasure[]>([])
+  const saved = useSavedMeasures(patientId, doc.id, canWrite)
+  const [view, setView] = useState<"panoramica" | "tres">("panoramica")
+  const [adjusting, setAdjusting] = useState(false)
   const [single, setSingle] = useState(false)
   const window = volume ? (preset === "mas" ? (custom ?? volume.presets.hueso) : volume.presets[preset]) : null
 
@@ -621,9 +515,16 @@ export function TomographyViewer({
             <DialogDescription className="text-xs text-slate-400">
               {doc.imaging ? `${doc.imaging.sliceCount.toLocaleString(activeOrgLocale())} cortes` : ""}
               {doc.source ? ` · ${doc.source}` : ""}
-              {" · Tres cortes"}
             </DialogDescription>
           </div>
+          {volume && !single && (
+            <Tabs value={view} onValueChange={(next) => setView(next as "panoramica" | "tres")}>
+              <TabsList aria-label="Vista">
+                <TabsTrigger value="panoramica">Panorámica y cortes</TabsTrigger>
+                <TabsTrigger value="tres">Tres cortes</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
           {onDetails && (
             <Button type="button" size="sm" variant="ghost" onClick={onDetails}>
               Detalles e informe
@@ -683,6 +584,20 @@ export function TomographyViewer({
                   </ToggleGroupItem>
                 </ToggleGroup>
               )}
+              {view === "panoramica" && !viewOnly && canWrite && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={adjusting ? "secondary" : "outline"}
+                  aria-pressed={adjusting}
+                  onClick={() => {
+                    setAdjusting((a) => !a)
+                    setTool("ninguna")
+                  }}
+                >
+                  Ajustar arco
+                </Button>
+              )}
               <Button
                 type="button"
                 size="sm"
@@ -690,58 +605,38 @@ export function TomographyViewer({
                 onClick={() => {
                   setPreset("hueso")
                   setTool("ninguna")
-                  setMeasures([])
+                  setAdjusting(false)
                 }}
               >
                 Restablecer
               </Button>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-              <ThreePlanes
+            {view === "panoramica" ? (
+              <PanoramicView
                 volume={volume}
                 window={window}
                 tool={tool}
-                measures={measures}
-                onMeasure={(m) => setMeasures((prev) => [...prev, { ...m, id: crypto.randomUUID() }])}
+                viewOnly={viewOnly}
+                canWrite={canWrite}
+                patientId={patientId}
+                doc={doc}
+                adjusting={adjusting}
+                onTool={setTool}
+                saved={saved}
+                note={MEASURE_NOTE(voxel)}
               />
-              <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
-                <h3 className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Medidas</h3>
-                {measures.length === 0 ? (
-                  <p className="text-slate-400">
-                    {viewOnly
-                      ? "Para medir, abre la tomografía en una computadora o una tablet."
-                      : "Elige «Medir» y marca dos puntos, o «Ángulo» y marca tres."}
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+                <ThreePlanes volume={volume} window={window} tool={tool} saved={saved} />
+                <aside className="flex w-full shrink-0 flex-col gap-3 border-t border-slate-800 bg-[#0d131b] p-4 text-sm lg:w-72 lg:border-t-0 lg:border-l">
+                  <MeasureList saved={saved} canWrite={canWrite} viewOnly={viewOnly} />
+                  <p className="text-xs text-slate-400">{MEASURE_NOTE(voxel)}</p>
+                  <p className="text-xs text-slate-500">
+                    Rueda o ↑ ↓ para avanzar · 1, 2 y 3 cambian el brillo{viewOnly ? "" : " · M mide · A ángulo"}
                   </p>
-                ) : (
-                  <ul className="flex flex-col gap-1.5">
-                    {measures.map((m) => (
-                      <li key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-900 px-2.5 py-1.5">
-                        <span className="text-slate-300">
-                          {m.kind === "angulo" ? "Ángulo" : "Distancia"} ·{" "}
-                          {PLANE_NAMES[m.view as Plane]?.label.toLowerCase() ?? m.view}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <b className="text-amber-400 tabular-nums">{formatMeasure(m)}</b>
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            aria-label="Quitar la medida"
-                            onClick={() => setMeasures((prev) => prev.filter((x) => x.id !== m.id))}
-                          >
-                            <X aria-hidden="true" />
-                          </Button>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="text-xs text-slate-400">{MEASURE_NOTE(voxel)}</p>
-                <p className="text-xs text-slate-500">
-                  Rueda o ↑ ↓ para avanzar · 1, 2 y 3 cambian el brillo{viewOnly ? "" : " · M mide · A ángulo"}
-                </p>
-              </aside>
-            </div>
+                </aside>
+              </div>
+            )}
           </>
         )}
       </DialogContent>

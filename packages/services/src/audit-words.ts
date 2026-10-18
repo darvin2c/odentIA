@@ -223,6 +223,7 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "document.report_status": say("Cambió el estado del informe de una imagen"),
   "imaging_study.started": say("Empezó a subir una tomografía a la ficha de un paciente"),
   "imaging_study.completed": say("Terminó de subir una tomografía a la ficha de un paciente"),
+  "imaging_study.measured": say("Guardó una medida en la tomografía de un paciente"),
   // Agenda
   "appointment.created": say("Reservó una cita"),
   "appointment.moved": say("Movió una cita"),

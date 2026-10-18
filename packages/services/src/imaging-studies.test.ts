@@ -4,12 +4,15 @@ import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { getPatientDocument, listPatientDocuments } from "./clinical.js"
 import {
+  addImagingMeasurement,
   cancelImagingUpload,
   getImagingStudyFiles,
+  listImagingMeasurements,
   listImagingUploads,
   looksLikeDicom,
   markImagingFilesUploaded,
   pendingImagingFiles,
+  retireImagingMeasurement,
   startImagingStudyUpload,
 } from "./imaging-studies.js"
 import { createPatient } from "./patients.js"
@@ -199,4 +202,52 @@ it("reconoce la marca DICM de PS3.10", () => {
   expect(looksLikeDicom(head)).toBe(false)
   head.set([0x44, 0x49, 0x43, 0x4d], 128)
   expect(looksLikeDicom(head)).toBe(true)
+})
+
+it("guarda medidas con quién y cuándo, y quitarlas las retira sin borrarlas", async () => {
+  const patient = await seed()
+  const { document } = await withOrgContext(appDb, "org_a", (tx) =>
+    startImagingStudyUpload(tx, "org_a", ACTOR, patient.id, { ...input(1), studyInstanceUid: "2.25.34009" }),
+  )
+  const measure = {
+    kind: "distancia" as const,
+    view: "transversal" as const,
+    points: [
+      [10, 20, 30],
+      [10, 20, 41.8],
+    ] as [number, number, number][],
+    value: 11.8,
+    toothNumber: 36,
+  }
+  // A medio subir no se mide.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) => addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, measure)),
+  ).rejects.toMatchObject({ code: "IMAGING_UPLOAD_PENDING" })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    markImagingFilesUploaded(tx, "org_a", ACTOR, patient.id, document.id, [0]),
+  )
+  const saved = await withOrgContext(appDb, "org_a", (tx) =>
+    addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, measure),
+  )
+  expect(saved).toMatchObject({ kind: "distancia", value: 11.8, toothNumber: 36, createdByName: "Tests" })
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      addImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, { ...measure, kind: "angulo", value: 200 }),
+    ),
+  ).rejects.toMatchObject({ code: "VALIDATION" })
+  expect(
+    await withOrgContext(appDb, "org_a", (tx) => listImagingMeasurements(tx, "org_a", patient.id, document.id)),
+  ).toHaveLength(1)
+  await withOrgContext(appDb, "org_a", (tx) =>
+    retireImagingMeasurement(tx, "org_a", ACTOR, patient.id, document.id, saved.id),
+  )
+  expect(
+    await withOrgContext(appDb, "org_a", (tx) => listImagingMeasurements(tx, "org_a", patient.id, document.id)),
+  ).toEqual([])
+  // Lo retirado no vuelve.
+  await expect(
+    withOrgContext(appDb, "org_a", (tx) =>
+      tx.execute(sql`update imaging_measurement set retired_at = null, retired_by = null where id = ${saved.id}`),
+    ),
+  ).rejects.toThrow()
 })

@@ -1,14 +1,18 @@
 import { sniffDocumentMime } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import {
+  addImagingMeasurement,
   cancelImagingUpload,
   getImagingStudyFiles,
   getPatientDocument,
   IMAGING_STUDY_MAX_FILES,
+  listImagingMeasurements,
   listImagingUploads,
   looksLikeDicom,
   markImagingFilesUploaded,
+  MEASUREMENT_VIEWS,
   pendingImagingFiles,
+  retireImagingMeasurement,
   setImagingThumbnail,
   startImagingStudyUpload,
 } from "@odentia/services"
@@ -54,6 +58,15 @@ const startInput = z
       )
       .min(1)
       .max(IMAGING_STUDY_MAX_FILES),
+  })
+  .strict()
+const measurementInput = z
+  .object({
+    kind: z.enum(["distancia", "angulo"]),
+    view: z.enum(MEASUREMENT_VIEWS),
+    points: z.array(z.tuple([z.number(), z.number(), z.number()])).min(2).max(3),
+    value: z.number().min(0),
+    toothNumber: z.number().int().min(11).max(48).nullish(),
   })
   .strict()
 const indexesInput = z.object({ indexes: z.array(z.number().int().min(0)).min(1).max(BATCH) }).strict()
@@ -260,6 +273,42 @@ export function createImagingStudiesRoute(deps: CrmDeps) {
           })),
         ),
       }
+    })
+  })
+
+  // Medidas guardadas (decisión 3): leerlas es clínico; guardarlas y quitarlas, escribir en la ficha.
+  app.get("/:id/imaging/studies/:documentId/measurements", async (c) => {
+    const { orgId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listImagingMeasurements(tx, orgId, c.req.param("id"), c.req.param("documentId")),
+      ),
+    )
+  })
+  app.post("/:id/imaging/studies/:documentId/measurements", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const parsed = measurementInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        addImagingMeasurement(tx, orgId, userId, c.req.param("id"), c.req.param("documentId"), parsed.data),
+      ),
+    )
+  })
+  app.post("/:id/imaging/studies/:documentId/measurements/:measurementId/retire", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, async () => {
+      await withOrgContext(deps.db, orgId, (tx) =>
+        retireImagingMeasurement(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("documentId"),
+          c.req.param("measurementId"),
+        ),
+      )
+      return { ok: true }
     })
   })
 

@@ -1,5 +1,6 @@
 import type { Db } from "@odentia/db"
-import { imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
+import { imagingMeasurement, imagingStudy, imagingStudyFile, patientDocument } from "@odentia/db/schema/clinical"
+import { user } from "@odentia/db/schema/auth"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 import {
@@ -495,4 +496,147 @@ export async function getImagingStudyFiles(
  */
 export function looksLikeDicom(head: Uint8Array): boolean {
   return head.length >= 132 && head[128] === 0x44 && head[129] === 0x49 && head[130] === 0x43 && head[131] === 0x4d
+}
+
+export const MEASUREMENT_VIEWS = ["panoramica", "transversal", "axial", "coronal", "sagital"] as const
+export type MeasurementView = (typeof MEASUREMENT_VIEWS)[number]
+
+export interface ImagingMeasurementInput {
+  kind: "distancia" | "angulo"
+  view: MeasurementView
+  /** Puntos [x, y, z] en mm dentro del volumen: dos en una distancia, tres en un ángulo. */
+  points: [number, number, number][]
+  value: number
+  toothNumber?: number | null
+}
+
+export interface ImagingMeasurementRow {
+  id: string
+  kind: string
+  view: string
+  points: [number, number, number][]
+  value: number
+  toothNumber: number | null
+  createdAt: Date
+  createdBy: string | null
+  createdByName: string | null
+}
+
+/** Medidas activas de una tomografía, con quién y cuándo (decisión 3). */
+export async function listImagingMeasurements(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  documentId: string,
+): Promise<ImagingMeasurementRow[]> {
+  await requireStudy(tx, orgId, patientId, documentId)
+  const rows = await tx
+    .select({
+      id: imagingMeasurement.id,
+      kind: imagingMeasurement.kind,
+      view: imagingMeasurement.view,
+      points: imagingMeasurement.points,
+      value: imagingMeasurement.value,
+      toothNumber: imagingMeasurement.toothNumber,
+      createdAt: imagingMeasurement.createdAt,
+      createdBy: imagingMeasurement.createdBy,
+      createdByName: user.name,
+    })
+    .from(imagingMeasurement)
+    .leftJoin(user, eq(user.id, imagingMeasurement.createdBy))
+    .where(
+      and(
+        eq(imagingMeasurement.organizationId, orgId),
+        eq(imagingMeasurement.documentId, documentId),
+        isNull(imagingMeasurement.retiredAt),
+      ),
+    )
+    .orderBy(asc(imagingMeasurement.createdAt))
+  return rows
+}
+
+/** Guarda una medida sin tocar el archivo. Solo en una tomografía completa y vigente. */
+export async function addImagingMeasurement(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  input: ImagingMeasurementInput,
+): Promise<ImagingMeasurementRow> {
+  const { study, retiredAt } = await requireStudy(tx, orgId, patientId, documentId)
+  if (retiredAt) throw new ServiceError("DOCUMENT_RETIRED", 409, "La tomografía está retirada")
+  if (!study.completedAt)
+    throw new ServiceError("IMAGING_UPLOAD_PENDING", 409, "La tomografía aún no termina de subirse")
+  if (input.kind !== "distancia" && input.kind !== "angulo") throw validation("Tipo de medida no reconocido")
+  if (!(MEASUREMENT_VIEWS as readonly string[]).includes(input.view)) throw validation("Vista no reconocida")
+  const needed = input.kind === "angulo" ? 3 : 2
+  if (
+    !Array.isArray(input.points) ||
+    input.points.length !== needed ||
+    !input.points.every((p) => Array.isArray(p) && p.length === 3 && p.every((v) => Number.isFinite(v) && Math.abs(v) < 2000))
+  )
+    throw validation(`La medida necesita ${needed} puntos`)
+  const max = input.kind === "angulo" ? 180 : 500
+  if (!Number.isFinite(input.value) || input.value < 0 || input.value > max) throw validation("El valor de la medida no es válido")
+  const tooth = input.toothNumber ?? null
+  if (tooth !== null && !(Number.isInteger(tooth) && tooth >= 11 && tooth <= 48))
+    throw validation("La pieza no es válida")
+  const [row] = await tx
+    .insert(imagingMeasurement)
+    .values({
+      organizationId: orgId,
+      patientId,
+      documentId,
+      kind: input.kind,
+      view: input.view,
+      points: input.points.map((p) => [p[0], p[1], p[2]] as [number, number, number]),
+      value: input.value,
+      toothNumber: tooth,
+      createdBy: actorUserId,
+    })
+    .returning()
+  if (!row) throw new Error("No se pudo guardar la medida")
+  await audit(tx, orgId, actorUserId, "imaging_study.measured", documentId, {
+    patientId,
+    kind: input.kind,
+    view: input.view,
+  })
+  const [named] = await tx.select({ name: user.name }).from(user).where(eq(user.id, actorUserId)).limit(1)
+  return {
+    id: row.id,
+    kind: row.kind,
+    view: row.view,
+    points: row.points,
+    value: row.value,
+    toothNumber: row.toothNumber,
+    createdAt: row.createdAt,
+    createdBy: row.createdBy,
+    createdByName: named?.name ?? null,
+  }
+}
+
+/** Quita una medida: queda retirada con quién y cuándo; no se borra. */
+export async function retireImagingMeasurement(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  documentId: string,
+  measurementId: string,
+): Promise<void> {
+  await requireStudy(tx, orgId, patientId, documentId)
+  const [row] = await tx
+    .update(imagingMeasurement)
+    .set({ retiredAt: new Date(), retiredBy: actorUserId })
+    .where(
+      and(
+        eq(imagingMeasurement.id, measurementId),
+        eq(imagingMeasurement.organizationId, orgId),
+        eq(imagingMeasurement.documentId, documentId),
+        isNull(imagingMeasurement.retiredAt),
+      ),
+    )
+    .returning({ id: imagingMeasurement.id })
+  if (!row) throw notFound("Medida")
 }

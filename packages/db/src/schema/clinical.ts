@@ -1629,6 +1629,57 @@ export const imagingStudyFile = pgTable(
 )
 
 /**
+ * Medida guardada en una tomografía (decisión 3 del lienzo, ADR 0055): quién y
+ * cuándo, sin cambiar el archivo. Puntos en mm dentro del volumen; quitarla la
+ * retira con su traza.
+ */
+export const imagingMeasurement = pgTable(
+  "imaging_measurement",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    patientId: uuid("patient_id")
+      .notNull()
+      .references(() => patient.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    kind: text("kind").notNull(),
+    /** Vista donde se marcó: panorámica, transversal, axial, coronal o sagital. */
+    view: text("view").notNull(),
+    /** Puntos [[x, y, z], …] en mm dentro del volumen. */
+    points: jsonb("points").$type<[number, number, number][]>().notNull(),
+    /** mm en una distancia, grados en un ángulo. */
+    value: real("value").notNull(),
+    /** Pieza (FDI) a la altura de la medida, si se sabe. */
+    toothNumber: smallint("tooth_number"),
+    createdBy: text("created_by").references(() => user.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    retiredBy: text("retired_by").references(() => user.id),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.organizationId, table.documentId],
+      foreignColumns: [imagingStudy.organizationId, imagingStudy.documentId],
+      name: "imaging_measurement_study_fk",
+    }).onDelete("cascade"),
+    index("imaging_measurement_org_document_idx").on(table.organizationId, table.documentId),
+    check("imaging_measurement_kind_check", sql`${table.kind} IN ('distancia','angulo')`),
+    check(
+      "imaging_measurement_view_check",
+      sql`${table.view} IN ('panoramica','transversal','axial','coronal','sagital')`,
+    ),
+    check(
+      "imaging_measurement_value_check",
+      sql`${table.value} >= 0 AND (${table.kind} <> 'angulo' OR ${table.value} <= 180)`,
+    ),
+    check(
+      "imaging_measurement_retired_check",
+      sql`(${table.retiredAt} IS NULL) = (${table.retiredBy} IS NULL)`,
+    ),
+  ],
+)
+
+/**
  * Consentimiento para el tratamiento de datos personales (la ley de cada país; en Perú, la Ley 29733): por
  * versión del aviso, con sus finalidades, quién lo otorga y su revocación.
  */

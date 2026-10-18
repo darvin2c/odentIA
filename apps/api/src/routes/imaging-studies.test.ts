@@ -227,6 +227,16 @@ it("quien lee la ficha la abre y la descarga como ZIP con los archivos tal como 
   expect(Object.keys(entries).sort()).toEqual(["DICOM/00001.dcm", "DICOM/00002.dcm", "DICOM/00003.dcm"])
   expect(entries["DICOM/00002.dcm"]).toEqual(dicomBytes(500))
 
+  // Medidas: la odontóloga las guarda; recepción ni las lee ni las escribe.
+  const measure = { kind: "distancia", view: "transversal", points: [[1, 2, 3], [1, 2, 14.8]], value: 11.8, toothNumber: 36 }
+  const savedMeasure = await post(dentist, `/patients/${id}/imaging/studies/${data.document.id}/measurements`, measure)
+  expect(savedMeasure.status).toBe(201)
+  const reception = buildApp("reception")
+  expect((await reception.request(`/patients/${id}/imaging/studies/${data.document.id}/measurements`)).status).toBe(403)
+  expect(
+    (await post(reception, `/patients/${id}/imaging/studies/${data.document.id}/measurements`, measure)).status,
+  ).toBe(403)
+
   // La URL de un solo archivo no sirve para la tomografía: no hay uno solo.
   const single = await dentist.request(`/patients/${id}/documents/${data.document.id}/url`)
   expect(single.status).toBe(400)

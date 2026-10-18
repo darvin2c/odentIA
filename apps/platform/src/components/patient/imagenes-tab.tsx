@@ -572,6 +572,7 @@ export function ImagenesTab({
           patientId={patientId}
           doc={scanDoc}
           open
+          canWrite={canWrite}
           onClose={() => setScanId(null)}
           onDetails={() => {
             setScanId(null)

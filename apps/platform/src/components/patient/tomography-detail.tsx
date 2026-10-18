@@ -93,7 +93,7 @@ export function TomographyDetail({
           en Weasis.
         </p>
         {viewing && (
-          <TomographyViewer patientId={patientId} doc={doc} open onClose={() => setViewing(false)} />
+          <TomographyViewer patientId={patientId} doc={doc} open canWrite={canUpload} onClose={() => setViewing(false)} />
         )}
       </div>
     )
