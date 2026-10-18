@@ -1774,11 +1774,13 @@ export function EncounterEditor({
             </div>
             <div className="flex flex-wrap gap-2">
               {availableSections.map((section) => (
+                // «Agregar Evolución, pronóstico e indicaciones» no cabe en 320 px: corta línea.
                 <Button
                   key={section.key}
                   type="button"
                   size="sm"
                   variant="outline"
+                  className="h-auto min-h-11 max-w-full shrink py-1 text-left whitespace-normal sm:min-h-8"
                   title={section.description}
                   onClick={() => addSection(section.key)}
                 >
