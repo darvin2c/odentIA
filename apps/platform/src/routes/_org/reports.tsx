@@ -14,7 +14,7 @@ import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
 import { AgendaTab } from "../../components/reports/agenda-tab"
-import { MoneyTab } from "../../components/reports/money-tab"
+import { FinanceTab } from "../../components/reports/finance-tab"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
 import { ReportPeriodPicker } from "../../components/reports/report-period"
 import { SalesTab } from "../../components/reports/sales-tab"
@@ -66,6 +66,8 @@ interface ReportsSearch {
   branch?: string
   /** Lista abierta al lado. */
   lista?: ReportListKey
+  /** Una vista dentro de la pestaña: `promociones` en Finanzas (tablero 2b). */
+  vista?: "promociones"
 }
 
 function tabOf(value: unknown): ReportTab | undefined {
@@ -88,6 +90,7 @@ export const Route = createFileRoute("/_org/reports")({
       ...(isReportPeriod(search.period) && search.period !== DEFAULT_PERIOD ? { period: search.period } : {}),
       ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
       ...(isReportList(search.lista) ? { lista: search.lista } : {}),
+      ...(search.vista === "promociones" ? { vista: "promociones" as const } : {}),
     }
   },
   component: ReportsPage,
@@ -187,7 +190,7 @@ function ReportsPage() {
                   <Link
                     key={item}
                     to="/reports"
-                    search={(prev) => ({ ...prev, tab: item === "resumen" ? undefined : item, lista: undefined })}
+                    search={(prev) => ({ ...prev, tab: item === "resumen" ? undefined : item, lista: undefined, vista: undefined })}
                     aria-current={item === tab ? "page" : undefined}
                     className={cn(
                       "-mb-px inline-flex min-h-11 shrink-0 items-center border-b-[2.5px] px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -225,7 +228,14 @@ function ReportsPage() {
                   }
                 />
               ) : tab === "finanzas" ? (
-                <MoneyTab query={query} onShowCurrentMonth={showCurrentMonth} advice={adviceNote("finanzas")} />
+                <FinanceTab
+                  query={query}
+                  view={search.vista}
+                  onView={(vista) => setSearch({ vista })}
+                  onOpenList={openList}
+                  onShowCurrentMonth={showCurrentMonth}
+                  advice={adviceNote("finanzas")}
+                />
               ) : tab === "agenda" ? (
                 <AgendaTab query={query} onOpenList={openList} advice={adviceNote("agenda")} />
               ) : tab === "pacientes" ? (

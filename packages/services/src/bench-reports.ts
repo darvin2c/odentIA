@@ -7,7 +7,7 @@
  *   pnpm --filter @odentia/services bench:reports
  */
 import { createAppDb, type Db, withOrgContext } from "@odentia/db"
-import { getReportAgenda, getReportList, getReportMoney, getReportSales, getReportService } from "./reports.js"
+import { getReportList, getReportMoney, getReportSales, getReportService } from "./reports.js"
 import { getReportProfessionals, getReportSummary } from "./report-summary.js"
 import { getAgendaReport } from "./report-agenda.js"
 import { getReportCommissions, getReportFinance, getReportOutlook, getReportPromotions } from "./report-finance.js"
@@ -23,17 +23,16 @@ const READS: Record<string, Read> = {
   summary: getReportSummary,
   professionals: getReportProfessionals,
   money: getReportMoney,
-  agenda: getReportAgenda,
+  agenda: getAgendaReport,
   sales: getReportSales,
   service: getReportService,
   "list:new_patients": (tx, org, query) => getReportList(tx, org, { ...query, list: "new_patients" }),
-  "agenda:v2": getAgendaReport,
   finance: getReportFinance,
   commissions: getReportCommissions,
   outlook: getReportOutlook,
   promotions: getReportPromotions,
 }
-// `BENCH_ONLY=agenda:v2,money` mide solo esas consultas.
+// `BENCH_ONLY=agenda,money` mide solo esas consultas.
 const only = process.env.BENCH_ONLY?.split(",").map((name) => name.trim()).filter(Boolean)
 
 const rows: Array<{ consulta: string; periodo: string; ms: number }> = []

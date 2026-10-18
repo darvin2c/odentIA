@@ -380,11 +380,11 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       returning: 0,
     },
     {
-      name: "Corona desde S/ 900",
+      name: "Corona de porcelana con precio desde",
       startsAt: new Date(startOf(monthAgo).getTime() + 5 * DAY_MS),
       endsAt: null,
       service: svc.CORONA,
-      priceCents: 900_00,
+      priceCents: Math.round((svc.CORONA.priceCents * 0.7) / 100_00) * 100_00,
       mode: "from" as const,
       fresh: 6,
       returning: 3,
@@ -438,7 +438,11 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       const visit = new Date(person.startsAt)
       const presentedAt = new Date(visit.getTime() - 2 * 3_600_000)
       const accepted = promotion.mode !== "from" || random() < 0.7
-      const priceCents = promotion.mode === "from" ? promotion.priceCents + Math.round(random() * 4) * 100_00 : promotion.priceCents
+      // En una «desde», el precio final queda entre el «desde» y la tarifa.
+      const priceCents =
+        promotion.mode === "from"
+          ? promotion.priceCents + Math.round(random() * Math.max(0, (promotion.service.priceCents - promotion.priceCents) / 100_00)) * 100_00
+          : promotion.priceCents
       const planId = randomUUID()
       const planItemId = randomUUID()
       const budgetId = randomUUID()
@@ -505,5 +509,12 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       budgets += 1
     }
   }
+  // Lo aceptado hace más de dos meses ya se hizo: la historia lo atendió en sus citas. Sin
+  // esto, «Lo que viene» contaría como pendiente todo lo aceptado en dos años.
+  await tx.execute(sql`
+    update treatment_plan_item pi set status = 'realizado'
+    from treatment_budget_item i join treatment_budget b on b.organization_id = i.organization_id and b.id = i.budget_id
+    where pi.organization_id = ${orgId} and pi.id = i.plan_item_id and pi.status = 'pendiente'
+      and i.decision = 'aceptado' and b.status in ('aceptado','parcial') and b.decided_at < now() - interval '60 days'`)
   return { settlements, orders, budgets }
 }

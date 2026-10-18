@@ -17,5 +17,8 @@ export {
   type SharePart,
   type SeriesTone,
   Sparkline,
+  WaterfallChart,
+  type WaterfallChartProps,
+  type WaterfallStep,
 } from "./data-charts.js";
 export { niceTicks, scaleLevel } from "./chart-math.js";

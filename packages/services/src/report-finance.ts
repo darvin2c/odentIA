@@ -43,7 +43,7 @@ export interface CommissionTotals {
   /** Lo cobrado de lo que atendió: la base de su comisión. */
   baseCents: number
   commissionCents: number
-  /** La parte ya pagada (congelada en un pago registrado). */
+  /** Lo ya pagado (congelado en un pago registrado), también lo de un cobro que se anuló después. */
   paidCents: number
   /** La parte que aún no entra en ningún pago. */
   freshCents: number
@@ -69,19 +69,24 @@ function commissionLinesSql(orgId: string, hull: Span, currency: string, branchI
         and a.voided_at is null and p.voided_at is null and c.voided_at is null and ep.voided_at is null
         and e.status = 'finalizada' and e.voided_at is null and c.currency = ${currency} ${branch}
     ), frozen as materialized (
+      -- Lo ya pagado, con lo que se pagó. Si el cobro se anuló después, se pagó igual
+      -- (cuenta en lo pagado) pero ya no es comisión del mes: se descuenta del próximo pago.
       select l.application_id, l.base_cents::bigint as base, l.commission_cents::bigint as commission, l.occurred_at as at,
-        s.professional_user_id as user_id
+        s.professional_user_id as user_id,
+        (a.voided_at is null and p.voided_at is null and c.voided_at is null) as live
       from commission_settlement_line l
       join commission_settlement s on s.organization_id = l.organization_id and s.id = l.settlement_id and s.voided_at is null
-      join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id and a.voided_at is null
-      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id and p.voided_at is null
-      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id and c.voided_at is null
+      join patient_payment_application a on a.organization_id = l.organization_id and a.id = l.application_id
+      join patient_payment p on p.organization_id = a.organization_id and p.id = a.payment_id
+      join patient_charge c on c.organization_id = a.organization_id and c.id = a.charge_id
       where l.organization_id = ${orgId} and l.kind = 'cobro' and l.voided_at is null and s.currency = ${currency}
         and l.occurred_at >= ${at(hull.start)} and l.occurred_at < ${at(hull.end)} ${branch}
     ), commission_line as materialized (
-      select f.user_id, f.at, f.base, f.commission, true as settled from frozen f
+      select f.user_id, f.at, case when f.live then f.base else 0 end as base, case when f.live then f.commission else 0 end as commission,
+        f.commission as paid, 0::bigint as fresh
+      from frozen f
       union all
-      select la.user_id, la.at, la.cents, (la.cents * coalesce(r.rate_bps, 0)) / 10000, false
+      select la.user_id, la.at, la.cents, (la.cents * coalesce(r.rate_bps, 0)) / 10000, 0, (la.cents * coalesce(r.rate_bps, 0)) / 10000
       from live_app la
       left join commission_rule r on r.organization_id = ${orgId} and r.professional_user_id = la.user_id
       where not exists (select 1 from frozen f where f.application_id = la.id)
@@ -102,8 +107,7 @@ export async function commissionsMany(
   const rows = await tx.execute<{ idx: number; userId: string; base: string; commission: string; paid: string; fresh: string }>(sql`
     with ${commissionLinesSql(orgId, hull, options.currency, options.branchId)}
     select s.idx, ml.user_id as "userId", sum(ml.base)::text as base, sum(ml.commission)::text as commission,
-      coalesce(sum(ml.commission) filter (where ml.settled), 0)::text as paid,
-      coalesce(sum(ml.commission) filter (where not ml.settled), 0)::text as fresh
+      sum(ml.paid)::text as paid, sum(ml.fresh)::text as fresh
     from member_line ml join ${spansSql(spans, "s")} on ml.at >= s.start_at and ml.at < s.end_at
     group by s.idx, ml.user_id`)
   return bySpan(
@@ -525,8 +529,8 @@ export async function getReportFinance(tx: Db, orgId: string, query: ReportQuery
   return {
     ...reportHead(scope),
     months: months.map(serializeBucket),
-    current: tramo(0),
-    previous: tramo(1),
+    /** El periodo y el anterior (`previous` de la cabecera es su tramo). */
+    totals: { current: tramo(0), previous: tramo(1) },
     /** Los 12 meses de cada línea pequeña. */
     trend: months.map((_, index) => tramo(index + 2)),
     /** Otras monedas del periodo, si las hubo: nunca se suman. */
@@ -776,4 +780,86 @@ export async function getReportPromotions(tx: Db, orgId: string, query: ReportQu
     /** Presupuestos y cobros son de la persona: no se filtra por sede. */
     wholeClinic: scope.branch ? (["promotions"] as const) : ([] as const),
   }
+}
+
+// --- Las listas detrás de las cifras ----------------------------------------------------
+
+export const FINANCE_LISTS = ["debts_age_0_30", "debts_age_31_60", "debts_age_61_90", "debts_age_90_plus", "upcoming_unbooked"] as const
+export type FinanceListKey = (typeof FINANCE_LISTS)[number]
+
+export function isFinanceList(list: string): list is FinanceListKey {
+  return (FINANCE_LISTS as readonly string[]).includes(list)
+}
+
+/** Cuántos días antes del cierre se anotó el concepto más antiguo, por tramo: `[desde, hasta)` en días. */
+const AGE_DAYS: Record<Exclude<FinanceListKey, "upcoming_unbooked">, [number, number | null]> = {
+  debts_age_0_30: [0, 31],
+  debts_age_31_60: [31, 61],
+  debts_age_61_90: [61, 91],
+  debts_age_90_plus: [91, null],
+}
+
+type FinanceListRow = {
+  id: string
+  at: string | Date
+  patientId: string
+  personName: string
+  title: string | null
+  professionalName: string | null
+  branchName: string | null
+  hasNextAppointment: boolean
+  cents: string | null
+  currency: string | null
+  total: number
+}
+
+/**
+ * Las personas detrás de una cifra de Finanzas: quién debe en cada tramo de
+ * antigüedad al cerrar el periodo (la misma consulta de la cifra) y quién tiene
+ * algo aceptado por hacer sin cita por venir (a hoy).
+ */
+export async function financeListRows(tx: Db, orgId: string, scope: ReportScope, list: FinanceListKey, limit: number, now: Date): Promise<FinanceListRow[]> {
+  const nextAppointment = (patient: SQL): SQL => sql`exists (
+    select 1 from appointment n where n.organization_id = ${orgId} and n.patient_id = ${patient}
+      and n.starts_at > ${at(now)} and n.status in ('programada','confirmada'))`
+  if (list === "upcoming_unbooked") {
+    const budget = { id: sql`b.id`, organizationId: sql`b.organization_id` }
+    const units = budgetLineUnitsSql({ billingMode: sql`i.billing_mode`, sessionsPlanned: sql`i.sessions_planned` })
+    return [
+      ...(await tx.execute<FinanceListRow>(sql`
+        with pending as (
+          select b.patient_id, max(coalesce(b.decided_at, b.presented_at)) as at, sum(i.price_cents::bigint * ${units}) as cents,
+            string_agg(distinct i.title, ' · ') as title
+          from treatment_budget b
+          join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
+            and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
+          left join treatment_plan_item pi on pi.organization_id = i.organization_id and pi.id = i.plan_item_id
+          where b.organization_id = ${orgId} and b.status in ('aceptado','parcial') and b.currency = ${scope.currency}
+            and (pi.id is null or pi.status not in ('realizado','cancelado','reemplazado'))
+            and not ${nextAppointment(sql`b.patient_id`)}
+          group by b.patient_id
+        )
+        select x.patient_id::text as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,
+          null::text as "professionalName", null::text as "branchName", false as "hasNextAppointment",
+          x.cents::text as cents, ${scope.currency}::text as currency, count(*) over()::int as total
+        from pending x
+        join patient p on p.id = x.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+        order by x.cents desc, x.patient_id limit ${limit}`)),
+    ]
+  }
+  const [from, to] = AGE_DAYS[list]
+  const end = scope.window.end
+  return [
+    ...(await tx.execute<FinanceListRow>(sql`
+      ${overdueDebtSql(orgId, [end], 0, scope.branch?.id)}
+      select o.patient_id::text || ':' || o.currency as id, o.since as at, o.patient_id as "patientId", pp.display_name as "personName",
+        null::text as title, null::text as "professionalName", null::text as "branchName",
+        ${nextAppointment(sql`o.patient_id`)} as "hasNextAppointment",
+        o.owed::text as cents, o.currency::text as currency, count(*) over()::int as total
+      from overdue o
+      join patient p on p.id = o.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+      where o.currency = ${scope.currency} and o.since <= ${at(end)} - make_interval(days => ${from})
+        ${to === null ? sql`` : sql`and o.since > ${at(end)} - make_interval(days => ${to})`}
+      order by o.since, o.patient_id limit ${limit}`)),
+  ]
 }

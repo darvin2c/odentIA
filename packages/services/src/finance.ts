@@ -990,6 +990,24 @@ export async function getMonthExpenses(
   const live = rows.filter((row) => !row.voidedAt && row.currency === unit)
   const byCategory = new Map<string, number>()
   for (const row of live) byCategory.set(row.category, addCents(byCategory.get(row.category) ?? 0, row.amountCents))
+  // El pago de una compra lleva su orden y el de una comisión lo dice: la lista los enlaza (ADR 0061).
+  const orderIds = [...new Set(rows.map((row) => row.purchaseOrderId).filter((id): id is string => id !== null))]
+  const orders = orderIds.length
+    ? await tx
+        .select({ id: purchaseOrder.id, orderNumber: purchaseOrder.orderNumber })
+        .from(purchaseOrder)
+        .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
+    : []
+  const commissionExpenses = rows.length
+    ? new Set(
+        (
+          await tx
+            .select({ expenseId: commissionSettlement.expenseId })
+            .from(commissionSettlement)
+            .where(and(eq(commissionSettlement.organizationId, orgId), inArray(commissionSettlement.expenseId, rows.map((row) => row.id))))
+        ).map((row) => row.expenseId),
+      )
+    : new Set<string | null>()
   return {
     year: query.year,
     month: query.month,
@@ -999,7 +1017,12 @@ export async function getMonthExpenses(
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
-    expenses: rows.map((row) => ({ ...row, fromCash: row.shiftId !== null })),
+    expenses: rows.map((row) => ({
+      ...row,
+      fromCash: row.shiftId !== null,
+      purchaseOrderNumber: orders.find((order) => order.id === row.purchaseOrderId)?.orderNumber ?? null,
+      commission: commissionExpenses.has(row.id),
+    })),
   }
 }
 
