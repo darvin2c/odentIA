@@ -1,58 +1,60 @@
 /**
  * Reportes: cómo va la clínica, para quien la dirige. Un periodo y una sede
- * valen para toda la pantalla; arriba, una cifra por pregunta; abajo, el
- * detalle de la que se elige. Todo viaja en la dirección (`?tab`, `?period`,
- * `?branch`, `?lista`): se puede compartir el enlace y volver a él.
+ * valen para toda la pantalla; el Resumen primero y una pestaña por pregunta
+ * (Finanzas, Pacientes, Agenda, Agente; decisión 1). Todo viaja en la
+ * dirección (`?tab`, `?period`, `?branch`, `?lista`): se puede compartir el
+ * enlace y volver a él.
  */
-import { formatMoney } from "@odentia/clinical"
-import { cn, Skeleton } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { cn } from "@odentia/ui"
+import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Bot, Settings } from "lucide-react"
+import { Settings } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { AdminRecommendationDrawer } from "../../components/agent/admin-recommendation"
 import { adviceFor, AdviceNote, useReportAdvice } from "../../components/reports/advice-note"
 import { AgendaTab } from "../../components/reports/agenda-tab"
 import { MoneyTab } from "../../components/reports/money-tab"
 import { ReportListDrawer } from "../../components/reports/report-list-drawer"
-import { type Better, ChangeLine, unlessEmpty } from "../../components/reports/report-parts"
 import { ReportPeriodPicker } from "../../components/reports/report-period"
 import { SalesTab } from "../../components/reports/sales-tab"
 import { ServiceTab } from "../../components/reports/service-tab"
+import { AdminWatch, SummaryTab } from "../../components/reports/summary-tab"
 import { ChoiceSelect } from "../../components/ui/choice-select"
+import { EmptyState } from "@odentia/ui-patterns"
 import { currentMonthIn } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { useBranchesOptions, useOrgFinanceProfile } from "../../lib/finance-collect"
 import { QueryErrorState } from "../../lib/query-error"
 import {
-  absoluteChange,
-  type Comparison,
   comparedWith,
-  durationLabel,
   fetchReport,
   isReportList,
   isReportPeriod,
-  MINUTES,
   periodLabel,
-  previousPhrase,
-  relativeChange,
   reportKey,
-  type ReportListKey,
-  type ReportOverview,
   type ReportAdviceTab,
+  type ReportListKey,
   type ReportQuery,
+  type ReportSummary,
 } from "../../lib/reports"
 
-const TABS = ["dinero", "agenda", "ventas", "atencion"] as const
+const TABS = ["resumen", "finanzas", "pacientes", "agenda", "agente"] as const
 type ReportTab = (typeof TABS)[number]
 
+/** Los nombres de antes siguen abriendo su pestaña: hay enlaces y avisos guardados con ellos. */
+const LEGACY_TABS: Record<string, ReportTab> = { dinero: "finanzas", ventas: "pacientes", atencion: "agente" }
+
 const TAB_COPY: Record<ReportTab, { title: string; question: string }> = {
-  dinero: { title: "Dinero", question: "Cuánto entró, cuánto se gastó y cuánto falta cobrar" },
+  resumen: { title: "Resumen", question: "Cómo va el negocio" },
+  finanzas: { title: "Finanzas", question: "Cuánto entró, cuánto se gastó y cuánto falta cobrar" },
+  pacientes: { title: "Pacientes", question: "El trabajo nuevo que entró y el que se hizo" },
   agenda: { title: "Agenda", question: "Si los pacientes vinieron y quién los atendió" },
-  ventas: { title: "Pacientes y ventas", question: "El trabajo nuevo que entró y el que se hizo" },
-  atencion: { title: "Atención", question: "Cómo respondimos a quien escribió" },
+  agente: { title: "Agente", question: "Cómo respondimos a quien escribió" },
 }
+
+/** Los avisos del Administrador vienen marcados con la pregunta de antes. */
+const ADVICE_TAB: Partial<Record<ReportTab, ReportAdviceTab>> = { finanzas: "dinero", agenda: "agenda", pacientes: "ventas" }
 
 /** Sin periodo en la dirección se mira el mes en curso, comparado con los mismos días del anterior. */
 const DEFAULT_PERIOD = "este_mes"
@@ -66,14 +68,28 @@ interface ReportsSearch {
   lista?: ReportListKey
 }
 
+function tabOf(value: unknown): ReportTab | undefined {
+  if (typeof value !== "string") return undefined
+  const tab = LEGACY_TABS[value] ?? value
+  return (TABS as readonly string[]).includes(tab) && tab !== "resumen" ? (tab as ReportTab) : undefined
+}
+
+/** Hoy en la clínica (`YYYY-MM-DD`): el último día que se puede elegir en un rango. */
+function todayIn(timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+}
+
 export const Route = createFileRoute("/_org/reports")({
   // Un valor mal escrito en el enlace no rompe la pantalla: se usa el de siempre.
-  validateSearch: (search: Record<string, unknown>): ReportsSearch => ({
-    ...((TABS as readonly unknown[]).includes(search.tab) ? { tab: search.tab as ReportTab } : {}),
-    ...(isReportPeriod(search.period) && search.period !== DEFAULT_PERIOD ? { period: search.period } : {}),
-    ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
-    ...(isReportList(search.lista) ? { lista: search.lista } : {}),
-  }),
+  validateSearch: (search: Record<string, unknown>): ReportsSearch => {
+    const tab = tabOf(search.tab)
+    return {
+      ...(tab ? { tab } : {}),
+      ...(isReportPeriod(search.period) && search.period !== DEFAULT_PERIOD ? { period: search.period } : {}),
+      ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
+      ...(isReportList(search.lista) ? { lista: search.lista } : {}),
+    }
+  },
   component: ReportsPage,
 })
 
@@ -85,22 +101,24 @@ function ReportsPage() {
   const branches = useBranchesOptions()
   const region = profile.data?.data ?? null
 
-  const tab = search.tab ?? "dinero"
+  const tab = search.tab ?? "resumen"
   const period = search.period ?? DEFAULT_PERIOD
   const query: ReportQuery = { period, branchId: search.branch }
-  const overview = useQuery({
-    queryKey: reportKey("overview", query),
-    queryFn: () => fetchReport<ReportOverview>("overview", query),
+  // El Resumen trae el periodo resuelto: el botón y la comparación lo dicen igual en todas las pestañas.
+  const head = useQuery({
+    queryKey: reportKey("summary", query),
+    queryFn: () => fetchReport<ReportSummary>("summary", query),
     enabled: allowed && region !== null,
     retry: false,
   })
 
-  // Los avisos del administrador acompañan a su cifra; la recomendación se abre al lado con su lista y su acción.
+  // Los avisos del Administrador acompañan a su cifra; la recomendación se abre al lado con su lista y su acción.
   const advice = useReportAdvice(query, allowed && region !== null)
   const notices = advice.data?.data.notices
   const [recommendation, setRecommendation] = useState<string | null>(null)
-  const adviceNote = (item: ReportAdviceTab): ReactNode => {
-    const found = adviceFor(notices, item)
+  const adviceNote = (item: ReportTab): ReactNode => {
+    const key = ADVICE_TAB[item]
+    const found = key ? adviceFor(notices, key) : null
     return found ? <AdviceNote advice={found} onOpen={setRecommendation} /> : undefined
   }
 
@@ -117,8 +135,8 @@ function ReportsPage() {
     )
   }
 
-  const head = overview.data?.data
-  const locale = head?.locale ?? region?.locale ?? "es"
+  const data = head.data?.data
+  const locale = data?.locale ?? region?.locale ?? "es"
   const branchList = branches.data?.data ?? []
 
   return (
@@ -136,8 +154,9 @@ function ReportsPage() {
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ReportPeriodPicker
               value={period}
-              label={head ? periodLabel(head.period, locale) : "Periodo"}
+              label={data ? periodLabel(data.period, locale) : "Periodo"}
               currentMonth={currentMonthIn(region.timezone)}
+              today={todayIn(region.timezone)}
               locale={locale}
               onChange={(next) => setSearch({ period: next === DEFAULT_PERIOD ? undefined : next, lista: undefined })}
             />
@@ -156,30 +175,61 @@ function ReportsPage() {
                 ))}
               </ChoiceSelect>
             ) : null}
-            {head ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(head, locale)}</span> : null}
+            {data ? <span className="text-sm text-muted-foreground">Comparado con {comparedWith(data, locale)}</span> : null}
           </div>
 
-          {overview.isError ? (
-            <QueryErrorState error={overview.error} onRetry={() => void overview.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
+          {head.isError ? (
+            <QueryErrorState error={head.error} onRetry={() => void head.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
           ) : (
             <>
-              <nav aria-label="Preguntas" className="grid min-w-0 grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+              <nav aria-label="Secciones de Reportes" className="flex min-w-0 gap-1 overflow-x-auto overflow-y-hidden border-b [scrollbar-width:none]">
                 {TABS.map((item) => (
-                  <QuestionTile key={item} tab={item} selected={item === tab} {...tileOf(item, head)} loading={overview.isPending} advised={item !== "atencion" && adviceFor(notices, item) !== null} />
+                  <Link
+                    key={item}
+                    to="/reports"
+                    search={(prev) => ({ ...prev, tab: item === "resumen" ? undefined : item, lista: undefined })}
+                    aria-current={item === tab ? "page" : undefined}
+                    className={cn(
+                      "-mb-px inline-flex min-h-11 shrink-0 items-center border-b-[2.5px] px-3.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      item === tab ? "border-primary font-extrabold text-primary-soft-foreground" : "border-transparent font-semibold text-foreground/80 hover:text-foreground",
+                    )}
+                  >
+                    {TAB_COPY[item].title}
+                  </Link>
                 ))}
               </nav>
 
-              <div>
-                <h2 className="text-lg font-bold tracking-tight">{TAB_COPY[tab].title}</h2>
-                <p className="text-sm text-muted-foreground">{TAB_COPY[tab].question}</p>
-              </div>
+              {tab !== "resumen" ? (
+                <div>
+                  <h2 className="text-lg font-bold tracking-tight">{TAB_COPY[tab].title}</h2>
+                  <p className="text-sm text-muted-foreground">{TAB_COPY[tab].question}</p>
+                </div>
+              ) : null}
 
-              {tab === "dinero" ? (
-                <MoneyTab query={query} onShowCurrentMonth={showCurrentMonth} advice={adviceNote("dinero")} />
+              {tab === "resumen" ? (
+                <SummaryTab
+                  query={query}
+                  onOpenList={openList}
+                  advice={
+                    <AdminWatch enabled={advice.data?.data.enabled}>
+                      {notices && notices.length > 0 ? (
+                        <div className="flex min-w-0 flex-col gap-2.5">
+                          {notices.map((notice) => (
+                            <AdviceNote key={notice.key} advice={notice} onOpen={setRecommendation} />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">{advice.isPending ? "Revisando…" : "Nada que atender en estas cifras."}</p>
+                      )}
+                    </AdminWatch>
+                  }
+                />
+              ) : tab === "finanzas" ? (
+                <MoneyTab query={query} onShowCurrentMonth={showCurrentMonth} advice={adviceNote("finanzas")} />
               ) : tab === "agenda" ? (
                 <AgendaTab query={query} onOpenList={openList} advice={adviceNote("agenda")} />
-              ) : tab === "ventas" ? (
-                <SalesTab query={query} onOpenList={openList} advice={adviceNote("ventas")} />
+              ) : tab === "pacientes" ? (
+                <SalesTab query={query} onOpenList={openList} advice={adviceNote("pacientes")} />
               ) : (
                 <ServiceTab query={query} />
               )}
@@ -204,89 +254,5 @@ function ConfigureClinic() {
       actionLabel={canSettings ? "Ir a Configuración" : undefined}
       onAction={() => void navigate({ to: "/settings" })}
     />
-  )
-}
-
-interface TileContent {
-  caption: string
-  value: ReactNode
-  /** `undefined`: nada que comparar todavía (sin datos o cargando). */
-  change?: Comparison | null
-  better: Better
-}
-
-/** La cifra que resume cada pregunta; su detalle no la repite. */
-function tileOf(tab: ReportTab, head: ReportOverview | undefined): TileContent {
-  if (!head) return { caption: TILE_CAPTION[tab], value: null, better: "none" }
-  const locale = head.locale
-  const phrase = previousPhrase(head, locale)
-  if (tab === "dinero") {
-    // La moneda de la clínica primero; con más de una, la cifra dice de cuál es.
-    const row = head.money.find((item) => item.currency === head.currency) ?? head.money[0]
-    if (!row) return { caption: TILE_CAPTION.dinero, value: "Sin movimientos", better: "up" }
-    return {
-      caption: head.money.length > 1 ? `Queda · ${row.currency}` : TILE_CAPTION.dinero,
-      value: formatMoney(row.quedaCents, row.currency, locale),
-      change: unlessEmpty(row.quedaCents, relativeChange(row.quedaCents, row.previousQuedaCents, phrase, locale)),
-      better: "up",
-    }
-  }
-  if (tab === "agenda")
-    return {
-      caption: TILE_CAPTION.agenda,
-      value: head.agenda.attended,
-      change: unlessEmpty(head.agenda.attended, relativeChange(head.agenda.attended, head.agenda.previousAttended, phrase, locale)),
-      better: "up",
-    }
-  if (tab === "ventas")
-    return {
-      caption: TILE_CAPTION.ventas,
-      value: head.sales.newPatients,
-      change: head.sales.newPatients === 0 && head.sales.previousNewPatients === 0 ? undefined : absoluteChange(head.sales.newPatients, head.sales.previousNewPatients, phrase, locale),
-      better: "up",
-    }
-  const seconds = head.service.avgFirstResponseSeconds
-  const before = head.service.previousAvgFirstResponseSeconds
-  if (seconds === null) return { caption: TILE_CAPTION.atencion, value: "Sin datos", better: "down" }
-  return {
-    caption: TILE_CAPTION.atencion,
-    value: durationLabel(seconds),
-    change: before === null ? null : absoluteChange(Math.round(seconds / 60), Math.round(before / 60), phrase, locale, MINUTES),
-    better: "down",
-  }
-}
-
-const TILE_CAPTION: Record<ReportTab, string> = {
-  dinero: "Queda",
-  agenda: "Citas atendidas",
-  ventas: "Pacientes nuevos",
-  atencion: "Primera respuesta",
-}
-
-function QuestionTile({ tab, selected, caption, value, change, better, loading, advised }: TileContent & { tab: ReportTab; selected: boolean; loading: boolean; advised: boolean }) {
-  return (
-    <Link
-      to="/reports"
-      search={(prev) => ({ ...prev, tab: tab === "dinero" ? undefined : tab, lista: undefined })}
-      aria-current={selected ? "page" : undefined}
-      className={cn(
-        "elevated flex min-h-[104px] min-w-0 flex-col gap-0.5 rounded-xl bg-card px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4 sm:py-3.5",
-        selected ? "border-2 border-primary" : "border-2 border-transparent ring-1 ring-border",
-      )}
-    >
-      <span className={cn("text-sm font-bold", selected ? "text-primary-soft-foreground" : "")}>{TAB_COPY[tab].title}</span>
-      <span className="text-xs text-muted-foreground">{caption}</span>
-      {loading ? (
-        <Skeleton className="mt-1 h-7 w-24" />
-      ) : (
-        <span className="truncate text-xl leading-7 font-bold tracking-tight tabular-nums sm:text-2xl sm:leading-[30px]">{value}</span>
-      )}
-      {!loading && change !== undefined ? <ChangeLine change={change} better={better} /> : null}
-      {advised ? (
-        <span className="mt-0.5 inline-flex items-center gap-1.5 text-[13px] font-bold text-primary-soft-foreground">
-          <Bot aria-hidden className="size-3.5 shrink-0" />1 aviso del administrador
-        </span>
-      ) : null}
-    </Link>
   )
 }

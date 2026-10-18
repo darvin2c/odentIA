@@ -41,7 +41,7 @@ async function twoMonths(db: Db, owner: OwnerFixture) {
     })
   // Mes pasado: tres atendidas, una inasistencia y una cancelación.
   await visit("Ana Paz", inMonth(1, 10), "atendida")
-  await visit("Bruno Díaz", inMonth(1, 11), "atendida", "agente")
+  await visit("Bruno Díaz", inMonth(1, 11), "atendida", "agent")
   await visit("Carla Soto", inMonth(1, 12), "atendida", "enlace")
   await visit("Diego Ruiz", inMonth(1, 13), "no_asistio")
   await visit("Elena Mora", inMonth(1, 14), "cancelada")
@@ -75,28 +75,41 @@ async function twoMonths(db: Db, owner: OwnerFixture) {
 
 for (const width of [1440, 390]) {
   test.describe(`Reportes a ${width}px`, () => {
-    test("una cifra por pregunta, un periodo para toda la pantalla y la lista detrás de una cifra", async ({ owner, fixtureDb }, info) => {
+    test("el Resumen primero, una pestaña por pregunta, un periodo para toda la pantalla y la lista detrás de una cifra", async ({ owner, fixtureDb }, info) => {
       await twoMonths(fixtureDb, owner)
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
       await gotoHydrated(page, tenant(owner.org.slug, "/reports?period=mes_pasado"))
 
-      const questions = page.getByRole("navigation", { name: "Preguntas" })
-      await expect(questions.getByRole("link")).toHaveCount(4)
-      // Cada cifra se compara con el mes anterior, con palabras.
-      await expect(questions.getByRole("link", { name: /^Agenda/ })).toContainText("3")
-      await expect(questions.getByRole("link", { name: /^Agenda/ })).toContainText(/50 % más que en/)
-      await expect(questions.getByRole("link", { name: /^Atención/ })).toContainText(/2 min menos que en/)
+      const tabs = page.getByRole("navigation", { name: "Secciones de Reportes" })
+      await expect(tabs.getByRole("link")).toHaveText(["Resumen", "Finanzas", "Pacientes", "Agenda", "Agente"])
+      await expect(tabs.getByRole("link", { name: "Resumen" })).toHaveAttribute("aria-current", "page")
       await expect(page.getByText(/^Comparado con /)).toBeVisible()
 
-      // Dinero: lo cobrado del mes pasado frente al anterior.
-      await expect(page.getByRole("heading", { name: "Dinero", exact: true })).toBeVisible()
-      await expect(page.getByText(/50 % más que en/).first()).toBeVisible()
+      // Seis cifras, cada una comparada con palabras y con su línea de 12 meses.
+      const figures = page.getByRole("region", { name: "Las seis cifras" })
+      const cobrado = figures.getByRole("region", { name: "Cobrado", exact: true })
+      await expect(cobrado).toContainText("300.00")
+      await expect(cobrado).toContainText(/50 % más que en/)
+      await expect(cobrado.getByRole("img", { name: /^Cobrado en los últimos 12 meses/ })).toBeVisible()
+      // Uno de cinco no vino (20 %); el mes anterior, uno de tres (33 %).
+      const noShow = figures.getByRole("region", { name: "No vinieron" })
+      await expect(noShow).toContainText("20 %")
+      await expect(noShow).toContainText(/13 puntos menos que en/)
+      await expect(noShow).toContainText("1 de 5 citas que ya pasaron")
+      await expect(figures.getByRole("region", { name: "Pacientes nuevos" })).toContainText("2")
+      await expect(page.getByRole("heading", { name: "Cobrado por mes" })).toBeVisible()
+      await observe(page, info, "resumen")
+
+      // Finanzas: lo cobrado del mes pasado frente al anterior.
+      await tabs.getByRole("link", { name: "Finanzas" }).click()
+      await expect(page).toHaveURL(/tab=finanzas/)
+      await expect(page.getByRole("heading", { name: "Finanzas", exact: true })).toBeVisible()
       await expect(page.getByRole("heading", { name: "Cobrado por medio de pago" })).toBeVisible()
-      await observe(page, info, "dinero")
+      await observe(page, info, "finanzas")
 
       // Agenda: los grupos suman el total.
-      await questions.getByRole("link", { name: /^Agenda/ }).click()
+      await tabs.getByRole("link", { name: "Agenda" }).click()
       await expect(page).toHaveURL(/tab=agenda/)
       await expect(page.getByRole("heading", { name: /^De 5 citas de / })).toBeVisible()
       await expect(page.getByRole("heading", { name: "Cómo se reservaron" })).toBeVisible()
@@ -114,20 +127,39 @@ for (const width of [1440, 390]) {
       await page.keyboard.press("Escape")
       await expect(page).not.toHaveURL(/lista=/)
 
-      // Pacientes y ventas, y Atención.
-      await questions.getByRole("link", { name: /^Pacientes y ventas/ }).click()
+      // Pacientes y Agente (por ahora, quién respondió).
+      await tabs.getByRole("link", { name: "Pacientes" }).click()
       await expect(page.getByRole("button", { name: "Ver los 2 pacientes nuevos" })).toBeVisible()
-      await observe(page, info, "ventas")
-      await questions.getByRole("link", { name: /^Atención/ }).click()
+      await observe(page, info, "pacientes")
+      await tabs.getByRole("link", { name: "Agente" }).click()
       await expect(page.getByRole("heading", { name: "Quién respondió primero" })).toBeVisible()
-      await observe(page, info, "atencion")
+      await observe(page, info, "agente")
 
-      // Cambiar el periodo cambia toda la pantalla; con varios meses aparecen las barras y su tabla.
-      await questions.getByRole("link", { name: /^Dinero/ }).click()
+      // «Elegir fechas» abre el calendario de rango de los filtros; cancelar no cambia nada.
+      await tabs.getByRole("link", { name: "Resumen" }).click()
       await page.getByRole("button", { name: /^Periodo: / }).click()
       await observe(page, info, "periodo")
+      await page.getByRole("button", { name: "Elegir fechas…" }).click()
+      await expect(page.getByRole("grid").first()).toBeVisible()
+      await observe(page, info, "periodo-fechas")
+      await page.getByRole("button", { name: "Cancelar" }).click()
+      await expect(page).toHaveURL(/period=mes_pasado/)
+
+      // Un rango se compara con los mismos días justo antes y su gráfico va por día.
+      const day = (date: Date): string => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(date)
+      const range = `${day(inMonth(1, 10))}..${day(inMonth(1, 14))}`
+      await gotoHydrated(page, tenant(owner.org.slug, `/reports?period=${range}`))
+      await expect(page.getByRole("button", { name: /^Periodo: Del 10 al 14 de / })).toBeVisible()
+      await expect(page.getByText(/^Comparado con los mismos días justo antes: del 5 al 9 de /)).toBeVisible()
+      await expect(figures.getByRole("region", { name: "Cobrado", exact: true })).toContainText("300.00")
+      await expect(page.getByRole("heading", { name: "Cobrado por día" })).toBeVisible()
+      await observe(page, info, "rango")
+
+      // Con varios meses, Finanzas trae sus barras y su tabla.
+      await page.getByRole("button", { name: /^Periodo: / }).click()
       await page.getByRole("button", { name: /^Últimos 3 meses/ }).click()
       await expect(page).toHaveURL(/period=ultimos_3_meses/)
+      await tabs.getByRole("link", { name: "Finanzas" }).click()
       await expect(page.getByRole("heading", { name: "Cobrado y gastado por mes" })).toBeVisible()
       await page.getByRole("button", { name: "Ver como tabla" }).click()
       await expect(page.getByRole("columnheader", { name: "Cobrado" })).toBeVisible()
@@ -161,7 +193,6 @@ for (const width of [1440, 390]) {
       await expect(note).toContainText("La inasistencia está en 100 %.")
       // Nombra la línea que sí lo atendería, y dice que está apagada.
       await expect(note).toContainText("«Reprogramar tras una inasistencia» está apagada.")
-      await expect(page.getByRole("navigation", { name: "Preguntas" }).getByRole("link", { name: /^Agenda/ })).toContainText("1 aviso del administrador")
       await observe(page, info, "administrador")
 
       // «Ver qué hacer» abre la recomendación de siempre: cómo se calculó, quiénes son y la acción.
@@ -185,6 +216,9 @@ for (const width of [1440, 390]) {
       const page = owner.page
       await page.setViewportSize({ width, height: 844 })
       await gotoHydrated(page, tenant(owner.org.slug, "/reports?period=mes_pasado"))
+      // Una clínica sin movimiento: el Resumen lo dice en vez de mostrar ceros.
+      await expect(page.getByText("Todavía no hay movimiento que mostrar")).toBeVisible()
+      await gotoHydrated(page, tenant(owner.org.slug, "/reports?tab=finanzas&period=mes_pasado"))
       await expect(page.getByText(/^Sin movimientos en /)).toBeVisible()
       await observe(page, info, "vacio")
       await page.getByRole("button", { name: "Ver este mes" }).click()
@@ -198,7 +232,7 @@ test("reportes es de quien dirige: recepción no entra y el servidor lo rechaza"
   const page = owner.page
   await gotoHydrated(page, tenant(owner.org.slug, "/reports"))
   await expect(page).toHaveURL(tenantPattern(owner.org.slug, "/home"))
-  for (const section of ["overview", "money", "agenda", "sales", "service", "list/no_show"]) {
+  for (const section of ["summary", "professionals", "money", "agenda", "sales", "service", "list/no_show", "list/debts_overdue"]) {
     const response = await api(page, "GET", `/api/reports/${section}?period=este_mes`, owner.org.slug)
     expect(response.status, section).toBe(403)
   }

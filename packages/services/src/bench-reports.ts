@@ -7,7 +7,8 @@
  *   pnpm --filter @odentia/services bench:reports
  */
 import { createAppDb, type Db, withOrgContext } from "@odentia/db"
-import { getReportAgenda, getReportList, getReportMoney, getReportOverview, getReportSales, getReportService } from "./reports.js"
+import { getReportAgenda, getReportList, getReportMoney, getReportSales, getReportService } from "./reports.js"
+import { getReportProfessionals, getReportSummary } from "./report-summary.js"
 
 const ORG = process.env.BENCH_ORG ?? "seed-org-dental-smile"
 const url = process.env.APP_DATABASE_URL
@@ -17,7 +18,8 @@ const db = createAppDb(url)
 const PERIODS = ["este_mes", "mes_pasado", "ultimos_3_meses", "este_ano"]
 type Read = (tx: Db, org: string, query: { period: string }) => Promise<unknown>
 const READS: Record<string, Read> = {
-  overview: getReportOverview,
+  summary: getReportSummary,
+  professionals: getReportProfessionals,
   money: getReportMoney,
   agenda: getReportAgenda,
   sales: getReportSales,

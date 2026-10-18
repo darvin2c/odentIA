@@ -1,5 +1,5 @@
 import { Button, cn, Calendar as DatePicker } from "@odentia/ui"
-import { format, subDays } from "date-fns"
+import { format, subDays, subMonths } from "date-fns"
 import { es } from "date-fns/locale"
 import { common } from "../common.js"
 import { formatTimeZone } from "../locale.js"
@@ -17,6 +17,8 @@ export type CalendarProps =
       mode: "range"
       selected?: CalendarRange
       compact?: boolean
+      /** Último día que se puede elegir (`yyyy-MM-dd`): los posteriores quedan deshabilitados. */
+      max?: string
       onSelect: (value: CalendarRange) => void
     }
 
@@ -45,6 +47,12 @@ function todayInClinicZone(): Date {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     Number(parts.find((item) => item.type === type)?.value)
   return new Date(part("year"), part("month") - 1, part("day"))
+}
+
+/** Con dos meses a la vista, el último elegido (o el tope) va a la derecha: no se abren meses por venir. */
+function rangeMonth(last: Date | undefined, compact?: boolean): Date | undefined {
+  if (!last) return undefined
+  return compact ? last : subMonths(last, 1)
 }
 
 const RANGE_PRESETS = [
@@ -84,6 +92,8 @@ export function Calendar(props: CalendarProps) {
         locale={es}
         numberOfMonths={props.compact ? 1 : 2}
         selected={selected}
+        defaultMonth={rangeMonth(selected.to ?? parseDateOnly(props.max), props.compact)}
+        {...(props.max ? { disabled: { after: parseDateOnly(props.max) as Date } } : {})}
         onSelect={(range) =>
           props.onSelect({ from: toDateOnly(range?.from), to: toDateOnly(range?.to) })
         }

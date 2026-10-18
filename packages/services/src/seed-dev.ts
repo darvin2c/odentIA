@@ -3470,7 +3470,7 @@ console.log("seed-dev ok")
 console.log(await summary(ORG_A, "dental-smile"))
 console.log(await summary(ORG_B, "clinica-norte"))
 console.log(
-  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones`,
+  `historia de Reportes (dental-smile, 24 meses, Miraflores y San Isidro): ${reportsHistory.appointments} citas, ${reportsHistory.patients} pacientes nuevos, ${reportsHistory.conversations} conversaciones, ${reportsHistory.budgets} presupuestos`,
 )
 console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev")
 process.exit(0)

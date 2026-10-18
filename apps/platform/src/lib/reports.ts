@@ -18,12 +18,25 @@ export const REPORT_PRESET_LABELS: Record<ReportPreset, string> = {
   este_ano: "Este año",
 }
 
-/** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano` o `YYYY-MM`; lo demás no es un periodo. */
+/** Un rango de días: `2026-09-10..2026-09-25`, ambos incluidos. */
+const RANGE = /^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/
+
+/** `este_mes`, `mes_pasado`, `ultimos_3_meses`, `este_ano`, `YYYY-MM` o un rango; lo demás no es un periodo. */
 export function isReportPeriod(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    ((REPORT_PRESETS as readonly string[]).includes(value) || /^\d{4}-(0[1-9]|1[0-2])$/.test(value))
+    ((REPORT_PRESETS as readonly string[]).includes(value) || /^\d{4}-(0[1-9]|1[0-2])$/.test(value) || RANGE.test(value))
   )
+}
+
+/** Los días de un periodo de rango; `null` si es de meses. */
+export function rangeOfPeriod(value: string): { from: string; to: string } | null {
+  const match = RANGE.exec(value)
+  return match ? { from: match[1] as string, to: match[2] as string } : null
+}
+
+export function rangePeriod(from: string, to: string): string {
+  return `${from}..${to}`
 }
 
 export function monthKey(value: YearMonth): string {
@@ -33,15 +46,20 @@ export function monthKey(value: YearMonth): string {
 export interface ReportSpan {
   from: YearMonth
   to: YearMonth
-  /** Termina ahora y no al final del mes. */
+  /** Termina ahora y no al final del mes o del día. */
   partial: boolean
   start: string
   end: string
+  /** En un rango, sus días (fecha local, ambos incluidos). */
+  days?: { from: string; to: string }
 }
+
+/** Cómo se agrupan los gráficos del periodo. */
+export type ReportGrain = "month" | "week" | "day"
 
 /** Lo que toda respuesta dice de sí misma. */
 export interface ReportHead {
-  period: ReportSpan & { key: string }
+  period: ReportSpan & { key: string; kind: "months" | "range"; grain: ReportGrain }
   previous: ReportSpan
   timezone: string
   locale: string
@@ -66,15 +84,35 @@ function monthCount(span: Pick<ReportSpan, "from" | "to">): number {
   return (span.to.year - span.from.year) * 12 + (span.to.month - span.from.month) + 1
 }
 
-/** «septiembre de 2026», «julio a septiembre de 2026». */
-export function spanLabel(span: Pick<ReportSpan, "from" | "to">, locale: string): string {
+/** Una fecha civil (`YYYY-MM-DD`) escrita sin moverla de día: «14 de septiembre de 2026». */
+export function dayText(day: string, locale: string, options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" }): string {
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone: "UTC" }).format(new Date(`${day}T12:00:00Z`))
+}
+
+/** «del 10 al 25 de septiembre de 2026», «del 28 de agosto al 3 de septiembre de 2026». */
+export function daysLabel(days: { from: string; to: string }, locale: string): string {
+  const [fromYear, fromMonth] = days.from.split("-")
+  const [toYear, toMonth] = days.to.split("-")
+  if (days.from === days.to) return `el ${dayText(days.to, locale)}`
+  const from =
+    fromYear !== toYear
+      ? dayText(days.from, locale)
+      : fromMonth !== toMonth
+        ? dayText(days.from, locale, { day: "numeric", month: "long" })
+        : dayText(days.from, locale, { day: "numeric" })
+  return `del ${from} al ${dayText(days.to, locale)}`
+}
+
+/** «septiembre de 2026», «julio a septiembre de 2026», «del 10 al 25 de septiembre de 2026». */
+export function spanLabel(span: Pick<ReportSpan, "from" | "to" | "days">, locale: string): string {
+  if (span.days) return daysLabel(span.days, locale)
   if (sameMonth(span.from, span.to)) return lower(monthLabel(span.from, locale), locale)
   const from = span.from.year === span.to.year ? monthName(span.from.month, locale) : monthLabel(span.from, locale)
   return `${lower(from, locale)} a ${lower(monthLabel(span.to, locale), locale)}`
 }
 
-/** Rótulo del botón del periodo: «Septiembre de 2026», «Octubre de 2026, hasta hoy». */
-export function periodLabel(span: Pick<ReportSpan, "from" | "to" | "partial">, locale: string): string {
+/** Rótulo del botón del periodo: «Septiembre de 2026», «Octubre de 2026, hasta hoy», «Del 10 al 25 de septiembre de 2026». */
+export function periodLabel(span: Pick<ReportSpan, "from" | "to" | "partial" | "days">, locale: string): string {
   const text = spanLabel(span, locale)
   return `${text.charAt(0).toLocaleUpperCase(locale)}${text.slice(1)}${span.partial ? ", hasta hoy" : ""}`
 }
@@ -82,6 +120,7 @@ export function periodLabel(span: Pick<ReportSpan, "from" | "to" | "partial">, l
 /** Contra qué se compara, para la línea bajo el título. */
 export function comparedWith(head: Pick<ReportHead, "previous">, locale: string): string {
   const { previous } = head
+  if (previous.days) return `los mismos días justo antes: ${daysLabel(previous.days, locale)}`
   if (!previous.partial) return spanLabel(previous, locale)
   return sameMonth(previous.from, previous.to)
     ? `los mismos días de ${spanLabel(previous, locale)}`
@@ -91,6 +130,10 @@ export function comparedWith(head: Pick<ReportHead, "previous">, locale: string)
 /** Cierre de toda comparación: «que en agosto», «que en los mismos días de septiembre». */
 export function previousPhrase(head: Pick<ReportHead, "previous">, locale: string): string {
   const { previous } = head
+  if (previous.days) {
+    const count = Math.round((Date.parse(`${previous.days.to}T00:00:00Z`) - Date.parse(`${previous.days.from}T00:00:00Z`)) / 86_400_000) + 1
+    return count === 1 ? "que el día anterior" : `que en los ${count} días anteriores`
+  }
   if (sameMonth(previous.from, previous.to)) {
     const month = lower(monthName(previous.from.month, locale), locale)
     return previous.partial ? `que en los mismos días de ${month}` : `que en ${month}`
@@ -281,13 +324,6 @@ export interface ReportService extends ReportHead {
   series: Array<YearMonth & { partial: boolean; conversations: number; responded: number }>
 }
 
-export interface ReportOverview extends ReportHead {
-  money: Array<{ currency: string; quedaCents: number; previousQuedaCents: number | null }>
-  agenda: { attended: number; previousAttended: number }
-  sales: { newPatients: number; previousNewPatients: number }
-  service: { avgFirstResponseSeconds: number | null; previousAvgFirstResponseSeconds: number | null }
-}
-
 export const REPORT_LISTS = [
   "no_show",
   "cancelled",
@@ -295,6 +331,7 @@ export const REPORT_LISTS = [
   "controls_pending",
   "budgets_waiting",
   "new_patients",
+  "debts_overdue",
 ] as const
 export type ReportListKey = (typeof REPORT_LISTS)[number]
 
@@ -348,7 +385,87 @@ export function fetchReportAdvice(query: ReportQuery): Promise<{ data: { enabled
   return apiFetch(`/api/reports/advice?${params(query)}`)
 }
 
-export type ReportSection = "overview" | "money" | "agenda" | "sales" | "service"
+export type ReportSection = "summary" | "professionals" | "money" | "agenda" | "sales" | "service"
+
+// --- Resumen ------------------------------------------------------------------------
+
+/** Un tramo de gráfico: un mes, una semana o un día, con sus días. */
+export interface ReportBucket {
+  key: string
+  firstDay: string
+  lastDay: string
+  /** No está completo: el periodo lo corta o todavía corre. */
+  partial: boolean
+}
+
+export interface ReportSummary extends ReportHead {
+  /** Los 12 meses de cada línea pequeña. */
+  months: ReportBucket[]
+  collected: {
+    currency: string
+    current: number
+    previous: number
+    months: number[]
+    others: Array<{ currency: string; current: number; previous: number }>
+  }
+  newPatients: { current: number; previous: number; months: number[] }
+  acceptance: {
+    current: { presented: number; accepted: number }
+    previous: { presented: number; accepted: number }
+    months: Array<{ presented: number; accepted: number }>
+  }
+  noShow: {
+    current: { noShow: number; total: number }
+    previous: { noShow: number; total: number }
+    months: Array<{ noShow: number; total: number }>
+  }
+  agent: {
+    current: { booked: number; recovered: number }
+    previous: { booked: number; recovered: number }
+    months: number[]
+  }
+  overdue: {
+    currency: string
+    days: number
+    current: { cents: number; people: number }
+    previous: { cents: number; people: number }
+    months: number[]
+  }
+  chart: Array<ReportBucket & { cents: number; previousCents: number }>
+  wholeClinic: string[]
+}
+
+/** Resumen › Por profesional: va aparte porque es la consulta más pesada. */
+export interface ReportProfessionals extends ReportHead {
+  rows: Array<{
+    userId: string
+    name: string
+    attended: number
+    noShow: number
+    total: number
+    presented: number
+    accepted: number
+    collectedCents: number
+  }>
+}
+
+/** Rótulo corto de un tramo bajo su columna: «sep», «14 sep», «14». */
+export function bucketShort(bucket: ReportBucket, grain: ReportGrain, locale: string): string {
+  if (grain === "month") return monthName(Number(bucket.firstDay.slice(5, 7)), locale, "short").toLocaleLowerCase(locale).replace(/\./g, "")
+  if (grain === "week") return dayText(bucket.firstDay, locale, { day: "numeric", month: "short" }).replace(/\./g, "")
+  return dayText(bucket.firstDay, locale, { day: "numeric" })
+}
+
+/** Nombre entero de un tramo: «Septiembre de 2026», «Semana del 14 al 20 de septiembre de 2026», «Lunes 14 de septiembre de 2026». */
+export function bucketLabel(bucket: ReportBucket, grain: ReportGrain, locale: string): string {
+  const upper = (text: string): string => text.charAt(0).toLocaleUpperCase(locale) + text.slice(1)
+  if (grain === "month") return monthLabel({ year: Number(bucket.firstDay.slice(0, 4)), month: Number(bucket.firstDay.slice(5, 7)) }, locale)
+  if (grain === "week") return `Semana ${daysLabel({ from: bucket.firstDay, to: bucket.lastDay }, locale)}`
+  return upper(dayText(bucket.firstDay, locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))
+}
+
+/** «por mes», «por semana», «por día». */
+export const GRAIN_WORD: Record<ReportGrain, string> = { month: "por mes", week: "por semana", day: "por día" }
 
 export function fetchReport<T>(section: ReportSection, query: ReportQuery): Promise<{ data: T }> {
   return apiFetch<{ data: T }>(`/api/reports/${section}?${params(query)}`)

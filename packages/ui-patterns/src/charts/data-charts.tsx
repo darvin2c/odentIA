@@ -55,6 +55,7 @@ function TableToggle({ asTable, onToggle }: { asTable: boolean; onToggle: () => 
 export function Sparkline({
   values,
   label,
+  lastPartial = false,
   width = 120,
   height = 36,
   className,
@@ -62,6 +63,11 @@ export function Sparkline({
   values: Array<number | null>
   /** Lo que dibuja, dicho con palabras: «Cobrado en los últimos 12 meses: sube de 38 900 a 48 200». */
   label: string
+  /**
+   * El último punto todavía corre (el mes en curso): su tramo va punteado y el
+   * punto hueco, para que no se lea como una caída.
+   */
+  lastPartial?: boolean
   width?: number
   height?: number
   className?: string
@@ -69,10 +75,12 @@ export function Sparkline({
   const points = sparkPoints(values, width, height)
   const drawn = points.filter((point): point is { x: number; y: number } => point !== null)
   const last = drawn[drawn.length - 1]
+  const tail = lastPartial && points[points.length - 1] ? drawn.slice(-2) : []
+  const body = tail.length === 2 ? points.slice(0, -1) : points
   // Un hueco corta la línea en tramos: no se inventa lo que falta.
   const segments: string[] = []
   let current: string[] = []
-  for (const point of points) {
+  for (const point of body) {
     if (point) current.push(`${point.x},${point.y}`)
     else if (current.length > 0) {
       segments.push(current.join(" "))
@@ -85,7 +93,19 @@ export function Sparkline({
       {segments.map((segment) => (
         <polyline key={segment} points={segment} fill="none" stroke="var(--series-muted)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
       ))}
-      {last ? <circle cx={last.x} cy={last.y} r={4} fill="var(--primary)" stroke="var(--card)" strokeWidth={2} /> : null}
+      {tail.length === 2 ? (
+        <polyline
+          points={tail.map((point) => `${point.x},${point.y}`).join(" ")}
+          fill="none"
+          stroke="var(--series-muted)"
+          strokeWidth={2}
+          strokeDasharray="3 3"
+          strokeLinecap="round"
+        />
+      ) : null}
+      {last ? (
+        <circle cx={last.x} cy={last.y} r={4} fill={lastPartial ? "var(--card)" : "var(--primary)"} stroke={lastPartial ? "var(--primary)" : "var(--card)"} strokeWidth={2} />
+      ) : null}
     </svg>
   )
 }

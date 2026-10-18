@@ -37,7 +37,7 @@ import {
 } from "@odentia/db/schema/finance"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { promotionServicePrice } from "@odentia/db/schema/promotions"
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -47,6 +47,7 @@ import {
 } from "./errors.js"
 import { getOrgLocale, orgProfileRequired } from "./locale.js"
 import { monthStart } from "./report-periods.js"
+import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
@@ -2298,6 +2299,77 @@ async function financeBuckets(
 }
 
 /**
+ * Lo cobrado por profesional en un tramo: solo lo atendido, la misma base de
+ * las comisiones (aplicaciones del tramo, netas de devoluciones con la regla
+ * de las comisiones). Lo usan Finanzas y el Resumen de Reportes.
+ */
+export async function collectedByProfessional(
+  tx: Db,
+  orgId: string,
+  range: { start: Date; end: Date; branchId?: string },
+  curr: string,
+): Promise<Array<{ professionalUserId: string; name: string | null; currency: string; cobradoCents: number }>> {
+  const apps = await collectedApplications(tx, orgId, range.start, range.end, curr, { branchId: range.branchId })
+  const totals = await paymentTotalsOf(
+    tx,
+    orgId,
+    apps.map((a) => a.paymentId),
+  )
+  for (const app of apps) if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
+  const refundByApp = await allocateRefunds(tx, orgId, apps, totals, range.start, range.end)
+  const profSums = new Map<string, number>()
+  for (const a of apps) {
+    const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
+    profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
+  }
+  const names = await userNames(tx, [...profSums.keys()])
+  return [...profSums].map(([professionalUserId, cobradoCents]) => ({
+    professionalUserId,
+    name: names.get(professionalUserId) ?? null,
+    currency: curr,
+    cobradoCents,
+  }))
+}
+
+/**
+ * Lo cobrado neto de varios tramos en una sola consulta, por moneda: la misma
+ * regla de `netoCents` de `financeBuckets` (cobros del tramo que siguen en pie
+ * al cerrarlo, menos las anulaciones del tramo de cobros anteriores y las
+ * devoluciones del tramo). Así el Resumen dibuja sus 12 meses sin 12 idas.
+ */
+export async function collectedNetMany(
+  tx: Db,
+  orgId: string,
+  spans: Span[],
+  options: { branchId?: string } = {},
+): Promise<Array<Array<{ currency: string; cents: number }>>> {
+  const branchOf = (column: SQL): SQL => (options.branchId ? sql`and ${column} = ${options.branchId}` : sql``)
+  const rows = await tx.execute<{ idx: number; currency: string; cents: string }>(sql`
+    select b.idx, x.currency, sum(x.cents)::text as cents
+    from ${spansSql(spans)}
+    join lateral (
+      select p.currency, p.amount_cents::bigint as cents from patient_payment p
+      where p.organization_id = ${orgId} and p.paid_at >= b.start_at and p.paid_at < b.end_at
+        and (p.voided_at is null or p.voided_at >= b.end_at) ${branchOf(sql`p.branch_id`)}
+      union all
+      select p.currency, -p.amount_cents::bigint from patient_payment p
+      where p.organization_id = ${orgId} and p.paid_at < b.start_at
+        and p.voided_at >= b.start_at and p.voided_at < b.end_at ${branchOf(sql`p.branch_id`)}
+      union all
+      select p.currency, -r.amount_cents::bigint from patient_payment_refund r
+      join patient_payment p on p.id = r.payment_id and p.organization_id = r.organization_id
+      where r.organization_id = ${orgId} and r.refunded_at >= b.start_at and r.refunded_at < b.end_at ${branchOf(sql`p.branch_id`)}
+    ) x on true
+    group by b.idx, x.currency`)
+  return bySpan(
+    spans,
+    [...rows],
+    (): Array<{ currency: string; cents: number }> => [],
+    (list, row) => [...list, { currency: row.currency, cents: safeCents(row.cents) }],
+  )
+}
+
+/**
  * Solo los totales por moneda de un tramo: con ellos se compara un periodo con
  * el anterior y se dibujan las barras por mes, sin recalcular los desgloses.
  */
@@ -2345,31 +2417,7 @@ export async function getFinanceResultBetween(tx: Db, orgId: string, range: Fina
     averageCents: number | null
   }> = []
   for (const curr of currencies) {
-    // Por profesional: solo lo atendido (misma base de las comisiones).
-    const apps = await collectedApplications(tx, orgId, start, end, curr, {
-      branchId: branch?.id,
-    })
-    const totals = await paymentTotalsOf(
-      tx,
-      orgId,
-      apps.map((a) => a.paymentId),
-    )
-    for (const app of apps)
-      if (!totals.has(app.paymentId)) totals.set(app.paymentId, app.paymentCents)
-    const refundByApp = await allocateRefunds(tx, orgId, apps, totals, start, end)
-    const profSums = new Map<string, number>()
-    for (const a of apps) {
-      const net = a.appCents - Math.min(a.appCents, refundByApp.get(a.appId) ?? 0)
-      profSums.set(a.dentistUserId, (profSums.get(a.dentistUserId) ?? 0) + net)
-    }
-    const names = await userNames(tx, [...profSums.keys()])
-    for (const [professionalUserId, cobradoCents] of profSums)
-      byProfessional.push({
-        professionalUserId,
-        name: names.get(professionalUserId) ?? null,
-        currency: curr,
-        cobradoCents,
-      })
+    byProfessional.push(...(await collectedByProfessional(tx, orgId, { start, end, branchId: branch?.id }, curr)))
     // Por promoción: todos los cargos cobrados con snapshot (con o sin
     // atención). veces = cargos distintos cobrados en el mes (sin doble
     // conteo por pagos parciales); importe = neto cobrado en el mes. El uso
