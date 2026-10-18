@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react"
 import type { CSSProperties } from "react"
 import { Brand } from "./brand.js"
-import { AuthSplit } from "./auth-split.js"
+import { AuthAside, AuthSplit } from "./auth-split.js"
+import { PasswordInput } from "./password-input.js"
 
 const meta = { title: "Identidad/Marca", component: Brand, parameters: { layout: "fullscreen" } } satisfies Meta<typeof Brand>
 export default meta
@@ -24,5 +25,14 @@ export const Temas: Story = {
 }
 
 export const Acceso: Story = {
-  render: () => <AuthSplit title="Inicia sesión" description="Accede a tu espacio de odentIA"><label className="flex flex-col gap-2">Correo electrónico<input type="email" className="rounded-md border p-2" /></label></AuthSplit>,
+  render: () => (
+    <AuthSplit
+      title="Buenas tardes, Carmen."
+      description="Clínica Dental Sonrisa"
+      aside={<AuthAside tag="Tu clínica" title="Omnicanal" accent="y agéntica."><p>Tus agentes siguieron trabajando mientras no estabas.</p></AuthAside>}
+      footer={<span>carmen@sonrisa.pe · <u>¿No eres tú?</u></span>}
+    >
+      <PasswordInput id="pw" value="" onChange={() => {}} autoComplete="current-password" />
+    </AuthSplit>
+  ),
 }

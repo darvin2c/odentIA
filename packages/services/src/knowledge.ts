@@ -604,6 +604,8 @@ export async function searchPublishedKnowledge(
 
 export interface ClinicInfoSnapshot {
   clinicName: string
+  /** Teléfono para urgencias de la clínica (E.164); nulo si no lo registró. */
+  emergencyPhone?: string | null
   timezone: string
   /** Formato regional de la clínica (BCP 47): con él se escriben los importes. */
   locale: string
@@ -629,6 +631,7 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
       tradeName: orgProfile.tradeName,
       timezone: orgProfile.timezone,
       locale: orgProfile.locale,
+      emergencyPhone: orgProfile.emergencyPhone,
     })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
@@ -650,6 +653,7 @@ export async function getClinicInfoSnapshot(tx: Db, orgId: string): Promise<Clin
   const promos = await listClinicPromotionSummaries(tx, orgId)
   return {
     clinicName: profile?.tradeName ?? profile?.legalName ?? "la clínica",
+    emergencyPhone: profile?.emergencyPhone ?? null,
     timezone: profile?.timezone ?? NEUTRAL_TIMEZONE,
     locale: profile?.locale || NEUTRAL_LOCALE,
     branches: branchRows.map((b) => ({ ...b, address: b.address ?? null })),
@@ -766,6 +770,11 @@ export function formatKnowledgeForPrompt(
       lines.push(parts)
     }
   }
+  lines.push(
+    snapshot.emergencyPhone
+      ? `Teléfono para urgencias de la clínica (también fuera de horario): ${snapshot.emergencyPhone}.`
+      : "La clínica no registró un teléfono para urgencias: ante una urgencia, que acuda al servicio de emergencias más cercano.",
+  )
   lines.push(...clinicLines)
   // Los medios activos de caja, en una línea: viajan en cada turno para que
   // «¿aceptan …?» se responda con el dato del sistema y no con un texto escrito.

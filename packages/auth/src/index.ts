@@ -4,7 +4,6 @@ import {
   changeEmailVerificationTemplate,
   invitationTemplate,
   type Mailer,
-  resetPasswordTemplate,
   verifyEmailTemplate,
 } from "@odentia/mail"
 import { betterAuth } from "better-auth"
@@ -14,6 +13,10 @@ import { organization } from "better-auth/plugins"
 import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access"
 import { twoFactor } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
+import { accessLink } from "./access-link.js"
+import { passwordBreachCheck } from "./password-breach.js"
+import { AGREEMENT_VERSION } from "./legal.js"
+import { legalAcceptance } from "./terms.js"
 
 export interface CreateAuthOptions {
   db: Db
@@ -29,6 +32,8 @@ export interface CreateAuthOptions {
   googleClientSecret: string
   /** Conexión owner: denial de sesiones con bloqueo global activo. */
   ownerDb: Db
+  /** Rechazar contraseñas filtradas (Have I Been Pwned); se apaga en pruebas sin red. */
+  passwordBreachCheck?: boolean
   /** Cabecera con la IP de quien pide; vacía, ninguna (ver `clientIpAddress`). */
   clientIpHeader?: string
 }
@@ -74,6 +79,7 @@ export function createAuth({
   googleClientId,
   googleClientSecret,
   ownerDb,
+  passwordBreachCheck: breachCheck = true,
   clientIpHeader,
 }: CreateAuthOptions) {
   return betterAuth({
@@ -86,13 +92,12 @@ export function createAuth({
         ? { google: { clientId: googleClientId, clientSecret: googleClientSecret } }
         : {}),
     },
+    // Sin `sendResetPassword`: la contraseña olvidada se recupera con el enlace
+    // de acceso (`access-link.ts`), que deja a la persona adentro.
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
-      sendResetPassword: async ({ user, url }) => {
-        const template = resetPasswordTemplate({ url })
-        await mailer.send({ to: user.email, ...template })
-      },
+      revokeSessionsOnPasswordReset: true,
     },
     emailVerification: {
       sendOnSignUp: true,
@@ -108,6 +113,12 @@ export function createAuth({
       additionalFields: {
         firstName: { type: "string", required: false, defaultValue: "" },
         lastName: { type: "string", required: false, defaultValue: "" },
+        // Lo pone el registro con correo (`legalAcceptance`); la fecha la escribe el servidor.
+        termsVersion: { type: "string", required: false },
+        termsAcceptedAt: { type: "date", required: false, input: false },
+        // Contrato de encargo: solo quien abre una clínica; la clínica lo copia al crearse.
+        processingAgreementVersion: { type: "string", required: false },
+        processingAgreementAcceptedAt: { type: "date", required: false, input: false },
       },
       changeEmail: {
         enabled: true,
@@ -125,6 +136,22 @@ export function createAuth({
     // Denial de sesiones para cuentas con bloqueo global (tabla user_global_block).
     // Sin fallback fail-open: la frontera siempre rechaza closed/blocked.
     databaseHooks: {
+      user: {
+        create: {
+          before: async (data) => {
+            const now = new Date()
+            return {
+              data: {
+                ...data,
+                ...(typeof data.termsVersion === "string" && data.termsVersion ? { termsAcceptedAt: now } : {}),
+                ...(typeof data.processingAgreementVersion === "string" && data.processingAgreementVersion
+                  ? { processingAgreementAcceptedAt: now }
+                  : {}),
+              },
+            }
+          },
+        },
+      },
       session: {
         create: {
           before: async (created) => {
@@ -150,6 +177,9 @@ export function createAuth({
       // fresca verificada en /api/admin/access (regla propia); con credencial
       // siempre exige contraseña. Solo lo enrolan staff (única UI).
       twoFactor({ allowPasswordless: true }),
+      accessLink({ mailer, webURL }),
+      passwordBreachCheck({ enabled: breachCheck }),
+      legalAcceptance(),
       organization({
         // `permissions.ts` decida por dominio. Sin gestión de miembros ni
         // invitaciones (igual que `member`): solo owner/admin administran,
@@ -180,7 +210,19 @@ export function createAuth({
             ac: ["read"],
           }),
         },
-        organizationHooks: { beforeUpdateOrganization: lockClinicIdentityFields },
+        organizationHooks: {
+          beforeUpdateOrganization: lockClinicIdentityFields,
+          // La clínica nace con el contrato de encargo que aceptó quien la abre; si no lo
+          // aceptó (entró invitado a otra), se le pide en la clínica al entrar.
+          afterCreateOrganization: async ({ organization: org, user }) => {
+            if ((user as { processingAgreementVersion?: string | null }).processingAgreementVersion !== AGREEMENT_VERSION) return
+            await ownerDb.execute(sql`
+              insert into processing_agreement_acceptance (organization_id, version, accepted_by, accepted_at)
+              values (${org.id}, ${AGREEMENT_VERSION}, ${user.id}, coalesce(
+                (select processing_agreement_accepted_at from "user" where id = ${user.id}), now()))
+              on conflict (organization_id, version) do nothing`)
+          },
+        },
         sendInvitationEmail: async ({ email, inviter, organization: org, invitation }) => {
           const template = invitationTemplate({
             organizationName: org.name,
@@ -212,4 +254,7 @@ export async function lockClinicIdentityFields({ organization: changes }: { orga
 
 export type Auth = ReturnType<typeof createAuth>
 export type Session = Auth["$Infer"]["Session"]
+export { ACCESS_LINK_TTL_SECONDS } from "./access-link.js"
+export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
+export { termsState } from "./terms.js"
 export * from "./permissions.js"

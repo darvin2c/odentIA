@@ -9,9 +9,8 @@ import {
   useRef,
   useState,
 } from "react"
-import { AGENTS, CHANS, DAY, type DayEvent, dir, via } from "./heroData"
+import { AGENTS, CHANS, DAY, type DayEvent, dir, type SceneHost, ToothScene, via } from "@odentia/brand-scene"
 import { pauseStore, useInterval, useNarrow, usePaused, useReducedMotion } from "./motion"
-import { type SceneHost, ToothScene } from "./toothScene"
 
 type Props = { ctaHref: string; ctaLabel: string }
 type Cur = {

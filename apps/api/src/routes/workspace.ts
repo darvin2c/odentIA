@@ -5,6 +5,7 @@ import {
   getWorkspaceHome,
   listWorkspaceAudit,
   listWorkspaceNotifications,
+  recordHomeVisit,
   readAllWorkspaceNotifications,
   readWorkspaceNotification,
   taskAreasOfRole,
@@ -55,6 +56,12 @@ export function createWorkspaceRoute(deps: CrmDeps) {
     const can = (permission: string) => canAccess(memberRole, permission as Permission)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, tx =>
       getWorkspaceHome(tx, orgId, userId, accessFor(memberRole), { branchId: parsed.data.branch, can })))
+  })
+  // «Mientras no estabas»: Inicio avisa que la persona la está mirando; la primera vez del día responde lo que hicieron los agentes.
+  app.post("/visit", c => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async tx =>
+      ({ away: await recordHomeVisit(tx, orgId, userId, accessFor(memberRole)) })))
   })
   app.get("/notifications", c => {
     const { orgId, userId, memberRole } = orgContextOf(c)

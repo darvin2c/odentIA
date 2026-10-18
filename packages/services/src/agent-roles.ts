@@ -147,9 +147,9 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
       {
         id: "derivar",
         label: "Pasar a una persona",
-        description: "Con el resumen del caso.",
+        description: "Lo que no puede responder queda como un tema para el equipo, con el resumen del caso; sigue atendiendo lo demás.",
         fixed: true,
-        tools: ["request_human_handoff"],
+        tools: ["request_human_handoff", "recordar_tema"],
       },
     ],
     always: [

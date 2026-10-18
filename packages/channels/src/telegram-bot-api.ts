@@ -40,7 +40,20 @@ interface TelegramMessage {
   text?: string
   caption?: string
   photo?: { file_id: string }[]
-  document?: { file_id: string; mime_type?: string }
+  document?: TelegramFile
+  voice?: TelegramFile
+  audio?: TelegramFile
+  video?: TelegramFile
+  /** Video redondo: Telegram no dice su tipo; siempre es MPEG-4. */
+  video_note?: TelegramFile
+  /** Mensaje que la persona citó al responder. */
+  reply_to_message?: { message_id: number }
+}
+
+/** Archivo de Bot API (Document, Voice, Audio, Video, VideoNote). */
+interface TelegramFile {
+  file_id: string
+  mime_type?: string
 }
 
 interface TelegramUpdate {
@@ -60,7 +73,31 @@ function displayNameOf(from?: TelegramUser): string | undefined {
   return from.username ? `@${from.username}` : undefined
 }
 
-function toNormalized(updateId: number, msg: TelegramMessage): NormalizedInbound {
+/**
+ * Archivo que trae el mensaje y su tipo MIME. Telegram declara `mime_type` en
+ * documento, voz, audio y video, pero es opcional: si falta se usa el formato
+ * que Bot API documenta para cada clase (voz OGG/Opus, audio MP3, video y
+ * video redondo MPEG-4, foto JPEG). Un documento sin tipo queda genérico.
+ */
+function mediaOf(msg: TelegramMessage): { fileId: string; mimeType: string } | null {
+  const photo = msg.photo?.at(-1)
+  if (photo) return { fileId: photo.file_id, mimeType: "image/jpeg" }
+  const candidates: [TelegramFile | undefined, string][] = [
+    [msg.document, "application/octet-stream"],
+    [msg.voice, "audio/ogg"],
+    [msg.audio, "audio/mpeg"],
+    [msg.video, "video/mp4"],
+    [msg.video_note, "video/mp4"],
+  ]
+  for (const [file, fallback] of candidates) {
+    if (file && typeof file.file_id === "string" && file.file_id) {
+      return { fileId: file.file_id, mimeType: file.mime_type || fallback }
+    }
+  }
+  return null
+}
+
+function toNormalized(updateId: number, msg: TelegramMessage): NormalizedInbound | null {
   const threadId = msg.chat.id
   const sender = msg.from
   const base = {
@@ -71,27 +108,59 @@ function toNormalized(updateId: number, msg: TelegramMessage): NormalizedInbound
     sentAt: new Date(msg.date * 1000).toISOString(),
   }
   const name = displayNameOf(sender)
-  const withName = name ? { senderDisplayName: name } : {}
-  if (typeof msg.text === "string") {
+  const withName = {
+    ...(name ? { senderDisplayName: name } : {}),
+    ...(msg.reply_to_message ? { replyToExternalId: `tg:${threadId}:${msg.reply_to_message.message_id}` } : {}),
+  }
+  if (typeof msg.text === "string" && msg.text) {
     return { ...base, ...withName, content: { type: "text", text: msg.text } }
   }
-  const photo = msg.photo?.at(-1)
-  const fileId = photo?.file_id ?? msg.document?.file_id
-  if (fileId) {
+  const media = mediaOf(msg)
+  if (media) {
     const caption = msg.caption ? { caption: msg.caption } : {}
     return {
       ...base,
       ...withName,
       content: {
         type: "media",
-        mediaExternalId: fileId,
-        mimeType: msg.document?.mime_type ?? "image/jpeg",
+        mediaExternalId: media.fileId,
+        mimeType: media.mimeType,
         ...caption,
       },
     }
   }
-  // Mensaje sin texto ni media soportada (sticker, poll, etc.): se ignora.
-  return { ...base, ...withName, content: { type: "text", text: "" } }
+  // Sin texto ni media soportada (sticker, encuesta, ubicación, contacto…):
+  // no entra a la bandeja ni despierta al agente.
+  return null
+}
+
+/**
+ * Tipo de lo descargado. El servidor de archivos de Telegram suele responder
+ * `application/octet-stream` (las notas de voz llegan como `.oga`); en ese caso
+ * se toma de la extensión que Telegram pone en `file_path`, para que quien
+ * guarda o transcribe sepa qué es.
+ */
+const MIME_BY_EXTENSION: Record<string, string> = {
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  pdf: "application/pdf",
+}
+
+function mimeOfDownload(contentType: string | null, filePath: string): string {
+  const declared = contentType?.split(";")[0]?.trim().toLowerCase()
+  if (declared && declared !== "application/octet-stream") return declared
+  const ext = filePath.split(".").at(-1)?.toLowerCase() ?? ""
+  return MIME_BY_EXTENSION[ext] ?? "application/octet-stream"
 }
 
 function isOkResult(json: unknown): json is { ok: true; result: unknown } {
@@ -186,7 +255,7 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     const msg = parsed.message ?? parsed.edited_message
     if (!msg || typeof msg.message_id !== "number" || !msg.chat) return empty
     const normalized = toNormalized(parsed.update_id, msg)
-    if (normalized.content.type === "text" && normalized.content.text === "") return empty
+    if (!normalized) return empty
     return { messages: [normalized], statuses: [] }
   },
 
@@ -197,11 +266,14 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     }
     // `to` es el externalThreadId del parse (`tg:<chatId>`).
     const chatId = msg.to.startsWith("tg:") ? msg.to.slice("tg:".length) : msg.to
+    // Respuesta citada (ADR 0050): el id propio es `tg:<chat>:<message_id>`.
+    const quoted = msg.replyToExternalId?.startsWith(`tg:${chatId}:`) ? Number(msg.replyToExternalId.split(":")[2]) : NaN
+    const reply = Number.isInteger(quoted) ? { reply_parameters: { message_id: quoted, allow_sending_without_reply: true } } : {}
     if (msg.kind.type === "text") {
       const result = await telegramCall(
         cfg,
         "sendMessage",
-        { chat_id: chatId, text: msg.kind.text },
+        { chat_id: chatId, text: msg.kind.text, ...reply },
         deps,
       )
       return { externalId: `tg:${chatId}:${resultMessageId(result)}` }
@@ -235,7 +307,7 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     const url = `https://api.telegram.org/file/bot${cfg.botToken}/${filePath}`
     const res = await deps.fetch(url)
     if (!res.ok) throw new Error(`Telegram descarga de media falló: ${res.status}`)
-    const mimeType = res.headers.get("content-type") ?? "application/octet-stream"
+    const mimeType = mimeOfDownload(res.headers.get("content-type"), filePath)
     const bytes = new Uint8Array(await res.arrayBuffer())
     const filename = filePath.split("/").at(-1) ?? mediaExternalId
     return { bytes, mimeType, filename }

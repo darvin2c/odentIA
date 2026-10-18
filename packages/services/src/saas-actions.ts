@@ -16,7 +16,7 @@ export const RECOVERY_WINDOW_DAYS = 7
 /** Lo que escribe el Administrador y no recupera nada: los recordatorios. */
 const NOT_RECOVERY_KINDS = ["recordatorio_cita", "recordatorio_control"]
 /** Por dónde reservó el agente: en su conversación o desde su enlace. La que agenda el equipo no cuenta. */
-const AGENT_SOURCES = ["agent", "enlace"]
+export const AGENT_SOURCES = ["agent", "enlace"]
 
 const CHANNEL_NAME: Record<string, string> = {
   whatsapp: "WhatsApp",
