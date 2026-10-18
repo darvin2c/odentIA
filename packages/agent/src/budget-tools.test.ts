@@ -10,9 +10,8 @@ import { randomUUID } from "node:crypto"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type ChannelAdapter, telegramBotApiAdapter, whatsappCloudApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { encounter, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { professionalProfile } from "@odentia/db/schema/clinical-forms"
@@ -110,10 +109,7 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values (${ORG}, 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
   )
-  const checkpointer = PostgresSaver.fromConnString(ownerUri)
-  await checkpointer.setup()
-  await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY, storage: storageStub }
+  runtime = { platform: { fake: true }, secretsKey: KEY, storage: storageStub }
   tgConnId = (
     await inOrg((tx) =>
       createConnection(tx, ORG, KEY, { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } }, { fetch, validateExternal: false }),
@@ -149,7 +145,6 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
-  await runtime?.checkpointer.end().catch(() => {})
   await container?.stop()
 })
 

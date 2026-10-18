@@ -26,9 +26,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
  */
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base"
 import type { AIMessage, BaseMessage } from "@langchain/core/messages"
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { whatsappCloudApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationConsent, automationJob, automationRule } from "@odentia/db/schema/automation"
@@ -269,15 +268,11 @@ beforeAll(async () => {
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}:${port}/dentalagent`)
   await ownerDb.execute(sql`insert into "organization" ("id", "name", "slug", "created_at") values (${ORG}, 'Clínica Sonríe', 'mes', now())`)
   await ownerDb.execute(sql`insert into "org_profile" ("organization_id", "legal_name", "trade_name", "country_code", "currency", "timezone", "locale") values (${ORG}, 'Clínica Sonríe', 'Clínica Sonríe', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`)
-  const checkpointer = PostgresSaver.fromConnString(ownerUri)
-  await checkpointer.setup()
-  await setupAgentMemory(ownerDb)
   const decisions = {
     ...(env.JEV_API_KEY ? { jev: { apiKey: env.JEV_API_KEY, baseUrl: env.JEV_BASE_URL, model: env.JEV_MODEL } } : {}),
     timeoutMs: Number(env.DECISIONS_TIMEOUT_MS ?? 8000),
   }
   runtime = {
-    checkpointer,
     // La clínica inventada usa el modelo de toda clínica (`chatgpt_6`) con las cuentas del entorno.
     platform: REAL ? { ...platformLlmFromEnv(env), timeoutMs: 120_000, maxRetries: 2 } : { fake: true },
     decisions,
@@ -288,7 +283,6 @@ beforeAll(async () => {
 }, 300_000)
 
 afterAll(async () => {
-  await runtime?.checkpointer.end().catch(() => {})
   await container?.stop().catch(() => {})
 })
 

@@ -3,9 +3,8 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createServer } from "node:http"
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
@@ -178,10 +177,7 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
   )
-  const checkpointer = PostgresSaver.fromConnString(ownerUri)
-  await checkpointer.setup()
-  await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY }
+  runtime = { platform: { fake: true }, secretsKey: KEY }
   const created = await withOrgContext(appDb, "org_a", (tx) =>
     createConnection(
       tx,
@@ -201,7 +197,6 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
-  await runtime?.checkpointer.end().catch(() => {})
   await container?.stop()
 })
 
@@ -823,16 +818,13 @@ it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", as
   expect(notices).toEqual([])
 })
 
-it("memoria del agente aísla por prefijo de thread_id", async () => {
-  const threadsA = await withOrgContext(appDb, "org_a", (tx) =>
-    tx.execute(sql`select count(*)::int as n from "checkpoints"`),
-  )
-  const n = (threadsA as unknown as { n: number }[])[0]?.n ?? 0
-  expect(n).toBeGreaterThan(0)
-  const threadsB = await withOrgContext(appDb, "org_b", (tx) =>
-    tx.execute(sql`select count(*)::int as n from "checkpoints"`),
-  )
-  expect((threadsB as unknown as { n: number }[])[0]?.n).toBe(0)
+it("el agente no guarda su borrador: tras sus corridas no hay tablas del grafo (ADR 0051)", async () => {
+  const runs = (await ownerDb.execute(sql`select count(*)::int as n from "agent_run_ledger"`)) as unknown as { n: number }[]
+  expect(runs[0]?.n).toBeGreaterThan(0)
+  const tables = (await ownerDb.execute(
+    sql`select tablename from pg_tables where schemaname = 'public' and tablename like 'checkpoint%'`,
+  )) as unknown as { tablename: string }[]
+  expect(tables.map((row) => row.tablename)).toEqual([])
 })
 
 it("simulación consulta seguimientos reales sin generar respuesta ni cambiar pendientes", async () => {
@@ -883,7 +875,7 @@ function systemTextOf(turn: BaseMessage[]): string {
     .join("\n")
 }
 
-it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar políticas", async () => {
+it("cada turno arma el contexto desde la base sin crecer por copia ni conservar políticas", async () => {
   const { conversationId } = await ingestText("tg:memoria-ctx", "evt-memoria-ctx", "Hola, una consulta")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
@@ -894,19 +886,12 @@ it("el contexto se reemplaza entre turnos sin crecer por copia ni conservar pol�
     toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
-  const threadId = `org_a:${conversationId}`
   toolCtx.draftText = "primer turno"
-  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: threadId } },
-  )
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
   // Lo que escribe la clínica en «Lo que el agente debe saber» le llega en el turno siguiente.
   const written = await withOrgContext(appDb, "org_a", (tx) => addAgentGuidance(tx, "org_a", "u_indicaciones", "PROMPT-TURNO-DOS"))
   toolCtx.draftText = "segundo turno"
-  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: threadId } },
-  )
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
   await withOrgContext(appDb, "org_a", (tx) => removeAgentGuidance(tx, "org_a", "u_indicaciones", written.id))
   expect(model.seen).toHaveLength(2)
   const first = model.seen[0] ?? []
@@ -949,10 +934,7 @@ it("el prompt incluye el compromiso de otro canal con procedencia y lo pierde al
     toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
-  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: `org_a:${tg.conversationId}` } },
-  )
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
   const firstSystem = systemTextOf(model.seen[0] ?? [])
   expect(firstSystem).toContain("[whatsapp")
   expect(firstSystem).toContain("prefiero cita los lunes por la mañana")
@@ -968,10 +950,7 @@ it("el prompt incluye el compromiso de otro canal con procedencia y lo pierde al
       toContactId: other.id,
       reason: "Corrige titular",
     }))
-  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: `org_a:${tg.conversationId}` } },
-  )
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
   const secondSystem = systemTextOf(model.seen[1] ?? [])
   expect(secondSystem).not.toContain("prefiero cita los lunes por la mañana")
 })
@@ -1013,10 +992,7 @@ it("el prompt avisa cuando hay más historial y ver_otros_canales pagina con cur
     toolsUsed: [], usage: emptyUsage(),
   }
   const model = new RecordingModel({})
-  await compileAgentGraph(model, toolCtx, runtime.checkpointer).invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: `org_a:${current.conversationId}` } },
-  )
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
   const system = systemTextOf(model.seen[0] ?? [])
   expect(system).toContain("[telegram")
   expect(system).toContain("usa ver_otros_canales")
@@ -1735,7 +1711,7 @@ it("en un hilo largo el contexto avisa de lo que no ve y la simulación comprueb
     call === 1
       ? toolCall("anotar_caso", { nota: "Pregunta por precios." }, "nota")
       : toolCall("send_reply", { text: "Cuesta S/ 61." }, `envia-${call}`))
-  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 }, { configurable: { thread_id: "sim-largo" } })
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
   expect(systemTextOf(model.seen[0] ?? [])).toContain("Solo ves los últimos 20 mensajes de 23")
   expect(toolCtx.lastChecks).toEqual([{ kind: "precio", value: "S/ 61", ok: false, source: null }])
   expect(toolCtx.handedOff).toBe(true)

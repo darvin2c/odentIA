@@ -7,9 +7,8 @@ import { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
 import { convertToOpenAITool } from "@langchain/core/utils/function_calling"
-import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { telegramBotApiAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, setupAgentMemory, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { agentRunLedger, aiUsage } from "@odentia/db/schema/agent"
 import { message } from "@odentia/db/schema/crm"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
@@ -127,10 +126,7 @@ beforeAll(async () => {
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}:${port}/dentalagent`)
   await ownerDb.execute(sql`insert into "organization" ("id", "name", "slug", "created_at") values (${ORG}, 'Clínica Uso', 'uso', now())`)
   await ownerDb.execute(sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values (${ORG}, 'Clínica Uso', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`)
-  const checkpointer = PostgresSaver.fromConnString(ownerUri)
-  await checkpointer.setup()
-  await setupAgentMemory(ownerDb)
-  runtime = { checkpointer, platform: { fake: true }, secretsKey: KEY }
+  runtime = { platform: { fake: true }, secretsKey: KEY }
   connectionId = (
     await withOrgContext(appDb, ORG, (tx) =>
       createConnection(tx, ORG, KEY, { channel: "telegram", provider: "telegram_bot_api", displayName: "Bot", config: { botToken: "T" } }, { fetch, validateExternal: false }))
@@ -153,7 +149,6 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(async () => {
-  await runtime?.checkpointer.end().catch(() => {})
   await container?.stop()
 })
 
