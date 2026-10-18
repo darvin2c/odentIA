@@ -1,7 +1,6 @@
 import type { Callbacks } from "@langchain/core/callbacks/manager"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
-import type { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
@@ -67,7 +66,6 @@ import {
   TOOL_ACTION_LABEL,
 } from "./tools.js"
 export interface AgentRuntime {
-  checkpointer: PostgresSaver
   /** Cuentas de odentIA en los proveedores; la organización solo elige el modelo. */
   platform: PlatformLlm
   /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
@@ -302,7 +300,7 @@ async function attendAgentRun(
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
-      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig; attention: number }
+      | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig }
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
     const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
@@ -474,7 +472,6 @@ async function attendAgentRun(
         }),
         spec,
         cfg,
-        attention: conv.attentionStartedAt.getTime(),
       }
     })
     if ("skip" in prepared && configProblem) {
@@ -499,7 +496,7 @@ async function attendAgentRun(
       })
       return "done"
     }
-    const { toolCtx, spec, cfg, attention } = prepared
+    const { toolCtx, spec, cfg } = prepared
     effectiveModel = spec.modelName
     toolCtx.treatment = cfg.treatment
     toolCtx.modelName = spec.modelName
@@ -606,15 +603,10 @@ async function attendAgentRun(
     }
     const invokeGraph = async () => {
       const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)
-      const graph = compileAgentGraph(model, toolCtx, runtime.checkpointer)
-      await graph.invoke(
-        { messages: [], turnCount: 0 },
-        {
-          // Cada atención (desde que se abrió o reabrió) es un hilo propio del grafo.
-          configurable: { thread_id: `${orgId}:${conversationId}:${attention}` },
-          ...(runtime.callbacks ? { callbacks: runtime.callbacks } : {}),
-        },
-      )
+      // El grafo no guarda su estado (ADR 0051): cada corrida arma el contexto
+      // desde la base y lo que debe quedar ya tiene su tabla.
+      const graph = compileAgentGraph(model, toolCtx)
+      await graph.invoke({ messages: [], turnCount: 0 }, runtime.callbacks ? { callbacks: runtime.callbacks } : {})
     }
     if (toolCtx.route?.path === "derivar") {
       // Primero el equipo: el caso queda registrado al instante, con su clase,
@@ -919,8 +911,7 @@ function messageText(msg: BaseMessage): string {
 
 /**
  * Simula un solo turno con el modelo y las instrucciones vigentes, sin
- * efectos externos ni persistencia: sin checkpointer (grafo sin memoria),
- * las herramientas corren en dryRun (describen, no escriben), el mensaje
+ * efectos externos ni persistencia: las herramientas corren en dryRun (describen, no escriben), el mensaje
  * hipotético no se persiste y no se escribe el libro. Solo lecturas RLS.
  * No reproduce activaciones ni derivaciones previas ni la memoria de la
  * atención real: el resultado es orientativo, no una equivalencia total.
@@ -961,10 +952,7 @@ export async function simulateAgentTurn(
   toolCtx.draftText = text.slice(0, 4000)
   const model = await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
-  const state = (await graph.invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: `${orgId}:${conversationId}:simulacion` } },
-  )) as { messages: BaseMessage[] }
+  const state = (await graph.invoke({ messages: [], turnCount: 0 })) as { messages: BaseMessage[] }
   const replies = state.messages.filter((m) => m instanceof AIMessage)
   const last = replies[replies.length - 1]
   const latencyMs = Date.now() - startedAt.getTime()
@@ -1111,10 +1099,7 @@ export async function simulateAgentSandbox(
   }
   const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec)
   const graph = compileAgentGraph(model, toolCtx)
-  const result = (await graph.invoke(
-    { messages: [], turnCount: 0 },
-    { configurable: { thread_id: `${orgId}:prueba` } },
-  )) as { messages: BaseMessage[] }
+  const result = (await graph.invoke({ messages: [], turnCount: 0 })) as { messages: BaseMessage[] }
   const replies = result.messages.filter((m) => m instanceof AIMessage)
   const last = replies[replies.length - 1]
   // Lo único que queda pendiente es lo que confirma el paciente (ADR 0023).
