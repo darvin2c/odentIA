@@ -2905,6 +2905,8 @@ const pedro = await db.transaction((tx) =>
           givenNames: "Pedro",
           familyName: "Quispe",
           birthDate: "2016-05-20",
+          // La clínica de la semilla también pide el sexo.
+          sex: "M",
           // La clínica pide el documento: el DNI del menor.
           docType: "DNI",
           docNumber: "78901234",
@@ -3016,6 +3018,9 @@ const revisionPedro = await reviseBudget(db, ORG_A, ANA_ID, pedro.id, presupuest
 })
 await deliverBudget(db, ORG_A, ANA_ID, pedro.id, revisionPedro.id)
 
+// Su propio celular: quien se registra por el QR con el de alguien que ya
+// está queda por confirmar en «Te espera», y Valeria es de otro hogar.
+const VALERIA_PHONE = "+51987000920"
 await db.transaction((tx) =>
   registerPatient(
     tx,
@@ -3027,15 +3032,18 @@ await db.transaction((tx) =>
       answers: {
         demographics: {
           displayName: "Valeria Quispe · QR demo",
+          givenNames: "Valeria",
+          familyName: "Quispe · QR demo",
           birthDate: "1998-04-10",
-          phone: SHARED_PHONE,
+          sex: "F",
+          phone: VALERIA_PHONE,
           docType: "DNI",
           docNumber: "45678920",
         },
         respondent: "patient",
         privacyAccepted: true,
+        // Sin grupo sanguíneo: la clínica de la semilla no lo pregunta.
         health: {
-          bloodGroup: "O+",
           allergies: {
             state: "recorded",
             items: [{ substance: "Penicilina", reaction: "Urticaria", severity: "severa" }],
@@ -3066,7 +3074,8 @@ await db.transaction((tx) =>
           givenNames: "Thiago",
           familyName: "Quispe",
           birthDate: "2019-03-02",
-          phone: SHARED_PHONE,
+          sex: "M",
+          phone: VALERIA_PHONE,
           docType: "DNI",
           docNumber: "78901299",
         },
@@ -3075,7 +3084,7 @@ await db.transaction((tx) =>
           displayName: "Valeria Quispe · QR demo",
           relationship: "guardian",
           relationshipDetail: "Madre",
-          phone: SHARED_PHONE,
+          phone: VALERIA_PHONE,
           docType: "DNI",
           docNumber: "45678920",
         },
@@ -3104,6 +3113,7 @@ await db
             givenNames: "Valeria",
             familyName: "Quispe Rojas",
             birthDate: "1990-01-01",
+            sex: "F",
             phone: "+51987000999",
             docType: "DNI",
             docNumber: "45678920",
