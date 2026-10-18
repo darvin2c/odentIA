@@ -35,4 +35,4 @@ Las compras de Inventario nunca llegaban a Finanzas. Una orden de compra registr
 ## Referencias
 
 - `packages/services/src/finance.ts` (`payPurchaseOrder`, `voidSupplierCreditUse`, `getPurchasesToPay`), `packages/services/src/purchase-balance.ts`, `packages/services/src/inventory.ts` (`cancelPurchaseOrder`).
-- Migraciones `0017_compras_pagadas_y_horario_con_historia` y `0018_…_reglas`.
+- Migraciones `0027_como_nos_conocio_compras_pagadas_y_horario_con_historia` y `0028_compras_pagadas_y_horario_con_historia_reglas`.

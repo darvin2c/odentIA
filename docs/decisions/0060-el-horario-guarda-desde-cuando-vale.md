@@ -35,4 +35,4 @@ La agenda y las reservas solo necesitan el horario vigente; nadie más leía el 
 ## Referencias
 
 - `packages/services/src/availability.ts` (`setProfessionalSchedule`), `packages/services/src/report-agenda.ts` (`agendaMinutes`).
-- Migraciones `0017_compras_pagadas_y_horario_con_historia` y `0018_…_reglas`.
+- Migraciones `0027_como_nos_conocio_compras_pagadas_y_horario_con_historia` y `0028_compras_pagadas_y_horario_con_historia_reglas`.
