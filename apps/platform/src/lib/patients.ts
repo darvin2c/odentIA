@@ -583,6 +583,8 @@ export interface TimelineItem {
   dueAt?: string | null
   /** Motivo de una atención anulada: la historia la muestra con él. */
   voidReason?: string | null
+  /** El periodontograma de la atención: un hecho de ella. */
+  periodontal?: PeriodontalBrief | null
 }
 
 export interface PlanPendingTotal {
@@ -728,6 +730,21 @@ export interface PatientSummary {
       | "createdAt"
     >
   >
+  /** «Encías»: el último periodontograma firmado y el último diagnóstico confirmado (issue 49). */
+  periodontal?: PeriodontalBrief | null
+}
+
+/** El periodontograma de una atención, para nombrarlo donde aparece. */
+export interface PeriodontalBrief {
+  chartId: string
+  encounterId: string
+  date: string
+  /** «Estadio III · Grado B · Generalizada»; null sin diagnóstico confirmado. */
+  classification: string | null
+  bleedingPercent: number | null
+  partial: boolean
+  /** Fecha de la visita del diagnóstico (solo en el Resumen). */
+  classifiedOn?: string | null
 }
 
 export type PatientContactRelationship = "self" | "guardian" | "family" | "other"

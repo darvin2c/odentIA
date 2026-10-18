@@ -236,6 +236,8 @@ it("cerrar exige motivo, diagnóstico, evolución y colegiatura, y firma con su 
     consents: [],
     // Sin cambios en el gráfico, el cierre no firma odontograma.
     odontogram: null,
+    // Sin periodontograma en la atención, el cierre no lo menciona.
+    periodontal: null,
   })
   await expect(f.run((tx) => finalizeEncounter(tx, ...f.args, encounterId))).rejects.toMatchObject({
     code: "CLOSING_INCOMPLETE",
