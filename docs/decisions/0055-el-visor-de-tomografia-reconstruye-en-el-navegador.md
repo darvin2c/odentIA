@@ -13,7 +13,7 @@ La odontóloga necesita ver la tomografía en tres cortes (desde arriba, de fren
 - **Lo que Cornerstone sí aporta, se usa.** Sus códecs WebAssembly ya leen las compresiones (fase 1).
 - **El arco lo propone el visor**, con un polinomio de segundo grado ajustado al esmalte en la banda oclusal (decisión 2), y se corrige arrastrando cinco puntos. Si no se encuentra, se marca con cinco clics.
 - **Los brillos se calculan con cada estudio**: un Otsu de tres clases separa en su histograma el aire, el tejido blando y el tejido duro, y cada brillo sale de esas clases. La CBCT no tiene una escala de grises común entre equipos. Los percentiles sobre todo el cuerpo resultaron frágiles: según el campo de visión, el hueso quedaba negro.
-- **Las medidas guardadas** viven en `imaging_measurement` (decisión 3), en coordenadas del paciente en mm, con quién y cuándo. Quitar una medida la retira; no se borra.
+- **Las medidas guardadas** viven en `imaging_measurement` (decisión 3), en mm dentro del volumen, con quién y cuándo. Quitar una medida la retira; no se borra.
 
 ## Alternativas descartadas
 
