@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  useIsMobile,
 } from "@odentia/ui"
 import { ConfirmDialog, FormDrawer, LoadingState } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -195,7 +196,8 @@ export function DocumentViewerHost({
       >
         <DialogContent
           aria-label={`Ver ${doc.label}`}
-          className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)]"
+          // En el teléfono ocupa toda la pantalla (tablero 5 del lienzo).
+          className="max-h-[92dvh] overflow-y-auto sm:max-w-[min(90vw,80rem)] max-md:top-0 max-md:left-0 max-md:h-dvh max-md:max-h-dvh max-md:max-w-none max-md:translate-x-0 max-md:translate-y-0 max-md:rounded-none max-md:pb-0"
           onKeyDown={(event) => {
             if (arrowsBelongToControl(event.target)) return
             if (event.key === "ArrowLeft" && previous) {
@@ -220,28 +222,30 @@ export function DocumentViewerHost({
                   {sequence.length > 1 && index >= 0 ? ` · ${index + 1} de ${sequence.length}` : ""}
                 </DialogDescription>
               </div>
-              {previous && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  aria-keyshortcuts="ArrowLeft"
-                  onClick={() => onNavigate(previous.id)}
-                >
-                  Anterior
-                </Button>
-              )}
-              {next && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  aria-keyshortcuts="ArrowRight"
-                  onClick={() => onNavigate(next.id)}
-                >
-                  Siguiente
-                </Button>
-              )}
+              <div className="flex gap-2 max-md:hidden">
+                {previous && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-keyshortcuts="ArrowLeft"
+                    onClick={() => onNavigate(previous.id)}
+                  >
+                    Anterior
+                  </Button>
+                )}
+                {next && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-keyshortcuts="ArrowRight"
+                    onClick={() => onNavigate(next.id)}
+                  >
+                    Siguiente
+                  </Button>
+                )}
+              </div>
             </div>
           </DialogHeader>
           <DocumentViewer
@@ -260,6 +264,32 @@ export function DocumentViewerHost({
               await onChanged()
             }}
           />
+          {/* En el teléfono, pasar de una a otra queda fijo abajo, al alcance del pulgar. */}
+          {sequence.length > 1 && index >= 0 ? (
+            <div className="sticky bottom-0 -mx-6 flex items-center justify-between gap-2 border-t bg-popover px-4 py-3 md:hidden">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!previous}
+                onClick={() => previous && onNavigate(previous.id)}
+              >
+                Anterior
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {index + 1} de {sequence.length}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!next}
+                onClick={() => next && onNavigate(next.id)}
+              >
+                Siguiente
+              </Button>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
       {editing && (
@@ -306,6 +336,8 @@ function DocumentViewer({
   onChanged: () => Promise<void>
   onRetired: () => Promise<void>
 }) {
+  // En el teléfono, los ajustes y los detalles empiezan plegados (tablero 5).
+  const phone = useIsMobile()
   const canRead = usePermission("clinical.read")
   // La tomografía no tiene un solo archivo: se abre en su detalle, no por URL.
   const urlQuery = useSignedUrl(patientId, doc.id, "original", !doc.imaging)
@@ -427,7 +459,18 @@ function DocumentViewer({
             adjustments={adjustments}
             className="max-h-[65vh]"
           />
-          <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
+          {phone ? (
+            <details className="rounded-md border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium">
+                Acercar, brillo y contraste
+              </summary>
+              <div className="pt-2">
+                <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
+              </div>
+            </details>
+          ) : (
+            <ImageAdjustControls value={adjustments} onChange={setAdjustments} />
+          )}
         </div>
       ) : isPdfDoc(doc) ? (
         <embed src={url} type="application/pdf" className="h-[70vh] w-full rounded-md border" />
@@ -480,7 +523,7 @@ function DocumentViewer({
         )}
         {/* Solo lo que la imagen tiene (decisión 10): lo vacío no ocupa lugar y
             se agrega con «Piezas y vínculos». */}
-        <details open className="rounded-md border px-3 py-2">
+        <details open={!phone} className="rounded-md border px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium">Detalles del archivo</summary>
           <dl className="grid grid-cols-1 gap-x-4 gap-y-2 pt-2 text-sm">
             <div>
