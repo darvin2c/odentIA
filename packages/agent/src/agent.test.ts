@@ -57,6 +57,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
+import { offTopicReply } from "./decision/route.js"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
 import { FAKE_REPLY_TEXT } from "./fake-model.js"
 import { type AgentRuntime, CONTACT_DAILY_RUN_LIMIT, previewLesson, processAgentRun, simulateAgentSandbox } from "./run.js"
@@ -2775,6 +2776,113 @@ it("quien escribe sin parar pasa al equipo sin llamar al modelo, y los demás si
   const answering = new ScriptedModel(() => toolCall("send_reply", { text: "Hola, dime en qué te ayudo." }, "call-1"))
   expect(await runScripted(answering, other.conversationId, other.messageId)).toBe("done")
   expect(await agentMessages(other.conversationId)).toEqual(["Hola, dime en qué te ayudo."])
+})
+
+it("el tope por persona pasa al equipo una sola vez al día: lo que sigue escribiendo se guarda sin respuesta ni tema nuevo", async () => {
+  const first = await ingestText("tg:tope-una-vez", "evt-tope-1", "Hola otra vez")
+  await ownerDb.insert(agentRunLedger).values(
+    Array.from({ length: CONTACT_DAILY_RUN_LIMIT }, () => ({
+      organizationId: "org_a", conversationId: first.conversationId, model: "fake", status: "ok", startedAt: new Date(), llmCalls: 1,
+    })),
+  )
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
+  expect(await runScripted(model, first.conversationId, first.messageId)).toBe("done")
+  // Un bot sigue escribiendo el mismo día: cada mensaje queda guardado y nada más.
+  const later: string[] = []
+  for (const [i, text] of ["¿Hola?", "Promoción imperdible solo hoy", "¿Hola?"].entries()) {
+    const next = await ingestText("tg:tope-una-vez", `evt-tope-${i + 2}`, text)
+    later.push(next.messageId)
+    expect(await runScripted(model, next.conversationId, next.messageId)).toBe("done")
+  }
+  expect(model.seen).toHaveLength(0)
+  expect(await agentMessages(first.conversationId)).toEqual([HANDOFF_NOTICE])
+  const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ reason: agentHandoff.reason }).from(agentHandoff).where(eq(agentHandoff.conversationId, first.conversationId)))
+  expect(handoffs).toHaveLength(1)
+  const tasks = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ title: crmTask.title }).from(crmTask).where(eq(crmTask.conversationId, first.conversationId)))
+  expect(tasks).toHaveLength(1)
+  const inbound = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ id: message.id }).from(message).where(and(eq(message.conversationId, first.conversationId), eq(message.direction, "in"))))
+  expect(inbound).toHaveLength(4)
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ trigger: agentRunLedger.triggerMessageId, status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, error: agentRunLedger.error })
+      .from(agentRunLedger).where(eq(agentRunLedger.conversationId, first.conversationId)).orderBy(agentRunLedger.startedAt))
+  expect(rows.filter((row) => row.status !== "ok")).toEqual([
+    { trigger: first.messageId, status: "handoff", llmCalls: 0, error: "CONTACT_DAILY_LIMIT" },
+    ...later.map((trigger) => ({ trigger, status: "omitida", llmCalls: 0, error: "tope-por-persona" })),
+  ])
+})
+
+it("lo que no es de la clínica recibe el texto fijo una sola vez al día; después, silencio sin cobro ni tema", async () => {
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline", decisionRoutingEnabled: true }))
+  // Muy seguro de que no es de la clínica, salvo cuando lo último que escribió pregunta por una limpieza.
+  const decision: DecisionModel = {
+    provider: "fake",
+    reportsProbabilities: true,
+    decide: async (state) => {
+      const latest = state.slice(state.indexOf("Contact (latest"))
+      const intent = latest.includes("limpieza") ? "price_or_service_info" : "off_topic"
+      return {
+        answers: [
+          { id: "handoff", kind: "yesno", probability: 0.02 },
+          { id: "intent", kind: "choice", choice: intent, probabilities: { [intent]: 0.97, other: 0.03 }, confidence: 0.97 },
+        ],
+        model: "prueba",
+        usage: null,
+        latencyMs: 1,
+      }
+    },
+  }
+  const writer = new ScriptedModel(() => toolCall("send_reply", { text: "Te cuento lo de la limpieza." }, "fuera-de-tema-limpieza"))
+  const run = async (eventId: string, text: string) => {
+    const inbound = await ingestText("tg:fuera-de-tema", eventId, text)
+    expect(await processAgentRun(appDb, { ...runtime, createModel: async () => writer, createDecisionModel: () => decision }, {
+      msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: inbound.conversationId, messageId: inbound.messageId },
+    })).toBe("done")
+    return inbound
+  }
+  // Lo que salió del agente, en el orden en que salió.
+  const sent = async (conversationId: string) =>
+    (await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ body: message.body }).from(message)
+        .where(and(eq(message.conversationId, conversationId), eq(message.senderKind, "agent")))
+        .orderBy(message.createdAt, message.id))).map((row) => row.body ?? "")
+  const runOf = async (conversationId: string, trigger: string) => {
+    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, error: agentRunLedger.error }).from(agentRunLedger)
+        .where(and(eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.triggerMessageId, trigger))))
+    return row
+  }
+  try {
+    const cfg = await withOrgContext(appDb, "org_a", (tx) => getAgentConfig(tx, "org_a"))
+    const fixed = offTopicReply(cfg.treatment, cfg.personaName, "Clínica", !cfg.disabledFunctions.includes("informar"))
+    const first = await run("evt-fuera-1", "¿Quién ganó el partido de anoche?")
+    expect(await sent(first.conversationId)).toEqual([fixed])
+    expect(await runOf(first.conversationId, first.messageId)).toEqual({ status: "ok", llmCalls: 0, error: null })
+
+    // La respuesta automática de otro negocio, o un bot, sigue escribiendo: no recibe el texto otra vez.
+    const second = await run("evt-fuera-2", "Gracias por su mensaje, en breve le atenderemos.")
+    expect(await sent(first.conversationId)).toEqual([fixed])
+    expect(await runOf(first.conversationId, second.messageId)).toEqual({ status: "omitida", llmCalls: 0, error: "fuera-de-tema-repetido" })
+    expect(writer.seen).toHaveLength(0)
+
+    // Lo de la clínica se sigue atendiendo como siempre.
+    await run("evt-fuera-3", "¿Cuánto cuesta una limpieza?")
+    expect(writer.seen).toHaveLength(1)
+    expect(await sent(first.conversationId)).toEqual([fixed, "Te cuento lo de la limpieza."])
+
+    // Y lo ajeno, el mismo día, sigue sin respuesta.
+    const fourth = await run("evt-fuera-4", "¿Y quién juega mañana?")
+    expect(await sent(first.conversationId)).toEqual([fixed, "Te cuento lo de la limpieza."])
+    expect(await runOf(first.conversationId, fourth.messageId)).toEqual({ status: "omitida", llmCalls: 0, error: "fuera-de-tema-repetido" })
+    // Nada de esto es un tema para el equipo.
+    const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ id: agentHandoff.id }).from(agentHandoff).where(eq(agentHandoff.conversationId, first.conversationId)))
+    expect(handoffs).toEqual([])
+  } finally {
+    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
+  }
 })
 
 it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no como «[adjunto]»", async () => {

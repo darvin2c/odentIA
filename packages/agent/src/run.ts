@@ -8,6 +8,8 @@ import { auditEvent } from "@odentia/db/schema/org"
 import {
   AGENT_MODEL_LABEL,
   type AgentConfig,
+  contactGotAgentTextToday,
+  contactHadRunToday,
   countAgentModelRunsToday,
   countContactModelRunsToday,
   askGeneralPermissionAfterBooking,
@@ -128,6 +130,12 @@ const TEAM_TOOK_OVER = "team-took-over"
  * cada corrida atiende una ráfaga entera de mensajes.
  */
 export const CONTACT_DAILY_RUN_LIMIT = 40
+/** Motivo de la derivación de quien llegó al tope por persona. */
+const CONTACT_DAILY_LIMIT = "CONTACT_DAILY_LIMIT"
+/** Ya pasó hoy al equipo por el tope por persona: lo que siga escribiendo se guarda sin responder. */
+const CONTACT_LIMIT_SILENCED = "tope-por-persona"
+/** Lo que no es de la clínica ya recibió hoy el texto fijo: no se le repite. */
+const OFF_TOPIC_REPEATED = "fuera-de-tema-repetido"
 /** La corrida se pospuso porque la persona seguía escribiendo; no deja fila en el libro. */
 const BURST_WAITING = "burst-waiting"
 
@@ -528,22 +536,29 @@ async function attendAgentRun(
     }
     // Tope por persona: quien escribe sin parar (un bot, una cadena) pasa al
     // equipo antes de agotar el tope diario de la clínica; los demás siguen
-    // atendidos. El agente queda apagado en ese hilo: no hay más corridas.
-    const contactToday = await withOrgContext(db, orgId, (tx) =>
-      countContactModelRunsToday(tx, orgId, toolCtx.contactId),
-    )
-    if (contactToday >= CONTACT_DAILY_RUN_LIMIT) {
+    // atendidos. Derivar no apaga al agente en el hilo (ADR 0050) y cada
+    // mensaje nuevo trae su corrida: el tema y el aviso salen una sola vez por
+    // persona y día, y lo que siga escribiendo ese día queda guardado, sin
+    // respuesta ni tema nuevo. Al día siguiente se la vuelve a atender.
+    const contactLimit = await withOrgContext(db, orgId, async (tx) => {
+      if ((await countContactModelRunsToday(tx, orgId, toolCtx.contactId)) < CONTACT_DAILY_RUN_LIMIT) return null
+      const handedOff = await contactHadRunToday(tx, orgId, toolCtx.contactId, { status: "handoff", error: CONTACT_DAILY_LIMIT })
+      return handedOff ? ("silencio" as const) : ("derivar" as const)
+    })
+    if (contactLimit === "derivar") {
       await performHandoff(toolCtx, `escribió más de ${CONTACT_DAILY_RUN_LIMIT} veces hoy; puede ser un envío automático`)
       await noticeAfterHandoff(toolCtx)
+    }
+    if (contactLimit) {
       await ledger(db, orgId, {
         conversationId,
         triggerMessageId: inboundMessageId,
         model: effectiveModel,
-        status: "handoff",
+        status: contactLimit === "derivar" ? "handoff" : "omitida",
         startedAt,
         endedAt: new Date(),
         llmCalls: 0,
-        error: "CONTACT_DAILY_LIMIT",
+        error: contactLimit === "derivar" ? CONTACT_DAILY_LIMIT : CONTACT_LIMIT_SILENCED,
       })
       return "done"
     }
@@ -602,6 +617,8 @@ async function attendAgentRun(
       const graph = compileAgentGraph(model, toolCtx)
       await graph.invoke({ messages: [], turnCount: 0 }, runtime.callbacks ? { callbacks: runtime.callbacks } : {})
     }
+    // Motivo por el que esta corrida, a propósito, no responde: queda `omitida`.
+    let omitReason: string | null = null
     if (toolCtx.route?.path === "derivar") {
       // Primero el equipo: el caso queda registrado al instante, con su clase,
       // su prioridad y lo que la persona escribió. Después el aviso a la
@@ -619,10 +636,19 @@ async function attendAgentRun(
     } else if (toolCtx.route?.path === "fuera_de_tema") {
       // Nada que ver con la clínica y el modelo de decisión muy seguro: un
       // texto fijo, sin llamar al modelo que escribe. Sale por send_reply,
-      // con el mismo formato del canal y la misma comprobación.
+      // con el mismo formato del canal y la misma comprobación. Como no llama
+      // al modelo no cuenta para ningún tope, así que sale como mucho una vez
+      // por persona y día: si no, un bot o la respuesta automática de otro
+      // negocio lo recibirían sin fin, o quedarían en bucle con él. Después,
+      // silencio: lo que escribe queda guardado y la corrida, omitida.
       const clinic = await publicClinicName(db, orgId)
-      const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
-      await reply?.invoke({ text: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")) })
+      const text = offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar"))
+      if (await withOrgContext(db, orgId, (tx) => contactGotAgentTextToday(tx, orgId, toolCtx.contactId, text))) {
+        omitReason = OFF_TOPIC_REPEATED
+      } else {
+        const reply = makeAgentTools(toolCtx).find((item) => item.name === "send_reply")
+        await reply?.invoke({ text })
+      }
     } else {
       await invokeGraph()
       // Quien preguntó por un servicio concreto queda anotado como oportunidad
@@ -667,7 +693,7 @@ async function attendAgentRun(
     // la campana. Un fallo al comprobarlo no reintenta la corrida: volvería a
     // llamar al modelo.
     const attendedMessageId = inboundMessageId
-    const silent = attendedMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled
+    const silent = attendedMessageId !== null && !toolCtx.handedOff && !toolCtx.replySettled && omitReason === null
     let unanswered =
       silent
         ? await withOrgContext(db, orgId, (tx) =>
@@ -721,9 +747,10 @@ async function attendAgentRun(
       triggerMessageId: inboundMessageId,
       model: effectiveModel,
       // Si el equipo la tomó o cerró mientras el modelo escribía, nada salió:
-      // queda omitida (no es una conversación atendida por el agente).
-      status: toolCtx.handedOff ? "handoff" : toolCtx.takenOver ? "omitida" : unanswered ? "sin_respuesta" : "ok",
-      ...(toolCtx.takenOver ? { error: TEAM_TOOK_OVER } : {}),
+      // queda omitida (no es una conversación atendida por el agente). Lo
+      // mismo cuando la corrida no responde a propósito, con su motivo.
+      status: toolCtx.handedOff ? "handoff" : toolCtx.takenOver || omitReason ? "omitida" : unanswered ? "sin_respuesta" : "ok",
+      ...(toolCtx.takenOver ? { error: TEAM_TOOK_OVER } : omitReason ? { error: omitReason } : {}),
       startedAt,
       endedAt: new Date(),
       latencyMs: Date.now() - startedAt.getTime(),
@@ -734,8 +761,9 @@ async function attendAgentRun(
       llmCalls: toolCtx.usage.calls,
       toolsUsed: toolCtx.toolsUsed,
     })
-    // Constancia de la ráfaga: solo si la corrida respondió o derivó. Una que
-    // quedó sin respuesta no cubre nada y las corridas del resto se ejecutan.
+    // Constancia de la ráfaga: solo si la corrida respondió, derivó o calló a
+    // propósito (`omitReason`). Una que quedó sin respuesta no cubre nada y
+    // las corridas del resto se ejecutan.
     if (toolCtx.handedOff || !unanswered) {
       for (const coveredId of coveredMessageIds) {
         await ledger(db, orgId, {
