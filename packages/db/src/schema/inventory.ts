@@ -252,6 +252,10 @@ export const stockMovement = pgTable(
     index("stock_movement_org_product_idx").on(table.organizationId, table.productId),
     index("stock_movement_org_warehouse_idx").on(table.organizationId, table.warehouseId),
     index("stock_movement_org_patient_idx").on(table.organizationId, table.patientId),
+    // Lo recibido de cada compra (saldo con el proveedor), sin recorrer los consumos clínicos.
+    index("stock_movement_org_purchase_idx")
+      .on(table.organizationId, table.purchaseOrderId)
+      .where(sql`${table.purchaseOrderId} is not null`),
     foreignKey({
       columns: [table.organizationId, table.patientId],
       foreignColumns: [patient.organizationId, patient.id],
