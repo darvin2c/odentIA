@@ -1,6 +1,6 @@
 # 0022 · La clínica elige entre dos modelos de odentIA
 
-Fecha: 2026-10-14 · Estado: aceptada · Sustituye a [0016](0016-proveedor-llm-por-organizacion.md)
+Fecha: 2026-10-14 · Estado: sustituida por [0052](0052-un-solo-modelo-para-el-agente.md): un solo modelo, que elige odentIA · Sustituye a [0016](0016-proveedor-llm-por-organizacion.md)
 
 ## Problema
 

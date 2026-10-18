@@ -1,4 +1,3 @@
-import type { AgentLlm } from "./crm"
 
 /**
  * La urgencia de un caso que pasó al equipo, en una palabra. La insignia
@@ -243,7 +242,7 @@ export interface AgentLearned {
 export type AgentProviderProblem = "rechazado" | "sin_saldo" | "sin_configurar"
 
 /**
- * La cuenta del modelo es de odentIA (ADR 0022): la clínica no puede
+ * La cuenta del modelo es de odentIA (ADR 0052): la clínica no puede
  * arreglar una clave, un saldo o un rechazo, así que nunca ve cuál fue. Se
  * dice qué pasa con los mensajes y que odentIA ya lo sabe (el caso
  * automático en Soporte lleva el motivo técnico).
@@ -256,28 +255,19 @@ export const AGENT_MODEL_DOWN = {
 } as const
 
 /**
- * «El modelo responde» (`GET /api/agent/model`): el modelo elegido y, si no
- * responde, si el otro sí. El servidor lo guarda 10 minutos; nunca entrega el
- * motivo técnico.
+ * «El modelo responde» (`GET /api/agent/model`). El servidor lo guarda 10
+ * minutos; nunca entrega el motivo técnico.
  */
 export interface AgentModelStatus {
-  llm: AgentLlm
   responds: boolean
-  other: { llm: AgentLlm; responds: boolean } | null
   checkedAt: string
 }
 
 export const MODEL_CHECK_TEXT = {
   checking: "Comprobando el modelo…",
-  otherWorks: "El modelo de odentIA no está disponible ahora. Ya avisamos a odentIA; mientras tanto puedes usar el otro.",
-  noneWorks: "Ningún modelo de odentIA responde ahora. Ya avisamos a odentIA y te escribimos cuando vuelva.",
+  down: "El modelo de odentIA no responde ahora. Ya avisamos a odentIA y te escribimos cuando vuelva.",
   unreachable: "No pudimos comprobar el modelo. Revisa tu conexión y vuelve a intentarlo.",
 } as const
-
-/** Lo que dice la comprobación cuando el modelo elegido no responde. */
-export function modelDownText(status: AgentModelStatus): string {
-  return status.other?.responds ? MODEL_CHECK_TEXT.otherWorks : MODEL_CHECK_TEXT.noneWorks
-}
 
 export interface AgentOverview {
   enabled: boolean

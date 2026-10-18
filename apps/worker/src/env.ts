@@ -36,8 +36,8 @@ const envSchema = z.object({
   MAILBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
   CHANNEL_SENDER_MODE: z.enum(["mock", "live"]).default("mock"),
   /**
-   * Cuentas de odentIA para los modelos que elige la clínica (ADR 0022). Sin
-   * la clave del proveedor del modelo elegido, el agente deriva y lo avisa.
+   * Cuenta de odentIA para el modelo del agente, uno solo (ADR 0052). Sin la
+   * clave, el agente deriva y lo avisa.
    * `LLM_MODEL=fake`: modelo determinista de desarrollo y pruebas (otro valor no tiene efecto).
    */
   LLM_MODEL: z.string().optional(),
@@ -45,8 +45,6 @@ const envSchema = z.object({
   NODE_ENV: z.string().optional(),
   LLM_OPENAI_API_KEY: z.string().optional().default(""),
   LLM_OPENAI_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
-  LLM_ANTHROPIC_API_KEY: z.string().optional().default(""),
-  LLM_ANTHROPIC_BASE_URL: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
   /** Tiempo límite por intento y reintentos del cliente del modelo. */
   LLM_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(60_000),
   LLM_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),

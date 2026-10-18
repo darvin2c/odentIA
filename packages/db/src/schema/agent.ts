@@ -301,7 +301,7 @@ export const agentRunLedger = pgTable(
     outputTokens: integer("output_tokens"),
     /** Parte de `input_tokens` servida desde la caché del proveedor. */
     cachedInputTokens: integer("cached_input_tokens"),
-    /** Parte de `input_tokens` que se escribió en la caché (Anthropic la cobra aparte). */
+    /** Parte de `input_tokens` que se escribió en la caché (el proveedor la cobra aparte). */
     cacheWriteTokens: integer("cache_write_tokens"),
     llmCalls: integer("llm_calls"),
     /** Millonésimas de USD: la suma de las filas de `ai_usage` de la corrida. */

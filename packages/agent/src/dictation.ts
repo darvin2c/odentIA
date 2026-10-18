@@ -10,7 +10,6 @@ import {
   type DiagnosisSystemKey,
   type DictationDraft,
   findingDiagnosisCode,
-  getAgentConfig,
   getDictationCatalog,
   getOrgLocale,
   operationAgentSchema,
@@ -103,13 +102,12 @@ function systemPrompt(input: { services: string[]; diagnosisList: string }): str
 }
 
 /**
- * Cómo se marca el fin de la parte fija para la caché de cada proveedor.
- * Anthropic solo guarda lo marcado. OpenAI admite el mismo corte en Chat
- * Completions; con `explicitCache` (`createConfiguredChatModel`) guarda solo
- * hasta ahí y no escribe, además, lo de cada pausa, que nunca se vuelve a leer.
+ * Cómo se marca el fin de la parte fija para la caché del proveedor. OpenAI
+ * admite el corte en Chat Completions; con `explicitCache`
+ * (`createConfiguredChatModel`) guarda solo hasta ahí y no escribe, además, lo
+ * de cada pausa, que nunca se vuelve a leer.
  */
 const CACHE_MARK: Partial<Record<LlmSpec["provider"], Record<string, unknown>>> = {
-  anthropic: { cache_control: { type: "ephemeral" } },
   openai: { prompt_cache_breakpoint: { mode: "explicit" } },
 }
 
@@ -430,10 +428,9 @@ export async function extractDictation(
     throw new ServiceError("VALIDATION", 400, `El dictado admite hasta ${DICTATION_CHARS} caracteres por vez; termina y sigue con otro`)
   }
   const { spec, services, diagnosisSystem, zone } = await withOrgContext(db, input.orgId, async (tx) => {
-    const cfg = await getAgentConfig(tx, input.orgId)
     const catalog = await getDictationCatalog(tx, input.orgId)
     return {
-      spec: resolveLlmSpec(cfg, deps.platform),
+      spec: resolveLlmSpec(deps.platform),
       services: catalog.services.map((service) => service.name),
       diagnosisSystem: catalog.diagnosisSystem,
       zone: await getOrgLocale(tx, input.orgId),

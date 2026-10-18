@@ -16,7 +16,7 @@ export const HOME_FAQ: (FaqItem & { pending?: boolean })[] = [
   },
   {
     q: "¿Qué inteligencia artificial usa?",
-    a: "Tu clínica elige entre los modelos de OpenAI y de Anthropic que odentIA pone a su disposición. No necesitas una cuenta propia ni una clave.",
+    a: "ChatGPT 6, de OpenAI, con la cuenta de odentIA. No necesitas una cuenta propia ni una clave.",
   },
   // Pendiente de confirmar: se muestra con su marcador y queda fuera de los datos estructurados.
   {

@@ -1322,7 +1322,6 @@ await settleTask(db, ORG_A, settledDemo.id, "Rosa Quispe confirmó su cita")
 // --- Agente A (B sin fila: ejercita el default deshabilitado) ---
 await upsertAgentConfig(db, ORG_A, {
   enabled: true,
-  llm: "chatgpt_6",
   handoffKeywords: ["humano", "asesor", "recepcion"],
   maxTurns: 10,
   // La voz de la clínica y una indicación por función: lo que se ve en Agente › Recepción.
@@ -3371,7 +3370,7 @@ await db.transaction(async (tx) => {
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no
 // salen de ningún proveedor. Jev queda sin costo: no tiene precio cargado.
 await db.insert(aiUsage).values([
-  { organizationId: ORG_A, origin: "recepcion", provider: "anthropic", model: "claude-haiku-5-5", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
+  { organizationId: ORG_A, origin: "recepcion", provider: "openai", model: "gpt-6-luna", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
   { organizationId: ORG_A, origin: "dictado", provider: "openai", model: "gpt-6-luna", calls: 14, inputTokens: 28_000, outputTokens: 4_200, costMicros: 4_900 },
   { organizationId: ORG_A, origin: "probar", provider: "openai", model: "gpt-6-luna", calls: 9, inputTokens: 27_000, outputTokens: 900, costMicros: 3_150 },
   { organizationId: ORG_A, origin: "transcripcion", provider: "transcripcion", model: "whisper-1", calls: 6, audioSeconds: 240, costMicros: 24_000 },

@@ -143,14 +143,12 @@ Una sola: si la petición no la trae, Better Auth vuelve al límite compartido.
 
 ### Modelo del agente
 
-La clínica elige «ChatGPT 6» o «Claude 5.5» y odentIA pone la cuenta
-(`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`). API y
-worker leen `LLM_OPENAI_API_KEY` y `LLM_ANTHROPIC_API_KEY`; sin la del proveedor
-del modelo elegido, Recepción no se enciende («El modelo responde»), el agente
-deriva cada caso y Soporte del back-office recibe el caso automático «Modelo sin
-responder» con la variable que falta. La clínica nunca ve la variable.
-`LLM_OPENAI_BASE_URL` y `LLM_ANTHROPIC_BASE_URL` solo hacen falta con una
-pasarela propia. `LLM_MODEL=fake` es solo para desarrollo y pruebas: con
+Un solo modelo para toda clínica, «ChatGPT 6», y odentIA pone la cuenta
+(`docs/decisions/0052-un-solo-modelo-para-el-agente.md`). API y worker leen
+`LLM_OPENAI_API_KEY`; sin ella, Recepción no se enciende («El modelo responde»),
+el agente deriva cada caso y Soporte del back-office recibe el caso automático
+«Modelo sin responder» con la variable que falta. La clínica nunca ve la
+variable. `LLM_OPENAI_BASE_URL` solo hace falta con una pasarela propia. `LLM_MODEL=fake` es solo para desarrollo y pruebas: con
 `NODE_ENV=production` y canales reales (`CHANNEL_SENDER_MODE=live` en el worker,
 `CHANNEL_VALIDATE_EXTERNAL` distinto de `false` en la API) ni la API ni el worker
 arrancan con él.

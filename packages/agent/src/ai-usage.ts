@@ -6,7 +6,7 @@ import { type AiUsageEntry, recordAiUsage } from "@odentia/services"
 /**
  * Precio de lista de un modelo en USD: por millón de tokens o por minuto de
  * audio. `cachedInput` es lo servido desde la caché y `cacheWrite`, lo que se
- * escribe en ella (Anthropic y OpenAI lo cobran aparte); sin ellos vale `input`.
+ * escribe en ella (el proveedor los cobra aparte); sin ellos vale `input`.
  */
 interface ModelPrice {
   input?: number
@@ -21,9 +21,7 @@ interface ModelPrice {
  * ADR 0031. Un modelo sin fila deja su uso con costo null: nunca 0 ni un
  * estimado. Si un proveedor cambia su precio, se cambia aquí; lo ya
  * registrado conserva el costo de su momento.
- * - claude-haiku-5-5: precio de Anthropic hasta 100K tokens de entrada por
- *   llamada (el agente queda muy por debajo); caché: lectura 0,1× y
- *   escritura 1,25× de la entrada.
+
  * - gpt-6-luna: el de la página de precios de OpenAI, leída el 2026-10-17;
  *   caché: lectura 0,1× y escritura 1,25× de la entrada. Chat Completions
  *   cobra la escritura (medido el 2026-10-17, ADR 0012). Vale también para
@@ -34,7 +32,7 @@ interface ModelPrice {
  *   docs.typesafe.ai/models, leído el 2026-10-17; la salida no se cobra.
  */
 export const AI_PRICES: Record<string, ModelPrice> = {
-  "claude-haiku-5-5": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
+
   "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
   "jev-1.13.0": { input: 0.042, output: 0 },
   "text-embedding-3-small": { input: 0.02 },

@@ -14,7 +14,7 @@ import { MailPanel } from "../../components/integrations/mail-panel"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import type { AgentModelStatus } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
-import { type AgentConfig, type ConnectionItem, usePermission } from "../../lib/crm"
+import { type ConnectionItem, usePermission } from "../../lib/crm"
 import {
   type ChannelRow,
   channelRows,
@@ -81,7 +81,6 @@ function IntegrationsPage() {
   const canWrite = usePermission("settings.write")
   const canSeeMail = usePermission("conversations.read")
   const canSeeAgent = usePermission("agent.read")
-  const canChangeModel = usePermission("agent.write")
   const locale = useOrgLocale()
   const search = Route.useSearch()
   // El aviso es el de la llegada: no cambia aunque después cambie la dirección.
@@ -105,12 +104,6 @@ function IntegrationsPage() {
     queryKey: ["mail"],
     queryFn: () => apiFetch<{ data: MailState }>("/api/mail/connections"),
     enabled: canRead && canSeeMail,
-    retry: 1,
-  })
-  const configQuery = useQuery({
-    queryKey: ["agent-config"],
-    queryFn: () => apiFetch<{ data: AgentConfig }>("/api/agent/config"),
-    enabled: canRead && canSeeAgent,
     retry: 1,
   })
   // «Responde» o «No responde»: la misma comprobación que el encendido (10 minutos en el servidor).
@@ -141,7 +134,7 @@ function IntegrationsPage() {
   const webchats = webchatQuery.data ? webchatRows(webchatQuery.data.data, lastInboundOf, since) : null
   const mailboxes = mailQuery.data ? mailRows(mailQuery.data.data, lastInboundOf, since) : null
   // Mientras se comprueba, la fila lo dice; la página no espera a la llamada al modelo.
-  const model = configQuery.data ? modelRow(configQuery.data.data, modelQuery.data?.data) : null
+  const model = modelRow(modelQuery.data?.data)
 
   const panelChannelRow =
     panel?.kind === "channel"
@@ -175,15 +168,11 @@ function IntegrationsPage() {
     connectionsQuery,
     webchatQuery,
     ...(canSeeMail ? [mailQuery] : []),
-    ...(canSeeAgent ? [configQuery, modelQuery] : []),
+    ...(canSeeAgent ? [modelQuery] : []),
   ]
   const failed = tried.filter(neverLoaded)
   const loading = tried.some((query) => query !== modelQuery && query.isPending)
-  const modelFailed = neverLoaded(configQuery) || neverLoaded(modelQuery)
-  // «Cambiar» solo se ofrece a quien puede abrir esa pantalla.
-  const changeModel: IntegrationAction | null = canChangeModel
-    ? { label: "Cambiar", emphasis: "secondary", to: "/settings/integrations/model" }
-    : null
+  const modelFailed = neverLoaded(modelQuery)
 
   /** Lo que ofrece cada fila. Un enlace o una acción solo se ofrece a quien puede usarla. */
   function channelActions(row: ChannelRow): IntegrationAction[] {
@@ -343,11 +332,7 @@ function IntegrationsPage() {
 
       {!canSeeAgent || modelFailed ? null : (
         <IntegrationBlock title="Inteligencia artificial">
-          {model ? (
-            <IntegrationRow row={model} actions={changeModel ? [changeModel] : []} />
-          ) : (
-            <IntegrationRowsSkeleton rows={1} />
-          )}
+          <IntegrationRow row={model} actions={[]} />
         </IntegrationBlock>
       )}
 

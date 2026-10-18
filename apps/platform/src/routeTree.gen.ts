@@ -67,7 +67,6 @@ import { Route as OrgSettingsSpecialtiesRouteImport } from './routes/_org/settin
 import { Route as OrgSettingsTeamRouteImport } from './routes/_org/settings.team'
 import { Route as OrgSettingsWebchatRouteImport } from './routes/_org/settings.webchat'
 import { Route as OrgSettingsIntegrationsIndexRouteImport } from './routes/_org/settings.integrations.index'
-import { Route as OrgSettingsIntegrationsModelRouteImport } from './routes/_org/settings.integrations.model'
 import { Route as OrgSettingsIntegrationsWebchatRouteImport } from './routes/_org/settings.integrations.webchat'
 import { Route as OrgSettingsIntegrationsWhatsappRouteImport } from './routes/_org/settings.integrations.whatsapp'
 import { Route as OrgPatientsPatientIdEncountersEncounterIdRouteImport } from './routes/_org/patients.$patientId.encounters.$encounterId'
@@ -372,12 +371,6 @@ const OrgSettingsIntegrationsIndexRoute =
     path: '/integrations/',
     getParentRoute: () => OrgSettingsRoute,
   } as any)
-const OrgSettingsIntegrationsModelRoute =
-  OrgSettingsIntegrationsModelRouteImport.update({
-    id: '/integrations/model',
-    path: '/integrations/model',
-    getParentRoute: () => OrgSettingsRoute,
-  } as any)
 const OrgSettingsIntegrationsWebchatRoute =
   OrgSettingsIntegrationsWebchatRouteImport.update({
     id: '/integrations/webchat',
@@ -484,7 +477,6 @@ export interface FileRoutesByFullPath {
   '/people/': typeof OrgPeopleIndexRoute
   '/services/': typeof OrgServicesIndexRoute
   '/settings/': typeof OrgSettingsIndexRoute
-  '/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
   '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
   '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
   '/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
@@ -550,7 +542,6 @@ export interface FileRoutesByTo {
   '/people': typeof OrgPeopleIndexRoute
   '/services': typeof OrgServicesIndexRoute
   '/settings': typeof OrgSettingsIndexRoute
-  '/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
   '/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
   '/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
   '/settings/integrations': typeof OrgSettingsIntegrationsIndexRoute
@@ -620,7 +611,6 @@ export interface FileRoutesById {
   '/_org/people/': typeof OrgPeopleIndexRoute
   '/_org/services/': typeof OrgServicesIndexRoute
   '/_org/settings/': typeof OrgSettingsIndexRoute
-  '/_org/settings/integrations/model': typeof OrgSettingsIntegrationsModelRoute
   '/_org/settings/integrations/webchat': typeof OrgSettingsIntegrationsWebchatRoute
   '/_org/settings/integrations/whatsapp': typeof OrgSettingsIntegrationsWhatsappRoute
   '/_org/settings/integrations/': typeof OrgSettingsIntegrationsIndexRoute
@@ -690,7 +680,6 @@ export interface FileRouteTypes {
     | '/people/'
     | '/services/'
     | '/settings/'
-    | '/settings/integrations/model'
     | '/settings/integrations/webchat'
     | '/settings/integrations/whatsapp'
     | '/settings/integrations/'
@@ -756,7 +745,6 @@ export interface FileRouteTypes {
     | '/people'
     | '/services'
     | '/settings'
-    | '/settings/integrations/model'
     | '/settings/integrations/webchat'
     | '/settings/integrations/whatsapp'
     | '/settings/integrations'
@@ -825,7 +813,6 @@ export interface FileRouteTypes {
     | '/_org/people/'
     | '/_org/services/'
     | '/_org/settings/'
-    | '/_org/settings/integrations/model'
     | '/_org/settings/integrations/webchat'
     | '/_org/settings/integrations/whatsapp'
     | '/_org/settings/integrations/'
@@ -1256,13 +1243,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgSettingsIntegrationsIndexRouteImport
       parentRoute: typeof OrgSettingsRoute
     }
-    '/_org/settings/integrations/model': {
-      id: '/_org/settings/integrations/model'
-      path: '/integrations/model'
-      fullPath: '/settings/integrations/model'
-      preLoaderRoute: typeof OrgSettingsIntegrationsModelRouteImport
-      parentRoute: typeof OrgSettingsRoute
-    }
     '/_org/settings/integrations/webchat': {
       id: '/_org/settings/integrations/webchat'
       path: '/integrations/webchat'
@@ -1367,7 +1347,6 @@ interface OrgSettingsRouteChildren {
   OrgSettingsTeamRoute: typeof OrgSettingsTeamRoute
   OrgSettingsWebchatRoute: typeof OrgSettingsWebchatRoute
   OrgSettingsIndexRoute: typeof OrgSettingsIndexRoute
-  OrgSettingsIntegrationsModelRoute: typeof OrgSettingsIntegrationsModelRoute
   OrgSettingsIntegrationsWebchatRoute: typeof OrgSettingsIntegrationsWebchatRoute
   OrgSettingsIntegrationsWhatsappRoute: typeof OrgSettingsIntegrationsWhatsappRoute
   OrgSettingsIntegrationsIndexRoute: typeof OrgSettingsIntegrationsIndexRoute
@@ -1390,7 +1369,6 @@ const OrgSettingsRouteChildren: OrgSettingsRouteChildren = {
   OrgSettingsTeamRoute: OrgSettingsTeamRoute,
   OrgSettingsWebchatRoute: OrgSettingsWebchatRoute,
   OrgSettingsIndexRoute: OrgSettingsIndexRoute,
-  OrgSettingsIntegrationsModelRoute: OrgSettingsIntegrationsModelRoute,
   OrgSettingsIntegrationsWebchatRoute: OrgSettingsIntegrationsWebchatRoute,
   OrgSettingsIntegrationsWhatsappRoute: OrgSettingsIntegrationsWhatsappRoute,
   OrgSettingsIntegrationsIndexRoute: OrgSettingsIntegrationsIndexRoute,

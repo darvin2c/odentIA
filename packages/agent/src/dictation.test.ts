@@ -192,19 +192,17 @@ describe("lo que recibe el modelo en cada pausa", () => {
     })
 
   it("la parte fija es igual en todas las pausas y va marcada para la caché; la fecha va con lo dictado", () => {
-    for (const provider of ["anthropic", "openai"] as const) {
-      const [first, firstHuman] = ask(provider, NOW, "Viene por dolor.")
-      const [later, laterHuman] = ask(provider, new Date(NOW.getTime() + 61_234), "Control en 6 meses.")
-      // Una pausa un minuto después repite la parte fija tal cual: la caché del proveedor la lee.
-      expect(later?.content).toEqual(first?.content)
-      const [block] = (first?.content ?? []) as Array<Record<string, unknown>>
-      expect(block).toMatchObject(provider === "anthropic" ? { cache_control: { type: "ephemeral" } } : { prompt_cache_breakpoint: { mode: "explicit" } })
-      expect(String(block?.["text"])).not.toContain("2026")
-      expect(firstHuman?.content).toContain("2026-10-12T15:00:00.000Z")
-      expect(laterHuman?.content).toContain("2026-10-12T15:01:01.234Z")
-      expect(laterHuman?.content).toContain("Lo nuevo que dictó:\n«Control en 6 meses.»")
-    }
+    const [first, firstHuman] = ask("openai", NOW, "Viene por dolor.")
+    const [later, laterHuman] = ask("openai", new Date(NOW.getTime() + 61_234), "Control en 6 meses.")
+    // Una pausa un minuto después repite la parte fija tal cual: la caché del proveedor la lee.
+    expect(later?.content).toEqual(first?.content)
+    const [block] = (first?.content ?? []) as Array<Record<string, unknown>>
+    expect(block).toMatchObject({ prompt_cache_breakpoint: { mode: "explicit" } })
+    expect(String(block?.["text"])).not.toContain("2026")
+    expect(firstHuman?.content).toContain("2026-10-12T15:00:00.000Z")
+    expect(laterHuman?.content).toContain("2026-10-12T15:01:01.234Z")
+    expect(laterHuman?.content).toContain("Lo nuevo que dictó:\n«Control en 6 meses.»")
     // Un modelo sin caché (el de demostración) recibe el mismo texto, sin marca.
-    expect(ask("fake", NOW, "Viene por dolor.")[0]?.content).toBe(((ask("anthropic", NOW, "x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
+    expect(ask("fake", NOW, "Viene por dolor.")[0]?.content).toBe(((ask("openai", NOW, "x")[0]?.content ?? []) as Array<{ text: string }>)[0]?.text)
   })
 })

@@ -312,9 +312,9 @@ describe("resumen del agente", () => {
     await run((tx) => upsertAgentConfig(tx, OTHER, { tone: "neutro" }), OTHER)
     expect(await provider()).toEqual({ problem: "rechazado", at: failedAt.toISOString() })
     // Una comprobación anterior al fallo, o una que dice que no responde, no lo retira.
-    const asked: string[] = []
-    const check = (responds: boolean, checkedAt: Date): AgentModelCheck => async (llm) => {
-      asked.push(llm)
+    let asked = 0
+    const check = (responds: boolean, checkedAt: Date): AgentModelCheck => async () => {
+      asked += 1
       return { responds, checkedAt: checkedAt.toISOString() }
     }
     expect((await provider(check(true, new Date(failedAt.getTime() - 1000)))).problem).toBe("rechazado")
@@ -323,13 +323,13 @@ describe("resumen del agente", () => {
     expect((await provider(async () => { throw new Error("sin red") })).problem).toBe("rechazado")
     // El modelo responde después del fallo: el aviso se va.
     expect(await provider(check(true, new Date()))).toEqual({ problem: null, at: null })
-    expect(asked).toEqual(["chatgpt_6", "chatgpt_6", "chatgpt_6"])
+    expect(asked).toBe(3)
   })
 
   it("encender exige un modelo que responda; los demás ajustes no lo comprueban", async () => {
-    const asked: string[] = []
-    const check = (responds: boolean): AgentModelCheck => async (llm) => {
-      asked.push(llm)
+    let asked = 0
+    const check = (responds: boolean): AgentModelCheck => async () => {
+      asked += 1
       return { responds, checkedAt: new Date().toISOString() }
     }
     await expect(run((tx) => upsertAgentConfig(tx, OTHER, { enabled: true }, { modelCheck: check(false) }), OTHER)).rejects.toMatchObject({
@@ -337,20 +337,11 @@ describe("resumen del agente", () => {
       status: 409,
     })
     expect((await run((tx) => getAgentConfig(tx, OTHER), OTHER)).enabled).toBe(false)
-    // Encender con otro modelo comprueba ese.
-    await expect(run((tx) => upsertAgentConfig(tx, OTHER, { enabled: true, llm: "claude_5_5" }, { modelCheck: check(false) }), OTHER)).rejects.toMatchObject({
-      code: MODEL_NOT_RESPONDING,
-    })
-    expect((await run((tx) => getAgentConfig(tx, OTHER), OTHER)).llm).toBe("chatgpt_6")
     expect((await run((tx) => upsertAgentConfig(tx, OTHER, { enabled: true }, { modelCheck: check(true) }), OTHER)).enabled).toBe(true)
-    // Encendido, cambiar a un modelo que no responde también se rechaza.
-    await expect(run((tx) => upsertAgentConfig(tx, OTHER, { llm: "claude_5_5" }, { modelCheck: check(false) }), OTHER)).rejects.toMatchObject({
-      code: MODEL_NOT_RESPONDING,
-    })
-    // Apagar o cambiar el tono no llama al modelo.
+    // Encendido, cambiar el tono o apagar no llama al modelo.
     await run((tx) => upsertAgentConfig(tx, OTHER, { tone: "formal" }, { modelCheck: check(false) }), OTHER)
     await run((tx) => upsertAgentConfig(tx, OTHER, { enabled: false }, { modelCheck: check(false) }), OTHER)
-    expect(asked).toEqual(["chatgpt_6", "claude_5_5", "chatgpt_6", "claude_5_5"])
+    expect(asked).toBe(2)
     expect((await run((tx) => getAgentConfig(tx, OTHER), OTHER)).enabled).toBe(false)
   })
 

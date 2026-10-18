@@ -250,9 +250,7 @@ const PLATFORM_PATH_RULES: PlatformPathRule[] = [
   // La dirección vieja de «Pendientes» solo redirige; conserva la misma regla.
   { prefix: "/agent/approvals", permissions: ["agent.read", "agent.decide"] },
   { prefix: "/agent", permissions: ["agent.read"] },
-  // Regla específica antes de la genérica: el modelo del agente se abre desde
-  // Integraciones, pero lo cambia quien administra el agente.
-  { prefix: "/settings/integrations/model", permissions: ["agent.write"] },
+
   // Reglas específicas antes de la genérica: etapas de venta y campos de
   // contacto son parte del trabajo diario de ventas; los define también quien
   // trabaja con oportunidades y contactos (`crm.write`), no solo quien configura.

@@ -1,5 +1,5 @@
-import { type AgentModelStatus, MODEL_CHECK_TEXT, modelDownText } from "./agent"
-import { type AgentConfig, agentLlmLabel, type ConnectionItem } from "./crm"
+import { type AgentModelStatus, MODEL_CHECK_TEXT } from "./agent"
+import { AGENT_MODEL_LABEL, type ConnectionItem } from "./crm"
 
 /**
  * Integraciones (Configuración): lo que se conecta una vez. Aquí vive lo que la
@@ -591,14 +591,13 @@ export function mailRows(
  * El modelo con la misma comprobación que el encendido de Recepción: una
  * llamada mínima que hace el servidor. Sin ella todavía, la fila dice que se
  * está comprobando y no afirma nada. Nunca dice por qué no responde: eso es
- * de odentIA.
+ * de odentIA, que también lo arregla; por eso la fila no ofrece acciones.
  */
-export function modelRow(config: Pick<AgentConfig, "llm">, model: AgentModelStatus | undefined): IntegrationRowModel {
-  const account = agentLlmLabel(config.llm)
-  const common = { ...base("model", "model"), review: [], detail: { kind: "account" as const, account, activity: null } }
+export function modelRow(model: AgentModelStatus | undefined): IntegrationRowModel {
+  const common = { ...base("model", "model"), review: [], detail: { kind: "account" as const, account: AGENT_MODEL_LABEL, activity: null } }
   if (!model) return { ...common, tone: "off", status: MODEL_CHECK_TEXT.checking, problem: null }
   if (model.responds) return { ...common, tone: "ok", status: "Responde", problem: null }
-  return { ...common, tone: "attention", status: "No responde", problem: modelDownText(model) }
+  return { ...common, tone: "attention", status: "No responde", problem: MODEL_CHECK_TEXT.down }
 }
 
 /* ---------- Avisos que llegan en la dirección tras autorizar un buzón ---------- */

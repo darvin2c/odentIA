@@ -1,15 +1,15 @@
 import {
   type AgentModelStatus,
-  checkAgentModels,
   createModelChecker,
   describeProviderProblem,
+  llmModelName,
   meterAiUse,
   type ModelChecker,
   type ModelCheckResult,
   type PlatformLlm,
 } from "@odentia/agent"
-import { type Db, withOrgContext } from "@odentia/db"
-import { AGENT_LLMS, type AgentLlm, type AgentModelCheck, getAgentConfig, reportModelOutage } from "@odentia/services"
+import type { Db } from "@odentia/db"
+import { AGENT_MODEL_LABEL, type AgentModelCheck, reportModelOutage } from "@odentia/services"
 import type { Context } from "hono"
 import { errorBody } from "./error.js"
 
@@ -41,28 +41,23 @@ export function modelCheckerOf(deps: AgentModelDeps): ModelChecker {
   return checker
 }
 
-const labelOf = (llm: AgentLlm) => AGENT_LLMS.find((option) => option.id === llm)?.label ?? llm
-
-async function reportFailed(deps: AgentModelDeps, orgId: string, failed: ModelCheckResult[]): Promise<void> {
-  for (const result of failed) {
-    if (!result.problem) continue
-    // El detalle técnico va al registro y a Soporte; nunca a la pantalla.
-    console.error(`agente: el modelo ${result.llm} no responde (${result.problem.code}: ${result.problem.detail})`)
-    if (!deps.ownerDb) continue
-    await reportModelOutage(deps.ownerDb, {
-      orgId,
-      llm: result.llm,
-      llmLabel: labelOf(result.llm),
-      code: result.problem.code,
-      detail: result.problem.detail,
-      at: new Date(result.checkedAt),
-    }).catch((error: unknown) => {
-      console.error(`agente: caso «Modelo sin responder» sin abrir (${error instanceof Error ? error.message : String(error)})`)
-    })
-  }
+async function reportFailed(deps: AgentModelDeps, orgId: string, result: ModelCheckResult): Promise<void> {
+  if (!result.problem) return
+  // El detalle técnico va al registro y a Soporte; nunca a la pantalla.
+  console.error(`agente: el modelo ${result.model} no responde (${result.problem.code}: ${result.problem.detail})`)
+  if (!deps.ownerDb) return
+  await reportModelOutage(deps.ownerDb, {
+    orgId,
+    llm: result.model,
+    llmLabel: AGENT_MODEL_LABEL,
+    code: result.problem.code,
+    detail: result.problem.detail,
+    at: new Date(result.checkedAt),
+  }).catch((error: unknown) => {
+    console.error(`agente: caso «Modelo sin responder» sin abrir (${error instanceof Error ? error.message : String(error)})`)
+  })
 }
 
-/** El modelo elegido y, si no responde, el otro: lo que dibuja el cajón y la fila de Integraciones. */
 /** «Volver a comprobar» llama al modelo como mucho una vez por minuto y clínica; antes, responde lo guardado. */
 export const FRESH_MODEL_CHECK_GAP_MS = 60_000
 
@@ -83,26 +78,22 @@ export function takeFreshModelCheck(checker: ModelChecker, orgId: string, now = 
   return true
 }
 
-export async function checkOrgModel(
-  deps: AgentModelDeps,
-  orgId: string,
-  llm: AgentLlm,
-  options: { fresh?: boolean; now?: number } = {},
-): Promise<AgentModelStatus> {
+/** Si el modelo responde: lo que dibuja el cajón y la fila de Integraciones. */
+export async function checkOrgModel(deps: AgentModelDeps, orgId: string, options: { fresh?: boolean; now?: number } = {}): Promise<AgentModelStatus> {
   const checker = modelCheckerOf(deps)
   // Cada comprobación nueva se paga con la cuenta de odentIA: una por minuto y clínica.
   const fresh = !!options.fresh && takeFreshModelCheck(checker, orgId, options.now)
   // La llamada mínima se paga: se anota con su origen (ADR 0031). Lo guardado no llama a nadie.
-  const { status, failed } = await meterAiUse(deps.db, orgId, "comprobacion", () => checkAgentModels(checker, llm, { fresh }))
-  await reportFailed(deps, orgId, failed)
-  return status
+  const result = await meterAiUse(deps.db, orgId, "comprobacion", () => checker.check({ fresh }))
+  await reportFailed(deps, orgId, result)
+  return { responds: result.responds, checkedAt: result.checkedAt }
 }
 
 /** La comprobación que reciben los servicios (encender, resumen). */
 export function orgModelCheck(deps: AgentModelDeps, orgId: string): AgentModelCheck {
-  return async (llm) => {
-    const result = await meterAiUse(deps.db, orgId, "comprobacion", () => modelCheckerOf(deps).check(llm))
-    if (!result.responds) await reportFailed(deps, orgId, [result])
+  return async () => {
+    const result = await meterAiUse(deps.db, orgId, "comprobacion", () => modelCheckerOf(deps).check())
+    await reportFailed(deps, orgId, result)
     return { responds: result.responds, checkedAt: result.checkedAt }
   }
 }
@@ -114,11 +105,13 @@ export function orgModelCheck(deps: AgentModelDeps, orgId: string): AgentModelCh
  */
 export async function modelProblemResponse(c: Context, deps: AgentModelDeps, orgId: string, error: unknown, who: "agente" | "asistente") {
   const problem = describeProviderProblem(error)
-  const { llm } = await withOrgContext(deps.db, orgId, (tx) => getAgentConfig(tx, orgId)).catch(() => ({ llm: null }))
-  if (llm && problem.code !== "DAILY_LIMIT") {
-    await reportFailed(deps, orgId, [
-      { llm, responds: false, problem: { code: problem.code, detail: problem.detail }, checkedAt: new Date().toISOString() },
-    ])
+  if (problem.code !== "DAILY_LIMIT") {
+    await reportFailed(deps, orgId, {
+      model: llmModelName(deps.llm),
+      responds: false,
+      problem: { code: problem.code, detail: problem.detail },
+      checkedAt: new Date().toISOString(),
+    })
   }
   const message =
     who === "agente"

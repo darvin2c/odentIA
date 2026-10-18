@@ -222,8 +222,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(behaves).toContainText("Se presenta como Sofi · trata de usted · tono cercano · pocos emojis")
   await expect(behaves).toContainText(`«¡Hola! 😊 Soy Sofi, asistente virtual de ${org.name}. ¿En qué le ayudo?»`)
   expect(await config()).toMatchObject({ personaName: "Sofi", emojis: "pocos" })
-  // Lo único técnico que decide la clínica, con el nombre de su pantalla.
-  await expect(page.getByRole("link", { name: /^Modelo del agente/ })).toHaveAttribute("href", "/settings/integrations/model")
+  // Nada técnico que decidir: el modelo lo elige odentIA (ADR 0052).
+  await expect(page.getByRole("link", { name: /^Modelo del agente/ })).toHaveCount(0)
   await expect(page.getByRole("link", { name: /^Ajustes técnicos/ })).toHaveCount(0)
 
   // --- Probar: dos turnos, nada se envía; los ejemplos siguen a la vista con el usado marcado ---

@@ -100,7 +100,7 @@ const diagnosticPayload = z.object({
   agent: z
     .object({
       enabled: z.boolean(),
-      llm: z.string().nullable(),
+
       decisionProvider: z.string(),
       decisionRoutingEnabled: z.boolean(),
       clinicalAssistantEnabled: z.boolean(),

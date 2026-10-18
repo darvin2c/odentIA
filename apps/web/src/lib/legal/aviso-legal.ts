@@ -44,7 +44,7 @@ export const AVISO_LEGAL: LegalDoc = {
       blocks: [
         "Los textos, diseños, imágenes, logotipos, código y demás contenidos de esta web, así como las marcas odentIA y Odentia32, son propiedad del titular o de terceros que han autorizado su uso [Por confirmar: registro de las marcas ante INDECOPI].",
         "No se permite reproducir, distribuir, transformar ni comunicar públicamente esos contenidos sin autorización escrita del titular, salvo para uso personal y no comercial o cuando la ley lo permita.",
-        "Las marcas de terceros que aparecen en la web (por ejemplo, WhatsApp, Instagram, Messenger, Telegram, ChatGPT o Claude) pertenecen a sus respectivos titulares y se mencionan solo para describir integraciones o compatibilidades.",
+        "Las marcas de terceros que aparecen en la web (por ejemplo, WhatsApp, Instagram, Messenger, Telegram o ChatGPT) pertenecen a sus respectivos titulares y se mencionan solo para describir integraciones o compatibilidades.",
       ],
     },
     {

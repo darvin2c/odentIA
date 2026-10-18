@@ -8,8 +8,6 @@ import { ServiceError, validation } from "./errors.js"
 export interface AgentConfig {
   organizationId: string
   enabled: boolean
-  /** Modelo que escribe, uno de `AGENT_LLMS`; la cuenta del proveedor es de odentIA. */
-  llm: AgentLlm
   dailyRunLimit: number
   /** Modelo de decisión: none | baseline | jev | openai_decisions. Toda clínica nace con Jev (ADR 0047). */
   decisionProvider: DecisionProvider
@@ -55,27 +53,14 @@ export const DECISION_PROVIDERS = ["none", "baseline", "jev", "openai_decisions"
 export type DecisionProvider = (typeof DECISION_PROVIDERS)[number]
 
 /**
- * Los modelos que la clínica puede elegir: odentIA los validó y pone la
- * cuenta (ADR 0022). Aquí solo el id y lo que ve la clínica; proveedor,
- * modelo exacto y opciones viven en `packages/agent/src/llm.ts`, y odentIA
- * los cambia sin que la clínica haga nada. El primero es el de toda clínica
- * y coincide con el valor por defecto de la base.
+ * Nombre en pantalla del modelo que escribe. Es uno solo y lo elige odentIA,
+ * no la clínica (ADR 0052); el modelo exacto y sus opciones viven en
+ * `packages/agent/src/llm.ts`.
  */
-export const AGENT_LLMS = [
-  { id: "chatgpt_6", label: "ChatGPT 6" },
-  { id: "claude_5_5", label: "Claude 5.5" },
-] as const
-export type AgentLlm = (typeof AGENT_LLMS)[number]["id"]
-export const AGENT_LLM_IDS = AGENT_LLMS.map((option) => option.id) as [AgentLlm, ...AgentLlm[]]
-export const DEFAULT_AGENT_LLM: AgentLlm = "chatgpt_6"
-
-export function isAgentLlm(value: unknown): value is AgentLlm {
-  return typeof value === "string" && (AGENT_LLM_IDS as readonly string[]).includes(value)
-}
+export const AGENT_MODEL_LABEL = "ChatGPT 6"
 
 const DEFAULTS = {
   enabled: false,
-  llm: DEFAULT_AGENT_LLM,
   dailyRunLimit: 500,
   // Jev elige el camino de cada mensaje: lo ajeno sale con el texto fijo y no se cobra (ADR 0047).
   // La columna de la base nace con el mismo valor: cambian juntos.
@@ -102,7 +87,6 @@ function toConfig(row: typeof agentConfig.$inferSelect): AgentConfig {
   return {
     organizationId: row.organizationId,
     enabled: row.enabled,
-    llm: isAgentLlm(row.llm) ? row.llm : DEFAULT_AGENT_LLM,
     dailyRunLimit: row.dailyRunLimit,
     decisionProvider: (DECISION_PROVIDERS as readonly string[]).includes(row.decisionProvider)
       ? (row.decisionProvider as DecisionProvider)
@@ -138,7 +122,6 @@ export async function getAgentConfig(tx: Db, orgId: string): Promise<AgentConfig
 
 export interface UpsertAgentConfigInput {
   enabled?: boolean
-  llm?: AgentLlm
   dailyRunLimit?: number
   decisionProvider?: DecisionProvider
   handoffKeywords?: string[]
@@ -167,24 +150,18 @@ export interface UpsertAgentConfigInput {
  * solo deciden con su resultado. La misma comprobación sirve al encendido,
  * al resumen y a Integraciones.
  */
-export type AgentModelCheck = (llm: AgentLlm) => Promise<{ responds: boolean; checkedAt: string }>
+export type AgentModelCheck = () => Promise<{ responds: boolean; checkedAt: string }>
 
 export interface UpsertAgentConfigOpts {
   actorUserId?: string | null
-  /**
-   * Con ella, encender (o cambiar de modelo con el agente encendido) exige un
-   * modelo que responda. La API la pasa siempre: ocultar el botón no basta.
-   */
+  /** Con ella, encender exige un modelo que responda. La API la pasa siempre: ocultar el botón no basta. */
   modelCheck?: AgentModelCheck
 }
 
 /** Encender Recepción con un modelo que no responde: cada paciente recibiría «una persona te va a responder». */
 export const MODEL_NOT_RESPONDING = "MODEL_NOT_RESPONDING"
 
-/**
- * Guarda la configuración. El modelo solo puede ser uno de `AGENT_LLMS`; su
- * cambio, como los demás, queda auditado con quién y cuándo.
- */
+/** Guarda la configuración; cada cambio queda auditado con quién y cuándo. */
 export async function upsertAgentConfig(
   tx: Db,
   orgId: string,
@@ -214,9 +191,6 @@ export async function upsertAgentConfig(
     (!Number.isInteger(input.closeAfterHours) || input.closeAfterHours < 6 || input.closeAfterHours > 23)
   ) {
     throw validation("Las horas para cerrar por silencio van de 6 a 23")
-  }
-  if (input.llm !== undefined && !isAgentLlm(input.llm)) {
-    throw validation(`El modelo del agente debe ser ${AGENT_LLMS.map((option) => option.label).join(" o ")}`)
   }
   if (input.decisionProvider !== undefined && !(DECISION_PROVIDERS as readonly string[]).includes(input.decisionProvider)) {
     throw validation("decisionProvider inválido")
@@ -254,11 +228,8 @@ export async function upsertAgentConfig(
     .from(agentConfig)
     .where(eq(agentConfig.organizationId, orgId))
     .limit(1)
-  const staysOn = input.enabled === true || (input.enabled === undefined && input.llm !== undefined && current?.enabled === true)
-  if (staysOn && opts.modelCheck) {
-    const currentLlm = current?.llm
-    const llm = input.llm ?? (isAgentLlm(currentLlm) ? currentLlm : DEFAULTS.llm)
-    if (!(await opts.modelCheck(llm)).responds) {
+  if (input.enabled === true && opts.modelCheck) {
+    if (!(await opts.modelCheck()).responds) {
       throw new ServiceError(MODEL_NOT_RESPONDING, 409, "El modelo no responde ahora, así que Recepción no se puede encender. Ya avisamos a odentIA.")
     }
   }
@@ -304,9 +275,7 @@ export async function upsertAgentConfig(
     .returning()
   if (!row) throw new Error("No se pudo guardar la configuración del agente")
 
-  // Con el modelo cambia adónde viajan los datos de pacientes: quién, cuándo y qué campo.
   const changed: string[] = []
-  if (patch.llm !== undefined && patch.llm !== (current?.llm ?? DEFAULTS.llm)) changed.push("llm")
   if (patch.dailyRunLimit !== undefined && patch.dailyRunLimit !== (current?.dailyRunLimit ?? DEFAULTS.dailyRunLimit)) {
     changed.push("dailyRunLimit")
   }
@@ -357,7 +326,7 @@ export async function upsertAgentConfig(
       action: "agent.config_updated",
       entity: "agent_config",
       entityId: orgId,
-      metadata: { changed, llm: row.llm, dailyRunLimit: row.dailyRunLimit, decisionProvider: row.decisionProvider, replyCheckEnabled: row.replyCheckEnabled },
+      metadata: { changed, dailyRunLimit: row.dailyRunLimit, decisionProvider: row.decisionProvider, replyCheckEnabled: row.replyCheckEnabled },
     })
   }
   return toConfig(row)

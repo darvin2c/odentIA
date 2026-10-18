@@ -69,18 +69,14 @@ ni emisión fiscal integrada.
 
 ### Modelo real
 
-La clínica elige entre dos modelos que odentIA validó y odentIA pone la cuenta
-(`docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`):
-«ChatGPT 6» (OpenAI, el de toda clínica) y «Claude 5.5» (Anthropic). El modelo
-exacto y sus opciones viven en `packages/agent/src/llm.ts` (`LLM_CATALOG`).
+Un solo modelo para toda clínica, «ChatGPT 6» (OpenAI), y odentIA pone la cuenta
+(`docs/decisions/0052-un-solo-modelo-para-el-agente.md`). El modelo exacto y sus
+opciones viven en `packages/agent/src/llm.ts` (`AGENT_MODEL`).
 
-En `infra/dev/.env`: quitar `LLM_MODEL=fake` y poner `LLM_OPENAI_API_KEY` y, para
-probar Claude, `LLM_ANTHROPIC_API_KEY`. `LLM_OPENAI_BASE_URL` y
-`LLM_ANTHROPIC_BASE_URL` solo hacen falta con una pasarela propia; sin ellas va la
-API pública de cada proveedor. Sin la clave del proveedor del modelo elegido el
-agente deriva y avisa con el nombre de la variable que falta.
-`LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada. Las evaluaciones
-(`eval:decisions`, `eval:admin`…) aceptan `--llm=chatgpt_6|claude_5_5`.
+En `infra/dev/.env`: quitar `LLM_MODEL=fake` y poner `LLM_OPENAI_API_KEY`.
+`LLM_OPENAI_BASE_URL` solo hace falta con una pasarela propia; sin ella va la API
+pública de OpenAI. Sin la clave el agente deriva y avisa con el nombre de la
+variable que falta. `LLM_TIMEOUT_MS` y `LLM_MAX_RETRIES` acotan cada llamada.
 `AGENT_BURST_WINDOW_SECONDS` (worker, 6 por defecto, 0–30) es lo que el agente
 espera tras un mensaje entrante antes de leer el hilo: normalmente agrupa una
 ráfaga en una sola corrida y una sola respuesta (mejor esfuerzo; límites en

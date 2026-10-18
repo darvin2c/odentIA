@@ -174,7 +174,7 @@ describe("a quien preguntó", () => {
   it("el caso automático «Modelo sin responder» no tiene a quién avisar: responderle o pedirle algo no detiene los avisos de las demás clínicas", async () => {
     const outage = await reportModelOutage(ownerDb, {
       orgId: ORG,
-      llm: "chatgpt_6",
+      llm: "gpt-6-luna",
       llmLabel: "ChatGPT",
       code: "PROVIDER_QUOTA",
       detail: "prueba: sin saldo",

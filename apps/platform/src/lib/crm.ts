@@ -514,8 +514,6 @@ export interface ConnectionItem {
 export interface AgentConfig {
   organizationId: string
   enabled: boolean
-  /** Con qué modelo trabaja el agente; la cuenta la pone odentIA (ADR 0022). */
-  llm: AgentLlm
   dailyRunLimit: number
   /** Modelo de decisión en sombra: none | baseline | jev | openai_decisions. */
   decisionProvider: "none" | "baseline" | "jev" | "openai_decisions"
@@ -545,14 +543,6 @@ export interface AgentConfig {
   closeAfterHours: number
 }
 
-/** Los dos modelos que odentIA validó, con el nombre que ve la clínica. El modelo exacto lo decide el servidor. */
-export const AGENT_LLMS = [
-  { id: "chatgpt_6", label: "ChatGPT 6" },
-  { id: "claude_5_5", label: "Claude 5.5" },
-] as const
-export type AgentLlm = (typeof AGENT_LLMS)[number]["id"]
-
-export function agentLlmLabel(llm: AgentLlm): string {
-  return AGENT_LLMS.find((item) => item.id === llm)?.label ?? "ChatGPT 6"
-}
+/** El modelo con que trabaja el agente, el mismo para toda clínica; lo elige odentIA (ADR 0052). */
+export const AGENT_MODEL_LABEL = "ChatGPT 6"
 

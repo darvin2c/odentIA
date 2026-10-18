@@ -427,7 +427,7 @@ it("texto sin herramienta de envío: un aviso; si vuelve a escribir sin enviar, 
 
 it("texto sin enviar: tras el aviso, el modelo lo envía y la persona lo recibe", async () => {
   const { conversationId, messageId } = await ingestText("tg:ag-aviso", "evt-ag-aviso", "Hola")
-  // Como Claude 5.5 en la medición del 2026-10-17: escribe la respuesta como texto y no la envía.
+  // Como hacía Claude 5.5 en la medición del 2026-10-17: escribe la respuesta como texto y no la envía.
   const model = new ScriptedModel((messages, call) =>
     call === 1
       ? new AIMessage({ content: "Hola, ¿en qué te ayudo?" })
@@ -539,21 +539,15 @@ async function rejectingProvider() {
   }
 }
 
-it("si odentIA no tiene la cuenta del proveedor del modelo elegido, el caso pasa al equipo sin llamar a nadie", async () => {
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { llm: "claude_5_5" }))
-  try {
-    const { conversationId, messageId } = await ingestText("tg:ag-sin-cuenta", "evt-ag-sin-cuenta", "Hola")
-    // Solo hay cuenta de OpenAI: la clave de un proveedor nunca sirve para el otro.
-    expect(await runAgent(conversationId, messageId, 0, { openai: { apiKey: "clave-openai", baseUrl: "http://127.0.0.1:9/v1" } })).toBe("done")
-    expect(await agentStatusOf(conversationId)).toBe("on")
-    const [row] = await withOrgContext(appDb, "org_a", (tx) =>
-      tx.select({ error: agentRunLedger.error, model: agentRunLedger.model }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
-    )
-    expect(row?.error).toMatch(/^API_KEY_REQUIRED: .*LLM_ANTHROPIC_API_KEY/)
-    expect(row?.model).toBe("claude-haiku-5-5")
-  } finally {
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { llm: "chatgpt_6" }))
-  }
+it("si odentIA no tiene la cuenta de OpenAI, el caso pasa al equipo sin llamar a nadie", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-sin-cuenta", "evt-ag-sin-cuenta", "Hola")
+  expect(await runAgent(conversationId, messageId, 0, {})).toBe("done")
+  expect(await agentStatusOf(conversationId)).toBe("on")
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ error: agentRunLedger.error, model: agentRunLedger.model }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)),
+  )
+  expect(row?.error).toMatch(/^API_KEY_REQUIRED: .*LLM_OPENAI_API_KEY/)
+  expect(row?.model).toBe("gpt-6-luna")
 })
 
 it("una credencial rechazada no reintenta: deriva, avisa una vez a quien administra y queda como error", async () => {
@@ -785,10 +779,10 @@ it("al alcanzar el tope diario el caso pasa al equipo sin llamar al modelo", asy
   }
 })
 
-it("la configuración por defecto usa ChatGPT 6 y no guarda cuentas de proveedor", async () => {
+it("la configuración no guarda modelo ni cuentas de proveedor (ADR 0052)", async () => {
   const cfg = await withOrgContext(appDb, "org_a", (tx) => getAgentConfig(tx, "org_a"))
-  expect(cfg).toMatchObject({ llm: "chatgpt_6", dailyRunLimit: 500 })
-  expect(Object.keys(cfg).filter((key) => /apikey|baseurl|^model$/i.test(key))).toEqual([])
+  expect(cfg).toMatchObject({ dailyRunLimit: 500 })
+  expect(Object.keys(cfg).filter((key) => /apikey|baseurl|^model$|^llm$/i.test(key))).toEqual([])
 })
 
 it("una reentrega con el hilo ya respondido no avisa ni queda sin_respuesta", async () => {

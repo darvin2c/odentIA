@@ -3,7 +3,7 @@ import type { Db } from "@odentia/db"
 import { withOrgContext } from "@odentia/db"
 import {
   AGENT_BASE_PRINCIPLES,
-  AGENT_LLM_IDS,
+
   AGENT_ROLE_IDS,
   AGENT_ROLES,
   getAgentConfig,
@@ -25,8 +25,6 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const putInput = z.object({
   enabled: z.boolean().optional(),
-  /** Uno de los modelos que odentIA validó (`AGENT_LLMS`); la cuenta es de odentIA. */
-  llm: z.enum(AGENT_LLM_IDS).optional(),
   dailyRunLimit: z.number().int().min(1).max(100_000).optional(),
   decisionProvider: z.enum(["none", "baseline", "jev", "openai_decisions"]).optional(),
   handoffKeywords: z.array(z.string().max(60)).max(30).optional(),
@@ -116,10 +114,7 @@ export function createAgentRoute(deps: AgentRouteDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     const fresh = c.req.query("fresh") === "1"
-    return runService(c, 200, async () => {
-      const { llm } = await withOrgContext(deps.db, orgId, (tx) => getAgentConfig(tx, orgId))
-      return checkOrgModel(deps, orgId, llm, { fresh })
-    })
+    return runService(c, 200, () => checkOrgModel(deps, orgId, { fresh }))
   })
 
   /**

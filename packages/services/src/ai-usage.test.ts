@@ -62,13 +62,13 @@ describe("uso de IA por origen", () => {
   it("una corrida guarda su costo en el libro y cada proveedor en el uso, con origen recepción", async () => {
     await run((tx) =>
       recordAgentRun(tx, ORG, {
-        model: "claude-haiku-5-5",
+        model: "gpt-6-luna",
         status: "ok",
         startedAt: new Date(),
         llmCalls: 2,
         cacheWriteTokens: 400,
         usage: [
-          entry({ provider: "anthropic", model: "claude-haiku-5-5", calls: 2, costMicros: 155 }),
+          entry({ provider: "openai", model: "gpt-6-luna", calls: 2, costMicros: 155 }),
           entry({ provider: "jev", model: "jev-1.13.0", costMicros: null }),
         ],
       }),

@@ -140,7 +140,7 @@ it("segundo hilo crea otra conversación; listados aíslan por org", async () =>
   expect(empty.items).toEqual([])
 })
 
-it("sendOutbound humano apaga el agente, marca leído y encola", async () => {
+it("sendOutbound humano no apaga el agente (ADR 0050), marca leído y encola", async () => {
   const connId = await makeTelegramConnection("org_a")
   const { conversationId } = await ingest(
     "org_a",
@@ -159,7 +159,8 @@ it("sendOutbound humano apaga el agente, marca leído y encola", async () => {
   const detail = await withOrgContext(appDb, "org_a", (tx) =>
     getConversationDetail(tx, "org_a", conversationId),
   )
-  expect(detail.conversation.agentStatus).toBe("off")
+  // Escribir no apaga al agente: espera mientras el equipo conversa en vivo y luego vuelve solo.
+  expect(detail.conversation.agentStatus).toBe("on")
   expect(detail.conversation.unreadCount).toBe(0)
   const queued = (await ownerDb.execute(
     sql`select message from pgmq.read('outbound_messages', 30, 10)`,

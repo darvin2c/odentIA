@@ -12,7 +12,7 @@ export {
   describeProviderProblem,
   fakeModelStartProblem,
   isProviderConfigError,
-  LLM_CATALOG,
+  AGENT_MODEL,
   LlmConfigError,
   llmModelName,
   type LlmProvider,
@@ -25,13 +25,11 @@ export {
 } from "./llm.js"
 export {
   type AgentModelStatus,
-  checkAgentModels,
   createModelChecker,
   MODEL_CHECK_TTL_MS,
   type ModelChecker,
   type ModelCheckResult,
   type ModelProbe,
-  otherAgentLlm,
 } from "./model-check.js"
 export * from "./decision/index.js"
 export { embedderFromEnv, type EmbeddingsEnv, FAKE_EMBEDDINGS_MODEL, fakeEmbedder, openAiEmbedder } from "./embeddings.js"

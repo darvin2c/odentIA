@@ -1,12 +1,11 @@
-import { ChatAnthropic } from "@langchain/anthropic"
 import { ChatOpenAI } from "@langchain/openai"
-import { AGENT_LLM_IDS, type AgentLlm, DEFAULT_AGENT_LLM, isAgentLlm, ServiceError } from "@odentia/services"
+import { ServiceError } from "@odentia/services"
 import { FakeChatModel } from "./fake-model.js"
 
 /** Códigos de problema del proveedor; `DAILY_LIMIT` lo emite la corrida, no la configuración. */
 export type LlmProblemCode = "API_KEY_REQUIRED" | "PROVIDER_REJECTED" | "PROVIDER_QUOTA" | "DAILY_LIMIT"
 
-/** La plataforma no puede usar el modelo elegido (le falta la cuenta de ese proveedor). */
+/** La plataforma no puede usar el modelo (le falta la cuenta del proveedor). */
 export class LlmConfigError extends Error {
   constructor(
     public readonly code: "API_KEY_REQUIRED",
@@ -17,7 +16,7 @@ export class LlmConfigError extends Error {
   }
 }
 
-export type LlmProvider = "openai" | "anthropic"
+export type LlmProvider = "openai"
 
 /** Cuenta de odentIA en un proveedor. */
 export interface ProviderAccount {
@@ -28,56 +27,31 @@ export interface ProviderAccount {
 
 /**
  * Cuentas de la plataforma (entorno de API y worker). La clínica no trae la
- * suya: elige uno de los modelos de `AGENT_LLMS` y odentIA pone la cuenta.
+ * suya ni elige modelo: odentIA pone la cuenta y el modelo (ADR 0052).
  */
 export interface PlatformLlm {
   /** Desarrollo y pruebas (`LLM_MODEL=fake`): el modelo determinista, sin proveedor. */
   fake?: boolean
   openai?: ProviderAccount
-  anthropic?: ProviderAccount
   timeoutMs?: number
   maxRetries?: number
 }
 
-interface LlmCatalogEntry {
-  provider: LlmProvider
-  /** Nombre exacto del modelo en el proveedor; la clínica nunca lo ve. */
-  modelName: string
-  /** `reasoning_effort` que viaja en cada petición (OpenAI). */
-  reasoningEffort?: string
-  /** Tope de salida por llamada (Anthropic lo exige). */
-  maxTokens?: number
-  /**
-   * Esfuerzo de razonamiento (Anthropic, `output_config.effort`). Haiku 5.5
-   * piensa por defecto con esfuerzo medio y lo pensado se cobra como salida.
-   */
-  effort?: "low" | "medium" | "high"
-}
-
 /**
- * Lo que hay detrás de cada opción que elige la clínica (`AGENT_LLMS` de los
- * servicios: id y etiqueta). odentIA cambia aquí el modelo o sus opciones;
- * la clínica no tiene que hacer nada. Motivos en
- * `docs/decisions/0022-la-clinica-elige-entre-dos-modelos-de-odentia.md`.
+ * El modelo que escribe, el mismo para toda clínica (ADR 0052; en pantalla,
+ * `AGENT_MODEL_LABEL` de los servicios). odentIA lo cambia aquí y la clínica
+ * no tiene que hacer nada.
  */
-export const LLM_CATALOG: Record<AgentLlm, LlmCatalogEntry> = {
+export const AGENT_MODEL = {
+  provider: "openai",
+  /** Nombre exacto del modelo en el proveedor; la clínica nunca lo ve. */
+  modelName: "gpt-6-luna",
   // gpt-6-luna en chat/completions rechaza herramientas si el razonamiento no va en `none`.
-  chatgpt_6: { provider: "openai", modelName: "gpt-6-luna", reasoningEffort: "none" },
-  // 2048 sobra para una respuesta de chat o una llamada a herramienta. Responder
-  // a un paciente o llamar a una herramienta no necesita pensar mucho: esfuerzo bajo.
-  claude_5_5: { provider: "anthropic", modelName: "claude-haiku-5-5", maxTokens: 2048, effort: "low" },
-}
-
-/** Variable de entorno con la clave de cada proveedor: el error la nombra. */
-const ACCOUNT_ENV: Record<LlmProvider, { key: string; label: string }> = {
-  openai: { key: "LLM_OPENAI_API_KEY", label: "OpenAI" },
-  anthropic: { key: "LLM_ANTHROPIC_API_KEY", label: "Anthropic" },
-}
+  reasoningEffort: "none",
+} as const satisfies { provider: LlmProvider; modelName: string; reasoningEffort: string }
 
 /** Modelo efectivo de una corrida: una sola fuente para proveedor, modelo y cuenta. */
 export interface LlmSpec {
-  /** La opción que eligió la clínica. */
-  llm: AgentLlm
   provider: LlmProvider | "fake"
   modelName: string
   apiKey?: string
@@ -85,45 +59,38 @@ export interface LlmSpec {
   timeoutMs: number
   maxRetries: number
   reasoningEffort?: string
-  maxTokens?: number
-  effort?: "low" | "medium" | "high"
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
 const DEFAULT_MAX_RETRIES = 2
 
 /** Nombre con que la corrida registra el modelo, aun antes de resolver la cuenta. */
-export function llmModelName(llm: AgentLlm, platform: PlatformLlm): string {
-  return platform.fake ? "fake" : LLM_CATALOG[llm].modelName
+export function llmModelName(platform: PlatformLlm): string {
+  return platform.fake ? "fake" : AGENT_MODEL.modelName
 }
 
 /**
- * Resuelve el modelo que eligió la clínica con la cuenta de odentIA en su
- * proveedor. Único resolvedor para corrida, simulación, dictado y
- * Administrador. Sin la clave de ese proveedor lanza `LlmConfigError`.
+ * Resuelve el modelo que escribe con la cuenta de odentIA. Único resolvedor
+ * para corrida, simulación, dictado, Administrador y evaluaciones. Sin la
+ * clave lanza `LlmConfigError`.
  */
-export function resolveLlmSpec(cfg: { llm: AgentLlm }, platform: PlatformLlm): LlmSpec {
+export function resolveLlmSpec(platform: PlatformLlm): LlmSpec {
   const common = {
-    llm: cfg.llm,
     timeoutMs: platform.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxRetries: platform.maxRetries ?? DEFAULT_MAX_RETRIES,
   }
   if (platform.fake) return { ...common, provider: "fake", modelName: "fake" }
-  const entry = LLM_CATALOG[cfg.llm]
-  const account = platform[entry.provider]
+  const account = platform.openai
   if (!account?.apiKey) {
-    const env = ACCOUNT_ENV[entry.provider]
-    throw new LlmConfigError("API_KEY_REQUIRED", `La plataforma no tiene la clave de ${env.label} configurada (${env.key})`)
+    throw new LlmConfigError("API_KEY_REQUIRED", "La plataforma no tiene la clave de OpenAI configurada (LLM_OPENAI_API_KEY)")
   }
   return {
     ...common,
-    provider: entry.provider,
-    modelName: entry.modelName,
+    provider: AGENT_MODEL.provider,
+    modelName: AGENT_MODEL.modelName,
     apiKey: account.apiKey,
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
-    ...(entry.reasoningEffort ? { reasoningEffort: entry.reasoningEffort } : {}),
-    ...(entry.maxTokens ? { maxTokens: entry.maxTokens } : {}),
-    ...(entry.effort ? { effort: entry.effort } : {}),
+    reasoningEffort: AGENT_MODEL.reasoningEffort,
   }
 }
 
@@ -133,8 +100,6 @@ export interface PlatformLlmEnv {
   LLM_MODEL?: string
   LLM_OPENAI_API_KEY?: string
   LLM_OPENAI_BASE_URL?: string
-  LLM_ANTHROPIC_API_KEY?: string
-  LLM_ANTHROPIC_BASE_URL?: string
   LLM_TIMEOUT_MS?: number | string
   LLM_MAX_RETRIES?: number | string
 }
@@ -152,13 +117,11 @@ function numberOf(value: number | string | undefined): number | undefined {
 
 export function platformLlmFromEnv(env: PlatformLlmEnv): PlatformLlm {
   const openai = account(env.LLM_OPENAI_API_KEY, env.LLM_OPENAI_BASE_URL)
-  const anthropic = account(env.LLM_ANTHROPIC_API_KEY, env.LLM_ANTHROPIC_BASE_URL)
   const timeoutMs = numberOf(env.LLM_TIMEOUT_MS)
   const maxRetries = numberOf(env.LLM_MAX_RETRIES)
   return {
     ...(env.LLM_MODEL?.trim() === "fake" ? { fake: true } : {}),
     ...(openai ? { openai } : {}),
-    ...(anthropic ? { anthropic } : {}),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     ...(maxRetries !== undefined ? { maxRetries } : {}),
   }
@@ -180,16 +143,6 @@ export function fakeModelStartProblem(env: { LLM_MODEL?: string | undefined; NOD
 }
 
 /**
- * Evaluaciones: el modelo que se pide con `--llm=` (por defecto el de toda
- * clínica) y las cuentas que se le pasan.
- */
-export function evalLlmSpec(requested: string | undefined, platform: PlatformLlm): LlmSpec {
-  const llm = requested ?? DEFAULT_AGENT_LLM
-  if (!isAgentLlm(llm)) throw new Error(`Modelo desconocido: ${llm} (${AGENT_LLM_IDS.join(" | ")})`)
-  return resolveLlmSpec({ llm }, platform)
-}
-
-/**
  * Fetch sin redirecciones: el modelo solo habla con el proveedor que fija
  * odentIA, nunca con otro destino al que una respuesta lo mande.
  */
@@ -197,27 +150,14 @@ const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, r
 
 /**
  * Modelo concreto del spec. No se leen variables del proceso que el SDK
- * tomaría por su cuenta (organización o proyecto de OpenAI, URL de
- * Anthropic): todo sale del spec. `fake` es el modelo determinista de dev/e2e.
- * Con `explicitCache`, OpenAI guarda en su caché solo hasta lo marcado con
+ * tomaría por su cuenta (organización o proyecto de OpenAI): todo sale del
+ * spec. `fake` es el modelo determinista de dev/e2e. Con `explicitCache`,
+ * OpenAI guarda en su caché solo hasta lo marcado con
  * `prompt_cache_breakpoint` (el dictado); sin él, además escribe lo último de
- * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer. Anthropic
- * siempre guarda solo lo marcado.
+ * cada llamada, a 1,25× de la entrada, aunque no se vuelva a leer.
  */
 export async function createConfiguredChatModel(spec: LlmSpec, options: { explicitCache?: boolean } = {}) {
   if (spec.provider === "fake") return new FakeChatModel({})
-  if (spec.provider === "anthropic") {
-    return new ChatAnthropic({
-      model: spec.modelName,
-      apiKey: spec.apiKey,
-      maxRetries: spec.maxRetries,
-      maxTokens: spec.maxTokens ?? 2048,
-      ...(spec.effort ? { outputConfig: { effort: spec.effort } } : {}),
-      // Sin URL propia, la pública: nunca la de ANTHROPIC_BASE_URL del proceso.
-      anthropicApiUrl: spec.baseUrl ?? "https://api.anthropic.com",
-      clientOptions: { timeout: spec.timeoutMs, fetch: noRedirectFetch },
-    })
-  }
   const modelKwargs = {
     // Directo en la petición: LangChain solo envía `reasoning` a los modelos que reconoce por su
     // nombre (o1…, gpt-5…) y gpt-6-luna no está en esa lista.
@@ -240,7 +180,7 @@ export async function createConfiguredChatModel(spec: LlmSpec, options: { explic
   })
 }
 
-/** El cuerpo de error del proveedor: OpenAI `{ error: { code, message } }`; Anthropic `{ type, error: { type, message } }`. */
+/** El cuerpo de error del proveedor: OpenAI `{ error: { code, message } }`. */
 function providerBody(error: unknown): { code?: unknown; type?: unknown; message?: unknown } | null {
   const body = (error as { error?: unknown } | null)?.error
   if (!body || typeof body !== "object") return null
@@ -268,23 +208,17 @@ function providerMessage(error: unknown): string | null {
   return typeof message === "string" ? message.slice(0, 200) : null
 }
 
-/**
- * Sin saldo o sin cuota: OpenAI responde `insufficient_quota` (429) o 402;
- * Anthropic, `billing_error` o un 400 que dice que el crédito no alcanza.
- */
+/** Sin saldo o sin cuota: OpenAI responde `insufficient_quota` (429) o 402. */
 function isQuotaProblem(error: unknown): boolean {
   const status = providerStatus(error)
-  const code = providerCode(error)
-  if (status === 402 || code === "insufficient_quota" || code === "billing_error") return true
-  return status === 400 && /credit balance/i.test(providerMessage(error) ?? "")
+  return status === 402 || providerCode(error) === "insufficient_quota"
 }
 
 /**
  * Un error del proveedor que no se arregla reintentando: credencial
  * rechazada, sin permiso, modelo inexistente, petición inválida o cuota
- * agotada. Se identifica por el estado HTTP del SDK (OpenAI y Anthropic lo
- * exponen igual); un ServiceError propio también lleva `status` y no es del
- * proveedor.
+ * agotada. Se identifica por el estado HTTP del SDK; un ServiceError propio
+ * también lleva `status` y no es del proveedor.
  */
 export function isProviderConfigError(error: unknown): boolean {
   if (error instanceof LlmConfigError) return true

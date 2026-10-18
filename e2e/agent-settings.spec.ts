@@ -1,47 +1,34 @@
-import { tenant, tenantPattern } from "./env"
+import { tenant } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
-test("modelo del agente: la clínica elige entre los dos modelos de odentIA, y lo que ya no se muestra sigue guardado", async ({ owner }, info) => {
+test("modelo del agente: Integraciones dice con qué modelo trabaja y si responde, sin nada que elegir (ADR 0052)", async ({ owner }, info) => {
   const { page, org } = owner
-  type Config = { llm: string; decisionProvider: string; maxTurns: number }
-  const config = () => call<Config>(page, "GET", "/api/agent/config", org.slug)
+  const config = () => call<Record<string, unknown>>(page, "GET", "/api/agent/config", org.slug)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await gotoHydrated(page, tenant(org.slug, "/settings/integrations"))
-  // Ajustes que la pantalla no muestra: tienen que seguir como estaban después de guardar aquí.
+  // Ajustes que ninguna pantalla de modelo toca: siguen como estaban.
   const hidden = await api(page, "PUT", "/api/agent/config", org.slug, { decisionProvider: "baseline", maxTurns: 7 })
   expect(hidden.status).toBe(200)
 
-  // Se llega desde Integraciones, por su fila, que dice el modelo con su nombre simple.
-  const row = page.getByRole("link", { name: "Cambiar Modelo del agente", exact: true })
-  await expect(page.getByText("ChatGPT 6", { exact: true })).toBeVisible()
-  await row.click()
-  await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/model"))
-  await expect(page.getByRole("heading", { level: 1, name: "Modelo del agente" })).toBeVisible()
-  const chatgpt = page.getByRole("radio", { name: "ChatGPT 6", exact: true })
-  const claude = page.getByRole("radio", { name: "Claude 5.5", exact: true })
-  const save = page.getByRole("button", { name: "Guardar", exact: true })
-  // Solo dos opciones con su nombre: sin cuenta propia, direcciones, claves ni prueba de conexión.
-  await expect(page.getByRole("radio")).toHaveCount(2)
-  await expect(chatgpt).toBeChecked()
-  await expect(page.getByText(/Cuenta propia|Dirección del proveedor|Probar conexión|Luna|Haiku/)).toHaveCount(0)
-  await expect(page.getByRole("textbox")).toHaveCount(0)
-  await expect(save).toBeDisabled()
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations"))
+  const block = page.getByRole("region", { name: "Inteligencia artificial" })
+  await expect(block).toContainText("ChatGPT 6")
+  // El modelo de demostración siempre responde.
+  await expect(block).toContainText("Responde")
+  // Ya no hay a dónde ir para cambiarlo: ni enlace, ni botón, ni otra opción.
+  await expect(block.getByRole("link")).toHaveCount(0)
+  await expect(block.getByRole("button")).toHaveCount(0)
+  await expect(page.getByText(/Claude|Anthropic|Cuenta propia|Probar conexión/)).toHaveCount(0)
+  await info.attach("modelo-en-integraciones", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  await claude.click()
-  await expect(save).toBeEnabled()
-  await save.click()
-  await expect(page.getByText("Modelo del agente guardado", { exact: true })).toBeVisible()
-  await expect(claude).toBeChecked()
-  await expect(save).toBeDisabled()
-  await info.attach("modelo-guardado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
-  await expect.poll(config).toMatchObject({ llm: "claude_5_5", decisionProvider: "baseline", maxTurns: 7 })
-
-  // El servidor solo admite los dos modelos; la prueba de conexión ya no existe.
-  expect((await api(page, "PUT", "/api/agent/config", org.slug, { llm: "gpt-6-luna" })).status).toBe(400)
+  // Un cliente viejo que mande el modelo no cambia nada, y la configuración no lo devuelve.
+  expect((await api(page, "PUT", "/api/agent/config", org.slug, { llm: "claude_5_5" })).status).toBe(200)
+  const saved = await config()
+  expect(saved).toMatchObject({ decisionProvider: "baseline", maxTurns: 7 })
+  expect(saved).not.toHaveProperty("llm")
   expect((await api(page, "POST", "/api/agent/config/llm/test", org.slug, {})).status).toBe(404)
 
-  // Queda en «Actividad del equipo» quién lo cambió, dicho con palabras.
+  // Queda en «Actividad del equipo» quién cambió la configuración, dicho con palabras.
   const audit = await call<{ items: Array<{ action: string; actorName: string | null; what: string; who: string }> }>(
     page,
     "GET",

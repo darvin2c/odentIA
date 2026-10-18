@@ -46,13 +46,7 @@ const PLATAFORMA: string[][] = [
 const SEGUN_CLINICA: string[][] = [
   [
     "OpenAI, L.L.C. («ChatGPT 6»)",
-    "Modelo de inteligencia artificial de los agentes, si la clínica lo elige.",
-    "Conversaciones, dictados y datos de pacientes necesarios para la tarea, incluidos datos de salud.",
-    "Estados Unidos",
-  ],
-  [
-    "Anthropic, PBC («Claude 5.5»)",
-    "Modelo de inteligencia artificial de los agentes, si la clínica lo elige.",
+    "Modelo de inteligencia artificial de los agentes, si la clínica los usa.",
     "Conversaciones, dictados y datos de pacientes necesarios para la tarea, incluidos datos de salud.",
     "Estados Unidos",
   ],
@@ -105,7 +99,7 @@ export const SUBENCARGADOS: LegalDoc = {
       id: "segun-clinica",
       title: "Proveedores que dependen de la clínica",
       blocks: [
-        "Solo intervienen si la clínica conecta el canal o elige el modelo correspondiente. Un canal que la clínica no conecta, o un modelo que no elige, no recibe ningún dato.",
+        "Solo intervienen si la clínica conecta el canal o usa los agentes. Un canal que la clínica no conecta, o un modelo que sus agentes no usan, no recibe ningún dato.",
         {
           table: {
             caption: "Proveedores que intervienen según la configuración de la clínica",

@@ -94,7 +94,7 @@ export interface AppDeps {
   /** Conexión dedicada LISTEN (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
-  /** Cuentas de odentIA en los proveedores del modelo (LLM_*); la organización solo elige el modelo. */
+  /** Cuenta de odentIA en el proveedor del modelo (LLM_*); la organización no elige ni trae la suya. */
   llm?: PlatformLlm
   /** Credenciales de plataforma de los modelos de decisión (JEV_*, OPENAI_DECISIONS_*). */
   decisions?: PlatformDecisions

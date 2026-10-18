@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck, LoaderCircle } from "lucide-react"
 import type { FormEvent, ReactNode } from "react"
-import { type AgentModelStatus, type AgentOverview, MODEL_CHECK_TEXT, modelDownText } from "../../lib/agent"
+import { type AgentModelStatus, type AgentOverview, MODEL_CHECK_TEXT } from "../../lib/agent"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { agentLlmLabel } from "../../lib/crm"
+import { AGENT_MODEL_LABEL } from "../../lib/crm"
 import { mutationErrorMessage } from "../../lib/query-error"
 
 function Check({
@@ -85,18 +85,6 @@ export function TurnOnDrawer({
     mutationFn: () => apiFetch<{ data: AgentModelStatus }>("/api/agent/model?fresh=1"),
     onSuccess: (fresh) => queryClient.setQueryData(AGENT_MODEL_QUERY_KEY, fresh),
   })
-  // «Usar el otro»: lo cambia y lo vuelve a comprobar ahí mismo.
-  const switchModel = useMutation({
-    retry: false,
-    mutationFn: async (llm: AgentModelStatus["llm"]) => {
-      await apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ llm }) })
-      return apiFetch<{ data: AgentModelStatus }>("/api/agent/model")
-    },
-    onSuccess: (fresh) => {
-      queryClient.setQueryData(AGENT_MODEL_QUERY_KEY, fresh)
-      void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
-    },
-  })
   const turnOn = useMutation({
     retry: false,
     mutationFn: () => apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ enabled: true }) }),
@@ -117,10 +105,10 @@ export function TurnOnDrawer({
 
   const { readiness, knows } = overview
   const hasChannel = readiness.channels.length > 0
-  const checking = model.isFetching || (open && model.isPending && !model.isError) || recheck.isPending || switchModel.isPending
+  const checking = model.isFetching || (open && model.isPending && !model.isError) || recheck.isPending
   const status = model.data?.data
   // Sin respuesta del servidor no se culpa al modelo: es la conexión.
-  const unreachable = !checking && (recheck.isError || switchModel.isError || model.isError || !status)
+  const unreachable = !checking && (recheck.isError || model.isError || !status)
   const modelOk = !checking && !unreachable && status?.responds === true
   const recheckAction = (
     <Button type="button" variant="link" size="sm" className={ACTION} onClick={() => recheck.mutate()}>
@@ -134,17 +122,10 @@ export function TurnOnDrawer({
       modelDetail = MODEL_CHECK_TEXT.unreachable
       modelAction = recheckAction
     } else if (status.responds) {
-      modelDetail = `Responde · ${agentLlmLabel(status.llm)}`
+      modelDetail = `Responde · ${AGENT_MODEL_LABEL}`
     } else {
-      modelDetail = modelDownText(status)
-      const other = status.other
-      modelAction = other?.responds ? (
-        <Button type="button" variant="link" size="sm" className={ACTION} onClick={() => switchModel.mutate(other.llm)}>
-          Usar el otro
-        </Button>
-      ) : (
-        recheckAction
-      )
+      modelDetail = MODEL_CHECK_TEXT.down
+      modelAction = recheckAction
     }
   }
   return (

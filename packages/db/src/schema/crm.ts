@@ -583,11 +583,6 @@ export const customFieldDef = pgTable(
 )
 
 /**
- * Configuración del agente por organización. El proveedor LLM propio es un
- * par atómico (URL base + clave cifrada): nunca se combina una URL de la
- * organización con la clave de la plataforma.
- */
-/**
  * Ajustes del Administrador por organización; ver `agent_config.advisor` (la
  * columna conserva el nombre que tenía cuando el agente se llamaba «Asesor»).
  * El estado de cada línea vive en `automation_rule`, no aquí.
@@ -610,11 +605,6 @@ export const agentConfig = pgTable(
       .primaryKey()
       .references(() => organization.id),
     enabled: boolean("enabled").notNull().default(false),
-    /**
-     * Modelo que escribe, uno de los que odentIA validó (`AGENT_LLMS` de los
-     * servicios). La cuenta del proveedor es de odentIA, nunca de la clínica.
-     */
-    llm: text("llm").notNull().default("chatgpt_6"),
     /** Corridas con llamada al modelo permitidas por día (zona de la organización). */
     dailyRunLimit: integer("daily_run_limit").notNull().default(500),
     /**
@@ -677,7 +667,7 @@ export const agentConfig = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check("agent_config_llm_check", sql`${table.llm} in ('chatgpt_6','claude_5_5')`),
+
     check("agent_config_daily_run_limit_check", sql`${table.dailyRunLimit} between 1 and 100000`),
     check("agent_config_close_after_hours_check", sql`${table.closeAfterHours} between 6 and 23`),
     check(
