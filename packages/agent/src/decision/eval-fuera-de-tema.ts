@@ -4,7 +4,7 @@
  * `eval/fuera-de-tema.json` más los 38 ejemplos de `eval/decisiones-ejemplos.json`
  * (todos de la clínica). Uso:
  *
- *   pnpm --filter @odentia/agent eval:off-topic -- --provider=jev|openai_decisions [--repeats=2] [--llm=chatgpt_6|claude_5_5]
+ *   pnpm --filter @odentia/agent eval:off-topic -- --provider=jev|openai_decisions [--repeats=2]
  *
  * El error caro es marcar como ajeno algo de la clínica (la persona se queda
  * sin respuesta útil): se lista cada uno con su probabilidad, para fijar el
@@ -12,7 +12,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { evalLlmSpec, platformLlmFromEnv } from "../llm.js"
+import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 import { triageState } from "./points.js"
 import { answerOf, type DecisionQuestion } from "./port.js"
@@ -41,7 +41,7 @@ const cases = [
 ]
 
 const env = process.env
-const spec = evalLlmSpec(arg("llm", "chatgpt_6"), platformLlmFromEnv(env))
+const spec = resolveLlmSpec(platformLlmFromEnv(env))
 const decision = await createDecisionModel(
   provider,
   {

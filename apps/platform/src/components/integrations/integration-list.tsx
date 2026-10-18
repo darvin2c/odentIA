@@ -5,10 +5,7 @@ import type { ReactNode } from "react"
 import { type IntegrationRowModel, rowShortWord } from "../../lib/integrations"
 
 /** Pantallas propias a las que lleva una fila. */
-export type IntegrationPath =
-  | "/settings/integrations/whatsapp"
-  | "/settings/integrations/webchat"
-  | "/settings/integrations/model"
+export type IntegrationPath = "/settings/integrations/whatsapp" | "/settings/integrations/webchat"
 
 /** Lo que se puede hacer con una fila: ir a su pantalla o hacer algo aquí mismo. */
 export interface IntegrationAction {

@@ -64,7 +64,7 @@ import { afterAll, beforeAll, it } from "vitest"
 import { ALREADY_TOLD_MIN, ALREADY_TOLD_QUESTION, alreadyToldState } from "./admin.js"
 import { createJevDecisionModel, type DecisionModel } from "./decision/index.js"
 import { UNSENT_TEXT } from "./graph.js"
-import { LLM_CATALOG, platformLlmFromEnv } from "./llm.js"
+import { AGENT_MODEL, platformLlmFromEnv } from "./llm.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
 import { insertTestPatients } from "@odentia/services/test-patient"
 
@@ -548,7 +548,7 @@ it("un mes de una clínica de prueba: cuántos tokens gasta cada modelo", async 
   }
 
   console.log("\n=== Prueba real de consumo · un mes de una clínica de prueba ===")
-  console.log(REAL ? `Modelo que escribe: ${LLM_CATALOG.chatgpt_6.modelName} · modelo de decisión: ${decider ? `Jev (${env.JEV_MODEL ?? "por defecto"})` : "ninguno"}` : "ENSAYO con el modelo de demostración: no mide nada.")
+  console.log(REAL ? `Modelo que escribe: ${AGENT_MODEL.modelName} · modelo de decisión: ${decider ? `Jev (${env.JEV_MODEL ?? "por defecto"})` : "ninguno"}` : "ENSAYO con el modelo de demostración: no mide nada.")
   console.log(`Clínica: ${CLINIC.patients} pacientes, ${plan.length} citas (${outcomes.filter((item) => item.outcome === "no_asistio").length} inasistencias, ${outcomes.filter((item) => item.outcome === "cancelada").length} cancelaciones), ${CLINIC.budgets} presupuestos, ${CLINIC.controls} controles.`)
   console.log("\n1. Lo que hizo el Administrador en el mes (lo cuenta el motor; ningún mensaje salió de la cola)")
   for (const line of lines) {

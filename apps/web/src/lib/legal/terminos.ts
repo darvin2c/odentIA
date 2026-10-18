@@ -125,7 +125,7 @@ export const TERMINOS: LegalDoc = {
             "El Administrador envía recordatorios, avisos de controles y seguimiento de presupuestos según lo que la Clínica configure.",
           ],
         },
-        "La Clínica decide qué puede hacer cada agente y puede activar o desactivar cada capacidad en cualquier momento. También elige el modelo de inteligencia artificial que usan los agentes entre los que odentIA ofrece.",
+        "La Clínica decide qué puede hacer cada agente y puede activar o desactivar cada capacidad en cualquier momento. odentIA elige el modelo de inteligencia artificial que usan los agentes y pone la cuenta.",
         "La inteligencia artificial puede equivocarse, entender mal un mensaje o dar una respuesta incompleta. La Clínica debe supervisar el trabajo de los agentes, revisar lo que proponen y corregir lo que sea necesario. odentIA no garantiza que las respuestas de los agentes sean exactas en todos los casos.",
         "La Clínica no debe usar los agentes para dar indicaciones clínicas a pacientes sin la intervención de un profesional, ni para atender urgencias médicas.",
       ],

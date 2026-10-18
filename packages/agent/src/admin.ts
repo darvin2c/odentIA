@@ -25,7 +25,7 @@ export interface AdminModelDeps {
 export async function createAdminDecisionModel(db: Db, deps: AdminModelDeps, orgId: string): Promise<DecisionModel | null> {
   const { provider, spec } = await withOrgContext(db, orgId, async (tx) => {
     const cfg = await getAgentConfig(tx, orgId)
-    return { provider: cfg.decisionProvider, spec: resolveLlmSpec(cfg, deps.platform) }
+    return { provider: cfg.decisionProvider, spec: resolveLlmSpec(deps.platform) }
   })
   if (spec.provider === "fake") return null
   const platform = deps.decisions ?? {}

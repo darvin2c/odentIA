@@ -335,7 +335,7 @@ const FAQ_ERROR: FaqItem = {
 }
 const FAQ_MODEL: FaqItem = {
   q: "¿Qué inteligencia artificial usa?",
-  a: "Tu clínica elige entre los modelos de OpenAI y de Anthropic que odentIA pone a su disposición. No necesitas una cuenta propia ni una clave.",
+  a: "ChatGPT 6, de OpenAI, con la cuenta de odentIA. No necesitas una cuenta propia ni una clave.",
 }
 const FAQ_META: FaqItem = {
   q: "¿Tengo que pagarle algo más a WhatsApp?",
@@ -1757,8 +1757,8 @@ export const PAGES = {
             text: "Cada tarea de los agentes se prende o se apaga. Las promociones solo van a quien aceptó recibirlas.",
           },
           {
-            title: "Tu clínica elige el modelo",
-            text: "Entre los modelos de OpenAI y de Anthropic que odentIA pone a su disposición.",
+            title: "Un modelo que probamos",
+            text: "ChatGPT 6, de OpenAI, con la cuenta de odentIA. No necesitas una cuenta propia ni una clave.",
           },
           {
             title: "Un tope de gasto",

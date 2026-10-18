@@ -13,7 +13,7 @@ const MOVED: Record<string, string> = {
   "/settings/channels": "/settings/integrations",
   "/settings/mail": "/settings/integrations",
   "/settings/webchat": "/settings/integrations/webchat",
-  "/settings/agent": "/settings/integrations/model",
+  "/settings/agent": "/settings/integrations",
   "/agent/approvals": "/agent/pendientes",
   // Una persona, una página (ADR 0029): Contactos y la ficha redirigen a la persona.
   "/contacts": "/people",

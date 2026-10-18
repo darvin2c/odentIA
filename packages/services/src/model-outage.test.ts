@@ -11,7 +11,7 @@ setupTestDb()
 
 const report = (orgId: string, code = "API_KEY_REQUIRED", at = new Date("2026-10-16T14:00:00Z")) => ({
   orgId,
-  llm: "chatgpt_6",
+  llm: "gpt-6-luna",
   llmLabel: "ChatGPT 6",
   code,
   detail: "La plataforma no tiene la clave de OpenAI configurada (LLM_OPENAI_API_KEY)",
@@ -29,7 +29,7 @@ describe("caso automático «Modelo sin responder»", () => {
       created: false,
     })
 
-    const cases = await ownerDb.select().from(supportCase).where(eq(supportCase.dedupeKey, "modelo-sin-responder:chatgpt_6:API_KEY_REQUIRED"))
+    const cases = await ownerDb.select().from(supportCase).where(eq(supportCase.dedupeKey, "modelo-sin-responder:gpt-6-luna:API_KEY_REQUIRED"))
     expect(cases).toHaveLength(1)
     expect(cases[0]).toMatchObject({
       question: "Modelo sin responder · Clínica norte, Clínica sur",
@@ -76,7 +76,7 @@ describe("caso automático «Modelo sin responder»", () => {
     const both = await Promise.all([reportModelOutage(ownerDb, report("org_a", "PROVIDER_REJECTED")), reportModelOutage(ownerDb, report("org_b", "PROVIDER_REJECTED"))])
     expect(both.filter((result) => result.created)).toHaveLength(1)
     expect(both[0]?.caseId).toBe(both[1]?.caseId)
-    const [kase] = await ownerDb.select().from(supportCase).where(eq(supportCase.dedupeKey, "modelo-sin-responder:chatgpt_6:PROVIDER_REJECTED"))
+    const [kase] = await ownerDb.select().from(supportCase).where(eq(supportCase.dedupeKey, "modelo-sin-responder:gpt-6-luna:PROVIDER_REJECTED"))
     expect(kase?.question).toMatch(/^Modelo sin responder · Clínica (norte|sur), Clínica (norte|sur)$/)
   })
 })

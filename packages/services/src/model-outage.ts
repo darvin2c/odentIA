@@ -18,7 +18,7 @@ const TITLE = "Modelo sin responder"
 
 export interface ModelOutageReport {
   orgId: string
-  /** Opción que eligió la clínica (`AGENT_LLMS`) y su nombre en pantalla. */
+  /** Modelo que no responde (el que escribe o el de decisión) y su nombre en pantalla. */
   llm: string
   llmLabel: string
   /** Clase del problema (`API_KEY_REQUIRED`, `PROVIDER_REJECTED`, `PROVIDER_QUOTA`). */

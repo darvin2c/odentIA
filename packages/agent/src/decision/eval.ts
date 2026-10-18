@@ -2,7 +2,7 @@
  * Evaluación de un modelo de decisión sobre ejemplos propios etiquetados
  * (nunca mensajes reales de pacientes sin autorización). Uso:
  *
- *   pnpm --filter @odentia/agent eval:decisions -- --provider=fake|baseline|jev|openai_decisions (fake exige LLM_MODEL=fake) [--llm=chatgpt_6|claude_5_5] [--file=eval/decisiones-ejemplos.json]
+ *   pnpm --filter @odentia/agent eval:decisions -- --provider=fake|baseline|jev|openai_decisions (fake exige LLM_MODEL=fake) [--file=eval/decisiones-ejemplos.json]
  *
  * Imprime acierto por pregunta y repetibilidad. Las credenciales se leen
  * del entorno (LLM_*, JEV_*, OPENAI_DECISIONS_*). El resultado es evidencia
@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { evalLlmSpec, platformLlmFromEnv } from "../llm.js"
+import { platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 import { createDecisionModel, type DecisionProvider } from "./index.js"
 import { TRIAGE_QUESTIONS, triageOutcome, triageState } from "./points.js"
 
@@ -42,7 +42,7 @@ const examples = JSON.parse(readFileSync(file, "utf8")) as Example[]
 
 const env = process.env
 // Con --provider=fake la línea base es el modelo de decisión falso, sin proveedor.
-const spec = evalLlmSpec(arg("llm", "chatgpt_6"), requested === "fake" ? { fake: true } : platformLlmFromEnv(env))
+const spec = resolveLlmSpec(requested === "fake" ? { fake: true } : platformLlmFromEnv(env))
 const decision = await createDecisionModel(
   provider,
   {

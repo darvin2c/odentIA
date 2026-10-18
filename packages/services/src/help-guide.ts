@@ -164,7 +164,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "agent.write",
     faqs: [
       { q: "¿Cómo enciendo el agente?", a: "En Agente, en la fila de Recepción, usa el interruptor. Te muestra cinco comprobaciones (canal, que el modelo responda, lo básico de tu clínica, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende." },
-      { q: "¿Qué hago si el modelo no responde?", a: "Los mensajes pasan a tu equipo y odentIA ya lo sabe: no tienes que arreglar nada. Si el otro modelo responde, puedes usarlo desde Encender Recepción o en Configuración › Integraciones › Modelo del agente; el aviso se va solo cuando el modelo vuelve a responder." },
+      { q: "¿Qué hago si el modelo no responde?", a: "Los mensajes pasan a tu equipo y odentIA ya lo sabe: no tienes que arreglar nada. El aviso se va solo cuando el modelo vuelve a responder." },
       { q: "¿Cuándo cierra el agente una conversación?", a: "Cuando la persona agradece o se despide y no queda nada pendiente, y cuando deja de responder: por defecto a las 22 horas de su último mensaje (lo cambias en la página de Recepción, entre 6 y 23 horas, porque pasadas 24 WhatsApp ya no deja despedirse). Si la persona escribe fuera del horario del agente, le responde al abrir; y si pasa el caso a una persona, siempre le avisa." },
       { q: "¿Cómo le enseño algo al agente?", a: "Los datos de tu clínica (precios, horarios, políticas) van en Agente › Conocimiento. Cómo quieres que atienda va en Agente › Recepción, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se borran igual. Si respondió mal, corrígelo en Agente › Aprender; al aprobar una regla que contradice otra te lo dice antes, con «Reemplazar», «Mantener las dos» o «Descartar»." },
       {
@@ -399,15 +399,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     terms: ["widget", "chat en mi página", "página web", "sitio web", "burbuja de chat"],
     writePermission: "settings.write",
   },
-  {
-    id: "ajustes_agente",
-    path: "/settings/integrations/model",
-    title: "Modelo del agente",
-    parent: INTEGRATIONS,
-    purpose: "Con qué entiende y escribe el agente: ChatGPT 6 o Claude 5.5, con la cuenta de odentIA; la clínica no necesita clave propia. Integraciones dice si responde, con la misma comprobación que el encendido. Lo del día a día —encenderlo, hasta dónde llega solo, el tope diario y sus indicaciones— está en Agente › Recepción.",
-    terms: ["modelo", "proveedor", "chatgpt", "claude", "inteligencia artificial", "ajustes técnicos"],
-    writePermission: "agent.write",
-  },
+
   {
     id: "auditoria",
     path: "/settings/audit",

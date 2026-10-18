@@ -8,10 +8,10 @@ function countingChecker() {
   let fresh = 0
   let saved: ModelCheckResult | null = null
   const checker: ModelChecker = {
-    async check(llm, options) {
+    async check(options) {
       if (options?.fresh || !saved) {
         fresh++
-        saved = { llm, responds: true, problem: null, checkedAt: new Date(fresh * 1000).toISOString() }
+        saved = { model: "gpt-6-luna", responds: true, problem: null, checkedAt: new Date(fresh * 1000).toISOString() }
       }
       return saved
     },
@@ -26,19 +26,19 @@ describe("«Volver a comprobar» el modelo", () => {
     // Lo guardado no llama a nadie ni registra uso: la base no se toca.
     const deps = { db: {} as Db, llm: {} as PlatformLlm, modelChecker: checker }
     const t0 = 1_000_000
-    const first = await checkOrgModel(deps, "org_a", "chatgpt_6", { fresh: true, now: t0 })
+    const first = await checkOrgModel(deps, "org_a", { fresh: true, now: t0 })
     expect(fresh()).toBe(1)
     // En bucle dentro del minuto: siempre lo guardado.
     for (let i = 1; i <= 5; i++) {
-      const again = await checkOrgModel(deps, "org_a", "chatgpt_6", { fresh: true, now: t0 + i * 1000 })
+      const again = await checkOrgModel(deps, "org_a", { fresh: true, now: t0 + i * 1000 })
       expect(again.checkedAt).toBe(first.checkedAt)
     }
     expect(fresh()).toBe(1)
     // Otra clínica tiene su propio minuto.
-    await checkOrgModel(deps, "org_b", "chatgpt_6", { fresh: true, now: t0 + 2000 })
+    await checkOrgModel(deps, "org_b", { fresh: true, now: t0 + 2000 })
     expect(fresh()).toBe(2)
     // Pasado el minuto, sí vuelve a comprobar.
-    const later = await checkOrgModel(deps, "org_a", "chatgpt_6", { fresh: true, now: t0 + FRESH_MODEL_CHECK_GAP_MS })
+    const later = await checkOrgModel(deps, "org_a", { fresh: true, now: t0 + FRESH_MODEL_CHECK_GAP_MS })
     expect(fresh()).toBe(3)
     expect(later.checkedAt).not.toBe(first.checkedAt)
   })

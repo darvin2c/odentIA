@@ -99,7 +99,7 @@ test("configuración: lista por grupos, cada apartado con su nombre y direccione
   for (const [from, to, name] of [
     ["/settings/channels", "/settings/integrations", "Integraciones"],
     ["/settings/webchat", "/settings/integrations/webchat", "Chat web"],
-    ["/settings/agent", "/settings/integrations/model", "Modelo del agente"],
+    ["/settings/agent", "/settings/integrations", "Integraciones"],
   ] as const) {
     await gotoHydrated(page, tenant(org.slug, from))
     await expect(page).toHaveURL(tenantPattern(org.slug, to))

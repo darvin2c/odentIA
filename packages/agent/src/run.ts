@@ -6,9 +6,8 @@ import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
-  AGENT_LLMS,
+  AGENT_MODEL_LABEL,
   type AgentConfig,
-  type AgentLlm,
   countAgentModelRunsToday,
   countContactModelRunsToday,
   askGeneralPermissionAfterBooking,
@@ -20,7 +19,6 @@ import {
   lessonImpact,
   ServiceError,
   isSaasSendBlocked,
-  DEFAULT_AGENT_LLM,
   getOrgLocale,
   nextAgentOpening,
   notifyAgentProviderProblem,
@@ -66,7 +64,7 @@ import {
   TOOL_ACTION_LABEL,
 } from "./tools.js"
 export interface AgentRuntime {
-  /** Cuentas de odentIA en los proveedores; la organización solo elige el modelo. */
+  /** Cuenta de odentIA en el proveedor del modelo; la organización no elige ni trae la suya. */
   platform: PlatformLlm
   /** Sustituye la construcción del modelo (pruebas con un modelo guionizado). */
   createModel?: (spec: LlmSpec) => Promise<Runnable<BaseMessage[], AIMessage>>
@@ -293,20 +291,17 @@ async function attendAgentRun(
   // Uso de la corrida en curso, para registrarlo también si termina en error.
   let runUsage: AgentToolCtx["usage"] | null = null
   // Modelo resuelto, para registrarlo aunque falle antes o después.
-  let effectiveModel = llmModelName(DEFAULT_AGENT_LLM, runtime.platform)
+  let effectiveModel = llmModelName(runtime.platform)
   let configProblem: ProviderProblem | null = null
-  // Modelo que eligió la clínica: el caso de Soporte dice cuál no responde.
-  let runLlm: AgentLlm | null = null
   try {
     let prepared:
       | { skip: { reason: string; model: string; silent?: boolean } }
       | { toolCtx: AgentToolCtx; spec: LlmSpec; cfg: AgentConfig }
     // La configuración del proveedor es estado de la organización: su fallo
     // no debe reintentarse ni derivar en silencio.
-    const resolveLlm = (cfg: AgentConfig): LlmSpec | null => {
-      runLlm = cfg.llm
+    const resolveLlm = (): LlmSpec | null => {
       try {
-        return resolveLlmSpec(cfg, runtime.platform)
+        return resolveLlmSpec(runtime.platform)
       } catch (error) {
         if (!(error instanceof LlmConfigError)) throw error
         configProblem = describeProviderProblem(error)
@@ -327,7 +322,6 @@ async function attendAgentRun(
         return { skip: { reason: "agent-off", model: effectiveModel } }
       }
       const cfg = await getAgentConfig(tx, orgId)
-      effectiveModel = llmModelName(cfg.llm, runtime.platform)
       if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
       const now = clock()
       const limit = await agentLimit(tx, orgId, cfg, conv.channelConnectionId, now)
@@ -463,7 +457,7 @@ async function attendAgentRun(
         await noticeAfterHandoff(toolCtx)
         return { skip: { reason: "handoff", model: effectiveModel } }
       }
-      const spec = resolveLlm(cfg)
+      const spec = resolveLlm()
       if (!spec) return { skip: { reason: "llm-config", model: effectiveModel } }
       return {
         toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
@@ -829,12 +823,11 @@ async function attendAgentRun(
   async function finishWithProviderProblem(problem: ProviderProblem): Promise<"done"> {
     await withOrgContext(db, orgId, (tx) => notifyAgentProviderProblem(tx, orgId, problem)).catch(() => {})
     // El aviso a la clínica dice «Ya avisamos a odentIA»: el caso de Soporte lleva el motivo técnico.
-    if (problem.code !== "DAILY_LIMIT" && runtime.ownerDb && runLlm) {
-      const llm: AgentLlm = runLlm
+    if (problem.code !== "DAILY_LIMIT" && runtime.ownerDb) {
       await reportModelOutage(runtime.ownerDb, {
         orgId,
-        llm,
-        llmLabel: AGENT_LLMS.find((option) => option.id === llm)?.label ?? llm,
+        llm: effectiveModel,
+        llmLabel: AGENT_MODEL_LABEL,
         code: problem.code,
         detail: problem.detail,
         at: startedAt,
@@ -936,7 +929,7 @@ export async function simulateAgentTurn(
     const cfg = await getAgentConfig(tx, orgId)
     return {
       contactId: conv.contactId,
-      spec: resolveLlmSpec(cfg, deps.platform),
+      spec: resolveLlmSpec(deps.platform),
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
       verifyReplies: cfg.replyCheckEnabled,
       emojis: cfg.emojis,
@@ -1021,7 +1014,7 @@ export async function simulateAgentSandbox(
     const cfg = await getAgentConfig(tx, orgId)
     return {
       cfg,
-      spec: resolveLlmSpec(cfg, deps.platform),
+      spec: resolveLlmSpec(deps.platform),
       excludedTools: await orgToolExclusions(tx, orgId, cfg),
     }
   })

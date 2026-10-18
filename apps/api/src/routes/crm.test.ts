@@ -387,7 +387,8 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
     body: JSON.stringify({ enabled: true }),
   })
   expect(put.status).toBe(200)
-  // El modelo es uno de los dos de odentIA; la clínica ya no trae proveedor ni lo prueba.
+  // El modelo lo elige odentIA (ADR 0052): la configuración no lo guarda ni lo devuelve, y un
+  // cliente viejo que lo mande no cambia nada.
   const chosen = await app.request("/agent/config", {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -395,14 +396,7 @@ it("conexiones listan webhookUrl sin secretos; agente con gating", async () => {
   })
   expect(chosen.status).toBe(200)
   const chosenBody = (await chosen.json()) as { data: Record<string, unknown> }
-  expect(chosenBody.data.llm).toBe("claude_5_5")
-  expect(Object.keys(chosenBody.data).filter((key) => /model|baseurl|apikey/i.test(key))).toEqual([])
-  const unknown = await app.request("/agent/config", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ llm: "gpt-4o" }),
-  })
-  expect(unknown.status).toBe(400)
+  expect(Object.keys(chosenBody.data).filter((key) => /llm|model|baseurl|apikey/i.test(key))).toEqual([])
   const probe = await app.request("/agent/config/llm/test", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
   expect(probe.status).toBe(404)
   const member = buildApp("member")
@@ -825,18 +819,18 @@ it("fichas, resumen y prueba del agente", async () => {
 })
 
 it("sin un modelo que responda no se enciende, «Probar» no cuenta y odentIA recibe el caso", async () => {
-  // Sin las claves de la plataforma: ningún modelo responde y no se llama a ningún proveedor.
+  // Sin la clave de la plataforma: el modelo no responde y no se llama al proveedor.
   const app = buildApp("owner", {})
   const json = { "content-type": "application/json" }
   await ownerDb.execute(
     sql`insert into "org_profile" ("organization_id", "legal_name", "country_code", "currency", "timezone", "locale") values ('org_a', 'Clínica', 'PE', 'PEN', 'America/Lima', 'es-PE') on conflict do nothing`,
   )
-  await app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ enabled: false, llm: "chatgpt_6" }) })
+  await app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ enabled: false }) })
 
   const model = await app.request("/agent/model")
   expect(model.status).toBe(200)
   const status = ((await model.json()) as { data: Record<string, unknown> }).data
-  expect(status).toMatchObject({ llm: "chatgpt_6", responds: false, other: { llm: "claude_5_5", responds: false } })
+  expect(status).toEqual({ responds: false, checkedAt: expect.any(String) })
   // La clínica nunca recibe el motivo técnico.
   expect(JSON.stringify(status)).not.toMatch(/LLM_|clave|API_KEY/)
 
@@ -863,7 +857,7 @@ it("sin un modelo que responda no se enciende, «Probar» no cuenta y odentIA re
 
   // Soporte de odentIA tiene un solo caso por motivo, con el motivo técnico.
   const cases = await ownerDb.execute<{ question: string; detail: string }>(
-    sql`select question, detail from support_case where dedupe_key = 'modelo-sin-responder:chatgpt_6:API_KEY_REQUIRED'`,
+    sql`select question, detail from support_case where dedupe_key = 'modelo-sin-responder:gpt-6-luna:API_KEY_REQUIRED'`,
   )
   expect(cases).toHaveLength(1)
   expect(cases[0]?.question).toBe("Modelo sin responder · Clínica")

@@ -151,11 +151,10 @@ const NOT_SENT =
  * dice una sola vez por corrida para que lo envíe; si vuelve a escribir sin
  * enviar, sigue lo de ADR 0050 en `run.ts` («Dame un momento» y otra corrida,
  * y a la segunda un tema para recepción). Medido el 2026-10-17:
- * con Claude 5.5 pasaba en 9 de 39 mensajes. Va como mensaje del usuario
- * porque LangChain no envía a Anthropic un mensaje de sistema a mitad de la
- * conversación. No se fuerza la herramienta (`tool_choice`): Haiku 5.5 lo
- * admite pero entonces no piensa, y Sonnet y Opus 5.5 lo rechazan. Tampoco se
- * envía el texto tal cual: la persona solo recibe lo que el modelo envía.
+ * con Claude 5.5, que odentIA ya no usa (ADR 0052), pasaba en 9 de 39
+ * mensajes. Va como mensaje del usuario y no como otro mensaje de sistema a
+ * mitad de la conversación. Tampoco se envía el texto tal cual: la persona
+ * solo recibe lo que el modelo envía.
  */
 export const UNSENT_TEXT =
   "Aviso del sistema, no lo escribió el interlocutor: tu último texto no le llegó a nadie, porque solo recibe lo que envías con send_reply. Si era tu respuesta, envíala ahora con send_reply; si antes necesitas consultar algo, usa la herramienta que corresponda."
@@ -832,20 +831,8 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     toolCtx.checkFailures = 0
     const history = historyToMessages(items, zone)
     if (draft) history.push(new HumanMessage({ content: draft }))
-    // Anthropic solo guarda en caché lo que se le marca: la parte igual para
-    // toda la organización (con las herramientas, que van antes) se marca y
-    // las llamadas siguientes la leen a una décima de su precio. OpenAI la
-    // guarda sola y no admite la marca.
-    const systemMessage =
-      toolCtx.modelProvider === "anthropic" && perTurn
-        ? new SystemMessage({
-            content: [
-              { type: "text", text: stable, cache_control: { type: "ephemeral" } },
-              { type: "text", text: perTurn },
-            ],
-          })
-        : new SystemMessage({ content: system })
-    return { messages: [systemMessage, ...history] }
+    // OpenAI guarda sola en su caché la parte igual para toda la organización.
+    return { messages: [new SystemMessage({ content: system }), ...history] }
   }
 
   async function llm(state: typeof AgentState.State) {

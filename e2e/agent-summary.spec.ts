@@ -184,8 +184,9 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   await info.attach("resumen-problema-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
   await info.attach("resumen-problema", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await problem.getByRole("link", { name: "Cambiar de modelo" }).click()
-  await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/model"))
+  // La clínica no tiene nada que arreglar ni otro modelo al que cambiar: el aviso no ofrece acciones.
+  await expect(problem.getByRole("link")).toHaveCount(0)
+  await expect(problem.getByRole("button")).toHaveCount(0)
 })
 
 test("bandeja: con Recepción apagada lo dice, y solo quien administra puede ir a encenderla", async ({ owner, fixtureDb }, info) => {

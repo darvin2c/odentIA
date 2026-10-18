@@ -150,26 +150,19 @@ it("agent config: defaults y upsert", async () => {
   ).rejects.toMatchObject({ status: 400 })
 })
 
-it("agent config: la clínica elige uno de los dos modelos de odentIA y el cambio se audita", async () => {
+it("agent config: la clínica no elige el modelo ni la configuración lo guarda (ADR 0052)", async () => {
   const defaults = await withOrgContext(appDb, "org_b", (tx) => getAgentConfig(tx, "org_b"))
-  expect(defaults.llm).toBe("chatgpt_6")
-  await expect(
-    withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { llm: "gpt-4o" as never })),
-  ).rejects.toThrow("ChatGPT 6 o Claude 5.5")
-  const chosen = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { llm: "claude_5_5", maxTurns: 7 }))
-  expect(chosen).toMatchObject({ llm: "claude_5_5", maxTurns: 7 })
-  expect(chosen).not.toHaveProperty("model")
-  expect(chosen).not.toHaveProperty("llmBaseUrl")
-  expect(chosen).not.toHaveProperty("hasLlmApiKey")
-  // Guardar otra cosa no toca el modelo elegido.
-  const kept = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { maxTurns: 8 }))
-  expect(kept.llm).toBe("claude_5_5")
+  expect(defaults).not.toHaveProperty("llm")
+  const saved = await withOrgContext(appDb, "org_b", (tx) => upsertAgentConfig(tx, "org_b", { maxTurns: 7, dailyRunLimit: 300 }))
+  expect(saved).toMatchObject({ maxTurns: 7, dailyRunLimit: 300 })
+  for (const field of ["llm", "model", "llmBaseUrl", "hasLlmApiKey"]) expect(saved).not.toHaveProperty(field)
   const audits = await withOrgContext(appDb, "org_b", (tx) =>
     tx
       .select({ metadata: auditEvent.metadata })
       .from(auditEvent)
       .where(and(eq(auditEvent.organizationId, "org_b"), eq(auditEvent.action, "agent.config_updated"))),
   )
-  // maxTurns no se audita; el modelo sí, con su valor.
-  expect(audits.map((a) => a.metadata)).toEqual([expect.objectContaining({ changed: ["llm"], llm: "claude_5_5" })])
+  // maxTurns no se audita; el tope diario sí, y ningún modelo.
+  expect(audits.map((a) => a.metadata)).toEqual([expect.objectContaining({ changed: ["dailyRunLimit"] })])
+  expect(audits[0]?.metadata).not.toHaveProperty("llm")
 })

@@ -649,21 +649,6 @@ function ReceptionPage() {
 
           {/* Decisión 24: lo que escribe la clínica y lo que aprendió, en una sola lista. */}
           <AgentGuidance canWrite={canWrite} />
-
-          {canWrite ? (
-            <Link
-              to="/settings/integrations/model"
-              className="elevated lift flex min-h-13 items-center gap-3 rounded-xl border bg-card px-4 py-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-6"
-            >
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="font-semibold">Modelo del agente</span>
-                <span className="text-muted-foreground">
-                  Con qué cuenta trabaja: la incluida con odentIA o la propia de la clínica.
-                </span>
-              </span>
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            </Link>
-          ) : null}
         </div>
 
         {canWrite ? (

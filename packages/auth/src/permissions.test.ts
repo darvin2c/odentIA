@@ -141,11 +141,6 @@ describe("permiso operativo agent.decide", () => {
     expect(canAccessAny("reception", platformPathPermission("/settings/integrations") ?? [])).toBe(false)
   })
 
-  it("el modelo del agente, bajo Integraciones, lo abre quien administra el agente", () => {
-    expect(platformPathPermission("/settings/integrations/model")).toEqual(["agent.write"])
-    expect(canAccessAny("admin", platformPathPermission("/settings/integrations/model") ?? [])).toBe(true)
-    expect(canAccessAny("reception", platformPathPermission("/settings/integrations/model") ?? [])).toBe(false)
-  })
 })
 
 describe("fronteras económicas por rol", () => {

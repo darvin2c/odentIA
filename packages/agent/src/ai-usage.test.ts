@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest"
 import { costMicrosOf, reportAiUse, reportReplyUse, summarizeAiUses, takeAiUsage, withAiMeter } from "./ai-usage.js"
 
 describe("costo de una llamada", () => {
-  it("cobra aparte lo leído y lo escrito en la caché de Claude", () => {
+  it("cobra aparte lo leído y lo escrito en la caché", () => {
     // 600 nuevos a 0,10 + 2.000 leídos a 0,01 + 400 escritos a 0,125 + 50 de salida a 0,50 (USD por millón).
     expect(
-      costMicrosOf({ model: "claude-haiku-5-5", inputTokens: 3_000, cachedInputTokens: 2_000, cacheWriteTokens: 400, outputTokens: 50 }),
+      costMicrosOf({ model: "gpt-6-luna", inputTokens: 3_000, cachedInputTokens: 2_000, cacheWriteTokens: 400, outputTokens: 50 }),
     ).toBe(60 + 20 + 50 + 25)
   })
 
@@ -52,8 +52,8 @@ describe("medir una operación", () => {
       { provider: "openai", model: "gpt-6-luna", inputTokens: 1_000, outputTokens: 100 },
       { provider: "openai", model: "gpt-6-luna", inputTokens: 2_000, cachedInputTokens: 1_000, outputTokens: 100 },
       { provider: "jev", model: "jev-1.13.0", inputTokens: 300, outputTokens: 5 },
-      { provider: "anthropic", model: "claude-haiku-5-5", inputTokens: 100, outputTokens: 10 },
-      { provider: "anthropic", model: "claude-haiku-5-5" },
+      { provider: "vectores", model: "text-embedding-3-small", inputTokens: 100 },
+      { provider: "vectores", model: "text-embedding-3-small" },
     ])
     expect(entries).toEqual([
       {
@@ -69,7 +69,7 @@ describe("medir una operación", () => {
       },
       // 300 de entrada a 0,042: 12,6 millonésimas, redondeadas; la salida de Jev no se cobra.
       { provider: "jev", model: "jev-1.13.0", calls: 1, inputTokens: 300, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: 5, audioSeconds: null, costMicros: 13 },
-      { provider: "anthropic", model: "claude-haiku-5-5", calls: 2, inputTokens: null, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: null, audioSeconds: null, costMicros: null },
+      { provider: "vectores", model: "text-embedding-3-small", calls: 2, inputTokens: null, cachedInputTokens: null, cacheWriteTokens: null, outputTokens: null, audioSeconds: null, costMicros: null },
     ])
   })
 

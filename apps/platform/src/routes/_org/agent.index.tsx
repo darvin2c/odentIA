@@ -175,17 +175,9 @@ function AgentSummaryPage() {
             <SummaryNotice
               tone="danger"
               title={AGENT_MODEL_DOWN.title}
-              action={
-                canWrite ? (
-                  <Link to="/settings/integrations/model" className={outlineLink}>
-                    Cambiar de modelo
-                  </Link>
-                ) : null
-              }
             >
               {AGENT_MODEL_DOWN.body}
               {overview.provider.at ? ` El último intento falló ${timeAgo(overview.provider.at)}.` : ""}
-              {canWrite ? "" : " Avisa a quien administra la clínica."}
             </SummaryNotice>
           ) : null}
           {limitReached && overview.enabled ? (

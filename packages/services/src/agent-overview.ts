@@ -166,7 +166,6 @@ const PROVIDER_PROBLEM_OF: Record<string, AgentProviderProblem> = {
 async function providerProblem(
   tx: Db,
   orgId: string,
-  llm: Parameters<AgentModelCheck>[0],
   modelCheck: AgentModelCheck | undefined,
 ): Promise<AgentOverview["provider"]> {
   const [last] = await tx.execute<{ status: string; error: string | null; started_at: Date | string }>(sql`
@@ -180,7 +179,7 @@ async function providerProblem(
   const at = new Date(last.started_at)
   if (modelCheck) {
     // Un fallo de la comprobación no inventa ni retira nada: se queda lo que dice el libro.
-    const check = await modelCheck(llm).catch(() => null)
+    const check = await modelCheck().catch(() => null)
     if (check?.responds && new Date(check.checkedAt) > at) return { problem: null, at: null }
   }
   return { problem, at: at.toISOString() }
@@ -236,7 +235,7 @@ export async function getAgentOverview(
     today: await agentOutcomes(tx, orgId, await startOfOrgDay(tx, zone.timezone)),
     week: await agentOutcomes(tx, orgId, weekAgo),
     learned: await learnedSince(tx, orgId, weekAgo),
-    provider: await providerProblem(tx, orgId, cfg.llm, opts.modelCheck),
+    provider: await providerProblem(tx, orgId, opts.modelCheck),
     knows: {
       answers: (await listActiveKnowledge(tx, orgId)).length,
       servicesWithPrice: sources.pricedServices,
