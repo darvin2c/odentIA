@@ -2900,3 +2900,29 @@ it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no 
   expect(said).toContain("Envió una imagen que no puedes ver")
   expect(said).not.toContain("[adjunto]")
 })
+
+it("a quien está en Spam o bloqueado el agente no le responde, no llama al modelo y no se cobra (ADR 0054)", async () => {
+  const model = new ScriptedModel(() => toolCall("send_reply", { text: "No debería salir." }, "call-1"))
+  for (const [screen, reason, by] of [
+    ["spam", "publicidad", null],
+    ["blocked", "amenazas", "u_agent_test"],
+  ] as const) {
+    const inbound = await ingestText(`tg:pantalla-${screen}`, `evt-pantalla-${screen}`, "GANA DINERO DESDE CASA")
+    const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, inbound.conversationId)))
+    if (by) {
+      await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values (${by}, 'Carla', 'carla@agente.test', true) on conflict (id) do nothing`)
+    }
+    await ownerDb.execute(sql`update contact set screen = ${screen}, screened_at = now(), screened_by_user_id = ${by},
+      screen_reason = ${reason}, screen_note = ${by ? "Amenazó a recepción" : null} where id = ${conv!.contactId}`)
+    expect(await runScripted(model, inbound.conversationId, inbound.messageId)).toBe("done")
+    expect(await agentMessages(inbound.conversationId)).toEqual([])
+    const rows = await withOrgContext(appDb, "org_a", (tx) =>
+      tx.select({ status: agentRunLedger.status, llmCalls: agentRunLedger.llmCalls, error: agentRunLedger.error })
+        .from(agentRunLedger).where(eq(agentRunLedger.conversationId, inbound.conversationId)))
+    expect(rows).toEqual([{ status: "omitida", llmCalls: 0, error: screen === "spam" ? "spam" : "bloqueado" }])
+    const charged = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from saas_action where conversation_id = ${inbound.conversationId}`)
+    expect(charged[0]?.n).toBe(0)
+  }
+  expect(model.seen).toHaveLength(0)
+})

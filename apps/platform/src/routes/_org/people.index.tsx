@@ -134,6 +134,9 @@ function PeoplePage() {
               {PERSON_KIND_LABELS[row.original.kind]}
             </Badge>
             {row.original.archived ? <Badge variant="outline">Archivada</Badge> : null}
+            {/* Spam y bloqueados no son contactos nuevos: se encuentran aquí con su estado (ADR 0054). */}
+            {row.original.screen === "spam" ? <Badge variant="outline">Spam</Badge> : null}
+            {row.original.screen === "blocked" ? <Badge variant="destructive">Bloqueado</Badge> : null}
           </span>
         ),
       },

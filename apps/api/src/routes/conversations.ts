@@ -1,6 +1,12 @@
 import { withOrgContext } from "@odentia/db"
 import {
+  BLOCK_REASONS,
+  blockPerson,
   confirmPhoneMatch,
+  contactOfConversation,
+  sendToSpam,
+  takeOutOfSpam,
+  unblockPerson,
   phoneMatchOf,
   assignConversation,
   attachmentUrl,
@@ -372,6 +378,64 @@ export function createConversationsRoute(deps: CrmDeps) {
       withOrgContext(deps.db, orgId, (tx) =>
         setAgentStatus(tx, orgId, c.req.param("id"), parsed.data.enabled, userId),
       ).then(() => ({ ok: true })),
+    )
+  })
+
+  /** La persona de una conversación, para Spam y Bloquear: actúan sobre ella, no sobre el hilo (ADR 0054). */
+  const contactOf = contactOfConversation
+
+  // «Es spam»: quien escribe en conversaciones. No vale para un paciente (409).
+  app.post("/:id/spam", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const contactId = await contactOf(tx, orgId, c.req.param("id"))
+        return sendToSpam(tx, orgId, { contactId, userId })
+      }),
+    )
+  })
+
+  // «No es spam»: vuelve a la Bandeja y queda protegida; el agente le responde si aún se puede.
+  app.post("/:id/not-spam", async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const contactId = await contactOf(tx, orgId, c.req.param("id"))
+        return takeOutOfSpam(tx, orgId, { contactId, userId })
+      }),
+    )
+  })
+
+  const blockInput = z.object({ reason: z.enum(BLOCK_REASONS), note: z.string().trim().min(1).max(500) }).strict()
+
+  // Bloquear y desbloquear: solo quien maneja los contactos (recepción, dueño y administración).
+  app.post("/:id/block", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para bloquear a una persona"), 403)
+    }
+    const parsed = blockInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const contactId = await contactOf(tx, orgId, c.req.param("id"))
+        await blockPerson(tx, orgId, { contactId, userId, reason: parsed.data.reason, note: parsed.data.note })
+        return { ok: true }
+      }),
+    )
+  })
+
+  app.post("/:id/unblock", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "crm.write")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para desbloquear a una persona"), 403)
+    }
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => {
+        const contactId = await contactOf(tx, orgId, c.req.param("id"))
+        await unblockPerson(tx, orgId, { contactId, userId })
+        return { ok: true }
+      }),
     )
   })
 

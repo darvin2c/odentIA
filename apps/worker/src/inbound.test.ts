@@ -22,14 +22,17 @@ const deps = { storage: storageStub, fetch, secretsKey: KEY }
 function job(
   eventId: string,
   thread = "tg:555",
+  text = `Hola (${eventId})`,
+  sender = "tg:555",
 ): { msg_id: number; read_ct: number; message: InboundMessageJob } {
+  // Cada mensaje dice algo distinto: el mismo texto cinco veces en una hora es spam (ADR 0054).
   const event: NormalizedInbound = {
     externalEventId: eventId,
     externalMessageId: eventId,
     externalThreadId: thread,
-    senderExternalId: "tg:555",
+    senderExternalId: sender,
     senderDisplayName: "Ana",
-    content: { type: "text", text: "Hola" },
+    content: { type: "text", text },
     sentAt: new Date().toISOString(),
   }
   return { msg_id: 1, read_ct: 0, message: { orgId: "org_a", connectionId: tgConnId, event } }
@@ -115,6 +118,30 @@ it("un entrante a una conversación cerrada la reabre y el agente la atiende (AD
     expect(reopened).toMatchObject({ status: "open", closeReason: null, closedAt: null, agentStatus: "on", nudgedAt: null })
     expect(reopened!.attentionStartedAt.getTime()).toBeGreaterThan(thread!.attentionStartedAt.getTime())
     expect(await queueDepth("agent_runs")).toBe(1)
+  } finally {
+    await ownerDb.execute(sql`delete from "agent_config" where "organization_id" = 'org_a'`)
+  }
+})
+
+it("el mismo texto cinco veces en una hora va a Spam y ya no encola corrida; a un bloqueado tampoco (ADR 0054)", async () => {
+  await ownerDb.execute(sql`insert into "agent_config" ("organization_id", "enabled") values ('org_a', true)`)
+  try {
+    for (let i = 1; i <= 5; i += 1) {
+      await ownerDb.execute(sql`select pgmq.purge_queue('agent_runs')`)
+      await consumeInbound(appDb, deps, job(`evt-bot-${i}`, "tg:bot", "GANA DINERO YA", "tg:bot"))
+      expect(await queueDepth("agent_runs")).toBe(i < 5 ? 1 : 0)
+    }
+    const [bot] = await ownerDb.execute<{ screen: string | null }>(sql`select c.screen from contact c
+      join conversation cv on cv.contact_id = c.id where cv.external_thread_id = 'tg:bot'`)
+    expect(bot?.screen).toBe("spam")
+
+    await consumeInbound(appDb, deps, job("evt-bloq-1", "tg:bloq", "Hola", "tg:bloq"))
+    await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u_worker_bloq', 'Carla', 'carla@worker.test', true) on conflict (id) do nothing`)
+    await ownerDb.execute(sql`update contact set screen = 'blocked', screened_at = now(), screened_by_user_id = 'u_worker_bloq',
+      screen_reason = 'acoso', screen_note = 'Insultos' where id = (select contact_id from conversation where external_thread_id = 'tg:bloq')`)
+    await ownerDb.execute(sql`select pgmq.purge_queue('agent_runs')`)
+    await consumeInbound(appDb, deps, job("evt-bloq-2", "tg:bloq", "¿Hola?", "tg:bloq"))
+    expect(await queueDepth("agent_runs")).toBe(0)
   } finally {
     await ownerDb.execute(sql`delete from "agent_config" where "organization_id" = 'org_a'`)
   }

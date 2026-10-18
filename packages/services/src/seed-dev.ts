@@ -101,6 +101,7 @@ import {
 } from "./clinical.js"
 import { createConnection } from "./connections.js"
 import { createContact, updateContact } from "./contacts.js"
+import { blockContact, markSpam } from "./contact-screen.js"
 import { createContactNote } from "./crm-workspace.js"
 import { grantDataConsent } from "./data-consents.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
@@ -1278,6 +1279,61 @@ for (const [index, item] of CLOSED_SEED.entries()) {
     status: "read",
     createdAt: new Date(at.getTime() + 600_000),
   })
+}
+
+// --- Spam y bloqueados (issue 77, ADR 0054): una persona por cada forma de
+// llegar a Spam (el mismo texto muchas veces, una venta a la clínica y una
+// estafa) y una bloqueada por recepción. Ninguna es paciente; no se envía nada.
+const SEED_SCREENED = [
+  { name: "+1 202 555 0142", phone: "+12025550142", reason: "repeticion", texts: Array.from({ length: 6 }, () => "GANA S/ 500 DIARIOS desde casa 💸 Escribe YA 👉 bit.ly/gana-ya") },
+  { name: "MarketDent", phone: "+51944100200", reason: "venta", texts: ["Hola, somos MarketDent 👋 Hacemos páginas web y campañas para clínicas dentales. ¿Con quién puedo hablar para enviarle nuestra propuesta?"] },
+  { name: "+51 913 004 221", phone: "+51913004221", reason: "estafa", texts: ["Su paquete está retenido en aduanas. Pague S/ 8,90 aquí para liberarlo: correos-pe.info/pago"] },
+  { name: "Kevin Ramos", phone: "+51951220418", reason: "amenazas", texts: ["¿Por qué me cobraron la consulta si no me atendieron?", "Esto no se queda así. Voy a ir a la clínica y van a ver."] },
+] as const
+for (const [index, item] of SEED_SCREENED.entries()) {
+  const person = await createContact(db, ORG_A, { displayName: item.name, phone: item.phone }, { userId: ANA_ID })
+  await db.insert(contactIdentity).values({
+    organizationId: ORG_A,
+    contactId: person.id,
+    channel: "whatsapp",
+    externalUserId: `wa:${item.phone.replace(/\D/g, "")}`,
+    displayName: item.name,
+    isPrimary: true,
+  })
+  const last = hoursAgo(5 + index * 7)
+  const conv = await seedConversation({
+    orgId: ORG_A,
+    contactId: person.id,
+    connectionId: connA.id,
+    thread: `seed-thread-screened-${index}`,
+    unreadCount: 0,
+    lastInboundAt: last,
+    lastMessageAt: last,
+  })
+  let firstMessageId = ""
+  for (const [n, text] of item.texts.entries()) {
+    const msg = await seedMessage({
+      orgId: ORG_A,
+      conversationId: conv.id,
+      direction: "in",
+      senderKind: "contact",
+      body: text,
+      externalId: `seed-msg-screened-${index}-${n}`,
+      status: "received",
+      createdAt: new Date(last.getTime() - (item.texts.length - 1 - n) * 6 * 60_000),
+    })
+    firstMessageId ||= msg.id
+  }
+  if (item.reason === "amenazas") {
+    await blockContact(db, ORG_A, {
+      contactId: person.id,
+      userId: ANA_ID,
+      reason: "amenazas",
+      note: "Amenazó a recepción después de que le cobramos la consulta.",
+    })
+  } else {
+    await markSpam(db, ORG_A, { contactId: person.id, reason: item.reason, userId: null, messageId: firstMessageId })
+  }
 }
 
 // --- Tareas A ---

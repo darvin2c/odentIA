@@ -3,11 +3,13 @@ import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
-import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import {
   AGENT_MODEL_LABEL,
   type AgentConfig,
+  BLOCKED_RUN_REASON,
+  SPAM_RUN_REASON,
   contactGotAgentTextToday,
   contactHadRunToday,
   countAgentModelRunsToday,
@@ -326,6 +328,14 @@ async function attendAgentRun(
       if (!conv) return { skip: { reason: "missing-conversation", model: effectiveModel } }
       // El agente nunca responde en una conversación cerrada (ADR 0024): un entrante la reabre antes.
       if (conv.status !== "open") return { skip: { reason: "conversation-closed", model: effectiveModel } }
+      // Spam y bloqueados (ADR 0054): el agente no los atiende y no se cobra.
+      const [who] = await tx
+        .select({ screen: contact.screen })
+        .from(contact)
+        .where(and(eq(contact.organizationId, orgId), eq(contact.id, conv.contactId)))
+        .limit(1)
+      if (who?.screen === "blocked") return { skip: { reason: BLOCKED_RUN_REASON, model: effectiveModel } }
+      if (who?.screen === "spam") return { skip: { reason: SPAM_RUN_REASON, model: effectiveModel } }
       if (conv.agentStatus !== "on") {
         return { skip: { reason: "agent-off", model: effectiveModel } }
       }

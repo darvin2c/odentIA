@@ -134,33 +134,60 @@ export function needsPersonSql(conv: SQL): SQL {
  * (`close_after_hours`). El ciclo no la cierra sola: la muestra «Te espera».
  */
 export function stillOpenWithPersonSql(conv: SQL): SQL {
-  return sql`(${conv}.status = 'open' and (${personInChargeSql(conv)} or not ${agentAttendingSql(conv)}) and not ${unansweredSql(conv)} and not ${handoffOpenExistsSql(conv)}
+  return sql`(${conv}.status = 'open' and not ${screenedSql(conv)} and (${personInChargeSql(conv)} or not ${agentAttendingSql(conv)}) and not ${unansweredSql(conv)} and not ${handoffOpenExistsSql(conv)}
     and exists (select 1 from agent_config ac_q where ac_q.organization_id = ${conv}.organization_id and ac_q.enabled
       and greatest(coalesce(${conv}.last_message_at, '-infinity'::timestamptz), ${conv}.attention_started_at)
         <= now() - make_interval(hours => ac_q.close_after_hours)))`
 }
 
 /**
- * Vistas de la Bandeja (ADR 0050): cuatro que no se superponen, así cada
- * conversación cae en una sola y los totales suman.
+ * Su persona está en Spam o bloqueada (ADR 0054): el agente no la atiende y
+ * no sale en ninguna de las cuatro pestañas, ni en Inicio ni en Reportes.
+ */
+export function screenedSql(conv: SQL): SQL {
+  return sql`exists (select 1 from contact c_scr
+    where c_scr.organization_id = ${conv}.organization_id and c_scr.id = ${conv}.contact_id and c_scr.screen is not null)`
+}
+
+/** Días de la lista de Spam: lo más viejo queda en la persona, no en la lista. */
+export const SPAM_VIEW_DAYS = 30
+
+/**
+ * Vistas de la Bandeja (ADR 0050 y 0054): las cuatro pestañas no se
+ * superponen, así cada conversación cae en una sola y los totales suman; Spam
+ * y Bloqueados son dos listas aparte, junto a las pestañas.
  * - `attend`, «Por atender»: pide a una persona (`needsPersonSql`).
  * - `awaiting_patient`: no tiene temas y espera al paciente.
  * - `agent`: la atiende el agente, sin temas y sin esperar al paciente.
  * - `closed`.
+ * - `spam`: su persona está en Spam y escribió en los últimos `SPAM_VIEW_DAYS`.
+ * - `blocked`: su persona está bloqueada.
  */
-export const CONVERSATION_VIEWS = ["attend", "agent", "awaiting_patient", "closed"] as const
+export const CONVERSATION_VIEWS = ["attend", "agent", "awaiting_patient", "closed", "spam", "blocked"] as const
 export type ConversationView = (typeof CONVERSATION_VIEWS)[number]
+/** Las cuatro pestañas: Spam y Bloqueados no cuentan en los totales de la Bandeja. */
+export const INBOX_TABS = ["attend", "agent", "awaiting_patient", "closed"] as const satisfies readonly ConversationView[]
+
+function screenIsSql(conv: SQL, screen: "spam" | "blocked"): SQL {
+  return sql`exists (select 1 from contact c_is
+    where c_is.organization_id = ${conv}.organization_id and c_is.id = ${conv}.contact_id and c_is.screen = ${screen})`
+}
 
 export function conversationViewSql(conv: SQL, view: ConversationView): SQL {
   switch (view) {
     case "attend":
-      return needsPersonSql(conv)
+      return sql`(${needsPersonSql(conv)} and not ${screenedSql(conv)})`
     case "awaiting_patient":
-      return sql`(${awaitingPatientSql(conv)} and not ${needsPersonSql(conv)})`
+      return sql`(${awaitingPatientSql(conv)} and not ${needsPersonSql(conv)} and not ${screenedSql(conv)})`
     case "agent":
-      return sql`(${agentAttendingSql(conv)} and not ${needsPersonSql(conv)} and not ${awaitingPatientSql(conv)})`
+      return sql`(${agentAttendingSql(conv)} and not ${needsPersonSql(conv)} and not ${awaitingPatientSql(conv)} and not ${screenedSql(conv)})`
     case "closed":
-      return sql`(${conv}.status = 'closed')`
+      return sql`(${conv}.status = 'closed' and not ${screenedSql(conv)})`
+    case "spam":
+      return sql`(${screenIsSql(conv, "spam")}
+        and coalesce(${conv}.last_message_at, ${conv}.created_at) > now() - make_interval(days => ${SPAM_VIEW_DAYS}))`
+    case "blocked":
+      return screenIsSql(conv, "blocked")
   }
 }
 
