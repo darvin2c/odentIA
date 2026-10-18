@@ -540,8 +540,8 @@ function InboxPage() {
               )
             })}
           </fieldset>
-          {/* Junto a las pestañas, en gris: no piden nada a nadie (ADR 0054). */}
-          <div className="flex items-center gap-1">
+          {/* Junto a las pestañas, en gris: no piden nada a nadie (ADR 0054). No se encogen: los filtros bajan de fila. */}
+          <div className="flex shrink-0 items-center gap-1">
             <Button
               type="button"
               size="sm"
@@ -567,7 +567,9 @@ function InboxPage() {
               <span className="sr-only sm:not-sr-only">Bloqueados</span>
             </Button>
           </div>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          {/* No se encoge por debajo de su contenido: alineado a la derecha, se desbordaría
+              sobre «Spam» y «Bloqueados»; si no cabe, baja de fila. */}
+          <div className="flex min-w-fit flex-1 flex-wrap items-center justify-end gap-2">
             <Button
               type="button"
               size="sm"

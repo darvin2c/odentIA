@@ -68,6 +68,13 @@ test("bandeja: el mismo texto cinco veces va a Spam y «No es spam» la devuelve
   await gotoHydrated(page, tenant(org.slug, "/inbox"))
   const spamButton = page.getByRole("button", { name: /^Spam/ })
   await expect(spamButton).toContainText("1")
+  // «Bloqueados» queda a la vista junto a Spam, sin que los filtros lo tapen.
+  await expect(page.getByRole("button", { name: "Bloqueados" })).toBeInViewport()
+  const blockedBox = await page.getByRole("button", { name: "Bloqueados" }).boundingBox()
+  const searchBox = await page.getByRole("searchbox").first().boundingBox().catch(() => null)
+  if (blockedBox && searchBox && Math.abs(blockedBox.y - searchBox.y) < blockedBox.height) {
+    expect(blockedBox.x + blockedBox.width).toBeLessThanOrEqual(searchBox.x)
+  }
   await spamButton.click()
   await expect(page.getByText("Spam · últimos 30 días")).toBeVisible()
   await expect(page.getByText("Repitió el mismo texto").first()).toBeVisible()
@@ -90,7 +97,7 @@ test("bandeja: el mismo texto cinco veces va a Spam y «No es spam» la devuelve
   await dialog.getByRole("button", { name: "Bloquear" }).click()
   await expect(page.getByText("Bloqueado por", { exact: false }).first()).toBeVisible()
   await shot("bandeja-bloqueado")
-  const blockedReply = await api<{ error?: { code?: string } }>(page, "POST", `/api/conversations/${threat.id}/messages`, org.slug, { body: "Hola" })
+  const blockedReply = await api<{ error?: { code?: string } }>(page, "POST", `/api/conversations/${threat.id}/messages`, org.slug, { text: "Hola" })
   expect(blockedReply.status).toBe(409)
   expect(blockedReply.body.error?.code).toBe("CONTACT_BLOCKED")
 
@@ -166,7 +173,8 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
   // Spam de quien no es paciente: se devuelve al instante y pasa a Spam.
   await rowOf("Préstamos Ya").getByRole("button", { name: /^Acciones de la fila/ }).click()
   await page.getByRole("menuitem", { name: "Pedir revisión" }).click()
-  const drawer = page.getByRole("dialog", { name: "Pedir revisión de este cobro" })
+  // Con espacio se abre como panel fijo a la derecha; si no, como cajón (el mismo formulario).
+  const drawer = page.getByRole("complementary", { name: "Panel lateral" }).or(page.getByRole("dialog", { name: "Pedir revisión de este cobro" }))
   await drawer.getByRole("radio", { name: /Era spam/ }).click()
   await shot("panel-pedir-revision")
   await drawer.getByRole("button", { name: "Pedir revisión" }).click()
@@ -208,6 +216,7 @@ test("plan y pagos: el spam se devuelve al instante; lo demás lo decide odentIA
   await expect(panel.getByText("«Le dio un horario del domingo que no tenemos.»")).toBeVisible()
   await panel.getByRole("button", { name: "Leer la conversación" }).click()
   await expect(panel.getByText("¿Atienden los domingos?")).toBeVisible()
+  await expect(panel.getByText("Persona ·", { exact: false })).toBeVisible()
   await panel.getByLabel("Qué le decimos a la clínica (obligatorio)").fill("Tienen razón: el agente leyó el horario de verano. Devolvemos la conversación.")
   await shot("admin-revision")
   await panel.getByRole("button", { name: /^Devolver/ }).click()

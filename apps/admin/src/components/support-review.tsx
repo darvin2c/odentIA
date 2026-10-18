@@ -87,7 +87,7 @@ function answerDue(iso: string): Date {
 }
 
 function speaker(message: z.infer<typeof reviewMessage>): string {
-  if (message.direction === "inbound") return "Persona"
+  if (message.direction === "in") return "Persona"
   return message.senderKind === "agent" ? "Agente" : message.senderKind === "user" ? "Equipo" : "Automático"
 }
 
@@ -185,7 +185,7 @@ export function SupportCaseReview({
                     {conversation.data ? "Volver a leer" : "Leer la conversación"}
                   </Button>
                   <span className="text-muted-foreground">
-                    Con permiso de la clínica hasta la respuesta, como mucho hasta el {day(review.readUntil)}. Queda en la auditoría.
+                    Con permiso de la clínica hasta la respuesta, como mucho hasta el {day(review.readUntil)} · queda en la auditoría
                   </span>
                 </span>
               ) : (
